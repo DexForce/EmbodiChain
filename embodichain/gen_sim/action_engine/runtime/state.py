@@ -19,16 +19,79 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Mapping
 
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
     HeldObjectState,
+    SceneSnapshot,
     TaskState,
 )
 
 __all__ = ["ExecutionState"]
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class _CollisionOverrideSceneSnapshot(SceneSnapshot):
+    """Keep semantic entity poses live while overriding collision poses."""
+
+    collision_pose_overrides: Mapping[str, torch.Tensor] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        SceneSnapshot.__post_init__(self)
+        normalized: dict[str, torch.Tensor] = {}
+        for entity_id, pose in self.collision_pose_overrides.items():
+            if entity_id not in self.collision_entity_ids:
+                raise ValueError(
+                    "Collision pose overrides must reference collision entities."
+                )
+            if (
+                not isinstance(pose, torch.Tensor)
+                or not pose.is_floating_point()
+                or pose.dim() not in (2, 3)
+                or pose.shape[-2:] != (4, 4)
+                or not bool(torch.isfinite(pose).all().item())
+            ):
+                raise ValueError(
+                    "Collision pose overrides must be finite floating tensors "
+                    "with shape (4, 4) or (B, 4, 4)."
+                )
+            normalized[entity_id] = pose.detach().clone()
+        object.__setattr__(
+            self,
+            "collision_pose_overrides",
+            MappingProxyType(normalized),
+        )
+
+    def collision_obstacle_poses(
+        self,
+        *,
+        batch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Mapping[str, torch.Tensor]:
+        """Return planner poses with intentional-contact rows parked."""
+        poses = dict(
+            SceneSnapshot.collision_obstacle_poses(
+                self,
+                batch_size=batch_size,
+                device=device,
+                dtype=dtype,
+            )
+        )
+        for entity_id, override in self.collision_pose_overrides.items():
+            pose = override.to(device=device, dtype=dtype)
+            if pose.shape == (4, 4):
+                pose = pose.unsqueeze(0).expand(batch_size, -1, -1)
+            elif pose.shape != (batch_size, 4, 4):
+                raise ValueError(
+                    f"Collision override {entity_id!r} must match planning "
+                    f"batch size {batch_size}."
+                )
+            poses[entity_id] = pose.clone()
+        return MappingProxyType(poses)
 
 
 @dataclass(slots=True, eq=False)

@@ -1,0 +1,3038 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Adapt Action Engine requests to the shared typed atomic-action planner."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager, nullcontext
+from copy import deepcopy
+from dataclasses import replace
+import logging
+import math
+from threading import RLock
+from typing import Any
+
+import torch
+
+from embodichain.gen_sim.action_engine.capabilities import (
+    AtomicCapability,
+    build_atomic_capability_registry,
+)
+from embodichain.gen_sim.action_engine.config import default_runtime_policy
+from embodichain.gen_sim.action_engine.gripper_profiles import get_gripper_profile
+from embodichain.gen_sim.action_engine.solver_profiles import (
+    expected_ik_solver_class,
+)
+from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    ActionInvocation,
+    ActionPlan,
+    AntipodalAffordance,
+    AtomicActionEngine,
+    AxisAlignGoal,
+    ControlPartCommandProfile,
+    CoordinatedPickGoal,
+    DynamicCollisionMode,
+    EndEffectorPoseGoal,
+    EntityState,
+    ExecutionSession,
+    MotionPolicy,
+    ObjectSemantics,
+    PlanningContext,
+    PlanningFailure,
+    PlannerDiagnostics,
+    RecoveryPolicy,
+    RobotObservation,
+    RigidObjectSceneProvider,
+    SceneProvider,
+    SceneSnapshot,
+    StateDelta,
+)
+from embodichain.lab.sim.planners import (
+    CuroboPlannerCfg,
+    CuroboWorldCfg,
+    MotionGenCfg,
+    MotionGenerator,
+    ToppraPlannerCfg,
+)
+from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+from embodichain.toolkits.graspkit.pg_grasp import (
+    AntipodalGraspPoseGenerator,
+    AntipodalGraspPoseGeneratorCfg,
+    GraspAnnotationCfg,
+    ParallelJawGraspCollisionCfg,
+)
+from embodichain.utils import logger as project_logger
+from embodichain.utils.logger import log_info, log_warning
+from embodichain.utils.math import matrix_from_quat, quat_from_matrix, quat_slerp
+
+from .body_grasp import AxisAlignBodyGraspAdapter
+from .coordinated_safety import _trajectory_safety_report
+from .grasp_diagnostics import _TracingAntipodalGraspPoseGenerator
+from .models import ActionOutcome, GroundedAction
+from .state import _CollisionOverrideSceneSnapshot, ExecutionState
+
+__all__ = ["AtomicActionAdapter"]
+
+
+_DEFAULT_PLANNER_POLICY: dict[str, Any] = {
+    "backend": "curobo",
+    "single_arm_strategy": "motion_gen",
+    "coordinated_strategy": "ik_interp",
+    "fallback_strategy": "ik_interp",
+    "allow_fallback": True,
+    "dynamic_collision": False,
+    "static_obstacle_uids": [],
+    "dynamic_obstacle_uids": [],
+    "curobo": {
+        "log_level": "error",
+        "obstacle_representation": "cuboid",
+        "multi_env": False,
+        "use_cuda_graph": True,
+        "preserve_plan_samples": False,
+        "max_attempts": 5,
+        "collision_activation_distance": 0.01,
+    },
+}
+
+# Preserve cuRobo's fixed world shape while disabling intentional-contact objects.
+_COLLISION_PARKING_Z_OFFSET = -100.0
+_BODY_GRASP_CANDIDATE_LIMIT = 500
+_BODY_GRASP_SEED = 17_392
+_COORDINATED_GRASP_SEED = 17_393
+_FREE_YAW_SAMPLE_COUNT = 8
+_RETREAT_LOG_LOCK = RLock()
+
+
+@contextmanager
+def _capture_retreat_warnings(enabled: bool) -> Iterator[list[str]]:
+    """Capture candidate-level planner warnings during bounded retreat search."""
+    messages: list[str] = []
+    if not enabled:
+        yield messages
+        return
+    collector = logging.Handler(level=logging.WARNING)
+    collector.emit = lambda record: messages.append(record.getMessage())
+    logger = project_logger.logger
+    with _RETREAT_LOG_LOCK:
+        handlers = list(logger.handlers)
+        propagate = logger.propagate
+        try:
+            logger.handlers[:] = [collector]
+            logger.propagate = False
+            yield messages
+        finally:
+            logger.handlers[:] = handlers
+            logger.propagate = propagate
+
+
+def _collision_cache_for_world(
+    representation: str, obstacle_count: int
+) -> dict[str, int]:
+    """Size cuRobo's fixed collision cache for the generated scene."""
+    cache = {"cuboid": 8, "mesh": 2}
+    if representation in cache:
+        cache[representation] = max(cache[representation], obstacle_count)
+    return cache
+
+
+def _supported_kwargs(config_type: type, values: Mapping[str, Any]) -> dict[str, Any]:
+    names: set[str] = set()
+    for cls in reversed(config_type.__mro__):
+        names.update(getattr(cls, "__annotations__", {}))
+    return {key: value for key, value in values.items() if key in names}
+
+
+def _as_hand_qpos(value: Any, dof: int, device: Any) -> torch.Tensor:
+    if dof == 0:
+        return torch.empty(0, dtype=torch.float32, device=device)
+    result = torch.as_tensor(value, dtype=torch.float32, device=device).flatten()
+    if result.numel() == 0:
+        return torch.zeros(dof, dtype=torch.float32, device=device)
+    if result.numel() == 1:
+        return result.repeat(dof)
+    if result.numel() >= dof:
+        return result[:dof]
+    repeats = (dof + result.numel() - 1) // result.numel()
+    return result.repeat(repeats)[:dof]
+
+
+def _diagonal_approach_direction(
+    horizontal: torch.Tensor,
+    *,
+    vertical: float = -1.0,
+) -> torch.Tensor:
+    """Combine one normalized horizontal role direction with a vertical component."""
+    horizontal = horizontal.to(dtype=torch.float32)
+    norm = torch.linalg.vector_norm(horizontal)
+    if float(norm) <= 1.0e-6:
+        raise ValueError("Handover role direction must be non-zero.")
+    horizontal = horizontal / norm
+    direction = torch.stack(
+        (horizontal[0], horizontal[1], horizontal.new_tensor(float(vertical)))
+    )
+    return direction / torch.linalg.vector_norm(direction)
+
+
+class AtomicActionAdapter:
+    """Own the shared atomic engine and preserve Action Engine runtime contracts."""
+
+    def __init__(
+        self,
+        env: Any,
+        *,
+        grasp_policy: Mapping[str, Any] | None = None,
+        planner_policy: Mapping[str, Any] | None = None,
+        capability_registry: Any | None = None,
+        scene_provider: SceneProvider | None = None,
+    ) -> None:
+        self.env = env
+        self.num_envs = int(env.num_envs)
+        self.device = env.device
+        self.gripper_profile = get_gripper_profile(
+            getattr(env, "agent_gripper_model", "pgi")
+        )
+        self.ik_solver, self.ik_solver_classes = self._resolve_runtime_ik_solver()
+        if grasp_policy is None:
+            profile = str(getattr(env, "agent_robot_profile", "dual_ur10"))
+            grasp_policy = default_runtime_policy(profile).grasp
+            grasp_policy = {
+                **grasp_policy,
+                **(getattr(env, "agent_grasp_runtime_defaults", {}) or {}),
+            }
+        self.grasp_policy = deepcopy(dict(grasp_policy))
+        self.planner_policy = deepcopy(_DEFAULT_PLANNER_POLICY)
+        if planner_policy is not None:
+            self._merge_planner_policy(self.planner_policy, planner_policy)
+        if not self.planner_policy.get("static_obstacle_uids"):
+            configured = getattr(env, "agent_static_obstacle_uids", ()) or ()
+            if configured:
+                self.planner_policy["static_obstacle_uids"] = [
+                    str(uid) for uid in configured
+                ]
+            else:
+                get_rigid_object = getattr(env.sim, "get_rigid_object", None)
+                if callable(get_rigid_object) and get_rigid_object("table") is not None:
+                    self.planner_policy["static_obstacle_uids"] = ["table"]
+        self.capabilities = capability_registry or build_atomic_capability_registry()
+        self._motion_generator: MotionGenerator | None = None
+        self._atomic_engine: AtomicActionEngine | None = None
+        self._coordinated_engines: dict[tuple[bool, float], AtomicActionEngine] = {}
+        self._semantics: dict[str, ObjectSemantics] = {}
+        self._scene_time = 0.0
+        if scene_provider is not None and not isinstance(scene_provider, SceneProvider):
+            raise TypeError("scene_provider must implement SceneProvider.")
+        self.scene_provider = scene_provider or self._build_scene_provider()
+
+    def _resolve_runtime_ik_solver(self) -> tuple[str, dict[str, str]]:
+        """Validate a declared bundle solver against the initialized robot."""
+        declared = getattr(self.env, "agent_ik_solver", None)
+        robot = getattr(self.env, "robot", None)
+        get_solver = getattr(robot, "get_solver", None)
+        classes: dict[str, str] = {}
+        if callable(get_solver):
+            for arm in ("left_arm", "right_arm"):
+                part = self.env.get_agent_arm_control_part(arm == "left_arm")
+                classes[arm] = type(get_solver(name=part)).__name__
+        if declared is None:
+            inferred = {
+                "URSolver": "ur",
+                "PytorchSolver": "pytorch",
+            }
+            modes = {inferred[name] for name in classes.values() if name in inferred}
+            return (modes.pop() if len(modes) == 1 else "unknown"), classes
+        declared = str(declared)
+        expected = expected_ik_solver_class(declared)
+        for arm, actual in classes.items():
+            if actual != expected:
+                raise ValueError(
+                    f"Runtime {arm} must use {expected} for "
+                    f"agent_ik_solver={declared!r}, got {actual!r}."
+                )
+        return declared, classes
+
+    @staticmethod
+    def _merge_planner_policy(
+        target: dict[str, Any],
+        update: Mapping[str, Any],
+    ) -> None:
+        for key, value in update.items():
+            if isinstance(value, Mapping) and isinstance(target.get(key), dict):
+                AtomicActionAdapter._merge_planner_policy(target[key], value)
+            else:
+                target[key] = deepcopy(value)
+
+    def initial_state(self) -> ExecutionState:
+        """Capture the initial full-robot planning seed."""
+        return ExecutionState(last_qpos=self.env.robot.get_qpos().clone())
+
+    def start_session(
+        self,
+        grounded: GroundedAction,
+        state: ExecutionState | None = None,
+    ) -> ExecutionSession:
+        """Start one closed-loop AtomicAction session from live scene state.
+
+        ProgramExecutor may continue using its compatibility scheduler for
+        compound and per-arm merged trajectories. New callers can use this
+        boundary to adopt feedback-driven execution without constructing
+        private planning contexts.
+        """
+        capability = self.capabilities.require_executable(grounded.action_class)
+        state = state or self.initial_state()
+        grounded = self._select_transport_yaw(grounded, state)
+        grounded = self._adapt_coordinated_pickment_grasps(
+            grounded,
+            capability,
+        )[0]
+        context = self._planning_context(state, grounded)
+        engine = self._engine_for(grounded, capability)
+        invocation = self._invocation(grounded, capability, engine=engine)
+        return engine.start((invocation,), context)
+
+    def _build_scene_provider(self) -> SceneProvider | None:
+        """Create the shared live rigid-object provider when entities are available."""
+        sim = getattr(self.env, "sim", None)
+        if sim is None:
+            return None
+        dynamic_uids = tuple(
+            str(uid) for uid in self.planner_policy.get("dynamic_obstacle_uids", ())
+        )
+        list_uids = getattr(sim, "get_rigid_object_uid_list", None)
+        uids = tuple(str(uid) for uid in list_uids()) if callable(list_uids) else ()
+        if not uids:
+            uids = dynamic_uids
+        get_rigid_object = getattr(sim, "get_rigid_object", None)
+        if not callable(get_rigid_object):
+            return None
+        entities = {
+            uid: entity for uid in uids if (entity := get_rigid_object(uid)) is not None
+        }
+        if not entities:
+            return None
+        collision_uids = (
+            dynamic_uids
+            if bool(self.planner_policy.get("dynamic_collision", False))
+            else ()
+        )
+        return RigidObjectSceneProvider(
+            entities,
+            collision_entity_ids=collision_uids,
+        )
+
+    def semantics(self, uid: str) -> ObjectSemantics:
+        """Build object semantics once for the stable scene entity ID."""
+        cached = self._semantics.get(uid)
+        if cached is not None:
+            return cached
+        entity = self.env.sim.get_rigid_object(uid)
+        if entity is None:
+            entity = getattr(
+                self.env.sim,
+                "get_articulation",
+                lambda _uid: None,
+            )(uid)
+            if entity is None:
+                raise ValueError(f"Unknown grasp target {uid!r}.")
+            active_joint_ids = list(getattr(entity, "active_joint_ids", ()))
+            if len(active_joint_ids) != 1:
+                raise ValueError(
+                    "Articulation semantics require exactly one active joint."
+                )
+            backend_entities = getattr(
+                entity,
+                "_entities",
+                getattr(entity, "entities", ()),
+            )
+            if not backend_entities:
+                raise ValueError("Articulation backend does not expose joint metadata.")
+            joint_name = str(entity.joint_names[active_joint_ids[0]])
+            joint_info = backend_entities[0].get_joint_info(joint_name)
+            child_link = str(getattr(joint_info, "child_link_name", ""))
+            vertices, triangles = entity.get_link_vert_face(child_link)
+        else:
+            vertices = entity.get_vertices(env_ids=[0], scale=True)
+            triangles = entity.get_triangles(env_ids=[0])
+        if isinstance(vertices, (tuple, list)):
+            vertices = vertices[0]
+        if isinstance(triangles, (tuple, list)):
+            triangles = triangles[0]
+        vertices = torch.as_tensor(vertices, dtype=torch.float32)
+        triangles = torch.as_tensor(triangles, dtype=torch.int64)
+        if vertices.ndim == 3 and vertices.shape[0] == 1:
+            vertices = vertices[0]
+        if triangles.ndim == 3 and triangles.shape[0] == 1:
+            triangles = triangles[0]
+        if vertices.ndim != 2 or vertices.shape[-1] != 3 or vertices.numel() == 0:
+            raise ValueError(f"Object {uid!r} has invalid mesh vertices.")
+        if triangles.ndim != 2 or triangles.shape[-1] != 3 or triangles.numel() == 0:
+            raise ValueError(f"Object {uid!r} has invalid mesh triangles.")
+
+        semantics = ObjectSemantics(
+            label=uid,
+            entity_id=uid,
+            geometry={"mesh_vertices": vertices, "mesh_triangles": triangles},
+            affordance=AntipodalAffordance(
+                object_label=uid,
+                mesh_vertices=vertices,
+                mesh_triangles=triangles,
+            ),
+        )
+        self._semantics[uid] = semantics
+        return semantics
+
+    def plan(
+        self,
+        grounded: GroundedAction,
+        state: ExecutionState | None = None,
+    ) -> ActionOutcome:
+        """Plan one grounded primitive through the mainline typed contract."""
+        capability = self.capabilities.require_executable(grounded.action_class)
+        state = state or self.initial_state()
+        grounded = self._select_transport_yaw(grounded, state)
+        context = self._planning_context(state, grounded)
+        coordinated_candidates = self._adapt_coordinated_pickment_grasps(
+            grounded,
+            capability,
+        )
+        grounded_candidates = tuple(
+            reorientation
+            for coordinated in coordinated_candidates
+            for candidate in self._adapt_axis_align_body_grasps(
+                coordinated,
+                context,
+                capability,
+            )
+            for reorientation in self._adapt_tool_down_candidates(candidate)
+        )
+        selected: (
+            tuple[
+                GroundedAction,
+                ActionInvocation,
+                ActionPlan,
+                AtomicActionEngine,
+            ]
+            | None
+        ) = None
+        selected_warnings: tuple[str, ...] = ()
+        candidate_search_warnings: list[str] = []
+        candidate_search_attempts = 0
+        coordinated_search_attempts: list[dict[str, Any]] = []
+        best_failure_count = self.num_envs + 1
+        for candidate in grounded_candidates:
+            candidate_engine = self._engine_for(candidate, capability)
+            candidate_invocation = self._invocation(
+                candidate,
+                capability,
+                engine=candidate_engine,
+            )
+            capture_warnings = bool(
+                candidate.motion_policy.get("retreat_reachability_search", False)
+                or candidate.motion_policy.get("reorient_tool_down", False)
+            )
+            grasp_seed = candidate.motion_policy.get("grasp_seed")
+            seed_context = (
+                nullcontext()
+                if grasp_seed is None
+                else self._isolated_random_seed(int(grasp_seed))
+            )
+            pair_context = self._coordinated_pair_selection_context(
+                candidate_engine,
+                candidate,
+                context,
+            )
+            upright_context = self._upright_grasp_selection_context(
+                candidate_engine,
+                candidate,
+                capability,
+            )
+            with (
+                seed_context,
+                pair_context,
+                upright_context,
+                _capture_retreat_warnings(capture_warnings) as warnings,
+            ):
+                candidate_plan = candidate_engine.plan(candidate_invocation, context)
+            self._record_selected_upright_grasp(
+                candidate,
+                candidate_plan,
+                context,
+            )
+            coordinated_trace = candidate.motion_policy.get("coordinated_grasp")
+            if isinstance(coordinated_trace, dict):
+                grasp_stages = (
+                    self._latest_coordinated_grasp_trace(candidate_engine) or {}
+                )
+                coordinated_trace["stages"] = grasp_stages
+                raw_plan_success = candidate_plan.plan_success.detach().clone()
+                candidate_plan, trajectory_audit = self._audit_coordinated_trajectory(
+                    candidate,
+                    candidate_invocation,
+                    candidate_plan,
+                    context,
+                    grasp_stages,
+                )
+                coordinated_trace["trajectory_audit"] = trajectory_audit
+                coordinated_search_attempts.append(
+                    {
+                        "candidate_index": coordinated_trace.get("candidate_index"),
+                        "approach_candidate_label": coordinated_trace.get(
+                            "approach_candidate_label"
+                        ),
+                        "approach_direction": coordinated_trace.get(
+                            "approach_direction"
+                        ),
+                        "middle_empty_ratio": coordinated_trace.get(
+                            "selected_middle_empty_ratio"
+                        ),
+                        "raw_plan_success": raw_plan_success.cpu().tolist(),
+                        "plan_success": candidate_plan.plan_success.detach()
+                        .cpu()
+                        .tolist(),
+                        "planner_messages": list(candidate_plan.diagnostics.messages),
+                        "stages": deepcopy(grasp_stages),
+                        "trajectory_audit": deepcopy(trajectory_audit),
+                    }
+                )
+            if capture_warnings:
+                candidate_search_warnings.extend(warnings)
+                candidate_search_attempts += 1
+            failure_count = int((~candidate_plan.plan_success).sum().item())
+            if selected is None or failure_count < best_failure_count:
+                selected = (
+                    candidate,
+                    candidate_invocation,
+                    candidate_plan,
+                    candidate_engine,
+                )
+                selected_warnings = tuple(warnings)
+                best_failure_count = failure_count
+            if failure_count == 0:
+                break
+        if selected is None:
+            raise RuntimeError("Atomic action adaptation produced no plan candidate.")
+        grounded, invocation, plan, selected_engine = selected
+        selected_coordinated_trace = grounded.motion_policy.get("coordinated_grasp")
+        if isinstance(selected_coordinated_trace, dict):
+            selected_coordinated_trace["search_attempts"] = deepcopy(
+                coordinated_search_attempts
+            )
+        if bool(grounded.motion_policy.get("reorient_tool_down", False)):
+            summary = (
+                "Tool-down reorientation search: "
+                f"resolved={int(plan.plan_success.sum())}/{plan.plan_success.numel()}, "
+                f"attempts={candidate_search_attempts}, "
+                f"selected_yaw_degrees="
+                f"{grounded.motion_policy.get('reorient_selected_yaw_degrees')}, "
+                f"suppressed_warnings={len(candidate_search_warnings)}."
+            )
+            if bool(plan.plan_success.all()):
+                log_info(summary)
+            else:
+                log_warning(summary)
+        selected_positions = self._positions_with_agent_holds(
+            plan,
+            grounded,
+            capability,
+        )
+        primary_success = plan.plan_success.to(self.device)
+        reachability_search = None
+        if bool(grounded.motion_policy.get("retreat_reachability_search", False)):
+            (
+                grounded,
+                selected_positions,
+                primary_success,
+                reachability_search,
+            ) = self._search_reachable_retreat(
+                grounded=grounded,
+                capability=capability,
+                state=state,
+                context=context,
+                invocation=invocation,
+                initial_positions=selected_positions,
+                initial_success=primary_success,
+                initial_warnings=selected_warnings,
+            )
+            invocation = replace(invocation, goal=grounded.target)
+        combined_success = primary_success.clone()
+        fallback_plan: ActionPlan | None = None
+        use_fallback = torch.zeros_like(combined_success)
+        fallback_attempted = torch.zeros_like(combined_success)
+        fallback_success = torch.zeros_like(combined_success)
+
+        fallback_strategy = self.planner_policy.get("fallback_strategy")
+        collision_safety = str(grounded.motion_policy.get("collision_safety", "auto"))
+        fallback_allowed = bool(self.planner_policy.get("allow_fallback", True)) and (
+            collision_safety != "required"
+        )
+        if (
+            fallback_allowed
+            and invocation.motion_policy.strategy == "motion_gen"
+            and fallback_strategy in {"ik_interp"}
+            and not bool(combined_success.all())
+        ):
+            fallback_attempted = ~primary_success
+            fallback_policy = replace(
+                invocation.motion_policy,
+                strategy=str(fallback_strategy),
+                dynamic_collision_mode=DynamicCollisionMode.OFF,
+                plan_opts=None,
+            )
+            fallback_plan = selected_engine.plan(
+                replace(invocation, motion_policy=fallback_policy),
+                context,
+            )
+            fallback_positions = self._positions_with_agent_holds(
+                fallback_plan,
+                grounded,
+                capability,
+            )
+            fallback_success = fallback_plan.plan_success.to(self.device)
+            use_fallback = fallback_attempted & fallback_success
+            selected_positions = self._merge_plan_rows(
+                selected_positions,
+                fallback_positions,
+                use_fallback,
+                state.last_qpos,
+            )
+            combined_success |= fallback_plan.plan_success.to(self.device)
+
+        options = invocation.skill_options
+        if capability.config_materializer == "handover":
+            combined_success &= self._handover_receiver_hold_mask(
+                selected_positions,
+                grounded,
+                options,
+                tolerance=float(
+                    grounded.motion_policy.get(
+                        "receiver_hold_joint_tolerance",
+                        2.0e-3,
+                    )
+                ),
+            )
+
+        terminal_qpos = (
+            selected_positions[:, -1]
+            if selected_positions.shape[1]
+            else state.last_qpos
+        )
+        primary_rows = combined_success & primary_success
+        projected_task = plan.expected_effects.apply(
+            context.task,
+            primary_rows,
+        )
+        held_keys = set(plan.expected_effects.held_object_updates)
+        if fallback_plan is not None:
+            fallback_rows = combined_success & use_fallback
+            projected_task = fallback_plan.expected_effects.apply(
+                projected_task,
+                fallback_rows,
+            )
+            held_keys.update(fallback_plan.expected_effects.held_object_updates)
+        committed_effects = StateDelta(
+            held_object_updates={
+                key: projected_task.held_objects.get(key) for key in held_keys
+            },
+        )
+        next_state = ExecutionState.from_task_state(
+            projected_task,
+            last_qpos=torch.where(
+                combined_success[:, None], terminal_qpos, state.last_qpos
+            ),
+        )
+        return ActionOutcome(
+            trajectory=selected_positions,
+            success=combined_success,
+            next_state=next_state,
+            grounded=grounded,
+            prior_state=state,
+            expected_effects=committed_effects,
+            planner_trace={
+                **self._planner_trace(
+                    grounded=grounded,
+                    invocation=invocation,
+                    context=context,
+                    state=state,
+                    primary_success=primary_success,
+                    primary_diagnostics=plan.diagnostics,
+                    fallback_allowed=fallback_allowed,
+                    fallback_strategy=(
+                        str(fallback_strategy)
+                        if invocation.motion_policy.strategy == "motion_gen"
+                        and fallback_strategy in {"ik_interp"}
+                        else None
+                    ),
+                    fallback_attempted=fallback_attempted,
+                    fallback_success=fallback_success,
+                    fallback_used=use_fallback,
+                    reachability_search=reachability_search,
+                ),
+                # Auditability takes precedence over compactness here: every
+                # selected planner route retains its complete joint path.
+                "planned_trajectory": selected_positions.detach().clone(),
+                "primary_action_diagnostics": deepcopy(dict(plan.diagnostics.metadata)),
+                "fallback_action_diagnostics": (
+                    None
+                    if fallback_plan is None
+                    else deepcopy(dict(fallback_plan.diagnostics.metadata))
+                ),
+                "action_segments": {
+                    segment.name: {
+                        "start": int(segment.start),
+                        "stop": int(segment.stop),
+                    }
+                    for segment in plan.segments
+                },
+            },
+        )
+
+    def _adapt_axis_align_body_grasps(
+        self,
+        grounded: GroundedAction,
+        context: PlanningContext,
+        capability: AtomicCapability,
+    ) -> tuple[GroundedAction, ...]:
+        if capability.target_materializer != "axis_align":
+            return (grounded,)
+        goal = grounded.target
+        if not isinstance(goal, AxisAlignGoal) or goal.grasp_xpos is not None:
+            return (grounded,)
+        object_pose = grounded.object_pose
+        if (
+            not isinstance(object_pose, torch.Tensor)
+            or object_pose.shape != (self.num_envs, 4, 4)
+            or not torch.isfinite(object_pose).all()
+        ):
+            raise ValueError(
+                "AxisAlign body grasp requires a finite grounded live object pose "
+                f"with shape ({self.num_envs}, 4, 4)."
+            )
+        _, hand_part, _ = self._parts(grounded.arm)
+        if hand_part is None:
+            raise ValueError("AxisAlign body grasp requires a configured hand part.")
+        options = self._build_config(grounded, capability)
+        selected_approach = options.approach_direction
+        adaptation = AxisAlignBodyGraspAdapter().adapt(
+            goal,
+            object_pose=object_pose,
+            grasp_generator=self._engine().grasp_pose_generators[hand_part],
+            approach_direction=selected_approach,
+            target_axis=options.target_axis,
+            seed=_BODY_GRASP_SEED,
+        )
+        cfg = dict(grounded.cfg)
+        cfg["approach_direction"] = selected_approach
+        candidates: list[GroundedAction] = []
+        for adaptation_index, candidate_goal in enumerate(adaptation.alternative_goals):
+            rank = adaptation.alternative_rank_indices[adaptation_index]
+            policy = dict(grounded.motion_policy)
+            policy["body_grasp"] = {
+                "long_axis_index": adaptation.axes.long_axis_index,
+                "short_axis_index": adaptation.axes.short_axis_index,
+                "elongation_ratio": adaptation.axes.elongation_ratio,
+                "candidate_indices": (
+                    adaptation.selection.ranked_candidate_indices[:, rank].tolist()
+                ),
+                "candidate_counts": (
+                    adaptation.selection.body_candidate_counts.tolist()
+                ),
+                "candidate_rank": rank,
+                "approach_direction": selected_approach.detach().cpu().tolist(),
+            }
+            candidates.append(
+                replace(
+                    grounded,
+                    target=candidate_goal,
+                    cfg=cfg,
+                    motion_policy=policy,
+                )
+            )
+        return tuple(candidates)
+
+    def _adapt_tool_down_candidates(
+        self,
+        grounded: GroundedAction,
+    ) -> tuple[GroundedAction, ...]:
+        """Build fixed-position, downward-TCP yaw candidates after E2 lift-clear."""
+        if not bool(grounded.motion_policy.get("reorient_tool_down", False)):
+            return (grounded,)
+        reference = grounded.motion_policy.get("reorient_reference_pose")
+        if not isinstance(reference, torch.Tensor):
+            raise ValueError("Tool-down reorientation requires a reference TCP pose.")
+        reference = reference.to(device=self.device, dtype=torch.float32)
+        if reference.shape == (4, 4):
+            reference = reference.unsqueeze(0).repeat(self.num_envs, 1, 1)
+        if reference.shape != (self.num_envs, 4, 4):
+            raise ValueError(
+                "Tool-down reorientation reference must have shape "
+                f"({self.num_envs}, 4, 4)."
+            )
+        waypoint_count = int(grounded.cfg.get("reorient_waypoint_count", 5))
+        if not 2 <= waypoint_count <= 16:
+            raise ValueError("reorient_waypoint_count must be in [2, 16].")
+        raw_yaws = grounded.cfg.get(
+            "reorient_yaw_degrees", (0.0, 45.0, -45.0, 90.0, -90.0, 180.0)
+        )
+        if not isinstance(raw_yaws, Sequence) or isinstance(raw_yaws, (str, bytes)):
+            raise TypeError("reorient_yaw_degrees must be a sequence.")
+        yaw_degrees = [float(value) for value in raw_yaws]
+        if not yaw_degrees or any(not math.isfinite(value) for value in yaw_degrees):
+            raise ValueError("reorient_yaw_degrees must contain finite values.")
+
+        base_rotation = self._downward_tcp_rotation(reference[:, :3, :3])
+        candidates = []
+        for yaw_degrees_value in yaw_degrees:
+            yaw = math.radians(yaw_degrees_value)
+            yaw_rotation = reference.new_tensor(
+                [
+                    [math.cos(yaw), -math.sin(yaw), 0.0],
+                    [math.sin(yaw), math.cos(yaw), 0.0],
+                    [0.0, 0.0, 1.0],
+                ]
+            )
+            target_rotation = torch.matmul(yaw_rotation, base_rotation)
+            waypoints = self._rotation_waypoints(
+                reference,
+                target_rotation,
+                waypoint_count=waypoint_count,
+            )
+            policy = {
+                **grounded.motion_policy,
+                "reorient_selected_yaw_degrees": yaw_degrees_value,
+            }
+            candidates.append(
+                replace(
+                    grounded,
+                    target=EndEffectorPoseGoal(xpos=waypoints),
+                    cfg={**grounded.cfg, **policy},
+                    motion_policy=policy,
+                )
+            )
+        return tuple(candidates)
+
+    def _downward_tcp_rotation(self, rotation: torch.Tensor) -> torch.Tensor:
+        """Project the current TCP heading while aligning local +Z with world -Z."""
+        x_axis = rotation[:, :3, 0].clone()
+        x_axis[:, 2] = 0.0
+        norm = torch.linalg.vector_norm(x_axis, dim=1, keepdim=True)
+        fallback = rotation[:, :3, 1].clone()
+        fallback[:, 2] = 0.0
+        fallback_norm = torch.linalg.vector_norm(fallback, dim=1, keepdim=True)
+        world_x = rotation.new_tensor([1.0, 0.0, 0.0]).expand_as(x_axis)
+        fallback = torch.where(
+            fallback_norm > 1.0e-6,
+            fallback / fallback_norm.clamp_min(1.0e-6),
+            world_x,
+        )
+        x_axis = torch.where(
+            norm > 1.0e-6,
+            x_axis / norm.clamp_min(1.0e-6),
+            fallback,
+        )
+        z_axis = rotation.new_tensor([0.0, 0.0, -1.0]).expand_as(x_axis)
+        y_axis = torch.linalg.cross(z_axis, x_axis, dim=1)
+        return torch.stack((x_axis, y_axis, z_axis), dim=2)
+
+    def _rotation_waypoints(
+        self,
+        reference: torch.Tensor,
+        target_rotation: torch.Tensor,
+        *,
+        waypoint_count: int,
+    ) -> torch.Tensor:
+        """Interpolate fixed-position TCP rotations, excluding the observed start."""
+        start_quat = quat_from_matrix(reference[:, :3, :3])
+        end_quat = quat_from_matrix(target_rotation)
+        end_quat = torch.where(
+            torch.sum(start_quat * end_quat, dim=1, keepdim=True) < 0.0,
+            -end_quat,
+            end_quat,
+        )
+        poses = reference[:, None].repeat(1, waypoint_count, 1, 1)
+        for index in range(waypoint_count):
+            fraction = float(index + 1) / float(waypoint_count)
+            interpolated = torch.stack(
+                [
+                    quat_slerp(start_quat[env_id], end_quat[env_id], tau=fraction)
+                    for env_id in range(self.num_envs)
+                ]
+            )
+            poses[:, index, :3, :3] = matrix_from_quat(interpolated)
+        return poses
+
+    def _adapt_coordinated_pickment_grasps(
+        self,
+        grounded: GroundedAction,
+        capability: AtomicCapability,
+    ) -> tuple[GroundedAction, ...]:
+        """Build deterministic live-geometry approach and partition candidates."""
+        if capability.config_materializer != "coordinated_pickment":
+            return (grounded,)
+        target = self._validate_coordinated_pickment_goal(grounded)
+        live_pose = grounded.object_pose
+        expected_shape = (self.num_envs, 4, 4)
+        if (
+            not isinstance(live_pose, torch.Tensor)
+            or live_pose.shape != expected_shape
+            or not bool(torch.isfinite(live_pose).all())
+        ):
+            raise ValueError(
+                "CoordinatedPickment requires a finite grounded live object pose "
+                f"with shape {expected_shape}."
+            )
+        live_pose = live_pose.to(device=self.device, dtype=torch.float32).clone()
+        affordance = target.semantics.affordance
+        assert isinstance(affordance, AntipodalAffordance)
+        vertices = torch.as_tensor(
+            affordance.mesh_vertices,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        if (
+            vertices.ndim != 2
+            or vertices.shape[1] != 3
+            or vertices.shape[0] < 3
+            or not bool(torch.isfinite(vertices).all())
+        ):
+            raise ValueError(
+                "CoordinatedPickment mesh vertices must be finite with shape (N, 3)."
+            )
+
+        left_base, right_base = self._coordinated_arm_bases()
+        arm_directions = right_base[:, :3, 3] - left_base[:, :3, 3]
+        arm_norms = torch.linalg.vector_norm(arm_directions, dim=1, keepdim=True)
+        if not bool(torch.isfinite(arm_directions).all()) or bool(
+            (arm_norms <= 1.0e-6).any()
+        ):
+            raise ValueError(
+                "Coordinated pickup requires distinct finite left/right arm bases."
+            )
+        arm_directions = arm_directions / arm_norms
+        shared_direction = arm_directions[0]
+        if bool(
+            (torch.matmul(arm_directions, shared_direction).abs() < 1.0 - 1.0e-4).any()
+        ):
+            raise ValueError(
+                "CoordinatedPickment requires one shared base-to-base direction "
+                "across vectorized environments."
+            )
+
+        centered = vertices - vertices.mean(dim=0, keepdim=True)
+        covariance = centered.transpose(0, 1) @ centered / float(vertices.shape[0])
+        eigenvalues, eigenvectors = torch.linalg.eigh(covariance)
+        principal_local = eigenvectors[:, -1]
+        world_axes = torch.matmul(live_pose[:, :3, :3], eigenvectors)
+        principal_world = world_axes[:, :, -1]
+        principal_world = principal_world / torch.linalg.vector_norm(
+            principal_world,
+            dim=1,
+            keepdim=True,
+        ).clamp_min(1.0e-6)
+        arm_alignment = torch.abs((principal_world * arm_directions).sum(dim=1))
+        elongation_ratio = torch.sqrt(
+            eigenvalues[-1].clamp_min(1.0e-12) / eigenvalues[-2].clamp_min(1.0e-12)
+        )
+        elongation_confidence = torch.clamp(
+            (elongation_ratio - 1.0) / 1.5,
+            min=0.0,
+            max=1.0,
+        )
+        base_ratio = float(grounded.cfg.get("middle_empty_ratio", 0.4))
+        if not math.isfinite(base_ratio) or not 0.0 <= base_ratio < 1.0:
+            raise ValueError("middle_empty_ratio must be finite and in [0, 1).")
+        geometric_ratio = 0.25 + 0.45 * float(arm_alignment.mean())
+        confidence = float(elongation_confidence)
+        preferred_ratio = (1.0 - confidence) * base_ratio + confidence * geometric_ratio
+        raw_ratios = (
+            preferred_ratio,
+            base_ratio,
+            preferred_ratio - 0.15,
+            preferred_ratio + 0.15,
+        )
+        ratios: list[float] = []
+        for raw_ratio in raw_ratios:
+            ratio = min(0.90, max(0.05, float(raw_ratio)))
+            if not any(abs(ratio - existing) <= 1.0e-6 for existing in ratios):
+                ratios.append(ratio)
+
+        requested_approach = grounded.cfg.get("approach_direction", (0.0, 0.0, -1.0))
+        requested_approach = torch.as_tensor(
+            requested_approach,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        if requested_approach.shape != (3,) or not bool(
+            torch.isfinite(requested_approach).all()
+        ):
+            raise ValueError("approach_direction must be a finite vector shaped (3,).")
+        approach_norm = torch.linalg.vector_norm(requested_approach)
+        if float(approach_norm) <= 1.0e-6:
+            raise ValueError("approach_direction must be non-zero.")
+        requested_approach = requested_approach / approach_norm
+
+        horizontal_arm = shared_direction.clone()
+        horizontal_arm[2] = 0.0
+        horizontal_arm_norm = torch.linalg.vector_norm(horizontal_arm)
+        if float(horizontal_arm_norm) <= 1.0e-6:
+            raise ValueError(
+                "CoordinatedPickment arm bases must be separated in the world XY plane."
+            )
+        horizontal_arm = horizontal_arm / horizontal_arm_norm
+        robot_forward = torch.stack(
+            (-horizontal_arm[1], horizontal_arm[0], horizontal_arm.new_tensor(0.0))
+        )
+        base_midpoint = 0.5 * (left_base[:, :3, 3] + right_base[:, :3, 3])
+        object_from_bases = live_pose[:, :3, 3] - base_midpoint
+        reach_alignment = torch.sum(object_from_bases[:, :2] * robot_forward[:2], dim=1)
+        if float(reach_alignment.mean()) < 0.0:
+            robot_forward = -robot_forward
+            reach_alignment = -reach_alignment
+
+        down = requested_approach.new_tensor([0.0, 0.0, -1.0])
+        approach_candidates: list[tuple[str, torch.Tensor]] = []
+
+        def add_approach(label: str, direction: torch.Tensor) -> None:
+            direction = direction.to(device=self.device, dtype=torch.float32)
+            norm = torch.linalg.vector_norm(direction)
+            if not bool(torch.isfinite(direction).all()) or float(norm) <= 1.0e-6:
+                return
+            direction = direction / norm
+            if any(
+                float(torch.dot(direction, existing)) >= 1.0 - 1.0e-5
+                for _, existing in approach_candidates
+            ):
+                return
+            approach_candidates.append((label, direction))
+
+        add_approach("robot_forward_down", robot_forward + down)
+        add_approach("current", requested_approach)
+        add_approach("world_down", down)
+        add_approach("robot_forward", robot_forward)
+
+        horizontal_axis_index: int | None = None
+        for axis_index in torch.argsort(eigenvalues).tolist():
+            axes = world_axes[:, :, axis_index]
+            if float(torch.mean(torch.abs(axes[:, 2]))) > 0.75:
+                continue
+            reference = axes[0]
+            consistency = torch.abs(torch.matmul(axes, reference))
+            if bool((consistency < 0.90).any()):
+                continue
+            horizontal_axis_index = int(axis_index)
+            horizontal_axis = reference.clone()
+            if float(torch.dot(horizontal_axis[:2], robot_forward[:2])) < 0.0:
+                horizontal_axis = -horizontal_axis
+            add_approach("short_axis_forward_down", horizontal_axis + down)
+            add_approach("short_axis_forward", horizontal_axis)
+            add_approach("short_axis_reverse_down", -horizontal_axis + down)
+            add_approach("short_axis_reverse", -horizontal_axis)
+            break
+
+        grasp_seed = grounded.cfg.get("grasp_seed", _COORDINATED_GRASP_SEED)
+        if type(grasp_seed) is not int or grasp_seed < 0:
+            raise ValueError("grasp_seed must be a non-negative integer.")
+        pair_candidate_count = grounded.cfg.get("grasp_pair_candidate_count", 3)
+        if type(pair_candidate_count) is not int:
+            raise ValueError("grasp_pair_candidate_count must be an integer.")
+        if not 1 <= pair_candidate_count <= 8:
+            raise ValueError("grasp_pair_candidate_count must be in [1, 8].")
+        trace = {
+            "strategy": "live_geometry_approach_search",
+            "local_pca_axes": eigenvectors.detach().cpu().tolist(),
+            "world_pca_axes": world_axes.detach().cpu().tolist(),
+            "pca_eigenvalues": eigenvalues.detach().cpu().tolist(),
+            "local_principal_axis": principal_local.detach().cpu().tolist(),
+            "world_principal_axes": principal_world.detach().cpu().tolist(),
+            "elongation_ratio": float(elongation_ratio),
+            "elongation_confidence": confidence,
+            "arm_axis_alignment": arm_alignment.detach().cpu().tolist(),
+            "left_to_right_arm_direction": shared_direction.detach().cpu().tolist(),
+            "robot_forward_direction": robot_forward.detach().cpu().tolist(),
+            "shared_reach_alignment": reach_alignment.detach().cpu().tolist(),
+            "requested_approach_direction": requested_approach.detach().cpu().tolist(),
+            "selected_horizontal_axis_index": horizontal_axis_index,
+            "approach_candidates": [
+                {
+                    "label": label,
+                    "direction": direction.detach().cpu().tolist(),
+                }
+                for label, direction in approach_candidates
+            ],
+            "candidate_middle_empty_ratios": list(ratios),
+            "grasp_seed": grasp_seed,
+            "grasp_pair_candidate_count": pair_candidate_count,
+        }
+        candidates: list[GroundedAction] = []
+        candidate_index = 0
+        for approach_index, (approach_label, approach) in enumerate(
+            approach_candidates
+        ):
+            for ratio in ratios:
+                for pair_rank in range(pair_candidate_count):
+                    cfg = {
+                        **grounded.cfg,
+                        "left_to_right_arm_direction": shared_direction.clone(),
+                        "approach_direction": approach.clone(),
+                        "middle_empty_ratio": ratio,
+                        "grasp_seed": grasp_seed,
+                        "grasp_pair_rank": pair_rank,
+                    }
+                    motion_policy = {
+                        **grounded.motion_policy,
+                        "grasp_seed": grasp_seed,
+                        "coordinated_grasp": {
+                            **trace,
+                            "candidate_index": candidate_index,
+                            "approach_candidate_index": approach_index,
+                            "approach_candidate_label": approach_label,
+                            "approach_direction": approach.detach().cpu().tolist(),
+                            "selected_middle_empty_ratio": ratio,
+                            "grasp_pair_rank": pair_rank,
+                        },
+                    }
+                    candidates.append(
+                        replace(
+                            grounded,
+                            target=replace(
+                                target, object_initial_pose=live_pose.clone()
+                            ),
+                            cfg=cfg,
+                            object_pose=live_pose.clone(),
+                            motion_policy=motion_policy,
+                        )
+                    )
+                    candidate_index += 1
+        return tuple(candidates)
+
+    @contextmanager
+    def _isolated_random_seed(self, seed: int) -> Iterator[None]:
+        """Run one stochastic grasp attempt without perturbing global RNG state."""
+        if type(seed) is not int or seed < 0:
+            raise ValueError("seed must be a non-negative integer.")
+        device = torch.device(self.device)
+        cuda_devices: list[int] = []
+        if device.type == "cuda":
+            cuda_devices.append(
+                torch.cuda.current_device() if device.index is None else device.index
+            )
+        with torch.random.fork_rng(devices=cuda_devices):
+            torch.manual_seed(seed)
+            if cuda_devices:
+                torch.cuda.manual_seed_all(seed)
+            yield
+
+    def _coordinated_arm_bases(self) -> tuple[torch.Tensor, torch.Tensor]:
+        from .frames import arm_base_poses
+
+        return arm_base_poses(self.env)
+
+    def _latest_coordinated_grasp_trace(
+        self,
+        engine: AtomicActionEngine,
+    ) -> dict[str, Any] | None:
+        """Return the S1-S5 trace emitted by the shared E5 grasp service."""
+        _, hand_part, _ = self._parts("left_arm")
+        if hand_part is None:
+            return None
+        generator = engine.grasp_pose_generators.get(hand_part)
+        if not isinstance(generator, _TracingAntipodalGraspPoseGenerator):
+            return None
+        return generator.last_dual_trace
+
+    def _audit_pose_interpolation(
+        self,
+        start: torch.Tensor,
+        end: torch.Tensor,
+        waypoint_count: int,
+        *,
+        interpolate_orientation: bool,
+    ) -> torch.Tensor:
+        """Build the Cartesian reference used only by the GenSim FK audit."""
+        if waypoint_count <= 0:
+            return start[:, None].repeat(1, 0, 1, 1)
+        weights = torch.linspace(
+            0.0,
+            1.0,
+            waypoint_count,
+            dtype=start.dtype,
+            device=start.device,
+        )
+        result = start[:, None].repeat(1, waypoint_count, 1, 1)
+        result[:, :, :3, 3] = torch.lerp(
+            start[:, None, :3, 3],
+            end[:, None, :3, 3],
+            weights[None, :, None],
+        )
+        if not interpolate_orientation:
+            return result
+        start_quat = quat_from_matrix(start[:, :3, :3])
+        end_quat = quat_from_matrix(end[:, :3, :3])
+        end_quat = torch.where(
+            torch.sum(start_quat * end_quat, dim=1, keepdim=True) < 0.0,
+            -end_quat,
+            end_quat,
+        )
+        for waypoint_index, weight in enumerate(weights.tolist()):
+            interpolated = torch.stack(
+                [
+                    quat_slerp(start_quat[row], end_quat[row], tau=float(weight))
+                    for row in range(start.shape[0])
+                ]
+            )
+            result[:, waypoint_index, :3, :3] = matrix_from_quat(interpolated)
+        return result
+
+    def _coordinated_selected_grasp_poses(
+        self,
+        grasp_stages: Mapping[str, Any],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        rows = grasp_stages.get("environment_rows")
+        if rows is None:
+            rows = [grasp_stages]
+        left: list[torch.Tensor] = []
+        right: list[torch.Tensor] = []
+        for row in rows:
+            pair = row.get("pair_selection")
+            if not isinstance(pair, Mapping) or not bool(pair.get("selected", False)):
+                raise ValueError(
+                    "Trajectory audit requires one selected grasp pair per row."
+                )
+            left.append(
+                torch.as_tensor(
+                    pair["selected_left_pose"],
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+            )
+            right.append(
+                torch.as_tensor(
+                    pair["selected_right_pose"],
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+            )
+        return torch.stack(left), torch.stack(right)
+
+    def _arm_trajectory_fk(
+        self,
+        positions: torch.Tensor,
+        control_part: str,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return every TCP pose and every serial-chain link point."""
+        joint_ids = list(self.env.robot.get_joint_ids(name=control_part))
+        arm_qpos = positions[:, :, joint_ids]
+        batch_size, waypoint_count, dof = arm_qpos.shape
+        solver = self.env.robot.get_solver(name=control_part)
+        flat_qpos = arm_qpos.reshape(batch_size * waypoint_count, dof)
+        local_eef = solver.get_fk(flat_qpos).reshape(
+            batch_size,
+            waypoint_count,
+            4,
+            4,
+        )
+        base_pose = self.env.robot.get_link_pose(
+            link_name=solver.root_link_name,
+            to_matrix=True,
+        ).to(device=positions.device, dtype=positions.dtype)
+        eef = torch.matmul(base_pose[:, None], local_eef)
+        chain = getattr(solver, "pk_serial_chain", None)
+        if chain is None:
+            raise ValueError(f"{control_part} has no serial chain for capsule audit.")
+        link_transforms = chain.forward_kinematics(flat_qpos, end_only=False)
+        link_points: list[torch.Tensor] = []
+        for transform in link_transforms.values():
+            local = transform.get_matrix().reshape(
+                batch_size,
+                waypoint_count,
+                4,
+                4,
+            )
+            world = torch.matmul(base_pose[:, None], local)
+            link_points.append(world[:, :, :3, 3])
+        link_points.append(eef[:, :, :3, 3])
+        return eef, torch.stack(link_points, dim=2)
+
+    @staticmethod
+    def _audit_batched_pose(
+        value: Any,
+        *,
+        batch_size: int,
+        device: torch.device | str,
+        name: str,
+    ) -> torch.Tensor:
+        pose = torch.as_tensor(value, dtype=torch.float32, device=device)
+        if pose.shape == (4, 4):
+            pose = pose.unsqueeze(0).repeat(batch_size, 1, 1)
+        if pose.shape != (batch_size, 4, 4) or not bool(torch.isfinite(pose).all()):
+            raise ValueError(f"{name} must have finite shape ({batch_size}, 4, 4).")
+        return pose
+
+    def _coordinated_audit_references(
+        self,
+        candidate: GroundedAction,
+        invocation: ActionInvocation,
+        plan: ActionPlan,
+        actual_left: torch.Tensor,
+        actual_right: torch.Tensor,
+        grasp_stages: Mapping[str, Any],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        positions = plan.joint_trajectory
+        assert positions is not None
+        batch_size = positions.batch_size
+        initial = self._audit_batched_pose(
+            candidate.target.object_initial_pose,
+            batch_size=batch_size,
+            device=self.device,
+            name="object_initial_pose",
+        )
+        target = self._audit_batched_pose(
+            candidate.target.object_target_pose,
+            batch_size=batch_size,
+            device=self.device,
+            name="object_target_pose",
+        )
+        left_grasp, right_grasp = self._coordinated_selected_grasp_poses(grasp_stages)
+        left_relation = torch.bmm(torch.linalg.inv(initial), left_grasp)
+        right_relation = torch.bmm(torch.linalg.inv(initial), right_grasp)
+        desired_left = actual_left.clone()
+        desired_right = actual_right.clone()
+        segments = {segment.name: segment for segment in plan.segments}
+
+        def assign(
+            name: str,
+            left_value: torch.Tensor,
+            right_value: torch.Tensor,
+        ) -> None:
+            segment = segments[name]
+            desired_left[:, segment.start : segment.stop] = left_value
+            desired_right[:, segment.start : segment.stop] = right_value
+
+        approach = segments["approach"]
+        assign(
+            "approach",
+            self._audit_pose_interpolation(
+                actual_left[:, approach.start],
+                left_grasp,
+                approach.waypoint_count,
+                interpolate_orientation=True,
+            ),
+            self._audit_pose_interpolation(
+                actual_right[:, approach.start],
+                right_grasp,
+                approach.waypoint_count,
+                interpolate_orientation=True,
+            ),
+        )
+        close = segments["close"]
+        assign(
+            "close",
+            left_grasp[:, None].repeat(1, close.waypoint_count, 1, 1),
+            right_grasp[:, None].repeat(1, close.waypoint_count, 1, 1),
+        )
+        lift_pose = initial.clone()
+        lift_pose[:, 2, 3] += float(invocation.skill_options.lift_height)
+        lift = segments["lift"]
+        lift_object = self._audit_pose_interpolation(
+            initial,
+            lift_pose,
+            lift.waypoint_count,
+            interpolate_orientation=False,
+        )
+        assign(
+            "lift",
+            torch.matmul(lift_object, left_relation[:, None]),
+            torch.matmul(lift_object, right_relation[:, None]),
+        )
+        move = segments["move"]
+        move_object = self._audit_pose_interpolation(
+            lift_pose,
+            target,
+            move.waypoint_count,
+            interpolate_orientation=True,
+        )
+        assign(
+            "move",
+            torch.matmul(move_object, left_relation[:, None]),
+            torch.matmul(move_object, right_relation[:, None]),
+        )
+        hold = segments["hold"]
+        assign(
+            "hold",
+            torch.matmul(target, left_relation)[:, None].repeat(
+                1, hold.waypoint_count, 1, 1
+            ),
+            torch.matmul(target, right_relation)[:, None].repeat(
+                1, hold.waypoint_count, 1, 1
+            ),
+        )
+        return desired_left, desired_right
+
+    def _audit_coordinated_trajectory(
+        self,
+        candidate: GroundedAction,
+        invocation: ActionInvocation,
+        plan: ActionPlan,
+        context: PlanningContext,
+        grasp_stages: Mapping[str, Any],
+    ) -> tuple[ActionPlan, dict[str, Any]]:
+        """Reject unsafe E5 joint paths before they can become executable."""
+        del context
+        raw_success = plan.plan_success.to(device=self.device)
+        if plan.joint_trajectory is None or not bool(raw_success.any()):
+            return plan, {
+                "success": raw_success.detach().cpu().tolist(),
+                "skipped": True,
+                "reason": "planner_failed_or_missing_trajectory",
+            }
+        positions = plan.joint_trajectory.positions.to(
+            device=self.device,
+            dtype=torch.float32,
+        )
+        try:
+            left_arm, _, _ = self._parts("left_arm")
+            right_arm, _, _ = self._parts("right_arm")
+            left_eef, left_links = self._arm_trajectory_fk(positions, left_arm)
+            right_eef, right_links = self._arm_trajectory_fk(positions, right_arm)
+            desired_left, desired_right = self._coordinated_audit_references(
+                candidate,
+                invocation,
+                plan,
+                left_eef,
+                right_eef,
+                grasp_stages,
+            )
+            direction = torch.as_tensor(
+                candidate.cfg["left_to_right_arm_direction"],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            report = _trajectory_safety_report(
+                left_qpos=positions[:, :, self.env.robot.get_joint_ids(name=left_arm)],
+                right_qpos=positions[
+                    :, :, self.env.robot.get_joint_ids(name=right_arm)
+                ],
+                left_eef=left_eef,
+                right_eef=right_eef,
+                desired_left_eef=desired_left,
+                desired_right_eef=desired_right,
+                left_link_points=left_links,
+                right_link_points=right_links,
+                left_to_right_direction=direction,
+                maximum_joint_step=float(candidate.cfg.get("maximum_joint_step", 0.25)),
+                maximum_orientation_error=float(
+                    candidate.cfg.get("maximum_wrist_orientation_error", 0.20)
+                ),
+                minimum_lateral_gap=float(
+                    candidate.cfg.get("minimum_grasp_lateral_gap", 0.05)
+                ),
+                capsule_radius=float(
+                    candidate.cfg.get("inter_arm_capsule_radius", 0.04)
+                ),
+                minimum_capsule_clearance=float(
+                    candidate.cfg.get("minimum_inter_arm_clearance", 0.01)
+                ),
+                orientation_start_index={
+                    segment.name: segment.start for segment in plan.segments
+                }["close"],
+            )
+            audited_success = raw_success & report.success.to(device=self.device)
+            audit_trace = {
+                "success": audited_success.detach().cpu().tolist(),
+                "failed_checks": report.failed_checks,
+                "metrics": report.metrics,
+                "orientation_audit_start": "close",
+                "capsule_model": {
+                    "left_link_segments": left_links.shape[2] - 1,
+                    "right_link_segments": right_links.shape[2] - 1,
+                },
+                "thresholds": {
+                    "maximum_joint_step": float(
+                        candidate.cfg.get("maximum_joint_step", 0.25)
+                    ),
+                    "maximum_wrist_orientation_error": float(
+                        candidate.cfg.get("maximum_wrist_orientation_error", 0.20)
+                    ),
+                    "minimum_lateral_gap": float(
+                        candidate.cfg.get("minimum_grasp_lateral_gap", 0.05)
+                    ),
+                    "inter_arm_capsule_radius": float(
+                        candidate.cfg.get("inter_arm_capsule_radius", 0.04)
+                    ),
+                    "minimum_inter_arm_clearance": float(
+                        candidate.cfg.get("minimum_inter_arm_clearance", 0.01)
+                    ),
+                },
+            }
+        except Exception as exc:
+            audited_success = torch.zeros_like(raw_success)
+            audit_trace = {
+                "success": audited_success.detach().cpu().tolist(),
+                "failed_checks": {"audit_error": raw_success.cpu().tolist()},
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        if torch.equal(audited_success, raw_success):
+            return plan, audit_trace
+        failed_rows = (
+            torch.nonzero(
+                raw_success & ~audited_success,
+                as_tuple=False,
+            )
+            .flatten()
+            .tolist()
+        )
+        message = (
+            f"GenSim trajectory safety audit rejected environment(s) {failed_rows}."
+        )
+        diagnostics = PlannerDiagnostics(
+            backend=plan.diagnostics.backend,
+            messages=(*plan.diagnostics.messages, message),
+            metadata={
+                **dict(plan.diagnostics.metadata),
+                "gensim_trajectory_audit": audit_trace,
+            },
+            failure=PlanningFailure("gensim_trajectory_safety_failed"),
+        )
+        return (
+            replace(
+                plan,
+                plan_success=audited_success,
+                diagnostics=diagnostics,
+            ),
+            audit_trace,
+        )
+
+    @contextmanager
+    def _upright_grasp_selection_context(
+        self,
+        engine: AtomicActionEngine,
+        candidate: GroundedAction,
+        capability: AtomicCapability,
+    ) -> Iterator[None]:
+        """Apply the E2 side-grasp policy only to upright pickup."""
+        local_axis = candidate.cfg.get("obj_upright_direction")
+        if (
+            capability.target_materializer != "object_grasp"
+            or candidate.cfg.get("rotate_upright") is None
+            or local_axis is None
+        ):
+            yield
+            return
+        _, hand_part, _ = self._parts(candidate.arm)
+        if hand_part is None:
+            yield
+            return
+        generator = engine.grasp_pose_generators.get(hand_part)
+        if not isinstance(generator, _TracingAntipodalGraspPoseGenerator):
+            yield
+            return
+        with generator.upright_selection_context(
+            local_axis=torch.as_tensor(
+                local_axis,
+                dtype=torch.float32,
+                device=self.device,
+            )
+        ):
+            yield
+        trace = generator.last_upright_trace
+        if trace is not None:
+            candidate.motion_policy["upright_grasp"] = trace
+
+    def _record_selected_upright_grasp(
+        self,
+        candidate: GroundedAction,
+        plan: ActionPlan,
+        context: PlanningContext,
+    ) -> None:
+        """Record the grasp actually selected after IK and downstream screening."""
+        trace = candidate.motion_policy.get("upright_grasp")
+        local_axis = candidate.cfg.get("obj_upright_direction")
+        if not isinstance(trace, dict) or local_axis is None:
+            return
+        held = next(
+            (
+                value
+                for value in plan.expected_effects.held_object_updates.values()
+                if value is not None
+            ),
+            None,
+        )
+        if held is None or held.semantics.entity_id is None:
+            return
+        entity = context.scene.entities.get(held.semantics.entity_id)
+        vertices = held.semantics.geometry.get("mesh_vertices")
+        if entity is None or vertices is None:
+            return
+        grasp_pose = held.grasp_xpos.to(device=self.device, dtype=torch.float32)
+        object_pose = entity.pose.to(device=self.device, dtype=torch.float32)
+        if object_pose.shape == (4, 4):
+            object_pose = object_pose.unsqueeze(0).expand(self.num_envs, -1, -1)
+        axis = torch.as_tensor(
+            local_axis,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        axis = axis / torch.linalg.vector_norm(axis)
+        vertices = torch.as_tensor(
+            vertices,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        vertex_positions = torch.matmul(vertices, axis)
+        axis_min = vertex_positions.min()
+        axis_extent = vertex_positions.max() - axis_min
+        world_axis = torch.matmul(object_pose[:, :3, :3], axis)
+        relative_centers = grasp_pose[:, :3, 3] - object_pose[:, :3, 3]
+        axis_positions = torch.sum(relative_centers * world_axis, dim=1)
+        axis_fractions = (axis_positions - axis_min) / axis_extent
+        closing_axes = torch.nn.functional.normalize(
+            grasp_pose[:, :3, 0],
+            dim=1,
+        )
+        axis_alignment = torch.abs(torch.sum(closing_axes * world_axis, dim=1))
+        trace.update(
+            {
+                "selected_axis_fraction": axis_fractions.detach().cpu().tolist(),
+                "selected_axis_alignment": axis_alignment.detach().cpu().tolist(),
+                "selected_grasp_pose": grasp_pose.detach().cpu().tolist(),
+            }
+        )
+
+    @contextmanager
+    def _coordinated_pair_selection_context(
+        self,
+        engine: AtomicActionEngine,
+        candidate: GroundedAction,
+        context: PlanningContext,
+    ) -> Iterator[None]:
+        """Bind live wrists and arm bases to one synchronous E5 generator call."""
+        trace = candidate.motion_policy.get("coordinated_grasp")
+        if not isinstance(trace, Mapping):
+            yield
+            return
+        _, left_hand, _ = self._parts("left_arm")
+        if left_hand is None:
+            yield
+            return
+        generator = engine.grasp_pose_generators.get(left_hand)
+        if not isinstance(generator, _TracingAntipodalGraspPoseGenerator):
+            yield
+            return
+        left_arm, _, _ = self._parts("left_arm")
+        right_arm, _, _ = self._parts("right_arm")
+        qpos = context.robot.qpos.to(device=self.device, dtype=torch.float32)
+        left_ids = list(self.env.robot.get_joint_ids(name=left_arm))
+        right_ids = list(self.env.robot.get_joint_ids(name=right_arm))
+        left_eef = self.env.robot.compute_fk(
+            qpos[:, left_ids],
+            name=left_arm,
+            to_matrix=True,
+        )
+        right_eef = self.env.robot.compute_fk(
+            qpos[:, right_ids],
+            name=right_arm,
+            to_matrix=True,
+        )
+        left_base, right_base = self._coordinated_arm_bases()
+        with generator.dual_arm_selection_context(
+            left_eef=left_eef,
+            right_eef=right_eef,
+            left_base=left_base,
+            right_base=right_base,
+            left_to_right_direction=torch.as_tensor(
+                candidate.cfg["left_to_right_arm_direction"],
+                dtype=torch.float32,
+                device=self.device,
+            ),
+            pair_rank=int(candidate.cfg.get("grasp_pair_rank", 0)),
+            minimum_separation=float(
+                candidate.cfg.get("minimum_grasp_separation", 0.08)
+            ),
+            minimum_lateral_gap=float(
+                candidate.cfg.get("minimum_grasp_lateral_gap", 0.05)
+            ),
+        ):
+            yield
+
+    def _search_reachable_retreat(
+        self,
+        *,
+        grounded: GroundedAction,
+        capability: AtomicCapability,
+        state: ExecutionState,
+        context: PlanningContext,
+        invocation: ActionInvocation,
+        initial_positions: torch.Tensor,
+        initial_success: torch.Tensor,
+        initial_warnings: Sequence[str] = (),
+    ) -> tuple[GroundedAction, torch.Tensor, torch.Tensor, dict[str, Any]]:
+        """Select a row-local retreat candidate accepted by the live planner."""
+        candidates = self._retreat_search_targets(grounded)
+        target = getattr(grounded.target, "xpos", None)
+        if not isinstance(target, torch.Tensor) or len(candidates) <= 1:
+            return (
+                grounded,
+                initial_positions,
+                initial_success,
+                {
+                    "strategy": "bounded_motion_planner",
+                    "attempts": [],
+                    "selected_target_z": (
+                        None
+                        if not isinstance(target, torch.Tensor)
+                        else target[:, 2, 3]
+                    ),
+                },
+            )
+
+        selected_target = candidates[0][1].clone()
+        selected_positions = initial_positions
+        success = initial_success.clone()
+        suppressed_warnings = list(initial_warnings)
+        reference = grounded.motion_policy["retreat_reference_pose"].to(
+            device=selected_target.device,
+            dtype=selected_target.dtype,
+        )
+        if reference.shape == (4, 4):
+            reference = reference.unsqueeze(0).repeat(self.num_envs, 1, 1)
+        selected_candidates = [
+            candidates[0][0] if bool(success[env_id]) else "unresolved"
+            for env_id in range(self.num_envs)
+        ]
+        attempts: list[dict[str, Any]] = [
+            {
+                "candidate": candidates[0][0],
+                "target_z": candidates[0][1][:, 2, 3].detach().clone(),
+                "target_distance": torch.linalg.vector_norm(
+                    candidates[0][1][:, :2, 3] - reference[:, :2, 3],
+                    dim=1,
+                )
+                .detach()
+                .clone(),
+                "success": initial_success.detach().clone(),
+            }
+        ]
+        for label, candidate_target in candidates[1:]:
+            unresolved = ~success
+            if not bool(unresolved.any()):
+                break
+            row_target = torch.where(
+                unresolved[:, None, None],
+                candidate_target,
+                selected_target,
+            )
+            candidate_grounded = replace(
+                grounded,
+                target=EndEffectorPoseGoal(xpos=row_target),
+            )
+            candidate_invocation = replace(
+                invocation,
+                goal=candidate_grounded.target,
+            )
+            with _capture_retreat_warnings(True) as warnings:
+                candidate_plan = self._engine().plan(candidate_invocation, context)
+            suppressed_warnings.extend(warnings)
+            candidate_positions = self._positions_with_agent_holds(
+                candidate_plan,
+                candidate_grounded,
+                capability,
+            )
+            candidate_success = candidate_plan.plan_success.to(self.device)
+            selected_rows = unresolved & candidate_success
+            selected_positions = self._merge_plan_rows(
+                selected_positions,
+                candidate_positions,
+                selected_rows,
+                state.last_qpos,
+            )
+            selected_target = torch.where(
+                selected_rows[:, None, None],
+                candidate_target,
+                selected_target,
+            )
+            for env_id in (
+                torch.nonzero(selected_rows, as_tuple=False).flatten().tolist()
+            ):
+                selected_candidates[env_id] = label
+            success |= candidate_success
+            attempts.append(
+                {
+                    "candidate": label,
+                    "target_z": candidate_target[:, 2, 3].detach().clone(),
+                    "target_distance": torch.linalg.vector_norm(
+                        candidate_target[:, :2, 3] - reference[:, :2, 3],
+                        dim=1,
+                    )
+                    .detach()
+                    .clone(),
+                    "success": candidate_success.detach().clone(),
+                }
+            )
+
+        selected_distance = torch.linalg.vector_norm(
+            selected_target[:, :2, 3] - reference[:, :2, 3], dim=1
+        )
+        metadata = {
+            "retreat_selected_target_z": selected_target[:, 2, 3].detach().clone(),
+            "retreat_selected_target_distance": selected_distance.detach().clone(),
+            "retreat_reachability_found": success.detach().clone(),
+        }
+        summary = (
+            "Retreat reachability search: "
+            f"mode={grounded.motion_policy.get('retreat_search_mode', 'vertical_then_baseward')}, "
+            f"resolved={int(success.sum())}/{success.numel()}, "
+            f"attempts={len(attempts)}, "
+            f"selected={selected_candidates}, "
+            f"suppressed_warnings={len(suppressed_warnings)}."
+        )
+        if bool(success.all()):
+            log_info(summary)
+        else:
+            log_warning(summary)
+        selected_grounded = replace(
+            grounded,
+            target=EndEffectorPoseGoal(xpos=selected_target),
+            cfg={**grounded.cfg, **metadata},
+            motion_policy={**grounded.motion_policy, **metadata},
+        )
+        return (
+            selected_grounded,
+            selected_positions,
+            success,
+            {
+                "strategy": "bounded_motion_planner",
+                "attempts": attempts,
+                "selected_target_z": selected_target[:, 2, 3].detach().clone(),
+                "selected_target_distance": selected_distance.detach().clone(),
+                "selected_candidates": selected_candidates,
+                "suppressed_warnings": len(suppressed_warnings),
+            },
+        )
+
+    def _retreat_search_targets(
+        self,
+        grounded: GroundedAction,
+    ) -> list[tuple[str, torch.Tensor]]:
+        """Build bounded height and baseward retreat candidates from live poses."""
+        target = getattr(grounded.target, "xpos", None)
+        reference = grounded.motion_policy.get("retreat_reference_pose")
+        if not isinstance(target, torch.Tensor) or not isinstance(
+            reference, torch.Tensor
+        ):
+            return []
+        target = target.to(device=self.device, dtype=torch.float32)
+        reference = reference.to(device=self.device, dtype=torch.float32)
+        if target.shape == (4, 4):
+            target = target.unsqueeze(0).repeat(self.num_envs, 1, 1)
+        if reference.shape == (4, 4):
+            reference = reference.unsqueeze(0).repeat(self.num_envs, 1, 1)
+        expected = (self.num_envs, 4, 4)
+        if target.shape != expected or reference.shape != expected:
+            return []
+
+        sample_count = int(grounded.cfg.get("retreat_search_samples", 6))
+        if not 2 <= sample_count <= 16:
+            raise ValueError("retreat_search_samples must be in [2, 16].")
+        search_mode = str(
+            grounded.motion_policy.get("retreat_search_mode", "vertical_then_baseward")
+        )
+        allowed_modes = {"horizontal_only", "vertical_only", "vertical_then_baseward"}
+        if search_mode not in allowed_modes:
+            raise ValueError(
+                "retreat_search_mode must be 'horizontal_only', 'vertical_only', "
+                "or 'vertical_then_baseward'."
+            )
+        if search_mode == "horizontal_only":
+            direction = target[:, :2, 3] - reference[:, :2, 3]
+            requested_distance = torch.linalg.vector_norm(
+                direction, dim=1, keepdim=True
+            )
+            if bool((requested_distance <= 1.0e-6).any()):
+                return [("requested", target.clone())]
+            direction = direction / requested_distance
+            minimum_distance = float(grounded.cfg.get("minimum_retreat_distance", 0.05))
+            if not math.isfinite(minimum_distance) or minimum_distance < 0.0:
+                raise ValueError(
+                    "minimum_retreat_distance must be finite and non-negative."
+                )
+            minimum = torch.minimum(
+                requested_distance[:, 0],
+                torch.full_like(requested_distance[:, 0], minimum_distance),
+            )
+            fractions = torch.linspace(
+                1.0,
+                0.0,
+                sample_count,
+                dtype=target.dtype,
+                device=target.device,
+            )
+            distances = (
+                minimum[:, None]
+                + (requested_distance[:, 0] - minimum)[:, None] * fractions[None]
+            )
+            candidates = [("requested", target.clone())]
+            for index in range(1, sample_count):
+                candidate = target.clone()
+                candidate[:, :2, 3] = (
+                    reference[:, :2, 3] + direction * distances[:, index, None]
+                )
+                candidates.append((f"distance_{index}", candidate))
+            return candidates
+
+        minimum_height = float(grounded.cfg.get("minimum_retreat_height", 0.05))
+        if not math.isfinite(minimum_height) or minimum_height < 0.0:
+            raise ValueError("minimum_retreat_height must be finite and non-negative.")
+        desired_height = torch.clamp(
+            target[:, 2, 3] - reference[:, 2, 3],
+            min=0.0,
+        )
+        minimum = torch.minimum(
+            desired_height,
+            torch.full_like(desired_height, minimum_height),
+        )
+        fractions = torch.linspace(
+            1.0,
+            0.0,
+            sample_count,
+            dtype=target.dtype,
+            device=target.device,
+        )
+        heights = (
+            minimum[:, None] + (desired_height - minimum)[:, None] * fractions[None]
+        )
+        candidates: list[tuple[str, torch.Tensor]] = [("requested", target.clone())]
+        for index in range(1, sample_count):
+            candidate = target.clone()
+            candidate[:, 2, 3] = reference[:, 2, 3] + heights[:, index]
+            candidates.append((f"height_{index}", candidate))
+
+        if search_mode == "vertical_only":
+            return candidates
+
+        from .frames import arm_base_poses
+
+        left_base, right_base = arm_base_poses(self.env)
+        base = left_base if grounded.arm == "left_arm" else right_base
+        direction = base[:, :2, 3] - reference[:, :2, 3]
+        norm = torch.linalg.vector_norm(direction, dim=1, keepdim=True)
+        direction = torch.where(
+            norm > 1.0e-6,
+            direction / torch.clamp(norm, min=1.0e-6),
+            torch.zeros_like(direction),
+        )
+        distance = float(grounded.cfg.get("retreat_distance", 0.10))
+        if not math.isfinite(distance) or distance < 0.0:
+            raise ValueError("retreat_distance must be finite and non-negative.")
+        for index in range(sample_count):
+            candidate = target.clone()
+            candidate[:, :2, 3] = reference[:, :2, 3] + direction * distance
+            candidate[:, 2, 3] = reference[:, 2, 3] + heights[:, index]
+            candidates.append((f"baseward_{index}", candidate))
+        return candidates
+
+    def _planner_trace(
+        self,
+        *,
+        grounded: GroundedAction,
+        invocation: ActionInvocation,
+        context: PlanningContext,
+        state: ExecutionState,
+        primary_success: torch.Tensor,
+        primary_diagnostics: Any,
+        fallback_allowed: bool,
+        fallback_strategy: str | None,
+        fallback_attempted: torch.Tensor,
+        fallback_success: torch.Tensor,
+        fallback_used: torch.Tensor,
+        reachability_search: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Build compact per-row evidence for the planner route actually used."""
+        exclusions = self._collision_exclusion_masks(grounded, state)
+        obstacle_positions = {
+            uid: context.scene.entities[uid].pose[:, :3, 3].detach().clone()
+            for uid in context.scene.collision_entity_ids
+        }
+        revisions = torch.as_tensor(
+            context.scene.collision_world_revisions(self.num_envs),
+            dtype=torch.int64,
+            device=self.device,
+        )
+        requested_backend = str(self.planner_policy["backend"])
+        primary_strategy = invocation.motion_policy.strategy
+        diagnostic_backend = str(primary_diagnostics.backend)
+        if (
+            primary_strategy == "motion_gen"
+            and diagnostic_backend in {"curobo", "toppra"}
+            and diagnostic_backend != requested_backend
+        ):
+            raise RuntimeError(
+                "Planner backend mismatch: runtime policy requested "
+                f"{requested_backend!r}, but the action plan reported "
+                f"{diagnostic_backend!r}."
+            )
+        primary_effective_backend = (
+            diagnostic_backend if primary_strategy == "motion_gen" else "ik_interp"
+        )
+        if bool(fallback_used.all()) and bool(fallback_used.any()):
+            effective_backend = "ik_interp"
+            effective_strategy = "ik_interp"
+        elif bool(fallback_used.any()):
+            effective_backend = "mixed"
+            effective_strategy = "mixed"
+        else:
+            effective_backend = primary_effective_backend
+            effective_strategy = primary_strategy
+        planner_failure_reason = None
+        if not bool(primary_success.all()):
+            if primary_diagnostics.messages:
+                planner_failure_reason = "; ".join(primary_diagnostics.messages)
+            else:
+                metadata = primary_diagnostics.metadata
+                for key in ("failure_reason", "reason", "error"):
+                    if metadata.get(key) is not None:
+                        planner_failure_reason = str(metadata[key])
+                        break
+            if planner_failure_reason is None:
+                planner_failure_reason = "planner_reported_failure"
+        collision_planning_capable = (
+            effective_backend == "curobo" and effective_strategy == "motion_gen"
+        )
+        search_budget: dict[str, Any] = {
+            "requested_backend": requested_backend,
+            "fallback_enabled": bool(fallback_allowed),
+        }
+        if requested_backend == "curobo":
+            search_budget["primary_max_attempts"] = int(
+                self.planner_policy.get("curobo", {}).get("max_attempts", 1)
+            )
+        trace = {
+            "action_class": grounded.action_class,
+            "arm": grounded.arm,
+            "gripper_model": self.gripper_profile.model.value,
+            "ik_solver": self.ik_solver,
+            "left_solver_class": self.ik_solver_classes.get("left_arm"),
+            "right_solver_class": self.ik_solver_classes.get("right_arm"),
+            "planner": requested_backend,
+            "requested_backend": requested_backend,
+            "effective_backend": effective_backend,
+            "effective_strategy": effective_strategy,
+            "primary_effective_backend": primary_effective_backend,
+            "primary_strategy": primary_strategy,
+            "dynamic_collision_mode": invocation.motion_policy.dynamic_collision_mode.value,
+            "collision_planning_capable": collision_planning_capable,
+            "collision_check_scope": (
+                "static_and_dynamic"
+                if collision_planning_capable
+                and invocation.motion_policy.dynamic_collision_mode.value != "off"
+                else ("static" if collision_planning_capable else "not_supported")
+            ),
+            "primary_success": primary_success.detach().clone(),
+            "planner_failure_reason": planner_failure_reason,
+            "fallback_allowed": fallback_allowed,
+            "fallback_strategy": fallback_strategy,
+            "fallback_attempted": fallback_attempted.detach().clone(),
+            "fallback_success": fallback_success.detach().clone(),
+            "fallback_used": fallback_used.detach().clone(),
+            "fallback_occurred": fallback_attempted.detach().clone(),
+            "search_budget": search_budget,
+            "collision_world_revision": revisions,
+            "collision_obstacle_positions": obstacle_positions,
+            "collision_exclusions": {
+                uid: mask.detach().clone() for uid, mask in exclusions.items()
+            },
+        }
+        if reachability_search is not None:
+            trace["reachability_search"] = deepcopy(dict(reachability_search))
+        options = invocation.skill_options
+        object_part = getattr(options, "pick_object_part", None)
+        approach_direction = getattr(options, "approach_direction", None)
+        if object_part is None:
+            object_part = getattr(options, "receive_pick_object_part", None)
+            approach_direction = getattr(
+                options,
+                "receive_approach_direction",
+                approach_direction,
+            )
+        if object_part is not None:
+            grasp_policy: dict[str, Any] = {"object_part": str(object_part)}
+            if isinstance(approach_direction, torch.Tensor):
+                direction = approach_direction.to(dtype=torch.float32)
+                norm = torch.linalg.vector_norm(direction)
+                if bool(torch.isfinite(norm)) and float(norm) > 0.0:
+                    grasp_policy["approach_direction"] = (
+                        (direction / norm).detach().cpu().tolist()
+                    )
+            trace["grasp_policy"] = grasp_policy
+        body_grasp = grounded.motion_policy.get("body_grasp")
+        if isinstance(body_grasp, Mapping):
+            trace["body_grasp"] = deepcopy(dict(body_grasp))
+        upright_grasp = grounded.motion_policy.get("upright_grasp")
+        if isinstance(upright_grasp, Mapping):
+            trace["upright_grasp"] = deepcopy(dict(upright_grasp))
+        coordinated_grasp = grounded.motion_policy.get("coordinated_grasp")
+        if isinstance(coordinated_grasp, Mapping):
+            trace["coordinated_grasp"] = deepcopy(dict(coordinated_grasp))
+        return trace
+
+    def _select_transport_yaw(
+        self,
+        grounded: GroundedAction,
+        state: ExecutionState,
+    ) -> GroundedAction:
+        """Choose the closest IK-feasible yaw when task semantics leave it free."""
+        sample_count = _FREE_YAW_SAMPLE_COUNT if grounded.allow_yaw_search else 1
+        capability = self.capabilities.get(grounded.action_class)
+        if (
+            capability.target_materializer != "semantic_held_object"
+            or sample_count <= 1
+        ):
+            return grounded
+        target_pose = getattr(grounded.target, "object_target_pose", None)
+        if not isinstance(target_pose, torch.Tensor):
+            return grounded
+        target_pose = target_pose.to(device=self.device, dtype=torch.float32)
+        if target_pose.shape == (4, 4):
+            target_pose = target_pose.unsqueeze(0).repeat(self.num_envs, 1, 1)
+        if target_pose.shape != (self.num_envs, 4, 4):
+            raise ValueError("Transport target must have shape (4, 4) or (N, 4, 4).")
+
+        arm_part, _, _ = self._parts(grounded.arm)
+        held = state.get_held_object(arm_part)
+        if held is None:
+            return grounded
+        object_to_eef = held.object_to_eef.to(
+            device=self.device,
+            dtype=target_pose.dtype,
+        )
+        if object_to_eef.shape == (4, 4):
+            object_to_eef = object_to_eef.unsqueeze(0).repeat(self.num_envs, 1, 1)
+        variants = self._yaw_variants(target_pose, sample_count)
+        eef_variants = torch.matmul(variants, object_to_eef[:, None])
+        joint_ids = list(self.env.robot.get_joint_ids(name=arm_part))
+        start_qpos = state.last_qpos[:, joint_ids]
+        seeds = start_qpos[:, None].expand(-1, sample_count, -1)
+        success, qpos = self.env.robot.compute_batch_ik(
+            pose=eef_variants,
+            name=arm_part,
+            joint_seed=seeds,
+        )
+        success = torch.as_tensor(
+            success,
+            dtype=torch.bool,
+            device=self.device,
+        ).reshape(self.num_envs, sample_count)
+        qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
+        success &= torch.isfinite(qpos).all(dim=-1)
+        distance = torch.linalg.vector_norm(qpos - seeds, dim=-1)
+        distance = torch.where(
+            success,
+            distance,
+            torch.full_like(distance, torch.inf),
+        )
+        yaw_offsets = torch.matmul(
+            variants[:, :, :3, :3],
+            target_pose[:, None, :3, :3].transpose(-1, -2),
+        )
+        yaw_distance = torch.atan2(
+            yaw_offsets[:, :, 1, 0],
+            yaw_offsets[:, :, 0, 0],
+        ).abs()
+        minimum_yaw = torch.where(
+            success,
+            yaw_distance,
+            torch.full_like(yaw_distance, torch.inf),
+        ).amin(dim=1)
+        minimum_rotation = success & torch.isclose(
+            yaw_distance,
+            minimum_yaw[:, None],
+            atol=1.0e-6,
+            rtol=0.0,
+        )
+        best = torch.where(
+            minimum_rotation,
+            distance,
+            torch.full_like(distance, torch.inf),
+        ).argmin(dim=1)
+        env_ids = torch.arange(self.num_envs, device=self.device)
+        selected = variants[env_ids, best]
+        selected = torch.where(
+            success.any(dim=1)[:, None, None],
+            selected,
+            target_pose,
+        )
+        return replace(
+            grounded,
+            target=replace(grounded.target, object_target_pose=selected),
+            target_object_pose=selected,
+        )
+
+    @staticmethod
+    def _yaw_variants(
+        target_pose: torch.Tensor,
+        sample_count: int,
+    ) -> torch.Tensor:
+        signed_steps = [0]
+        for step in range(1, (sample_count + 1) // 2):
+            signed_steps.extend((step, -step))
+        if sample_count % 2 == 0:
+            signed_steps.append(sample_count // 2)
+        angles = target_pose.new_tensor(signed_steps) * (2.0 * math.pi / sample_count)
+        yaw = target_pose.new_zeros((sample_count, 3, 3))
+        yaw[:, 0, 0] = torch.cos(angles)
+        yaw[:, 0, 1] = -torch.sin(angles)
+        yaw[:, 1, 0] = torch.sin(angles)
+        yaw[:, 1, 1] = torch.cos(angles)
+        yaw[:, 2, 2] = 1.0
+        variants = target_pose[:, None].repeat(1, sample_count, 1, 1)
+        variants[:, :, :3, :3] = torch.matmul(yaw[None], target_pose[:, None, :3, :3])
+        return variants
+
+    def _planning_context(
+        self,
+        state: ExecutionState,
+        grounded: GroundedAction,
+    ) -> PlanningContext:
+        qpos = state.last_qpos.to(device=self.device, dtype=torch.float32)
+        get_qvel = getattr(self.env.robot, "get_qvel", None)
+        qvel = get_qvel() if callable(get_qvel) else None
+        if not isinstance(qvel, torch.Tensor) or qvel.shape != qpos.shape:
+            qvel = torch.zeros_like(qpos)
+        else:
+            qvel = qvel.to(device=self.device, dtype=qpos.dtype)
+        return PlanningContext(
+            robot=RobotObservation(timestamp=self._scene_time, qpos=qpos, qvel=qvel),
+            task=state.to_task_state(),
+            scene=self._scene_snapshot(grounded, state),
+            env_ids=torch.arange(
+                self.num_envs,
+                dtype=torch.long,
+                device=self.device,
+            ),
+            control_dt=float(getattr(self.env, "step_dt", 1.0 / 60.0)),
+        )
+
+    def _scene_snapshot(
+        self,
+        grounded: GroundedAction,
+        state: ExecutionState,
+    ) -> SceneSnapshot:
+        dynamic_uids = tuple(
+            str(uid) for uid in self.planner_policy.get("dynamic_obstacle_uids", ())
+        )
+        env_ids = torch.arange(
+            self.num_envs,
+            dtype=torch.long,
+            device=self.device,
+        )
+        if self.scene_provider is None:
+            base = SceneSnapshot(timestamp=self._scene_time, version=0)
+        else:
+            base = self.scene_provider.snapshot(
+                timestamp=self._scene_time,
+                env_ids=env_ids,
+            )
+        if not bool(self.planner_policy.get("dynamic_collision", False)):
+            return base
+        exclusion_masks = self._collision_exclusion_masks(grounded, state)
+        entities = dict(base.entities)
+        collision_pose_overrides: dict[str, torch.Tensor] = {}
+        for uid in dynamic_uids:
+            entity_state = entities.get(uid)
+            if entity_state is None:
+                raise ValueError(
+                    f"SceneProvider omitted cuRobo dynamic obstacle {uid!r}."
+                )
+            pose = entity_state.pose.to(dtype=torch.float32, device=self.device)
+            if pose.shape == (4, 4):
+                pose = pose.unsqueeze(0).repeat(self.num_envs, 1, 1)
+            if pose.shape != (self.num_envs, 4, 4):
+                raise ValueError(
+                    f"Dynamic obstacle {uid!r} pose must have shape (4, 4) or "
+                    f"({self.num_envs}, 4, 4), got {tuple(pose.shape)}."
+                )
+            excluded = exclusion_masks.get(uid)
+            if excluded is not None and bool(excluded.any()):
+                collision_pose = pose.clone()
+                collision_pose[excluded, 2, 3] += _COLLISION_PARKING_Z_OFFSET
+                collision_pose_overrides[uid] = collision_pose
+            entities[uid] = EntityState(
+                pose=pose,
+                confidence=entity_state.confidence,
+            )
+        return _CollisionOverrideSceneSnapshot(
+            timestamp=base.timestamp,
+            version=base.version,
+            entities=entities,
+            collision_world_revision=base.collision_world_revision,
+            collision_entity_ids=dynamic_uids,
+            collision_pose_overrides=collision_pose_overrides,
+        )
+
+    def _collision_exclusion_masks(
+        self,
+        grounded: GroundedAction,
+        state: ExecutionState,
+    ) -> dict[str, torch.Tensor]:
+        """Return per-environment masks for obstacles intentionally in contact."""
+        dynamic_uids = {
+            str(uid) for uid in self.planner_policy.get("dynamic_obstacle_uids", ())
+        }
+        masks: dict[str, torch.Tensor] = {}
+
+        def include(uid: str | None, env_mask: torch.Tensor | None = None) -> None:
+            if uid is None or uid not in dynamic_uids:
+                return
+            mask = (
+                torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+                if env_mask is None
+                else torch.as_tensor(
+                    env_mask,
+                    dtype=torch.bool,
+                    device=self.device,
+                ).reshape(-1)
+            )
+            if mask.shape != (self.num_envs,):
+                raise ValueError(
+                    f"Collision exclusion mask for {uid!r} must have shape "
+                    f"({self.num_envs},), got {tuple(mask.shape)}."
+                )
+            masks[uid] = masks.get(uid, torch.zeros_like(mask)) | mask
+
+        if self.capabilities.get(grounded.action_class).allows_target_contact:
+            target_uid = grounded.object_uid
+            if target_uid is None:
+                target_uid = getattr(
+                    getattr(grounded.target, "semantics", None),
+                    "label",
+                    None,
+                )
+            include(target_uid)
+
+        for held in state.held_objects.values():
+            include(held.semantics.entity_id, held.env_mask)
+        collision_exclusion_uids = grounded.motion_policy.get(
+            "collision_exclusion_uids", ()
+        )
+        if isinstance(collision_exclusion_uids, str):
+            collision_exclusion_uids = (collision_exclusion_uids,)
+        for uid in collision_exclusion_uids:
+            include(str(uid))
+        return masks
+
+    def _invocation(
+        self,
+        grounded: GroundedAction,
+        capability: AtomicCapability,
+        *,
+        engine: AtomicActionEngine | None = None,
+    ) -> ActionInvocation:
+        if capability.resource_mode == "coordinated_object":
+            strategy = str(self.planner_policy["coordinated_strategy"])
+        elif grounded.control == "hand":
+            strategy = "ik_interp"
+        else:
+            strategy = str(self.planner_policy["single_arm_strategy"])
+        sample_count = max(2, int(grounded.cfg.get("sample_interval", 50)))
+        dynamic_collision = bool(self.planner_policy.get("dynamic_collision", False))
+        collision_required = (
+            grounded.motion_policy.get("collision_safety") == "required"
+        )
+        if dynamic_collision and strategy == "motion_gen":
+            dynamic_mode = (
+                DynamicCollisionMode.REQUIRED
+                if collision_required
+                else DynamicCollisionMode.AUTO
+            )
+        else:
+            dynamic_mode = DynamicCollisionMode.OFF
+        goal = grounded.target
+        if capability.config_materializer == "coordinated_pickment":
+            self._validate_coordinated_pickment_goal(grounded)
+        return ActionInvocation(
+            skill_id=str(capability.action_type.skill_id),
+            goal=goal,
+            binding=self._binding(grounded, capability, engine=engine),
+            motion_policy=MotionPolicy(
+                strategy=strategy,
+                sample_count=sample_count,
+                dynamic_collision_mode=dynamic_mode,
+            ),
+            recovery_policy=RecoveryPolicy(),
+            skill_options=self._build_config(grounded, capability),
+        )
+
+    @staticmethod
+    def _validate_coordinated_pickment_goal(
+        grounded: GroundedAction,
+    ) -> CoordinatedPickGoal:
+        """Validate the coordinated goal against the engine-scoped generator."""
+        target = grounded.target
+        if not isinstance(target, CoordinatedPickGoal):
+            raise TypeError("CoordinatedPickment requires a CoordinatedPickGoal.")
+        requested = grounded.cfg.get("is_filter_ground_collision")
+        if requested is not None and not isinstance(requested, bool):
+            raise TypeError("is_filter_ground_collision must be a boolean.")
+        if not isinstance(target.semantics.affordance, AntipodalAffordance):
+            raise TypeError(
+                "CoordinatedPickment requires an AntipodalAffordance for GenSim "
+                "grasp filtering."
+            )
+        return target
+
+    def _binding(
+        self,
+        action: GroundedAction,
+        capability: AtomicCapability,
+        *,
+        engine: AtomicActionEngine | None = None,
+    ) -> ActionBinding:
+        engine = self._engine() if engine is None else engine
+        contract = getattr(capability.action_type, "binding_contract", None)
+        if contract is None:
+            return ActionBinding(owner_id=engine.binding_owner_id)
+
+        slot_parts: dict[str, tuple[str, str | None]] = {}
+        task_state_keys: dict[str, str] | None = None
+        if capability.config_materializer == "handover":
+            transfer_side = str(action.cfg.get("transfer_arm", "left_arm"))
+            receive_side = "right_arm" if transfer_side == "left_arm" else "left_arm"
+            transfer_arm, transfer_hand, _ = self._parts(transfer_side)
+            receive_arm, receive_hand, _ = self._parts(receive_side)
+            if transfer_hand is None or receive_hand is None:
+                raise ValueError("HandOver requires two configured end effectors.")
+            slot_parts = {
+                "source": (transfer_arm, transfer_hand),
+                "destination": (receive_arm, receive_hand),
+            }
+        elif capability.config_materializer == "coordinated_pickment":
+            left_arm, left_hand, _ = self._parts("left_arm")
+            right_arm, right_hand, _ = self._parts("right_arm")
+            if left_hand is None or right_hand is None:
+                raise ValueError("Coordinated pickup requires two end effectors.")
+            slot_parts = {
+                "left": (left_arm, left_hand),
+                "right": (right_arm, right_hand),
+            }
+        elif capability.config_materializer == "coordinated_placement":
+            placing_arm, placing_hand, _ = self._parts("left_arm")
+            support_arm, support_hand, _ = self._parts("right_arm")
+            if placing_hand is None or support_hand is None:
+                raise ValueError("Coordinated placement requires two end effectors.")
+            slot_parts = {
+                "placing": (placing_arm, placing_hand),
+                "support": (support_arm, support_hand),
+            }
+        else:
+            arm_part, hand_part, _ = self._parts(action.arm)
+            motion_part = hand_part if action.control == "hand" else arm_part
+            if motion_part is None:
+                raise ValueError(
+                    f"{action.arm} has no configured {action.control} part."
+                )
+            slot_parts = {"primary": (motion_part, hand_part)}
+            if action.control == "hand" and bool(
+                action.cfg.get("single_release", False)
+            ):
+                task_state_keys = {"primary": arm_part}
+
+        endpoints: dict[str, dict[str, str]] = {}
+        for slot in contract.slots:
+            try:
+                motion_part, hand_part = slot_parts[slot.slot_id]
+            except KeyError as exc:
+                raise ValueError(
+                    f"No GenSim binding is available for slot {slot.slot_id!r}."
+                ) from exc
+            selected: dict[str, str] = {}
+            for requirement in slot.endpoints:
+                if requirement.endpoint_id == "motion":
+                    selected["motion"] = motion_part
+                elif requirement.endpoint_id == "grasp":
+                    if hand_part is None:
+                        raise ValueError(
+                            f"{capability.name} requires a grasp endpoint for "
+                            f"slot {slot.slot_id!r}."
+                        )
+                    selected["grasp"] = hand_part
+                else:
+                    raise ValueError(
+                        f"Unsupported GenSim endpoint {slot.slot_id}."
+                        f"{requirement.endpoint_id}."
+                    )
+            endpoints[slot.slot_id] = selected
+        skill_id = str(capability.action_type.skill_id)
+        if task_state_keys is None:
+            return engine.bind_control_parts(skill_id, endpoints)
+        return engine.bind_control_parts(
+            skill_id,
+            endpoints,
+            task_state_keys=task_state_keys,
+        )
+
+    def _build_config(
+        self,
+        action: GroundedAction,
+        capability: AtomicCapability | type,
+    ) -> Any:
+        """Build the mainline immutable ``ActionOptions`` value.
+
+        The method name is retained as a narrow compatibility hook for existing
+        Action Engine tests and extensions; it no longer constructs legacy
+        hardware-bound ``ActionCfg`` objects.
+        """
+        if isinstance(capability, type):
+            registered = self.capabilities.require_executable(action.action_class)
+            if registered.config_type is not capability:
+                raise ValueError(
+                    f"Options type {capability.__name__!r} does not match "
+                    f"AtomicAction {action.action_class!r}."
+                )
+            capability = registered
+        if capability.config_materializer_hook is not None:
+            return capability.config_materializer_hook(
+                adapter=self,
+                action=action,
+                capability=capability,
+            )
+        builder = getattr(
+            self,
+            f"_build_{capability.config_materializer}_config",
+            self._build_single_arm_config,
+        )
+        return builder(action, capability)
+
+    def _config_policy(self, action: GroundedAction) -> dict[str, Any]:
+        policy = dict(action.cfg)
+        for key in (
+            "postcondition_tolerance",
+            "relation_distance",
+            "hover_height",
+            "staging_lift_height",
+            "transport_clearance",
+            "surface_clearance",
+            "receiver_hold_joint_tolerance",
+            "post_hold_steps",
+        ):
+            policy.pop(key, None)
+        return policy
+
+    def _build_single_arm_config(
+        self,
+        action: GroundedAction,
+        capability: AtomicCapability,
+    ) -> Any:
+        policy = self._config_policy(action)
+        config_type = capability.config_type
+        if capability.target_materializer == "semantic_held_object":
+            from .atomic_compat import ExactTargetMoveHeldObjectOptions
+
+            config_type = ExactTargetMoveHeldObjectOptions
+        elif capability.target_materializer == "joint_state":
+            from .atomic_compat import ActionEngineMoveJointsOptions
+
+            config_type = ActionEngineMoveJointsOptions
+        if capability.target_materializer == "press":
+            press_depth = policy.pop("press_depth", None)
+            if press_depth is not None and "press_distance" not in policy:
+                policy["press_distance"] = press_depth
+        approach_mode = policy.pop("approach_direction_mode", None)
+        if approach_mode == "handover_transfer":
+            from .frames import robot_frame_axes
+
+            _, lateral = robot_frame_axes(self.env)
+            outward = lateral[0] if action.arm == "left_arm" else -lateral[0]
+            policy["approach_direction"] = _diagonal_approach_direction(
+                -outward.to(device=self.device)
+            )
+        elif approach_mode is not None:
+            raise ValueError(f"Unknown approach_direction_mode {approach_mode!r}.")
+        for name in ("approach_direction", "obj_upright_direction", "target_axis"):
+            if name in policy and not isinstance(policy[name], torch.Tensor):
+                policy[name] = torch.as_tensor(
+                    policy[name], dtype=torch.float32, device=self.device
+                )
+        return config_type(**_supported_kwargs(config_type, policy))
+
+    def _build_coordinated_pickment_config(
+        self,
+        action: GroundedAction,
+        capability: AtomicCapability,
+    ) -> Any:
+        policy = self._config_policy(action)
+        left_base, right_base = self._coordinated_arm_bases()
+        direction = right_base[0, :3, 3] - left_base[0, :3, 3]
+        norm = torch.linalg.vector_norm(direction)
+        if not torch.isfinite(direction).all() or norm <= 1.0e-6:
+            raise ValueError(
+                "Coordinated pickup requires distinct finite left/right arm bases."
+            )
+        policy.setdefault("left_to_right_arm_direction", direction / norm)
+        for name in ("approach_direction", "left_to_right_arm_direction"):
+            if name in policy and not isinstance(policy[name], torch.Tensor):
+                policy[name] = torch.as_tensor(
+                    policy[name], dtype=torch.float32, device=self.device
+                )
+        return capability.config_type(
+            **_supported_kwargs(capability.config_type, policy)
+        )
+
+    def _build_coordinated_placement_config(
+        self,
+        action: GroundedAction,
+        capability: AtomicCapability,
+    ) -> Any:
+        return self._build_single_arm_config(action, capability)
+
+    def _build_handover_config(
+        self,
+        action: GroundedAction,
+        capability: AtomicCapability,
+    ) -> Any:
+        policy = self._config_policy(action)
+        middle = action.cfg.get("middle_object_pose")
+        final = action.cfg.get("final_object_pose")
+        if middle is None or final is None:
+            raise ValueError("HandOver grounding must provide middle and final poses.")
+        transfer_side = str(action.cfg.get("transfer_arm", "left_arm"))
+        receive_side = "right_arm" if transfer_side == "left_arm" else "left_arm"
+        from .frames import robot_frame_axes
+
+        _, lateral = robot_frame_axes(self.env)
+        receiver_outward = (
+            lateral[0] if receive_side == "left_arm" else -lateral[0]
+        ).to(device=self.device)
+        receiver_inward_approach = -receiver_outward
+        policy.update(
+            {
+                "middle_object_pose": middle,
+                # Delivery is represented by a following MoveHeldObject node.
+                # Keep the receiver fixed while the source retreats here.
+                "final_object_pose": middle,
+                "receive_approach_direction": _diagonal_approach_direction(
+                    receiver_inward_approach
+                ),
+            }
+        )
+        return capability.config_type(
+            **_supported_kwargs(capability.config_type, policy)
+        )
+
+    def _positions_with_agent_holds(
+        self,
+        plan: ActionPlan,
+        grounded: GroundedAction,
+        capability: AtomicCapability,
+    ) -> torch.Tensor:
+        trajectory = plan.joint_trajectory
+        if trajectory is None:
+            raise ValueError(
+                f"AtomicAction {plan.skill_id!r} did not retain a joint trajectory."
+            )
+        positions = trajectory.positions.to(
+            device=self.device,
+            dtype=torch.float32,
+        )
+        hold_steps = int(grounded.cfg.get("post_hold_steps", 0))
+        if capability.state_effect != "release" or hold_steps <= 0:
+            return positions
+        release = next((item for item in plan.segments if item.name == "release"), None)
+        if release is None or release.stop <= 0 or release.stop > positions.shape[1]:
+            return positions
+        hold = positions[:, release.stop - 1 : release.stop].repeat(1, hold_steps, 1)
+        return torch.cat(
+            (positions[:, : release.stop], hold, positions[:, release.stop :]),
+            dim=1,
+        )
+
+    @staticmethod
+    def _merge_plan_rows(
+        primary: torch.Tensor,
+        fallback: torch.Tensor,
+        use_fallback: torch.Tensor,
+        hold_qpos: torch.Tensor,
+    ) -> torch.Tensor:
+        steps = max(primary.shape[1], fallback.shape[1], 1)
+
+        def padded(value: torch.Tensor) -> torch.Tensor:
+            if value.shape[1] == 0:
+                return hold_qpos[:, None].repeat(1, steps, 1)
+            if value.shape[1] < steps:
+                value = torch.cat(
+                    (value, value[:, -1:].repeat(1, steps - value.shape[1], 1)),
+                    dim=1,
+                )
+            return value
+
+        primary = padded(primary)
+        fallback = padded(fallback)
+        return torch.where(use_fallback[:, None, None], fallback, primary)
+
+    def _handover_receiver_hold_mask(
+        self,
+        trajectory: torch.Tensor,
+        grounded: GroundedAction,
+        options: Any,
+        *,
+        tolerance: float,
+    ) -> torch.Tensor:
+        if tolerance < 0.0:
+            raise ValueError("receiver_hold_joint_tolerance must be non-negative.")
+        retreat_steps = max(2, int(options.retreat_steps))
+        if trajectory.shape[1] < retreat_steps:
+            return torch.zeros(
+                self.num_envs, dtype=torch.bool, device=trajectory.device
+            )
+        transfer_side = str(grounded.cfg.get("transfer_arm", "left_arm"))
+        receive_side = "right_arm" if transfer_side == "left_arm" else "left_arm"
+        receive_arm, _, _ = self._parts(receive_side)
+        receiver_ids = self.env.robot.get_joint_ids(name=receive_arm)
+        receiver = trajectory[:, -retreat_steps:, receiver_ids]
+        drift = torch.amax(torch.abs(receiver - receiver[:, :1]), dim=(1, 2))
+        return torch.isfinite(drift) & (drift <= tolerance)
+
+    def execute_trajectory(
+        self,
+        trajectory: torch.Tensor,
+        *,
+        active: torch.Tensor,
+        waypoint_observer: Callable[[int], None] | None = None,
+    ) -> list[torch.Tensor]:
+        """Advance the environment while holding inactive vectorized rows."""
+        if trajectory.ndim != 3 or trajectory.shape[0] != self.num_envs:
+            raise ValueError("Execution trajectory must have shape (N, T, robot_dof).")
+        active = active.to(device=trajectory.device, dtype=torch.bool)
+        current = self.env.robot.get_qpos().to(
+            device=trajectory.device,
+            dtype=trajectory.dtype,
+        )
+        commands: list[torch.Tensor] = []
+        for waypoint_index, waypoint in enumerate(trajectory.unbind(dim=1)):
+            command = torch.where(active[:, None], waypoint, current)
+            self.env.step(command)
+            self._scene_time += self._scene_step_duration()
+            update = getattr(self.env, "update_obj_info", None)
+            if callable(update):
+                update()
+            if waypoint_observer is not None:
+                waypoint_observer(waypoint_index)
+            commands.append(command.detach())
+            current = command
+        sync = getattr(self.env, "sync_agent_state_from_qpos", None)
+        if callable(sync) and commands:
+            sync(commands[-1])
+        return commands
+
+    def _scene_step_duration(self) -> float:
+        """Return one positive logical waypoint duration for scene timestamps."""
+        sim_config = getattr(getattr(self.env, "sim", None), "sim_config", None)
+        candidates = (
+            getattr(self.env, "physics_dt", None),
+            getattr(sim_config, "physics_dt", None),
+        )
+        for value in candidates:
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                duration = float(value)
+                if math.isfinite(duration) and duration > 0.0:
+                    return duration
+        return 1.0
+
+    def combine(
+        self,
+        outcomes: Mapping[str, ActionOutcome | None],
+        masks: Mapping[str, torch.Tensor],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Merge independently planned arm paths into one synchronized stream."""
+        present = [item for item in outcomes.values() if item is not None]
+        if not present:
+            raise ValueError("At least one arm outcome is required.")
+        steps = max(int(item.trajectory.shape[1]) for item in present)
+        current = self.env.robot.get_qpos().to(self.device, dtype=torch.float32)
+        merged = current[:, None, :].repeat(1, max(steps, 1), 1)
+        success = torch.ones(
+            self.num_envs,
+            dtype=torch.bool,
+            device=self.device,
+        )
+        for arm, outcome in outcomes.items():
+            if outcome is None:
+                continue
+            mask = masks[arm].to(self.device, dtype=torch.bool)
+            success &= ~mask | outcome.success
+            trajectory = outcome.trajectory
+            if trajectory.shape[1] == 0:
+                continue
+            if trajectory.shape[1] < steps:
+                padding = trajectory[:, -1:].repeat(1, steps - trajectory.shape[1], 1)
+                trajectory = torch.cat((trajectory, padding), dim=1)
+            joint_ids = self.joint_ids(arm, include_hand=True)
+            if not joint_ids:
+                continue
+            selected = merged[:, :, joint_ids]
+            merged[:, :, joint_ids] = torch.where(
+                mask[:, None, None], trajectory[:, :, joint_ids], selected
+            )
+        return merged, success
+
+    def joint_ids(self, arm: str, *, include_hand: bool) -> list[int]:
+        if arm == "coordinated":
+            return list(range(int(self.env.robot.dof)))
+        side = "left" if arm == "left_arm" else "right"
+        result = list(getattr(self.env, f"{side}_arm_joints", ()))
+        if include_hand:
+            result.extend(getattr(self.env, f"{side}_eef_joints", ()))
+        return result
+
+    def _engine(self) -> AtomicActionEngine:
+        if self._atomic_engine is None:
+            self._atomic_engine = self._new_engine(
+                self._generator(),
+                filter_ground_collision=True,
+            )
+        return self._atomic_engine
+
+    def _engine_for(
+        self,
+        grounded: GroundedAction,
+        capability: AtomicCapability,
+    ) -> AtomicActionEngine:
+        if capability.config_materializer != "coordinated_pickment":
+            return self._engine()
+        filter_ground_collision = grounded.cfg.get(
+            "is_filter_ground_collision",
+            True,
+        )
+        if not isinstance(filter_ground_collision, bool):
+            raise TypeError("is_filter_ground_collision must be a boolean.")
+        opening_margin = grounded.cfg.get(
+            "grasp_opening_margin",
+            self.gripper_profile.grasp_model.opening_margin,
+        )
+        if isinstance(opening_margin, bool) or not isinstance(
+            opening_margin, (int, float)
+        ):
+            raise TypeError("grasp_opening_margin must be a real number.")
+        opening_margin = float(opening_margin)
+        if (
+            not math.isfinite(opening_margin)
+            or opening_margin < 0.0
+            or opening_margin >= self.gripper_profile.grasp_model.max_opening_width
+        ):
+            raise ValueError(
+                "grasp_opening_margin must be finite, non-negative, and smaller "
+                "than the selected gripper's maximum opening width."
+            )
+        profile_margin = self.gripper_profile.grasp_model.opening_margin
+        if filter_ground_collision and opening_margin == profile_margin:
+            return self._engine()
+        cache_key = (filter_ground_collision, opening_margin)
+        cached = self._coordinated_engines.get(cache_key)
+        if cached is None:
+            cached = self._new_engine(
+                MotionGenerator(cfg=self._motion_generator_cfg()),
+                filter_ground_collision=filter_ground_collision,
+                opening_margin=opening_margin,
+            )
+            self._coordinated_engines[cache_key] = cached
+        return cached
+
+    def _new_engine(
+        self,
+        motion_generator: MotionGenerator,
+        *,
+        filter_ground_collision: bool,
+        opening_margin: float | None = None,
+    ) -> AtomicActionEngine:
+        from embodichain.gen_sim.action_engine.capabilities import HeldObjectHandOver
+
+        from .atomic_compat import ActionEngineMoveJoints, ExactTargetMoveHeldObject
+
+        engine = AtomicActionEngine(
+            motion_generator,
+            control_profiles=self._control_profiles(),
+            grasp_pose_generators=self._grasp_pose_generators(
+                filter_ground_collision=filter_ground_collision,
+                opening_margin=opening_margin,
+            ),
+        )
+        engine.register(ExactTargetMoveHeldObject(), replace=True)
+        engine.register(ActionEngineMoveJoints(), replace=True)
+        engine.register(HeldObjectHandOver(), replace=True)
+        return engine
+
+    def _generator(self) -> MotionGenerator:
+        if self._motion_generator is None:
+            self._motion_generator = MotionGenerator(cfg=self._motion_generator_cfg())
+        return self._motion_generator
+
+    def _motion_generator_cfg(self) -> MotionGenCfg:
+        backend = str(self.planner_policy.get("backend", "curobo"))
+        if backend == "curobo":
+            options = dict(self.planner_policy.get("curobo", {}))
+            obstacle_uids = tuple(
+                dict.fromkeys(
+                    [
+                        *self.planner_policy.get("static_obstacle_uids", ()),
+                        *self.planner_policy.get("dynamic_obstacle_uids", ()),
+                    ]
+                )
+            )
+            rigid_objects: dict[str, Any] = {}
+            for uid in obstacle_uids:
+                obstacle_uid = str(uid)
+                entity = self.env.sim.get_rigid_object(obstacle_uid)
+                if entity is None:
+                    raise ValueError(f"Unknown cuRobo obstacle {uid!r}.")
+                rigid_objects[obstacle_uid] = entity
+            obstacle_representation = str(
+                options.get("obstacle_representation", "cuboid")
+            )
+            world = CuroboWorldCfg(
+                rigid_objects=rigid_objects or None,
+                obstacle_representation=obstacle_representation,
+                collision_cache=_collision_cache_for_world(
+                    obstacle_representation,
+                    len(rigid_objects),
+                ),
+                dynamic_obstacle_names=[
+                    str(uid)
+                    for uid in self.planner_policy.get("dynamic_obstacle_uids", ())
+                ],
+                multi_env=bool(options.get("multi_env", False)),
+            )
+            planner_cfg = CuroboPlannerCfg(
+                robot_uid=self.env.robot.uid,
+                log_level=str(options.get("log_level", "error")),
+                world=world,
+                use_cuda_graph=bool(options.get("use_cuda_graph", True)),
+                preserve_plan_samples=bool(options.get("preserve_plan_samples", False)),
+                max_attempts=int(options.get("max_attempts", 5)),
+                collision_activation_distance=float(
+                    options.get("collision_activation_distance", 0.01)
+                ),
+            )
+        elif backend == "toppra":
+            planner_cfg = ToppraPlannerCfg(robot_uid=self.env.robot.uid)
+        else:
+            raise ValueError(f"Unsupported Action Engine planner backend {backend!r}.")
+        return MotionGenCfg(planner_cfg=planner_cfg)
+
+    def _control_profiles(self) -> dict[str, ControlPartCommandProfile]:
+        profiles: dict[str, ControlPartCommandProfile] = {}
+        for side in ("left_arm", "right_arm"):
+            try:
+                _, hand_part, hand_dof = self._parts(side)
+            except ValueError:
+                continue
+            if hand_part is None or hand_dof == 0 or hand_part in profiles:
+                continue
+            profiles[hand_part] = ControlPartCommandProfile.joint_positions(
+                open=_as_hand_qpos(self.env.open_state, hand_dof, self.device),
+                grasp=_as_hand_qpos(self.env.close_state, hand_dof, self.device),
+            )
+        return profiles
+
+    def _grasp_pose_generators(
+        self,
+        *,
+        filter_ground_collision: bool = True,
+        opening_margin: float | None = None,
+    ) -> dict[str, AntipodalGraspPoseGenerator]:
+        """Build one mainline grasp service for each runtime hand endpoint."""
+        if not isinstance(filter_ground_collision, bool):
+            raise TypeError("filter_ground_collision must be a boolean.")
+        options = self.grasp_policy
+        geometry = self.gripper_profile.grasp_model
+        if opening_margin is None:
+            opening_margin = geometry.opening_margin
+        if isinstance(opening_margin, bool) or not isinstance(
+            opening_margin, (int, float)
+        ):
+            raise TypeError("opening_margin must be a real number or None.")
+        opening_margin = float(opening_margin)
+        if (
+            not math.isfinite(opening_margin)
+            or opening_margin < 0.0
+            or opening_margin >= geometry.max_opening_width
+        ):
+            raise ValueError(
+                "opening_margin must be finite, non-negative, and smaller than "
+                "the selected gripper's maximum opening width."
+            )
+        model = ParallelJawGripperModelCfg(
+            model_id=geometry.model_id,
+            min_opening_width=geometry.min_opening_width,
+            max_opening_width=geometry.max_opening_width,
+            finger_length=geometry.finger_length,
+            finger_width=geometry.finger_width,
+            finger_thickness=geometry.finger_thickness,
+            palm_depth=geometry.palm_depth,
+        )
+        algorithm = AntipodalGraspPoseGeneratorCfg(
+            sample_count=int(options["antipodal_n_sample"]),
+            ray_deviation_angle=float(options["antipodal_max_angle"]),
+            approach_deviation_angle=float(options["max_deviation_angle"]),
+            approach_direction_samples=int(options["n_deviated_approach_directions"]),
+            max_candidates=_BODY_GRASP_CANDIDATE_LIMIT,
+        )
+        collision = ParallelJawGraspCollisionCfg(
+            point_sample_density=float(options["point_sample_dense"]),
+            max_decomposition_hulls=int(options["max_decomposition_hulls"]),
+            opening_margin=opening_margin,
+            filter_ground_collision=filter_ground_collision,
+        )
+        annotation = GraspAnnotationCfg(
+            selection_mode="whole_mesh",
+            viser_port=int(options["viser_port"]),
+            force_refresh=bool(options["force_grasp_reannotate"]),
+        )
+        shared_generator = _TracingAntipodalGraspPoseGenerator(
+            model,
+            algorithm_cfg=algorithm,
+            collision_cfg=collision,
+            annotation_cfg=annotation,
+        )
+        generators: dict[str, AntipodalGraspPoseGenerator] = {}
+        for arm in ("left_arm", "right_arm"):
+            try:
+                _, hand_part, _ = self._parts(arm)
+            except ValueError:
+                continue
+            if hand_part is None or hand_part in generators:
+                continue
+            generators[hand_part] = shared_generator
+        return generators
+
+    def _parts(self, arm: str) -> tuple[str, str | None, int]:
+        if arm not in {"left_arm", "right_arm"}:
+            raise ValueError(f"Expected a physical arm, got {arm!r}.")
+        is_left = arm == "left_arm"
+        if hasattr(self.env, "get_agent_arm_control_part"):
+            arm_part = self.env.get_agent_arm_control_part(is_left)
+            hand_part = self.env.get_agent_eef_control_part(is_left)
+        else:
+            arm_part = arm
+            hand_part = "left_eef" if is_left else "right_eef"
+        hand_ids = (
+            []
+            if hand_part is None
+            else list(self.env.robot.get_joint_ids(name=hand_part))
+        )
+        return (
+            str(arm_part),
+            None if hand_part is None else str(hand_part),
+            len(hand_ids),
+        )
