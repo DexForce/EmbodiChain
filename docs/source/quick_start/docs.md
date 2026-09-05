@@ -2,9 +2,13 @@
 
 ## 1. Install the documentation dependencies
 
-Build the docs from a source checkout in a Python 3.10 or 3.11 virtual
-environment. API generation imports EmbodiChain modules, so install the project
-runtime and the documentation toolchain from the repository root:
+Build the docs from a source checkout in a Python 3.11 virtual environment.
+API generation imports optional GenSim modules, so this setup installs the
+`gensim` extra and its ABI-specific `bpy` dependency. A Python 3.12 environment
+can run the core package, but it cannot run this full documentation setup.
+
+Install the project runtime and documentation toolchain from the repository
+root:
 
 ```bash
 pip install -e ".[gensim]" \
