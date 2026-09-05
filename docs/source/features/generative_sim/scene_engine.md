@@ -97,7 +97,8 @@ SCENE_ENGINE_ARTICULATED_GENERATION_GENERATE_PATH="/generate_articulation"
 
 - **Scene understanding**: analyzes the image and segments the table and visible objects.
 - **Scene generation**: generates meshes, prepares SimReady geometry, detects the table support surface, and refines the table-top layout.
-- **Scene export**: copies the final GLBs and writes a portable z-up scene export.
+- **Scene export**: writes the editable GLB/USDC scene export and a portable
+  Scene USD package for preview and delivery.
 
 ## Output and Preview
 
@@ -113,7 +114,25 @@ scene_output/
     |-- scene_config.json    # Exported z-up scene description
     |-- scene_graph.json     # Table support and planar relation graph
     `-- scene.json           # Scene Engine object metadata and y-up poses
+`-- scene_usd/
+    |-- scene.usda           # Scene-level USD interchange artifact
+    |-- scene_usd_manifest.json
+    |-- textures/            # Texture files referenced by scene.usda
+    `-- assets/              # Native runtime payloads used by DexSim preview
+        |-- <rigid_uid>/     # External-texture GLTF, buffers, and textures
+        `-- <articulation_uid>/ # USDC and its external texture files
 ```
+
+`scene_export/` remains the editable source form. `scene_usd/` is the
+delivery/preview package: its manifest associates each packaged GLTF or USDC
+asset with the final scene pose. DexSim currently cannot faithfully restore a
+GLB's internal node hierarchy from a flattened USD mesh alone, so the
+`--usd` preview loads the package's native GLTF/USDC payloads through that
+manifest. This preserves GLB geometry, textures, articulated objects, and
+their final layout.
+
+When sharing or moving a Scene USD result, copy the complete `scene_usd/`
+directory, not only `scene.usda`.
 
 Validate the export without opening a window:
 
@@ -125,3 +144,23 @@ embodichain preview-scene \
 
 For an interactive preview, omit `--headless`. Add `--viser` to publish the
 scene through Viser.
+
+Preview the packaged Scene USD instead:
+
+```bash
+embodichain preview-scene \
+    --output_root /path/to/scene_output \
+    --usd \
+    --device cuda
+```
+
+Add `--viser` to view the same package in the browser. Articulated objects are
+loaded as articulations, so supported joints keep their interactive controls:
+
+```bash
+embodichain preview-scene \
+    --output_root /path/to/scene_output \
+    --usd \
+    --device cuda \
+    --viser
+```
