@@ -16,12 +16,16 @@ Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
 | `fix_base` | `bool` | `True` | Whether to fix the base of the articulation. |
 | `use_usd_properties` | `bool` | `False` | If True, use physical properties from USD file; if False, override with config values. Only effective for usd files. |
 | `init_qpos` | `List[float]` | `None` | Initial joint positions. |
+| `qpos_limits` | `Tensor` / `Dict[str, List[float]]` | `None` | Override joint position limits. Replaces asset limits and may either tighten or expand the range. |
 | `body_scale` | `List[float]` | `[1.0, 1.0, 1.0]` | Scaling factors for the articulation links. |
-| `disable_self_collisions` | `bool` | `True` | Whether to disable self-collisions. |
-| `drive_props` | `JointDrivePropertiesCfg` | `...` | Default drive properties. |
+| `disable_self_collision` | `bool` | `True` | Whether to disable self-collisions. |
+| `enable_gravity` | `bool` | `True` | Whether gravity affects the articulation. This runtime flag also applies when `use_usd_properties=True`. |
+| `drive_pros` | `JointDrivePropertiesCfg` | `drive_type="none"` | Default drive properties. |
 | `attrs` | `RigidBodyAttributesCfg` | `...` | Default rigid body attributes applied to all links. |
 | `link_attrs` | `dict[str, LinkPhysicsOverrideCfg]` | `None` | Optional per-link overrides keyed by group name; each group matches link names via regex. |
 
+At runtime, call `articulation.set_gravity(...)` to change gravity for every
+environment or for a selected set of environment indices.
 
 ### Per-link physics (`link_attrs`)
 
@@ -56,7 +60,7 @@ for the same partial-override behavior.
 
 ### Drive Configuration
 
-The `drive_props` parameter controls the joint physics behavior. It is defined using the `JointDrivePropertiesCfg` class. For articulation object without internal drive force, like cabinet and drawer, better set `drive_type` to `"none"`.
+The `drive_pros` parameter controls the joint physics behavior. It is defined using the `JointDrivePropertiesCfg` class. Generic articulations default to `drive_type="none"`, so passive assets such as cabinets and drawers do not receive internal drive forces unless explicitly configured.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -67,6 +71,49 @@ The `drive_props` parameter controls the joint physics behavior. It is defined u
 | `friction` | `float` / `Dict` | `0.0` | Joint friction coefficient. |
 | `armature` | `float` / `Dict` | `0.0` | Joint armature added to joint-space inertia ($kg$ for prismatic, $kg \cdot m^2$ for revolute). |
 | `drive_type` | `str` | `"none"` | Drive mode: `"force"`(driven by a force), `"acceleration"`(driven by an acceleration) or `none`(no force). |
+
+### Joint Position Limits
+
+Use `qpos_limits` to override the limits defined in the asset file. This is the
+articulation's effective physical limit in simulation, so it is also the range
+used when `set_qpos(...)` clamps requested joint positions.
+
+```python
+from embodichain.lab.sim.cfg import ArticulationCfg
+import torch
+
+# Override specific joints by name or regex at initialization.
+art_cfg = ArticulationCfg(
+    fpath="assets/robots/franka/franka.urdf",
+    qpos_limits={
+        "panda_joint1": [-2.5, 2.5],
+        "panda_joint[2-4]": [-1.5, 1.5],
+    },
+)
+
+# Or provide a (dof, 2) tensor/array applied to all environments.
+dof = 7
+art_cfg = ArticulationCfg(
+    fpath="assets/robots/franka/franka.urdf",
+    qpos_limits=torch.tensor([[-2.0, 2.0]] * dof),
+)
+```
+
+You can also change the active limits at runtime:
+
+```python
+# Tighten limits for joints 0 and 1 on all environments.
+new_limits = torch.tensor([[-0.1, 0.1], [-0.2, 0.2]], device=device)
+articulation.set_qpos_limits(new_limits, joint_ids=[0, 1])
+
+# Query the effective limits.
+effective_limits = articulation.get_qpos_limits(joint_ids=[0, 1])
+```
+
+If you need solver-only planning limits that are tighter than the physical
+articulation limits, configure them on the solver with
+`SolverCfg.user_qpos_limits`; that behavior lives in the solver layer, not the
+articulation layer.
 
 ### Setup & Initialization
 
@@ -116,7 +163,7 @@ usd_art_cfg_override = ArticulationCfg(
     fpath=get_data_path("path/to/robot.usd"),
     init_pos=(0, 0, 0.5),
     use_usd_properties=False,  # Use config instead
-    drive_props=JointDrivePropertiesCfg(stiffness=5000, damping=500)
+    drive_pros=JointDrivePropertiesCfg(stiffness=5000, damping=500)
 )
 robot = sim.add_articulation(cfg=usd_art_cfg_override)
 ```
@@ -140,6 +187,7 @@ State data is accessed via getter methods that return batched tensors (`N` envir
 | `get_qpos(target=False)` | `(N, dof)` | Current joint positions (or joint targets if `target=True`). |
 | `get_qvel(target=False)` | `(N, dof)` | Current joint velocities (or velocity targets if `target=True`). |
 | `get_joint_drive()` | `Tuple[Tensor, ...]` | Returns `(stiffness, damping, max_effort, max_velocity, friction, armature)`, each shaped `(N, dof)`. |
+| `get_joint_drive_type()` | `list[list[DriveType]]` | Backend drive type for each selected environment and joint. |
 
 ```python
 # Example: Accessing state
@@ -147,6 +195,39 @@ print(f"Degrees of freedom: {articulation.dof}")
 print(f"Current Joint Positions: {articulation.get_qpos()}")
 print(f"End Effector Pose: {articulation.get_link_pose('ee_link')}")
 ```
+
+### Atomic Action Geometry Adapter
+
+`Articulation` exposes deterministic, domain-neutral facts through APIs such as
+`get_link_vert_face()`, `compute_fk()`, and `get_parent_joint_chain()`. Atomic
+Action integrations compose those facts with initial-state mesh transforms,
+Open3D surface sampling, and affordance-specific geometry metadata through
+`sample_initial_articulation_geometry()` in
+`embodichain.lab.sim.atomic_actions`. The adapter returns a typed value; call
+`to_object_geometry()` only at the `ObjectSemantics.geometry` boundary.
+
+Keeping this stochastic conversion in the Atomic Action layer means simulation
+objects do not own private point-cloud keys or affordance interpretation.
+
+### Visual Appearance
+
+Asset materials are wrapped automatically during articulation construction. Materials are organized by environment and link:
+
+```python
+materials = articulation.get_visual_material_inst()
+base_material = materials[0].get("base_link")
+if base_material is not None:
+    base_material.set_roughness(0.5)
+```
+
+| Method | Return / Args | Description |
+| :--- | :--- | :--- |
+| `set_visual_material(mat, env_ids=None, link_names=None, shared=False)` | `mat: VisualMaterial` | Create and assign material instances to selected links. |
+| `restore_visual_material(env_ids=None, link_names=None)` | - | Restore the asset's original per-link, per-segment materials. |
+| `get_visual_material_inst(env_ids=None, link_names=None)` | `List[Dict[str, VisualMaterialInst]]` | Get representative materials by environment and link. Missing materials are omitted from each dictionary. |
+| `get_existing_visual_material(env_ids=None, link_names=None, shared=False)` | `List[Dict[str, List[ReuseSegmentState]]]` | Retain each original segment instance and create a working instance from the link's existing material template. |
+
+For links with multiple mesh segments, `get_visual_material_inst()` exposes the first valid material. Use `get_existing_visual_material()` for per-segment operations. Segments on the same link share one working instance, while each link keeps an independent working instance. `shared=True` builds link state from the first environment for reuse across the batch. `reset()` restores the original materials for every link in each selected environment before resetting articulation state.
 
 ### Control & Dynamics
 You can control the articulation by setting target states or directly applying forces.

@@ -1,0 +1,21 @@
+tasks:
+  - point_mass
+algorithms:
+  - apg
+  - ppo
+seeds:
+  - 0
+  - 1
+  - 2
+protocol:
+  device: cuda:0
+  headless: true
+  iterations: 500
+  buffer_size: 256
+  num_envs: 64
+  num_eval_envs: 32
+  evaluation_interval: 32000
+  evaluation_episodes: 128
+  threshold_sustain_count: 3
+  final_eval_window: 3
+  save_interval: 262144

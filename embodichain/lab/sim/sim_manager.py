@@ -32,7 +32,7 @@ from pathlib import Path
 from copy import deepcopy
 from datetime import datetime
 from functools import cached_property
-from typing import Callable, Dict, List, Sequence, Union
+from typing import TYPE_CHECKING, Callable, Dict, List, Sequence, Union
 from dataclasses import dataclass, asdict, field, MISSING
 
 # Global cache directories
@@ -66,7 +66,7 @@ from embodichain.lab.sim.objects import (
     Light,
     RigidConstraint,
 )
-from embodichain.lab.sim.objects.gizmo import Gizmo
+from embodichain.lab.sim.objects.gizmo import Gizmo, GizmoCfg
 from embodichain.lab.sim.sensors import (
     SensorCfg,
     BaseSensor,
@@ -75,12 +75,12 @@ from embodichain.lab.sim.sensors import (
     ContactSensor,
 )
 from embodichain.lab.sim.cfg import (
-    DLSSCfg,
     RenderCfg,
     PhysicsCfg,
     MarkerCfg,
     GPUMemoryCfg,
     WindowRecordCfg,
+    WindowCameraPoseCfg,
     LightCfg,
     RigidObjectCfg,
     SoftObjectCfg,
@@ -91,13 +91,23 @@ from embodichain.lab.sim.cfg import (
     RigidConstraintCfg,
 )
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
+from embodichain.lab.sim.profiler import Profiler, ProfilerCfg
+from embodichain.lab.visualization.cfg import VisualizationCfg
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import look_at_to_pose, pose_inv
+from embodichain.utils.math import look_at_to_pose, matrix_from_quat, pose_inv
+
+if TYPE_CHECKING:
+    from embodichain.lab.visualization import (
+        RuntimeHealth,
+        RuntimeStats,
+        SceneManifest,
+        SceneOverlays,
+        VisualizationRuntime,
+    )
 
 __all__ = [
     "SimulationManager",
     "SimulationManagerCfg",
-    "DLSSCfg",
     "SIM_CACHE_DIR",
     "MATERIAL_CACHE_DIR",
     "CONVEX_DECOMP_DIR",
@@ -116,7 +126,12 @@ class SimulationManagerCfg:
     """The height of the simulation window."""
 
     headless: bool = False
-    """Whether to run the simulation in headless mode (no Window)."""
+    """Whether to run without an automatically opened native window.
+
+    This is forced to ``True`` when the Viser backend is enabled. Viser and
+    the native DexSim window are mutually exclusive; browser Gizmos do not
+    require a native window.
+    """
 
     render_cfg: RenderCfg = field(default_factory=RenderCfg)
     """The rendering configuration parameters."""
@@ -146,6 +161,14 @@ class SimulationManagerCfg:
     physics_dt: float = 1.0 / 100.0
     """The time step for the physics simulation."""
 
+    profiler: ProfilerCfg | None = None
+    """Optional simulation profiler. ``None`` disables profiling.
+
+    Standalone calls to :meth:`SimulationManager.update` are recorded below a
+    ``sim_update`` root. When the manager is owned by an environment, the same
+    profiler instance composes with the environment's step/reset hierarchy.
+    """
+
     sim_device: Union[str, torch.device] = "cpu"
     """The device for the physics simulation. Can be 'cpu', 'cuda', or a torch.device object."""
 
@@ -156,6 +179,17 @@ class SimulationManagerCfg:
 
     window_record: WindowRecordCfg = field(default_factory=WindowRecordCfg)
     """Viewer window recording settings (hotkey, paths, FPS, memory budget)."""
+
+    window_camera_pose: WindowCameraPoseCfg = field(default_factory=WindowCameraPoseCfg)
+    """Interactive viewer camera-pose printing settings."""
+
+    visualization: VisualizationCfg = field(default_factory=VisualizationCfg)
+    """Live browser visualization settings."""
+
+    def __post_init__(self) -> None:
+        """Apply visualization-dependent simulation defaults."""
+        if self.visualization.backend == "viser":
+            self.headless = True
 
 
 @dataclass
@@ -177,6 +211,16 @@ class _WindowRecordState:
     capture_from_sim_update: bool = False
     task_status: int = TASK_RETURN.TASK_LOOP
     loop_handle: object | None = None
+
+
+@dataclass(frozen=True)
+class _AxisMarkerGroup:
+    """Native axis handles and their backend-neutral display dimensions."""
+
+    handles: tuple[MeshObject, ...]
+    arena_index: int
+    axis_length: float
+    axis_radius: float
 
 
 class SimulationManager:
@@ -211,6 +255,7 @@ class SimulationManager:
         instance = super(SimulationManager, cls).__new__(cls)
         # Store sim_config in the instance for use in __init__ or elsewhere
         instance.sim_config = sim_config
+        instance._is_constructed = False
         cls._instances[n_instance] = instance
         return instance
 
@@ -241,6 +286,7 @@ class SimulationManager:
         self.device = torch.device("cpu")
 
         world_config = self._convert_sim_config(sim_config)
+        self.profiler = Profiler(sim_config.profiler, self.device)
 
         # Initialize warp runtime context before creating the world.
         wp.init()
@@ -262,6 +308,13 @@ class SimulationManager:
         )
         self._window_record_input_control: ObjectManipulator | None = None
         self._window_record_save_threads: list[threading.Thread] = []
+        wcp = sim_config.window_camera_pose
+        self._window_camera_pose_hotkey_cfg: dict[str, object] | None = (
+            {"convert_to_look_at": wcp.convert_to_look_at}
+            if wcp.enable_hotkey
+            else None
+        )
+        self._window_camera_pose_input_control: ObjectManipulator | None = None
 
         self._world.set_delta_time(sim_config.physics_dt)
         self._world.show_coordinate_axis(False)
@@ -284,7 +337,7 @@ class SimulationManager:
         self._gizmos: Dict[str, object] = dict()  # Store active gizmos
 
         # marker management
-        self._markers: Dict[str, MeshObject] = dict()
+        self._markers: dict[str, _AxisMarkerGroup] = {}
 
         self._rigid_objects: Dict[str, RigidObject] = dict()
         self._constraints: Dict[str, RigidConstraint] = dict()
@@ -296,6 +349,14 @@ class SimulationManager:
 
         self._sensors: Dict[str, BaseSensor] = dict()
         self._lights: Dict[str, _Light] = dict()
+
+        self._visualization_runtime = None
+        self._visualization_overlays: SceneOverlays | None = None
+        self._visualization_topology_revision = 0
+        self._visualization_manifest_topology_revision = -1
+        self._visualization_sim_step = 0
+        self._visualization_sim_time = 0.0
+        self._visualization_error_reported = False
 
         # material placeholder.
         self._visual_materials: Dict[str, VisualMaterial] = dict()
@@ -312,11 +373,13 @@ class SimulationManager:
 
         # Set physics to manual update mode by default.
         self.set_manual_update(True)
-
         self._build_multiple_arenas(sim_config.num_envs)
+        self.start_visualization()
 
         if sim_config.headless is False:
             self._window = self._world.get_windows()
+
+        self._is_constructed = True
 
     @classmethod
     def get_instance(cls, instance_id: int = 0) -> SimulationManager:
@@ -443,6 +506,195 @@ class SimulationManager:
         uid_list.extend(list(self._articulations.keys()))
         return uid_list
 
+    @property
+    def visualization_runtime(self) -> VisualizationRuntime | None:
+        """Return the active visualization runtime, if one has been started."""
+        return self._visualization_runtime
+
+    @property
+    def visualization_health(self) -> RuntimeHealth:
+        """Return current visualization service and client health."""
+        from embodichain.lab.visualization import RuntimeHealth
+
+        if self._visualization_runtime is not None:
+            return self._visualization_runtime.health
+        configured = self.sim_config.visualization.backend == "viser"
+        return RuntimeHealth(
+            status="stopped" if configured else "disabled",
+            running=False,
+            endpoint=None,
+            client_count=0,
+            published_scene_revision=0,
+        )
+
+    @property
+    def visualization_stats(self) -> RuntimeStats | None:
+        """Return visualization telemetry, or ``None`` before startup."""
+        if self._visualization_runtime is None:
+            return None
+        return self._visualization_runtime.stats
+
+    @property
+    def visualization_overlays(self) -> SceneOverlays | None:
+        """Return the overlays included in every Viser scene frame."""
+        return self._visualization_overlays
+
+    def set_visualization_overlays(self, overlays: SceneOverlays | None) -> None:
+        """Set persistent overlays for automatic Viser captures.
+
+        The overlays remain active across :meth:`update` calls until replaced
+        or cleared with ``None``. When Viser is running, the new overlays are
+        published immediately.
+
+        Args:
+            overlays: Backend-neutral overlays to publish with every frame, or
+                ``None`` to clear all persistent overlays.
+        """
+        self._visualization_overlays = overlays
+        if (
+            self.sim_config.visualization.backend == "viser"
+            and self._visualization_runtime is not None
+        ):
+            self.capture_visualization_safely(force=True)
+
+    def notify_visualization_topology_changed(self) -> int:
+        """Mark scene topology dirty and return its new local revision."""
+        self._visualization_topology_revision += 1
+        return self._visualization_topology_revision
+
+    def start_visualization(self) -> VisualizationRuntime | None:
+        """Start the configured live visualizer and publish the current scene."""
+        if self.sim_config.visualization.backend == "none":
+            return None
+        if getattr(self, "is_window_opened", False):
+            raise RuntimeError(
+                "Cannot start the Viser backend while the native DexSim window "
+                "is open. Close the native window before starting Viser."
+            )
+        if self._visualization_runtime is not None:
+            if self._visualization_runtime.is_running:
+                return self._visualization_runtime
+            self._visualization_runtime.stop()
+            self._visualization_runtime = None
+
+        from embodichain.lab.visualization import SceneExporter, VisualizationRuntime
+
+        visualization_cfg = self.sim_config.visualization
+        if (
+            visualization_cfg.allow_commands
+            and visualization_cfg.viser_server.host
+            not in {"127.0.0.1", "localhost", "::1"}
+        ):
+            logger.log_warning(
+                "Viser simulation commands are enabled on a non-loopback interface. "
+                "Only expose this endpoint behind a trusted, authenticated boundary."
+            )
+        runtime = VisualizationRuntime(
+            SceneExporter(self, visualization_cfg),
+            visualization_cfg,
+        )
+        runtime.start()
+        self._visualization_runtime = runtime
+        self._visualization_manifest_topology_revision = (
+            self._visualization_topology_revision
+        )
+        self._visualization_error_reported = False
+        logger.log_info(f"Viser visualization ready at {runtime.endpoint}")
+        runtime.capture(
+            sim_step=self._visualization_sim_step,
+            sim_time=self._visualization_sim_time,
+            overlays=self._visualization_overlays,
+            force=True,
+        )
+        return runtime
+
+    def refresh_visualization(self) -> SceneManifest | None:
+        """Publish current scene topology when Viser is active."""
+        runtime = self.start_visualization()
+        if runtime is None:
+            return None
+        for _, gizmo in self.get_gizmo_items():
+            cancel = getattr(gizmo, "cancel_interaction", None)
+            if cancel is not None:
+                cancel("viser:")
+        manifest = runtime.refresh_scene()
+        self._visualization_manifest_topology_revision = (
+            self._visualization_topology_revision
+        )
+        return manifest
+
+    def capture_visualization(
+        self,
+        force: bool = False,
+        *,
+        capture_camera_images: bool = True,
+    ) -> bool:
+        """Capture current scene data for the configured visualizer.
+
+        Args:
+            force: Whether to bypass visualization frame-rate limiting.
+            capture_camera_images: Whether camera images may be captured.
+
+        Returns:
+            Whether scene or camera data was captured.
+        """
+        runtime = self.start_visualization()
+        if runtime is None:
+            return False
+        if (
+            self._visualization_manifest_topology_revision
+            != self._visualization_topology_revision
+        ):
+            self.refresh_visualization()
+        return runtime.capture(
+            sim_step=self._visualization_sim_step,
+            sim_time=self._visualization_sim_time,
+            overlays=self._visualization_overlays,
+            force=force,
+            capture_camera_images=capture_camera_images,
+        )
+
+    def capture_visualization_safely(
+        self,
+        force: bool = False,
+        *,
+        capture_camera_images: bool = True,
+    ) -> None:
+        """Update visualization without allowing failures to stop simulation.
+
+        The first visualization failure is logged and subsequent captures are
+        skipped until the runtime is restarted.
+
+        Args:
+            force: Whether to bypass visualization frame-rate limiting.
+            capture_camera_images: Whether camera images may be captured.
+        """
+        if self._visualization_error_reported:
+            return
+        try:
+            self.capture_visualization(
+                force=force,
+                capture_camera_images=capture_camera_images,
+            )
+        except Exception as error:
+            if not self._visualization_error_reported:
+                logger.log_warning(f"Viser visualization update failed: {error!r}")
+                self._visualization_error_reported = True
+
+    def stop_visualization(self) -> None:
+        """Stop the visualization server and release its worker thread."""
+        runtime = self._visualization_runtime
+        if runtime is None:
+            return
+        try:
+            runtime.stop()
+        finally:
+            for _, gizmo in self.get_gizmo_items():
+                cancel = getattr(gizmo, "cancel_interaction", None)
+                if cancel is not None:
+                    cancel("viser:")
+            self._visualization_runtime = None
+
     def _convert_sim_config(
         self, sim_config: SimulationManagerCfg
     ) -> dexsim.WorldConfig:
@@ -471,41 +723,7 @@ class SimulationManager:
             )
             sim_config.render_cfg.renderer = resolved_renderer
 
-        world_config.renderer = sim_config.render_cfg.to_dexsim_flags()
-        world_config.raytrace_config.render_iterations_per_frame = (
-            sim_config.render_cfg.spp
-        )
-
-        # Configure DLSS 3.5 (Ray Reconstruction + Super Resolution).
-        # Only effective with OfflineRT renderer in windowed mode.
-        dlss_cfg = sim_config.render_cfg.dlss
-        if dlss_cfg.dlss_enabled:
-            if sim_config.render_cfg.renderer != "rt":
-                logger.log_warning(
-                    f"DLSS is enabled but renderer is '{sim_config.render_cfg.renderer}', "
-                    f"not 'rt' (OfflineRT). DLSS only works with the OfflineRT renderer. "
-                    f"DLSS settings will be ignored."
-                )
-            else:
-                world_config.dlss_config = dlss_cfg.to_dexsim_cfg(
-                    window_width=sim_config.width,
-                    window_height=sim_config.height,
-                )
-                dlss = world_config.dlss_config
-                world_config.raytrace_config.window_taa_enabled = False
-
-                # Align the window size with the effective target resolution.
-                # Rule: win_config.width/height == target_width/target_height.
-                win_config.width = dlss.target_width
-                win_config.height = dlss.target_height
-
-                logger.log_info(
-                    f"DLSS enabled with renderer='{sim_config.render_cfg.renderer}': "
-                    f"render={dlss.render_width}x{dlss.render_height}, "
-                    f"target={dlss.target_width}x{dlss.target_height}, "
-                    f"upsample_ratio={dlss_cfg.upsample_ratio}, "
-                    f"quality={dlss.dlss_quality}."
-                )
+        sim_config.render_cfg.apply_to_dexsim_config(world_config)
 
         if type(sim_config.sim_device) is str:
             self.device = torch.device(sim_config.sim_device)
@@ -595,27 +813,45 @@ class SimulationManager:
             physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
             step (int, optional): the number of steps to update physics. Defaults to 10.
         """
-        if self.is_use_gpu_physics and not self._is_initialized_gpu_physics:
-            logger.log_warning(
-                f"Using GPU physics, but not initialized yet. Forcing initialization."
-            )
-            self.init_gpu_physics()
-
-        if self.is_physics_manually_update:
-            if physics_dt is None:
-                physics_dt = self.sim_config.physics_dt
-            for i in range(step):
-                self._world.update(physics_dt)
-                if (
-                    self._window_record_state is not None
-                    and self._window_record_state.capture_from_sim_update
-                ):
-                    self._step_window_record_from_sim_update(
-                        self._window_record_state, physics_dt
+        with self.profiler.section("sim_update", is_root=True):
+            with self.profiler.section("gpu_physics_check"):
+                if self.is_use_gpu_physics and not self._is_initialized_gpu_physics:
+                    logger.log_warning(
+                        "Using GPU physics, but not initialized yet. "
+                        "Forcing initialization."
                     )
+                    with self.profiler.section("gpu_physics_init"):
+                        self.init_gpu_physics()
 
-        else:
-            logger.log_warning("Physics simulation is not manually updated.")
+            if self.is_physics_manually_update:
+                with self.profiler.section("manual_update"):
+                    if physics_dt is None:
+                        with self.profiler.section("resolve_physics_dt"):
+                            physics_dt = self.sim_config.physics_dt
+                    for i in range(step):
+                        with self.profiler.section("gizmo_update"):
+                            self.update_gizmos()
+                        with self.profiler.section("world_update"):
+                            self._world.update(physics_dt)
+                        self._visualization_sim_step += 1
+                        self._visualization_sim_time += physics_dt
+                        if (
+                            self._window_record_state is not None
+                            and self._window_record_state.capture_from_sim_update
+                        ):
+                            with self.profiler.section("window_record_capture"):
+                                self._step_window_record_from_sim_update(
+                                    self._window_record_state, physics_dt
+                                )
+                        if self.sim_config.visualization.backend == "viser":
+                            with self.profiler.section("visualization_capture"):
+                                self.capture_visualization_safely(
+                                    capture_camera_images=i == step - 1
+                                )
+
+            else:
+                with self.profiler.section("manual_update_disabled"):
+                    logger.log_warning("Physics simulation is not manually updated.")
 
     def get_env(self, arena_index: int = -1) -> dexsim.environment.Arena:
         """Get the arena or env by index.
@@ -638,11 +874,115 @@ class SimulationManager:
         else:
             return self._env
 
+    def visualize_point_cloud(
+        self,
+        points: torch.Tensor | np.ndarray,
+        colors: torch.Tensor | np.ndarray | None = None,
+        point_size: float = 2.0,
+        name: str = "point_cloud",
+    ) -> dexsim.models.PointCloud:
+        """Visualize a static point cloud in the native simulation viewer.
+
+        Each invocation creates a separate native point-cloud object. This
+        convenience API is intended for static data, not incremental or
+        streaming updates.
+
+        Args:
+            points: Point positions with shape ``(N, 3)``.
+            colors: Optional per-point RGB or RGBA colors with shape ``(N, 3)``
+                or ``(N, 4)``. Values in ``[0, 255]`` are normalized to
+                ``[0, 1]``. The alpha channel of RGBA input is ignored by the
+                native renderer. Defaults to green.
+            point_size: Native renderer point size. Defaults to ``2.0``.
+            name: Name assigned to the native point-cloud object.
+
+        Returns:
+            The native DexSim point-cloud handle.
+
+        Raises:
+            RuntimeError: If there is no active simulation environment.
+            ValueError: If the points or colors do not have a supported shape.
+        """
+        if isinstance(points, torch.Tensor):
+            points = points.detach().cpu().numpy()
+        points = np.asarray(points, dtype=np.float32)
+        if points.ndim != 2 or points.shape[1] != 3:
+            raise ValueError(f"Points must have shape (N, 3), got {points.shape}")
+        if len(points) == 0:
+            raise ValueError("Points array is empty")
+
+        if colors is None:
+            colors = np.tile(
+                np.array((0.0, 1.0, 0.0), dtype=np.float32), (len(points), 1)
+            )
+        else:
+            if isinstance(colors, torch.Tensor):
+                colors = colors.detach().cpu().numpy()
+            colors = np.asarray(colors)
+            if colors.ndim != 2 or colors.shape[0] != len(points):
+                raise ValueError(
+                    f"Colors must have shape ({len(points)}, 3) or ({len(points)}, 4), "
+                    f"got {colors.shape}"
+                )
+            if colors.shape[1] not in (3, 4):
+                raise ValueError(
+                    "Colors must have 3 (RGB) or 4 (RGBA) channels, "
+                    f"got {colors.shape[1]}"
+                )
+            if colors.max() > 1.0:
+                colors = colors / 255.0
+            colors = np.asarray(colors[:, :3], dtype=np.float32)
+
+        env = self.get_env()
+        if env is None:
+            raise RuntimeError("Simulation manager has no active simulation")
+
+        point_cloud = env.create_point_cloud(name=name)
+        point_cloud.add_points(points)
+        point_cloud.set_colors(colors)
+        point_cloud.set_point_size(point_size)
+
+        logger.log_info(
+            f"Created point cloud '{name}' with {len(points)} points "
+            f"(point_size={point_size})"
+        )
+        return point_cloud
+
     def get_world(self) -> dexsim.World:
         return self._world
 
-    def open_window(self) -> None:
-        """Open the simulation window."""
+    def can_open_native_window(self) -> bool:
+        """Return whether the native DexSim window may be opened.
+
+        The Viser backend owns visualization while it is configured or
+        running, so a native window must not be opened for the same simulation.
+
+        Returns:
+            ``True`` unless the Viser backend is configured or running.
+        """
+        return (
+            self.sim_config.visualization.backend != "viser"
+            and self._visualization_runtime is None
+        )
+
+    def open_window(self) -> bool:
+        """Open the native DexSim simulation window when allowed.
+
+        Viser owns visualization while it is configured or running. In that
+        case this method safely skips the native window so launchers do not
+        need a separate Viser condition.
+
+        Returns:
+            ``True`` when the native window is open, otherwise ``False``.
+        """
+        if not self.can_open_native_window():
+            logger.log_info(
+                "Skipping the native DexSim window because the Viser backend "
+                "is configured or running."
+            )
+            return False
+        if self.is_window_opened:
+            return True
         self._world.open_window()
         self._window = self._world.get_windows()
 
@@ -651,7 +991,13 @@ class SimulationManager:
             and self._window_record_input_control is None
         ):
             self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
+        if (
+            self._window_camera_pose_hotkey_cfg is not None
+            and self._window_camera_pose_input_control is None
+        ):
+            self.enable_window_camera_pose_hotkey(**self._window_camera_pose_hotkey_cfg)
         self.is_window_opened = True
+        return True
 
     def close_window(self) -> None:
         """Close the simulation window."""
@@ -660,6 +1006,7 @@ class SimulationManager:
         self._world.close_window()
         self._window = None
         self._window_record_input_control = None
+        self._window_camera_pose_input_control = None
         self.is_window_opened = False
 
     def _build_multiple_arenas(self, num: int, space: float | None = None) -> None:
@@ -744,18 +1091,7 @@ class SimulationManager:
         pointing downward along the -Z axis.
         """
         # Environment emission light
-        self.set_emission_light([1.0, 1.0, 1.0], 120.0)
-
-        # Directional light as global scene light
-        dir_light_cfg = LightCfg(
-            uid="default_global_light",
-            light_type="sun",
-            intensity=8.0,
-            direction=(0.0, 0.0, -1.0),
-            color=(1.0, 0.95, 0.85),
-            enable_shadow=True,
-        )
-        self.add_light(dir_light_cfg)
+        self.set_emission_light([1.0, 1.0, 1.0], 100.0)
 
     def set_default_background(self) -> None:
         """Set default background."""
@@ -993,9 +1329,10 @@ class SimulationManager:
 
         if cfg.shape.visual_material:
             mat = self.create_visual_material(cfg.shape.visual_material)
-            rigid_obj.set_visual_material(mat)
+            rigid_obj.set_visual_material(mat, update_default=True)
 
         self._rigid_objects[uid] = rigid_obj
+        self.notify_visualization_topology_changed()
 
         return rigid_obj
 
@@ -1027,6 +1364,7 @@ class SimulationManager:
 
         soft_obj = SoftObject(cfg=cfg, entities=obj_list, device=self.device)
         self._soft_objects[uid] = soft_obj
+        self.notify_visualization_topology_changed()
         return soft_obj
 
     def add_cloth_object(self, cfg: ClothObjectCfg) -> ClothObject:
@@ -1057,6 +1395,7 @@ class SimulationManager:
 
         cloth_obj = ClothObject(cfg=cfg, entities=obj_list, device=self.device)
         self._cloth_objects[uid] = cloth_obj
+        self.notify_visualization_topology_changed()
         return cloth_obj
 
     def get_rigid_object(self, uid: str) -> RigidObject | None:
@@ -1414,6 +1753,7 @@ class SimulationManager:
         )
 
         self._rigid_object_groups[uid] = rigid_obj_group
+        self.notify_visualization_topology_changed()
 
         return rigid_obj_group
 
@@ -1530,6 +1870,7 @@ class SimulationManager:
         articulation = Articulation(cfg=cfg, entities=obj_list, device=self.device)
 
         self._articulations[uid] = articulation
+        self.notify_visualization_topology_changed()
 
         return articulation
 
@@ -1624,6 +1965,7 @@ class SimulationManager:
         robot = Robot(cfg=cfg, entities=obj_list, device=self.device)
 
         self._robots[uid] = robot
+        self.notify_visualization_topology_changed()
 
         return robot
 
@@ -1651,14 +1993,24 @@ class SimulationManager:
         return list(self._robots.keys())
 
     def enable_gizmo(
-        self, uid: str, control_part: str | None = None, gizmo_cfg: object = None
-    ) -> Gizmo:
+        self,
+        uid: str,
+        control_part: str | None = None,
+        gizmo_cfg: GizmoCfg | None = None,
+        *,
+        enable_native: bool | None = None,
+    ) -> Gizmo | None:
         """Enable gizmo control for any simulation object (Robot, RigidObject, Camera, etc.).
 
         Args:
-            uid (str): UID of the object to attach gizmo to (searches in robots, rigid_objects, sensors, etc.)
-            control_part (str | None, optional): Control part name for robots. Defaults to "arm".
-            gizmo_cfg (object, optional): Gizmo configuration object. Defaults to None.
+            uid: UID of the robot, rigid object, or camera sensor.
+            control_part: Robot control part used for IK/FK.
+            gizmo_cfg: Native and Viser Gizmo appearance configuration.
+            enable_native: Whether to create a DexSim Gizmo. By default, native
+                controls are created only when a native window is active.
+
+        Returns:
+            The created Gizmo, or ``None`` if setup failed.
         """
         # Create gizmo key combining uid and control_part
         gizmo_key = f"{uid}:{control_part}" if control_part else uid
@@ -1668,7 +2020,7 @@ class SimulationManager:
             logger.log_warning(
                 f"Gizmo for '{uid}' with control_part '{control_part}' already exists."
             )
-            return
+            return self._gizmos[gizmo_key]
 
         # Search for target object in different collections
         target = None
@@ -1688,80 +2040,94 @@ class SimulationManager:
             logger.log_error(
                 f"Object with uid '{uid}' not found in any collection (robots, rigid_objects, sensors, articulations)."
             )
-            return
+            return None
 
+        if enable_native is None:
+            enable_native = self.is_window_opened or not self.sim_config.headless
+        gizmo: Gizmo | None = None
         try:
-            gizmo = Gizmo(target, gizmo_cfg, control_part)
-            self._gizmos[gizmo_key] = gizmo
-            logger.log_info(
-                f"Gizmo enabled for {object_type} '{uid}' with control_part '{control_part}'"
+            gizmo = Gizmo(
+                target,
+                gizmo_cfg,
+                control_part,
+                enable_native=enable_native,
             )
-
-            # Initialize GizmoController if not already done.
-            if not hasattr(self, "_gizmo_controller") or self._gizmo_controller is None:
+            if enable_native and (
+                not hasattr(self, "_gizmo_controller") or self._gizmo_controller is None
+            ):
                 window = (
                     self._world.get_windows()
                     if hasattr(self._world, "get_windows")
                     else None
                 )
+                if window is None:
+                    raise RuntimeError(
+                        "A native window is required for the DexSim Gizmo controller."
+                    )
                 self._gizmo_controller = GizmoController()
                 window.add_input_control(self._gizmo_controller)
+            self._gizmos[gizmo_key] = gizmo
+            self.notify_visualization_topology_changed()
+            logger.log_info(
+                f"Gizmo enabled for {object_type} '{uid}' with control_part "
+                f"'{control_part}' (native={enable_native}, "
+                f"viser={self.sim_config.visualization.allow_commands})"
+            )
 
         except Exception as e:
+            if gizmo is not None:
+                gizmo.destroy()
             logger.log_error(
                 f"Failed to create gizmo for {object_type} '{uid}' with control_part '{control_part}': {e}"
             )
+            return None
 
         return gizmo
 
     def disable_gizmo(self, uid: str, control_part: str | None = None) -> None:
-        """Disable and remove gizmo for a robot.
+        """Disable and remove a Gizmo.
 
         Args:
-            uid (str): Object UID to disable gizmo for
-            control_part (str | None, optional): Control part name for robots. Defaults to None.
+            uid: Target asset UID.
+            control_part: Robot control part, if applicable.
         """
-        # Create gizmo key combining uid and control_part
         gizmo_key = f"{uid}:{control_part}" if control_part else uid
-
         if gizmo_key not in self._gizmos:
-            from embodichain.utils import logger
-
             logger.log_warning(
                 f"No gizmo found for '{uid}' with control_part '{control_part}'."
             )
             return
 
         try:
-            gizmo = self._gizmos[gizmo_key]
-            if gizmo is not None:
-                gizmo.destroy()
-            del self._gizmos[gizmo_key]
-
-            from embodichain.utils import logger
-
+            gizmo = self._gizmos.pop(gizmo_key)
+            try:
+                if gizmo is not None:
+                    gizmo.destroy()
+            finally:
+                self.notify_visualization_topology_changed()
             logger.log_info(
                 f"Gizmo disabled for '{uid}' with control_part '{control_part}'"
             )
-
-        except Exception as e:
-            from embodichain.utils import logger
-
+        except Exception as error:
             logger.log_error(
-                f"Failed to disable gizmo for '{uid}' with control_part '{control_part}': {e}"
+                f"Failed to disable gizmo for '{uid}' with control_part "
+                f"'{control_part}': {error}"
             )
 
-    def get_gizmo(self, uid: str, control_part: str | None = None) -> object:
-        """Get gizmo instance for a robot.
+    def get_gizmo(
+        self,
+        uid: str,
+        control_part: str | None = None,
+    ) -> Gizmo | None:
+        """Return an active Gizmo.
 
         Args:
-            uid (str): Object UID
-            control_part (str | None, optional): Control part name for robots. Defaults to None.
+            uid: Target asset UID.
+            control_part: Robot control part, if applicable.
 
         Returns:
-            object: Gizmo instance if found, None otherwise.
+            Gizmo instance if found, otherwise ``None``.
         """
-        # Create gizmo key combining uid and control_part
         gizmo_key = f"{uid}:{control_part}" if control_part else uid
         return self._gizmos.get(gizmo_key, None)
 
@@ -1775,40 +2141,96 @@ class SimulationManager:
         Returns:
             bool: True if gizmo exists, False otherwise.
         """
-        # Create gizmo key combining uid and control_part
         gizmo_key = f"{uid}:{control_part}" if control_part else uid
         return gizmo_key in self._gizmos
 
-    def list_gizmos(self) -> Dict[str, bool]:
-        """List all active gizmos and their status.
+    def list_gizmos(self) -> dict[str, bool]:
+        """List active Gizmo IDs and availability.
 
         Returns:
-            Dict[str, bool]: Dictionary mapping gizmo keys (uid:control_part) to gizmo active status.
+            Mapping from ``uid[:control_part]`` to availability.
         """
         return {
             gizmo_key: (gizmo is not None) for gizmo_key, gizmo in self._gizmos.items()
         }
 
-    def update_gizmos(self):
-        """Update all active gizmos."""
+    def get_gizmo_items(self) -> tuple[tuple[str, Gizmo], ...]:
+        """Return a stable snapshot of active Gizmo IDs and controllers."""
+        return tuple(
+            (gizmo_key, gizmo)
+            for gizmo_key, gizmo in getattr(self, "_gizmos", {}).items()
+            if gizmo is not None
+        )
+
+    def process_visualization_commands(self) -> int:
+        """Apply queued Viser Gizmo commands on the simulation thread.
+
+        Returns:
+            Number of commands accepted for active Gizmos.
+        """
+        runtime = self._visualization_runtime
+        if runtime is None or not getattr(
+            self.sim_config.visualization,
+            "allow_commands",
+            False,
+        ):
+            return 0
+        accepted = 0
+        for command in runtime.drain_gizmo_commands():
+            if (
+                command.run_id != runtime.exporter.run_id
+                or command.scene_revision != runtime.exporter.scene_revision
+            ):
+                continue
+            gizmo = self._gizmos.get(command.gizmo_id)
+            if gizmo is None:
+                continue
+            source_id = f"viser:{command.client_id}"
+            if command.phase in {"start", "update"} and not gizmo.begin_interaction(
+                source_id
+            ):
+                continue
+            position = torch.as_tensor(
+                command.position,
+                dtype=torch.float32,
+                device=self.device,
+            )
+            position = position - self.arena_offsets[0]
+            wxyz = torch.as_tensor(
+                command.wxyz,
+                dtype=torch.float32,
+                device=self.device,
+            ).unsqueeze(0)
+            pose = torch.eye(
+                4,
+                dtype=torch.float32,
+                device=self.device,
+            ).unsqueeze(0)
+            pose[0, :3, :3] = matrix_from_quat(wxyz)[0]
+            pose[0, :3, 3] = position
+            if not gizmo.request_local_pose(pose, source_id=source_id):
+                continue
+            accepted += 1
+            if command.phase == "end":
+                gizmo.end_interaction(source_id)
+        return accepted
+
+    def update_gizmos(self) -> None:
+        """Apply Viser commands and update all active Gizmos."""
+        self.process_visualization_commands()
         for gizmo_key, gizmo in list(
-            self._gizmos.items()
+            getattr(self, "_gizmos", {}).items()
         ):  # Use list() to avoid modification during iteration
             if gizmo is not None:
                 try:
                     gizmo.update()
-                except Exception as e:
-                    from embodichain.utils import logger
-
-                    logger.log_error(f"Error updating gizmo '{gizmo_key}': {e}")
+                except Exception as error:
+                    logger.log_error(f"Error updating gizmo '{gizmo_key}': {error}")
 
     def toggle_gizmo_visibility(
         self, uid: str, control_part: str | None = None
-    ) -> bool:
-        """
-        Toggle the visibility of a gizmo by uid and optional control_part.
-        Returns the new visibility state (True=visible, False=hidden), or None if not found.
-        """
+    ) -> bool | None:
+        """Toggle Gizmo visibility and return the new state, if it exists."""
         gizmo = self.get_gizmo(uid, control_part)
         if gizmo is not None:
             return gizmo.toggle_visibility()
@@ -1817,9 +2239,7 @@ class SimulationManager:
     def set_gizmo_visibility(
         self, uid: str, visible: bool, control_part: str | None = None
     ) -> None:
-        """
-        Set the visibility of a gizmo by uid and optional control_part.
-        """
+        """Set Gizmo visibility by target UID and optional control part."""
         gizmo = self.get_gizmo(uid, control_part)
         if gizmo is not None:
             gizmo.set_visible(visible)
@@ -1850,6 +2270,8 @@ class SimulationManager:
         sensor = self.SUPPORTED_SENSOR_TYPES[sensor_type](sensor_cfg, self.device)
 
         self._sensors[sensor_uid] = sensor
+        if isinstance(sensor, Camera):
+            self.notify_visualization_topology_changed()
 
         # Check if the sensor needs to change the parent frame.
 
@@ -1893,31 +2315,37 @@ class SimulationManager:
         if uid in self._rigid_objects:
             obj = self._rigid_objects.pop(uid)
             obj.destroy()
+            self.notify_visualization_topology_changed()
             return True
 
         if uid in self._soft_objects:
             obj = self._soft_objects.pop(uid)
             obj.destroy()
+            self.notify_visualization_topology_changed()
             return True
 
         if uid in self._cloth_objects:
             obj = self._cloth_objects.pop(uid)
             obj.destroy()
+            self.notify_visualization_topology_changed()
             return True
 
         if uid in self._rigid_object_groups:
             group = self._rigid_object_groups.pop(uid)
             group.destroy()
+            self.notify_visualization_topology_changed()
             return True
 
         if uid in self._articulations:
             art = self._articulations.pop(uid)
             art.destroy()
+            self.notify_visualization_topology_changed()
             return True
 
         if uid in self._robots:
             robot = self._robots.pop(uid)
             robot.destroy()
+            self.notify_visualization_topology_changed()
             return True
 
         return False
@@ -2028,7 +2456,12 @@ class SimulationManager:
         #     # Create point markers
         #     pass
 
-        self._markers[name] = (marker_handles, cfg.arena_index)
+        self._markers[name] = _AxisMarkerGroup(
+            handles=tuple(marker_handles),
+            arena_index=cfg.arena_index,
+            axis_length=cfg.axis_len,
+            axis_radius=cfg.axis_size,
+        )
 
         if self.is_physics_manually_update:
             self.update(step=1)
@@ -2047,9 +2480,9 @@ class SimulationManager:
             logger.log_warning(f"Marker {name} not found.")
             return False
         try:
-            env = self.get_env(self._markers[name][1])
-            marker_handles, arena_index = self._markers[name]
-            for marker_handle in marker_handles:
+            marker_group = self._markers[name]
+            env = self.get_env(marker_group.arena_index)
+            for marker_handle in marker_group.handles:
                 if marker_handle is not None:
                     env.remove_actor(marker_handle.get_name())
             self._markers.pop(name)
@@ -2057,6 +2490,25 @@ class SimulationManager:
         except Exception as e:
             logger.log_warning(f"Failed to remove marker {name}: {str(e)}")
             return False
+
+    def get_axis_marker_items(
+        self,
+    ) -> tuple[tuple[str, tuple[MeshObject, ...], float, float], ...]:
+        """Return active axes for backend-neutral visualization.
+
+        Returns:
+            Tuples containing the marker name, native handles, axis length, and
+            axis radius for each active marker group.
+        """
+        return tuple(
+            (
+                name,
+                group.handles,
+                group.axis_length,
+                group.axis_radius,
+            )
+            for name, group in self._markers.items()
+        )
 
     def add_custom_window_control(self, controls: list[ObjectManipulator]) -> None:
         """Add one or more custom window input controls.
@@ -2440,6 +2892,145 @@ class SimulationManager:
         )
         return True
 
+    @staticmethod
+    def _window_camera_pose_to_look_at(
+        pose: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Convert a DexSim window model matrix to look-at vectors.
+
+        DexSim stores the viewer camera model matrix with columns
+        ``[right, up, -forward]``. The local camera up axis changes while the
+        viewer orbits, but ``Windows.set_look_at`` uses a world-up reference.
+        Always use DexSim's default Z-up vector so a captured snippet retains
+        the standard viewer controls.
+
+        Args:
+            pose: A 4x4 homogeneous viewer camera pose matrix.
+
+        Returns:
+            The ``(eye, look_at, up)`` vectors accepted by
+            ``Windows.set_look_at``.
+
+        Raises:
+            ValueError: If ``pose`` is not a 4x4 homogeneous matrix.
+        """
+        matrix = np.asarray(pose, dtype=np.float64)
+        if matrix.shape != (4, 4):
+            raise ValueError(
+                f"Window camera pose must have shape (4, 4), got {matrix.shape}."
+            )
+        eye = matrix[:3, 3]
+        look_at = eye - matrix[:3, 2]
+        up = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+        return eye, look_at, up
+
+    @staticmethod
+    def _format_window_camera_pose(
+        pose: np.ndarray, convert_to_look_at: bool = True
+    ) -> str:
+        """Format a DexSim window pose as an executable Python snippet.
+
+        Args:
+            pose: A 4x4 homogeneous viewer camera pose matrix.
+            convert_to_look_at: Print a ``set_look_at`` call when true;
+                otherwise print the raw pose matrix.
+
+        Returns:
+            An executable Python snippet containing the camera pose.
+
+        Raises:
+            ValueError: If ``pose`` is not a 4x4 homogeneous matrix.
+        """
+        matrix = np.asarray(pose, dtype=np.float64)
+        if matrix.shape != (4, 4):
+            raise ValueError(
+                f"Window camera pose must have shape (4, 4), got {matrix.shape}."
+            )
+
+        def _format_float(value: float) -> str:
+            if abs(value) < 1e-12:
+                return "0.0"
+            formatted = format(value, ".8g")
+            if "e" not in formatted and "." not in formatted:
+                formatted += ".0"
+            return formatted
+
+        def _vector_literal(vector: np.ndarray) -> str:
+            values = ", ".join(_format_float(float(value)) for value in vector)
+            return f"np.array([{values}], dtype=np.float32)"
+
+        if convert_to_look_at:
+            eye, look_at, up = SimulationManager._window_camera_pose_to_look_at(matrix)
+            return (
+                "window.set_look_at("
+                f"eye={_vector_literal(eye)}, "
+                f"look_at={_vector_literal(look_at)}, "
+                f"up={_vector_literal(up)})"
+            )
+
+        rows = ",\n    ".join(
+            "[" + ", ".join(_format_float(float(value)) for value in row) + "]"
+            for row in matrix
+        )
+        return f"window_pose = np.array([\n    {rows}\n], dtype=np.float32)"
+
+    def print_window_camera_pose(self, convert_to_look_at: bool = True) -> str | None:
+        """Print the current viewer camera pose as reusable Python code.
+
+        Args:
+            convert_to_look_at: Print ``window.set_look_at(...)`` by default.
+                Set false to print the raw 4x4 pose matrix instead.
+
+        Returns:
+            The printed snippet, or ``None`` when no viewer window is open.
+        """
+        if self._window is None:
+            logger.log_warning("No simulation window available to print its pose.")
+            return None
+
+        pose = np.asarray(self._window.get_pose_matrix(), dtype=np.float32)
+        snippet = self._format_window_camera_pose(pose, convert_to_look_at)
+        print(snippet)
+        return snippet
+
+    def enable_window_camera_pose_hotkey(self, convert_to_look_at: bool = True) -> bool:
+        """Register ``p`` to print the current viewer camera pose.
+
+        Args:
+            convert_to_look_at: Print a ``window.set_look_at(...)`` call when
+                true, which is the default. Set false to print the raw matrix.
+
+        Returns:
+            Whether the control is registered on an available window.
+        """
+        self._window_camera_pose_hotkey_cfg = {"convert_to_look_at": convert_to_look_at}
+        if self._window is None:
+            logger.log_warning(
+                "No simulation window available yet. The camera pose print "
+                "hotkey will be registered after `open_window()`."
+            )
+            return False
+        if self._window_camera_pose_input_control is not None:
+            return True
+
+        from dexsim.types import InputKey
+
+        sim = self
+        hotkey_cfg = dict(self._window_camera_pose_hotkey_cfg)
+
+        class WindowCameraPoseEvent(ObjectManipulator):
+            def on_key_down(self, key):
+                if key == InputKey.SCANCODE_P.value:
+                    sim.print_window_camera_pose(**hotkey_cfg)
+
+        self._window_camera_pose_input_control = WindowCameraPoseEvent()
+        self._window.add_input_control(self._window_camera_pose_input_control)
+        logger.log_info(
+            "Camera pose print hotkey registered. Press 'p' to print the "
+            "current viewer pose."
+        )
+        return True
+
     def create_visual_material(self, cfg: VisualMaterialCfg) -> VisualMaterial:
         """Create a visual material with given configuration.
 
@@ -2503,6 +3094,12 @@ class SimulationManager:
         for uid, rigid_obj_group in self._rigid_object_groups.items():
             if uid not in excluded_uids:
                 rigid_obj_group.reset(env_ids)
+        for uid, soft_obj in self._soft_objects.items():
+            if uid not in excluded_uids:
+                soft_obj.reset(env_ids)
+        for uid, cloth_obj in self._cloth_objects.items():
+            if uid not in excluded_uids:
+                cloth_obj.reset(env_ids)
         for uid, light in self._lights.items():
             if uid not in excluded_uids:
                 light.reset(env_ids)
@@ -2569,6 +3166,11 @@ class SimulationManager:
                 the destruction task. If None, reads EMBODICHAIN_SIM_EXIT_PROCESS.
         """
 
+        try:
+            self.stop_visualization()
+        except Exception as error:
+            logger.log_warning(f"Failed to stop Viser visualization cleanly: {error!r}")
+
         if exit_process is None:
             exit_process = (
                 os.getenv("EMBODICHAIN_SIM_EXIT_PROCESS", "1").strip().lower()
@@ -2591,6 +3193,12 @@ class SimulationManager:
         if self.is_window_recording():
             self.stop_window_record()
         self.wait_window_record_saves()
+
+        # Stop the render loop before releasing scene resources. Vulkan window
+        # presentation may otherwise continue acquiring swapchain images while
+        # Env::Clean tears down render objects used by the in-flight frame.
+        if getattr(self, "is_window_opened", False):
+            self.close_window()
 
         import sys, gc
 
@@ -2660,19 +3268,33 @@ class SimulationManager:
         gc.collect()
 
     @staticmethod
-    def flush_cleanup_queue():
-        """Dequeue executor and synchronization barrier provided for top-level main loop / Pytest Fixture calls"""
+    def flush_cleanup_queue() -> None:
+        """Run pending destruction tasks and wait for their scenes to disappear.
+
+        An empty queue means that no manager requested destruction.  In that
+        case, returning immediately is important: other managers may still own
+        live worlds, and waiting for the global world count to reach zero would
+        block until the timeout even though there is nothing to clean up.
+        """
         import gc
 
-        while not SimulationManager._cleanup_queue.empty():
-            task = SimulationManager._cleanup_queue.get_nowait()
+        drained_task = False
+        while True:
+            try:
+                task = SimulationManager._cleanup_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            drained_task = True
             try:
                 task()
             except Exception as e:
                 from embodichain.utils import logger
 
                 logger.log_error(f"Error during delayed destruction: {e}")
-                pass
+
+        if not drained_task:
+            return
 
         # After the queue is emptied, perform a top-level full GC to thoroughly reclaim dead objects that haven't released their RefPtrs yet
         gc.collect()

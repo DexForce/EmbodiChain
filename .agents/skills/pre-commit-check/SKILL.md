@@ -1,11 +1,12 @@
 ---
 name: pre-commit-check
-description: Use before committing or creating a PR for EmbodiChain to verify code style, headers, annotations, exports, and docstrings pass CI checks
+description: Use before committing or creating a PR for EmbodiChain to select proportional validation and verify affected code style, tests, headers, annotations, exports, and docstrings
 ---
 
 # Pre-Commit Check
 
-Run all local checks that the CI pipeline enforces, catching issues before pushing.
+Run proportional local checks for the files being changed, catching relevant
+issues before pushing without defaulting to the full test suite.
 
 ## When to Use
 
@@ -25,6 +26,10 @@ git status --short
 
 Collect all changed/added `.py` files.
 
+Classify the change by affected area: workflow, docs, agent skill, packaged
+configuration, isolated Python module, package-wide behavior, or cross-cutting
+infrastructure.
+
 ### 2. Run Black Formatting Check
 
 This is the **first CI gate** and will cause immediate failure:
@@ -35,7 +40,19 @@ black --check --diff --color ./
 
 If it fails, run `black .` and review the formatting changes.
 
-### 3. Check Apache 2.0 Copyright Header
+### 3. Check Public API Documentation Coverage
+
+Run the same read-only gate used by CI:
+
+```bash
+python docs/scripts/check_api_docs.py
+```
+
+If it reports missing exports, use `$update-api-docs` to add useful Sphinx
+entries and descriptions. Do not change `__all__` solely to make this check
+pass.
+
+### 4. Check Apache 2.0 Copyright Header
 
 Every `.py` file must begin with the 15-line copyright block. For each changed/new `.py` file, verify the first line is:
 
@@ -63,11 +80,11 @@ The full header template:
 # ----------------------------------------------------------------------------
 ```
 
-### 4. Check `from __future__ import annotations`
+### 5. Check `from __future__ import annotations`
 
 Every `.py` file must have this import (after the header, before other imports). This enables `A | B` syntax and forward references.
 
-### 5. Check `__all__` in Public Modules
+### 6. Check `__all__` in Public Modules
 
 For any new or modified module under `embodichain/`, verify it defines `__all__` listing all public symbols. Example:
 
@@ -77,7 +94,7 @@ __all__ = ["MyClass", "my_function"]
 
 Skip this check for `__init__.py` files that only re-export via `from . import *`.
 
-### 6. Check Docstrings on Public APIs
+### 7. Check Docstrings on Public APIs
 
 For any new public function, class, or method:
 - Must have a Google-style docstring
@@ -85,7 +102,7 @@ For any new public function, class, or method:
 - Must include `Returns:` section if it returns a value
 - Use `.. attention::` or `.. tip::` directives for non-obvious behavior
 
-### 7. Check Type Annotations
+### 8. Check Type Annotations
 
 For any new public API:
 - All parameters must have type hints
@@ -93,21 +110,63 @@ For any new public API:
 - Use `A | B` over `Union[A, B]`
 - Use `TYPE_CHECKING` guard for imports that would cause circular dependencies
 
-### 8. Check `@configclass` Usage
+### 9. Check `@configclass` Usage
 
 For any new configuration class:
 - Must use `@configclass` decorator (not bare `@dataclass`)
 - Must use `from dataclasses import MISSING` for required fields
 - Import from `embodichain.utils import configclass`
 
-### 9. Check Test Coverage
+### 10. Select and Run Relevant Tests
+
+Do not treat the CI test job as a requirement to run `pytest tests` locally for
+every change. Choose the smallest command set that exercises the affected
+behavior:
+
+| Change scope | Default validation |
+|---|---|
+| `.github/workflows/**` only | `actionlint` on changed workflows; run related script tests only when workflow scripts changed |
+| Docs content only | Relevant Sphinx build or docs-specific tests |
+| `.agents/skills/**` and thin adapters | Run `quick_validate.py` for each changed canonical skill; compile/run any bundled scripts |
+| Task Program components/deployments | Run the `$add-task-program` static deployment inspector plus the closest configured-integration/package-data tests |
+| Other packaged JSON/YAML | Parse through the production loader and run the closest config/layout tests |
+| One Python module | Matching `tests/**/test_<module>.py` |
+| One package/subsystem | Tests for that package plus focused integration tests |
+| Packaging/release code | Package build and artifact validation |
+| Shared core, global test config, or multiple subsystems | Broader affected tests; full suite only when narrow coverage is not credible |
+
+Skip runtime tests when no executable behavior is affected, but still run the
+appropriate syntax or configuration validator. Run the full suite only when:
+
+- the change affects shared core behavior used throughout the repository;
+- global dependencies, test configuration, or environment initialization changed;
+- several subsystems are modified together;
+- a release-critical behavior cannot be validated narrowly; or
+- the user explicitly requests it.
+
+Before starting a command likely to take more than two minutes, report the
+selected scope and why narrower validation is insufficient. Honor explicit user
+instructions to skip or narrow tests.
+
+For canonical skill directories, use:
+
+```bash
+python /root/.codex/skills/.system/skill-creator/scripts/quick_validate.py \
+  .agents/skills/<skill>
+```
+
+Thin `.claude/skills/` and `.github/copilot/` adapters should point back to
+the canonical `.agents/skills/<skill>/SKILL.md`; do not duplicate the full
+instructions in adapters.
+
+### 11. Check Test Coverage
 
 For any new public module or function:
 - A corresponding test must exist at `tests/<subpackage>/test_<module>.py`
 - Test file must also have the Apache 2.0 header
 - Report if tests are missing
 
-### 10. Summary Report
+### 12. Summary Report
 
 Output a pass/fail summary:
 
@@ -115,12 +174,15 @@ Output a pass/fail summary:
 Pre-Commit Check Results
 ========================
 [PASS] Black formatting
+[PASS] Public API docs coverage
 [PASS] Apache 2.0 headers (5/5 files)
 [FAIL] from __future__ import annotations — missing in: foo.py
 [PASS] __all__ exports
 [PASS] Docstrings on public APIs
 [PASS] Type annotations
 [PASS] @configclass usage
+[PASS] Targeted tests — tests/foo/test_bar.py
+[N/A] Full test suite — isolated change covered by targeted tests
 [WARN] Missing tests for: bar.py
 
 Fix the above issues before committing.
@@ -131,10 +193,13 @@ Fix the above issues before committing.
 The project's CI pipeline (`.github/workflows/main.yml`) runs:
 
 1. **lint** job: `black --check --diff --color ./`
-2. **test** job: `pytest tests`
-3. **build** job: Sphinx docs build
+2. **lint** job: `python docs/scripts/check_api_docs.py`
+3. **test** job: proportional pytest groups after lint passes
+4. **build** job: Sphinx docs build after lint passes
 
-This skill covers items 1 and 2 locally. Docs build is heavier and typically only needed for documentation changes.
+This skill always covers the relevant lint and structural checks, then selects
+tests proportionally. It does not require reproducing the entire CI pipeline for
+every local change.
 
 ## Common Mistakes
 
@@ -152,7 +217,9 @@ This skill covers items 1 and 2 locally. Docs build is heavier and typically onl
 |-------|---------------|
 | Black formatting | `black --check --diff --color ./` |
 | Auto-fix formatting | `black .` |
+| Public API docs | `python docs/scripts/check_api_docs.py` |
 | Header check | Verify first line is `# ---...---` |
 | `__future__` import | Grep for `from __future__ import annotations` |
 | `__all__` export | Grep for `__all__` in module |
-| Run tests | `pytest tests/<path>` |
+| Run targeted tests | `pytest tests/<affected-path>` |
+| Run full tests | `pytest tests` only when the full-suite criteria above apply |

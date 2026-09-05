@@ -43,7 +43,7 @@ Soft bodies require both voxelization and physical attributes.
 | `mass` | `float` | `-1.0` | Total mass. If negative, density is used. |
 | `density` | `float` | `1000.0` | Material density in kg/m^3. |
 
-For Soft Object tutorial, please refer to the [Soft Body Simulation](https://dexforce.github.io/EmbodiChain/tutorial/create_softbody.html).
+For a runnable example, see the {doc}`Soft Body Simulation </tutorial/create_softbody>` tutorial.
 
 
 ### Setup & Initialization
@@ -94,6 +94,19 @@ print(f"Simulation Vertices Shape: {sim_verts.shape}")
 velocities = soft_object.get_current_sim_vertex_velocities()
 print(f"Vertex Velocities: {velocities}")
 ```
+
+#### Visual Material
+
+When a soft object is constructed, EmbodiChain wraps the first valid material already attached to each environment's render body. The original dexsim material instance is retained.
+
+```python
+materials = soft_object.get_visual_material_inst()
+if materials[0] is not None:
+    materials[0].set_base_color([0.8, 0.3, 0.2, 1.0])
+```
+
+`set_visual_material(mat, env_ids=None, shared=False)` assigns a replacement material, while `restore_visual_material(env_ids=None)` restores the original per-segment assignments. `get_visual_material_inst(env_ids=None)` returns one representative `VisualMaterialInst | None` per selected environment. `reset()` restores the original material before resetting the selected soft bodies.
+
 #### Pose Management
 You can set the global pose of a soft object (which transforms all its vertices), but getting a single "pose" from a deformed object is not supported.
 

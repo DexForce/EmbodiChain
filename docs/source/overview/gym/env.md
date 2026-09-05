@@ -25,6 +25,51 @@ The environment is defined by inheriting from {class}`~envs.EmbodiedEnvCfg`. Thi
 
 {class}`~envs.EmbodiedEnvCfg` inherits from {class}`~envs.EnvCfg` (the base environment configuration class, sometimes referred to as `BaseEnvCfg`), which provides fundamental environment parameters. The following sections describe both the base class parameters and the additional parameters specific to {class}`~envs.EmbodiedEnvCfg`.
 
+### File-Based Component Ownership
+
+File-based deployments may build the same in-memory configuration from
+reusable physical owners. A task-local `env.yaml` component combines simulation
+scene entities with ordinary environment and manager values, while an
+embodiment component combines one robot with its sensors:
+
+```yaml
+# env.yaml: reusable and not directly runnable
+environment_id: repeated_pick_place
+simulation:
+  rigid_object:
+    - uid: cube
+      # Physical object configuration.
+env:
+  events: {}
+  dataset: {}
+```
+
+A separate runnable config supplies `id` and selects those owners:
+
+```yaml
+# task.ur5.yaml
+id: TaskProgramRepeatedPickPlace-v1
+environment:
+  component: env.yaml
+embodiment:
+  component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+```
+
+This split lets one environment support several embodiments and lets one
+embodiment run across several environments. It is independent of how expert
+behavior is authored: a registered handwritten task can select the same two
+components, while a configuration-defined Task Program adds
+`task_program.{program,integration,execution_policy}` only to its runnable
+deployment. The pure `env.yaml` has `environment_id` but no runnable `id` or
+Task Program fields.
+
+Component references resolve relative to the runnable config. A deployment
+must not declare component-owned fields inline at the same time. The original
+fully inline Gym format remains supported; a standalone physical
+`scene.component` also remains available when `environment.component` is not
+selected. See {doc}`/guides/configuration` for the full file schemas and
+{doc}`/tutorial/task_program` for a complete Task Program composition.
+
 ### BaseEnvCfg Parameters
 
 Since {class}`~envs.EmbodiedEnvCfg` inherits from {class}`~envs.EnvCfg`, it includes the following base parameters:
@@ -39,13 +84,69 @@ Since {class}`~envs.EmbodiedEnvCfg` inherits from {class}`~envs.EnvCfg`, it incl
   The seed for the random number generator. Defaults to ``None``, in which case the seed is not set. The seed is set at the beginning of the environment initialization to ensure deterministic behavior across different runs.
 
 * **sim_steps_per_control** (int): 
-  Number of simulation steps per control (environment) step. This parameter determines the relationship between the simulation timestep and the control timestep. For instance, if the simulation dt is 0.01s and the control dt is 0.1s, then ``sim_steps_per_control`` should be 10. This means that the control action is updated every 10 simulation steps. Defaults to ``4``.
+  Number of physics simulation steps per control (environment) step. This integer decimation determines the actual environment cadence. For instance, if the physics timestep is 0.01 s and ``sim_steps_per_control`` is 10, each environment step represents 0.1 s. Defaults to ``4``.
+
+* **target_control_frequency** (float | None):
+  Optional convenience setting for a desired control frequency. EmbodiChain converts it to an integer ``sim_steps_per_control`` using the configured physics timestep, taking precedence over a directly configured step count. The requested frequency must be exactly representable; otherwise initialization raises an error instead of changing the physics timestep or silently approximating the rate. Defaults to ``None``.
+
+### Environment Timing
+
+The simulation timestep and the environment sampling timestep have different responsibilities:
+
+```text
+physics_dt = sim_cfg.physics_dt
+step_dt = physics_dt * sim_steps_per_control
+control_frequency = 1 / step_dt
+```
+
+Choose ``physics_dt`` according to physics stability and contact accuracy. To change how often a policy, controller, or expert trajectory supplies an action, change the integer ``sim_steps_per_control`` instead. The environment exposes ``physics_dt``, ``step_dt``, ``physics_frequency``, and ``control_frequency`` as derived runtime properties.
+
+If configuration is easier in hertz, set ``target_control_frequency``. For example, a 0.01 s physics timestep can represent 25 Hz exactly with four physics steps per environment step. It cannot represent 30 Hz exactly, so that combination is rejected.
 
 * **ignore_terminations** (bool): 
   Whether to ignore terminations when deciding when to auto reset. Terminations can be caused by the task reaching a success or fail state as defined in a task's evaluation function. If set to ``False``, episodes will stop early when termination conditions are met. If set to ``True``, episodes will only stop due to the timelimit, which is useful for modeling tasks as infinite horizon. Defaults to ``False``.
 
 * **max_episode_steps** (int): 
   Maximum number of steps per episode. If set to ``-1``, episodes will not have a step limit and will only end due to success/failure conditions. Defaults to ``300``.
+
+### Reproducible Event Randomization
+
+Configuration-defined tasks can set a top-level ``seed`` before the scene and
+event managers are constructed:
+
+```yaml
+id: EmbodiedEnv-v1
+seed: 2026
+num_envs: 4
+env:
+  events:
+    randomize_light:
+      func: randomize_emission_light
+      mode: interval
+      interval_step: 10
+      is_global: true
+      params:
+        intensity_range: [0.5, 2.0]
+```
+
+The common environment launcher can override this value with
+``--seed 2026``. When a seed is configured, the Event Manager derives a stable
+random stream for every functor name, mode, and invocation. Function-style and
+class-style event functors using Python ``random``, NumPy's process RNG, or
+Torch's CPU/simulation-device RNG are therefore reproducible and isolated from
+policy-side random draws. Class construction is also scoped because visual
+randomizers may create random palettes during initialization.
+
+Calling ``env.reset(seed=2026)`` rewinds the event streams and interval
+counters. Calling ``reset()`` without a seed continues the existing sequence.
+If the environment seed is ``None``, events retain the process-global RNG
+behavior from earlier releases. Custom functors that own an explicitly created
+generator remain responsible for seeding that generator.
+
+Reproducibility assumes the same task configuration, event call/reset schedule,
+assets, software versions, and device class. A seed controls randomization; it
+does not promise bitwise-identical physics or rendering across different
+hardware or simulator versions.
 
 ### EmbodiedEnvCfg Parameters
 
@@ -195,7 +296,7 @@ class MyDatasetCfg:
         func="LeRobotRecorder",
         params={
             "save_path": "./outputs/datasets/my_task",
-            "robot_meta": {"robot_type": "my_robot", "control_freq": 25},
+            "robot_meta": {"robot_type": "my_robot"},
             "instruction": {"lang": "move the cube to the goal"},
             "use_videos": False,
         },
@@ -229,6 +330,32 @@ This example shows the typical division of responsibilities:
 - ``rewards`` shape RL behavior.
 - ``actions`` define how policy outputs map to robot control commands.
 - ``dataset`` controls structured episode export, independent from debug-video recording.
+
+## Rollout Buffer Modes
+
+{class}`~envs.EmbodiedEnv` always stores rollout data in one rectangular
+``TensorDict``; it does not allocate a Python list or ragged
+tensor per environment. Leaf tensors use a layout such as
+``[num_envs, max_steps, ...]``. The cursor semantics depend on how the buffer is
+used:
+
+- **Expert/demo mode** is used by dataset and scripted-trajectory collection.
+  Every row has its own ``rollout_steps[env_id]`` cursor and every stored frame
+  has a ``valid`` flag. A row that finishes early is frozen while other rows
+  continue, so logical episode lengths can differ even though the underlying
+  tensor remains fixed-size. LeRobot recorders slice each row to its own valid
+  length and do not export padding or a stale tail.
+- **RL mode** is selected for externally supplied buffers containing the RL
+  fields ``obs``, ``action``, ``reward``, ``done``, ``value``, ``terminated``,
+  and ``truncated``. These buffers use a uniform
+  ``[num_envs, rollout_time + 1]`` layout and one shared
+  ``current_rollout_step``. Environments may auto-reset independently, but
+  collection stays on the vector rollout's synchronized time axis; the
+  expert-only per-row cursor and ``valid`` slicing are not applied.
+
+Consequently, references to “different parallel episode lengths” in the
+demonstration and LeRobot documentation describe expert collection, not the RL
+training buffer.
 
 ## Manager Systems
 
@@ -331,7 +458,9 @@ In a gym config file, use the ``actions`` section:
 ````{tip}
 **Using an AI coding agent?** The following skills can scaffold boilerplate for you:
 
-- **`/add-task-env`** — Generate a new task environment with the correct file structure, `@register_env` decorator, base class methods, `__init__.py` update, and test stub.
+- **`/add-task-env`** — Generate either an import-registered task module or a
+  configuration-defined Task Program deployment, with the matching config
+  layout and test stub.
 - **`/add-functor`** — Add observation, reward, event, or randomization functors with the correct signature and module placement.
 - **`/add-test`** — Write tests following project conventions (pytest or class style, mock patterns, correct file placement).
 - **`/pre-commit-check`** — Run all local CI checks (black, headers, `__all__`, type annotations) before committing.
@@ -372,7 +501,7 @@ Configure rewards through the {class}`~envs.managers.RewardManager` in your envi
 Inherit from {class}`~envs.EmbodiedEnv` for IL tasks:
 
 ```python
-from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.lab.gym.envs import DemoSegment, EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 
 @register_env("MyILTask-v0")
@@ -380,12 +509,20 @@ class MyILTaskEnv(EmbodiedEnv):
     def __init__(self, cfg: MyTaskEnvCfg, **kwargs):
         super().__init__(cfg, **kwargs)
 
-    def create_demo_action_list(self, *args, **kwargs):
-        # Required: Generate scripted demonstrations for data collection
-        pass
+    def create_demo_segments(self, *args, **kwargs):
+        # Plan lazily: each iteration runs after the previous segment finishes.
+        for object_uid in self.object_order:
+            yield DemoSegment(
+                actions=self.plan_pick_and_place(object_uid),
+                name="pick_and_place",
+                target_uid=object_uid,
+                instruction=f"Place {object_uid} in its target bin",
+                # Optional zero-argument, per-env subtask validation.
+                validator=lambda uid=object_uid: self.is_object_placed(uid),
+            )
 
     def is_task_success(self, **kwargs):
-        # Required: Define success criteria for filtering successful episodes
+        # Define final task success for episode classification and filtering.
         # Returns: torch.Tensor of shape (num_envs,) with boolean values
         return success_tensor
 
@@ -395,6 +532,17 @@ class MyILTaskEnv(EmbodiedEnv):
         info["custom_metric"] = ...
         return info
 ```
+
+``create_demo_segments()`` is the preferred expert API. Each
+{class}`~envs.DemoSegment` may carry its own target, language instruction,
+metadata, and validator, and its action iterable may be generated lazily from
+the scene state left by the previous segment. Existing tasks that implement
+``create_demo_action_list()`` remain compatible and are represented as one
+``legacy`` segment.
+
+The common executor checks termination after every action. A task should
+override ``is_task_success()`` with a meaningful per-environment result so
+normal plan exhaustion cannot classify incomplete demonstrations as success.
 
 For a complete example of a modular environment setup, please refer to the {ref}`tutorial_modular_env` tutorial.
 

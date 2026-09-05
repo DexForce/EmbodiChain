@@ -143,15 +143,63 @@ class RobotCfg(ArticulationCfg):
 
 ### PinkSolver-specific
 
-- `variable_input_tasks` / `fixed_input_tasks`: lists of `pink.tasks.FrameTask` for QP optimisation.
+- `variable_input_tasks` contains exactly one `pink.tasks.FrameTask` targeted
+  by the single-pose IK API and may include other task types. Additional fixed
+  frame constraints belong in `fixed_input_tasks`.
 - `mesh_path`: path for Pinocchio URDF mesh loading.
 - `show_ik_warnings` / `fail_on_joint_limit_violation`: error-handling behaviour.
+- Supports single-pose and sequential batch IK while preserving one seed per
+  target and returning a consistent `(N,)`, `(N, 1, dof)` result contract.
+- End-effector targets are interpreted as TCP poses; the configured TCP is
+  removed before setting the controlled Pink frame target. Targets remain
+  relative to `root_link_name` even when that link is offset from the URDF root.
+- Convergence is checked against the single targeted variable FrameTask. Maximum-iteration,
+  stagnation, and solver-exception exits report failure and preserve the
+  corresponding input seed.
+- Adaptive controls (`stagnation_tolerance`, `stagnation_iterations`,
+  `max_backtracks`, `damping_growth`, `damping_decay`, and `max_damping`)
+  use a lexicographic merit that prioritizes FrameTask progress and considers
+  only controllable projected null-space posture error as a secondary term.
+  They increase regularization and terminate stalled solves early.
+- Effective limits intersect URDF, user-configured, and runtime robot limits,
+  then synchronize the result into the reduced Pinocchio model in Pink order.
 
 ### SRSSolver-specific
 
 - `dh_params`, `link_lengths`, `rotation_directions`, `T_b_ob`, `T_e_oe`: kinematic model params.
 - `sort_ik`: whether to rank solutions by distance to seed.
+- `search_mode`: `"seeded"` computes the seed's geometric shoulder-elbow-wrist
+  arm angle and searches redundancy angles radially around it; if the configured
+  radial step cannot produce `num_samples` distinct angles in one revolution,
+  the incomplete radial prefix is replaced by a complete seed-centered uniform
+  full-circle grid. `"full"` samples the complete `[-pi, pi)` interval directly.
+- `redundancy_step`: angular increment used by seed-centered search.
+- Requesting all solutions always uses full-space redundancy sampling.
+- CPU and CUDA derive the reference plane in the base frame and use the same
+  signed arm-angle, shoulder-azimuth degeneracy rule, and periodic
+  nearest-solution formulas. Shoulder azimuth is set to zero only when the
+  shoulder-to-wrist projection onto the XY plane is near zero.
+- At shoulder or wrist Euler singularities, both analytical backends preserve
+  the seed's free coupled joint and solve the remaining coupled angle, avoiding
+  arbitrary equivalent-angle jumps near singular configurations.
+- Candidate revolute angles are shifted by integer multiples of `2*pi` into
+  the configured joint limits, choosing the representation nearest the seed.
+- Runtime `set_tcp()` and `set_ik_nearest_weight()` calls synchronize the CPU
+  and Warp analytical-backend caches immediately.
+- CPU target/reference-plane geometry is precomputed per target and elbow
+  branch. CUDA derives target/config/angle indices directly from the Warp
+  thread id, and all-solution sorting uses device-side tensor sorting rather
+  than a serial quadratic Warp sort.
+- Warp arm-angle and IK scratch arrays are reused by shape within a solver
+  instance to avoid repeated device allocations during steady-state calls.
+- Periodic-equivalent all-solutions candidates are greedily deduplicated
+  against retained representatives on CPU before indexing the original device
+  tensor, preserving order without allocating quadratic GPU scratch space.
 - Requires `num_envs` in `init_solver()`.
+
+Focused performance and accuracy validation is available at
+`scripts/benchmark/robotics/kinematic_solver/srs_solver.py`; it compares CPU
+and available CUDA backends in seeded and full redundancy-search modes.
 
 ### OPWSolver-specific
 
@@ -177,10 +225,15 @@ batches for IK multi-start:
 A `pink.tasks.Task` subclass for posture control in the null space of
 higher-priority tasks.
 
-- Error: `e(q) = M · (q* − q)` where `M` is a joint-selection mask.
+- Error: a Pinocchio manifold difference masked in tangent space (`nv`), with
+  an empty joint selection meaning all actuated joints while floating-base
+  coordinates are always excluded.
 - Jacobian: null-space projector `N(q) = I − J_primary⁺ · J_primary`.
-- Used exclusively with `PinkSolver` for multi-task QP IK (e.g., controlling
-  posture while satisfying end-effector constraints).
+- Add it to either `variable_input_tasks` or `fixed_input_tasks`; PinkSolver
+  initializes it, includes it in QP solving, and uses its controllable projected
+  error only as a secondary backtracking merit behind FrameTask progress. It
+  updates its simulator-ordered target through
+  `update_null_space_joint_targets()`.
 
 ---
 

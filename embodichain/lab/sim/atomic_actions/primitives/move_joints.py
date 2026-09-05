@@ -18,119 +18,145 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import ClassVar
 
 import torch
 
-from embodichain.utils import configclass, logger
-
-from ..core import (
-    ActionCfg,
-    ActionResult,
-    AtomicAction,
-    JointPositionTarget,
-    NamedJointPositionTarget,
-    WorldState,
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
 )
-from ..trajectory import TrajectoryBuilder
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.requirements import (
+    JOINT_POSITION_CAPABILITY,
+    SkillBindingContract,
+)
+from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    build_joint_plan_states,
+    resolve_joint_target,
+    to_full_robot_trajectory,
+)
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_motion_slot,
+)
 
 
-@configclass
-class MoveJointsCfg(ActionCfg):
-    name: str = "move_joints"
-    """Name of the action, used for identification and logging."""
+@dataclass(frozen=True, slots=True, eq=False)
+class JointPositionGoal:
+    """Explicit or named joint-space goal for a bound robot resource."""
 
-    sample_interval: int = 50
-    """Number of waypoints in the interpolated joint-space trajectory."""
+    target: torch.Tensor | str
+    """Joint qpos/waypoints or a named control-part profile command."""
 
-    named_joint_positions: dict[str, torch.Tensor] | None = None
-    """Optional named joint targets resolved by ``NamedJointPositionTarget``."""
+    def __post_init__(self) -> None:
+        if isinstance(self.target, str):
+            if not self.target.strip():
+                raise ValueError("Named joint-position target must not be empty.")
+            return
+        if not isinstance(self.target, torch.Tensor):
+            raise TypeError(
+                "target must be a torch.Tensor or str, "
+                f"got {type(self.target).__name__}."
+            )
+        if self.target.dim() not in (1, 2, 3) or self.target.shape[-1] == 0:
+            raise ValueError(
+                "Tensor target must have shape (control_dof,), "
+                "(num_envs, control_dof), "
+                "or (num_envs, n_waypoint, control_dof), "
+                f"got {tuple(self.target.shape)}."
+            )
 
 
-class MoveJoints(AtomicAction):
-    """Plan a joint-space move for the configured control part.
+@dataclass(frozen=True, slots=True, eq=False)
+class MoveJointsOptions(ActionOptions):
+    """Per-invocation behavior for :class:`MoveJoints`."""
 
-    The :class:`JointPositionTarget` may carry either a single waypoint
-    ``(n_envs, control_dof)`` or a multi-waypoint trajectory
-    ``(n_envs, n_waypoint, control_dof)``. In the multi-waypoint case the
-    action plans a single trajectory that visits every waypoint in order,
-    starting from the inherited ``WorldState.last_qpos``.
-    """
 
-    TargetType: ClassVar[tuple[type, ...]] = (
-        JointPositionTarget,
-        NamedJointPositionTarget,
+class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
+    """Plan joint motion from the observed state to one or more waypoints."""
+
+    skill_id: ClassVar[str] = "move_joints"
+    GoalType: ClassVar[type] = JointPositionGoal
+    OptionsType: ClassVar[type] = MoveJointsOptions
+    agent_visible: ClassVar[bool] = False
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            make_motion_slot(
+                "primary",
+                capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
+            ),
+        ),
     )
 
-    def __init__(
+    def _plan(
         self,
-        motion_generator,
-        cfg: MoveJointsCfg | None = None,
-    ) -> None:
-        super().__init__(motion_generator, cfg or MoveJointsCfg())
-        self.builder = TrajectoryBuilder(motion_generator)
-        self.n_envs = self.robot.get_qpos().shape[0]
-        self.joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
-        self.joint_dof = len(self.joint_ids)
-        self.robot_dof = self.robot.dof
-        self.named_joint_positions = self.cfg.named_joint_positions or {}
-
-    def execute(
-        self,
-        target: JointPositionTarget | NamedJointPositionTarget,
-        state: WorldState,
-    ) -> ActionResult:
-        target_qpos = self.builder.resolve_joint_target(
-            self._resolve_target_qpos(target),
-            n_envs=self.n_envs,
-            joint_dof=self.joint_dof,
-            control_part=self.cfg.control_part,
-        )
-        start_qpos = self.builder.resolve_start_qpos(
-            state.last_qpos[:, self.joint_ids],
-            n_envs=self.n_envs,
-            arm_dof=self.joint_dof,
-            control_part=self.cfg.control_part,
-        )
-        joint_traj = self.builder.plan_joint_traj(
-            start_qpos, target_qpos, self.cfg.sample_interval
-        )
-        full = self._embed(joint_traj, state.last_qpos)
-        return ActionResult(
-            success=torch.ones(self.n_envs, dtype=torch.bool, device=self.device),
-            trajectory=full,
-            next_state=WorldState(
-                last_qpos=full[:, -1, :].clone(),
-                held_object=state.held_object,
-                coordinated_held_object=state.coordinated_held_object,
+        request: ResolvedActionRequest[JointPositionGoal, MoveJointsOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        """Plan a joint-space goal without mutating the robot or task state."""
+        goal = request.goal
+        motion = request.binding.endpoint("primary", "motion")
+        motion_target = motion.require_target(JointPositionTarget)
+        control_part = motion_target.control_part
+        joint_ids = list(motion_target.joint_ids)
+        joint_dof = len(motion_target.joint_ids)
+        target_qpos = resolve_joint_target(
+            self._resolve_target_qpos(
+                goal,
+                request=request,
+                context=context,
             ),
+            num_envs=context.batch_size,
+            joint_dof=joint_dof,
+            control_part=control_part,
+            device=self.device,
+        )
+        start_qpos = context.robot.qpos[:, joint_ids]
+        result = self.motion_generator.generate(
+            build_joint_plan_states(target_qpos),
+            options=request.motion_policy.to_motion_gen_options(
+                start_qpos=start_qpos,
+                control_part=control_part,
+                interpolation_dt=context.control_dt,
+            ),
+        )
+        success, trajectory = to_full_robot_trajectory(
+            result,
+            base_qpos=context.robot.qpos,
+            joint_ids=joint_ids,
+            env_ids=context.env_ids,
+        )
+        return self.build_plan(
+            request,
+            context,
+            success=success,
+            trajectory=trajectory,
         )
 
     def _resolve_target_qpos(
-        self, target: JointPositionTarget | NamedJointPositionTarget
+        self,
+        goal: JointPositionGoal,
+        *,
+        request: ResolvedActionRequest[JointPositionGoal, MoveJointsOptions],
+        context: PlanningContext,
     ) -> torch.Tensor:
-        if isinstance(target, JointPositionTarget):
-            return target.qpos
-        if target.name not in self.named_joint_positions:
-            logger.log_error(
-                f"Unknown named joint-position target '{target.name}' for "
-                f"MoveJoints. Available targets: {sorted(self.named_joint_positions)}",
-                KeyError,
-            )
-        return self.named_joint_positions[target.name]
-
-    def _embed(
-        self, joint_traj: torch.Tensor, last_full_qpos: torch.Tensor
-    ) -> torch.Tensor:
-        n_wp = joint_traj.shape[1]
-        full = torch.empty(
-            (self.n_envs, n_wp, self.robot_dof),
-            dtype=torch.float32,
+        """Resolve an explicit or named joint goal to a tensor."""
+        if isinstance(goal.target, torch.Tensor):
+            return goal.target
+        return request.binding.endpoint("primary", "motion").joint_positions(
+            goal.target,
+            num_envs=context.batch_size,
             device=self.device,
+            dtype=context.robot.qpos.dtype,
         )
-        full[:, :, :] = last_full_qpos.unsqueeze(1)
-        full[:, :, self.joint_ids] = joint_traj
-        return full
 
 
-__all__ = ["MoveJoints", "MoveJointsCfg"]
+__all__ = [
+    "JointPositionGoal",
+    "MoveJoints",
+    "MoveJointsOptions",
+]

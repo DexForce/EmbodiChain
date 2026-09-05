@@ -75,6 +75,37 @@ def get_dexsim_arena_num() -> int:
     return len(arenas)
 
 
+def _resolve_mesh_collision_params(
+    cfg: RigidObjectCfg,
+) -> tuple[int, str, int]:
+    """Resolve legacy and shape-level mesh collision parameters."""
+
+    def is_missing(value) -> bool:
+        # deepcopy() can produce a distinct instance of dataclasses.MISSING.
+        return value is MISSING or isinstance(value, type(MISSING))
+
+    max_convex_hull_num = next(
+        value
+        for value in (
+            cfg.max_convex_hull_num,
+            cfg.shape.max_convex_hull_num,
+            1,
+        )
+        if not is_missing(value)
+    )
+    acd_method = next(
+        value
+        for value in (cfg.acd_method, cfg.shape.acd_method, "coacd")
+        if not is_missing(value)
+    )
+    sdf_resolution = next(
+        value
+        for value in (cfg.sdf_resolution, cfg.shape.sdf_resolution, 0)
+        if not is_missing(value)
+    )
+    return max_convex_hull_num, acd_method, sdf_resolution
+
+
 def get_dexsim_drive_type(drive_type: str) -> DriveType:
     """Get the dexsim drive type from a string.
 
@@ -278,18 +309,8 @@ def load_mesh_objects_from_cfg(
         option.smooth = cfg.shape.load_option.smooth
 
         cfg: RigidObjectCfg
-        max_convex_hull_num = (
-            cfg.max_convex_hull_num
-            if cfg.max_convex_hull_num is not MISSING
-            else cfg.shape.max_convex_hull_num
-        )
-        acd_method = (
-            cfg.acd_method if cfg.acd_method is not MISSING else cfg.shape.acd_method
-        )
-        sdf_resolution = (
-            cfg.sdf_resolution
-            if cfg.sdf_resolution is not MISSING
-            else cfg.shape.sdf_resolution
+        max_convex_hull_num, acd_method, sdf_resolution = (
+            _resolve_mesh_collision_params(cfg)
         )
         fpath = cfg.shape.fpath
 

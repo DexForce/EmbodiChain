@@ -21,7 +21,7 @@ torchrun --nproc_per_node=2 -m embodichain train-rl --config <config_path> --dis
 Example:
 
 ```bash
-torchrun --nproc_per_node=2 -m embodichain train-rl --config configs/agents/rl/push_cube/train_config.yaml --distributed
+torchrun --nproc_per_node=2 -m embodichain train-rl --config embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.json --distributed
 ```
 
 No config file changes needed; `device` and `gpu_id` are overridden automatically per rank.
@@ -46,4 +46,3 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nproc_per_node=2 -m embodichain train-rl --c
 - **Episode stats**: `episode_reward_avg_100` and `episode_length_avg_100` are aggregated across all ranks via `all_gather` for accurate global metrics.
 - **Evaluation**: Only rank 0 creates and runs the evaluation environment.
 - **Checkpoints**: Only rank 0 saves; the underlying policy state (without DDP wrapper) is stored.
-

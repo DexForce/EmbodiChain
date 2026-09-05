@@ -2,7 +2,16 @@
 
 This section describes the default window interaction controls available in the simulation. These controls allow users to interact with the simulation environment using keyboard, mouse, and customizable input events.
 
-The main visualization window is provided by **DexSim**. When `SimConfig.headless=False` or `SimulationManager.open_window()` is called, DexSim creates the viewer with **ORBIT** camera control by default.
+The main visualization window is provided by **DexSim**. When
+`SimulationManagerCfg.headless=False` or `SimulationManager.open_window()` is
+called, DexSim creates the viewer with **ORBIT** camera control by default.
+The native window and the Viser backend are mutually exclusive;
+`SimulationManager.open_window()` safely returns `False` without opening a
+native window while Viser is enabled.
+Likewise, `SimulationManager.start_visualization()` rejects Viser startup while
+the native window is open.
+See {doc}`Viser browser visualization </overview/sim/viser_visualization>` for
+the headless browser frontend.
 
 ## Default Window Controls
 
@@ -38,8 +47,11 @@ In ORBIT mode, plain `W/A/S/D/Q/E` does not move the view. Hold **Left Ctrl** wh
 | Input | Operation |
 |-------|-----------|
 | **Viewer recording (toggle)** | Press **`r`** to **start** recording what the interactive viewer shows, and press **`r`** again to **stop** and save as MP4 videos. Recording uses a hidden camera that follows the live viewer camera pose, so the exported videos match the on-screen view. Useful for debugging and recording demos. |
+| **Print camera pose** | Press **`p`** to print the current viewer pose as an executable `window.set_look_at(...)` call. |
 
 Recording hotkey registration is controlled by `SimConfig.window_record.enable_hotkey` (enabled by default). You can also call `SimulationManager.start_window_record()`, `stop_window_record()`, or `toggle_window_record()` programmatically.
+
+The camera-pose hotkey is controlled by `SimulationManagerCfg.window_camera_pose.enable_hotkey` and prints look-at form by default. Set `SimulationManagerCfg.window_camera_pose.convert_to_look_at=False` to print the raw 4x4 pose matrix instead. The same output can be requested programmatically with `SimulationManager.print_window_camera_pose()`.
 
 ## Customizing Window Events
 

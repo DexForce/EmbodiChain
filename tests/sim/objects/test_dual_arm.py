@@ -137,8 +137,12 @@ def test_build_dual_arm_ur_solver_is_per_arm_and_arm_local():
         assert solver.ur_type == "ur5"
         # URSolverCfg pins urdf_path to the single-arm URDF in __post_init__, so
         # the engine keeps link names UNPREFIXED to match that URDF (arm-local).
-        assert solver.root_link_name == "base_link"
-        assert solver.end_link_name == "ee_link"
+        if side == "left_arm":
+            assert solver.root_link_name == "left_base_link"
+            assert solver.end_link_name == "left_ee_link"
+        elif side == "right_arm":
+            assert solver.root_link_name == "right_base_link"
+            assert solver.end_link_name == "right_ee_link"
 
 
 def test_build_dual_arm_ur_urdf_components():
@@ -156,6 +160,15 @@ def test_build_dual_arm_dual_part_toggle():
     mounts = resolve_mounts({"preset": "side_by_side", "separation": 0.6})
     cfg = build_dual_arm_cfg(base, mounts, dual_part=False)
     assert "dual_arm" not in cfg.control_parts
+
+
+def test_build_dual_arm_preserves_gravity_setting() -> None:
+    base = URRobotCfg.from_dict({"robot_type": "ur5", "enable_gravity": False})
+    mounts = resolve_mounts({"preset": "side_by_side", "separation": 0.6})
+
+    cfg = build_dual_arm_cfg(base, mounts)
+
+    assert cfg.enable_gravity is False
 
 
 # --------------------------------------------------------------------------- #
@@ -182,9 +195,17 @@ def test_dual_arm_from_dict_explicit_base_robot():
     assert cfg.solver_cfg["left_arm"].ur_type == "ur5"
 
 
+def test_dual_arm_from_dict_franka_base_robot():
+    cfg = DualArmRobotCfg.from_dict(
+        {"base_robot": "franka", "mount": {"preset": "side_by_side", "separation": 0.6}}
+    )
+    assert set(["left_arm", "right_arm", "dual_arm"]).issubset(cfg.control_parts.keys())
+    assert set(["left_hand", "right_hand"]).issubset(cfg.control_parts.keys())
+
+
 def test_dual_arm_unknown_base_robot_raises():
     with pytest.raises(ValueError):
-        DualArmRobotCfg.from_dict({"base_robot": "franka"})
+        DualArmRobotCfg.from_dict({"base_robot": "telepathic"})
 
 
 def test_dual_arm_roundtrip():

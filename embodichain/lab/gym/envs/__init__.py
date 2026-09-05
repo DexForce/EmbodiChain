@@ -14,7 +14,17 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Environment framework: ``BaseEnv`` / ``EmbodiedEnv`` class hierarchy, task registration, manager wiring, and the step/reset lifecycle."""
+
+from __future__ import annotations
+
 from .base_env import *
+from .demo import *
 from .embodied_env import *
-from .tasks import *
+from .settling import *
+from .types import *
 from .wrapper import *
+
+# Official task environments live in the bundled ``embodichain_tasks`` package
+# and register through the same ``embodichain.tasks`` entry-point mechanism as
+# third-party task packages.

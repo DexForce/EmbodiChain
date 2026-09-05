@@ -105,7 +105,6 @@ The main environment configuration inherits from :class:`envs.EmbodiedEnvCfg` an
 Uses the pre-configured :class:`DexforceW1Cfg` with customizations:
 
 - **Version**: Specific robot variant (v021)
-- **Arm Type**: Anthropomorphic configuration
 - **Position**: Initial placement in the scene
 
 **Sensor Configuration**
@@ -174,7 +173,7 @@ The actual environment class is remarkably simple due to the configuration-drive
 
 .. literalinclude:: ../../../scripts/tutorials/gym/modular_env.py
    :language: python
-   :start-at: @register_env("ModularEnv-v1", override=True)
+   :start-at: @register_env("ModularEnv-v1", max_episode_steps=100, override=True)
    :end-at: super().__init__(cfg, **kwargs)
 
 The :class:`envs.EmbodiedEnv` base class automatically:
@@ -242,3 +241,11 @@ This tutorial demonstrates the full power of EmbodiChain's modular environment s
 
    - **/add-task-env** — Scaffold a new task environment with the correct file structure, ``@register_env`` decorator, base class methods, ``__init__.py`` update, and test stub.
    - **/add-functor** — Add observation, reward, event, or randomization functors with the correct signature and module placement.
+
+Next Steps
+~~~~~~~~~~
+
+- :doc:`task_program` — Compose a modular environment with a declarative Task
+  Program, embodiment, scene binding, and execution policy.
+- :doc:`data_generation` — Record expert demonstrations from modular
+  environments.

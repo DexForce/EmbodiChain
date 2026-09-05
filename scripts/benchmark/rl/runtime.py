@@ -28,12 +28,19 @@ from tensordict import TensorDict
 from torch.utils.tensorboard import SummaryWriter
 
 from embodichain.learning.rl.algo import build_algo
+from embodichain.learning.rl.differentiable_trainer import (
+    DifferentiableTrainer,
+    DifferentiableTrainerCfg,
+)
+from embodichain.learning.rl.env import build_learning_env
+from embodichain.learning.rl.evaluation import evaluate_episodes
 from embodichain.learning.rl.models import build_mlp_from_cfg, build_policy
+from embodichain.learning.rl.routing import get_trainer_class
 from embodichain.learning.rl.utils import dict_to_tensordict, flatten_dict_observation
 from embodichain.learning.rl.utils.trainer import Trainer
 from embodichain.lab.gym.envs.managers.cfg import EventCfg
-from embodichain.lab.gym.envs.tasks.rl import build_env
-from embodichain.lab.gym.utils.gym_utils import DEFAULT_MANAGER_MODULES, config_to_cfg
+from embodichain.lab.gym.utils.registration import build_env, discover_task_packages
+from embodichain.lab.gym.utils.gym_utils import get_manager_modules, config_to_cfg
 from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.utils.utility import load_config
@@ -96,9 +103,7 @@ def _build_env_cfg(
     gpu_id: int,
 ):
     gym_config_data = load_config(gym_config_path)
-    gym_env_cfg = config_to_cfg(
-        gym_config_data, manager_modules=DEFAULT_MANAGER_MODULES
-    )
+    gym_env_cfg = config_to_cfg(gym_config_data, manager_modules=get_manager_modules())
     if num_envs is not None:
         gym_env_cfg.num_envs = int(num_envs)
     if gym_env_cfg.sim_cfg is None:
@@ -186,8 +191,13 @@ def build_policy_from_env(policy_block: dict[str, Any], env, device: torch.devic
     sample_obs, _ = env.reset()
     sample_obs_td = dict_to_tensordict(sample_obs, device)
     obs_dim = flatten_dict_observation(sample_obs_td).shape[-1]
-    flat_obs_space = env.flattened_observation_space
-    env_action_dim = env.action_space.shape[-1]
+    flat_obs_space = getattr(env, "flattened_observation_space", None)
+    if flat_obs_space is None:
+        flat_obs_space = env.single_observation_space
+    action_space = getattr(env, "action_space", None)
+    if action_space is None:
+        action_space = env.single_action_space
+    env_action_dim = action_space.shape[-1]
 
     policy_name = policy_block["name"].lower()
     if policy_name == "actor_critic":
@@ -196,7 +206,7 @@ def build_policy_from_env(policy_block: dict[str, Any], env, device: torch.devic
         return build_policy(
             policy_block,
             flat_obs_space,
-            env.action_space,
+            action_space,
             device,
             actor=actor,
             critic=critic,
@@ -206,11 +216,127 @@ def build_policy_from_env(policy_block: dict[str, Any], env, device: torch.devic
         return build_policy(
             policy_block,
             flat_obs_space,
-            env.action_space,
+            action_space,
             device,
             actor=actor,
         )
-    return build_policy(policy_block, flat_obs_space, env.action_space, device)
+    return build_policy(policy_block, flat_obs_space, action_space, device)
+
+
+def _train_learning_config(
+    cfg_json: dict[str, Any],
+    output_dir: str | Path,
+) -> dict[str, Any]:
+    trainer_cfg = deepcopy(cfg_json["trainer"])
+    policy_block = deepcopy(cfg_json["policy"])
+    algo_block = deepcopy(cfg_json["algorithm"])
+    device = resolve_device(trainer_cfg.get("device", "cpu"))
+    set_random_seed(int(trainer_cfg.get("seed", 1)), device)
+    discover_task_packages()
+
+    env_block = trainer_cfg["learning_env"]
+    env_name = env_block if isinstance(env_block, str) else env_block["name"]
+    env_kwargs = {} if isinstance(env_block, str) else dict(env_block.get("cfg", {}))
+    num_envs = int(trainer_cfg.get("num_envs", 64))
+    env = build_learning_env(env_name, num_envs=num_envs, device=device, **env_kwargs)
+    eval_env = None
+    if trainer_cfg.get("enable_eval", True):
+        eval_env = build_learning_env(
+            env_name,
+            num_envs=int(trainer_cfg.get("num_eval_envs", 8)),
+            device=device,
+            **env_kwargs,
+        )
+
+    output_root = Path(output_dir)
+    checkpoint_dir = output_root / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    writer = SummaryWriter(str(output_root / "logs"))
+    try:
+        policy = build_policy_from_env(policy_block, env, device)
+        if "initial_log_std" in policy_block and hasattr(policy, "log_std"):
+            with torch.no_grad():
+                policy.log_std.fill_(float(policy_block["initial_log_std"]))
+        algorithm = build_algo(algo_block["name"], algo_block["cfg"], policy, device)
+        iterations = int(trainer_cfg.get("iterations", 1))
+        eval_freq = int(trainer_cfg.get("eval_freq", 0))
+        trainer_class = get_trainer_class(algorithm)
+        best_eval_metric = trainer_cfg.get("best_eval_metric", "eval/avg_reward")
+        best_eval_mode = trainer_cfg.get("best_eval_mode", "max")
+        if trainer_class is DifferentiableTrainer:
+            segment_length = int(trainer_cfg.get("segment_length", 25))
+            update_horizon = int(trainer_cfg.get("update_horizon", segment_length))
+            trainer = DifferentiableTrainer(
+                cfg=DifferentiableTrainerCfg(
+                    segment_length=segment_length,
+                    update_horizon=update_horizon,
+                    deterministic_actions=bool(
+                        trainer_cfg.get("deterministic_actions", False)
+                    ),
+                    checkpoint_dir=str(checkpoint_dir),
+                    experiment_name=str(trainer_cfg.get("exp_name", "benchmark_run")),
+                    save_frequency_updates=int(
+                        trainer_cfg.get("save_frequency_updates", 0)
+                    ),
+                    eval_frequency_steps=eval_freq,
+                    num_eval_episodes=int(trainer_cfg.get("num_eval_episodes", 5)),
+                    eval_seed=trainer_cfg.get("eval_seed"),
+                    best_eval_metric=best_eval_metric,
+                    best_eval_mode=best_eval_mode,
+                ),
+                env=env,
+                policy=policy,
+                algorithm=algorithm,
+                writer=writer,
+                eval_env=eval_env,
+            )
+            total_steps = iterations * update_horizon * num_envs
+        else:
+            buffer_size = int(trainer_cfg.get("buffer_size", 256))
+            trainer = Trainer(
+                policy=policy,
+                env=env,
+                algorithm=algorithm,
+                buffer_size=buffer_size,
+                batch_size=int(algorithm.cfg.batch_size),
+                writer=writer,
+                eval_freq=eval_freq,
+                save_freq=int(trainer_cfg.get("save_freq", 0)),
+                checkpoint_dir=str(checkpoint_dir),
+                exp_name=str(trainer_cfg.get("exp_name", "benchmark_run")),
+                use_wandb=False,
+                eval_env=eval_env,
+                num_eval_episodes=int(trainer_cfg.get("num_eval_episodes", 5)),
+                eval_seed=trainer_cfg.get("eval_seed"),
+                best_eval_metric=best_eval_metric,
+                best_eval_mode=best_eval_mode,
+            )
+            total_steps = iterations * buffer_size * num_envs
+        start_time = time.perf_counter()
+        summary = trainer.train(total_steps)
+        wall_time = time.perf_counter() - start_time
+        checkpoint_path = trainer.save_checkpoint()
+    finally:
+        writer.close()
+        if eval_env is not None:
+            eval_env.close()
+        env.close()
+
+    peak_gpu_memory_mb = (
+        torch.cuda.max_memory_allocated(device=device) / (1024.0 * 1024.0)
+        if device.type == "cuda"
+        else 0.0
+    )
+    summary.update(
+        {
+            "checkpoint_path": checkpoint_path,
+            "output_dir": str(output_root),
+            "wall_time_sec": float(wall_time),
+            "training_fps": float(total_steps / max(wall_time, 1e-6)),
+            "peak_gpu_memory_mb": float(peak_gpu_memory_mb),
+        }
+    )
+    return summary
 
 
 def train_with_config(
@@ -218,6 +344,8 @@ def train_with_config(
     output_dir: str | Path,
 ) -> dict[str, Any]:
     """Train an RL configuration and return a structured summary."""
+    if "learning_env" in cfg_json["trainer"]:
+        return _train_learning_config(cfg_json, output_dir)
     trainer_cfg = deepcopy(cfg_json["trainer"])
     policy_block = deepcopy(cfg_json["policy"])
     algo_block = deepcopy(cfg_json["algorithm"])
@@ -323,104 +451,85 @@ def evaluate_checkpoint(
     policy_block = deepcopy(cfg_json["policy"])
 
     device = resolve_device(trainer_cfg.get("device", "cpu"))
-    gym_config_data, gym_env_cfg = _build_env_cfg(
-        gym_config_path=trainer_cfg["gym_config"],
-        num_envs=num_envs if num_envs is not None else trainer_cfg.get("num_eval_envs"),
-        headless=True,
-        device=device,
-        gpu_id=int(trainer_cfg.get("gpu_id", 0)),
-    )
+    is_learning_env = "learning_env" in trainer_cfg
+    if is_learning_env:
+        discover_task_packages()
+        env_block = trainer_cfg["learning_env"]
+        env_name = env_block if isinstance(env_block, str) else env_block["name"]
+        env_kwargs = (
+            {} if isinstance(env_block, str) else dict(env_block.get("cfg", {}))
+        )
+        eval_num_envs = int(
+            num_envs if num_envs is not None else trainer_cfg.get("num_eval_envs", 4)
+        )
+    else:
+        gym_config_data, gym_env_cfg = _build_env_cfg(
+            gym_config_path=trainer_cfg["gym_config"],
+            num_envs=(
+                num_envs if num_envs is not None else trainer_cfg.get("num_eval_envs")
+            ),
+            headless=True,
+            device=device,
+            gpu_id=int(trainer_cfg.get("gpu_id", 0)),
+        )
     env = None
     try:
-        env = build_env(gym_config_data["id"], base_env_cfg=gym_env_cfg)
+        if is_learning_env:
+            env = build_learning_env(
+                env_name,
+                num_envs=eval_num_envs,
+                device=device,
+                **env_kwargs,
+            )
+        else:
+            env = build_env(gym_config_data["id"], base_env_cfg=gym_env_cfg)
         policy = build_policy_from_env(policy_block, env, device)
         eval_rollout_buffer = None
         if hasattr(env, "set_rollout_buffer"):
             eval_rollout_buffer = _allocate_eval_rollout_buffer(env, policy, device)
+            env.set_rollout_buffer(eval_rollout_buffer)
 
-        checkpoint = torch.load(checkpoint_path, map_location=device)
+        try:
+            checkpoint = torch.load(
+                checkpoint_path,
+                map_location=device,
+                weights_only=True,
+            )
+        except TypeError:
+            checkpoint = torch.load(checkpoint_path, map_location=device)
         policy.load_state_dict(checkpoint["policy"])
         policy.eval()
 
-        target_episodes = int(num_episodes)
-        completed = 0
-        cumulative_reward = torch.zeros(
-            env.num_envs, dtype=torch.float32, device=device
-        )
-        step_count = torch.zeros(env.num_envs, dtype=torch.int32, device=device)
-
-        returns: list[float] = []
-        lengths: list[int] = []
-        successes: list[float] = []
-        metric_values: dict[str, list[float]] = {}
-        env_step_count = 0
-        env_step_time = 0.0
-
-        if eval_rollout_buffer is not None:
-            env.set_rollout_buffer(eval_rollout_buffer)
-        obs, _ = env.reset()
-        while completed < target_episodes:
-            flat_obs = flatten_dict_observation(obs)
-            action_td = TensorDict(
-                {"obs": flat_obs},
-                batch_size=[env.num_envs],
-                device=device,
-            )
-            action_td = policy.get_action(action_td, deterministic=True)
-            action_manager = getattr(env, "action_manager", None)
-            if action_manager is None:
-                action_in = action_td["action"]
-            else:
-                action_in = action_manager.convert_policy_action_to_env_action(
-                    action_td["action"]
-                )
-
+        def on_step(_: dict[str, Any]) -> None:
             if eval_rollout_buffer is not None:
                 _compact_eval_rollout_buffer(env, eval_rollout_buffer)
-                eval_rollout_buffer["action"][:, env.current_rollout_step].copy_(
-                    action_td["action"]
-                )
-            step_start = time.perf_counter()
-            obs, reward, terminated, truncated, info = env.step(action_in)
-            env_step_time += time.perf_counter() - step_start
-            env_step_count += env.num_envs
 
-            done = terminated | truncated
-            cumulative_reward += reward.float()
-            step_count += 1
-
-            newly_done = done.nonzero(as_tuple=False).squeeze(-1)
-            for env_id in newly_done.tolist():
-                if completed >= target_episodes:
-                    break
-                returns.append(float(cumulative_reward[env_id].item()))
-                lengths.append(int(step_count[env_id].item()))
-                if "success" in info:
-                    successes.append(float(info["success"][env_id].item()))
-                if "metrics" in info:
-                    for key, value in info["metrics"].items():
-                        metric_values.setdefault(key, []).append(
-                            float(value[env_id].item())
-                        )
-                cumulative_reward[env_id] = 0.0
-                step_count[env_id] = 0
-                completed += 1
+        start_time = time.perf_counter()
+        unified_metrics = evaluate_episodes(
+            policy=policy,
+            env=env,
+            num_episodes=int(num_episodes),
+            device=device,
+            seed=trainer_cfg.get("eval_seed"),
+            on_step=on_step,
+        )
+        elapsed = time.perf_counter() - start_time
+        avg_length = unified_metrics["eval/avg_length"]
+        return {
+            "num_episodes": int(num_episodes),
+            "avg_reward": unified_metrics["eval/avg_reward"],
+            "avg_episode_length": avg_length,
+            "success_rate": unified_metrics["eval/success_rate"],
+            "environment_fps": float(num_episodes * avg_length / max(elapsed, 1e-6)),
+            "metrics": {
+                key.removeprefix("eval/metrics/"): value
+                for key, value in unified_metrics.items()
+                if key.startswith("eval/metrics/")
+            },
+        }
     finally:
         if env is not None:
             env.close()
-
-    return {
-        "num_episodes": completed,
-        "avg_reward": float(np.mean(returns)) if returns else float("nan"),
-        "avg_episode_length": float(np.mean(lengths)) if lengths else float("nan"),
-        "success_rate": float(np.mean(successes)) if successes else float("nan"),
-        "environment_fps": float(env_step_count / max(env_step_time, 1e-6)),
-        "metrics": {
-            key: float(np.mean(values))
-            for key, values in metric_values.items()
-            if values
-        },
-    }
 
 
 def dump_json(data: dict[str, Any], path: str | Path) -> Path:

@@ -16,16 +16,14 @@
 
 """Demonstrate dual-arm coordinated placement with bread and pan meshes.
 
-The left UR5 picks up bread. The right UR5 picks up a pan and moves it to the
-lower alignment pose. The left UR5 places the bread above the pan and releases
+The left arm picks up bread. The right arm picks up a pan and moves it to the
+lower alignment pose. The left arm places the bread above the pan and releases
 it while the right hand keeps holding the pan.
 """
 
 from __future__ import annotations
 
 import argparse
-import math
-import os
 import sys
 import time
 from pathlib import Path
@@ -38,48 +36,53 @@ import numpy as np
 import torch
 from scipy.spatial.transform import Rotation as SciRotation
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    Affordance,
-    CoordinatedPlacement,
-    CoordinatedPlacementCfg,
-    CoordinatedPlacementTarget,
+    ControlPartCommandProfile,
+    create_simulation_atomic_action_engine,
+    CoordinatedPlacementOptions,
+    CoordinatedPlacementGoal,
+    GraspGoal,
     HeldObjectState,
     ObjectSemantics,
-    TrajectoryBuilder,
-    WorldState,
+    PickUpOptions,
+    MotionPolicy,
+    TaskState,
 )
 from embodichain.lab.sim.cfg import (
-    JointDrivePropertiesCfg,
-    LightCfg,
-    RenderCfg,
     RigidBodyAttributesCfg,
     RigidObjectCfg,
-    RobotCfg,
-    URDFCfg,
 )
 from embodichain.lab.sim.objects import RigidObject, Robot
-from embodichain.lab.sim.planners import (
-    MotionGenCfg,
-    MotionGenerator,
-    MoveType,
-    PlanState,
-    ToppraPlannerCfg,
-)
 from embodichain.lab.sim.shapes import MeshCfg
-from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.utils import logger
+from scripts.tutorials.atomic_action.scenario_utils import (
+    add_dual_tutorial_robot,
+    compute_local_bounds,
+    compute_world_bounds,
+    create_manual_object_semantics,
+    get_local_vertices,
+    invert_pose,
+    log_action_plan,
+    normalize_vector,
+    resolve_cached_data_path,
+    rotate_pose_about_world_z,
+    settle_object,
+    transform_points,
+)
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    TutorialRobot,
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
+    create_toppra_motion_generator,
+    create_tutorial_argument_parser,
+    create_tutorial_simulation,
     draw_axis_marker,
-    get_tutorial_window_size,
-    make_ur5_solver_cfg,
-    should_open_tutorial_window,
-    should_wait_for_tutorial_input,
-    start_auto_play_recording,
-    stop_auto_play_recording,
+    format_tensor,
+    get_hand_open_close_qpos,
+    prepare_tutorial_scene,
+    replay_trajectory,
+    run_tutorial,
 )
 
 DEFAULT_MESH_FRAME_CORRECTION_EULER_DEG = (-90.0, 0.0, 0.0)
@@ -110,8 +113,6 @@ def transform_baseline_pose(
     return tuple(float(value) for value in pos), tuple(float(value) for value in rot)
 
 
-ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
-GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 PLACEMENT_ASSET_ROOT = "CoordinatedPlacementAndPickment"
 TABLE_MESH_PATH = f"{PLACEMENT_ASSET_ROOT}/table.glb"
 BREAD_MESH_PATH = f"{PLACEMENT_ASSET_ROOT}/bread.glb"
@@ -122,9 +123,6 @@ GRIPPER_TCP_Z = 0.121
 PICK_SAMPLE_INTERVAL = 100
 COORDINATED_SAMPLE_INTERVAL = 120
 ROBOT_INIT_POS = (1.85, 0.0, 0.1)
-ROBOT_INIT_ROT = (0.0, 0.0, -90.0)
-LEFT_ARM_HOME = (0.0, 0.0, -1.57, -1.57, 1.57, 1.57)
-RIGHT_ARM_HOME = (-1.57, -1.57, -1.57, -1.57, 0.0, 0.0)
 TABLE_TOP_Z = 0.65
 BASELINE_TABLE_TOP_Z = 0.3621708124799265
 SCENE_Z_OFFSET = TABLE_TOP_Z - BASELINE_TABLE_TOP_Z
@@ -198,177 +196,33 @@ TRAJECTORY_SIM_STEPS = 8
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the demo."""
-    parser = argparse.ArgumentParser(description="Dual-arm coordinated placement demo")
-    add_env_launcher_args_to_parser(parser)
-    parser.set_defaults(device="cuda", renderer="hybrid")
-    parser.add_argument(
-        "--diagnose_plan",
-        action="store_true",
-        help="Plan and print diagnostics without playing the trajectory.",
-    )
-    parser.add_argument(
-        "--debug_state",
-        action="store_true",
-        help="Log hand targets and object poses during execution.",
-    )
-    parser.add_argument(
-        "--auto_play",
-        action="store_true",
-        help="Run the viewer demo without waiting for keyboard input.",
-    )
-    parser.add_argument(
-        "--no_vis_eef_axis",
-        action="store_true",
-        help="Do not draw coordinated placement target coordinate frames.",
-    )
-    parser.add_argument(
-        "--headless_play",
-        action="store_true",
-        help="Execute planned trajectories without opening the viewer window.",
+    parser = create_tutorial_argument_parser(
+        "Dual-arm coordinated placement demo",
+        features=(
+            "debug_state",
+            "diagnose_plan",
+            "headless_play",
+            "visualize_axes",
+        ),
+        default_device="cuda",
+        default_renderer="hybrid",
     )
     return parser.parse_args()
 
 
-def get_cached_data_path(data_path: str) -> str:
-    """Resolve an asset path from the local cache before importing data helpers."""
-    if os.path.isabs(data_path):
-        return data_path
-
-    data_root = Path(
-        os.environ.get(
-            "EMBODICHAIN_DATA_ROOT",
-            str(Path.home() / ".cache" / "embodichain_data"),
-        )
+def create_dual_robot(
+    sim: SimulationManager,
+    robot_type: TutorialRobot,
+) -> Robot:
+    """Create the selected dual-arm robot with its matching grippers."""
+    return add_dual_tutorial_robot(
+        sim,
+        robot_type=robot_type,
+        uid=f"Dual{robot_type.title()}CoordinatedPlacement",
+        urdf_name=f"dual_{robot_type}_coordinated_placement",
+        tcp_z=GRIPPER_TCP_Z,
+        init_pos=ROBOT_INIT_POS,
     )
-    candidates = (
-        data_root / data_path,
-        data_root / "extract" / data_path,
-    )
-    for candidate in candidates:
-        if candidate.exists():
-            return str(candidate)
-
-    from embodichain.data import get_data_path
-
-    return get_data_path(data_path)
-
-
-def rotation_z(yaw: float) -> np.ndarray:
-    """Build a 3x3 yaw rotation matrix."""
-    cos_yaw = math.cos(yaw)
-    sin_yaw = math.sin(yaw)
-    return np.array(
-        [
-            [cos_yaw, -sin_yaw, 0.0],
-            [sin_yaw, cos_yaw, 0.0],
-            [0.0, 0.0, 1.0],
-        ],
-        dtype=np.float32,
-    )
-
-
-def make_transform(xyz: tuple[float, float, float], yaw: float) -> np.ndarray:
-    """Build a homogeneous transform from translation and yaw."""
-    transform = np.eye(4, dtype=np.float32)
-    transform[:3, :3] = rotation_z(yaw)
-    transform[:3, 3] = np.asarray(xyz, dtype=np.float32)
-    return transform
-
-
-def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
-    """Create the simulation manager and a light."""
-    width, height = get_tutorial_window_size(args)
-    sim = SimulationManager(
-        SimulationManagerCfg(
-            width=width,
-            height=height,
-            headless=True,
-            num_envs=args.num_envs,
-            sim_device=args.device,
-            render_cfg=RenderCfg(renderer=args.renderer),
-            physics_dt=1.0 / 100.0,
-            arena_space=3.0,
-        )
-    )
-    sim.add_light(
-        cfg=LightCfg(
-            uid="main_light",
-            color=(0.6, 0.6, 0.6),
-            intensity=30.0,
-            init_pos=(0.0, -0.4, 3.0),
-        )
-    )
-    return sim
-
-
-def make_prefixed_ur5_solver_cfg(prefix: str) -> URSolverCfg:
-    """Create a UR5 solver cfg for a prefixed arm in the assembled robot."""
-    cfg = make_ur5_solver_cfg(GRIPPER_TCP_Z)
-    cfg.root_link_name = f"{prefix}_base_link"
-    cfg.end_link_name = f"{prefix}_ee_link"
-    return cfg
-
-
-def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
-    """Create a dual-UR5 robot with one PGI gripper on each arm."""
-    arm_urdf_path = get_cached_data_path(ARM_URDF_PATH)
-    gripper_urdf_path = get_cached_data_path(GRIPPER_URDF_PATH)
-    cfg = RobotCfg(
-        uid="DualUR5CoordinatedPlacement",
-        urdf_cfg=URDFCfg(
-            components=[
-                {
-                    "component_type": "left_arm",
-                    "urdf_path": arm_urdf_path,
-                    "transform": make_transform((-0.3, -1.45, 0.4), np.pi / 2),
-                },
-                {
-                    "component_type": "right_arm",
-                    "urdf_path": arm_urdf_path,
-                    "transform": make_transform((0.3, -1.45, 0.4), np.pi / 2),
-                },
-                {"component_type": "left_hand", "urdf_path": gripper_urdf_path},
-                {"component_type": "right_hand", "urdf_path": gripper_urdf_path},
-            ],
-            fname="dual_ur5_coordinated_placement",
-        ),
-        drive_pros=JointDrivePropertiesCfg(
-            stiffness={
-                "left_joint[0-9]": 1e4,
-                "right_joint[0-9]": 1e4,
-                "left_gripper_finger[1-2]_joint_1": 1e3,
-                "right_gripper_finger[1-2]_joint_1": 1e3,
-            },
-            damping={
-                "left_joint[0-9]": 1e3,
-                "right_joint[0-9]": 1e3,
-                "left_gripper_finger[1-2]_joint_1": 1e2,
-                "right_gripper_finger[1-2]_joint_1": 1e2,
-            },
-            max_effort={
-                "left_joint[0-9]": 1e5,
-                "right_joint[0-9]": 1e5,
-                "left_gripper_finger[1-2]_joint_1": 1e4,
-                "right_gripper_finger[1-2]_joint_1": 1e4,
-            },
-            drive_type="force",
-        ),
-        control_parts={
-            "left_arm": ["left_joint[0-9]"],
-            "right_arm": ["right_joint[0-9]"],
-            "dual_arm": ["left_joint[0-9]", "right_joint[0-9]"],
-            "left_hand": ["left_gripper_finger1_joint_1"],
-            "right_hand": ["right_gripper_finger1_joint_1"],
-        },
-        solver_cfg={
-            "left_arm": make_prefixed_ur5_solver_cfg("left"),
-            "right_arm": make_prefixed_ur5_solver_cfg("right"),
-        },
-        init_pos=list(ROBOT_INIT_POS),
-        init_rot=list(ROBOT_INIT_ROT),
-        init_qpos=list(LEFT_ARM_HOME) + list(RIGHT_ARM_HOME) + [0.0, 0.0, 0.0, 0.0],
-    )
-    return sim.add_robot(cfg=cfg)
 
 
 def create_table(sim: SimulationManager) -> RigidObject:
@@ -376,7 +230,7 @@ def create_table(sim: SimulationManager) -> RigidObject:
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="table",
-            shape=MeshCfg(fpath=get_cached_data_path(TABLE_MESH_PATH)),
+            shape=MeshCfg(fpath=resolve_cached_data_path(TABLE_MESH_PATH)),
             attrs=RigidBodyAttributesCfg(
                 mass=10.0,
                 dynamic_friction=0.9,
@@ -396,7 +250,7 @@ def create_bread(sim: SimulationManager) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="bread",
             shape=MeshCfg(
-                fpath=get_cached_data_path(BREAD_MESH_PATH), compute_uv=False
+                fpath=resolve_cached_data_path(BREAD_MESH_PATH), compute_uv=False
             ),
             attrs=RigidBodyAttributesCfg(
                 mass=0.01,
@@ -420,7 +274,9 @@ def create_pan(sim: SimulationManager) -> RigidObject:
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="pan",
-            shape=MeshCfg(fpath=get_cached_data_path(PAN_MESH_PATH), compute_uv=False),
+            shape=MeshCfg(
+                fpath=resolve_cached_data_path(PAN_MESH_PATH), compute_uv=False
+            ),
             attrs=RigidBodyAttributesCfg(
                 mass=0.01,
                 dynamic_friction=0.97,
@@ -440,100 +296,6 @@ def create_pan(sim: SimulationManager) -> RigidObject:
             init_rot=list(PAN_INIT_ROT),
         )
     )
-
-
-def settle_object(sim: SimulationManager, obj: RigidObject, step: int = 5) -> None:
-    """Settle an object before planning."""
-    if sim.device.type == "cuda":
-        sim.init_gpu_physics()
-    obj.reset()
-    if step > 0:
-        sim.update(step=step)
-    obj.clear_dynamics()
-
-
-def create_object_semantics(obj: RigidObject, label: str) -> ObjectSemantics:
-    """Create minimal object semantics for manually specified grasps."""
-    return ObjectSemantics(
-        label=label,
-        geometry={},
-        affordance=Affordance(object_label=label),
-        entity=obj,
-    )
-
-
-def get_hand_open_close_qpos(
-    robot: Robot, hand_control_part: str, device: torch.device
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Get open and close qpos for a PGI gripper control part."""
-    limits = robot.get_qpos_limits(name=hand_control_part)[0].to(
-        device=device, dtype=torch.float32
-    )
-    hand_open = limits[:, 0]
-    hand_close = torch.minimum(limits[:, 1], torch.full_like(limits[:, 1], 0.030))
-    return hand_open, hand_close
-
-
-def get_pan_handle_open_close_qpos(
-    robot: Robot, hand_control_part: str, device: torch.device
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Get right hand qpos tuned for holding the thin pan handle."""
-    limits = robot.get_qpos_limits(name=hand_control_part)[0].to(
-        device=device, dtype=torch.float32
-    )
-    hand_open = limits[:, 0]
-    hand_close = torch.clamp(
-        torch.full_like(limits[:, 1], PAN_HANDLE_CLOSE_QPOS),
-        min=limits[:, 0],
-        max=limits[:, 1],
-    )
-    return hand_open, hand_close
-
-
-def invert_pose(pose: torch.Tensor) -> torch.Tensor:
-    """Invert batched homogeneous transforms."""
-    inv_pose = pose.clone()
-    rot_t = pose[:, :3, :3].transpose(1, 2)
-    inv_pose[:, :3, :3] = rot_t
-    inv_pose[:, :3, 3] = -torch.bmm(rot_t, pose[:, :3, 3:4]).squeeze(-1)
-    return inv_pose
-
-
-def get_local_vertices(obj: RigidObject) -> torch.Tensor:
-    """Get scaled local mesh vertices."""
-    return obj.get_vertices(env_ids=[0], scale=True)[0]
-
-
-def compute_local_bounds(vertices: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """Compute local mesh AABB from scaled vertices."""
-    return vertices.min(dim=0).values, vertices.max(dim=0).values
-
-
-def transform_points(pose: torch.Tensor, points: torch.Tensor) -> torch.Tensor:
-    """Transform local points by a homogeneous pose."""
-    return points @ pose[:3, :3].transpose(0, 1) + pose[:3, 3]
-
-
-def compute_world_bounds(
-    object_pose: torch.Tensor,
-    local_vertices: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Compute world AABB from transformed local mesh vertices."""
-    world_vertices = transform_points(object_pose, local_vertices)
-    return world_vertices.min(dim=0).values, world_vertices.max(dim=0).values
-
-
-def rotate_pose_about_world_z(pose: torch.Tensor, yaw_deg: float) -> torch.Tensor:
-    """Rotate pose orientation about world Z while preserving translation."""
-    yaw = math.radians(yaw_deg)
-    rot = torch.eye(3, dtype=pose.dtype, device=pose.device)
-    rot[0, 0] = math.cos(yaw)
-    rot[0, 1] = -math.sin(yaw)
-    rot[1, 0] = math.sin(yaw)
-    rot[1, 1] = math.cos(yaw)
-    rotated_pose = pose.clone()
-    rotated_pose[:3, :3] = rot @ pose[:3, :3]
-    return rotated_pose
 
 
 def get_pan_basin_vertices(pan_vertices: torch.Tensor) -> torch.Tensor:
@@ -582,14 +344,6 @@ def build_flat_object_grasp_pose(
     grasp_position[1] += world_xy_offset[1]
     grasp_position[2] = world_max[2] + z_clearance
     return build_top_down_tcp_pose(grasp_position, device)
-
-
-def normalize_vector(vector: torch.Tensor, fallback: torch.Tensor) -> torch.Tensor:
-    """Normalize a vector with a deterministic fallback for degenerate cases."""
-    norm = torch.linalg.norm(vector)
-    if norm < 1e-6:
-        return fallback.to(device=vector.device, dtype=vector.dtype)
-    return vector / norm
 
 
 def build_pan_handle_grasp_pose(
@@ -684,12 +438,6 @@ def build_placing_object_target_pose(
     return pose
 
 
-def format_tensor(tensor: torch.Tensor) -> str:
-    """Format tensor values for compact logging."""
-    rounded = (tensor.detach().cpu() * 10000.0).round() / 10000.0
-    return str(rounded.tolist())
-
-
 def compute_actual_held_state(
     robot: Robot,
     semantics: ObjectSemantics,
@@ -714,116 +462,6 @@ def compute_actual_held_state(
         object_to_eef=object_to_eef,
         grasp_xpos=tcp_pose,
     )
-
-
-def plan_manual_pick(
-    motion_gen: MotionGenerator,
-    robot: Robot,
-    *,
-    arm_control_part: str,
-    hand_control_part: str,
-    grasp_pose: torch.Tensor,
-    hand_open_qpos: torch.Tensor,
-    hand_close_qpos: torch.Tensor,
-    sample_interval: int,
-    hand_interp_steps: int,
-    pre_grasp_distance: float,
-    lift_height: float,
-    start_state: WorldState,
-) -> tuple[bool, torch.Tensor, WorldState]:
-    """Plan a demo-local pick trajectory from a hand-authored TCP grasp pose."""
-    builder = TrajectoryBuilder(motion_gen)
-    device = start_state.last_qpos.device
-    n_envs = robot.get_qpos().shape[0]
-    robot_dof = robot.dof
-    arm_joint_ids = robot.get_joint_ids(name=arm_control_part)
-    hand_joint_ids = robot.get_joint_ids(name=hand_control_part)
-    arm_dof = len(arm_joint_ids)
-
-    grasp_xpos = builder.resolve_pose_target(grasp_pose, n_envs=n_envs)
-    grasp_z = grasp_xpos[:, :3, 2]
-    pre_grasp_xpos = builder.apply_local_offset(
-        grasp_xpos, -grasp_z * pre_grasp_distance
-    )
-    lift_xpos = builder.apply_local_offset(
-        grasp_xpos,
-        torch.tensor([0.0, 0.0, lift_height], device=device),
-    )
-    start_arm_qpos = builder.resolve_start_qpos(
-        start_state.last_qpos[:, arm_joint_ids],
-        n_envs=n_envs,
-        arm_dof=arm_dof,
-        control_part=arm_control_part,
-    )
-    n_approach, n_close, n_lift = builder.split_three_phase(
-        sample_interval,
-        hand_interp_steps,
-        first_phase_name="approach",
-        third_phase_name="lift",
-    )
-
-    target_states_list = [
-        [
-            PlanState(xpos=pre_grasp_xpos[i], move_type=MoveType.EEF_MOVE),
-            PlanState(xpos=grasp_xpos[i], move_type=MoveType.EEF_MOVE),
-        ]
-        for i in range(n_envs)
-    ]
-    ok, approach_arm = builder.plan_arm_traj(
-        target_states_list,
-        start_arm_qpos,
-        n_approach,
-        control_part=arm_control_part,
-        arm_dof=arm_dof,
-    )
-    if not bool(torch.all(ok)):
-        logger.log_warning(f"Failed to plan {arm_control_part} manual pick approach.")
-        return (
-            False,
-            torch.empty((n_envs, 0, robot_dof), dtype=torch.float32, device=device),
-            start_state,
-        )
-
-    grasp_arm_qpos = approach_arm[:, -1, :]
-    target_states_list = [
-        [PlanState(xpos=lift_xpos[i], move_type=MoveType.EEF_MOVE)]
-        for i in range(n_envs)
-    ]
-    ok, lift_arm = builder.plan_arm_traj(
-        target_states_list,
-        grasp_arm_qpos,
-        n_lift,
-        control_part=arm_control_part,
-        arm_dof=arm_dof,
-    )
-    if not bool(torch.all(ok)):
-        logger.log_warning(f"Failed to plan {arm_control_part} manual pick lift.")
-        return (
-            False,
-            torch.empty((n_envs, 0, robot_dof), dtype=torch.float32, device=device),
-            start_state,
-        )
-
-    hand_open = builder.expand_hand_qpos(
-        hand_open_qpos, n_envs=n_envs, hand_dof=len(hand_joint_ids)
-    )
-    hand_close = builder.expand_hand_qpos(
-        hand_close_qpos, n_envs=n_envs, hand_dof=len(hand_joint_ids)
-    )
-    hand_close_path = builder.interpolate_hand_qpos(
-        hand_open, hand_close, n_waypoints=n_close
-    )
-
-    full = start_state.last_qpos.unsqueeze(1).repeat(1, sample_interval, 1).clone()
-    full[:, :n_approach, arm_joint_ids] = approach_arm
-    full[:, :n_approach, hand_joint_ids] = hand_open.unsqueeze(1)
-    full[:, n_approach : n_approach + n_close, arm_joint_ids] = (
-        grasp_arm_qpos.unsqueeze(1)
-    )
-    full[:, n_approach : n_approach + n_close, hand_joint_ids] = hand_close_path
-    full[:, n_approach + n_close :, arm_joint_ids] = lift_arm
-    full[:, n_approach + n_close :, hand_joint_ids] = hand_close.unsqueeze(1)
-    return True, full, WorldState(last_qpos=full[:, -1, :].clone(), held_object=None)
 
 
 def log_scene_targets(
@@ -869,22 +507,6 @@ def draw_coordinated_axes(
     )
 
 
-def log_action_plan(
-    robot: Robot,
-    action_name: str,
-    traj: torch.Tensor,
-    joint_ids: list[int],
-    segments: dict[str, int] | None = None,
-) -> None:
-    """Log common action plan details."""
-    joint_names = [robot.joint_names[joint_id] for joint_id in joint_ids]
-    logger.log_info(f"{action_name} joint ids: {joint_ids}")
-    logger.log_info(f"{action_name} joint names: {joint_names}")
-    logger.log_info(f"{action_name} trajectory shape: {tuple(traj.shape)}")
-    if segments is not None:
-        logger.log_info(f"{action_name} trajectory segments: {segments}")
-
-
 def log_execution_state(
     robot: Robot,
     bread: RigidObject,
@@ -906,26 +528,6 @@ def log_execution_state(
     )
 
 
-def execute_trajectory(
-    sim: SimulationManager,
-    robot: Robot,
-    traj: torch.Tensor,
-    joint_ids: list[int],
-    bread: RigidObject,
-    pan: RigidObject,
-    debug_state: bool,
-) -> None:
-    """Play a planned trajectory in simulation."""
-    total_steps = traj.shape[1]
-    log_stride = max(1, total_steps // 10)
-    for i in range(total_steps):
-        robot.set_qpos(traj[:, i, :], joint_ids=joint_ids)
-        sim.update(step=TRAJECTORY_SIM_STEPS)
-        if debug_state and (i % log_stride == 0 or i == total_steps - 1):
-            log_execution_state(robot, bread, pan, i, total_steps)
-        time.sleep(1e-2)
-
-
 def run_coordinated_placement_demo(
     args: argparse.Namespace, sim: SimulationManager, robot: Robot
 ) -> None:
@@ -941,50 +543,64 @@ def run_coordinated_placement_demo(
     pan.clear_dynamics()
     bread_pose = bread_pose_batch[0].to(device=sim.device, dtype=torch.float32)
     pan_pose = pan_pose_batch[0].to(device=sim.device, dtype=torch.float32)
-    n_envs = bread_pose_batch.shape[0]
+    num_envs = bread_pose_batch.shape[0]
     bread_vertices = get_local_vertices(bread)
     pan_vertices = get_local_vertices(pan)
     bread_local_min, bread_local_max = compute_local_bounds(bread_vertices)
     log_scene_targets(bread_pose, pan_pose)
-    bread_semantics = create_object_semantics(bread, BREAD_LABEL)
-    pan_semantics = create_object_semantics(pan, PAN_LABEL)
-    motion_gen = MotionGenerator(
-        cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
-    )
+    bread_semantics = create_manual_object_semantics(bread, BREAD_LABEL)
+    pan_semantics = create_manual_object_semantics(pan, PAN_LABEL)
+    motion_gen = create_toppra_motion_generator(robot)
 
-    right_open, right_close = get_pan_handle_open_close_qpos(
-        robot, "right_hand", sim.device
+    right_open, right_close = get_hand_open_close_qpos(
+        robot,
+        hand_control_part="right_hand",
+        close_qpos=PAN_HANDLE_CLOSE_QPOS,
     )
-    left_open, left_close = get_hand_open_close_qpos(robot, "left_hand", sim.device)
-    coordinated_action = CoordinatedPlacement(
+    left_open, left_close = get_hand_open_close_qpos(
+        robot,
+        hand_control_part="left_hand",
+        close_qpos=0.030,
+    )
+    left_pick_options = PickUpOptions(
+        pre_grasp_distance=PICK_APPROACH_DISTANCE,
+        lift_height=0.12,
+        hand_interp_steps=10,
+    )
+    right_pick_options = PickUpOptions(
+        pre_grasp_distance=PICK_APPROACH_DISTANCE,
+        lift_height=0.10,
+        hand_interp_steps=PAN_PICK_HAND_INTERP_STEPS,
+    )
+    coordinated_options = CoordinatedPlacementOptions(
+        release=True,
+        placing_height_offset=BREAD_TARGET_HEIGHT_OFFSET,
+        support_height_offset=SUPPORT_TARGET_HEIGHT_OFFSET,
+        lift_height=PLACE_LIFT_HEIGHT,
+        hand_interp_steps=10,
+        hold_steps=6,
+        retreat_steps=18,
+    )
+    engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
-        cfg=CoordinatedPlacementCfg(
-            control_part="dual_arm",
-            placing_arm_control_part="left_arm",
-            support_arm_control_part="right_arm",
-            placing_hand_control_part="left_hand",
-            support_hand_control_part="right_hand",
-            placing_hand_open_qpos=left_open,
-            placing_hand_close_qpos=left_close,
-            support_hand_close_qpos=right_close,
-            release=True,
-            placing_height_offset=BREAD_TARGET_HEIGHT_OFFSET,
-            support_height_offset=SUPPORT_TARGET_HEIGHT_OFFSET,
-            lift_height=PLACE_LIFT_HEIGHT,
-            sample_interval=COORDINATED_SAMPLE_INTERVAL,
-            hand_interp_steps=10,
-            hold_steps=6,
-            retreat_steps=18,
-        ),
+        scene_entities=(bread, pan),
+        control_profiles={
+            "left_hand": ControlPartCommandProfile.joint_positions(
+                open=left_open,
+                grasp=left_close,
+            ),
+            "right_hand": ControlPartCommandProfile.joint_positions(
+                open=right_open,
+                grasp=right_close,
+            ),
+        },
     )
     full_joint_ids = list(range(robot.dof))
-    state = WorldState(last_qpos=robot.get_qpos().clone())
+    state = engine.initial_context(control_dt=sim.sim_config.physics_dt)
 
-    wait_for_user = should_wait_for_tutorial_input(args)
-    if should_open_tutorial_window(args):
-        sim.open_window()
-    if wait_for_user and not args.diagnose_plan:
-        input("Inspect the scene, then press Enter to plan left pick-up...")
+    wait_for_user = prepare_tutorial_scene(
+        sim, args, "Inspect the scene, then press Enter to compile both pick-ups..."
+    )
 
     bread_grasp_pose = build_flat_object_grasp_pose(
         bread_pose,
@@ -994,101 +610,111 @@ def run_coordinated_placement_demo(
         sim.device,
         z_clearance=BREAD_GRASP_Z_CLEARANCE,
     )
-    start_time = time.time()
-    left_pick_success, left_pick_traj, state = plan_manual_pick(
-        motion_gen,
-        robot,
-        arm_control_part="left_arm",
-        hand_control_part="left_hand",
-        grasp_pose=bread_grasp_pose,
-        hand_open_qpos=left_open,
-        hand_close_qpos=left_close,
-        sample_interval=PICK_SAMPLE_INTERVAL,
-        hand_interp_steps=10,
-        pre_grasp_distance=PICK_APPROACH_DISTANCE,
-        lift_height=0.12,
-        start_state=state,
-    )
-    logger.log_info(
-        f"Plan left bread pick-up cost time: {time.time() - start_time:.2f} seconds"
-    )
-    if not left_pick_success:
-        logger.log_warning("Failed to plan left bread pick-up trajectory.")
-        return
-    log_action_plan(robot, "left_pick_up", left_pick_traj, full_joint_ids)
-    bread_object_to_eef = torch.bmm(
-        broadcast_pose_batch(invert_pose(bread_pose.unsqueeze(0)), num_envs=n_envs),
-        broadcast_pose_batch(bread_grasp_pose, num_envs=n_envs),
-    )
-    bread_held_state = HeldObjectState(
-        semantics=bread_semantics,
-        object_to_eef=bread_object_to_eef,
-        grasp_xpos=broadcast_pose_batch(bread_grasp_pose, num_envs=n_envs),
-    )
-
     pan_grasp_pose = build_pan_handle_grasp_pose(
         pan_pose,
         pan_vertices,
         sim.device,
         z_clearance=PAN_GRASP_Z_CLEARANCE,
     )
+    pick_invocations = (
+        engine.make_invocation(
+            "pick_up",
+            GraspGoal(
+                semantics=bread_semantics,
+                grasp_xpos=broadcast_pose_batch(bread_grasp_pose, num_envs=num_envs),
+            ),
+            control_parts={"primary": {"motion": "left_arm", "grasp": "left_hand"}},
+            motion_policy=MotionPolicy(
+                strategy="motion_gen",
+                sample_count=PICK_SAMPLE_INTERVAL,
+            ),
+            skill_options=left_pick_options,
+        ),
+        engine.make_invocation(
+            "pick_up",
+            GraspGoal(
+                semantics=pan_semantics,
+                grasp_xpos=broadcast_pose_batch(pan_grasp_pose, num_envs=num_envs),
+            ),
+            control_parts={"primary": {"motion": "right_arm", "grasp": "right_hand"}},
+            motion_policy=MotionPolicy(
+                strategy="motion_gen",
+                sample_count=PAN_PICK_SAMPLE_INTERVAL,
+            ),
+            skill_options=right_pick_options,
+        ),
+    )
     start_time = time.time()
-    right_pick_success, right_pick_traj, state = plan_manual_pick(
-        motion_gen,
-        robot,
-        arm_control_part="right_arm",
-        hand_control_part="right_hand",
-        grasp_pose=pan_grasp_pose,
-        hand_open_qpos=right_open,
-        hand_close_qpos=right_close,
-        sample_interval=PAN_PICK_SAMPLE_INTERVAL,
-        hand_interp_steps=PAN_PICK_HAND_INTERP_STEPS,
-        pre_grasp_distance=PICK_APPROACH_DISTANCE,
-        lift_height=0.10,
-        start_state=state,
-    )
+    pick_compiled = engine.compile(pick_invocations, state)
     logger.log_info(
-        f"Plan right pan pick-up cost time: {time.time() - start_time:.2f} seconds"
+        f"Compile both pick-ups cost time: {time.time() - start_time:.2f} seconds"
     )
-    if not right_pick_success:
+    if len(pick_compiled.action_plans) != len(pick_invocations):
+        logger.log_warning("Failed to compile both pick-up trajectories.")
+        return
+    left_pick_result, right_pick_result = pick_compiled.action_plans
+    if not left_pick_result.plan_success.all():
+        logger.log_warning("Failed to plan left bread pick-up trajectory.")
+        return
+    if not pick_compiled.plan_success.all():
         logger.log_warning("Failed to plan right pan pick-up trajectory.")
         return
+    left_pick_trajectory = left_pick_result.joint_trajectory
+    right_pick_trajectory = right_pick_result.joint_trajectory
+    if left_pick_trajectory is None or right_pick_trajectory is None:
+        raise RuntimeError("PickUp did not produce joint trajectories.")
+    left_pick_traj = left_pick_trajectory.positions
+    right_pick_traj = right_pick_trajectory.positions
+    state = pick_compiled.projected_context
+    bread_held_state = state.get_held_object("left_arm")
+    if bread_held_state is None:
+        raise RuntimeError("PickUp did not produce a held state for the bread.")
+    pan_held_state = state.get_held_object("right_arm")
+    if pan_held_state is None:
+        raise RuntimeError("PickUp did not produce a held state for the pan.")
+    log_action_plan(robot, "left_pick_up", left_pick_traj, full_joint_ids)
     log_action_plan(robot, "right_pick_up", right_pick_traj, full_joint_ids)
-    pan_object_to_eef = torch.bmm(
-        broadcast_pose_batch(invert_pose(pan_pose.unsqueeze(0)), num_envs=n_envs),
-        broadcast_pose_batch(pan_grasp_pose, num_envs=n_envs),
-    )
-    pan_held_state = HeldObjectState(
-        semantics=pan_semantics,
-        object_to_eef=pan_object_to_eef,
-        grasp_xpos=broadcast_pose_batch(pan_grasp_pose, num_envs=n_envs),
-    )
 
     if args.diagnose_plan:
         robot.set_qpos(state.last_qpos, joint_ids=full_joint_ids)
     else:
         if wait_for_user:
             input("Press Enter to execute both pick-up trajectories...")
-        execute_trajectory(
+
+        def log_trajectory_execution(step_idx: int, total_steps: int) -> None:
+            if args.debug_state and (
+                step_idx % max(1, total_steps // 10) == 0 or step_idx == total_steps - 1
+            ):
+                log_execution_state(robot, bread, pan, step_idx, total_steps)
+
+        replay_trajectory(
             sim,
             robot,
-            left_pick_traj,
-            full_joint_ids,
-            bread,
-            pan,
-            args.debug_state,
+            left_pick_trajectory,
+            args,
+            video_prefix="",
+            hold_steps=0,
+            trajectory_sim_steps=TRAJECTORY_SIM_STEPS,
+            joint_ids=full_joint_ids,
+            on_trajectory_step=log_trajectory_execution,
+            record=False,
         )
         bread.clear_dynamics()
-        execute_trajectory(
+        replay_trajectory(
             sim,
             robot,
-            right_pick_traj,
-            full_joint_ids,
-            bread,
-            pan,
-            args.debug_state,
+            right_pick_trajectory,
+            args,
+            video_prefix="",
+            hold_steps=0,
+            trajectory_sim_steps=TRAJECTORY_SIM_STEPS,
+            joint_ids=full_joint_ids,
+            on_trajectory_step=log_trajectory_execution,
+            record=False,
         )
         pan.clear_dynamics()
+        # Reconcile the projected task state with measurements before compiling
+        # placement. This keeps the second stage robust to pick-up execution error.
         bread_pose_batch = clone_local_pose_from_first_env(bread).to(
             device=sim.device, dtype=torch.float32
         )
@@ -1113,6 +739,17 @@ def run_coordinated_placement_demo(
             "right_arm",
             sim.device,
         )
+        held_objects = dict(state.task.held_objects)
+        held_objects["left_arm"] = bread_held_state
+        held_objects["right_arm"] = pan_held_state
+        state = state.project(
+            qpos=robot.get_qpos().clone(),
+            task=TaskState(
+                batch_size=state.batch_size,
+                device=state.robot.qpos.device,
+                held_objects=held_objects,
+            ),
+        )
 
     support_target_pose = build_support_object_target_pose(pan_pose, sim.device)
     placing_target_pose = build_placing_object_target_pose(
@@ -1133,30 +770,46 @@ def run_coordinated_placement_demo(
             sim,
             support_target_pose,
             placing_target_pose,
+            num_envs=num_envs,
         )
-    coordinated_target = CoordinatedPlacementTarget(
+    coordinated_target = CoordinatedPlacementGoal(
         placing_object_target_pose=broadcast_pose_batch(
-            placing_target_pose, num_envs=n_envs
+            placing_target_pose, num_envs=num_envs
         ),
         support_object_target_pose=broadcast_pose_batch(
-            support_target_pose, num_envs=n_envs
+            support_target_pose, num_envs=num_envs
         ),
-        placing_held_object=bread_held_state,
-        support_held_object=pan_held_state,
         placing_height_offset=BREAD_TARGET_HEIGHT_OFFSET,
         support_height_offset=SUPPORT_TARGET_HEIGHT_OFFSET,
         release=True,
     )
     start_time = time.time()
-    coordinated_result = coordinated_action.execute(coordinated_target, state)
-    coordinated_success = coordinated_result.success
-    coordinated_traj = coordinated_result.trajectory
-    state = coordinated_result.next_state
+    placement_compiled = engine.compile(
+        (
+            engine.make_invocation(
+                "coordinated_placement",
+                coordinated_target,
+                control_parts={
+                    "placing": {"motion": "left_arm", "grasp": "left_hand"},
+                    "support": {"motion": "right_arm", "grasp": "right_hand"},
+                },
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=COORDINATED_SAMPLE_INTERVAL,
+                ),
+                skill_options=coordinated_options,
+            ),
+        ),
+        state,
+    )
+    coordinated_success = placement_compiled.plan_success
+    coordinated_traj = placement_compiled.trajectory.positions
+    state = placement_compiled.projected_context
     logger.log_info(
         "Plan coordinated placement cost time: "
         f"{time.time() - start_time:.2f} seconds"
     )
-    if not coordinated_success:
+    if not coordinated_success.all():
         logger.log_warning("Failed to plan coordinated placement trajectory.")
         return
     log_action_plan(
@@ -1164,47 +817,41 @@ def run_coordinated_placement_demo(
         "coordinated_placement",
         coordinated_traj,
         full_joint_ids,
-        coordinated_action._compute_segment_lengths(coordinated_action.cfg.release),
+        {
+            segment.name: segment.waypoint_count
+            for segment in placement_compiled.action_plans[0].segments
+        },
     )
 
     if args.diagnose_plan:
         return
 
-    recording_started = start_auto_play_recording(
+    if args.auto_play and not args.no_vis_eef_axis:
+        draw_coordinated_axes(
+            sim,
+            support_target_pose,
+            placing_target_pose,
+            num_envs=num_envs,
+        )
+    if wait_for_user:
+        input("Press Enter to execute coordinated placement...")
+
+    replay_trajectory(
         sim,
+        robot,
+        placement_compiled.trajectory,
         args,
         video_prefix="coordinated_placement_auto_play",
+        hold_steps=80,
+        trajectory_sim_steps=TRAJECTORY_SIM_STEPS,
+        joint_ids=full_joint_ids,
+        on_trajectory_step=log_trajectory_execution,
         look_at=(
             (-0.25, 0.0, 2.5),
             (-0.05, 0.0, 0.72),
             (0.0, 0.0, 1.0),
         ),
     )
-    try:
-        if args.auto_play and not args.no_vis_eef_axis:
-            draw_coordinated_axes(
-                sim,
-                support_target_pose,
-                placing_target_pose,
-                num_envs=n_envs,
-            )
-        if wait_for_user:
-            input("Press Enter to execute coordinated placement...")
-        execute_trajectory(
-            sim,
-            robot,
-            coordinated_traj,
-            full_joint_ids,
-            bread,
-            pan,
-            args.debug_state,
-        )
-        for _ in range(80):
-            robot.set_qpos(state.last_qpos, joint_ids=full_joint_ids)
-            sim.update(step=2)
-            time.sleep(1e-2)
-    finally:
-        stop_auto_play_recording(sim, recording_started)
     if wait_for_user:
         input("Press Enter to exit the simulation...")
 
@@ -1212,10 +859,14 @@ def run_coordinated_placement_demo(
 def main() -> None:
     """Run the coordinated placement demo."""
     args = parse_arguments()
-    sim = initialize_simulation(args)
-    robot = create_dual_ur5_robot(sim)
+    sim = create_tutorial_simulation(
+        args,
+        arena_space=3.0,
+        light_pos=(0.0, -0.4, 3.0),
+    )
+    robot = create_dual_robot(sim, args.robot)
     run_coordinated_placement_demo(args, sim, robot)
 
 
 if __name__ == "__main__":
-    main()
+    run_tutorial(main)

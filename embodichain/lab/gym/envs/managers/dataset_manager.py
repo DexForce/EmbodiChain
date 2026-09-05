@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import inspect
+import threading
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 from collections.abc import Sequence
 
@@ -28,6 +29,8 @@ from prettytable import PrettyTable
 from embodichain.utils import logger
 from .manager_base import ManagerBase
 from .cfg import DatasetFunctorCfg
+
+__all__ = ["DatasetManager"]
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
@@ -56,6 +59,7 @@ class DatasetManager(ManagerBase):
         >>>     dataset: dict = {
         >>>         "lerobot": DatasetFunctorCfg(
         >>>             func=LeRobotRecorder,
+        >>>             save_failed_episodes=True,
         >>>             params={
         >>>                 "robot_meta": {...},
         >>>                 "instruction": {"lang": "pick and place"},
@@ -80,6 +84,10 @@ class DatasetManager(ManagerBase):
         self._mode_functor_names: dict[str, list[str]] = {}
         self._mode_functor_cfgs: dict[str, list[DatasetFunctorCfg]] = {}
         self._mode_class_functor_cfgs: dict[str, list[DatasetFunctorCfg]] = {}
+        self._finalize_lock = threading.Lock()
+        self._finalized = False
+        self._finalize_result: Optional[str] = None
+        self._finalize_error: Optional[str] = None
 
         # Call base class to parse functors
         super().__init__(cfg, env)
@@ -180,6 +188,14 @@ class DatasetManager(ManagerBase):
         """List of available modes for the dataset manager."""
         return list(self._mode_functor_names.keys())
 
+    @property
+    def save_failed_episodes(self) -> bool:
+        """Whether any configured dataset recorder should keep failed episodes."""
+        return any(
+            functor_cfg.save_failed_episodes
+            for functor_cfg in self._mode_functor_cfgs.get("save", [])
+        )
+
     """
     Operations.
     """
@@ -234,32 +250,61 @@ class DatasetManager(ManagerBase):
             )
 
     def finalize(self) -> Optional[str]:
-        """Finalize all dataset functors.
+        """Finalize every dataset functor exactly once.
 
-        Called when the environment is closed. Saves any remaining episodes
-        and finalizes all datasets.
+        Finalization is a storage barrier only; individual recorders must not
+        implicitly commit live episode buffers here. All functors are attempted
+        even when one fails, and their failures are reported together.
 
         Returns:
-            Path to the first saved dataset, or None if failed.
-        """
-        dataset_paths = []
+            Path to the first finalized dataset, or ``None`` if none was returned.
 
-        # Call finalize on all functor instances across all modes
-        for mode_cfgs in self._mode_functor_cfgs.values():
-            for functor_cfg in mode_cfgs:
-                if hasattr(functor_cfg.func, "finalize"):
+        Raises:
+            RuntimeError: If one or more functors fail to finalize.
+        """
+        with self._finalize_lock:
+            if self._finalized:
+                if self._finalize_error is not None:
+                    raise RuntimeError(self._finalize_error)
+                return self._finalize_result
+
+            dataset_paths: list[str] = []
+            errors: list[str] = []
+
+            # Call every functor even when an earlier cleanup failed.
+            for mode, mode_cfgs in self._mode_functor_cfgs.items():
+                names = self._mode_functor_names.get(mode, [])
+                for index, functor_cfg in enumerate(mode_cfgs):
+                    functor = functor_cfg.func
+                    if not hasattr(functor, "finalize"):
+                        continue
+                    functor_name = (
+                        names[index] if index < len(names) else type(functor).__name__
+                    )
                     try:
-                        path = functor_cfg.func.finalize()
+                        path = functor.finalize()
                         if path:
                             dataset_paths.append(path)
-                    except Exception as e:
-                        logger.log_error(f"Failed to finalize functor: {e}")
+                    except Exception as error:  # noqa: BLE001 - aggregate cleanup
+                        errors.append(f"{functor_name}: {error}")
 
-        if dataset_paths:
-            logger.log_info(f"Finalized {len(dataset_paths)} datasets")
-            return dataset_paths[0]
+            self._finalize_result = dataset_paths[0] if dataset_paths else None
+            self._finalized = True
 
-        return None
+            if errors:
+                self._finalize_error = (
+                    f"Failed to finalize {len(errors)} dataset functor(s): "
+                    + "; ".join(errors)
+                )
+                raise RuntimeError(self._finalize_error)
+
+            if dataset_paths:
+                logger.log_info(f"Finalized {len(dataset_paths)} datasets")
+            return self._finalize_result
+
+    def close(self) -> Optional[str]:
+        """Finalize all dataset functors; repeated calls are safe."""
+        return self.finalize()
 
     def get_cached_data(self) -> list[Dict[str, Any]]:
         """Get cached data from all dataset functors (for online training).

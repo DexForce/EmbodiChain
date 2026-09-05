@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 from dexsim.utility.path import get_resources_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -24,12 +26,25 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.objects import (
+    SoftBodyData,
     SoftObject,
     SoftObjectCfg,
 )
 import pytest
+import torch
 
 COW_PATH = get_resources_data_path("Model", "cow", "cow.obj")
+
+
+def test_degenerate_soft_body_surface_is_empty() -> None:
+    """Degenerate collision geometry does not prevent visualization startup."""
+    data = object.__new__(SoftBodyData)
+    data.device = torch.device("cpu")
+    data._rest_position_buffer = torch.zeros((1, 3, 4), dtype=torch.float32)
+
+    triangles = data.collision_surface_triangles
+
+    assert triangles.shape == (0, 3)
 
 
 class BaseSoftObjectTest:
@@ -50,7 +65,7 @@ class BaseSoftObjectTest:
         assert os.path.isfile(COW_PATH)
 
         # Enable manual physics update for precise control
-        self.n_envs = 4
+        self.num_envs = 4
 
         # add softbody to the scene
         self.cow: SoftObject = self.sim.add_soft_object(
@@ -81,6 +96,16 @@ class BaseSoftObjectTest:
         self.cow.reset()
         for _ in range(100):
             self.sim.update(step=1)
+
+    def test_get_deformable_mesh_geometry(self):
+        """Test current collision vertices and matching surface triangles."""
+        self.sim.init_gpu_physics()
+        vertices = self.cow.get_current_collision_vertices()
+        triangles = self.cow.get_collision_surface_triangles(env_ids=[0])
+
+        assert vertices.ndim == 3 and vertices.shape[0] == self.sim.num_envs
+        assert triangles.ndim == 3 and triangles.shape[0] == 1
+        assert int(triangles.max()) < vertices.shape[1]
 
     def test_remove(self):
         self.sim.remove_asset(self.cow.uid)

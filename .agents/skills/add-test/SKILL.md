@@ -21,7 +21,7 @@ Tests mirror the source tree under `tests/`:
 embodichain/lab/sim/solvers/pytorch_solver.py  →  tests/sim/solvers/test_pytorch_solver.py
 embodichain/lab/gym/envs/managers/rewards.py    →  tests/gym/envs/managers/test_reward_functors.py
 embodichain/toolkits/graspkit/pg_grasp/foo.py   →  tests/toolkits/test_pg_grasp.py
-embodichain/lab/gym/envs/tasks/rl/push_cube.py  →  tests/gym/envs/tasks/test_push_cube.py
+embodichain_tasks/embodichain_tasks/manipulation/push_cube.py → tests/gym/envs/tasks/test_push_cube.py
 ```
 
 Rules:
@@ -89,6 +89,7 @@ class TestMySimComponent:
 
     def teardown_method(self):
         self.sim.destroy()
+        SimulationManager.flush_cleanup_queue()
 
     def test_basic_behavior(self):
         result = self.sim.do_something()
@@ -98,6 +99,60 @@ class TestMySimComponent:
         with pytest.raises(ValueError):
             self.sim.do_something(bad_input)
 ```
+
+## Resource-Aware Test Classification
+
+Use the narrowest test type that proves the behavior:
+
+- Prefer mocks or CPU-only inputs for pure logic and shape validation.
+- `tests/conftest.py` automatically classifies conventional CUDA, renderer, and
+  real-simulation tests. Add `@pytest.mark.gpu`, `@pytest.mark.slow`, or
+  `@pytest.mark.requires_sim` explicitly only when the test's node id/source
+  cannot reveal that requirement (for example, a hidden CUDA helper or an
+  end-to-end toolkit test).
+
+GPU tests are skipped by default to keep normal test runs within the shared VRAM budget. Run them explicitly and serially:
+
+```bash
+# Default suite: GPU-marked tests are skipped.
+pytest tests/
+
+# Dedicated GPU suite. Do not add -n unless pytest-xdist is installed.
+pytest tests/ --run-gpu -m gpu
+```
+
+For backend/device matrices, run the complete contract on one representative
+configuration and use small (one environment, low-resolution) smoke tests for
+the remaining configurations. Always destroy a real `SimulationManager` and
+flush its cleanup queue in teardown.
+
+## Task Program and task-configuration tests
+
+Choose the test surface by ownership layer:
+
+| Changed boundary | Primary test location |
+|---|---|
+| Language schema, strict decoder, AST/compiler | `tests/lab/task_program/` |
+| Semantic scene/profile/call/effect contracts | `tests/lab/task_program/semantics/` |
+| Configured integration, catalog, simulation assembly | `tests/gym/envs/task_program/` |
+| Gym bridge and episode completion | `tests/gym/envs/task_program/`, `tests/gym/envs/test_embodied_env_task_program.py` |
+| Packaged task components/deployments | `tests/test_task_program_package_data.py`, task-layout/config tests |
+| Lightweight RL environment/trainer routing | `tests/learning/` |
+
+For JSON/YAML configuration, test through the same strict loader and component
+composition used by production. A `yaml.safe_load()` assertion alone does not
+prove closed fields, relative component paths, physical scene targets,
+contracts, catalog coverage, or program preflight.
+
+Add negative coverage for the earliest ownership boundary being changed:
+unknown fields, missing component files, duplicate inline/component ownership,
+absent `simulation_uid`, contract mismatch, unknown Semantic Calls, or missing
+registered lowerers. Keep live-simulation qualification separate from
+provider-free decode/compiler tests.
+
+For a complete configured Task Program deployment, use
+`$add-task-program`'s read-only inspector as a focused smoke check before
+adding a heavier environment test.
 
 ## Mocking Patterns for Functor Tests
 
@@ -199,6 +254,9 @@ pytest tests/<subpath>/test_<module>.py -v
 # Single test function
 pytest tests/<subpath>/test_<module>.py::test_expected_output -v
 
+# GPU-specific test
+pytest tests/<subpath>/test_<module>.py --run-gpu -m gpu -v
+
 # Single test class method
 pytest tests/<subpath>/test_<module>.py::TestMyClass::test_basic_behavior -v
 ```
@@ -219,6 +277,8 @@ black tests/<subpath>/test_<module>.py
 | `from __future__` | Required after header |
 | Magic numbers | Define as named constants with explanatory comments |
 | Simulation tests | Initialize/teardown in `setup_method`/`teardown_method` |
+| CUDA coverage | Use `@pytest.mark.gpu`; run with `--run-gpu -m gpu` |
+| Long integration | Use `@pytest.mark.slow`; keep it out of normal PR runs |
 | Pure-logic tests | Use mock objects, no real sim |
 | `SceneEntityCfg` | Use `MagicMock(uid="...")` in tests |
 | Assertions | `assert`, `pytest.approx`, `torch.allclose`, `pytest.raises` |
@@ -232,14 +292,16 @@ black tests/<subpath>/test_<module>.py
 | Using real `SimulationManager` for functor tests | Use `MockEnv`/`MockSim` — much faster, no GPU needed |
 | Hardcoded numbers without explanation | Define as `EXPECTED_DISTANCE = 0.5  # cube at origin, target at (0.5, 0, 0)` |
 | Testing multiple concepts in one function | Split into separate `test_<scenario>` functions |
-| Forgetting `teardown_method` | Always call `self.sim.destroy()` in teardown |
+| Forgetting cleanup | Call `self.sim.destroy()` and `SimulationManager.flush_cleanup_queue()` in teardown |
+| Using full matrices | Use one full representative case and low-resource smoke coverage elsewhere |
 | Not running `black` on test file | CI checks all files including tests |
 
 ## Quick Reference
 
 | Action | Command |
 |--------|---------|
-| Run all tests | `pytest tests/` |
+| Run default tests | `pytest tests/` |
+| Run GPU tests | `pytest tests/ --run-gpu -m gpu` |
 | Run single file | `pytest tests/<path>/test_<name>.py -v` |
 | Run single test | `pytest tests/<path>::test_<name> -v` |
 | Run with print output | `pytest -s tests/<path>/test_<name>.py` |

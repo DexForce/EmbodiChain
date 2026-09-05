@@ -19,18 +19,23 @@ This script demonstrates the creation and simulation of a robot that grasps a ri
 in a simulated environment using the SimulationManager and grasp planning utilities.
 """
 
+from __future__ import annotations
+
 import argparse
 import numpy as np
 import time
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+from dexsim.utility.path import get_resources_data_path
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
     RenderCfg,
@@ -41,13 +46,11 @@ from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
     URDFCfg,
 )
-from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
-    GraspGenerator,
-    GraspGeneratorCfg,
-    AntipodalSamplerCfg,
-)
-from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
-    GripperCollisionCfg,
+from embodichain.toolkits.graspkit.pg_grasp import (
+    AntipodalGraspPoseGenerator,
+    AntipodalGraspPoseGeneratorCfg,
+    GraspAnnotationCfg,
+    ParallelJawGraspCollisionCfg,
 )
 
 
@@ -81,6 +84,7 @@ def initialize_simulation(args) -> SimulationManager:
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
         arena_space=2.5,
+        visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(config)
 
@@ -134,7 +138,7 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]) -> Robot:
                 tcp=[
                     [0.0, 1.0, 0.0, 0.0],
                     [-1.0, 0.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, 0.12],
+                    [0.0, 0.0, 1.0, 0.14],
                     [0.0, 0.0, 0.0, 1.0],
                 ],
             )
@@ -145,11 +149,11 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]) -> Robot:
     return sim.add_robot(cfg=cfg)
 
 
-def create_mug(sim: SimulationManager):
+def create_obj(sim: SimulationManager):
     mug_cfg = RigidObjectCfg(
         uid="table",
         shape=MeshCfg(
-            fpath=get_data_path("CoffeeCup/cup.ply"),
+            fpath=get_resources_data_path("Model", "BakeTexture", "hdr_color_mesh.ply"),
         ),
         attrs=RigidBodyAttributesCfg(
             mass=0.01,
@@ -158,16 +162,15 @@ def create_mug(sim: SimulationManager):
         ),
         max_convex_hull_num=16,
         acd_method="vhacd",
-        init_pos=[0.55, 0.0, 0.01],
-        init_rot=[0.0, 0.0, -90],
-        body_scale=(4, 4, 4),
+        init_pos=[0.55, 0.0, 0.08],
+        init_rot=[0.0, 0.0, 0.0],
     )
     mug = sim.add_rigid_object(cfg=mug_cfg)
     return mug
 
 
 def get_grasp_traj(sim: SimulationManager, robot: Robot, grasp_xpos: torch.Tensor):
-    n_envs = sim.num_envs
+    num_envs = sim.num_envs
     rest_arm_qpos = robot.get_qpos("arm")
 
     approach_xpos = grasp_xpos.clone()
@@ -197,12 +200,12 @@ def get_grasp_traj(sim: SimulationManager, robot: Robot, grasp_xpos: torch.Tenso
     )
     hand_trajectory = torch.cat(
         [
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_close_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_close_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_close_qpos[None, None, :].repeat(num_envs, 1, 1),
         ],
         dim=1,
     )
@@ -219,19 +222,11 @@ if __name__ == "__main__":
     args = parse_arguments()
     sim = initialize_simulation(args)
     robot = create_robot(sim, position=[0.0, 0.0, 0.0])
-    mug = create_mug(sim)
+    obj = create_obj(sim)
 
     # get mug grasp pose
-    grasp_cfg = GraspGeneratorCfg(
-        viser_port=11801,
-        antipodal_sampler_cfg=AntipodalSamplerCfg(
-            n_sample=10000, max_length=0.088, min_length=0.003
-        ),
-        is_partial_annotate=False,
-        is_filter_ground_collision=True,
-        n_top_grasps=30,
-    )
-    sim.open_window()
+    if not args.headless:
+        sim.open_window()
 
     # Annotate part of the mug to be grasped by following the instructions in the visualization window:
     # 1. View grasp object in browser (e.g http://localhost:11801)
@@ -240,47 +235,55 @@ if __name__ == "__main__":
 
     start_time = time.time()
 
-    gripper_collision_cfg = GripperCollisionCfg(
-        max_open_length=0.088, finger_length=0.078, point_sample_dense=0.012
+    # Construct one standalone generator. The same instance can also be passed
+    # to AtomicActionEngine(grasp_pose_generators={"hand": grasp_generator}).
+    grasp_generator = AntipodalGraspPoseGenerator(
+        ParallelJawGripperModelCfg(
+            model_id="tutorial_parallel_jaw",
+            min_opening_width=0.003,
+            max_opening_width=0.088,
+            finger_length=0.078,
+        ),
+        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(
+            sample_count=10_000,
+            max_candidates=30,
+        ),
+        collision_cfg=ParallelJawGraspCollisionCfg(
+            point_sample_density=0.012,
+            filter_ground_collision=True,
+        ),
+        annotation_cfg=GraspAnnotationCfg(
+            selection_mode="whole_mesh",
+            viser_port=11801,
+        ),
     )
 
-    # Extract mesh data from the mug and create grasp generator
-    vertices = mug.get_vertices(env_ids=[0], scale=True)[0]
-    triangles = mug.get_triangles(env_ids=[0])[0]
-    grasp_generator = GraspGenerator(
-        vertices=vertices,
-        triangles=triangles,
-        cfg=grasp_cfg,
-        gripper_collision_cfg=gripper_collision_cfg,
-    )
-
-    # Annotate grasp region (populates internal antipodal point pairs)
-    grasp_generator.annotate()
+    # Extract target-local geometry. The generator, rather than the target,
+    # owns all algorithm and end-effector parameters.
+    vertices = obj.get_vertices(env_ids=[0], scale=True)[0]
+    triangles = obj.get_triangles(env_ids=[0])[0]
 
     # Compute grasp poses per environment
     approach_direction = torch.tensor(
         [0, 0, -1], dtype=torch.float32, device=sim.device
     )
-    obj_poses = mug.get_local_pose(to_matrix=True)
-    grasp_xpos_list = []
-
+    obj_poses = obj.get_local_pose(to_matrix=True)
     rest_xpos = robot.compute_fk(
         qpos=robot.get_qpos("arm"), name="arm", to_matrix=True
     )[0]
-    for i, obj_pose in enumerate(obj_poses):
-        is_success, grasp_pose, open_length = grasp_generator.get_grasp_poses(
-            obj_pose,
-            approach_direction,
-            visualize_collision=False,
-            visualize_pose=True,
+    grasp_success, grasp_xpos, _ = grasp_generator.get_best_grasp_poses(
+        mesh_vertices=vertices,
+        mesh_triangles=triangles,
+        obj_poses=obj_poses,
+        approach_direction=approach_direction,
+    )
+    if not bool(grasp_success.all().item()):
+        logger.log_warning("At least one environment has no valid grasp pose.")
+        grasp_xpos = torch.where(
+            grasp_success[:, None, None],
+            grasp_xpos,
+            rest_xpos.expand_as(grasp_xpos),
         )
-        if is_success:
-            grasp_xpos_list.append(grasp_pose.unsqueeze(0))
-        else:
-            logger.log_warning(f"No valid grasp pose found for {i}-th object.")
-            grasp_xpos_list.append(rest_xpos.unsqueeze(0))
-
-    grasp_xpos = torch.cat(grasp_xpos_list, dim=0)
     cost_time = time.time() - start_time
     logger.log_info(f"Get grasp pose cost time: {cost_time:.2f} seconds")
 

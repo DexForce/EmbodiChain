@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-import time
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -29,25 +28,22 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
-    JointPositionTarget,
-    MoveJoints,
-    MoveJointsCfg,
-    NamedJointPositionTarget,
+    ControlPartCommandProfile,
+    JointPositionGoal,
+    MotionPolicy,
 )
-from embodichain.lab.sim.cfg import LightCfg, RenderCfg
-from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
-    create_ur5_gripper_robot_cfg,
+    add_tutorial_robot,
+    create_curobo_motion_generator,
+    create_tutorial_argument_parser,
+    create_tutorial_simulation,
     draw_axis_marker,
-    get_tutorial_window_size,
-    start_auto_play_recording,
-    stop_auto_play_recording,
+    prepare_tutorial_scene,
+    replay_trajectory,
+    run_tutorial,
 )
 
 MOVE_JOINTS_SAMPLE_INTERVAL = 80
@@ -55,160 +51,92 @@ POST_TRAJECTORY_STEPS = 120
 
 
 def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Demonstrate MoveJoints with named and explicit qpos targets."
-    )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--auto_play",
-        action="store_true",
-        help="Run the viewer demo without waiting for keyboard input.",
-    )
-    parser.add_argument(
-        "--no_vis_eef_axis",
-        action="store_true",
-        help="Do not draw the current end-effector/TCP coordinate frame before planning.",
+    """Parse command-line arguments for the MoveJoints tutorial."""
+    parser = create_tutorial_argument_parser(
+        "Demonstrate MoveJoints with named and explicit qpos targets.",
+        features=("visualize_axes",),
     )
     return parser.parse_args()
 
 
-def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
-    width, height = get_tutorial_window_size(args)
-    cfg = SimulationManagerCfg(
-        width=width,
-        height=height,
-        headless=True,
-        num_envs=args.num_envs,
-        sim_device=args.device,
-        render_cfg=RenderCfg(renderer=args.renderer),
-        physics_dt=1.0 / 100.0,
-        arena_space=2.5,
-    )
-    sim = SimulationManager(cfg)
-    sim.add_light(
-        cfg=LightCfg(
-            uid="main_light",
-            color=(0.6, 0.6, 0.6),
-            intensity=30.0,
-            init_pos=(1.0, 0.0, 3.0),
-        )
-    )
-    return sim
-
-
-def create_robot(sim: SimulationManager, position=(0.0, 0.0, 0.0)) -> Robot:
-    cfg = create_ur5_gripper_robot_cfg(init_pos=position)
-    return sim.add_robot(cfg=cfg)
-
-
-def make_arm_qpos(values: list[float], device: torch.device) -> torch.Tensor:
-    return torch.tensor(values, dtype=torch.float32, device=device)
-
-
-def draw_start_eef_axis(sim: SimulationManager, robot: Robot) -> None:
-    eef_pose = robot.compute_fk(
-        qpos=robot.get_qpos(name="arm"),
-        name="arm",
-        to_matrix=True,
-    )
-    draw_axis_marker(sim, "move_joints_start_eef_axis", eef_pose)
-
-
 def main() -> None:
-    """Move the robot arm through named and explicit joint targets."""
+    """Move the robot arm through a named target and two explicit waypoints."""
     args = parse_arguments()
+    sim = create_tutorial_simulation(args)
+    robot = add_tutorial_robot(sim, args.robot)
+    motion_gen = create_curobo_motion_generator(robot)
 
-    # ------------------------------------------------------------------ #
-    # Step 1: Set up simulation and robot                                 #
-    # ------------------------------------------------------------------ #
-    sim = initialize_simulation(args)
-    robot = create_robot(sim)
+    home = robot.get_qpos(name="arm")[0].clone()
+    limits = robot.get_qpos_limits(name="arm")[0]
 
-    # ------------------------------------------------------------------ #
-    # Step 2: Create a MotionGenerator for the robot                      #
-    # ------------------------------------------------------------------ #
-    motion_gen = MotionGenerator(
-        cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
+    def offset_from_home(offsets: tuple[float, ...]) -> torch.Tensor:
+        target = home.clone()
+        count = min(target.numel(), len(offsets))
+        target[:count] += torch.tensor(
+            offsets[:count], dtype=target.dtype, device=target.device
+        )
+        return torch.minimum(torch.maximum(target, limits[:, 0]), limits[:, 1])
+
+    ready = offset_from_home((0.35, 0.37, -0.27, -0.08, 0.0, 0.20))
+    mid = offset_from_home((0.15, 0.17, -0.12, -0.03, 0.0, 0.10))
+    engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "arm": ControlPartCommandProfile.joint_positions(ready=ready),
+        },
     )
-
-    # ------------------------------------------------------------------ #
-    # Step 3: Configure the MoveJoints atomic action                      #
-    # ------------------------------------------------------------------ #
-    ready_qpos = make_arm_qpos([0.35, -1.20, 1.30, -1.65, -1.57, 0.20], sim.device)
-    mid_qpos = make_arm_qpos([0.15, -1.40, 1.45, -1.60, -1.57, 0.10], sim.device)
-    home_qpos = make_arm_qpos([0.0, -1.57, 1.57, -1.57, -1.57, 0.0], sim.device)
-    move_joints_cfg = MoveJointsCfg(
-        control_part="arm",
-        sample_interval=MOVE_JOINTS_SAMPLE_INTERVAL,
-        named_joint_positions={"ready": ready_qpos},
-    )
-
-    # ------------------------------------------------------------------ #
-    # Step 4: Build the AtomicActionEngine                                #
-    # ------------------------------------------------------------------ #
-    atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(MoveJoints(motion_gen, cfg=move_joints_cfg))
-
-    # ------------------------------------------------------------------ #
-    # Step 5: Open the viewer and show the starting end-effector frame    #
-    # ------------------------------------------------------------------ #
-    if not args.headless:
-        sim.open_window()
     if not args.no_vis_eef_axis:
-        draw_start_eef_axis(sim, robot)
-    if not args.auto_play:
-        input("Inspect the robot, then press Enter to plan MoveJoints...")
+        draw_axis_marker(
+            sim,
+            "move_joints_start_eef_axis",
+            robot.compute_fk(robot.get_qpos(name="arm"), name="arm", to_matrix=True),
+        )
+    wait_for_user = prepare_tutorial_scene(
+        sim, args, "Inspect the robot, then press Enter to plan MoveJoints..."
+    )
 
-    # ------------------------------------------------------------------ #
-    # Step 6: Plan the declared (name, typed_target) sequence             #
-    # ------------------------------------------------------------------ #
-    # The second MoveJoints step passes a multi-waypoint trajectory
-    # (n_envs, n_waypoint, control_dof): the arm visits `mid_qpos` then
-    # `home_qpos` in a single planned trajectory.
-    n_envs = robot.get_qpos().shape[0]
-    multi_waypoint_qpos = (
-        torch.stack([mid_qpos, home_qpos], dim=0).unsqueeze(0).repeat(n_envs, 1, 1)
+    waypoints = (
+        torch.stack([mid, home]).unsqueeze(0).repeat(robot.get_qpos().shape[0], 1, 1)
     )
-    logger.log_info(
-        "Planning MoveJoints: NamedJointPositionTarget('ready') -> "
-        "multi-waypoint trajectory (mid -> home)"
+    control_parts = {"primary": {"motion": "arm"}}
+    policy = MotionPolicy(
+        strategy="motion_gen",
+        sample_count=MOVE_JOINTS_SAMPLE_INTERVAL,
     )
-    is_success, traj, _ = atomic_engine.run(
-        steps=[
-            ("move_joints", NamedJointPositionTarget(name="ready")),
-            ("move_joints", JointPositionTarget(qpos=multi_waypoint_qpos)),
-        ]
+    compiled = engine.compile(
+        (
+            engine.make_invocation(
+                "move_joints",
+                JointPositionGoal("ready"),
+                control_parts=control_parts,
+                motion_policy=policy,
+            ),
+            engine.make_invocation(
+                "move_joints",
+                JointPositionGoal(waypoints),
+                control_parts=control_parts,
+                motion_policy=policy,
+            ),
+        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
-    if not is_success.all():
+    if not compiled.plan_success.all():
         logger.log_warning("Failed to plan MoveJoints demo trajectory.")
         return
 
-    if not args.auto_play:
+    if wait_for_user:
         input("Press Enter to replay the MoveJoints demo...")
-
-    # ------------------------------------------------------------------ #
-    # Step 7: Replay the planned trajectory                               #
-    # ------------------------------------------------------------------ #
-    recording_started = start_auto_play_recording(
-        sim, args, video_prefix="move_joints_auto_play"
+    replay_trajectory(
+        sim,
+        robot,
+        compiled.trajectory,
+        args,
+        video_prefix="move_joints_auto_play",
+        hold_steps=POST_TRAJECTORY_STEPS,
     )
-    try:
-        for i in range(traj.shape[1]):
-            robot.set_qpos(traj[:, i, :])
-            sim.update(step=4)
-            time.sleep(1e-2)
-
-        final_qpos = traj[:, -1, :]
-        for _ in range(POST_TRAJECTORY_STEPS):
-            robot.set_qpos(final_qpos)
-            sim.update(step=2)
-            time.sleep(1e-2)
-    finally:
-        stop_auto_play_recording(sim, recording_started)
-
-    if not args.auto_play:
+    if wait_for_user:
         input("Press Enter to exit the simulation...")
 
 
 if __name__ == "__main__":
-    main()
+    run_tutorial(main)

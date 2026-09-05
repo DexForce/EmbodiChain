@@ -13,3 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+
+"""Environment utilities: the registration system (``register_env``, ``make``), Gymnasium integration helpers, miscellaneous utilities, and ``EnvProfiler`` for step/reset timing."""
+
+from __future__ import annotations
+
+from embodichain.lab.gym.utils.profiler import EnvProfiler, EnvProfilerCfg
+from embodichain.lab.gym.utils.trajectory_state import (
+    capture_trajectory_state,
+    restore_trajectory_state,
+)
+
+__all__ = [
+    "EnvProfiler",
+    "EnvProfilerCfg",
+    "capture_trajectory_state",
+    "restore_trajectory_state",
+]

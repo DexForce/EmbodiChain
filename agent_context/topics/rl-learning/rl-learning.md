@@ -4,168 +4,234 @@
 
 | What | Path |
 |------|------|
-| CLI entry | `embodichain/learning/rl/train.py` → `parse_args()` + `train_from_config(config_path)` |
-| Trainer class | `embodichain/learning/rl/utils/trainer.py` → `Trainer` |
-| Package init | `embodichain/learning/rl/__init__.py` — re-exports `algo`, `buffer`, `models`, `utils` |
+| Unified CLI | `embodichain train-rl --config <train.yaml-or-json>` |
+| CLI implementation | `embodichain/learning/rl/train.py` → `cli()` |
+| Programmatic training | `embodichain/learning/rl/train.py` → `train_from_config()` |
+| Algorithm registry | `embodichain/learning/rl/algo/__init__.py` |
+| Policy registry | `embodichain/learning/rl/models/__init__.py` |
+| Lightweight env registry | `embodichain/learning/rl/env.py` |
+| Standard trainer | `embodichain/learning/rl/utils/trainer.py` → `Trainer` |
+| Differentiable trainer | `embodichain/learning/rl/differentiable_trainer.py` |
+| Official configs | `embodichain_tasks/configs/tasks/<domain>/<task>/agents/` |
 
-Run training:
+The compatibility module entry point is:
+
 ```bash
-python -m embodichain.learning.rl.train --config <path-to-yaml-or-json> [--distributed | --no-distributed]
+python -m embodichain.learning.rl.train --config <train.yaml-or-json>
 ```
 
-## Overview
+Prefer the unified `embodichain train-rl` command.
 
-The RL subsystem implements on-policy reinforcement learning with a modular pipeline:
+## Configuration Resolution
 
-1. **Config** — JSON/YAML file defines `trainer`, `policy`, and `algorithm` blocks.
-2. **Environment** — Built via `build_env()` from `embodichain.lab.gym.envs.tasks.rl`.
-3. **Policy** — Neural-network module (`Policy` ABC) producing actions from observations.
-4. **Collector** — Steps the env, writes transitions into a preallocated `TensorDict`.
-5. **Buffer** — `RolloutBuffer` owns the preallocated storage; marks it full after collection.
-6. **Algorithm** — Consumes the rollout, computes losses, and updates policy weights.
-7. **Trainer** — Orchestrates the collect → update → log → eval → checkpoint loop.
+Training configs are JSON or YAML mappings with three top-level blocks:
 
-All rollout data flows as `TensorDict` objects (from the `tensordict` library).
+- `trainer`: environment selection, runtime, rollout, evaluation, logging,
+  checkpoint, and distributed settings;
+- `policy`: registered policy name and network definitions;
+- `algorithm`: registered algorithm name plus its config mapping.
 
-## Architecture
+The resolution flow is:
 
-```
-train_from_config()
-  ├─ build_env()                     → Gym env
-  ├─ build_policy(policy_block, ...) → Policy (ActorCritic | ActorOnly | custom)
-  ├─ build_algo(name, cfg, policy)   → Algorithm (PPO | GRPO)
-  └─ Trainer(policy, env, algorithm, ...)
-       ├─ RolloutBuffer  [buffer/standard_buffer.py]
-       ├─ SyncCollector  [collector/sync_collector.py]
-       └─ .train(total_timesteps)
-            loop:
-              _collect_rollout()  →  buffer.start_rollout() → collector.collect() → buffer.add()
-              algorithm.update(buffer.get())
-              _log_train(losses)
-              _eval_once()  (if eval_freq hit)
-              save_checkpoint()  (if save_freq hit)
+```text
+CLI --config
+  → load_config()
+  → trainer / policy / algorithm blocks
+  → choose trainer.learning_env or trainer.gym_config
+  → build environment
+  → build policy and optional MLP modules
+  → build algorithm config from the registry
+  → route by algorithm.rollout_kind
+  → train, evaluate, log, and checkpoint
 ```
 
-## PPO Algorithm
+Read concrete values from the selected config and current config classes. Do
+not assume example-config values are global defaults.
 
-**Source**: `embodichain/learning/rl/algo/ppo.py`
+## Environment Paths
 
-- Config: `PPOCfg(AlgorithmCfg)` — `n_epochs=10`, `clip_coef=0.2`, `ent_coef=0.01`, `vf_coef=0.5`.
-- Inherits `AlgorithmCfg` defaults: `lr=3e-4`, `batch_size=64`, `gamma=0.99`, `gae_lambda=0.95`, `max_grad_norm=0.5`.
-- `update(rollout)` flow:
-  1. `compute_gae(rollout, gamma, gae_lambda)` — writes `advantage` and `return` into the TensorDict.
-  2. `transition_view(rollout, flatten=True)` — drops padded final slot, flattens to `[N*T]`.
-  3. For `n_epochs` × minibatch iterations:
-     - Evaluate current policy: `policy.evaluate_actions(batch)` → `logprobs`, `entropy`, `values`.
-     - Clipped surrogate objective + value loss + entropy bonus.
-     - Adam step with `max_grad_norm` clipping.
+### Simulator Gym Environment
 
-### GRPO Algorithm
+Select this path with `trainer.gym_config`.
 
-**Source**: `embodichain/learning/rl/algo/grpo.py`
+1. The CLI discovers installed task packages and executes their init hooks.
+2. `train_from_config()` loads the gym config.
+3. `config_to_cfg()` builds the environment config and manager functors.
+4. Trainer runtime fields override simulation device, GPU, renderer, headless
+   mode, environment count, and optional profiling.
+5. `build_env()` constructs the registered Gym environment.
+6. A sample reset determines flattened observation and action dimensions.
 
-- Config: `GRPOCfg(AlgorithmCfg)` — `group_size=4`, `kl_coef=0.02`, `ent_coef=0.0`, `reset_every_rollout=True`, `truncate_at_first_done=True`.
-- Maintains a frozen `ref_policy` deepcopy for KL penalty when `kl_coef > 0`.
-- Requires `group_size >= 2` for within-group advantage normalization.
+Simulator environments use standard rollouts. A differentiable algorithm on
+this path is rejected. Simulator tasks with a supported training configuration
+declare `supports_rl=True` in `@register_env`; `embodichain list-task` displays
+them with `[Simulator, RL]` instead of treating the simulator registry as a
+mutually exclusive capability group.
 
-### Algorithm Registry
+Direct callers of `train_from_config()` that bypass `cli()` must ensure
+task packages and init hooks needed by a simulator environment have already
+been loaded.
 
-**Source**: `embodichain/learning/rl/algo/__init__.py`
+### Lightweight Learning Environment
 
-```python
-_ALGO_REGISTRY = {"ppo": (PPOCfg, PPO), "grpo": (GRPOCfg, GRPO)}
-build_algo(name, cfg_kwargs, policy, device, distributed=False)
+Select this path with `trainer.learning_env`, either as a registered name or
+as a mapping with `name` and `cfg`.
+
+`build_learning_env()` resolves factories registered with
+`@register_learning_env`. A learning environment implements the
+`LearningVecEnv` protocol. Differentiable algorithms additionally require
+`DifferentiableVecEnv.detach_state()` as the truncated-backpropagation
+boundary.
+
+This path supports both standard algorithms and differentiable algorithms,
+but currently rejects distributed training and environment profiling.
+
+## Rollout and Trainer Routing
+
+`BaseAlgorithm.rollout_kind` is the routing contract:
+
+```text
+RolloutKind.STANDARD
+  → Trainer
+  → SyncCollector
+  → RolloutBuffer backed by TensorDict
+  → PPO or GRPO update
+
+RolloutKind.DIFFERENTIABLE
+  → DifferentiableTrainer
+  → DifferentiableCollector
+  → graph-connected DifferentiableRollout segments
+  → APG update
 ```
 
-When `distributed=True`, wraps the policy in `DistributedDataParallel` before passing to the algorithm.
+PPO and GRPO use `STANDARD`. APG uses `DIFFERENTIABLE`.
+`get_trainer_class()` centralizes this selection for lightweight learning
+environments.
 
-## Rollout Buffer
+The standard buffer reserves shape `[num_envs, rollout_length + 1]`; the
+last slot holds the bootstrap observation/value while transition-only fields
+use it as padding. The collector writes into the preallocated rollout and the
+algorithm consumes it after collection.
 
-**Source**: `embodichain/learning/rl/buffer/standard_buffer.py`
+The differentiable path does not copy transitions into the standard buffer.
+It preserves the action-to-reward autograd graph across short segments.
+`segment_length` sets TBPTT boundaries, while `update_horizon` controls
+how many environment steps contribute to one optimizer update.
 
-- `RolloutBuffer(num_envs, rollout_len, obs_dim, action_dim, device)`.
-- Preallocates a single TensorDict with batch shape `[num_envs, rollout_len + 1]`.
-- The `+1` slot holds the bootstrap observation/value; transition-only fields (`action`, `reward`, `done`) pad the final index.
-- API: `start_rollout()` → returns the shared TensorDict for the collector to write into; `add(rollout)` → marks full; `get(flatten=True)` → returns transition view and clears.
-- **Invariant**: the buffer holds at most one rollout at a time. Calling `start_rollout()` when full raises `RuntimeError`.
+## Component Ownership
 
-### Buffer Utilities
+| Component | Owner |
+|-----------|-------|
+| Algorithm base, rollout kind, optimizer scheduling | `algo/base.py`, `utils/optimizer.py` |
+| PPO, GRPO, APG implementations | `algo/ppo.py`, `algo/grpo.py`, `algo/apg.py` |
+| Standard rollout storage and views | `buffer/` |
+| Standard and differentiable collection | `collector/` |
+| Policy interface, actor-critic, actor-only, MLP builder | `models/` |
+| Standard collect/update loop | `utils/trainer.py` |
+| Differentiable TBPTT/update loop | `differentiable_trainer.py` |
+| Shared completed-episode evaluation | `evaluation.py` |
+| Learning environment protocol and registry | `env.py` |
+| End-to-end config and runtime assembly | `train.py` |
 
-**Source**: `embodichain/learning/rl/buffer/utils.py`
+Rollout payloads on the standard path are `TensorDict` objects. Policies
+consume observations and write action, log-probability, entropy, and value
+fields needed by their algorithm. Differentiable policies must expose
+graph-preserving action sampling.
 
-- `transition_view(rollout, flatten)` — slices `[:, :-1]` on transition fields, optionally reshapes to `[N*T]`.
-- `iterate_minibatches(rollout, batch_size, device)` — yields shuffled minibatches from a flattened rollout.
+## Training and Evaluation Lifecycle
 
-## Actor-Critic Models
+The standard trainer repeats:
 
-**Source**: `embodichain/learning/rl/models/`
+1. start and collect a rollout;
+2. update the algorithm;
+3. log train metrics;
+4. evaluate when the configured step boundary is reached;
+5. save periodic and best-evaluation checkpoints.
 
-### Policy ABC (`policy.py`)
-- `Policy(nn.Module, ABC)` — requires `forward()`, `get_value()`, `evaluate_actions()`.
-- `get_action()` — convenience wrapper calling `forward()` under `torch.no_grad()`.
-- All methods consume and return `TensorDict`.
+Evaluation uses an independent environment and
+`evaluate_episodes()`. It counts completed asynchronous episodes, reports
+terminal metrics, temporarily switches the policy to evaluation mode, and
+restores its prior mode.
 
-### ActorCritic (`actor_critic.py`)
-- Gaussian policy with learnable `log_std` per action dim (clamped `[-5, 2]`).
-- Requires externally injected `actor` and `critic` `nn.Module` instances.
-- `forward(td)` → samples action from `Normal(actor(obs), exp(log_std))`, writes `action`, `sample_log_prob`, `value`.
+Checkpoints include policy parameters, trainer counters, best-evaluation
+state, and optimizer or LR-scheduler state when present.
 
-### ActorOnly (`actor_only.py`)
-- Same interface but `value` is always zeros (for algorithms like GRPO that don't use a critic).
+On the simulator path, distributed mode initializes NCCL, assigns one CUDA
+device per local rank, wraps the policy in
+`DistributedDataParallel`, aggregates step and episode statistics, and
+keeps logging, evaluation, and checkpoint ownership on rank zero.
+Differentiable algorithms and lightweight learning environments do not
+currently support this distributed path.
 
-### MLP (`mlp.py`)
-- `MLP(nn.Sequential)` — configurable hidden dims, activation, LayerNorm, dropout, orthogonal init.
+## Official Examples
 
-### Policy Registry (`__init__.py`)
-```python
-_POLICY_REGISTRY: {"actor_critic": ActorCritic, "actor_only": ActorOnly}
-build_policy(policy_block, obs_space, action_space, device, actor, critic)
-build_mlp_from_cfg(module_cfg, in_dim, out_dim)  # expects {"type": "mlp", "network_cfg": {...}}
-```
+| Example | Environment path | Config location |
+|---------|------------------|-----------------|
+| CartPole | registered simulator Gym env | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/` |
+| PushCube | registered simulator Gym env | `embodichain_tasks/configs/tasks/manipulation/push_cube/agents/` |
+| PointMass PPO | registered lightweight env, standard rollout | `embodichain_tasks/configs/tasks/classic_control/point_mass/agents/ppo.yaml` |
+| PointMass APG | differentiable lightweight env | `embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml` |
+| Newton planar reach | experimental differentiable FK reference | `embodichain/learning/rl/experimental/newton/` |
 
-## Training Pipeline
+`PointMassRL` is the reference environment for comparing standard and
+differentiable training over the same task dynamics. The Newton planar-reach
+example is an experimental gradient reference, not a general simulator task.
 
-**Source**: `embodichain/learning/rl/utils/trainer.py`
+## Extension Points
 
-`Trainer.__init__` creates `RolloutBuffer` and `SyncCollector`.
+### Add an Algorithm
 
-`Trainer.train(total_timesteps)` loop:
-1. `_collect_rollout()` — calls `buffer.start_rollout()`, then `collector.collect(buffer_size, rollout, on_step_callback)`, then `buffer.add(rollout)`.
-2. `algorithm.update(buffer.get(flatten=False))` — algorithm decides its own flatten/GAE logic.
-3. `_log_train(losses)` — writes to TensorBoard + optional W&B.
-4. Periodic `_eval_once(num_episodes)` and `save_checkpoint()`.
+1. Implement a `BaseAlgorithm` subclass and config under `algo/`.
+2. Declare the correct `RolloutKind`.
+3. Register the config/class pair in `algo/__init__.py`.
+4. Add focused algorithm, routing, and rollout-contract tests.
 
-Distributed training:
-- `train_from_config` initializes NCCL process group, offsets seed by rank.
-- Only rank 0 creates log dirs, TensorBoard writer, and W&B.
-- Timestamps are broadcast from rank 0 to ensure consistent run directories.
+### Add a Policy
 
-### Collector
+1. Implement the `Policy` contract under `models/`.
+2. Register it in `models/__init__.py`.
+3. Ensure its outputs satisfy every intended algorithm.
+4. Provide graph-preserving sampling if used with differentiable rollouts.
 
-**Source**: `embodichain/learning/rl/collector/sync_collector.py`
+### Add a Lightweight Environment
 
-`SyncCollector(env, policy, device, reset_every_rollout)`:
-- `collect(num_steps, rollout, on_step_callback)` — steps env synchronously, writing obs/action/reward/done into the preallocated rollout TensorDict.
-- Observations are flattened via `flatten_dict_observation()` before storage.
-- Requires a preallocated rollout (`rollout=None` raises `ValueError`).
+1. Implement `LearningVecEnv`, or `DifferentiableVecEnv` for APG.
+2. Register the factory with `@register_learning_env`.
+3. Ensure finished rows auto-reset while returning terminal reward/done with
+   the next initial observation.
+4. Add an official config under
+   `embodichain_tasks/configs/tasks/<domain>/<task>/agents/` when it is a
+   bundled task.
 
-### Helper Utilities
+Use `add-task-env` for simulator-backed task environments and
+`manager-functor` for their observation, reward, event, and action
+components.
 
-**Source**: `embodichain/learning/rl/utils/helper.py`
+## Invariants
 
-- `flatten_dict_observation(obs: TensorDict)` → `[num_envs, obs_dim]` tensor.
-- `dict_to_tensordict(obs_dict, device)` → converts env observation mapping to TensorDict.
+- The selected environment must expose batched observation/action spaces and
+  `num_envs`.
+- Policy observation and action dimensions must match the built environment.
+- An algorithm's `RolloutKind` must match its collector, rollout type, and
+  trainer.
+- The standard buffer holds at most one unconsumed rollout.
+- APG must retain differentiable rewards until its optimizer boundary;
+  `detach_state()` must not reset or resample the task.
+- GRPO environment count must satisfy its grouping contract.
+- Evaluation must use completed episodes and an independent environment.
+- Only rank zero owns external logging and checkpoints in distributed runs.
 
 ## Common Failure Modes
 
-| Symptom | Likely Cause |
-|---------|-------------|
-| `RuntimeError: RolloutBuffer already contains a rollout` | Called `start_rollout()` without consuming via `get()`. |
-| `ValueError: Preallocated rollout batch size mismatch` | `buffer_size` in trainer config doesn't match `num_steps` passed to collector. |
-| `ValueError: Algorithm 'X' not found` | Algo name not in `_ALGO_REGISTRY`. Check `get_registered_algo_names()`. |
-| `ValueError: ActorCritic policy requires external 'actor' and 'critic' modules` | Config uses `actor_critic` policy but doesn't define `actor`/`critic` MLP blocks in the JSON. |
-| `ValueError: Configured policy.action_dim=N does not match env action dim M` | `policy.action_dim` in config disagrees with the env's action manager. |
-| `RuntimeError: torch.distributed is not initialized` | `distributed=True` but `init_process_group()` was not called (launch via `torchrun`). |
-| `GRPO: group_size >= 2` | GRPO requires at least 2 environments per group for normalization. |
-| NaN losses | Check `log_std` bounds, gradient clipping, and reward scale. `max_grad_norm` defaults to 0.5. |
-| Stale observations after reset | `SyncCollector` resets obs via `_reset_env()` on init; set `reset_every_rollout=True` if episodes must fully reset between rollouts. |
+| Symptom | Likely cause |
+|---------|--------------|
+| Algorithm or policy name is not found | Name is absent from the corresponding registry |
+| Learning environment is not found | Its task package was not discovered or the module containing its decorator was not imported |
+| Differentiable algorithm rejects the config | The config selected `trainer.gym_config` instead of a differentiable `learning_env` |
+| Distributed training is rejected | The request uses a lightweight/differentiable path, or the process group/CUDA device is not initialized |
+| Policy dimension mismatch | Policy config disagrees with the built environment's observation or action space |
+| Standard buffer is already full | A rollout was started before the previous one was consumed with `get()` |
+| APG gradients disappear | Actions were sampled under `no_grad`, transitions were copied/detached, or the state was detached too early |
+| GRPO reshape or grouping fails | `num_envs` is not divisible by `group_size` |
+| Evaluation never completes | The environment does not emit completed asynchronous episodes or terminal metrics correctly |
+| Output/checkpoint directories diverge across ranks | Distributed run metadata was not coordinated through rank zero |

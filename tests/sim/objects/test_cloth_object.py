@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 from dexsim.utility.path import get_resources_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -76,7 +78,7 @@ class BaseSoftObjectTest:
         self.sim = SimulationManager(sim_cfg)
 
         # Enable manual physics update for precise control
-        self.n_envs = 4
+        self.num_envs = 4
 
         cloth_verts, cloth_faces = create_2d_grid_mesh(
             width=0.3, height=0.3, nx=12, ny=12
@@ -128,6 +130,16 @@ class BaseSoftObjectTest:
             self.cloth._data.n_vertices,
             3,
         ), "Vertex positions shape mismatch"
+
+    def test_get_deformable_mesh_geometry(self):
+        """Test current cloth vertices and matching surface triangles."""
+        self.sim.init_gpu_physics()
+        vertices = self.cloth.get_current_vertex_position()
+        triangles = self.cloth.get_triangles(env_ids=[0])
+
+        assert vertices.ndim == 3 and vertices.shape[0] == self.sim.num_envs
+        assert triangles.ndim == 3 and triangles.shape[0] == 1
+        assert int(triangles.max()) < vertices.shape[1]
 
     def teardown_method(self):
         """Clean up resources after each test method."""

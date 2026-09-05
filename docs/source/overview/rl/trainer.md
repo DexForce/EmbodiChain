@@ -22,8 +22,22 @@ This module implements the main RL training loop, logging management, and event-
 - `train(total_timesteps)`: Main training loop, automatically collects data, updates policy, and logs.
 - `_collect_rollout()`: Collect one rollout through `SyncCollector`, supports custom callback statistics.
 - `_log_train(losses)`: Log training loss, reward, sampling speed, etc.
-- `_eval_once()`: Periodic evaluation, records evaluation metrics.
+- `_eval_once()`: Calls the shared evaluator and records exact completed
+  episode metrics.
 - `save_checkpoint()`: Save model parameters and training state.
+
+### DifferentiableTrainer
+- Coordinates APG rollouts without copying graph-connected transitions into
+  the standard preallocated buffer.
+- Accumulates pathwise gradients across `segment_length` TBPTT segments until
+  `update_horizon` is reached.
+- Uses the same episode statistics, deterministic evaluator, TensorBoard/W&B
+  namespaces, best-checkpoint selection, and global-step semantics as
+  `Trainer`.
+
+The trainers remain separate because their rollout ownership and autograd
+requirements differ. `train-rl` selects between them through each algorithm's
+`RolloutKind`.
 
 ## Event Management
 - Supports custom events (e.g., environment randomization, data logging) injected via EventManager.
@@ -50,5 +64,3 @@ trainer.save_checkpoint()
 - It is recommended to perform periodic evaluation and model saving to prevent loss of progress during training.
 - The event mechanism can be used for automated experiments, data collection, and environment reset.
 - Logging and monitoring help analyze training progress and tune hyperparameters.
-
----

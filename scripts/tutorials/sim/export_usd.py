@@ -18,9 +18,12 @@
 This script demonstrates how to export a simulation scene to a usd file using the SimulationManager.
 """
 
+from __future__ import annotations
+
 import argparse
 import numpy as np
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.cfg import (
@@ -69,6 +72,7 @@ def initialize_simulation(args) -> SimulationManager:
         physics_dt=1.0 / 100.0,
         num_envs=1,
         arena_space=2.5,
+        visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(config)
 

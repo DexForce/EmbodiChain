@@ -373,3 +373,13 @@ class DatasetFunctorCfg(FunctorCfg):
     """
 
     mode: Literal["save"] = "save"
+
+    save_failed_episodes: bool = False
+    """Whether to save failed episodes.
+
+    If enabled for any dataset functor, all save-mode dataset functors receive
+    both successful and failed episodes. During ``run-env`` expert generation,
+    a non-empty failed or truncated result is committed and counts toward
+    ``max_episodes`` instead of being discarded and retried. Empty plans and
+    execution exceptions remain uncommitted.
+    """

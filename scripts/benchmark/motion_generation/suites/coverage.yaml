@@ -1,0 +1,67 @@
+schema_version: 1
+name: motion_generation
+suite_version: free_space_common_coverage_v1
+profile: coverage
+
+planners:
+  - id: curobo
+    adapter: curobo
+    role: primary_baseline
+    enabled: true
+    config:
+      max_attempts: 5
+      max_planning_time: null
+      interpolation_dt: 0.025
+      collision_activation_distance: 0.01
+      use_cuda_graph: true
+      cuda_graph_fallback: true
+      warmup_iterations: 1
+      preserve_plan_samples: true
+      world:
+        obstacle_representation: sphere
+        multi_env: false
+      auto_gen:
+        fit_type: voxel
+        sphere_density: 0.1
+        collision_sphere_buffer: 0.0
+  - id: ik_interpolate
+    adapter: ik_interpolate
+    role: diagnostic_baseline
+    enabled: false
+    config:
+      interpolation_dt: 0.025
+  - id: toppra
+    adapter: toppra
+    role: diagnostic_baseline
+    enabled: false
+    config:
+      velocity: 0.2
+      acceleration: 0.5
+  - id: nmg
+    adapter: neural_stub
+    role: candidate
+    enabled: false
+    config:
+      model_revision: not-ready
+      pos_eps: 0.05
+      rot_eps: 0.3
+
+protocol:
+  warmup_trials: 3
+  measured_trials: 20
+  sample_interval: 80
+  validation_samples: 256
+  position_threshold_m: 0.01
+  rotation_threshold_rad: 0.1
+  joint_limit_tolerance_rad: 0.00001
+
+tracks:
+  - id: free-space-common
+    scenario: free_space
+    enabled: true
+    config:
+      batch_sizes: [1, 8, 64]
+      waypoint_counts: [1, 3, 5]
+      path_shapes: [direct, l_turn, s_curve, orientation_only, combined]
+      start_state_bins: [nominal, random_reachable, near_limit, near_singularity]
+      seeds: [11, 23, 37, 53, 71]

@@ -14,9 +14,16 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Gym environment registration and task-package discovery utilities."""
+
 from __future__ import annotations
 
+import importlib
+import importlib.metadata
+import importlib.util
 import json
+import logging
+import os
 import sys
 import torch
 
@@ -31,7 +38,28 @@ from gymnasium.envs.registration import WrapperSpec
 from dexsim.utility import log_warning
 
 if TYPE_CHECKING:
-    from embodichain.lab.gym.envs import BaseEnv
+    from embodichain.lab.gym.envs import BaseEnv, EmbodiedEnvCfg
+    from embodichain.lab.task_program.integrations import (
+        TaskProgramAdapterFactory,
+        SimulationTaskProgramRegistration,
+    )
+
+_logger = logging.getLogger(__name__)
+
+__all__ = [
+    "EnvSpec",
+    "REGISTERED_ENVS",
+    "TimeLimitWrapper",
+    "build_env",
+    "discover_task_packages",
+    "execute_init_hooks",
+    "get_env_spec",
+    "make",
+    "make_vec",
+    "register",
+    "register_env",
+    "register_env_function",
+]
 
 
 class EnvSpec:
@@ -41,16 +69,84 @@ class EnvSpec:
         cls: Type[BaseEnv],
         max_episode_steps=None,
         default_kwargs: dict = None,
+        task_program_registration: SimulationTaskProgramRegistration | None = None,
+        task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
+        supports_rl: bool = False,
     ):
         """A specification for a Embodied environment."""
+        if type(supports_rl) is not bool:
+            raise TypeError("supports_rl must be a bool.")
+        if task_program_registration is not None:
+            from embodichain.lab.task_program.integrations import (
+                SimulationTaskProgramRegistration,
+            )
+
+            if type(task_program_registration) is not SimulationTaskProgramRegistration:
+                raise TypeError(
+                    "task_program_registration must be exactly "
+                    "SimulationTaskProgramRegistration or None."
+                )
+        if task_program_adapter_factory is not None:
+            from embodichain.lab.task_program.integrations import (
+                TaskProgramAdapterFactory,
+            )
+
+            if not isinstance(
+                task_program_adapter_factory,
+                TaskProgramAdapterFactory,
+            ):
+                raise TypeError(
+                    "task_program_adapter_factory must implement "
+                    "TaskProgramAdapterFactory or be None."
+                )
+            factory_registration = getattr(
+                task_program_adapter_factory,
+                "registration",
+                None,
+            )
+            if factory_registration is not None:
+                from embodichain.lab.task_program.integrations import (
+                    SimulationTaskProgramRegistration,
+                )
+
+                if type(factory_registration) is not SimulationTaskProgramRegistration:
+                    raise TypeError(
+                        "task_program_adapter_factory.registration must be "
+                        "exactly SimulationTaskProgramRegistration."
+                    )
+            if (
+                task_program_registration is not None
+                and factory_registration is not None
+                and factory_registration is not task_program_registration
+            ):
+                raise ValueError(
+                    "task_program_adapter_factory must own the exact "
+                    "task_program_registration."
+                )
+            if task_program_registration is None:
+                task_program_registration = factory_registration
         self.uid = uid
         self.cls = cls
         self.max_episode_steps = max_episode_steps
         self.default_kwargs = {} if default_kwargs is None else default_kwargs
+        self.supports_rl = supports_rl
+        self.task_program_registration = task_program_registration
+        self.task_program_adapter_factory = task_program_adapter_factory
 
     def make(self, **kwargs):
         _kwargs = self.default_kwargs.copy()
         _kwargs.update(kwargs)
+        if self.task_program_adapter_factory is not None:
+            supplied_factory = _kwargs.get("task_program_adapter_factory")
+            if (
+                supplied_factory is not None
+                and supplied_factory is not self.task_program_adapter_factory
+            ):
+                raise ValueError(
+                    "A registered Task Program adapter factory cannot be "
+                    "overridden at environment construction."
+                )
+            _kwargs["task_program_adapter_factory"] = self.task_program_adapter_factory
         return self.cls(**_kwargs)
 
     @property
@@ -69,7 +165,13 @@ REGISTERED_ENVS: Dict[str, EnvSpec] = {}
 
 
 def register(
-    name: str, cls: Type[BaseEnv], max_episode_steps=None, default_kwargs: dict = None
+    name: str,
+    cls: Type[BaseEnv],
+    max_episode_steps=None,
+    default_kwargs: dict = None,
+    task_program_registration: SimulationTaskProgramRegistration | None = None,
+    task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
+    supports_rl: bool = False,
 ):
     """Register a Embodied environment."""
 
@@ -81,7 +183,13 @@ def register(
     if not (issubclass(cls, BaseEnv) or issubclass(cls, BaseEnv)):
         raise TypeError(f"Env {name} must inherit from BaseEnv or BaseEnv")
     REGISTERED_ENVS[name] = EnvSpec(
-        name, cls, max_episode_steps=max_episode_steps, default_kwargs=default_kwargs
+        name,
+        cls,
+        max_episode_steps=max_episode_steps,
+        default_kwargs=default_kwargs,
+        supports_rl=supports_rl,
+        task_program_registration=task_program_registration,
+        task_program_adapter_factory=task_program_adapter_factory,
     )
 
 
@@ -139,18 +247,57 @@ def make(env_id, **kwargs):
     return env
 
 
+def get_env_spec(env_id: str) -> EnvSpec:
+    """Return one registered environment specification or fail closed."""
+    if type(env_id) is not str or not env_id or env_id != env_id.strip():
+        raise ValueError("env_id must be a non-empty string without outer whitespace.")
+    try:
+        return REGISTERED_ENVS[env_id]
+    except KeyError as exc:
+        raise KeyError(f"Env {env_id!r} not found in registry.") from exc
+
+
+def build_env(env_id: str, base_env_cfg: EmbodiedEnvCfg):
+    """Create an environment from a registered env id.
+
+    A thin convenience wrapper around :func:`make` that deep-copies the base
+    config so callers can safely mutate the resulting environment's cfg
+    without affecting shared defaults. This helper used to live in the task
+    package; it now lives with the registry so that core code paths such as RL
+    training do not need to depend on an official task package.
+
+    Args:
+        env_id: Registered environment id (see :func:`register_env`).
+        base_env_cfg: Base environment configuration to instantiate with.
+
+    Returns:
+        The instantiated environment.
+    """
+    return make(env_id, cfg=deepcopy(base_env_cfg))
+
+
 def make_vec(env_id, **kwargs):
     env = gym.make(env_id, **kwargs)
     return env
 
 
-def register_env(uid: str, max_episode_steps=None, override=False, **kwargs):
+def register_env(
+    uid: str,
+    max_episode_steps=None,
+    override=False,
+    *,
+    supports_rl: bool = False,
+    task_program_registration: SimulationTaskProgramRegistration | None = None,
+    task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
+    **kwargs,
+):
     """A decorator to register Embodied environments.
 
     Args:
         uid (str): unique id of the environment.
         max_episode_steps (int): maximum number of steps in an episode.
         override (bool): whether to override the environment if it is already registered.
+        supports_rl: Whether the environment has a supported RL training path.
 
     Notes:
         - `max_episode_steps` is processed differently from other keyword arguments in gym.
@@ -165,13 +312,32 @@ def register_env(uid: str, max_episode_steps=None, override=False, **kwargs):
         )
 
     def _register_env(cls):
-        cls = register_env_function(cls, uid, override, max_episode_steps, **kwargs)
+        cls = register_env_function(
+            cls,
+            uid,
+            override,
+            max_episode_steps,
+            supports_rl=supports_rl,
+            task_program_registration=task_program_registration,
+            task_program_adapter_factory=task_program_adapter_factory,
+            **kwargs,
+        )
         return cls
 
     return _register_env
 
 
-def register_env_function(cls, uid, override=False, max_episode_steps=None, **kwargs):
+def register_env_function(
+    cls,
+    uid,
+    override=False,
+    max_episode_steps=None,
+    *,
+    supports_rl: bool = False,
+    task_program_registration: SimulationTaskProgramRegistration | None = None,
+    task_program_adapter_factory: TaskProgramAdapterFactory | None = None,
+    **kwargs,
+):
     if uid in REGISTERED_ENVS:
         if override:
             from gymnasium.envs.registration import registry
@@ -188,6 +354,9 @@ def register_env_function(cls, uid, override=False, max_episode_steps=None, **kw
         cls,
         max_episode_steps=max_episode_steps,
         default_kwargs=deepcopy(kwargs),
+        supports_rl=supports_rl,
+        task_program_registration=task_program_registration,
+        task_program_adapter_factory=task_program_adapter_factory,
     )
 
     # Register for gym
@@ -200,3 +369,122 @@ def register_env_function(cls, uid, override=False, max_episode_steps=None, **kw
         kwargs=deepcopy(kwargs),
     )
     return cls
+
+
+def _import_task_package(ep: importlib.metadata.EntryPoint):
+    """Import a task package and ensure its auto-registration runs.
+
+    Legacy editable installs from before official tasks were bundled in the
+    main distribution can expose two editable projects from the same checkout.
+    The repository-level ``embodichain_tasks/`` container may then be picked up
+    as a namespace package that shadows the real
+    ``embodichain_tasks/embodichain_tasks/`` package.
+
+    A namespace package never executes ``__init__.py``, so the package's
+    ``import_packages()`` call -- which triggers every ``@register_env`` --
+    is skipped and no environments are registered.
+
+    When such shadowing is detected (the imported module has no ``__file__``),
+    this helper locates the real ``__init__.py`` beneath one of the namespace's
+    search locations (``<location>/<top_level>/__init__.py``) and loads it
+    directly so registration runs. This is a no-op for regular, non-shadowed
+    installs.
+
+    Args:
+        ep: The ``embodichain.tasks`` entry point to import.
+
+    Returns:
+        The imported module (the real package when possible, otherwise the
+        namespace module).
+    """
+    module_name = ep.value
+    top_level = module_name.partition(".")[0]
+    mod = importlib.import_module(module_name)
+    if getattr(mod, "__file__", None) is not None:
+        return mod
+
+    # Only top-level packages can be reliably force-loaded here; dotted entry
+    # point values fall back to the plain import above.
+    if module_name != top_level:
+        return mod
+
+    # Namespace shadowing: search each namespace location for the real
+    # package's __init__.py and load it in place of the namespace module.
+    for location in list(getattr(mod, "__path__", [])):
+        init_path = os.path.join(location, top_level, "__init__.py")
+        if not os.path.isfile(init_path):
+            continue
+        pkg_dir = os.path.dirname(init_path)
+        spec = importlib.util.spec_from_file_location(
+            top_level, init_path, submodule_search_locations=[pkg_dir]
+        )
+        if spec is None or spec.loader is None:
+            continue
+        real_mod = importlib.util.module_from_spec(spec)
+        sys.modules[top_level] = real_mod
+        spec.loader.exec_module(real_mod)
+        return real_mod
+    return mod
+
+
+def discover_task_packages() -> list[str]:
+    """Import all registered task packages via ``embodichain.tasks`` entry_points.
+
+    Each task package recursively imports its task modules, which triggers
+    ``@register_env`` → ``gym.register()``. After this call, all tasks from all
+    installed packages are available in gymnasium's global registry.
+
+    Returns:
+        List of entry point names that were successfully imported.
+    """
+    imported: list[str] = []
+    try:
+        eps = importlib.metadata.entry_points(group="embodichain.tasks")
+    except TypeError:
+        # Python < 3.12: entry_points() requires a keyword argument
+        eps = importlib.metadata.entry_points().get("embodichain.tasks", [])
+
+    for ep in eps:
+        try:
+            _import_task_package(ep)
+            imported.append(ep.name)
+        except Exception:
+            _logger.warning(
+                f"Failed to import task package '{ep.name}' ({ep.value})",
+                exc_info=True,
+            )
+    return imported
+
+
+def execute_init_hooks() -> list[str]:
+    """Execute all registered init hooks via ``embodichain.init`` entry_points.
+
+    Hooks are called in entry_points declaration order. An exception from one
+    hook does not prevent others from executing.
+
+    Each entry point value must be in the format ``"module.path:function_name"``.
+    The function must accept no arguments and return ``None``.
+
+    Returns:
+        List of hook names that were executed successfully.
+    """
+    executed: list[str] = []
+    try:
+        eps = importlib.metadata.entry_points(group="embodichain.init")
+    except TypeError:
+        # Python < 3.12
+        eps = importlib.metadata.entry_points().get("embodichain.init", [])
+
+    for ep in eps:
+        try:
+            module_name, func_name = ep.value.split(":", 1)
+            module = importlib.import_module(module_name)
+            func = getattr(module, func_name)
+            func()
+            executed.append(ep.name)
+        except Exception:
+            _logger.warning(
+                f"Init hook '{ep.name}' ({ep.value}) failed",
+                exc_info=True,
+            )
+    return executed

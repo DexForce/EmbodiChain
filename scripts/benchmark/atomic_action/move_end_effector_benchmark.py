@@ -18,7 +18,7 @@
 
 Measures planning latency, memory usage, trajectory success, and final TCP
 translation error for several reachable pose targets.
-Run: python -m scripts.benchmark.atomic_action.move_end_effector_benchmark
+Run: embodichain benchmark atomic-action --action move_end_effector
 """
 
 from __future__ import annotations
@@ -120,17 +120,33 @@ def _run_case(
 ):
     """Run one MoveEndEffector case."""
     torch = ensure_torch()
-    from embodichain.lab.sim.atomic_actions import EndEffectorPoseTarget
+    from embodichain.lab.sim.atomic_actions import (
+        ActionInvocation,
+        EndEffectorPoseGoal,
+        MotionPolicy,
+    )
 
     reset_robot(robot, initial_qpos)
     target_pose = _make_pose(sim.device, pose_case.xyz)
+    binding = atomic_engine.bind_control_parts(
+        "move_end_effector",
+        {"primary": {"motion": "arm"}},
+    )
 
     elapsed, mem_delta, peak_gpu, result = timed_call(
-        lambda: atomic_engine.run(
-            steps=[("move_end_effector", EndEffectorPoseTarget(xpos=target_pose))]
+        lambda: atomic_engine.compile(
+            (
+                ActionInvocation(
+                    skill_id="move_end_effector",
+                    goal=EndEffectorPoseGoal(xpos=target_pose),
+                    binding=binding,
+                    motion_policy=MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
+                ),
+            )
         )
     )
-    is_success, traj, _ = result
+    is_success = bool(result.plan_success.all().item())
+    traj = result.trajectory.positions
     video_path = None
     if should_record_case(args, recorded_count, bool(is_success)):
         reset_robot(robot, initial_qpos)
@@ -220,8 +236,6 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     ensure_torch()
     from embodichain.lab.sim.atomic_actions import (
         AtomicActionEngine,
-        MoveEndEffector,
-        MoveEndEffectorCfg,
     )
     from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg
     from embodichain.lab.sim.planners import ToppraPlannerCfg
@@ -251,14 +265,6 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
     atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(
-        MoveEndEffector(
-            motion_gen,
-            cfg=MoveEndEffectorCfg(
-                control_part="arm", sample_interval=MOVE_SAMPLE_INTERVAL
-            ),
-        )
-    )
 
     results: list[dict[str, object]] = []
     video_paths: list[str] = []

@@ -35,7 +35,8 @@ EmbodiedEnvCfg
 ├── sim_cfg: SimulationManagerCfg
 │   ├── render_cfg: RenderCfg
 │   ├── physics_config: PhysicsCfg
-│   └── gpu_memory_config: GPUMemoryCfg
+│   ├── gpu_memory_config: GPUMemoryCfg
+│   └── visualization: VisualizationCfg
 ├── robot: RobotCfg
 │   ├── urdf_cfg: URDFCfg
 │   ├── drive_pros: JointDrivePropertiesCfg
@@ -128,12 +129,18 @@ For RL training and data generation, EmbodiChain uses file-based configs (`.json
 
 Configs are loaded with `embodichain.utils.utility.load_config`, which selects the parser from the file extension. Both formats produce the same in-memory dictionary and are passed to `config_to_cfg()` for environment setup.
 
+For offline expert generation, `max_episodes` counts persisted
+per-environment episodes rather than vector batches. Thus `num_envs: 4` and
+`max_episodes: 10` produce two full four-row commits plus a final two-row
+commit. Failed rows count only when the relevant `DatasetFunctorCfg` sets
+`save_failed_episodes: true`.
+
 Example paths in the repository:
 
 | Use case | JSON example | YAML example |
 |---|---|---|
-| Gym environment | `configs/gym/cobotmagic.json` | `configs/gym/cobotmagic.yaml` |
-| RL training | `configs/agents/rl/basic/cart_pole/train_config.json` | `configs/agents/rl/basic/cart_pole/train_config.yaml` |
+| Runnable Gym deployment | `embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.json` | `embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml` |
+| RL training | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.json` | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml` |
 
 When a training config references a gym config (via `trainer.gym_config`), the nested path may also use any supported extension.
 
@@ -141,27 +148,55 @@ When a training config references a gym config (via `trainer.gym_config`), the n
 
 ```json
 {
+    "id": "EmbodiedEnv-v1",
+    "num_envs": 4,
     "max_episodes": 100,
     "max_episode_steps": 600,
+    "physics_config": {
+        "gravity": [0.0, 0.0, -9.81],
+        "bounce_threshold": 2.0,
+        "enable_ccd": false,
+        "length_tolerance": 0.05,
+        "speed_tolerance": 0.25
+    },
+    "render_cfg": {
+        "renderer": "auto",
+        "spp": 1,
+        "tone_mapping_enabled": false,
+        "tone_mapping_exposure": 1.0
+    },
+    "visualization": {
+        "backend": "viser",
+        "scene_fps": 15.0,
+        "sensor_image_fps": 2.0,
+        "soft_body_fps": 5.0,
+        "env_ids": [0],
+        "viser_server": {
+            "host": "127.0.0.1",
+            "port": 8080
+        }
+    },
+    "robot": {
+        "uid": "robot",
+        "urdf_cfg": {
+            "components": [
+                {
+                    "component_type": "arm",
+                    "urdf_path": "robots/my_robot/my_robot.urdf"
+                }
+            ]
+        }
+    },
+    "sensor": [
+        {
+            "uid": "cam_high",
+            "type": "StereoCamera",
+            "height": 540,
+            "width": 960
+        }
+    ],
     "env": {
-        "num_envs": 4,
-        "sim_cfg": {
-            "sim_device": "cuda:0",
-            "headless": true
-        },
-        "robot": {
-            "uid": "robot",
-            "urdf_cfg": {"fpath": "robots/my_robot/my_robot.urdf"}
-        },
         "control_parts": ["arm"],
-        "sensor": [
-            {
-                "uid": "cam_high",
-                "type": "StereoCamera",
-                "height": 540,
-                "width": 960
-            }
-        ],
         "actions": {
             "delta_qpos": {
                 "func": "DeltaQposTerm",
@@ -211,6 +246,108 @@ When a training config references a gym config (via `trainer.gym_config`), the n
     }
 }
 ```
+
+The `visualization` section is optional and defaults to
+`{"backend": "none"}`. Setting `"backend": "viser"` starts browser
+visualization when the environment constructs its `SimulationManager`. The
+`--viser*` command-line options override these values for
+`embodichain run-env`.
+
+Set `sensor_image_fps` to `null` to capture camera previews once per eligible
+simulation step instead of applying a wall-clock FPS limit. `run-env --viser`
+uses this step-synchronized mode by default when neither the configuration nor
+`--viser-image-fps` supplies a rate.
+
+Keep `viser_server.host` on loopback for remote workers and use SSH port
+forwarding unless the service is behind an authenticated gateway. See
+[Browser visualization with Viser](../overview/sim/viser_visualization.md) for
+the full schema, supported scene content, and deformable-object behavior.
+
+### Reusable Physical Environments and Runnable Deployments
+
+Use componentized YAML when one physical task environment must support several
+embodiments, or one embodiment must run in several environments. The task-local
+layout separates a reusable environment from runnable deployment choices:
+
+```text
+<task>/
+├── env.yaml
+├── task.franka.yaml
+├── task.ur5.yaml
+└── task_program/
+    ├── integration.yaml
+    └── program.yaml
+```
+
+The pure `env.yaml` component owns physical scene entities and ordinary Gym
+values. It requires `environment_id`, `simulation`, and `env`, may include run
+controls such as `max_episode_steps`, and contains no runnable `id`, robot,
+sensor, or Task Program selection:
+
+```yaml
+environment_id: repeated_pick_place
+max_episode_steps: 1200
+simulation:
+  rigid_object:
+    - uid: cube
+      # Shape, dynamics, and initial pose.
+env:
+  events: {}
+  dataset: {}
+```
+
+A runnable deployment has `id` and selects one environment and embodiment. A
+configuration-defined Task Program additionally selects its program,
+integration, and execution policy:
+
+```yaml
+id: TaskProgramRepeatedPickPlace-v1
+environment:
+  component: env.yaml
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.yaml
+  execution_policy: ../../../components/execution_policies/trajectory_open_loop.yaml
+embodiment:
+  component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+```
+
+All references above resolve relative to the runnable deployment file. An
+embodiment component owns its simulation robot and sensor suite; it may also
+own a `skill_profile` when Task Program needs semantic resources. The
+task-local `integration.yaml` owns its nested `scene_binding`, including each
+canonical `entity_id` to physical `simulation_uid` mapping.
+
+Component ownership is exclusive. Do not combine `environment.component` with
+inline environment or scene fields, and do not combine `embodiment.component`
+with inline `robot` or `sensor` fields. The original inline format and a
+standalone physical `scene.component` remain supported when no environment
+component is selected. A registered handwritten-trajectory task may select the
+same environment and embodiment components while omitting `task_program`, so
+neither reusable component is coupled to an expert-authoring method. See the
+[Task Program tutorial](../tutorial/task_program.rst) for a complete runnable
+composition.
+
+### Robot Preset Configs
+
+Use `class_type` to select a `RobotCfg` subclass from
+`embodichain.lab.sim.robots`. Subclass-specific fields remain in the robot
+configuration and are passed to its `from_dict()` method. For example, this
+selects the canonical UR preset and then specifies the UR5 variant:
+
+```json
+{
+    "robot": {
+        "class_type": "URRobot",
+        "robot_type": "ur5",
+        "uid": "Manipulator"
+    }
+}
+```
+
+For backward compatibility, existing configs may continue to use
+`"robot_type": "CobotMagic"` as the preset-class selector when the selected
+class has no separate variant field.
 
 ### RL Training Config (`train_config.json` / `train_config.yaml`)
 
@@ -269,7 +406,7 @@ trainer:
   device: cuda:0
   iterations: 500
   buffer_size: 1024
-  gym_config: configs/agents/rl/basic/cart_pole/gym_config.yaml
+  gym_config: embodichain_tasks/configs/tasks/classic_control/cart_pole/env.yaml
 policy:
   name: actor_critic
   actor:
@@ -313,11 +450,14 @@ This is automatically converted to a `SceneEntityCfg` object at runtime.
 
 ## Tips
 
-1. **Start from an existing config.** Copy a config file from `configs/gym/` or `configs/agents/rl/` and modify it for your task.
+1. **Start from an existing config.** Copy a task config from `embodichain_tasks/configs/tasks/<domain>/<task>/`, then modify it for your task.
 2. **Use Python configs for development.** They provide IDE auto-completion and type checking.
 3. **Use JSON or YAML configs for experiments.** YAML is often easier to read for nested structures; JSON remains fully supported.
 4. **Validate configs early.** Run your environment with a short episode count to catch config errors before long training runs.
-5. **Keep config pairs together.** For action-bank tasks, version `gym_config` and `action_config` together (either format).
+5. **Keep ownership explicit.** Put the reusable physical environment in
+   `env.yaml`, runnable choices in `task.<embodiment>.yaml`, and Task Program
+   intent plus semantic integration in `task_program/{program,integration}.yaml`.
+   Keep shared embodiments and execution policies under `configs/components/`.
 
 ---
 
@@ -325,5 +465,6 @@ This is automatically converted to a `SceneEntityCfg` object at runtime.
 
 - [Custom Functors Guide](custom_functors.md) — How to write observation, reward, event, and action functors
 - [Embodied Environments](../overview/gym/env.md) — Full environment configuration reference
+- [Browser Visualization](../overview/sim/viser_visualization.md) — Viser configuration and runtime behavior
 - [Tutorial: Modular Environment](../tutorial/modular_env.rst) — Complete example using config-driven setup
 - [Tutorial: RL Training](../tutorial/rl.rst) — RL training configuration walkthrough

@@ -27,6 +27,8 @@ from embodichain.learning.rl.utils import AlgorithmCfg
 from embodichain.utils import configclass
 from .base import BaseAlgorithm
 
+__all__ = ["GRPO", "GRPOCfg"]
+
 
 @configclass
 class GRPOCfg(AlgorithmCfg):
@@ -42,7 +44,7 @@ class GRPOCfg(AlgorithmCfg):
     truncate_at_first_done: bool = True
 
 
-class GRPO(BaseAlgorithm):
+class GRPO(BaseAlgorithm[TensorDict]):
     """Group Relative Policy Optimization on top of TensorDict rollouts."""
 
     def __init__(self, cfg: GRPOCfg, policy):
@@ -53,7 +55,7 @@ class GRPO(BaseAlgorithm):
         self.cfg = cfg
         self.policy = policy
         self.device = torch.device(cfg.device)
-        self.optimizer = torch.optim.Adam(policy.parameters(), lr=cfg.learning_rate)
+        self._setup_optimization(cfg, policy.parameters())
         if self.cfg.kl_coef > 0.0:
             raw_policy = getattr(policy, "module", policy)
             self.ref_policy = deepcopy(raw_policy).to(self.device).eval()
@@ -66,21 +68,21 @@ class GRPO(BaseAlgorithm):
         self, rewards: torch.Tensor, dones: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute discounted returns and valid-step mask over `[N, T]` rollout."""
-        n_envs, t_steps = rewards.shape
+        num_envs, t_steps = rewards.shape
         seq_mask = torch.ones(
-            (n_envs, t_steps), dtype=torch.float32, device=self.device
+            (num_envs, t_steps), dtype=torch.float32, device=self.device
         )
         step_returns = torch.zeros(
-            (n_envs, t_steps), dtype=torch.float32, device=self.device
+            (num_envs, t_steps), dtype=torch.float32, device=self.device
         )
 
-        alive = torch.ones(n_envs, dtype=torch.float32, device=self.device)
+        alive = torch.ones(num_envs, dtype=torch.float32, device=self.device)
         for t in range(t_steps):
             seq_mask[:, t] = alive
             if self.cfg.truncate_at_first_done:
                 alive = alive * (~dones[:, t]).float()
 
-        running_return = torch.zeros(n_envs, dtype=torch.float32, device=self.device)
+        running_return = torch.zeros(num_envs, dtype=torch.float32, device=self.device)
         for t in reversed(range(t_steps)):
             running_return = (
                 rewards[:, t] + self.cfg.gamma * running_return * (~dones[:, t]).float()
@@ -93,11 +95,11 @@ class GRPO(BaseAlgorithm):
         self, step_returns: torch.Tensor, seq_mask: torch.Tensor
     ) -> torch.Tensor:
         """Normalize per-step returns within each environment group."""
-        n_envs, t_steps = step_returns.shape
+        num_envs, t_steps = step_returns.shape
         group_size = self.cfg.group_size
 
-        returns_grouped = step_returns.view(n_envs // group_size, group_size, t_steps)
-        mask_grouped = seq_mask.view(n_envs // group_size, group_size, t_steps)
+        returns_grouped = step_returns.view(num_envs // group_size, group_size, t_steps)
+        mask_grouped = seq_mask.view(num_envs // group_size, group_size, t_steps)
 
         valid_count = mask_grouped.sum(dim=1, keepdim=True)
         valid_count_safe = torch.clamp(valid_count, min=1.0)
@@ -110,7 +112,7 @@ class GRPO(BaseAlgorithm):
         group_std = torch.sqrt(group_var)
 
         advantages = (returns_grouped - group_mean) / (group_std + self.cfg.eps)
-        return advantages.view(n_envs, t_steps) * seq_mask
+        return advantages.view(num_envs, t_steps) * seq_mask
 
     def update(self, rollout: TensorDict) -> Dict[str, float]:
         rollout = rollout.clone()
@@ -196,8 +198,10 @@ class GRPO(BaseAlgorithm):
                 total_kl += kl.item() * weight
                 total_weight += weight
 
+        self._step_scheduler()
         return {
             "actor_loss": total_actor_loss / max(1.0, total_weight),
             "entropy": total_entropy / max(1.0, total_weight),
             "approx_ref_kl": total_kl / max(1.0, total_weight),
+            "learning_rate": self.current_learning_rate(),
         }

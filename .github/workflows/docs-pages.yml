@@ -4,6 +4,7 @@ on:
   workflow_run:
     workflows: ["CI/CD Pipeline"]
     types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       ref:
@@ -14,6 +15,8 @@ on:
         description: "Existing CI/CD Pipeline run ID to deploy from instead of rebuilding"
         required: false
         type: string
+  release:
+    types: [published]
 
 permissions:
   actions: read
@@ -22,15 +25,56 @@ permissions:
   id-token: write
 
 concurrency:
-  group: github-pages
+  # The release run waits for its dispatched deployment, so it must not hold
+  # the deployment concurrency group while the child workflow is queued.
+  group: ${{ github.event_name == 'release' && format('github-pages-release-{0}', github.run_id) || 'github-pages' }}
   cancel-in-progress: false
 
 jobs:
+  # Release-triggered deploys can report success while continuing to serve the
+  # previous artifact when the release reuses an already deployed commit SHA.
+  # Dispatching the build avoids that GitHub Pages failure mode:
+  # https://github.com/actions/deploy-pages/issues/383
+  redispatch-release:
+    if: >
+      github.event_name == 'release' &&
+      github.event.action == 'published' &&
+      startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      actions: write
+      checks: read
+      contents: read
+    steps:
+      - name: Dispatch release docs build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          dispatched_url="$(gh workflow run docs-pages.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref "${DEFAULT_BRANCH}" \
+            -f ref="${RELEASE_TAG}")"
+          dispatched_run_id="${dispatched_url##*/}"
+          if [[ ! "${dispatched_run_id}" =~ ^[0-9]+$ ]]; then
+            echo "Could not determine dispatched workflow run ID from: ${dispatched_url}" >&2
+            exit 1
+          fi
+          echo "Waiting for dispatched docs workflow ${dispatched_run_id}."
+          gh run watch "${dispatched_run_id}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --compact \
+            --exit-status \
+            --interval 10
+
   deploy-from-artifact:
     if: >
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push') ||
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main') ||
       (github.event_name == 'workflow_dispatch' &&
        inputs.artifact_run_id != '')
     runs-on: ubuntu-latest
@@ -46,14 +90,40 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: ./docs-site
 
+      - name: Stamp Pages artifact
+        env:
+          DEPLOYMENT_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: printf '%s\n' "${DEPLOYMENT_ID}" > ./docs-site/pages-deployment-id.txt
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
+          name: github-pages-${{ github.run_attempt }}
           path: ./docs-site
 
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
+
+      - name: Verify deployed artifact
+        env:
+          EXPECTED_DEPLOYMENT_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          for attempt in {1..30}; do
+            marker_url="${PAGE_URL%/}/pages-deployment-id.txt?run=${EXPECTED_DEPLOYMENT_ID}&attempt=${attempt}"
+            deployed_id="$(curl --location --connect-timeout 5 --max-time 10 --fail --silent --show-error "${marker_url}" || true)"
+            if [[ "${deployed_id}" == "${EXPECTED_DEPLOYMENT_ID}" ]]; then
+              echo "Verified Pages deployment ${EXPECTED_DEPLOYMENT_ID}."
+              exit 0
+            fi
+            echo "Waiting for Pages deployment ${EXPECTED_DEPLOYMENT_ID} (attempt ${attempt}/30)..."
+            sleep 10
+          done
+          echo "Pages did not serve deployment ${EXPECTED_DEPLOYMENT_ID}." >&2
+          exit 1
 
   build-and-deploy:
     if: github.event_name == 'workflow_dispatch' && inputs.artifact_run_id == ''
@@ -77,7 +147,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref != '' && inputs.ref || 'main' }}
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.ref != '' && inputs.ref || 'main' }}
       - uses: ./.github/actions/activate-conda
 
       - name: Restore full multi-version docs site
@@ -92,7 +162,7 @@ jobs:
         shell: bash
         run: |
           SITE_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
-          TARGET_REF="${{ inputs.ref != '' && inputs.ref || 'main' }}"
+          TARGET_REF="${{ github.event_name == 'release' && github.event.release.tag_name || inputs.ref != '' && inputs.ref || 'main' }}"
           SKIP_VERSION="main"
           if [[ "${TARGET_REF}" == v* ]]; then
             SKIP_VERSION="${TARGET_REF}"
@@ -105,7 +175,7 @@ jobs:
       - name: Build docs site
         shell: bash
         run: |
-          TARGET_REF="${{ inputs.ref != '' && inputs.ref || 'main' }}"
+          TARGET_REF="${{ github.event_name == 'release' && github.event.release.tag_name || inputs.ref != '' && inputs.ref || 'main' }}"
           pip install -e ".[gensim]" \
             --extra-index-url http://pyp.open3dv.site:2345/simple/ \
             --trusted-host pyp.open3dv.site \
@@ -157,11 +227,37 @@ jobs:
           name: docs-site-manual
           path: ./docs-site
 
+      - name: Stamp Pages artifact
+        env:
+          DEPLOYMENT_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: printf '%s\n' "${DEPLOYMENT_ID}" > ./docs-site/pages-deployment-id.txt
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
+          name: github-pages-${{ github.run_attempt }}
           path: ./docs-site
 
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
+
+      - name: Verify deployed artifact
+        env:
+          EXPECTED_DEPLOYMENT_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          for attempt in {1..30}; do
+            marker_url="${PAGE_URL%/}/pages-deployment-id.txt?run=${EXPECTED_DEPLOYMENT_ID}&attempt=${attempt}"
+            deployed_id="$(curl --location --connect-timeout 5 --max-time 10 --fail --silent --show-error "${marker_url}" || true)"
+            if [[ "${deployed_id}" == "${EXPECTED_DEPLOYMENT_ID}" ]]; then
+              echo "Verified Pages deployment ${EXPECTED_DEPLOYMENT_ID}."
+              exit 0
+            fi
+            echo "Waiting for Pages deployment ${EXPECTED_DEPLOYMENT_ID} (attempt ${attempt}/30)..."
+            sleep 10
+          done
+          echo "Pages did not serve deployment ${EXPECTED_DEPLOYMENT_ID}." >&2
+          exit 1

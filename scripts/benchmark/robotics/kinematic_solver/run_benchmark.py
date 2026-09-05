@@ -19,7 +19,7 @@
 Measures IK wall-clock latency, pose accuracy, success rate, and memory usage
 across OPW (Warp CUDA vs CPU), UR analytic (Warp CPU vs CUDA), and the
 Pytorch solver (CPU vs optional CUDA).
-Run: python -m scripts.benchmark.robotics.kinematic_solver.run_benchmark
+Run: embodichain benchmark robotics-kinematic-solver
 """
 
 from __future__ import annotations

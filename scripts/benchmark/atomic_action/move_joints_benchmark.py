@@ -18,7 +18,7 @@
 
 Measures planning latency, memory usage, trajectory success, and final arm joint
 error for named and explicit joint-position targets.
-Run: python -m scripts.benchmark.atomic_action.move_joints_benchmark
+Run: embodichain benchmark atomic-action --action move_joints
 """
 
 from __future__ import annotations
@@ -106,25 +106,34 @@ def _qpos(values, device):
     return torch.tensor(values, dtype=torch.float32, device=device)
 
 
-def _targets_for_sequence(sequence_case: JointSequenceCase, device):
+def _targets_for_sequence(atomic_engine, sequence_case: JointSequenceCase, device):
     """Build typed MoveJoints targets for a sequence case."""
     from embodichain.lab.sim.atomic_actions import (
-        JointPositionTarget,
-        NamedJointPositionTarget,
+        ActionInvocation,
+        JointPositionGoal,
+        MotionPolicy,
     )
 
     targets = []
+    binding = atomic_engine.bind_control_parts(
+        "move_joints",
+        {"primary": {"motion": "arm"}},
+    )
+    policy = MotionPolicy(sample_count=MOVE_JOINTS_SAMPLE_INTERVAL)
     for index, name in enumerate(sequence_case.sequence):
         if index == 0 and name == "ready":
-            targets.append(("move_joints", NamedJointPositionTarget(name="ready")))
+            goal = JointPositionGoal(target="ready")
         else:
-            targets.append(
-                (
-                    "move_joints",
-                    JointPositionTarget(qpos=_qpos(JOINT_TARGETS[name], device)),
-                )
+            goal = JointPositionGoal(target=_qpos(JOINT_TARGETS[name], device))
+        targets.append(
+            ActionInvocation(
+                skill_id="move_joints",
+                goal=goal,
+                binding=binding,
+                motion_policy=policy,
             )
-    return targets
+        )
+    return tuple(targets)
 
 
 def _run_case(
@@ -140,9 +149,12 @@ def _run_case(
     """Run one MoveJoints case."""
     torch = ensure_torch()
     reset_robot(robot, initial_qpos)
-    steps = _targets_for_sequence(case, sim.device)
-    elapsed, mem_delta, peak_gpu, result = timed_call(lambda: atomic_engine.run(steps))
-    is_success, traj, _ = result
+    steps = _targets_for_sequence(atomic_engine, case, sim.device)
+    elapsed, mem_delta, peak_gpu, result = timed_call(
+        lambda: atomic_engine.compile(steps)
+    )
+    is_success = bool(result.plan_success.all().item())
+    traj = result.trajectory.positions
     video_path = None
     if should_record_case(args, recorded_count, bool(is_success)):
         reset_robot(robot, initial_qpos)
@@ -230,8 +242,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     ensure_torch()
     from embodichain.lab.sim.atomic_actions import (
         AtomicActionEngine,
-        MoveJoints,
-        MoveJointsCfg,
+        ControlPartCommandProfile,
     )
     from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg
     from embodichain.lab.sim.planners import ToppraPlannerCfg
@@ -261,18 +272,12 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
     ready_qpos = _qpos(READY_QPOS, sim.device)
-    atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(
-        MoveJoints(
-            motion_gen,
-            cfg=MoveJointsCfg(
-                control_part="arm",
-                sample_interval=MOVE_JOINTS_SAMPLE_INTERVAL,
-                named_joint_positions={"ready": ready_qpos},
-            ),
-        )
+    atomic_engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "arm": ControlPartCommandProfile.joint_positions(ready=ready_qpos),
+        },
     )
-
     results: list[dict[str, object]] = []
     video_paths: list[str] = []
     print("\n=== MoveJoints Sequence Sweep ===")

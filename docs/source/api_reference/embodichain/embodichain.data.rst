@@ -6,17 +6,31 @@ embodichain.data
 Data Package Overview
 ---------------------
 
-The ``embodichain.data`` package centralizes dataset resolution and asset download
-helpers used by simulation tasks and training pipelines.
+The ``embodichain.data`` package centralizes dataset resolution, asset download
+helpers, preset asset registries, and shared constants/enums used by simulation
+tasks and training pipelines.
 
 .. rubric:: Submodules
 
 .. autosummary::
 
+   assets
    constants
    dataset
    download
    enum
+
+Asset Registry
+--------------
+
+Preset configuration objects for scene assets (robots, end-effectors, objects,
+materials, sensors, planners, solvers, demo scenes) ready to reference from
+task configs.
+
+.. automodule:: embodichain.data.assets
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 Constants
 ---------

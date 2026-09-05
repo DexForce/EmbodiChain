@@ -1,0 +1,672 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import math
+from pathlib import Path
+from typing import Any
+
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
+
+from embodichain.utils.logger import log_warning
+
+
+@dataclass(frozen=True)
+class MaskCandidate:
+    """One numbered mask candidate returned by the Image Segmentation Server."""
+
+    index: int
+    mask_rle: dict[str, Any]
+
+
+def build_mask_candidates(mask_rles: list[dict[str, Any]]) -> list[MaskCandidate]:
+    return [
+        MaskCandidate(index=index, mask_rle=mask_rle)
+        for index, mask_rle in enumerate(mask_rles, start=1)
+    ]
+
+
+def decode_rle_mask(mask_rle: dict[str, Any]) -> Image.Image:
+    """Decode an uncompressed RLE mask into a binary image."""
+
+    # Check the return value's format.
+    size = mask_rle.get("size")
+    counts = mask_rle.get("counts")
+    if (
+        not isinstance(size, list)
+        or len(size) != 2
+        or not all(isinstance(value, int) and value > 0 for value in size)
+    ):
+        raise ValueError("Image Segmentation Server RLE needs size=[height, width].")
+    if not isinstance(counts, list):
+        raise ValueError("Image Segmentation Server RLE counts must be a list.")
+
+    height, width = size
+    pixel_count = height * width
+    starts_with = mask_rle.get("starts_with", 0)
+    if starts_with not in (0, 1, False, True):
+        raise ValueError("Image Segmentation Server RLE starts_with must be 0 or 1.")
+
+    pixels = bytearray(pixel_count)
+    is_foreground = bool(
+        starts_with
+    )  # True for white foreground, False for black background.
+    offset = 0  # How many pixels have been filled so far.
+    for raw_count in counts:
+        if isinstance(raw_count, bool):
+            raise ValueError(
+                "Image Segmentation Server RLE counts must contain integers."
+            )
+        try:
+            count = int(raw_count)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Image Segmentation Server RLE counts must contain integers."
+            ) from exc
+        if count < 0 or offset + count > pixel_count:
+            raise ValueError(
+                "Image Segmentation Server RLE counts do not match its declared size."
+            )
+        if is_foreground:
+            pixels[offset : offset + count] = (
+                b"\xff" * count
+            )  # Write white pixels for the foreground.
+        offset += count
+        is_foreground = not is_foreground
+
+    if offset != pixel_count:
+        raise ValueError("Image Segmentation Server RLE does not cover the image.")
+    return Image.frombytes("L", (width, height), bytes(pixels))
+
+
+def invert_mask_if_foreground_is_off_center(candidate: MaskCandidate) -> MaskCandidate:
+    """Invert a mask when its foreground is less concentrated at image center.
+
+    This heuristic is intended for generated single-object images, where the
+    object is expected near the center and SAM3 may return its background.
+    """
+    mask = decode_rle_mask(candidate.mask_rle)
+    width, height = mask.size
+    left, top = width // 6, height // 6
+    right, bottom = width - left, height - top
+    center_mask = mask.crop((left, top, right, bottom))
+
+    center_foreground_ratio = _foreground_ratio(center_mask)
+    total_foreground_pixels = _foreground_pixel_count(mask)
+    outside_foreground_pixels = total_foreground_pixels - _foreground_pixel_count(
+        center_mask
+    )
+    outside_pixel_count = width * height - center_mask.width * center_mask.height
+    outside_foreground_ratio = outside_foreground_pixels / outside_pixel_count
+    if center_foreground_ratio >= outside_foreground_ratio:
+        return candidate
+
+    inverted_mask = mask.point(lambda value: 0 if value else 255)
+    return MaskCandidate(
+        index=candidate.index,
+        mask_rle=_encode_binary_mask_rle(inverted_mask),
+    )
+
+
+def union_overlapping_mask_candidates(
+    candidates: list[MaskCandidate],
+    *,
+    min_iou: float = 0.8,
+) -> list[MaskCandidate]:
+    """Union candidate masks with IOU >= min_iou into one mask candidate."""
+    if not 0 < min_iou <= 1:
+        raise ValueError("min_iou must be greater than 0 and at most 1.")
+    if not candidates:
+        return []
+
+    masks = [decode_rle_mask(candidate.mask_rle) for candidate in candidates]
+    image_size = masks[0].size
+    for mask in masks:
+        _require_image_size(mask, image_size)
+
+    parents = list(
+        range(len(candidates))
+    )  # Initialize the Union-Find data structure for candidates.
+    for first_index, first_mask in enumerate(masks):
+        for second_index in range(first_index + 1, len(masks)):
+            if _mask_iou(first_mask, masks[second_index]) >= min_iou:
+                _union_parent(
+                    parents, first_index, second_index
+                )  # Union the two candidates into one.
+
+    grouped_indices: dict[int, list[int]] = {}
+    for index in range(len(candidates)):
+        # Put all the index of the same parent into one group.
+        grouped_indices.setdefault(_find_parent(parents, index), []).append(index)
+
+    merged_candidates: list[MaskCandidate] = []
+    for merged_index, member_indices in enumerate(grouped_indices.values(), start=1):
+        merged_mask = masks[member_indices[0]]
+        for member_index in member_indices[1:]:
+            # Union the masks of the same group into one mask (lighter = union).
+            merged_mask = ImageChops.lighter(merged_mask, masks[member_index])
+        merged_candidates.append(
+            MaskCandidate(
+                index=merged_index,
+                mask_rle=_encode_binary_mask_rle(merged_mask),
+            )
+        )
+    return merged_candidates
+
+
+def save_binary_mask(
+    candidate: MaskCandidate,
+    *,
+    image_size: tuple[int, int],
+    output_path: str | Path,
+) -> Path:
+    """Save one candidate as a white-foreground, black-background PNG mask."""
+    mask = decode_rle_mask(candidate.mask_rle)
+    _require_image_size(mask, image_size)  # Check whether the image size == mask size.
+
+    resolved_output_path = Path(output_path).expanduser().resolve()
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    mask.save(resolved_output_path)
+    return resolved_output_path
+
+
+def save_visible_rgba_crop(
+    *,
+    image_path: str | Path,
+    mask_path: str | Path,
+    output_path: str | Path,
+    output_size: tuple[int, int] = (512, 512),
+    padding_ratio: float = 0.1,
+) -> Path:
+    """Save a fixed-size RGBA crop of one object's visible source-image pixels."""
+    if len(output_size) != 2 or not all(
+        isinstance(value, int) and value > 0 for value in output_size
+    ):
+        raise ValueError("RGBA crop output_size must contain two positive integers.")
+    if padding_ratio < 0:
+        raise ValueError("RGBA crop padding_ratio must be non-negative.")
+
+    with Image.open(image_path) as loaded_image:
+        image = loaded_image.convert("RGB")
+    with Image.open(mask_path) as loaded_mask:
+        mask = loaded_mask.convert("L")
+    _require_image_size(mask, image.size)
+    bbox = mask.getbbox()
+    if bbox is None:
+        raise ValueError("Cannot save an RGBA crop for an empty binary mask.")
+
+    left, top, right, bottom = bbox
+    padding = math.ceil(max(right - left, bottom - top) * padding_ratio)
+    crop_bounds = (
+        max(0, left - padding),
+        max(0, top - padding),
+        min(image.width, right + padding),
+        min(image.height, bottom + padding),
+    )
+    image_crop = image.crop(crop_bounds)
+    mask_crop = mask.crop(crop_bounds)
+    scale = min(
+        output_size[0] / image_crop.width,
+        output_size[1] / image_crop.height,
+    )
+    resized_size = (
+        max(1, round(image_crop.width * scale)),
+        max(1, round(image_crop.height * scale)),
+    )
+    rgba_crop = image_crop.resize(resized_size, Image.Resampling.LANCZOS).convert(
+        "RGBA"
+    )
+    rgba_crop.putalpha(mask_crop.resize(resized_size, Image.Resampling.NEAREST))
+
+    rgba_canvas = Image.new("RGBA", output_size, (0, 0, 0, 0))
+    paste_xy = (
+        (output_size[0] - resized_size[0]) // 2,
+        (output_size[1] - resized_size[1]) // 2,
+    )
+    rgba_canvas.alpha_composite(rgba_crop, dest=paste_xy)
+    resolved_output_path = Path(output_path).expanduser().resolve()
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    rgba_canvas.save(resolved_output_path)
+    return resolved_output_path
+
+
+def render_image_without_masks(
+    *,
+    image_path: str | Path,
+    mask_paths: list[str | Path],
+    output_path: str | Path,
+    removed_color: tuple[int, int, int] = (128, 128, 128),
+) -> tuple[Path, Image.Image]:
+    """Gray masked regions and return the image path with their combined mask."""
+    image = Image.open(image_path).convert("RGB")
+    ignored_mask = Image.new("L", image.size, 0)
+    for mask_path in mask_paths:
+        mask = Image.open(mask_path).convert("L")
+        _require_image_size(mask, image.size)
+        ignored_mask = ImageChops.lighter(ignored_mask, mask)
+
+    removed_layer = Image.new("RGB", image.size, removed_color)
+    result = Image.composite(removed_layer, image, ignored_mask)
+    resolved_output_path = Path(output_path).expanduser().resolve()
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    result.save(resolved_output_path)
+    return resolved_output_path, ignored_mask
+
+
+def render_numbered_mask_candidates(
+    *,
+    image_path: str | Path,
+    candidates: list[MaskCandidate],
+    output_path: str | Path,
+    mask_style: str = "fill",
+    label_avoid_mask: Image.Image | None = None,
+) -> Path:
+    """Overlay numbered mask candidates on their source image.
+    Notice that:
+        - mask_style can be either "fill" or "outline".
+        - The label font and its background scale with the source image resolution.
+        - label_avoid_mask keeps labels outside known occluding regions.
+    """
+    if mask_style not in {"fill", "outline"}:
+        raise ValueError("mask_style must be 'fill' or 'outline'.")
+
+    image = Image.open(image_path).convert("RGBA")
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    colors = (
+        (239, 83, 80, 160),
+        (66, 165, 245, 160),
+        (102, 187, 106, 160),
+        (255, 202, 40, 160),
+        (171, 71, 188, 160),
+        (38, 198, 218, 160),
+    )
+
+    decoded_masks: list[tuple[MaskCandidate, Image.Image]] = []
+    for candidate in candidates:
+        mask = decode_rle_mask(candidate.mask_rle)
+        _require_image_size(mask, image.size)
+        decoded_masks.append((candidate, mask))
+        color_layer = Image.new(
+            "RGBA", image.size, colors[(candidate.index - 1) % len(colors)]
+        )
+        transparent_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        rendered_mask = (
+            mask if mask_style == "fill" else _mask_outer_outline(mask, image.size)
+        )
+        overlay.alpha_composite(
+            Image.composite(color_layer, transparent_layer, rendered_mask)
+        )
+
+    draw = ImageDraw.Draw(overlay)  # Initialize a draw object.
+    font = _load_label_font(image.size)
+    if label_avoid_mask is not None:
+        label_blocked_mask = label_avoid_mask.convert("L")
+        _require_image_size(label_blocked_mask, image.size)
+    else:
+        label_blocked_mask = None
+    label_occupied_mask = Image.new("L", image.size, 0)
+    for candidate, mask in decoded_masks:
+        bbox = mask.getbbox()
+        if bbox is None:
+            raise ValueError(
+                f"Image Segmentation Server candidate {candidate.index} has an empty mask."
+            )
+        center = (
+            ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
+            if label_blocked_mask is None
+            else _find_label_center_inside_bbox(
+                candidate_mask=mask,
+                candidate_bbox=bbox,
+                blocked_mask=ImageChops.lighter(
+                    label_blocked_mask, label_occupied_mask
+                ),
+                label=str(candidate.index),
+                font=font,
+            )
+        )
+        if center is None:
+            # Keep every candidate selectable even when its AABB is entirely
+            # occluded. This is preferable to silently omitting its number.
+            log_warning(
+                "Could not place table-candidate label %s outside masked objects "
+                "while keeping it inside the candidate AABB; using the AABB center.",
+                candidate.index,
+            )
+            center = ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
+        label_bounds = _number_label_bounds(
+            draw=draw, label=str(candidate.index), center=center, font=font
+        )
+        _draw_number_label(
+            draw=draw,
+            label=str(candidate.index),
+            center=center,
+            font=font,
+        )
+        if label_blocked_mask is not None:
+            ImageDraw.Draw(label_occupied_mask).rectangle(label_bounds, fill=255)
+
+    resolved_output_path = Path(output_path).expanduser().resolve()
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.alpha_composite(image, overlay).convert("RGB").save(resolved_output_path)
+    return resolved_output_path
+
+
+def render_asset_mask_id_overlay(
+    *,
+    image_path: str | Path,
+    asset_masks: list[tuple[str, str | Path]],
+    output_path: str | Path,
+) -> Path:
+    """Overlay outlined asset masks and stable asset IDs on a scene image.
+
+    The table mask is intentionally omitted so its large contour does not
+    obscure the asset labels or their visual context in the source image.
+    """
+    asset_ids = [asset_id for asset_id, _ in asset_masks]
+    if any(not asset_id for asset_id in asset_ids):
+        raise ValueError("Every asset mask must have a non-empty asset id.")
+    if len(asset_ids) != len(set(asset_ids)):
+        raise ValueError("Asset mask ids must be unique.")
+
+    image = Image.open(image_path).convert("RGBA")
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    colors = (
+        (239, 83, 80, 255),
+        (66, 165, 245, 255),
+        (102, 187, 106, 255),
+        (255, 202, 40, 255),
+        (171, 71, 188, 255),
+        (38, 198, 218, 255),
+    )
+    decoded_masks: list[tuple[str, Image.Image]] = []
+    for index, (asset_id, mask_path) in enumerate(asset_masks):
+        mask = Image.open(mask_path).convert("L")
+        _require_image_size(mask, image.size)
+        decoded_masks.append((asset_id, mask))
+        color_layer = Image.new("RGBA", image.size, colors[index % len(colors)])
+        transparent_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        overlay.alpha_composite(
+            Image.composite(
+                color_layer,
+                transparent_layer,
+                _mask_outer_outline(mask, image.size),
+            )
+        )
+
+    draw = ImageDraw.Draw(overlay)
+    for asset_id, mask in decoded_masks:
+        bbox = mask.getbbox()
+        if bbox is None:
+            raise ValueError(f"Asset mask {asset_id!r} is empty.")
+        font = _load_asset_id_label_font(
+            image_size=image.size,
+            mask_bbox=bbox,
+            label=asset_id,
+        )
+        _draw_number_label(
+            draw=draw,
+            label=asset_id,
+            center=((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2),
+            font=font,
+            minimum_padding=2,
+        )
+
+    resolved_output_path = Path(output_path).expanduser().resolve()
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.alpha_composite(image, overlay).convert("RGB").save(resolved_output_path)
+    return resolved_output_path
+
+
+def _require_image_size(mask: Image.Image, image_size: tuple[int, int]) -> None:
+    if mask.size != image_size:
+        raise ValueError(
+            "Image Segmentation Server mask size does not match the input image: "
+            f"{mask.size} != {image_size}."
+        )
+
+
+def _find_label_center_inside_bbox(
+    *,
+    candidate_mask: Image.Image,
+    candidate_bbox: tuple[int, int, int, int],
+    blocked_mask: Image.Image,
+    label: str,
+    font: ImageFont.ImageFont,
+) -> tuple[float, float] | None:
+    """Find the nearest label centre that stays in a candidate AABB and avoids masks."""
+    probe_draw = ImageDraw.Draw(Image.new("RGBA", candidate_mask.size))
+    bounds_at_origin = _number_label_bounds(
+        draw=probe_draw, label=label, center=(0.0, 0.0), font=font
+    )
+    minimum_x = candidate_bbox[0] - bounds_at_origin[0]
+    maximum_x = candidate_bbox[2] - 1 - bounds_at_origin[2]
+    minimum_y = candidate_bbox[1] - bounds_at_origin[1]
+    maximum_y = candidate_bbox[3] - 1 - bounds_at_origin[3]
+    if minimum_x > maximum_x or minimum_y > maximum_y:
+        return None
+
+    # Expand each blocked region by the label's largest half-extent, so testing
+    # one candidate centre guarantees the complete label rectangle stays clear.
+    label_radius = max(
+        -bounds_at_origin[0],
+        bounds_at_origin[2],
+        -bounds_at_origin[1],
+        bounds_at_origin[3],
+    )
+    blocked_centres = blocked_mask.filter(ImageFilter.MaxFilter(2 * label_radius + 1))
+    bbox_center = (
+        (candidate_bbox[0] + candidate_bbox[2]) / 2,
+        (candidate_bbox[1] + candidate_bbox[3]) / 2,
+    )
+    for require_candidate_mask in (True, False):
+        for step in (max(1, round(min(candidate_mask.size) / 512)), 1):
+            best_center: tuple[float, float] | None = None
+            best_distance_squared = float("inf")
+            for y_coordinate in range(minimum_y, maximum_y + 1, step):
+                for x_coordinate in range(minimum_x, maximum_x + 1, step):
+                    if blocked_centres.getpixel((x_coordinate, y_coordinate)):
+                        continue
+                    if require_candidate_mask and not candidate_mask.getpixel(
+                        (x_coordinate, y_coordinate)
+                    ):
+                        continue
+                    distance_squared = (x_coordinate - bbox_center[0]) ** 2 + (
+                        y_coordinate - bbox_center[1]
+                    ) ** 2
+                    if distance_squared < best_distance_squared:
+                        best_center = (float(x_coordinate), float(y_coordinate))
+                        best_distance_squared = distance_squared
+            if best_center is not None:
+                return best_center
+    return None
+
+
+def _mask_outer_outline(mask: Image.Image, image_size: tuple[int, int]) -> Image.Image:
+    """Use dilation and subtraction to get the outer outline of a binary mask."""
+    # Asset-candidate images use outlines only; keep them visible at common
+    # image resolutions without obscuring the original object appearance.
+    outline_width = max(2, round(min(image_size) / 200))
+    dilated_mask = mask.filter(ImageFilter.MaxFilter(outline_width * 2 + 1))
+    return ImageChops.subtract(dilated_mask, mask)
+
+
+def _mask_iou(first_mask: Image.Image, second_mask: Image.Image) -> float:
+    """Compute the Intersection over Union (IoU) of two binary masks."""
+    _require_image_size(second_mask, first_mask.size)
+    intersection = ImageChops.multiply(first_mask, second_mask)
+    union = ImageChops.lighter(first_mask, second_mask)
+    union_pixels = union.histogram()[255]
+    if union_pixels == 0:
+        return 0.0
+    return intersection.histogram()[255] / union_pixels
+
+
+def _foreground_pixel_count(mask: Image.Image) -> int:
+    """Return the number of white pixels in one binary mask."""
+    return mask.convert("L").histogram()[255]
+
+
+def _foreground_ratio(mask: Image.Image) -> float:
+    """Return the white-pixel ratio in one non-empty image region."""
+    pixel_count = mask.width * mask.height
+    if pixel_count == 0:
+        raise ValueError("Mask region must contain at least one pixel.")
+    return _foreground_pixel_count(mask) / pixel_count
+
+
+def _encode_binary_mask_rle(mask: Image.Image) -> dict[str, Any]:
+    binary_mask = mask.convert("L").point(
+        lambda value: 255 if value else 0
+    )  # Force translate an image into a binary mask.
+    width, height = binary_mask.size
+    counts: list[int] = []
+    current_value = 0
+    run_length = 0
+    for value in binary_mask.tobytes():
+        value = 255 if value else 0
+        if value == current_value:
+            run_length += 1
+            continue
+        counts.append(run_length)
+        current_value = value
+        run_length = 1
+    counts.append(run_length)
+    return {
+        "size": [height, width],
+        "counts": counts,
+        "starts_with": 0,
+    }
+
+
+def _find_parent(parents: list[int], index: int) -> int:
+    while parents[index] != index:
+        parents[index] = parents[parents[index]]
+        index = parents[index]
+    return index
+
+
+def _union_parent(parents: list[int], first_index: int, second_index: int) -> None:
+    first_root = _find_parent(parents, first_index)
+    second_root = _find_parent(parents, second_index)
+    if first_root != second_root:
+        parents[second_root] = first_root
+
+
+def _load_label_font(image_size: tuple[int, int]) -> ImageFont.ImageFont:
+    font_size = max(16, round(min(image_size) / 32))
+    return _load_label_font_at_size(font_size)
+
+
+def _load_asset_id_label_font(
+    *,
+    image_size: tuple[int, int],
+    mask_bbox: tuple[int, int, int, int],
+    label: str,
+) -> ImageFont.ImageFont:
+    """Choose an ID-label font constrained by both image and mask dimensions."""
+    # The image sets the readable upper bound; the individual mask then caps it.
+    image_font_size = min(32, max(8, round(min(image_size) / 48)))
+    mask_width = mask_bbox[2] - mask_bbox[0]
+    mask_height = mask_bbox[3] - mask_bbox[1]
+    maximum_label_width = max(24, round(mask_width * 0.9))
+    maximum_label_height = max(16, round(mask_height * 0.75))
+    # Measure the complete text-and-background rectangle, not glyphs alone.
+    probe_draw = ImageDraw.Draw(Image.new("RGBA", image_size))
+    smallest_font = _load_label_font_at_size(6)
+    for font_size in range(image_font_size, 5, -1):
+        font = _load_label_font_at_size(font_size)
+        label_bounds = _number_label_bounds(
+            draw=probe_draw,
+            label=label,
+            center=(0.0, 0.0),
+            font=font,
+            minimum_padding=2,
+        )
+        if (
+            label_bounds[2] - label_bounds[0] <= maximum_label_width
+            and label_bounds[3] - label_bounds[1] <= maximum_label_height
+        ):
+            return font
+        smallest_font = font
+    return smallest_font
+
+
+def _load_label_font_at_size(font_size: int) -> ImageFont.ImageFont:
+    """Load the shared bold label font at one validated pixel size."""
+    if font_size < 1:
+        raise ValueError("Label font size must be positive.")
+    try:
+        return ImageFont.truetype("DejaVuSans-Bold.ttf", font_size)
+    except OSError:
+        return ImageFont.load_default()
+
+
+def _draw_number_label(
+    *,
+    draw: ImageDraw.ImageDraw,
+    label: str,
+    center: tuple[float, float],
+    font: ImageFont.ImageFont,
+    minimum_padding: int = 4,
+) -> None:
+    """Draw a numbered label with red background and white text at the given center position."""
+    label_bounds = _number_label_bounds(
+        draw=draw,
+        label=label,
+        center=center,
+        font=font,
+        minimum_padding=minimum_padding,
+    )
+    label_box = draw.textbbox((0, 0), label, font=font)
+    label_width = label_box[2] - label_box[0]
+    label_height = label_box[3] - label_box[1]
+    x = center[0] - label_width / 2
+    y = center[1] - label_height / 2
+    draw.rectangle(
+        label_bounds,
+        fill=(220, 0, 0, 255),
+        outline=(255, 255, 255, 255),
+        width=max(1, round(max(label_width, label_height) / 12)),
+    )
+    draw.text((x, y), label, fill=(255, 255, 255, 255), font=font)
+
+
+def _number_label_bounds(
+    *,
+    draw: ImageDraw.ImageDraw,
+    label: str,
+    center: tuple[float, float],
+    font: ImageFont.ImageFont,
+    minimum_padding: int = 4,
+) -> tuple[int, int, int, int]:
+    """Return the red label rectangle bounds for a label centre."""
+    label_box = draw.textbbox((0, 0), label, font=font)
+    label_width = label_box[2] - label_box[0]
+    label_height = label_box[3] - label_box[1]
+    if minimum_padding < 0:
+        raise ValueError("Label minimum padding must be non-negative.")
+    padding = max(minimum_padding, round(max(label_width, label_height) / 4))
+    x = center[0] - label_width / 2
+    y = center[1] - label_height / 2
+    return (
+        round(x - padding),
+        round(y - padding),
+        round(x + label_width + padding),
+        round(y + label_height + padding),
+    )

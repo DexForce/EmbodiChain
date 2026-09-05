@@ -14,6 +14,24 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from . import sim
-from . import gym
+"""EmbodiChain's robotics laboratory.
+
+Bundles Task Programs, simulation and environment runtime components,
+real-device controllers, and browser visualization.
+"""
+
+from __future__ import annotations
+
 from . import devices
+from . import task_program
+from . import gym
+from . import sim
+from . import visualization
+
+__all__ = [
+    "devices",
+    "task_program",
+    "gym",
+    "sim",
+    "visualization",
+]

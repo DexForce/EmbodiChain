@@ -186,7 +186,6 @@ embodichain/database/train/*
 Log/
 
 # tensorboard logs
-embodichain/agents/policy/runs/*
 *.pth
 outputs
 test_configs/*
@@ -203,3 +202,15 @@ embodichain/VERSION
 
 # benchmark results
 scripts/benchmark/rl/reports/*
+
+# Local agent execution state and isolated worktrees
+.superpowers/
+.worktrees/
+# Local gym project workspace
+/gym_project/
+.gen_sim/
+
+# Local Gradio UI dependencies, generated Articraft records, and bytecode
+/embodichain/gen_sim/gradio_ui/.articraft/
+/embodichain/gen_sim/gradio_ui/.gen_sim/
+/embodichain/gen_sim/gradio_ui/__pycache__/

@@ -14,11 +14,33 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .config import AlgorithmCfg
+"""RL helper utilities: algorithm config, optimizers, and observation helpers."""
+
+from .config import AlgorithmCfg, LRSchedulerCfg, OptimizerCfg
 from .helper import dict_to_tensordict, flatten_dict_observation
+from .optimizer import (
+    bind_scheduler_horizon,
+    build_lr_scheduler,
+    build_optimizer,
+    coerce_lr_scheduler_cfg,
+    coerce_optimizer_cfg,
+    get_registered_lr_scheduler_names,
+    get_registered_optimizer_names,
+    scheduler_needs_horizon,
+)
 
 __all__ = [
     "AlgorithmCfg",
+    "LRSchedulerCfg",
+    "OptimizerCfg",
+    "bind_scheduler_horizon",
+    "build_lr_scheduler",
+    "build_optimizer",
+    "coerce_lr_scheduler_cfg",
+    "coerce_optimizer_cfg",
     "dict_to_tensordict",
     "flatten_dict_observation",
+    "get_registered_lr_scheduler_names",
+    "get_registered_optimizer_names",
+    "scheduler_needs_horizon",
 ]

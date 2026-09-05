@@ -14,18 +14,28 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 
 import functools
 from abc import ABC, abstractmethod
-from dataclasses import MISSING
+from collections.abc import Mapping
+from dataclasses import MISSING, dataclass
+from typing import Literal
 
 from embodichain.utils import logger
 from embodichain.utils import configclass
 from embodichain.lab.sim.sim_manager import SimulationManager
-from .utils import PlanState, PlanResult
+from .utils import MoveType, PlanState, PlanResult
 
-__all__ = ["BasePlannerCfg", "PlanOptions", "BasePlanner", "validate_plan_options"]
+__all__ = [
+    "BasePlannerCfg",
+    "CollisionWorldInfo",
+    "PlanOptions",
+    "BasePlanner",
+    "validate_plan_options",
+]
 
 
 @configclass
@@ -40,6 +50,57 @@ class BasePlannerCfg:
 @configclass
 class PlanOptions:
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class CollisionWorldInfo:
+    """Describe one planner's collision-world integration contract.
+
+    Args:
+        entity_ids: Every canonical entity ID represented in the planner world.
+        dynamic_entity_ids: Canonical IDs accepted for per-plan pose updates.
+        batch_mode: Whether the collision world is shared across environments or
+            instantiated per environment. ``None`` means the mode is irrelevant
+            or unspecified.
+        supports_updates: Whether the planner accepts per-plan dynamic poses via
+            :meth:`BasePlanner.with_collision_world`.
+    """
+
+    entity_ids: tuple[str, ...] = ()
+    dynamic_entity_ids: tuple[str, ...] = ()
+    batch_mode: Literal["shared", "per_env"] | None = None
+    supports_updates: bool = False
+
+    def __post_init__(self) -> None:
+        for field_name, entity_ids in (
+            ("entity_ids", self.entity_ids),
+            ("dynamic_entity_ids", self.dynamic_entity_ids),
+        ):
+            if not isinstance(entity_ids, tuple) or not all(
+                isinstance(entity_id, str)
+                and entity_id
+                and entity_id == entity_id.strip()
+                for entity_id in entity_ids
+            ):
+                raise TypeError(
+                    f"{field_name} must be a tuple of non-empty strings without "
+                    "outer whitespace."
+                )
+            if len(set(entity_ids)) != len(entity_ids):
+                raise ValueError(f"{field_name} must contain unique IDs.")
+
+        unknown_dynamic_ids = sorted(
+            set(self.dynamic_entity_ids).difference(self.entity_ids)
+        )
+        if unknown_dynamic_ids:
+            raise ValueError(
+                "dynamic_entity_ids must be a subset of entity_ids; unknown="
+                f"{unknown_dynamic_ids}."
+            )
+        if self.batch_mode not in (None, "shared", "per_env"):
+            raise ValueError("batch_mode must be 'shared', 'per_env', or None.")
+        if not isinstance(self.supports_updates, bool):
+            raise TypeError("supports_updates must be a bool.")
 
 
 def _infer_batch_size(target_states: list[PlanState]) -> int | None:
@@ -155,6 +216,122 @@ class BasePlanner(ABC):
 
         self.device = self.robot.device
 
+    supported_move_types: frozenset[MoveType] = frozenset()
+    """Movement target types accepted directly by this planner.
+
+    :class:`MotionGenerator` uses this declaration to validate targets and
+    determine whether Cartesian targets must first be converted into joint
+    waypoints for a joint-only backend.
+    """
+
+    preserve_plan_samples: bool = False
+    """Whether callers must retain this planner's returned sample points exactly.
+
+    When ``True``, :class:`MotionGenerator` returns the planner's trajectory
+    without resampling, preserving collision-checked samples. When ``False``
+    (the default), the generator may normalize the trajectory to a requested
+    waypoint count.
+    """
+
+    supports_collision_world_updates: bool = False
+    """Whether per-plan dynamic obstacle poses can update the collision world."""
+
+    supports_joint_trajectory_validation: bool = False
+    """Whether exact joint samples can be checked against bounds/collisions."""
+
+    @property
+    def collision_world_info(self) -> CollisionWorldInfo | None:
+        """Return the planner's collision-world contract, if it has one."""
+        return None
+
+    def supports_move_type(self, move_type: MoveType) -> bool:
+        """Return whether the planner accepts a movement target type directly.
+
+        Args:
+            move_type: Movement target type to query.
+
+        Returns:
+            ``True`` when :meth:`plan` accepts the target type without
+            :class:`MotionGenerator` preprocessing.
+        """
+        return move_type in self.supported_move_types
+
+    def default_plan_options(self) -> PlanOptions:
+        """Return backend-default planning options."""
+        return PlanOptions()
+
+    def with_motion_context(
+        self,
+        options: PlanOptions,
+        *,
+        start_qpos: torch.Tensor | None,
+        control_part: str | None,
+    ) -> PlanOptions:
+        """Attach MotionGenerator runtime context to backend options.
+
+        The base planner has no context fields and therefore returns ``options``
+        unchanged. Backends with contextual options override this method.
+
+        Args:
+            options: The backend's planning options, already constructed (either
+                by the caller or via :meth:`default_plan_options`).
+            start_qpos: Optional starting joint configuration ``(B, DOF)``.
+            control_part: Optional control-part name.
+
+        Returns:
+            The (possibly mutated) planning options carrying the context.
+        """
+        return options
+
+    def with_collision_world(
+        self,
+        options: PlanOptions,
+        *,
+        obstacle_poses: Mapping[str, torch.Tensor],
+    ) -> PlanOptions:
+        """Attach dynamic obstacle poses to backend planning options.
+
+        The base planner does not consume a collision world. Backends whose
+        :attr:`collision_world_info` enables updates override this method.
+
+        Args:
+            options: Backend-specific options to enrich.
+            obstacle_poses: Batched world poses keyed by stable obstacle ID.
+
+        Returns:
+            Planning options unchanged for a backend without world updates.
+        """
+        return options
+
+    def validate_joint_trajectory(
+        self,
+        trajectory: torch.Tensor,
+        *,
+        control_part: str,
+        obstacle_poses: Mapping[str, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        """Validate exact joint samples without replacing their path.
+
+        Backends that implement this contract must evaluate every supplied
+        sample against joint bounds, self-collision, and their configured world
+        collision model. They return a boolean mask with shape ``(B, T)``.
+
+        Args:
+            trajectory: Simulator-order joint samples with shape ``(B, T, D)``.
+            control_part: Robot control part whose ordered joints form ``D``.
+            obstacle_poses: Optional current dynamic-obstacle world poses.
+
+        Returns:
+            Per-environment, per-sample validity mask.
+
+        Raises:
+            NotImplementedError: Always for the base planner.
+        """
+        del trajectory, control_part, obstacle_poses
+        raise NotImplementedError(
+            f"{type(self).__name__} does not validate exact joint trajectories."
+        )
+
     @validate_plan_options
     @abstractmethod
     def plan(
@@ -182,7 +359,12 @@ class BasePlanner(ABC):
                   accelerations. Populated by planners that compute dynamics; may
                   be ``None`` for planners that do not.
                 - dt: torch.Tensor ``(B, N)``, per-point time deltas
-                - duration: torch.Tensor ``(B,)``, total trajectory duration per env
+                - duration: derived torch.Tensor ``(B,)``, total trajectory
+                  duration per env
+
+                Returning ``positions`` without ``dt`` raises at
+                :class:`PlanResult` construction. ``duration`` is always derived
+                from ``dt.sum(dim=1)``.
         """
         logger.log_error("Subclasses must implement plan() method", NotImplementedError)
 

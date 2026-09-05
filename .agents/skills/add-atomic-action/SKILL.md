@@ -1,339 +1,394 @@
 ---
 name: add-atomic-action
-description: Use when adding a new simulation atomic action or motion primitive to EmbodiChain's AtomicActionEngine.
+description: Add a new simulation atomic action or motion primitive to EmbodiChain's typed planning and execution framework. Use when implementing a new skill, goal contract, action planner, symbolic effect, registration entry, documentation, and tests for AtomicActionEngine.
 ---
 
 # Add Atomic Action
 
-Scaffold a new atomic action following EmbodiChain's `AtomicAction` pattern: a typed
-target, a `WorldState` threaded across actions, and an `ActionResult` carrying a
-full-DoF trajectory.
+Add an action-owned goal and a side-effect-free `AtomicAction._plan()`
+implementation. The inherited public `plan()` entry point binds the current
+collision scene before calling the skill hook. The engine owns all
+motion-planning resources; action constructors accept only optional typed
+default options. Keep task-graph/MLLM logic, simulator stepping, controller
+I/O, and physical-effect commits outside the action.
 
-## When to Use
+## Read the current contracts
 
-- User asks to add a new motion primitive (push, wipe, insert, hand-over, …)
-- User says "add a new atomic action", "create a custom action", "implement a push action"
-- User wants to extend `AtomicActionEngine` with a behaviour not covered by the built-ins
-
-## Key Files
+Inspect only the files relevant to the requested skill:
 
 | Purpose | Path |
-|---------|------|
-| Base classes (`ActionCfg`, `AtomicAction`, `WorldState`, `ActionResult`, typed targets, `ObjectSemantics`) | `embodichain/lab/sim/atomic_actions/core.py` |
-| Affordance types (`Affordance`, `AntipodalAffordance`, `InteractionPoints`) | `embodichain/lab/sim/atomic_actions/affordance.py` |
-| Stateless trajectory helpers (`TrajectoryBuilder`) | `embodichain/lab/sim/atomic_actions/trajectory.py` |
-| Built-in action primitives (reference implementations) | `embodichain/lab/sim/atomic_actions/primitives/` |
-| Backward-compatible action re-export module | `embodichain/lab/sim/atomic_actions/actions.py` |
-| Engine + global registry (`register_action`, `AtomicActionEngine.register` / `run`) | `embodichain/lab/sim/atomic_actions/engine.py` |
-| Public API exports | `embodichain/lab/sim/atomic_actions/__init__.py` |
-| Reference docs | `docs/source/overview/sim/atomic_actions/index.md`, `docs/source/overview/sim/atomic_actions/builtin_actions.md` |
+|---|---|
+| Base action and descriptors | `embodichain/lab/sim/atomic_actions/core.py` |
+| Goals and dynamic pose references | `embodichain/lab/sim/atomic_actions/goals.py` |
+| Skill endpoint requirements | `embodichain/lab/sim/atomic_actions/requirements.py` |
+| Resolved endpoint bindings and targets | `embodichain/lab/sim/atomic_actions/bindings.py` |
+| Invocation, options, and resolved request | `embodichain/lab/sim/atomic_actions/invocation.py` |
+| Control-part semantic commands | `embodichain/lab/sim/atomic_actions/control.py` |
+| Invocation policies | `embodichain/lab/sim/atomic_actions/policies.py` |
+| Robot/task/scene state | `embodichain/lab/sim/atomic_actions/state.py` |
+| Dynamic scene provider contract | `embodichain/lab/sim/atomic_actions/scene.py` |
+| Effects and plans | `embodichain/lab/sim/atomic_actions/effects.py`, `plans.py` |
+| Runtime command frames and payloads | `embodichain/lab/sim/atomic_actions/runtime_commands.py` |
+| Endpoint command transports | `embodichain/lab/sim/atomic_actions/transports.py` |
+| Trajectory helpers | `embodichain/lab/sim/atomic_actions/trajectory_ops.py` |
+| Engine-owned planning resources | `embodichain/lab/sim/atomic_actions/runtime.py` |
+| Declarative robot resources and adapters | `embodichain/lab/task_program/semantics/profiles.py` |
+| Reference implementations | `embodichain/lab/sim/atomic_actions/primitives/` |
+| Static compiler and execution session | `engine.py`, `execution.py` |
+| Controller-facing execution ports | `runner.py`, `sim_adapter.py` |
 
-## The Contract (read first)
-
-Every atomic action is a **sibling** inheriting `AtomicAction` directly — do **not**
-inherit from `MoveEndEffector` or any other action. Each action:
-
-1. Declares `TargetType: ClassVar[type | tuple[type, ...]]` — the concrete target dataclass,
-   or tuple of dataclasses, it accepts.
-2. Holds `self.builder = TrajectoryBuilder(motion_generator)` for shared trajectory math.
-3. Implements exactly one method: `execute(self, target, state: WorldState) -> ActionResult`.
-   - `target` is an instance of `self.TargetType`.
-   - `state.last_qpos` is the full-robot qpos `(n_envs, robot.dof)` to plan from;
-     `state.held_object` is the object currently grasped (or `None`).
-   - Returns `ActionResult(success, trajectory, next_state)` where `trajectory` is
-     full-DoF shaped `(n_envs, n_waypoints, robot.dof)` and `next_state` is the
-     successor `WorldState` (advance `last_qpos` to the trajectory's final row;
-     set/clear/preserve `held_object` per the action's semantics).
-   - `success` is a per-environment boolean tensor of shape `(n_envs,)` (or a
-     scalar bool). Use `ActionResult.success_all` (or `.success.all()`) when you
-     need a single aggregate boolean.
-
-There is **no** `validate` method, **no** `**kwargs`, **no** `start_qpos` parameter,
-**no** `updates_held_object_state` flag, and **no** `get_held_object_state`. The
-`WorldState` is the single channel for inter-action state.
-
-`ActionCfg` (and therefore every action cfg) carries two motion-source fields used
-by `TrajectoryBuilder.plan_arm_traj`:
-- `motion_source: str = "ik_interp"` — `"ik_interp"` (batched IK + interpolation)
-  or `"motion_gen"` (delegates to the batched `MotionGenerator`).
-- `planner_type: str | None = None` — `"toppra"` or `"neural"`; required when
-  `motion_source="motion_gen"`.
-
-## Steps
-
-### 1. Define the config
-
-Add a `@configclass`-decorated class that extends `ActionCfg` **directly** (the cfg
-hierarchy is flat — do not inherit from another action's cfg). For a built-in
-primitive, place the config beside the action class in
-`embodichain/lab/sim/atomic_actions/primitives/<action_name>.py`.
+The public contract is:
 
 ```python
-from __future__ import annotations
+plan = engine.plan(invocation: ActionInvocation[Goal], context: PlanningContext)
+```
+
+Use `engine.plan_action(action, invocation, context)` for a configured action
+that is intentionally not in the stable skill registry. Never pass a motion
+generator to an action constructor.
+
+Do not add compatibility code for `ActionTarget`, `WorldState`, `ActionResult`,
+`execute()`, or `AtomicActionEngine.run()`.
+
+## 1. Define the goal
+
+Place a frozen action-owned dataclass beside the action. Add a stable
+`goal_kind: ClassVar[str]`. Do not inherit a marker base merely for dispatch;
+declare the accepted type on the action instead.
+
+```python
+from dataclasses import dataclass
+from typing import ClassVar
 
 import torch
 
-from embodichain.utils import configclass
-from embodichain.lab.sim.atomic_actions.core import ActionCfg
 
-
-@configclass
-class PushCfg(ActionCfg):
-    name: str = "push"            # must match the engine registration key
-    push_distance: float = 0.05   # metres to push forward
-    sample_interval: int = 30     # waypoints for the push phase
-    control_part: str = "arm"
+@dataclass(frozen=True, slots=True, eq=False)
+class PushGoal:
+    goal_kind: ClassVar[str] = "push"
+    contact_pose: torch.Tensor
 ```
 
-**Rules:**
-- `name` must be unique and match the key used to register the action with the engine.
-- Inherit from `ActionCfg` directly. If the action needs hand open/close fields,
-  declare them on this cfg (see `PickUpCfg` for the pattern) — do not invent a
-  shared `GraspActionCfg` parent.
-- All fields must have defaults.
+Keep only semantic intent in the goal. Do not include arm/hand names, planner
+options, retry counts, live state, or a generic optional field bag. Use
+`SceneEntityPose` for a pose that must be resolved again when the scene moves.
+Use `ObjectActionGoal` only when the shared `semantics` field is genuinely
+required.
 
-### 2. Define a typed target (if needed)
+## 2. Define runtime options and control commands
 
-Reuse an existing target when it fits (`EndEffectorPoseTarget(xpos)` for an EEF-pose target,
-`JointPositionTarget(qpos)` for an explicit control-part qpos target,
-`NamedJointPositionTarget(name)` for a named qpos target resolved by action config,
-`GraspTarget(semantics)` for a pickup, `HeldObjectPoseTarget(object_target_pose)` for
-moving a grasped object). Only define a new frozen dataclass target when the action
-needs inputs the existing targets don't carry. Put new targets in `core.py`.
+Define a frozen `ActionOptions` subclass only when skill behavior may vary by
+invocation. Examples include distances, grasp constraints, and segment split
+counts. If no such behavior exists, use the base `ActionOptions`.
+
+Do not put `strategy`, planner choice, sample count, control period,
+velocity limits, collision policy, or recovery thresholds in skill options;
+those belong to `MotionPolicy` or `RecoveryPolicy`.
 
 ```python
 from dataclasses import dataclass
 
-@dataclass(frozen=True)
-class PushTarget:
-    contact_pose: torch.Tensor      # (4, 4) or (n_envs, 4, 4) EEF contact pose
+from embodichain.lab.sim.atomic_actions import ActionOptions
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class PushOptions(ActionOptions):
+    push_distance: float = 0.05
 ```
 
-### 3. Implement the action class
+Do not put arm/hand names, hand qpos, or named robot postures in options.
+Declare robot-independent participant slots and endpoints with
+`SkillBindingContract`; the engine or a bound robot skill profile produces the
+engine-owned `ActionBinding`. Register embodiment-specific commands such as
+`open`, `grasp`, or `ready` on `ControlPartCommandProfile`; use
+`ActionControlOverrides` only for one invocation revision.
 
-Subclass `AtomicAction` directly, declare `TargetType`, compose a `TrajectoryBuilder`,
-and implement `execute`.
+## 3. Implement the planner
+
+Inherit `AtomicAction[PushGoal, PushOptions]` directly. Declare stable metadata
+and an explicit, robot-independent endpoint contract. Every concrete action
+class must declare `binding_contract` in its own class body; use
+`SkillBindingContract()` for a skill that consumes no robot resource.
 
 ```python
-from __future__ import annotations
-
-import torch
 from typing import ClassVar
 
-from embodichain.lab.sim.planners import PlanState, MoveType
-from embodichain.lab.sim.atomic_actions.core import (
-    ActionCfg,
-    ActionResult,
+from embodichain.lab.sim.atomic_actions import (
+    ActionPlan,
     AtomicAction,
-    WorldState,
+    CARTESIAN_POSE_CAPABILITY,
+    JointPositionTarget,
+    PlanningContext,
+    ResolvedActionRequest,
+    SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
+    StateDelta,
 )
-from embodichain.lab.sim.atomic_actions.trajectory import TrajectoryBuilder
-from embodichain.utils import logger
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    build_pose_plan_states,
+    to_full_robot_trajectory,
+)
 
 
-class Push(AtomicAction):
-    """Push an object forward by a fixed distance from a contact pose."""
+class Push(AtomicAction[PushGoal, PushOptions]):
+    skill_id: ClassVar[str] = "push"
+    GoalType: ClassVar[type] = PushGoal
+    OptionsType: ClassVar[type] = PushOptions
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                slot_id="primary",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        endpoint_id="motion",
+                        capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
+                    ),
+                ),
+            ),
+        ),
+    )
 
-    TargetType: ClassVar[type] = PushTarget  # set to EndEffectorPoseTarget if you reused it
+    def __init__(self, default_options: PushOptions | None = None) -> None:
+        super().__init__(default_options)
 
-    def __init__(self, motion_generator, cfg: PushCfg | None = None):
-        super().__init__(motion_generator, cfg or PushCfg())
-        self.builder = TrajectoryBuilder(motion_generator)
-        self.n_envs = self.robot.get_qpos().shape[0]
-        self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
-        self.arm_dof = len(self.arm_joint_ids)
-        self.robot_dof = self.robot.dof
+    def _plan(
+        self,
+        request: ResolvedActionRequest[PushGoal, PushOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        goal = self.require_goal(request)
+        motion_target = request.binding.endpoint(
+            "primary", "motion"
+        ).require_target(JointPositionTarget)
+        control_part = motion_target.control_part
+        joint_ids = list(motion_target.joint_ids)
+        start_qpos = context.robot.qpos[:, joint_ids]
+        target_poses = goal.contact_pose
 
-    def execute(self, target: PushTarget, state: WorldState) -> ActionResult:
-        # 1. Resolve the batched contact pose (n_envs, 4, 4).
-        contact_xpos = self.builder.resolve_pose_target(
-            target.contact_pose, n_envs=self.n_envs
+        # Build planner states and generate controlled-joint motion using
+        # request.motion_policy. Embed it into full robot DoF.
+        result = self.motion_generator.generate(
+            build_pose_plan_states(target_poses),
+            options=request.motion_policy.to_motion_gen_options(
+                start_qpos=start_qpos,
+                control_part=control_part,
+            ),
         )
-
-        # 2. Resolve the arm start qpos from the threaded WorldState.
-        start_arm_qpos = self.builder.resolve_start_qpos(
-            state.last_qpos[:, self.arm_joint_ids],
-            n_envs=self.n_envs,
-            arm_dof=self.arm_dof,
-            control_part=self.cfg.control_part,
+        success, trajectory = to_full_robot_trajectory(
+            result,
+            base_qpos=context.robot.qpos,
+            joint_ids=joint_ids,
+            env_ids=context.env_ids,
+            control_dt=request.motion_policy.control_dt,
         )
-
-        # 3. Plan the arm trajectory via the builder (uses IK + interpolation by default;
-        #    set cfg.motion_source="motion_gen" to use the MotionGenerator instead).
-        target_states = [
-            [PlanState(xpos=contact_xpos[i], move_type=MoveType.EEF_MOVE)]
-            for i in range(self.n_envs)
-        ]
-        success, arm_traj = self.builder.plan_arm_traj(
-            target_states,
-            start_arm_qpos,
-            self.cfg.sample_interval,
-            control_part=self.cfg.control_part,
-            arm_dof=self.arm_dof,
-            cfg=self.cfg,
-        )
-
-        # 4. Embed the arm slice into a full-DoF trajectory (n_envs, n_wp, robot.dof).
-        full = torch.empty(
-            (self.n_envs, arm_traj.shape[1], self.robot_dof),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        full[:, :, :] = state.last_qpos.unsqueeze(1)
-        full[:, :, self.arm_joint_ids] = arm_traj
-
-        return ActionResult(
+        return self.build_plan(
+            request,
+            context,
             success=success,
-            trajectory=full,
-            next_state=WorldState(
-                last_qpos=full[:, -1, :].clone(),
-                held_object=state.held_object,  # push does not grasp
-            ),
-        )
-
-    def _fail(self, state: WorldState) -> ActionResult:
-        return ActionResult(
-            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
-            trajectory=torch.empty(
-                (self.n_envs, 0, self.robot_dof),
-                dtype=torch.float32,
-                device=self.device,
-            ),
-            next_state=state,
+            trajectory=trajectory,
+            expected_effects=StateDelta(),
         )
 ```
 
-**Rules:**
-- `execute()` returns an `ActionResult` — never a bare tuple.
-- `trajectory` shape is always `(n_envs, n_waypoints, robot.dof)` (full robot DoF).
-- Pass `cfg=self.cfg` to every `self.builder.plan_arm_traj(...)` call so the builder
-  reads `motion_source` / `planner_type` from the action config.
-- Use `self.builder.<helper>` for all trajectory math (`resolve_pose_target`,
-  `resolve_joint_target`, `resolve_start_qpos`, `apply_local_offset`, `plan_arm_traj`,
-  `plan_joint_traj`, `split_three_phase`, `interpolate_hand_qpos`). Do not reimplement
-  that math inline.
-- Thread `WorldState` explicitly: advance `last_qpos` to the final trajectory row;
-  set/clear/preserve `held_object` per what the action does to the grasp.
-- Use `logger.log_error(msg, ValueError)` for contract violations (wrong target type,
-  missing cfg fields); use `logger.log_warning` + `_fail(state)` for soft planning
-  failures.
-- Call `super().__init__()` — it sets `self.robot`, `self.motion_generator`,
-  `self.device`, `self.cfg`, `self.control_part`.
+Follow these invariants:
 
-### 4. Register the action
+- Let the engine supply `self.robot` and `self.motion_generator`; use
+  `_on_bind()` only for robot/device-dependent setup.
+- Keep slot and endpoint IDs semantic and robot-independent. Declare all-of
+  capabilities, required typed commands, and disjointness constraints in the
+  `SkillBindingContract`; do not infer resources from endpoint names.
+- Resolve an endpoint with `request.binding.endpoint(slot_id, endpoint_id)` and
+  call `require_target(ExpectedTarget)` before using target-specific fields.
+- Import pure target-shaping, interpolation, pose-translation, and full-robot
+  embedding helpers directly from `atomic_actions.trajectory_ops`; keep
+  stateful planning inside `MotionGenerator`.
+- Call `require_goal()` before planning.
+- Implement `_plan()` rather than overriding the framework-owned public
+  `plan()` method; the latter injects the latest dynamic obstacle poses into a
+  copied planner policy.
+- Plan from `context.robot.qpos`, never an implicit live robot start state.
+- For joint-backed motion, return full-robot `(B, N, robot.dof)` motion as a
+  tensor or `TimedTrajectory` with matching `env_ids` through `build_plan()`.
+- Preserve row-local planner success. `build_plan()` normalizes the mask and
+  replaces unsuccessful trajectory rows with the context's observed qpos.
+- Preserve backend timing/derivatives when available.
+- For a composite trajectory, pass an ordered `segment_lengths` mapping with
+  the actual returned waypoint counts. Segments are inspection metadata, not
+  independent planning or recovery boundaries.
+- Return `failed_plan(request, context, message=...)` for an expected soft
+  planning failure.
+- Never mutate the context, step simulation, send commands, or claim a physical
+  effect occurred.
+- Declare attachment/task changes with `StateDelta`; the execution runtime
+  applies them only after verification.
+- Set `scene_dependencies` indirectly by using `SceneEntityPose` in the goal;
+  `build_plan()` records them for dynamic invalidation.
+- Do not add dynamic-obstacle arguments to a skill. A `SceneProvider` declares
+  `collision_entity_ids`; supported planners receive those entity poses through
+  the framework-owned `plan()` entry point.
 
-Register an **instance** with the engine so `run()` can dispatch it by name.
+## 4. Emit generic runtime commands when needed
 
-```python
-from embodichain.lab.sim.atomic_actions import AtomicActionEngine, Push
-
-engine = AtomicActionEngine(motion_generator=motion_gen)
-engine.register(Push(motion_gen, cfg=PushCfg()))  # keyed by cfg.name "push"
-```
-
-For third-party / plugin actions that should be discoverable without the caller
-constructing them, register the **class** in the global registry:
-
-```python
-from embodichain.lab.sim.atomic_actions import register_action
-register_action("push", Push)
-```
-
-### 5. Export from the public API
-
-Add the config, action class, and any new target to the package exports. For a
-built-in primitive, first export it from
-`embodichain/lab/sim/atomic_actions/primitives/__init__.py`:
-
-```python
-from .push import Push, PushCfg
-
-__all__ = [
-    ...,
-    "Push",
-    "PushCfg",
-]
-```
-
-Then export it from the public API in
-`embodichain/lab/sim/atomic_actions/__init__.py`:
+Use `build_command_plan()` when a skill targets a mobile base, whole-body
+controller, tool, or another non-joint transport. Build immutable endpoint
+commands; keep live controller and device handles in the transport:
 
 ```python
-from .primitives import Push, PushCfg
-# (and from .core import PushTarget if you defined one)
-
-__all__ = [
-    ...,
-    "Push",
-    "PushCfg",
-]
+target = request.binding.endpoint("primary", "tool").require_target(ToolTarget)
+frames = tuple(
+    RuntimeCommandFrame(
+        commands=(EndpointCommand(target=target, payload=ToolPayload(value)),),
+        active_mask=torch.ones(
+            context.batch_size,
+            dtype=torch.bool,
+            device=context.robot.qpos.device,
+        ),
+        env_ids=context.env_ids,
+        hold_duration=torch.full(
+            (context.batch_size,),
+            request.motion_policy.control_dt,
+            device=context.robot.qpos.device,
+        ),
+    )
+    for value in command_values
+)
+return self.build_command_plan(
+    request,
+    context,
+    success=success,
+    commands=TimedCommandSequence(frames=frames, env_ids=context.env_ids),
+)
 ```
 
-Keep `embodichain/lab/sim/atomic_actions/actions.py` as a compatibility facade;
-update it only if the new built-in should also be available from the legacy
-`embodichain.lab.sim.atomic_actions.actions` import path.
+For a new transport kind:
 
-### 6. Update the supported actions table
+1. Define an immutable `RuntimeEndpointTarget` and `RuntimeCommandPayload` with
+   the same stable `transport_id`; both must return independently owned
+   snapshots. Payloads also expose `batch_size` and `device`. If target-specific
+   addressing or safe hold depends on fields beyond the exact target type,
+   `transport_id`, and `target_id`, override `address_fingerprint` to include
+   those immutable fields; frames, replans, and revisions preserve it.
+2. If declarative robot profiles select it, define a `ResourceEndpoint` and an
+   exact-type `ResourceEndpointAdapter` that returns `EndpointResolution` with
+   the runtime target and physical claim metadata.
+3. Implement `EndpointCommandTransport.send()`, `hold()`, and `cancel()`, then
+   register it in `EndpointCommandRouter` used as the `ExecutionRunner` command
+   sink. The router validates payload types before dispatch.
 
-Add a row to the table in `docs/source/overview/sim/atomic_actions/builtin_actions.md`:
+The default command-plan feedback mode is timed and `joint_trajectory` is
+optional. Use joint-position feedback only when a matching full-robot
+`joint_trajectory` is supplied. Test target/payload snapshot ownership, frame
+batch/device consistency, routing, acknowledgement, hold, and cancel behavior.
 
-```markdown
-| `Push` | Single | `PushTarget` — contact pose | Approach → push forward | Add a demo asset or `N/A` |
-```
+## 5. Register and invoke
 
-### 7. Write a test
-
-Add a test in `tests/sim/atomic_actions/` (append to `test_actions.py` or create a new
-file). Mock the `MotionGenerator` (see the `_make_mock_motion_generator` helper in
-`test_actions.py`) and assert on behaviour: target type, full-DoF trajectory shape,
-and the `WorldState` contract.
+Register an instance by its class-level `skill_id`:
 
 ```python
-def test_push_action_cfg_defaults():
-    cfg = PushCfg()
-    assert cfg.name == "push"
-    assert cfg.push_distance == 0.05
-
-def test_push_action_returns_full_dof_trajectory():
-    mg = _make_mock_motion_generator()
-    action = Push(mg, PushCfg(sample_interval=10))
-    state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
-    with patch(
-        "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
-        return_value=torch.zeros(NUM_ENVS, 10, ARM_DOF),
-    ):
-        result = action.execute(PushTarget(contact_pose=torch.eye(4)), state)
-    assert isinstance(result, ActionResult)
-    assert result.success_all is True
-    assert result.trajectory.shape == (NUM_ENVS, 10, TOTAL_DOF)
-    # push preserves held_object
-    assert result.next_state.held_object is state.held_object
+engine.register(Push())
 ```
 
-## Common Mistakes
+Use the global registry only for discoverable third-party classes:
 
-| Mistake | Fix |
-|---------|-----|
-| Inheriting from `MoveEndEffector` | Inherit `AtomicAction` directly and compose a `TrajectoryBuilder`. Actions are siblings, not a tree. |
-| Returning `(bool, Tensor, joint_ids)` | Return an `ActionResult` with a full-DoF `(n_envs, n_wp, robot.dof)` trajectory. |
-| Declaring `validate` / `updates_held_object_state` / `get_held_object_state` | These were removed. State flows only through `WorldState` and `ActionResult.next_state`. |
-| `execute(target, start_qpos=None, **kwargs)` | Signature is `execute(self, target, state: WorldState) -> ActionResult`. No `**kwargs`, no `start_qpos`. |
-| Reimplementing IK / interpolation inline | Use `self.builder.plan_arm_traj(...)`, `self.builder.plan_joint_traj(...)`, and friends. |
-| Returning arm-only or arm+hand trajectory | Always embed into full `robot.dof` before returning. |
-| Forgetting `cfg=self.cfg` in `plan_arm_traj` | The builder defaults to `motion_source="ik_interp"`; pass `cfg=self.cfg` to opt into `motion_gen` / `planner_type`. |
-| Treating `ActionResult.success` as a scalar | It is `(n_envs,)` for batched actions; use `.success_all` or `.success.all()` for a single bool. |
-| `name` not matching the engine registration key | Keep `cfg.name` identical to the key passed to `engine.register(...)` / `register_action(...)`. |
-| Forgetting to export from `__init__.py` | Users import from the public API — missing exports cause `ImportError`. |
-| Inheriting another action's cfg | Cfgs are flat; extend `ActionCfg` directly and declare the fields you need. |
+```python
+register_action(Push)
+```
 
-## Quick Reference
+Construct a grounded invocation explicitly:
 
-| Step | Action |
-|------|--------|
-| 1 | Define a flat `@configclass` extending `ActionCfg` with a unique `name` |
-| 2 | Define a typed target (or reuse `EndEffectorPoseTarget` / `JointPositionTarget` / `NamedJointPositionTarget` / `GraspTarget` / `HeldObjectPoseTarget`) |
-| 3 | Subclass `AtomicAction` directly, set `TargetType`, compose `TrajectoryBuilder`, implement `execute(target, state) -> ActionResult` (pass `cfg=self.cfg` to `plan_arm_traj` and return per-env `success`) |
-| 4 | Register: `engine.register(Push(mg, cfg=...))` (instance) or `register_action("push", Push)` (class) |
-| 5 | Export config + action (+ target) from `primitives/__init__.py` and `atomic_actions/__init__.py` |
-| 6 | Add a row to the supported-actions table in `builtin_actions.md` and update API reference docs |
-| 7 | Write behavioural tests (target type, full-DoF shape, `WorldState` contract) |
+```python
+binding = engine.bind_control_parts(
+    "push",
+    {"primary": {"motion": "left_arm"}},
+)
+invocation = ActionInvocation(
+    skill_id="push",
+    goal=PushGoal(contact_pose),
+    binding=binding,
+    motion_policy=MotionPolicy(sample_count=60),
+    recovery_policy=RecoveryPolicy(max_replans=2),
+)
+compiled = engine.compile((invocation,))
+```
+
+For dynamic scene updates or online error recovery, create a session with
+`engine.start(...)`, then connect it to observation, command, and clock ports
+through `ExecutionRunner`. Use non-blocking `runner.step()` in an existing event
+loop or `runner.run_until_blocked()` in a simple application.
+
+`engine.bind_control_parts()` is the explicit direct-core path for joint-backed
+control parts. When a `RobotSkillProfile` is installed, prefer
+`engine.skill_profile.resolve("push", selections).action_binding` so capability,
+command, resource-claim, and custom-adapter validation remain declarative.
+
+## 6. Export and document
+
+Export the goal, options, and action from:
+
+1. `embodichain/lab/sim/atomic_actions/primitives/__init__.py`
+2. `embodichain/lab/sim/atomic_actions/__init__.py`
+
+Add the stable skill ID, goal, binding slots/endpoints, and effect to
+`docs/source/overview/sim/atomic_actions/builtin_actions.md`. Update API docs for
+new public classes. Do not create a compatibility re-export module or a closed
+built-in-goal union.
+
+### Task Program handoff
+
+An Atomic Skill is not automatically a Task Program Semantic Call. If the user
+also requests high-level declarative exposure, finish and test the Atomic Skill
+contract first, then invoke `$add-semantic-call`. Prefer a registered Semantic
+Call extension unless the concept is intentionally promoted to a stable
+built-in language primitive.
+
+If the new skill requires new logical resources, endpoints, capabilities, or
+commands on a reusable robot, update them through
+`$add-embodiment-component`; do not encode task or profile metadata in the
+Atomic Action.
+
+## 7. Test behavior
+
+Add pure pytest tests under `tests/sim/atomic_actions/`. Cover:
+
+- descriptor `skill_id`, `GoalType`, and explicit binding contract;
+- invalid goal, wrong binding owner, and missing/extra endpoint rejection;
+- per-environment planning success/failure masks;
+- full-robot trajectory shape, `env_ids`, timing, and failed-row hold behavior;
+- generic command target/payload ownership, frame batch/device consistency, and
+  optional `joint_trajectory` behavior when the skill emits command frames;
+- side-effect-free context handling;
+- masked `StateDelta` application for task effects;
+- `SceneEntityPose` replanning when the action accepts a dynamic goal;
+- collision-world revision replanning when the action uses a dynamic-world
+  planner;
+- effect verification when the action declares a non-empty delta.
+
+Run focused tests, format changed Python files with the pinned Black version,
+then use the `pre-commit-check` skill before committing.
+
+## Common mistakes
+
+| Mistake | Required correction |
+|---|---|
+| Inherit another action | Inherit `AtomicAction` directly; compose helpers. |
+| Add one generic target with many optional fields | Define a narrow action-owned goal. |
+| Put hardware names in the goal | Declare semantic slots/endpoints and resolve an engine-owned binding. |
+| Put arm/hand control-part names in skill options | Read typed runtime targets from bound endpoints. |
+| Declare legacy role tuples on the action | Declare a class-local `SkillBindingContract`. |
+| Use role-specific binding accessors | Use `binding.endpoint(...).require_target(...)`. |
+| Construct a binding from role dictionaries | Use a bound skill profile, or `engine.bind_control_parts()` for the direct joint path. |
+| Pass an arbitrary joint/link/TCP name to the direct path | `bind_control_parts()` values must be keys in `RobotCfg.control_parts`; add an endpoint adapter for another resource kind. |
+| Put hand qpos or named robot postures in skill options | Register semantic commands on the concrete control-part profile. |
+| Put planner/recovery knobs in skill options | Move them to invocation policies. |
+| Pass a motion generator to each action | Pass it once to `AtomicActionEngine`; construct actions from default options only. |
+| Read `robot.get_qpos()` inside `plan()` | Use `context.robot.qpos`. |
+| Return an arm-only tensor | Embed into full robot DoF. |
+| Collapse or manually mask batched planner success | Return the row-local mask; let `build_plan()` hold unsuccessful rows. |
+| Model one action as independently recoverable phases | Return one trajectory with optional named segment metadata. |
+| Mutate held state after planning | Declare a `StateDelta`. |
+| Treat `plan_success` as physical success | Verify effects during execution. |
+| Step the simulator from the action | Emit plans; connect execution through `ExecutionRunner`. |
+| Put live controller handles in targets or payloads | Keep immutable addressing/data in values and own handles in the transport. |
+| Force a non-joint endpoint into a fake trajectory | Emit typed frames with `build_command_plan()` and install its transport. |
+| Override public `plan()` | Implement `_plan()` so scene binding cannot be bypassed. |

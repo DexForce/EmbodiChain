@@ -2,229 +2,407 @@ embodichain.lab.sim.atomic_actions
 ==================================
 
 .. automodule:: embodichain.lab.sim.atomic_actions
+   :members:
+   :no-index:
 
-   .. rubric:: Classes
+   .. rubric:: Planning contracts
 
    .. autosummary::
 
-      Affordance
-      AntipodalAffordance
-      InteractionPoints
-      ObjectSemantics
-      EndEffectorPoseTarget
+      ActionBinding
+      EndpointBinding
+      RuntimeEndpointTarget
       JointPositionTarget
-      NamedJointPositionTarget
-      GraspTarget
-      HeldObjectPoseTarget
-      CoordinatedPickmentTarget
-      CoordinatedPlacementTarget
-      Target
-      HeldObjectState
-      CoordinatedHeldObjectState
-      WorldState
-      ActionResult
-      ActionCfg
+      ControlCommand
+      JointPositionCommand
+      ControlPartCommandProfile
+      ActionControlOverrides
+      ActionInvocation
+      PhaseEffectGateRequirement
+      ResolvedActionRequest
+      ActionOptions
+      MotionPolicy
+      RecoveryPolicy
+      RobotObservation
+      TaskState
+      SceneSnapshot
+      SceneEntityPose
+      PlanningContext
+      StateDelta
+      TimedTrajectory
+      RuntimeCommandPayload
+      JointPositionPayload
+      EndpointCommand
+      RuntimeCommandFrame
+      TimedCommandSequence
+      TrajectorySegment
+      PlannerDiagnostics
+      PlanningFailure
+      ActionPlan
+      CompiledTrajectory
+
+   .. rubric:: Articulation geometry adaptation
+
+   .. autosummary::
+
+      ArticulationAffordanceGeometry
+      ArticulationGeometryProvider
+      ArticulationJointGeometry
+      sample_initial_articulation_geometry
+
+   .. rubric:: Semantic resource contracts
+
+   .. autosummary::
+
+      SkillDescriptor
+      SkillBindingContract
+      SkillResourceSlot
+      SkillEndpointRequirement
+      DisjointSlotEndpoints
+      DisjointResourceSlots
+
+   .. rubric:: Execution contracts
+
+   .. autosummary::
+
       AtomicAction
-      TrajectoryBuilder
-      MoveEndEffectorCfg
-      MoveEndEffector
-      MoveJointsCfg
-      MoveJoints
-      PickUpCfg
-      PickUp
-      MoveHeldObjectCfg
-      MoveHeldObject
-      PlaceCfg
-      Place
-      PressCfg
-      Press
-      CoordinatedPickmentCfg
-      CoordinatedPickment
-      CoordinatedPlacementCfg
-      CoordinatedPlacement
       AtomicActionEngine
+      ExecutionSession
+      ExecutionRunner
+      ExecutionRunnerCfg
+      RunnerStep
+      RunnerStatus
+      ObservationProvider
+      CommandSink
+      EndpointCommandTransport
+      EndpointCommandRouter
+      CommandAcknowledgement
+      CommandAckStatus
+      CommandDispatch
+      CommandOperation
+      ExecutionClock
+      create_simulation_atomic_action_engine
+      SimulationExecutionAdapter
+      ExecutionTick
+      EffectVerificationRequest
+      EffectVerificationRequirement
+      EffectVerificationResult
+      PhaseEffectGateRequest
+      PhaseEffectGateResult
+      HeldObjectGuardRequest
+      HeldObjectGuardResult
+      ExecutionPlanAttempt
+      ExecutionEvent
+      ExecutionEventKind
+      ExecutionStatus
+
+   .. rubric:: Built-in goals and actions
+
+   .. autosummary::
+
+      EndEffectorPoseGoal
+      JointPositionGoal
+      GraspGoal
+      HandOverGoal
+      AxisAlignGoal
+      AxisAlignOptions
+      AxisAlignAffordance
+      HeldObjectPoseGoal
+      PourGoal
+      PourOptions
+      PushObjectGoal
+      PushObjectOptions
+      PushObjectToolCalibration
+      PlaceGoal
+      AssembleGoal
+      PressGoal
+      PressOptions
+      PressAffordance
+      SlideGoal
+      SlideOptions
+      SlideAffordance
+      OpenDoorGoal
+      OpenDoorOptions
+      OpenDoorAffordance
+      TwistGoal
+      TwistOptions
+      TwistAffordance
+      CoordinatedPickGoal
+      CoordinatedPlacementGoal
+      MoveEndEffector
+      MoveJoints
+      PickUp
+      AxisAlign
+      MoveHeldObject
+      Pour
+      PushObject
+      Place
+      Press
+      Slide
+      OpenDoor
+      Twist
+      CoordinatedPickment
+      CoordinatedPlacement
+      HandOver
 
 .. toctree::
    :maxdepth: 1
    :hidden:
 
    embodichain.lab.sim.atomic_actions.primitives
+   embodichain.lab.sim.atomic_actions.tracking
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions
 
-Layout
-------
+Articulation geometry adaptation
+--------------------------------
 
-The public API is exported from ``embodichain.lab.sim.atomic_actions``. Built-in
-primitive implementations live under
-``embodichain.lab.sim.atomic_actions.primitives`` and
-``embodichain.lab.sim.atomic_actions.actions`` remains a compatibility re-export
-for existing imports.
+The adapter converts deterministic articulation meshes, FK, and parent-joint
+topology into sampled Atomic Action affordance geometry. Initial state and scale
+are explicit inputs; the simulation object does not own sampling or semantic
+geometry keys.
 
-Core
-----
+.. currentmodule:: embodichain.lab.sim.atomic_actions.articulation_geometry
 
-.. autoclass:: Affordance
-    :members:
-    :show-inheritance:
+.. autoclass:: ArticulationGeometryProvider
+   :members:
 
-.. autoclass:: AntipodalAffordance
-    :members:
-    :show-inheritance:
+.. autoclass:: ArticulationJointGeometry
+   :members:
 
-.. autoclass:: InteractionPoints
-    :members:
-    :show-inheritance:
+.. autoclass:: ArticulationAffordanceGeometry
+   :members:
 
-.. autoclass:: ObjectSemantics
-    :members:
-    :show-inheritance:
+.. autofunction:: sample_initial_articulation_geometry
 
-.. autoclass:: EndEffectorPoseTarget
-    :members:
-    :show-inheritance:
+.. currentmodule:: embodichain.lab.sim.atomic_actions
 
-.. autoclass:: JointPositionTarget
-    :members:
-    :show-inheritance:
+Semantic resource contracts
+---------------------------
 
-.. autoclass:: NamedJointPositionTarget
-    :members:
-    :show-inheritance:
+.. autoclass:: SkillDescriptor
+   :members:
 
-.. autoclass:: GraspTarget
-    :members:
-    :show-inheritance:
+.. autoclass:: SkillBindingContract
+   :members:
 
-.. autoclass:: HeldObjectPoseTarget
-    :members:
-    :show-inheritance:
+.. autoclass:: SkillResourceSlot
+   :members:
 
-.. autoclass:: CoordinatedPickmentTarget
-    :members:
-    :show-inheritance:
+.. autoclass:: SkillEndpointRequirement
+   :members:
 
-.. autoclass:: CoordinatedPlacementTarget
-    :members:
-    :show-inheritance:
+.. autoclass:: DisjointSlotEndpoints
+   :members:
 
-.. autodata:: Target
+.. autoclass:: DisjointResourceSlots
+   :members:
 
-.. autoclass:: HeldObjectState
-    :members:
-    :show-inheritance:
+Standard capability identifiers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. autoclass:: CoordinatedHeldObjectState
-    :members:
-    :show-inheritance:
+.. autodata:: JOINT_POSITION_CAPABILITY
 
-.. autoclass:: WorldState
-    :members:
-    :show-inheritance:
+.. autodata:: CARTESIAN_POSE_CAPABILITY
 
-.. autoclass:: ActionResult
-    :members:
-    :show-inheritance:
+.. autodata:: FORWARD_KINEMATICS_CAPABILITY
 
-.. autoclass:: ActionCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
+.. autodata:: INVERSE_KINEMATICS_CAPABILITY
 
-.. autoclass:: AtomicAction
-    :members:
-    :show-inheritance:
+.. autodata:: BATCH_INVERSE_KINEMATICS_CAPABILITY
 
-Trajectory helpers
+.. autodata:: GRASP_CAPABILITY
+
+Planning and state
 ------------------
 
-.. autoclass:: TrajectoryBuilder
-    :members:
-    :show-inheritance:
+.. autoclass:: ActionBinding
+   :members:
 
-Actions
--------
+.. autoclass:: EndpointBinding
+   :members:
 
-.. autoclass:: MoveEndEffectorCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-    :show-inheritance:
+.. autoclass:: RuntimeEndpointTarget
+   :members:
 
-.. autoclass:: MoveEndEffector
-    :members:
-    :show-inheritance:
+.. autoclass:: JointPositionTarget
+   :members:
 
-.. autoclass:: MoveJointsCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-    :show-inheritance:
+.. autoclass:: ControlCommand
+   :members:
 
-.. autoclass:: MoveJoints
-    :members:
-    :show-inheritance:
+.. autoclass:: JointPositionCommand
+   :members:
 
-.. autoclass:: PickUpCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-    :show-inheritance:
+.. autoclass:: ControlPartCommandProfile
+   :members:
 
-.. autoclass:: PickUp
-    :members:
-    :show-inheritance:
+.. autoclass:: ActionControlOverrides
+   :members:
 
-.. autoclass:: MoveHeldObjectCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-    :show-inheritance:
+.. autoclass:: ActionInvocation
+   :members:
 
-.. autoclass:: MoveHeldObject
-    :members:
-    :show-inheritance:
+.. autoclass:: ResolvedActionRequest
+   :members:
 
-.. autoclass:: PlaceCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-    :show-inheritance:
+.. autoclass:: ActionOptions
+   :members:
 
-.. autoclass:: Place
-    :members:
-    :show-inheritance:
+.. autoclass:: MotionPolicy
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict
 
-.. autoclass:: PressCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-    :show-inheritance:
+.. autoclass:: RecoveryPolicy
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict
 
-.. autoclass:: Press
-    :members:
-    :show-inheritance:
+.. autoclass:: PlanningContext
+   :members:
 
-.. autoclass:: CoordinatedPickmentCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-    :show-inheritance:
+.. autoclass:: RobotObservation
+   :members:
 
-.. autoclass:: CoordinatedPickment
-    :members:
-    :show-inheritance:
+.. autoclass:: TaskState
+   :members:
 
-.. autoclass:: CoordinatedPlacementCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-    :show-inheritance:
+.. autoclass:: SceneSnapshot
+   :members:
 
-.. autoclass:: CoordinatedPlacement
-    :members:
-    :show-inheritance:
+.. autoclass:: SceneEntityPose
+   :members:
 
-Engine & Registry
------------------
+.. autoclass:: StateDelta
+   :members:
+
+.. autoclass:: TimedTrajectory
+   :members:
+
+.. autoclass:: PlanningFailure
+   :members:
+
+.. autoclass:: RuntimeCommandPayload
+   :members:
+
+.. autoclass:: JointPositionPayload
+   :members:
+
+.. autoclass:: EndpointCommand
+   :members:
+
+.. autoclass:: RuntimeCommandFrame
+   :members:
+
+.. autoclass:: TimedCommandSequence
+   :members:
+
+.. autoclass:: ActionPlan
+   :members:
+
+Engine and execution
+--------------------
+
+.. autoclass:: AtomicAction
+   :members:
 
 .. autoclass:: AtomicActionEngine
-    :members:
-    :show-inheritance:
+   :members:
 
-.. autofunction:: register_action
+.. autoclass:: ExecutionSession
+   :members:
 
-.. autofunction:: unregister_action
+.. autoclass:: ExecutionRunner
+   :members:
 
-.. autofunction:: get_registered_actions
+.. autoclass:: ExecutionRunnerCfg
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict
+
+.. autoclass:: ObservationProvider
+   :members:
+
+.. autoclass:: CommandSink
+   :members:
+
+.. autoclass:: EndpointCommandTransport
+   :members:
+
+.. autoclass:: EndpointCommandRouter
+   :members:
+
+.. autoclass:: ExecutionClock
+   :members:
+
+.. autoclass:: MonotonicExecutionClock
+   :members:
+
+.. autofunction:: create_simulation_atomic_action_engine
+
+.. autoclass:: SimulationExecutionAdapter
+   :members:
+
+.. autoclass:: CommandAcknowledgement
+   :members:
+
+.. autoclass:: CommandAckStatus
+   :members:
+
+.. autoclass:: CommandDispatch
+   :members:
+
+.. autoclass:: CommandOperation
+   :members:
+
+.. autoclass:: RunnerStep
+   :members:
+
+.. autoclass:: RunnerStatus
+   :members:
+
+.. autoclass:: ExecutionTick
+   :members:
+
+.. autoclass:: ExecutionEvent
+   :members:
+
+.. autoclass:: ExecutionEventKind
+   :members:
+
+.. autoclass:: ExecutionStatus
+   :members:
+
+.. autoclass:: EffectVerificationRequest
+   :members:
+
+.. autoclass:: EffectVerificationRequirement
+   :members:
+
+.. autoclass:: EffectVerificationResult
+   :members:
+
+.. autoclass:: ExecutionPlanAttempt
+   :members:
+
+Semantic objects and helpers
+----------------------------
+
+.. autoclass:: ObjectSemantics
+   :members:
+
+.. autoclass:: HeldObjectState
+   :members:
+
+Verification implementation module
+----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.verification
+
+.. autosummary::
+
+   EffectExpectationResult
+   EffectVerificationRequest
+   EffectVerificationResult
+   HeldObjectGuardRequest
+   HeldObjectGuardResult
+   PhaseEffectGateRequest
+   PhaseEffectGateResult

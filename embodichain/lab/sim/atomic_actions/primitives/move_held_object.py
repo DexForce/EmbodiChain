@@ -18,161 +18,186 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import ClassVar
 
 import torch
 
-from embodichain.lab.sim.planners import MoveType, PlanState
-from embodichain.utils import configclass, logger
-
-from ._helpers import arm_qpos_from_state, resolve_object_target
-from ..core import (
-    ActionCfg,
-    ActionResult,
-    AtomicAction,
-    HeldObjectPoseTarget,
-    WorldState,
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    arm_qpos_from_state,
+    require_shared_task_state_key,
+    resolve_object_target,
 )
-from embodichain.utils.math import (
-    axis_angle_to_rotation_matrix,
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.control import (
+    GRASP_COMMAND,
+    JointPositionCommand,
 )
-from ..trajectory import TrajectoryBuilder
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.goals import (
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
+from embodichain.lab.sim.atomic_actions.requirements import (
+    CARTESIAN_POSE_CAPABILITY,
+    FORWARD_KINEMATICS_CAPABILITY,
+    SkillBindingContract,
+)
+from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import build_pose_plan_states
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
+)
 
 
-@configclass
-class MoveHeldObjectCfg(ActionCfg):
-    name: str = "move_held_object"
-    """Name of the action, used for identification and logging."""
+@dataclass(frozen=True, slots=True, eq=False)
+class HeldObjectPoseGoal:
+    """Desired pose for the object held by this action's control part."""
 
-    sample_interval: int = 50
-    """Number of waypoints in the planned trajectory."""
+    object_target_pose: PoseGoalValue
+    """Target object pose, shape ``(4, 4)`` or ``(num_envs, 4, 4)``."""
 
-    hand_control_part: str = "hand"
-    """Name of the robot part that controls the hand joints."""
-
-    hand_close_qpos: torch.Tensor | None = None
-    """Joint positions for the closed hand state, shape ``[hand_dof,]``."""
-
-    obj_upright_direction: torch.Tensor | None = None
-    """Optional object local direction to align with world up after grasping. By dafault we will use (0, 0, 1)."""
-
-    pick_rotate_upright: float | None = None
-    """Optional rotation (radians) about the grasp y-axis to apply to the grasp pose"""
+    def __post_init__(self) -> None:
+        validate_pose_goal(
+            self.object_target_pose,
+            "object_target_pose",
+            allow_waypoints=False,
+        )
 
 
-class MoveHeldObject(AtomicAction):
-    """Move the held object to a target object pose; keep the gripper closed."""
+@dataclass(frozen=True, slots=True, eq=False)
+class MoveHeldObjectOptions(ActionOptions):
+    """Per-invocation held-object transport behavior."""
 
-    TargetType: ClassVar[type] = HeldObjectPoseTarget
 
-    def __init__(
+class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
+    """Move the held object to the exact target object pose with a closed hand.
+
+    The requested object orientation is preserved exactly. Callers that need a
+    transport orientation must encode it in :class:`HeldObjectPoseGoal`; this
+    action never substitutes an implicit end-effector orientation.
+    """
+
+    skill_id: ClassVar[str] = "move_held_object"
+    GoalType: ClassVar[type] = HeldObjectPoseGoal
+    OptionsType: ClassVar[type] = MoveHeldObjectOptions
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            make_manipulation_slot(
+                "primary",
+                motion_capabilities=frozenset(
+                    {
+                        CARTESIAN_POSE_CAPABILITY,
+                        FORWARD_KINEMATICS_CAPABILITY,
+                    }
+                ),
+                grasp_commands={GRASP_COMMAND: JointPositionCommand},
+            ),
+        ),
+    )
+
+    def _plan(
         self,
-        motion_generator,
-        cfg: MoveHeldObjectCfg | None = None,
-    ) -> None:
-        super().__init__(motion_generator, cfg or MoveHeldObjectCfg())
-        self.builder = TrajectoryBuilder(motion_generator)
-        self.n_envs = self.robot.get_qpos().shape[0]
-        self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
-        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
-        self.arm_dof = len(self.arm_joint_ids)
-        self.robot_dof = self.robot.dof
-
-        if self.cfg.hand_close_qpos is None:
-            logger.log_error(
-                "hand_close_qpos must be specified in MoveHeldObjectCfg", ValueError
+        request: ResolvedActionRequest[HeldObjectPoseGoal, MoveHeldObjectOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        """Plan exact object-space transport without changing the attachment."""
+        target = request.goal
+        options = request.skill_options
+        binding = request.binding
+        motion = binding.endpoint("primary", "motion")
+        grasp = binding.endpoint("primary", "grasp")
+        motion_target = motion.require_target(JointPositionTarget)
+        grasp_target = grasp.require_target(JointPositionTarget)
+        task_state_key = require_shared_task_state_key(
+            motion,
+            grasp,
+            participant="MoveHeldObject primary participant",
+        )
+        control_part = motion_target.control_part
+        arm_joint_ids = list(motion_target.joint_ids)
+        hand_joint_ids = list(grasp_target.joint_ids)
+        hand_grasp_qpos = grasp.joint_positions(
+            GRASP_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        state = context
+        held_object = state.get_held_object(task_state_key)
+        if held_object is None:
+            raise ValueError(
+                "MoveHeldObject requires an object held by task-state resource "
+                f"{task_state_key!r} - run PickUp first."
             )
-        self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
-
-    def execute(self, target: HeldObjectPoseTarget, state: WorldState) -> ActionResult:
-        if state.held_object is None:
-            logger.log_error(
-                "MoveHeldObject requires WorldState.held_object - run PickUp first.",
-                ValueError,
+        eligible = context.task.exclusive_held_object_mask(task_state_key)
+        if not eligible.any():
+            return self.failed_plan(
+                request,
+                context,
+                message="Held object is not exclusive to the control part.",
             )
         object_target_pose = resolve_object_target(
-            target.object_target_pose, n_envs=self.n_envs, device=self.device
+            resolve_pose_goal(
+                target.object_target_pose,
+                context,
+                name="object_target_pose",
+            ),
+            num_envs=self.num_envs,
+            device=self.device,
         )
-        start_arm_qpos = self.builder.resolve_start_qpos(
-            arm_qpos_from_state(state, self.arm_joint_ids),
-            n_envs=self.n_envs,
-            arm_dof=self.arm_dof,
-            control_part=self.cfg.control_part,
-        )
-        if self.cfg.pick_rotate_upright is not None:
-            held_eef_xpos = self.robot.compute_fk(
-                qpos=start_arm_qpos, name=self.cfg.control_part, to_matrix=True
-            )
-            held_obj_xpos = state.held_object.semantics.entity.get_local_pose(
-                to_matrix=True
-            )
-            if self.cfg.obj_upright_direction is None:
-                upright_direction = torch.tensor([0, 0, 1], device=self.device)
-            else:
-                upright_direction = self.cfg.obj_upright_direction.to(self.device)
-            obj_upright = (upright_direction * held_obj_xpos[:, :3, :3]).sum(axis=2)
-
-            grasp_ry = held_eef_xpos[:, :3, 1]
-            dot_result = (grasp_ry * obj_upright).sum(axis=1)
-            # revert flag is -1 if the dot product is negative, 1 if positive
-            revert_flag = torch.where(dot_result < 0, 1.0, -1.0)
-            grasp_rx = held_eef_xpos[:, :3, 0]
-            # rotate util upright
-            rota_axis_angle = -0.5 * torch.pi * revert_flag * grasp_rx
-            gripper_rotate_offset = axis_angle_to_rotation_matrix(rota_axis_angle)
-            # modified target xpos rotation
-            object_target_pose[:, :3, :3] = torch.bmm(
-                gripper_rotate_offset, held_obj_xpos[:, :3, :3]
-            )
-        object_to_eef = state.held_object.object_to_eef.to(
+        start_arm_qpos = arm_qpos_from_state(state, arm_joint_ids)
+        object_to_eef = held_object.object_to_eef.to(
             device=self.device, dtype=torch.float32
         )
         if object_to_eef.shape == (4, 4):
-            object_to_eef = object_to_eef.unsqueeze(0).repeat(self.n_envs, 1, 1)
+            object_to_eef = object_to_eef.unsqueeze(0).repeat(self.num_envs, 1, 1)
         move_eef_xpos = torch.bmm(object_target_pose, object_to_eef)
 
-        target_states_list = [
-            [PlanState(xpos=move_eef_xpos[i], move_type=MoveType.EEF_MOVE)]
-            for i in range(self.n_envs)
-        ]
-        success, arm_traj = self.builder.plan_arm_traj(
-            target_states_list,
-            start_arm_qpos,
-            self.cfg.sample_interval,
-            control_part=self.cfg.control_part,
-            arm_dof=self.arm_dof,
-            cfg=self.cfg,
+        result = self.motion_generator.generate(
+            build_pose_plan_states(move_eef_xpos),
+            options=request.motion_policy.to_motion_gen_options(
+                start_qpos=start_arm_qpos,
+                control_part=control_part,
+                interpolation_dt=context.control_dt,
+            ),
         )
+        assert isinstance(result.success, torch.Tensor)
+        assert result.positions is not None
+        success = result.success & eligible
+        arm_traj = result.positions
 
         full = torch.empty(
-            (self.n_envs, arm_traj.shape[1], self.robot_dof),
+            (self.num_envs, arm_traj.shape[1], self.robot_dof),
             dtype=torch.float32,
             device=self.device,
         )
         full[:, :, :] = state.last_qpos.unsqueeze(1)
-        full[:, :, self.arm_joint_ids] = arm_traj
-        full[:, :, self.hand_joint_ids] = self.hand_close_qpos
+        full[:, :, arm_joint_ids] = arm_traj
+        full[:, :, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
+        assert result.dt is not None
 
-        return ActionResult(
+        return self.build_plan(
+            request,
+            context,
             success=success,
-            trajectory=full,
-            next_state=WorldState(
-                last_qpos=full[:, -1, :].clone(),
-                held_object=state.held_object,
-                coordinated_held_object=state.coordinated_held_object,
+            trajectory=TimedTrajectory.from_positions(
+                full,
+                env_ids=context.env_ids,
+                dt=result.dt,
             ),
-        )
-
-    def _fail(self, state: WorldState) -> ActionResult:
-        return ActionResult(
-            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
-            trajectory=torch.empty(
-                (self.n_envs, 0, self.robot_dof),
-                dtype=torch.float32,
-                device=self.device,
-            ),
-            next_state=state,
+            segment_lengths={"transport": full.shape[1]},
         )
 
 
-__all__ = ["MoveHeldObject", "MoveHeldObjectCfg"]
+__all__ = [
+    "HeldObjectPoseGoal",
+    "MoveHeldObject",
+    "MoveHeldObjectOptions",
+]

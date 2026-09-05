@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Real-device controllers that mirror the simulation ``Robot`` API for deploying policies on physical hardware."""
+
 from .device import Device
 from .device_controller import DeviceController
 

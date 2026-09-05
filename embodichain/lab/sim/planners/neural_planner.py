@@ -245,6 +245,8 @@ class NeuralPlanner(BasePlanner):
         KeyError: If the checkpoint is missing required keys.
     """
 
+    supported_move_types = frozenset({MoveType.EEF_MOVE})
+
     def __init__(self, cfg: NeuralPlannerCfg):
         super().__init__(cfg)
 
@@ -255,6 +257,22 @@ class NeuralPlanner(BasePlanner):
 
     def default_plan_options(self) -> NeuralPlanOptions:
         return NeuralPlanOptions()
+
+    def with_motion_context(
+        self,
+        options: PlanOptions,
+        *,
+        start_qpos: torch.Tensor | None,
+        control_part: str | None,
+    ) -> NeuralPlanOptions:
+        """Forward MotionGenerator context into :class:`NeuralPlanOptions`."""
+        if not isinstance(options, NeuralPlanOptions):
+            logger.log_error("NeuralPlanner requires NeuralPlanOptions", TypeError)
+        if options.control_part is None:
+            options.control_part = control_part
+        if options.start_qpos is None:
+            options.start_qpos = start_qpos
+        return options
 
     def _load_checkpoint(self, checkpoint_path: Path) -> None:
         if not checkpoint_path.exists():
@@ -450,7 +468,8 @@ class NeuralPlanner(BasePlanner):
             dtype=torch.float32,
             device=self.device,
         )
-        dt = dt.unsqueeze(0).expand(b, -1)
+        dt = dt.unsqueeze(0).expand(b, -1).clone()
+        dt[:, 0] = 0.0
         positions_t = positions_t.permute(1, 0, 2)
         xpos_t = xpos_t.permute(1, 0, 2, 3)
         velocities_t, accelerations_t = self._compute_vel_acc_via_finite_diff(
@@ -464,11 +483,6 @@ class NeuralPlanner(BasePlanner):
             accelerations=accelerations_t,
             xpos_list=xpos_t,
             dt=dt,
-            duration=torch.full(
-                (b,),
-                float(max(positions_t.shape[1] - 1, 0) * self.cfg.dt),
-                device=self.device,
-            ),
         )
 
     def _parse_waypoints(

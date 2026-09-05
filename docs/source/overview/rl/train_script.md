@@ -7,8 +7,11 @@ This module provides the RL training entry script, responsible for parsing confi
 ### train.py
 - Main training script, supports command-line arguments (such as --config), automatically loads JSON or YAML config.
 - Initializes device, random seed, output directory, and logging (TensorBoard/WandB).
-- Loads environment config, supports multi-environment parallelism and evaluation environments.
-- Builds policy (e.g., actor-critic), algorithm (e.g., PPO), and Trainer.
+- Loads either a simulator `gym_config` or a lightweight registered
+  `learning_env`, with independent vectorized evaluation environments.
+- Builds the policy and algorithm, then routes standard rollouts
+  (PPO/GRPO) to `Trainer` and differentiable rollouts (APG) to
+  `DifferentiableTrainer`.
 - Supports event management (e.g., environment randomization, data logging, evaluation events).
 - Automatically saves model checkpoints and performs periodic evaluation.
 
@@ -16,6 +19,7 @@ This module provides the RL training entry script, responsible for parsing confi
 - Supports command-line arguments:
     - `--config`: Specify the path to the config file (``.json``, ``.yaml``, or ``.yml``).
     - `--distributed`: Enable multi-GPU distributed training.
+    - `--profile` / `--profile_output`: Gym env profiling during training (requires `trainer.gym_config`).
 - The config file includes parameters for trainer, policy, algorithm, events, and other modules.
 - See [Multi-GPU Training](multi_gpu.md) for distributed training.
 
@@ -34,8 +38,19 @@ This module provides the RL training entry script, responsible for parsing confi
 
 ## Usage Example
 ```bash
-python -m embodichain train-rl --config configs/agents/rl/basic/cart_pole/train_config.yaml
+embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
+embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml
+embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/point_mass/agents/ppo.yaml
 ```
+
+PointMass intentionally uses one differentiable PyTorch environment for both
+algorithms. The standard collector runs it under `torch.no_grad()`, whereas
+APG retains the dynamics graph and detaches it only at configured TBPTT
+segment boundaries.
+
+Evaluation always uses a separate environment and deterministic actions.
+Metrics are logged under `eval/*`; `num_eval_episodes` is the exact number of
+completed episodes rather than episodes per parallel environment.
 
 ## Extension and Customization
 - Supports custom event modules for flexible training flow extension.
@@ -46,5 +61,3 @@ python -m embodichain train-rl --config configs/agents/rl/basic/cart_pole/train_
 - It is recommended to manage all experiment parameters via JSON or YAML config files for reproducibility and tuning.
 - Supports multi-environment and event extension to improve training flexibility.
 - Logging and checkpoint management help with experiment tracking and recovery.
-
----

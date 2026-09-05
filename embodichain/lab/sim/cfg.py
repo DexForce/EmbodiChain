@@ -15,19 +15,23 @@
 # ----------------------------------------------------------------------------
 
 from __future__ import annotations
+
 import enum
 import json
+import math
 import os
 
 import dexsim
 import numpy as np
 import torch
 
-from typing import Sequence, Union, Dict, Literal, List, Any, Optional
+from typing import Sequence, Dict, Literal, List, Any, Optional
 from dataclasses import field, MISSING
 
 from dexsim.types import (
+    DenoiserType,
     Renderer,
+    ToneMappingType,
     PhysicalAttr,
     ActorType,
     AxisArrowType,
@@ -44,6 +48,36 @@ from embodichain.utils import logger
 from embodichain.utils.utility import key_in_nested_dict
 
 from .shapes import ShapeCfg, MeshCfg
+from .workspace.cfg import RobotWorkspaceCfg
+
+__all__ = [
+    "DEFAULT_RENDERER",
+    "DLSSCfg",
+    "RenderCfg",
+    "PhysicsCfg",
+    "MarkerCfg",
+    "WindowRecordCfg",
+    "WindowCameraPoseCfg",
+    "GPUMemoryCfg",
+    "RigidBodyAttributesCfg",
+    "RigidBodyAttributesOverrideCfg",
+    "LinkPhysicsOverrideCfg",
+    "link_attrs_from_dict",
+    "SoftbodyVoxelAttributesCfg",
+    "SoftbodyPhysicalAttributesCfg",
+    "ClothPhysicalAttributesCfg",
+    "JointDrivePropertiesCfg",
+    "ObjectBaseCfg",
+    "LightCfg",
+    "RigidObjectCfg",
+    "SoftObjectCfg",
+    "ClothObjectCfg",
+    "RigidObjectGroupCfg",
+    "RigidConstraintCfg",
+    "URDFCfg",
+    "ArticulationCfg",
+    "RobotCfg",
+]
 
 # Global default renderer settings for simulation.
 #
@@ -57,74 +91,82 @@ DEFAULT_RENDERER: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
 
 @configclass
 class DLSSCfg:
-    """DLSS 3.5 configuration for the simulation window.
+    """DexSim DLSS configuration for window and offscreen rendering.
 
-    NVIDIA DLSS 3.5 provides two AI-powered features for the OfflineRT renderer:
-
-    - **Ray Reconstruction (RR)**: Replaces the OptiX denoiser. It takes the noisy
-      1-spp path-traced HDR image plus G-buffer guides (albedo, normals, roughness,
-      depth, motion vectors) and reconstructs a clean image at render resolution.
-    - **Super Resolution (SR)**: Upscales the RR output from render resolution to
-      target/display resolution.
-
-    When :attr:`dlss_enabled` is ``True``, both Ray Reconstruction and Super
-    Resolution are enabled together. The upscaling ratio is controlled through
-    :attr:`dlss_quality` (for example, ``5`` = DLAA / 1.0x, ``3`` = Quality).
+    Ray Reconstruction (RR) and Super Resolution (SR) are independently
+    configurable on the ``"hybrid"``, ``"fast-rt"``, and ``"rt"`` renderers.
+    Defaults match DexSim v0.5.0: window DLSS is enabled, while offscreen
+    cameras require an explicit opt-in in addition to the master switch.
 
     .. attention::
-        DLSS is only available with the ``"rt"`` (OfflineRT) renderer in windowed
-        mode. Offscreen cameras always use the OptiX denoiser regardless of DLSS
-        settings. The window resolution (``SimulationManagerCfg.width/height``)
-        should match ``target_width/target_height`` when the target resolution is
-        explicitly set.
-
-    Reference: ``developer_docs/dlss/README_DLSS.md`` in the dexsim repository.
+        DLSS requires a Vulkan render device, a compatible NVIDIA GPU/driver,
+        and a DexSim build with the NGX runtime. Initialization is deferred
+        until rendering; configuration conversion alone cannot verify support.
+        Each enabled offscreen camera needs its own temporal history and
+        Vulkan exchange images, increasing GPU memory use.
     """
 
     dlss_enabled: bool = True
-    """Master DLSS enable toggle. Off → standard OptiX denoiser / TAA path."""
+    """Master switch for DLSS. False retains the standard rendering path."""
 
-    dlss_quality: int = -1
-    """DLSS quality preset. ``-1`` = auto (ratio-based), ``0`` = UltraPerformance
-    (~3.0x), ``1`` = Performance (~2.25x), ``2`` = Balanced (~1.75x, default),
-    ``3`` = Quality (~1.5x), ``4`` = UltraQuality (~1.3x), ``5`` = DLAA (1.0x,
-    no upscale — render must equal target)."""
+    offscreen_dlss_enabled: bool = False
+    """Opt offscreen cameras into DLSS, including in headless simulations."""
 
-    upsample_ratio: float = 1.0
-    """Convenience ratio ``target_width / render_width`` (and height). When
-    :attr:`render_width`/:attr:`render_height` are ``0``, the render resolution
-    is computed from the effective target resolution as
-    ``target / upsample_ratio``. Defaults to ``1.0`` (1:1 / DLAA mode). Must be
-    ``>= 1.0``. Explicit render or target dimensions take precedence over this
-    value."""
+    rayreconstruction_enabled: bool = True
+    """Enable RR denoising. Can be used without SR at the target resolution."""
+
+    upscale_enabled: bool = True
+    """Enable SR upscaling. Can be used independently of RR."""
+
+    dlss_quality: int = 2
+    """Quality mode and derived internal scale: ``-1`` auto (58%), ``0`` Ultra
+    Performance (~33%), ``1`` Performance (50%), ``2`` Balanced (58%),
+    ``3`` Quality (~67%), ``4`` Ultra Quality (77%), ``5`` DLAA (100%)."""
+
+    upsample_ratio: float | None = None
+    """Optional window target/render ratio, at least 1.0. None leaves zero
+    render dimensions for DexSim to derive from quality. When specified,
+    computes each unset render dimension from the actual window size. Only
+    FastRT/OfflineRT windows honor these overrides; hybrid and offscreen
+    targets derive their internal resolution from quality."""
 
     render_width: int = 0
-    """Internal render resolution width. ``0`` = use window width.
-    The path tracer and DLSS-RR operate at this resolution."""
+    """Internal FastRT/OfflineRT window width; zero derives it from quality."""
 
     render_height: int = 0
-    """Internal render resolution height. ``0`` = use window height."""
+    """Internal FastRT/OfflineRT window height; zero derives it from quality."""
 
     target_width: int = 0
-    """Target/display resolution width. ``0`` = use window width.
-    DLSS-SR upscales to this resolution. Should match the window size."""
+    """DexSim compatibility field. Set the actual window or camera width instead."""
 
     target_height: int = 0
-    """Target/display resolution height. ``0`` = use window height."""
+    """DexSim compatibility field. Set the actual window or camera height instead."""
 
     exposure_compensation: float = 1.0
-    """Multiplier on the DLSS-RR pre-exposure scalar. ``>1`` (e.g. ``2.0``)
-    brightens the HDR fed to RR, speeding ghost rejection in dark areas;
-    ``<1`` darkens. ``1.0`` = neutral. Typical range 0.5–8.0; tune per scene.
-    No rebuild needed."""
+    """Positive, finite exposure multiplier used by the RR bridge."""
+
+    def __post_init__(self) -> None:
+        """Validate quality, dimensions, ratio, and exposure settings."""
+        if type(self.dlss_quality) is not int or not -1 <= self.dlss_quality <= 5:
+            raise ValueError("DLSSCfg.dlss_quality must be an integer from -1 to 5.")
+        for name in ("render_width", "render_height", "target_width", "target_height"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"DLSSCfg.{name} must be a non-negative integer.")
+        if self.upsample_ratio is not None and (
+            not math.isfinite(self.upsample_ratio) or self.upsample_ratio < 1.0
+        ):
+            raise ValueError("DLSSCfg.upsample_ratio must be finite and at least 1.0.")
+        if (
+            not math.isfinite(self.exposure_compensation)
+            or self.exposure_compensation <= 0.0
+        ):
+            raise ValueError(
+                "DLSSCfg.exposure_compensation must be positive and finite."
+            )
 
     def to_dexsim_cfg(self, window_width: int, window_height: int) -> dexsim.DLSSConfig:
-        """Resolve effective DLSS settings and return a dexsim config object.
-
-        The effective target resolution defaults to the window size unless
-        :attr:`target_width`/:attr:`target_height` are set explicitly. The render
-        resolution defaults to the target unless :attr:`render_width`/
-        :attr:`render_height` are explicit or :attr:`upsample_ratio` is provided.
+        """Convert settings without changing the window or camera output size.
 
         Args:
             window_width: Window width in pixels.
@@ -133,40 +175,26 @@ class DLSSCfg:
         Returns:
             Populated :class:`dexsim.DLSSConfig` instance ready to assign to
             ``world_config.dlss_config``.
+
+        Raises:
+            ValueError: If the configuration contains invalid values.
         """
-        effective_target_width = (
-            self.target_width if self.target_width > 0 else window_width
-        )
-        effective_target_height = (
-            self.target_height if self.target_height > 0 else window_height
-        )
-
-        if (
-            self.upsample_ratio >= 1.0
-            and self.render_width == 0
-            and self.render_height == 0
-        ):
-            effective_render_width = int(effective_target_width / self.upsample_ratio)
-            effective_render_height = int(effective_target_height / self.upsample_ratio)
-        else:
-            effective_render_width = (
-                self.render_width if self.render_width > 0 else effective_target_width
-            )
-            effective_render_height = (
-                self.render_height
-                if self.render_height > 0
-                else effective_target_height
-            )
-
+        self.__post_init__()
         dlss = dexsim.DLSSConfig()
         dlss.dlss_enabled = self.dlss_enabled
-        dlss.rayreconstruction_enabled = True
-        dlss.upscale_enabled = True
+        dlss.offscreen_dlss_enabled = self.offscreen_dlss_enabled
+        dlss.rayreconstruction_enabled = self.rayreconstruction_enabled
+        dlss.upscale_enabled = self.upscale_enabled
         dlss.dlss_quality = self.dlss_quality
-        dlss.render_width = effective_render_width
-        dlss.render_height = effective_render_height
-        dlss.target_width = effective_target_width
-        dlss.target_height = effective_target_height
+        dlss.render_width = self.render_width
+        dlss.render_height = self.render_height
+        if self.upsample_ratio is not None:
+            if self.render_width == 0:
+                dlss.render_width = max(1, int(window_width / self.upsample_ratio))
+            if self.render_height == 0:
+                dlss.render_height = max(1, int(window_height / self.upsample_ratio))
+        dlss.target_width = self.target_width
+        dlss.target_height = self.target_height
         dlss.exposure_compensation = self.exposure_compensation
         return dlss
 
@@ -190,10 +218,25 @@ class RenderCfg:
     """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid', 'fast-rt' or 'rt'."""
 
     dlss: DLSSCfg = field(default_factory=DLSSCfg)
-    """DLSS 3.5 configuration for AI-powered denoising and upscaling.
-    Only effective when ``renderer="rt"`` (OfflineRT) and in windowed mode."""
+    """DLSS settings for hybrid, fast-rt, and rt windows and opt-in offscreen cameras."""
 
-    def to_dexsim_flags(self):
+    tone_mapping_enabled: bool = False
+    """Whether to map HDR RGB output with the modified Reinhard curve."""
+
+    tone_mapping_exposure: float = 1.0
+    """Fixed linear exposure multiplier applied before tone mapping."""
+
+    def __post_init__(self) -> None:
+        """Validate rendering parameters."""
+        if self.spp < 1:
+            logger.log_error("RenderCfg.spp must be at least 1.", ValueError)
+        if self.tone_mapping_exposure < 0.0:
+            logger.log_error(
+                "RenderCfg.tone_mapping_exposure must be non-negative.", ValueError
+            )
+
+    def to_dexsim_flags(self) -> Renderer:
+        """Convert the renderer name to DexSim's renderer enum."""
         if self.renderer == "hybrid":
             return Renderer.HYBRID
         elif self.renderer == "fast-rt":
@@ -213,6 +256,28 @@ class RenderCfg:
                 f"Invalid renderer type '{self.renderer}' specified. Must be one of 'auto', 'hybrid', 'fast-rt', or 'rt'."
             )
 
+    def apply_to_dexsim_config(self, world_config: dexsim.WorldConfig) -> None:
+        """Apply rendering settings to a DexSim world configuration.
+
+        Args:
+            world_config: DexSim world configuration to update in place.
+        """
+        world_config.renderer = self.to_dexsim_flags()
+        world_config.dlss_config = self.dlss.to_dexsim_cfg(
+            window_width=world_config.win_config.width,
+            window_height=world_config.win_config.height,
+        )
+        world_config.raytrace_config.render_iterations_per_frame = self.spp
+        world_config.raytrace_config.open_denoise = True
+        world_config.raytrace_config.denoiser_type = DenoiserType.OPTIX
+        world_config.postprocess_config.tone_mapping_enabled = self.tone_mapping_enabled
+        world_config.postprocess_config.tone_mapping_type = (
+            ToneMappingType.MODIFIED_REINHARD
+        )
+        world_config.postprocess_config.tone_mapping_exposure = (
+            self.tone_mapping_exposure
+        )
+
 
 @configclass
 class PhysicsCfg:
@@ -222,20 +287,8 @@ class PhysicsCfg:
     bounce_threshold: float = 2.0
     """The speed threshold below which collisions will not produce bounce effects."""
 
-    enable_pcm: bool = True
-    """Enable persistent contact manifold (PCM) for improved collision handling."""
-
-    enable_tgs: bool = True
-    """Enable temporal gauss-seidel (TGS) solver for better stability."""
-
     enable_ccd: bool = False
     """Enable continuous collision detection (CCD) for fast-moving objects."""
-
-    enable_enhanced_determinism: bool = False
-    """Enable enhanced determinism for consistent simulation results."""
-
-    enable_friction_every_iteration: bool = True
-    """Enable friction calculations at every solver iteration."""
 
     length_tolerance: float = 0.05
     """The length tolerance for the simulation.
@@ -249,15 +302,17 @@ class PhysicsCfg:
     """
 
     def to_dexsim_args(self) -> Dict[str, Any]:
-        """Convert to dexsim physics args dictionary."""
+        """Convert to DexSim physics arguments.
+
+        Solver implementation details that are not exposed by :class:`PhysicsCfg`
+        retain their established defaults here.
+        """
         args = {
             "gravity": self.gravity.tolist(),
             "bounce_threshold": self.bounce_threshold,
-            "enable_pcm": self.enable_pcm,
-            "enable_tgs": self.enable_tgs,
             "enable_ccd": self.enable_ccd,
-            "enable_enhanced_determinism": self.enable_enhanced_determinism,
-            "enable_friction_every_iteration": self.enable_friction_every_iteration,
+            "enable_enhanced_determinism": False,
+            "enable_friction_every_iteration": True,
         }
         return args
 
@@ -317,6 +372,17 @@ class WindowRecordCfg:
 
     video_prefix: str = "viewer_record"
     """Video file prefix used when no explicit save path is provided."""
+
+
+@configclass
+class WindowCameraPoseCfg:
+    """Configuration for printing the interactive viewer camera pose."""
+
+    enable_hotkey: bool = True
+    """Whether to register the ``p`` hotkey when the window opens."""
+
+    convert_to_look_at: bool = True
+    """Whether the hotkey prints a ``set_look_at`` call instead of a matrix."""
 
 
 @configclass
@@ -422,6 +488,8 @@ class RigidBodyAttributesCfg:
         attr.sleep_threshold = self.sleep_threshold
         attr.restitution = self.restitution
         attr.enable_ccd = self.enable_ccd
+        attr.max_linear_velocity = self.max_linear_velocity
+        attr.max_angular_velocity = self.max_angular_velocity
         attr.max_depenetration_velocity = self.max_depenetration_velocity
         attr.min_position_iters = self.min_position_iters
         attr.min_velocity_iters = self.min_velocity_iters
@@ -429,7 +497,7 @@ class RigidBodyAttributesCfg:
 
     @classmethod
     def from_dict(
-        cls, init_dict: Dict[str, Union[str, float, int]]
+        cls, init_dict: Dict[str, str | float | int]
     ) -> RigidBodyAttributesCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()
@@ -482,7 +550,7 @@ class RigidBodyAttributesOverrideCfg:
 
     @classmethod
     def from_dict(
-        cls, init_dict: Dict[str, Union[str, float, int, bool]]
+        cls, init_dict: Dict[str, str | float | int | bool]
     ) -> RigidBodyAttributesOverrideCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()
@@ -800,7 +868,7 @@ class JointDrivePropertiesCfg:
     If the drive type is "none", then no force will be applied to joint.
     """
 
-    stiffness: Union[Dict[str, float], float] = 1e4
+    stiffness: Dict[str, float] | float = 1e4
     """Stiffness of the joint drive.
 
     The unit depends on the joint model:
@@ -809,7 +877,7 @@ class JointDrivePropertiesCfg:
     * For angular joints, the unit is kg-m^2/s^2/rad (N-m/rad).
     """
 
-    damping: Union[Dict[str, float], float] = 1e3
+    damping: Dict[str, float] | float = 1e3
     """Damping of the joint drive.
 
     The unit depends on the joint model:
@@ -818,20 +886,20 @@ class JointDrivePropertiesCfg:
     * For angular joints, the unit is kg-m^2/s/rad (N-m-s/rad).
     """
 
-    max_effort: Union[Dict[str, float], float] = 1e10
+    max_effort: Dict[str, float] | float = 1e10
     """Maximum effort that can be applied to the joint (in kg-m^2/s^2)."""
 
-    max_velocity: Union[Dict[str, float], float] = 1e10
+    max_velocity: Dict[str, float] | float = 1e10
     """Maximum velocity that the joint can reach (in rad/s or m/s).
 
     For linear joints, this is the maximum linear velocity with unit m/s.
     For angular joints, this is the maximum angular velocity with unit rad/s.
     """
 
-    friction: Union[Dict[str, float], float] = 0.0
+    friction: Dict[str, float] | float = 0.0
     """Friction coefficient of the joint"""
 
-    armature: Union[Dict[str, float], float] = 0.0
+    armature: Dict[str, float] | float = 0.0
     """Joint armature added to joint-space spatial inertia.
 
     Units depend on the joint model:
@@ -842,10 +910,22 @@ class JointDrivePropertiesCfg:
 
     @classmethod
     def from_dict(
-        cls, init_dict: Dict[str, Union[str, float, int]]
+        cls,
+        init_dict: Dict[str, str | float | int | Dict[str, float]],
+        *,
+        defaults: JointDrivePropertiesCfg | None = None,
     ) -> JointDrivePropertiesCfg:
-        """Initialize the configuration from a dictionary."""
-        cfg = cls()
+        """Initialize the configuration from a dictionary.
+
+        Args:
+            init_dict: Joint-drive properties to override.
+            defaults: Optional base properties whose unspecified values are
+                preserved. If omitted, the class defaults are used.
+
+        Returns:
+            Parsed joint-drive properties.
+        """
+        cfg = defaults.copy() if defaults is not None else cls()
         for key, value in init_dict.items():
             if hasattr(cfg, key):
                 setattr(cfg, key, value)
@@ -864,7 +944,7 @@ class ObjectBaseCfg:
     It is used as a base class for specific asset configurations.
     """
 
-    uid: Union[str, None] = None
+    uid: str | None = None
 
     init_pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
     """Position of the root in simulation world frame. Defaults to (0.0, 0.0, 0.0)."""
@@ -876,7 +956,7 @@ class ObjectBaseCfg:
     """4x4 transformation matrix of the root in local frame. If specified, it will override init_pos and init_rot."""
 
     @classmethod
-    def from_dict(cls, init_dict: Dict[str, Union[str, float, tuple]]) -> ObjectBaseCfg:
+    def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> ObjectBaseCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()  # Create a new instance of the class (cls)
         for key, value in init_dict.items():
@@ -1074,7 +1154,7 @@ class RigidObjectCfg(ObjectBaseCfg):
     accuracy of collision, but also takes more time to initialize and simulate.
     """
 
-    body_scale: Union[tuple, list] = (1.0, 1.0, 1.0)
+    body_scale: tuple | list = (1.0, 1.0, 1.0)
     """Scale of the rigid body in the simulation world frame."""
 
     use_usd_properties: bool = False
@@ -1156,7 +1236,7 @@ class RigidObjectGroupCfg:
     )
     """
 
-    uid: Union[str, None] = None
+    uid: str | None = None
 
     rigid_objects: Dict[str, RigidObjectCfg] = MISSING
     """Configuration for the rigid objects in the group."""
@@ -1287,12 +1367,12 @@ class RigidConstraintCfg:
 class URDFCfg:
     """Standalone configuration class for URDF assembly."""
 
-    components: Dict[str, Dict[str, Union[str, Dict, np.ndarray]]] = field(
+    components: Dict[str, Dict[str, str | Dict | np.ndarray]] = field(
         default_factory=dict
     )
     """Dictionary of robot components to be assembled."""
 
-    sensors: Dict[str, Dict[str, Union[str, np.ndarray]]] = field(default_factory=dict)
+    sensors: Dict[str, Dict[str, str | np.ndarray]] = field(default_factory=dict)
     """Dictionary of sensors to be attached to the robot."""
 
     use_signature_check: bool = True
@@ -1310,7 +1390,7 @@ class URDFCfg:
     fpath_prefix: str = EMBODICHAIN_DEFAULT_DATA_ROOT + "/assembled"
     """Output directory prefix for the assembled URDF file."""
 
-    component_prefix: List[tuple[str, Union[str, None]]] = field(
+    component_prefix: List[tuple[str, str | None]] = field(
         default_factory=lambda: [
             ("chassis", None),
             ("legs", None),
@@ -1340,8 +1420,7 @@ class URDFCfg:
     """Case normalization policy applied to joint/link names during URDF assembly.
 
     Supported values per key are ``"upper"``, ``"lower"`` or ``"original"``
-    (legacy alias ``"none"``). The default upper-cases joints and lower-cases
-    links. Set ``{"joint": "original"}`` to preserve the source URDF casing.
+    (legacy alias ``"none"``). The default preserves source URDF casing.
     """
 
     def __init__(
@@ -1677,7 +1756,7 @@ class ArticulationCfg(ObjectBaseCfg):
     drive_pros: JointDrivePropertiesCfg = JointDrivePropertiesCfg(drive_type="none")
     """Properties to define the drive mechanism of a joint."""
 
-    body_scale: Union[tuple, list] = (1.0, 1.0, 1.0)
+    body_scale: tuple | list = (1.0, 1.0, 1.0)
     """Scale of the articulation in the simulation world frame."""
 
     attrs: RigidBodyAttributesCfg = RigidBodyAttributesCfg()
@@ -1702,11 +1781,32 @@ class ArticulationCfg(ObjectBaseCfg):
     disable_self_collision: bool = True
     """Whether to enable or disable self-collisions."""
 
-    init_qpos: Union[torch.Tensor, np.ndarray, Sequence[float]] = None
-    """Initial joint positions of the articulation. 
-    
+    enable_gravity: bool = True
+    """Whether gravity is enabled for the articulation.
+
+    This runtime flag is applied regardless of :attr:`use_usd_properties`.
+    """
+
+    init_qpos: torch.Tensor | np.ndarray | Sequence[float] = None
+    """Initial joint positions of the articulation.
+
     If None, the joint positions will be set to zero.
     If provided, it should be a array of shape (num_joints,).
+    """
+
+    qpos_limits: (
+        torch.Tensor | np.ndarray | Sequence[float] | Dict[str, List[float]] | None
+    ) = None
+    """Override joint position limits of the articulation.
+
+    If None, the joint position limits from the asset file (URDF/USD) are used.
+    If provided as a tensor/array of shape (num_joints, 2), it is applied to all
+    joints in the order of ``joint_names``.
+    If provided as a dictionary, keys are joint names or regular expressions and
+    values are ``[min, max]`` limits.
+
+    This field replaces the asset limits for the articulation and can be used to
+    either tighten or expand the allowed range.
     """
 
     sleep_threshold: float = 0.005
@@ -1737,7 +1837,7 @@ class ArticulationCfg(ObjectBaseCfg):
 
     @classmethod
     def from_dict(
-        cls, init_dict: Dict[str, Union[str, float, tuple, dict]]
+        cls, init_dict: Dict[str, str | float | tuple | dict]
     ) -> ArticulationCfg:
         """Initialize the configuration from a dictionary."""
         cfg = cls()
@@ -1746,7 +1846,15 @@ class ArticulationCfg(ObjectBaseCfg):
                 cfg.link_attrs = link_attrs_from_dict(value)
             elif hasattr(cfg, key):
                 attr = getattr(cfg, key)
-                if is_configclass(attr):
+                if isinstance(attr, JointDrivePropertiesCfg) and isinstance(
+                    value, dict
+                ):
+                    setattr(
+                        cfg,
+                        key,
+                        JointDrivePropertiesCfg.from_dict(value, defaults=attr),
+                    )
+                elif is_configclass(attr):
                     setattr(cfg, key, attr.from_dict(value))
                 else:
                     setattr(cfg, key, value)
@@ -1804,12 +1912,15 @@ class RobotCfg(ArticulationCfg):
     """
 
     # TODO: how to support one solver for multiple parts?
-    solver_cfg: Union[SolverCfg, Dict[str, SolverCfg], None] = None
+    solver_cfg: SolverCfg | Dict[str, SolverCfg] | None = None
     """Solver is used to compute forward and inverse kinematics for the robot.
     """
 
+    workspace_cfg: Dict[str, RobotWorkspaceCfg] | None = None
+    """Runtime workspace cache configuration keyed by control-part name."""
+
     @classmethod
-    def from_dict(cls, init_dict: Dict[str, Union[str, float, tuple]]) -> RobotCfg:
+    def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> RobotCfg:
         """Initialize the configuration from a dictionary."""
         if isinstance(init_dict, cls):
             return init_dict
@@ -1828,8 +1939,29 @@ class RobotCfg(ArticulationCfg):
                     from embodichain.lab.sim.cfg import URDFCfg
 
                     setattr(cfg, key, URDFCfg.from_dict(value))
+                elif key == "workspace_cfg" and isinstance(value, dict):
+                    setattr(
+                        cfg,
+                        key,
+                        {
+                            part: (
+                                part_cfg
+                                if isinstance(part_cfg, RobotWorkspaceCfg)
+                                else RobotWorkspaceCfg(**part_cfg)
+                            )
+                            for part, part_cfg in value.items()
+                        },
+                    )
                 elif key == "fpath":
                     setattr(cfg, key, get_data_path(value))
+                elif isinstance(attr, JointDrivePropertiesCfg) and isinstance(
+                    value, dict
+                ):
+                    setattr(
+                        cfg,
+                        key,
+                        JointDrivePropertiesCfg.from_dict(value, defaults=attr),
+                    )
                 elif is_configclass(attr):
                     setattr(
                         cfg, key, attr.from_dict(value)
@@ -1889,6 +2021,8 @@ class RobotCfg(ArticulationCfg):
         def serialize(obj, _visited=None):
             if _visited is None:
                 _visited = set()
+            if isinstance(obj, enum.Enum):
+                return obj.value
             if isinstance(obj, (dict, object)) and not isinstance(
                 obj, (str, int, float, bool, type(None))
             ):
@@ -1897,12 +2031,15 @@ class RobotCfg(ArticulationCfg):
                     return None
                 _visited.add(obj_id)
 
-            if isinstance(obj, enum.Enum):
-                return obj.value
             if isinstance(obj, np.ndarray):
                 return obj.tolist()
             if isinstance(obj, dict):
-                return {str(k): serialize(v, _visited) for k, v in obj.items()}
+                return {
+                    (k.value if isinstance(k, enum.Enum) else str(k)): serialize(
+                        v, _visited
+                    )
+                    for k, v in obj.items()
+                }
             if isinstance(obj, (list, tuple)):
                 return [serialize(v, _visited) for v in obj]
             if hasattr(obj, "to_dict") and obj is not self:

@@ -14,9 +14,20 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .data import OnlineDataEngine, OnlineDataEngineCfg
+"""Process-safe shared buffer (``OnlineDataEngine``) that decouples simulation producers from training consumers."""
+
+from __future__ import annotations
+
+from .data import (
+    OnlineDataEngine,
+    OnlineDataEngineCfg,
+    OnlineDataEngineState,
+    OnlineDataWorkerError,
+)
 
 __all__ = [
     "OnlineDataEngine",
     "OnlineDataEngineCfg",
+    "OnlineDataEngineState",
+    "OnlineDataWorkerError",
 ]

@@ -6,8 +6,13 @@
 Overview
 --------
 
-The ``sim`` package provides simulation-core APIs including scene/object
-management, materials, sensors, planning/IK utilities, and action helpers.
+The ``sim`` package is EmbodiChain's simulation core. It is organized around
+the :class:`SimulationManager` (the DexSim scene handle), the scene-object
+hierarchy (lights, rigid/soft/cloth bodies, articulations, robots, gizmos,
+constraints), the sensor suite (cameras, stereo cameras, contact sensors), IK
+solvers and motion planners, the atomic-action motion-primitive layer, a
+reusable workspace-analysis and sampling toolkit, and the shared configuration
+types and utilities that wire all of these together.
 
 .. rubric:: Submodules
 
@@ -15,6 +20,7 @@ management, materials, sensors, planning/IK utilities, and action helpers.
    :toctree: .
 
    sim_manager
+   profiler
    cfg
    common
    material
@@ -25,6 +31,7 @@ management, materials, sensors, planning/IK utilities, and action helpers.
    solvers
    planners
    atomic_actions
+   workspace
    types
    utility
 
@@ -33,12 +40,20 @@ management, materials, sensors, planning/IK utilities, and action helpers.
 Simulation Manager
 ------------------
 
-.. autoclass:: SimulationManager
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.sim_manager
+
+Profiler
+--------
+
+.. autoclass:: Profiler
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. autoclass:: SimulationManagerCfg
+.. autoclass:: ProfilerCfg
    :members:
    :undoc-members:
    :show-inheritance:
@@ -56,35 +71,26 @@ Configuration
 Common Components
 -----------------
 
-.. automodule:: embodichain.lab.sim.common
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.common
 
 Materials
 ---------
 
-.. automodule:: embodichain.lab.sim.material
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.material
 
 Shapes
 ------
 
-.. automodule:: embodichain.lab.sim.shapes
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :exclude-members: __init__, copy, replace, to_dict, validate
+.. toctree::
+   :maxdepth: 1
 
-Atomic Actions
---------------
-
-.. automodule:: embodichain.lab.sim.atom_actions
-   :members:
-   :undoc-members:
-   :show-inheritance:
+   embodichain.lab.sim.shapes
 
 Objects
 -------
@@ -105,10 +111,10 @@ Sensors
 Robot Configurations
 --------------------
 
-.. automodule:: embodichain.lab.sim.robots
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.robots
 
 Solvers
 -------
@@ -133,6 +139,15 @@ Atomic Actions
    :maxdepth: 1
 
    embodichain.lab.sim.atomic_actions
+
+Robot Workspace
+---------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.workspace
+
 Shared Types
 ------------
 
@@ -148,3 +163,16 @@ Utility
    :maxdepth: 1
 
    embodichain.lab.sim.utility
+
+DLSS Configuration
+------------------
+
+.. currentmodule:: embodichain.lab.sim
+
+Configure window and offscreen Ray Reconstruction and Super Resolution through
+``SimulationManagerCfg.render_cfg.dlss``. Output resolution remains owned by the
+window or camera configuration.
+
+.. autoclass:: DLSSCfg
+   :members:
+   :undoc-members:

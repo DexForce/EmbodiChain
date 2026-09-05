@@ -14,10 +14,46 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
+from functools import lru_cache
+
+import inspect
 import os
+import re
 import pytest
 
 os.environ.setdefault("EMBODICHAIN_SIM_EXIT_PROCESS", "0")
+
+
+@pytest.fixture(scope="session")
+def _discover_task_packages():
+    """Discover all installed task packages once per test session.
+
+    Official task environments now ship as the ``embodichain_tasks`` import
+    package inside the main EmbodiChain distribution. Third-party packages can
+    also declare an ``embodichain.tasks`` entry point. Tasks are no longer
+    auto-registered by importing
+    ``embodichain.lab.gym.envs``, so tests that build task envs via
+    ``make(env_id)`` / ``build_env`` / ``train_from_config`` need discovery to
+    run first. This mirrors what the ``run_env`` and ``train-rl`` CLIs do at
+    startup.
+    """
+    from embodichain.lab.gym.utils.registration import (
+        discover_task_packages,
+        execute_init_hooks,
+    )
+
+    discover_task_packages()
+    execute_init_hooks()
+
+
+@pytest.fixture(autouse=True)
+def _discover_task_packages_for_marked_tests(request):
+    """Discover task packages only for tests that consume registered tasks."""
+    if request.node.get_closest_marker("requires_tasks") is not None:
+        request.getfixturevalue("_discover_task_packages")
+    yield
 
 
 def pytest_addoption(parser):
@@ -26,6 +62,12 @@ def pytest_addoption(parser):
         action="store",
         default="hybrid",
         help="Specify the renderer backend: hybrid, or fast-rt",
+    )
+    parser.addoption(
+        "--run-gpu",
+        action="store_true",
+        default=False,
+        help="Run tests marked gpu; these are skipped by default to limit VRAM use.",
     )
 
 
@@ -37,39 +79,136 @@ def pytest_configure(config):
                 f"Invalid renderer: {renderer}. Must be one of 'hybrid', 'fast-rt'"
             )
 
-        # Override the global default renderer in the simulation config
-        from embodichain.lab.sim import cfg
+        # DexSim initialization is intentionally deferred to the first real-simulation
+        # test.  Most of the suite consists of pure-Python tests and should not acquire
+        # a CUDA/Vulkan context merely because pytest has started.
 
-        cfg.DEFAULT_RENDERER = renderer
 
-        # PREVENT IMPLICIT INITIALIZATION BY EXPLICITLY INITIALIZING DEXSIM HERE
-        import dexsim
-        import dexsim.types
+_SIMULATION_MANAGER_CONSTRUCTOR = re.compile(r"\bSimulationManager\s*\(")
 
-        # Map string to dexsim configuration types
-        renderer_map = {
-            "hybrid": dexsim.types.Renderer.HYBRID,
-            "fast-rt": dexsim.types.Renderer.FASTRT,
-        }
-        backend_map = {
-            "hybrid": dexsim.types.Backend.VULKAN,
-            "fast-rt": dexsim.types.Backend.VULKAN,
-        }
 
-        if dexsim.get_world_num() == 0:
-            sim_config = dexsim.WorldConfig()
-            sim_config.renderer = renderer_map.get(
-                renderer, dexsim.types.Renderer.HYBRID
+@lru_cache(maxsize=None)
+def _source_constructs_real_sim(obj):
+    """Return whether an object's source directly constructs a simulation manager."""
+    try:
+        return (
+            _SIMULATION_MANAGER_CONSTRUCTOR.search(inspect.getsource(obj)) is not None
+        )
+    except (OSError, TypeError):
+        return False
+
+
+def _callable_constructs_real_sim(obj):
+    """Check a callable and the module-level helpers it directly references."""
+    if _source_constructs_real_sim(obj):
+        return True
+
+    code = getattr(obj, "__code__", None)
+    module = inspect.getmodule(obj)
+    if code is None or module is None:
+        return False
+
+    for name in code.co_names:
+        helper = vars(module).get(name)
+        if inspect.isfunction(helper) and _source_constructs_real_sim(helper):
+            return True
+    return False
+
+
+def _requires_real_sim(item):
+    """Return whether a test item creates a real SimulationManager."""
+    if item.get_closest_marker("subprocess_sim") is not None:
+        return False
+    if item.get_closest_marker("requires_sim") is not None:
+        return True
+    if item.get_closest_marker("no_sim") is not None:
+        return False
+
+    module = getattr(item, "module", None)
+    if module is not None and "SimulationManager" in vars(module):
+        return True
+
+    if _callable_constructs_real_sim(item.obj):
+        return True
+
+    test_class = getattr(item, "cls", None)
+    if test_class is not None:
+        for cls in test_class.__mro__:
+            if _source_constructs_real_sim(cls):
+                return True
+
+    fixture_info = getattr(item, "_fixtureinfo", None)
+    fixture_defs_by_name = getattr(fixture_info, "name2fixturedefs", {})
+    for fixture_defs in fixture_defs_by_name.values():
+        for fixture_def in fixture_defs:
+            if _callable_constructs_real_sim(fixture_def.func):
+                return True
+
+    return False
+
+
+def _initialize_sim_engine(renderer):
+    """Initialize DexSim once, immediately before the first real-sim test."""
+    from embodichain.lab.sim import cfg
+
+    cfg.DEFAULT_RENDERER = renderer
+
+    import dexsim
+    import dexsim.types
+
+    if dexsim.get_world_num() != 0:
+        return
+
+    renderer_map = {
+        "hybrid": dexsim.types.Renderer.HYBRID,
+        "fast-rt": dexsim.types.Renderer.FASTRT,
+    }
+    sim_config = dexsim.WorldConfig()
+    sim_config.renderer = renderer_map[renderer]
+    sim_config.backend = dexsim.types.Backend.VULKAN
+    sim_config.open_windows = False
+    dexsim.init_sim_engine(sim_config)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(config, items):
+    """Classify real-simulation tests for fast and resource-aware test selection."""
+    for item in items:
+        nodeid = item.nodeid.lower()
+        requires_sim = _requires_real_sim(item)
+        if requires_sim:
+            item.add_marker(pytest.mark.requires_sim)
+            item.add_marker(pytest.mark.xdist_group(name="simulation"))
+        else:
+            module_name = getattr(item.module, "__name__", "unknown")
+            item.add_marker(
+                pytest.mark.xdist_group(name=f"module-{module_name.replace('.', '-')}")
             )
-            sim_config.backend = backend_map.get(renderer, dexsim.types.Backend.VULKAN)
-            sim_config.open_windows = False
-            # This triggers initialization with the correct properties immediately.
-            dexsim.init_sim_engine(sim_config)
+        if "cuda" in nodeid or "gpu" in nodeid:
+            item.add_marker(pytest.mark.gpu)
+        if requires_sim and (
+            "/sensors/" in nodeid or "hybrid" in nodeid or "fastrt" in nodeid
+        ):
+            item.add_marker(pytest.mark.renderer)
+
+        if item.get_closest_marker("gpu") is not None and not config.getoption(
+            "--run-gpu"
+        ):
+            item.add_marker(
+                pytest.mark.skip(
+                    reason="GPU tests require --run-gpu and should run in a serial job."
+                )
+            )
 
 
 @pytest.fixture(autouse=True, scope="function")
-def wait_scene_destruction_after_test():
+def wait_scene_destruction_after_test(request):
     """Ensure C++ engine scenes are fully destructed globally after each test exits."""
+    if not _requires_real_sim(request.node):
+        yield
+        return
+
+    _initialize_sim_engine(request.config.getoption("--renderer"))
     yield
 
     # [Improvement - delayed destruction]: top-level dequeue and traceback cleanup.

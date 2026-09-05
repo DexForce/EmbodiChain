@@ -14,12 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import torch
 import pytest
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.objects import RigidObjectGroup
+from embodichain.lab.sim.objects import RigidBodyGroupData, RigidObjectGroup
 from embodichain.lab.sim.cfg import RigidObjectGroupCfg, RigidObjectCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
@@ -29,6 +31,29 @@ DUCK_PATH = "ToyDuck/toy_duck.glb"
 TABLE_PATH = "ShopTableSimple/shop_table_simple.ply"
 NUM_ARENAS = 4
 Z_TRANSLATION = 2.0
+
+
+@pytest.mark.no_sim
+def test_cpu_body_data_reads_angular_velocity_from_angular_api():
+    """CPU rigid-object groups must not report linear velocity as angular."""
+
+    class VelocityEntity:
+        def get_linear_velocity(self):
+            return [1.0, 2.0, 3.0]
+
+        def get_angular_velocity(self):
+            return [4.0, 5.0, 6.0]
+
+    body_data = object.__new__(RigidBodyGroupData)
+    body_data.entities = [[VelocityEntity(), VelocityEntity()]]
+    body_data.device = torch.device("cpu")
+
+    angular_velocity = body_data.ang_vel
+
+    assert torch.equal(
+        angular_velocity,
+        torch.tensor([[[4.0, 5.0, 6.0], [4.0, 5.0, 6.0]]]),
+    )
 
 
 class BaseRigidObjectGroupTest:
@@ -100,6 +125,19 @@ class BaseRigidObjectGroupTest:
             f"Unexpected user_ids shape: {user_ids.shape}, "
             f"expected ({NUM_ARENAS}, {self.obj_group.num_objects})"
         )
+
+    def test_get_object_mesh_geometry(self):
+        """Test constituent render geometry used by external visualizers."""
+        vertices = self.obj_group.get_object_vertices(
+            0,
+            env_ids=[0],
+            scale=True,
+        )
+        triangles = self.obj_group.get_object_triangles(0, env_ids=[0])
+
+        assert vertices.ndim == 3 and vertices.shape[0] == 1
+        assert triangles.ndim == 3 and triangles.shape[0] == 1
+        assert int(triangles.max()) < vertices.shape[1]
 
     def test_remove(self):
         self.sim.remove_asset(self.obj_group.uid)

@@ -1,3 +1,22 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+import argparse
 import os
 import time
 import numpy as np
@@ -9,9 +28,14 @@ from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import MarkerCfg
+from embodichain.lab.visualization import (
+    VisualizationCfg,
+    add_viser_args_to_parser,
+    visualization_cfg_from_args,
+)
 
 
-def main():
+def main(visualization: VisualizationCfg | None = None) -> None:
     # Set numpy and torch print options for better readability
     np.set_printoptions(precision=5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
@@ -20,7 +44,11 @@ def main():
     sim_device = "cpu"
     num_envs = 9  # Number of parallel environments
     config = SimulationManagerCfg(
-        headless=False, sim_device=sim_device, arena_space=2.0, num_envs=num_envs
+        headless=False,
+        sim_device=sim_device,
+        arena_space=2.0,
+        num_envs=num_envs,
+        visualization=visualization or VisualizationCfg(),
     )
     sim = SimulationManager(config)
     sim.set_manual_update(False)
@@ -218,8 +246,11 @@ def main():
                 )
         time.sleep(0.005)
 
+    sim.capture_visualization(force=True)
     embed(header="Test PytorchSolver batch example. Press Ctrl+D to exit.")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_viser_args_to_parser(parser)
+    main(visualization=visualization_cfg_from_args(parser.parse_args()))

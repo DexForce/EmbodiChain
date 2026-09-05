@@ -14,6 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
 
 import cv2
 import pickle
@@ -30,6 +31,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Callable
 
+from embodichain.utils.config_paths import resolve_config_path as _resolve_config_path
 from embodichain.utils.string import callable_to_string
 
 
@@ -240,6 +242,7 @@ def read_all_folder_images(base_path: str) -> List[np.ndarray]:
         for file in files:
             if file.endswith((".png", ".jpg", ".jpeg")):
                 image_files.append(os.path.join(subdir, file))
+    image_files.sort()
 
     # Then process with progress bar
     for image_path in tqdm(image_files, desc="Loading images"):
@@ -380,7 +383,8 @@ def load_config(path: str | Path) -> Dict[str, Any]:
     Supports JSON (``.json``) and YAML (``.yaml`` / ``.yml``) formats.
 
     Args:
-        path: Path to the config file.
+        path: Path to the config file. Repository-style paths beginning with
+            ``embodichain_tasks/configs`` also resolve from an installed wheel.
 
     Returns:
         The parsed config dictionary.
@@ -389,7 +393,7 @@ def load_config(path: str | Path) -> Dict[str, Any]:
         ValueError: If the file extension is not supported.
         TypeError: If the parsed YAML root is not a mapping.
     """
-    path = Path(path)
+    path = _resolve_config_path(path)
     config_format = _config_format_from_path(path)
 
     if config_format == "json":

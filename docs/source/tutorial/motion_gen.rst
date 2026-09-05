@@ -59,6 +59,7 @@ Typical Usage
 
    # Create motion generation options
    motion_opts = MotionGenOptions(
+       strategy="motion_gen",
        plan_opts=plan_opts,
        control_part=arm_name,
        is_interpolate=True,
@@ -104,6 +105,9 @@ API Reference
 .. code-block:: python
 
    motion_opts = MotionGenOptions(
+       strategy="motion_gen",               # "motion_gen" or "ik_interp"
+       sample_count=None,                    # Optional normalized output length
+       interpolation_dt=None,                # Required for deterministic interpolation
        plan_opts=ToppraPlanOptions(...),  # Options for the underlying planner
        control_part=arm_name,              # Robot part to control (e.g., 'left_arm')
        is_interpolate=False,               # Whether to pre-interpolate trajectory
@@ -119,11 +123,14 @@ API Reference
 .. code-block:: python
 
    generate(
-       target_states: List[PlanState],
-       options: MotionGenOptions = MotionGenOptions(),
+       target_states: list[PlanState],
+       options: MotionGenOptions | None = None,
    ) -> PlanResult
 
-- Generates a time-optimal trajectory (joint space), returning a ``PlanResult`` data class.
+- ``strategy="motion_gen"`` delegates to the configured backend; ``strategy="ik_interp"`` performs deterministic waypoint IK and joint interpolation and requires ``interpolation_dt``.
+- Returns a normalized, environment-batched ``PlanResult`` with explicit ``dt``
+  and derived ``duration`` whenever positions are present. Missing timing raises
+  immediately.
 - Uses ``target_states`` (list of PlanState) and ``options`` (MotionGenOptions) instead of individual parameters.
 
 **interpolate_trajectory**
@@ -134,7 +141,7 @@ API Reference
        control_part: str | None = None,
        xpos_list: torch.Tensor | None = None,
        qpos_list: torch.Tensor | None = None,
-       options: MotionGenOptions = MotionGenOptions(),
+       options: MotionGenOptions | None = None,
    ) -> Tuple[torch.Tensor, torch.Tensor | None]
 
 - Interpolates trajectory between waypoints (joint or Cartesian), auto-handles FK/IK.
@@ -162,7 +169,7 @@ API Reference
 - (Reserved) Plan trajectory with collision checking (not yet implemented).
 
 Notes & Best Practices
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 - Only collision-free planning is currently supported; collision checking is a placeholder.
 - Input/outputs are numpy arrays or torch tensors; ensure type consistency.

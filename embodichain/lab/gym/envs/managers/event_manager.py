@@ -15,18 +15,80 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
-import torch
-from collections.abc import Sequence
-from prettytable import PrettyTable
+import random
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from numbers import Integral
 from typing import TYPE_CHECKING, Union
 
+import numpy as np
+import torch
+from prettytable import PrettyTable
+
 from embodichain.utils import logger
-from .manager_base import ManagerBase
+from .manager_base import Functor, ManagerBase
 from .cfg import EventCfg
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
+
+
+_MAX_TORCH_SEED = 2**63 - 1
+
+
+def _derive_functor_seed(
+    seed: int,
+    phase: str,
+    mode: str,
+    functor_name: str,
+    invocation: int,
+) -> int:
+    """Derive a stable seed for one event-functor invocation."""
+    digest = hashlib.blake2b(digest_size=8, person=b"EmbodiEventRNG")
+    for value in (seed, phase, mode, functor_name, invocation):
+        encoded = str(value).encode("utf-8")
+        digest.update(len(encoded).to_bytes(4, byteorder="little"))
+        digest.update(encoded)
+    return int.from_bytes(digest.digest(), byteorder="little") % _MAX_TORCH_SEED
+
+
+@contextmanager
+def _scoped_random_seed(seed: int, device: torch.device | str) -> Iterator[None]:
+    """Temporarily seed the global RNG APIs used by event functors."""
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    torch_cpu_state = torch.get_rng_state()
+
+    torch_device = torch.device(device)
+    cuda_device: torch.device | None = None
+    cuda_state: torch.Tensor | None = None
+    if torch_device.type == "cuda":
+        cuda_index = torch_device.index
+        if cuda_index is None:
+            cuda_index = torch.cuda.current_device()
+        cuda_device = torch.device("cuda", cuda_index)
+        cuda_state = torch.cuda.get_rng_state(cuda_device)
+
+    try:
+        random.seed(seed)
+        np.random.seed(seed % 2**32)
+
+        cpu_generator = torch.Generator(device="cpu")
+        cpu_generator.manual_seed(seed)
+        torch.set_rng_state(cpu_generator.get_state())
+        if cuda_device is not None:
+            cuda_generator = torch.Generator(device=cuda_device)
+            cuda_generator.manual_seed(seed)
+            torch.cuda.set_rng_state(cuda_generator.get_state(), cuda_device)
+        yield
+    finally:
+        random.setstate(python_state)
+        np.random.set_state(numpy_state)
+        torch.set_rng_state(torch_cpu_state)
+        if cuda_device is not None and cuda_state is not None:
+            torch.cuda.set_rng_state(cuda_state, cuda_device)
 
 
 class EventManager(ManagerBase):
@@ -76,6 +138,14 @@ class EventManager(ManagerBase):
         self._mode_functor_names: dict[str, list[str]] = dict()
         self._mode_functor_cfgs: dict[str, list[EventCfg]] = dict()
         self._mode_class_functor_cfgs: dict[str, list[EventCfg]] = dict()
+        self._functor_invocation_counts: dict[tuple[str, str, str], int] = {}
+
+        cfg_seed = getattr(getattr(env, "cfg", None), "seed", None)
+        self._seed = (
+            int(cfg_seed)
+            if isinstance(cfg_seed, Integral) and not isinstance(cfg_seed, bool)
+            else None
+        )
 
         # call the base class (this will parse the functors config)
         super().__init__(cfg, env)
@@ -126,26 +196,52 @@ class EventManager(ManagerBase):
         """Modes of events."""
         return list(self._mode_functor_names.keys())
 
+    @property
+    def seed(self) -> int | None:
+        """Return the base seed used for event-functor randomization."""
+        return self._seed
+
     """
     Operations.
     """
 
     def reset(self, env_ids: Union[Sequence[int], None] = None) -> dict[str, float]:
         # call all functors that are classes
-        for mode_cfg in self._mode_class_functor_cfgs.values():
-            for functor_cfg in mode_cfg:
-                functor_cfg.func.reset(env_ids=env_ids)
-
-        # resolve number of environments
-        if env_ids is None:
-            num_envs = self._env.num_envs
-        else:
-            num_envs = len(env_ids)
+        for mode, functor_cfgs in self._mode_functor_cfgs.items():
+            for functor_name, functor_cfg in zip(
+                self._mode_functor_names[mode], functor_cfgs
+            ):
+                if isinstance(functor_cfg.func, Functor):
+                    with self._functor_seed_scope(
+                        phase="reset",
+                        mode=mode,
+                        functor_name=functor_name,
+                    ):
+                        functor_cfg.func.reset(env_ids=env_ids)
 
         # May be add more useful reset logic later.
 
         # nothing to log here
         return {}
+
+    def set_seed(self, seed: int | None) -> None:
+        """Set the event seed and rewind all deterministic event streams.
+
+        Args:
+            seed: Base task-environment seed. ``None`` disables scoped event
+                randomization and preserves the process-global RNG behavior.
+
+        Raises:
+            TypeError: If ``seed`` is not an integer or ``None``.
+        """
+        if seed is not None and (
+            not isinstance(seed, Integral) or isinstance(seed, bool)
+        ):
+            raise TypeError(f"Event seed must be an integer or None, got {type(seed)}.")
+        self._seed = None if seed is None else int(seed)
+        self._functor_invocation_counts.clear()
+        for count in getattr(self, "_interval_functor_step_count", []):
+            count.zero_()
 
     def apply(
         self,
@@ -188,7 +284,9 @@ class EventManager(ManagerBase):
             )
 
         # iterate over all the event functors
-        for index, functor_cfg in enumerate(self._mode_functor_cfgs[mode]):
+        for index, (functor_name, functor_cfg) in enumerate(
+            zip(self._mode_functor_names[mode], self._mode_functor_cfgs[mode])
+        ):
             functor_cfg: EventCfg
             if mode == "interval":
                 self._interval_functor_step_count[index] += 1
@@ -203,7 +301,9 @@ class EventManager(ManagerBase):
                 ):
 
                     # call the event functor (with None for env_ids)
-                    functor_cfg.func(self._env, None, **functor_cfg.params)
+                    self._call_event_functor(
+                        mode, functor_name, functor_cfg, self._env, None
+                    )
                 else:
                     valid_env_ids = (
                         (
@@ -216,16 +316,26 @@ class EventManager(ManagerBase):
                     )
                     if len(valid_env_ids) > 0:
                         # call the event functor
-                        functor_cfg.func(self._env, valid_env_ids, **functor_cfg.params)
+                        self._call_event_functor(
+                            mode,
+                            functor_name,
+                            functor_cfg,
+                            self._env,
+                            valid_env_ids,
+                        )
             elif mode == "reset":
                 # resolve the environment indices
                 if env_ids is None:
                     env_ids = slice(None)
 
-                functor_cfg.func(self._env, env_ids, **functor_cfg.params)
+                self._call_event_functor(
+                    mode, functor_name, functor_cfg, self._env, env_ids
+                )
             else:
                 # call the event functor
-                functor_cfg.func(self._env, env_ids, **functor_cfg.params)
+                self._call_event_functor(
+                    mode, functor_name, functor_cfg, self._env, env_ids
+                )
 
     """
     Operations - Functor settings.
@@ -322,8 +432,14 @@ class EventManager(ManagerBase):
                     f" Received: '{type(functor_cfg)}'."
                 )
 
-            # resolve common parameters
-            self._resolve_common_functor_cfg(functor_name, functor_cfg, min_argc=2)
+            # Resolve class functors in their own deterministic stream because
+            # constructors may build random palettes or other random state.
+            with self._functor_seed_scope(
+                phase="initialize",
+                mode=functor_cfg.mode,
+                functor_name=functor_name,
+            ):
+                self._resolve_common_functor_cfg(functor_name, functor_cfg, min_argc=2)
 
             # check if mode is a new mode
             if functor_cfg.mode not in self._mode_functor_names:
@@ -335,8 +451,9 @@ class EventManager(ManagerBase):
             self._mode_functor_names[functor_cfg.mode].append(functor_name)
             self._mode_functor_cfgs[functor_cfg.mode].append(functor_cfg)
 
-            # check if the functor is a class
-            if inspect.isclass(functor_cfg.func):
+            # Resolution replaces class-style functors (including string
+            # references to classes) with initialized Functor instances.
+            if isinstance(functor_cfg.func, Functor):
                 self._mode_class_functor_cfgs[functor_cfg.mode].append(functor_cfg)
 
             # resolve the mode of the events
@@ -351,3 +468,42 @@ class EventManager(ManagerBase):
                         self.num_envs, dtype=torch.int32, device=self.device
                     )
                     self._interval_functor_step_count.append(count)
+
+    def _call_event_functor(
+        self,
+        mode: str,
+        functor_name: str,
+        functor_cfg: EventCfg,
+        *args,
+    ):
+        """Call one event functor inside its deterministic random stream."""
+        with self._functor_seed_scope(
+            phase="call", mode=mode, functor_name=functor_name
+        ):
+            return super()._call_functor(functor_name, functor_cfg, *args)
+
+    @contextmanager
+    def _functor_seed_scope(
+        self,
+        *,
+        phase: str,
+        mode: str,
+        functor_name: str,
+    ) -> Iterator[None]:
+        """Enter the next deterministic stream for a named event functor."""
+        if self._seed is None:
+            yield
+            return
+
+        key = (phase, mode, functor_name)
+        invocation = self._functor_invocation_counts.get(key, 0)
+        self._functor_invocation_counts[key] = invocation + 1
+        functor_seed = _derive_functor_seed(
+            self._seed,
+            phase,
+            mode,
+            functor_name,
+            invocation,
+        )
+        with _scoped_random_seed(functor_seed, self.device):
+            yield

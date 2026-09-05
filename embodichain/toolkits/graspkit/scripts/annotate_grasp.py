@@ -22,32 +22,25 @@ point pairs to the grasp-annotator cache.
 
 Usage examples::
 
-    python -m embodichain annotate-grasp --mesh_path /path/to/object.ply
-    python -m embodichain annotate-grasp --mesh_path mug.obj
+    embodichain annotate-grasp --mesh_path /path/to/object.ply
+    embodichain annotate-grasp --mesh_path mug.obj
 """
 
 from __future__ import annotations
 
 import argparse
-
-import torch
-import trimesh
-
-from embodichain.toolkits.graspkit.pg_grasp import (
-    AntipodalSamplerCfg,
-    GraspGenerator,
-    GraspGeneratorCfg,
-)
-from embodichain.utils.logger import log_info
+from collections.abc import Sequence
 
 
-def cli() -> None:
+def cli(argv: Sequence[str] | None = None) -> None:
     """Command-line interface for grasp pose annotation.
 
-    Parses CLI arguments, loads the mesh, and launches interactive
-    annotation via the Viser browser UI.
+    Args:
+        argv: Arguments excluding the command name. Uses ``sys.argv`` when
+            omitted.
     """
     parser = argparse.ArgumentParser(
+        prog="embodichain annotate-grasp",
         description=(
             "Interactively annotate a grasp region on a mesh and "
             "compute antipodal point pairs."
@@ -91,7 +84,19 @@ def cli() -> None:
         help="Compute device, e.g. 'cpu' or 'cuda' (default: cpu).",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    import torch
+    import trimesh
+
+    from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+    from embodichain.toolkits.graspkit.pg_grasp import (
+        AntipodalGraspPoseGenerator,
+        AntipodalGraspPoseGeneratorCfg,
+        GraspAnnotationCfg,
+        ParallelJawGraspCollisionCfg,
+    )
+    from embodichain.utils.logger import log_info
 
     # Load mesh via trimesh
     log_info(f"Loading mesh from {args.mesh_path}", color="green")
@@ -99,27 +104,31 @@ def cli() -> None:
     vertices = torch.tensor(mesh.vertices, dtype=torch.float32, device=args.device)
     triangles = torch.tensor(mesh.faces, dtype=torch.int64, device=args.device)
 
-    # Build configuration
-    sampler_cfg = AntipodalSamplerCfg(
-        n_sample=args.n_sample,
-        max_length=args.max_length,
-        min_length=args.min_length,
+    generator = AntipodalGraspPoseGenerator(
+        ParallelJawGripperModelCfg(
+            model_id="annotation_parallel_jaw",
+            min_opening_width=args.min_length,
+            max_opening_width=args.max_length,
+        ),
+        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(sample_count=args.n_sample),
+        collision_cfg=ParallelJawGraspCollisionCfg(opening_margin=0.0),
+        annotation_cfg=GraspAnnotationCfg(
+            selection_mode="interactive",
+            viser_port=args.viser_port,
+            force_refresh=True,
+        ),
     )
-    cfg = GraspGeneratorCfg(
-        viser_port=args.viser_port,
-        antipodal_sampler_cfg=sampler_cfg,
-    )
-
-    # Create generator and run annotation
-    generator = GraspGenerator(vertices=vertices, triangles=triangles, cfg=cfg)
     log_info(
         "Annotate the grasp region in the browser window:\n"
-        "  1. Open http://localhost:{port}\n"
+        f"  1. Open http://localhost:{args.viser_port}\n"
         "  2. Click 'Rect Select Region' and drag to select\n"
         "  3. Click 'Confirm Selection' to finish",
         color="green",
     )
-    hit_point_pairs = generator.annotate()
+    hit_point_pairs = generator.prepare_mesh(
+        mesh_vertices=vertices,
+        mesh_triangles=triangles,
+    )
 
     log_info(
         f"Annotation complete. {hit_point_pairs.shape[0]} antipodal pairs cached.",
@@ -129,3 +138,6 @@ def cli() -> None:
 
 if __name__ == "__main__":
     cli()
+
+
+__all__ = ["cli"]

@@ -5,6 +5,13 @@
 
 This page lists all available event functors that can be used with the Event Manager. Event functors are configured using {class}`~cfg.EventCfg` and can be triggered at different stages: ``startup``, ``reset``, or ``interval``.
 
+Set the task's top-level ``seed`` (or pass ``--seed`` to the common environment
+launcher) to make all standard-RNG event functors reproducible. The Event
+Manager isolates each named functor's Python, NumPy, and Torch random stream, so
+unrelated event or policy random draws do not change its sequence. Passing a
+seed again through ``env.reset(seed=...)`` rewinds that sequence. See
+{doc}`env` for the complete contract and limitations.
+
 ````{tip}
 **Using an AI coding agent?** Use the **`/add-functor`** skill to scaffold a new event or randomization functor with the correct signature (`env, env_ids, ...`), function or class style, and module placement. Use **`/add-test`** to generate mock-based tests.
 ````
@@ -53,16 +60,24 @@ This page lists all available event functors that can be used with the Event Man
 * - Functor Name
   - Description
 * - {class}`~randomization.visual.randomize_visual_material`
-  - Randomize textures, base colors, and material properties (metallic, roughness, IOR). Implemented as a Functor class. Supports both RigidObject and Articulation assets.
+  - Randomize textures, base colors, and material properties (metallic, roughness, IOR) for rigid objects and articulations. The default path retains each asset's original material instance and creates a working instance from the same material template; randomization swaps the render body between those instances without creating a new `VisualMaterial` template.
 
     ```json
     {"func": "randomize_visual_material",
      "mode": "interval", "interval_step": 10,
      "params": {"entity_cfg": {"uid": "table"},
-                "random_texture_prob": 0.5,
                 "texture_path": "CocoBackground/coco",
+                "p_original": 0.2,
+                "p_library": 0.5,
+                "p_solid": 0.3,
+                "solid_texture_count": 32,
+                "shared": false,
                 "base_color_range": [[0.2, 0.2, 0.2], [1.0, 1.0, 1.0]]}}
     ```
+
+    `p_original`, `p_library`, and `p_solid` select the original instance, a library texture on the working instance, or a solid-color texture on the working instance. When all three are omitted, the defaults are `0`, `random_texture_prob`, and `1 - random_texture_prob`; the default `random_texture_prob` is `0.5`. If no texture library is loaded, the library probability is added to the solid probability. Explicit probabilities are normalized, and any omitted member of an explicit set is treated as zero.
+
+    Rigid-object mesh segments share one working instance per environment. Articulations use one working instance and sample one tier per selected link. Set `shared=true` to reuse one state, plan, and link-tier selection across all environments. Solid textures come from a bounded palette created during initialization; `solid_texture_count` controls its size and defaults to 32. Set `fallback_to_new=true` to force the legacy create-and-replace path. The functor also falls back automatically when the asset material cannot be reused. The default plane is always randomized in place.
 * - {func}`~randomization.visual.randomize_light`
   - Vary light position, color, intensity, and direction within specified ranges.
 
@@ -204,6 +219,15 @@ This page lists all available event functors that can be used with the Event Man
      "params": {"grid_origin": [0.5, -0.3], "grid_size": [0.4, 0.6],
                 "grid_res": [4, 6], "entity_cfg": {"uid": "objects"}}}
     ```
+* - {class}`~randomization.spatial.randomize_anchor_height`
+  - Randomize the height of an anchor object and shift other objects by the same delta. Implemented as a Functor class. Samples a per-environment height delta (uniform range or discrete candidates), moves the anchor object relative to its configured initial position, and adds the same delta to the Z component of every other included object while preserving XY and rotation.
+
+    ```json
+    {"func": "randomize_anchor_height", "mode": "reset",
+     "params": {"anchor_uid": "table",
+                "height_delta_range": [[-0.05], [0.05]],
+                "exclude_uids": ["floor"]}}
+    ```
 ```
 
 ## Geometry Randomization
@@ -230,6 +254,36 @@ This page lists all available event functors that can be used with the Event Man
      "params": {"entity_cfg": {"uid": "objects"},
                 "scale_range": [[0.8, 0.8, 0.8], [1.2, 1.2, 1.2]]}}
     ```
+```
+
+## Simulation Control
+
+```{list-table} Simulation Control Functors
+:header-rows: 1
+:widths: 25 75
+
+* - Functor Name
+  - Description
+* - {func}`~events.wait_for_dynamic_objects_to_settle`
+  - Advance physics until every selected dynamic rigid object, rigid object
+    group member, or articulation link remains below the configured linear and
+    angular velocity thresholds for several consecutive checks. When
+    ``entity_cfgs`` is omitted, all supported non-robot dynamic entities are
+    discovered automatically.
+
+    ```json
+    {"func": "wait_for_dynamic_objects_to_settle", "mode": "reset",
+     "params": {
+       "entity_cfgs": [{"uid": "cube"}],
+       "min_steps": 10,
+       "max_steps": 120,
+       "check_interval_steps": 2,
+       "required_stable_checks": 3,
+       "timeout_behavior": "raise"}}
+    ```
+
+    Because physics updates advance the entire vectorized world, partial
+    ``env_ids`` are rejected unless ``allow_partial_envs`` is explicitly enabled.
 ```
 
 ## Asset Management

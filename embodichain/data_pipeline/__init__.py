@@ -14,7 +14,13 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Online data streaming and recording for live-simulation training.
+
+Exposes online datasets/samplers, a process-safe trajectory engine, and compressed depth-sidecar storage for LeRobot datasets.
+"""
+
 from . import datasets
+from . import depth_video
 from . import engine
 
-__all__ = ["datasets", "engine"]
+__all__ = ["datasets", "depth_video", "engine"]

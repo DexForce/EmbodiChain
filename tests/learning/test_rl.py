@@ -14,11 +14,19 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import json
 import pytest
 import tempfile
 from pathlib import Path
+
+pytestmark = [
+    pytest.mark.requires_sim,
+    pytest.mark.requires_tasks,
+    pytest.mark.slow,
+]
 
 
 class TestRLTraining:
@@ -30,8 +38,12 @@ class TestRLTraining:
     def setup_method(self):
         """Set up test configuration before each test method."""
         # Load the existing push_cube config
-        train_config_path = "configs/agents/rl/push_cube/train_config.json"
-        gym_config_path = "configs/agents/rl/push_cube/gym_config.json"
+        train_config_path = (
+            "embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.json"
+        )
+        gym_config_path = (
+            "embodichain_tasks/configs/tasks/manipulation/push_cube/env.json"
+        )
 
         with open(train_config_path, "r") as f:
             train_config = json.load(f)
@@ -47,7 +59,6 @@ class TestRLTraining:
                 "params": {
                     "robot_meta": {
                         "robot_type": "UR10_DH_Gripper",
-                        "control_freq": 25,
                     },
                     "instruction": {"lang": "push_cube_to_target"},
                     "extra": {

@@ -14,18 +14,24 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import numpy as np
 
-from typing import List, Dict, Tuple, Union, Sequence
+from typing import Dict, List, Literal, Sequence, Tuple
 from dataclasses import dataclass, field
 from tensordict import TensorDict
 
 from dexsim.engine import Articulation as _Articulation
-from embodichain.lab.sim.cfg import RobotCfg
+from embodichain.lab.sim.cfg import RobotCfg, RobotWorkspaceCfg
 from embodichain.lab.sim.solvers import SolverCfg, BaseSolver
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.sim.utility.tensor import to_tensor
+from embodichain.lab.sim.workspace.runtime import (
+    RobotWorkspace,
+    WorkspaceSample,
+)
 from embodichain.utils.math import quat_from_matrix, matrix_from_quat
 from embodichain.utils.string import (
     is_regular_expression,
@@ -77,12 +83,18 @@ class Robot(Articulation):
 
         self._control_groups: Dict[str, ControlGroup] = {}
 
+        # Articulation initialization may apply configured qpos limits through
+        # Robot.set_qpos_limits(), which synchronizes this registry.
+        self._solvers: Dict[str, BaseSolver] = {}
+
+        # Workspaces are loaded lazily so constructing a robot does not perform
+        # cache I/O unless a task actually requests workspace sampling.
+        self._workspaces: Dict[str, RobotWorkspace] = {}
+
         if self.cfg.control_parts:
             self._init_control_parts(self.cfg.control_parts)
 
         super().__init__(cfg, entities, device)
-
-        self._solvers = {}
 
         if self.cfg.solver_cfg:
             self.init_solver(self.cfg.solver_cfg)
@@ -98,6 +110,226 @@ class Robot(Articulation):
     def control_parts(self) -> Dict[str, List[str]] | None:
         """Get the control parts of the robot."""
         return self.cfg.control_parts
+
+    def attach_workspace(
+        self, workspace: RobotWorkspace, name: str | None = None
+    ) -> None:
+        """Attach a runtime workspace to a control part.
+
+        Args:
+            workspace: Runtime workspace to attach.
+            name: Control-part name. Use ``None`` for the default solver.
+        """
+        key = name or "default"
+        if self.control_parts and name is not None and name not in self.control_parts:
+            raise ValueError(
+                f"The control part {name!r} does not exist in {self.control_parts}."
+            )
+        self._workspaces[key] = workspace.to(self.device)
+
+    def get_workspace(self, name: str | None = None) -> RobotWorkspace:
+        """Get or lazily load the workspace for a control part.
+
+        Args:
+            name: Control-part name. If omitted and exactly one workspace is
+                configured, that workspace is selected automatically.
+
+        Returns:
+            Runtime robot workspace.
+
+        Raises:
+            ValueError: If no unambiguous workspace configuration exists.
+        """
+        workspace_cfgs = self.cfg.workspace_cfg or {}
+        key = name or "default"
+        if name is None and key not in workspace_cfgs and key not in self._workspaces:
+            available = set(workspace_cfgs) | set(self._workspaces)
+            if len(available) == 1:
+                key = next(iter(available))
+            else:
+                raise ValueError(
+                    "A control-part name is required when the robot has zero or "
+                    f"multiple workspaces; available workspaces: {sorted(available)}."
+                )
+
+        if key not in self._workspaces:
+            workspace_cfg = workspace_cfgs.get(key)
+            if workspace_cfg is None:
+                raise ValueError(
+                    f"No workspace is configured for control part {key!r}."
+                )
+            self._workspaces[key] = RobotWorkspace.from_cache(
+                workspace_cfg.cache_path,
+                device=self.device,
+                voxel_size=workspace_cfg.voxel_size,
+            )
+        return self._workspaces[key]
+
+    def sample_reachable_pose(
+        self,
+        name: str | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        num_samples: int = 1,
+        strategy: Literal["point_uniform", "voxel_uniform"] | None = None,
+        position_bounds: (
+            torch.Tensor | tuple[Sequence[float], Sequence[float]] | None
+        ) = None,
+        min_score: float | None = None,
+        max_attempts: int = 64,
+        generator: torch.Generator | None = None,
+    ) -> WorkspaceSample:
+        """Sample kinematically reachable end-effector poses.
+
+        Cached joint configurations are sampled first and then evaluated with
+        runtime FK. This accounts for the current control-part base pose in
+        every target environment. A valid sample is kinematically reachable,
+        but is not guaranteed to have a collision-free trajectory from the
+        robot's current state.
+
+        Args:
+            name: Control-part name.
+            env_ids: Target environment IDs. Defaults to all environments.
+            num_samples: Number of samples per environment.
+            strategy: Sampling strategy. Defaults to the workspace config.
+            position_bounds: Optional arena-frame bounds ``((xmin, ymin, zmin),
+                (xmax, ymax, zmax))`` applied after FK.
+            min_score: Optional minimum cached reachability score.
+            max_attempts: Candidate count per environment when applying bounds.
+            generator: Optional torch random number generator.
+
+        Returns:
+            Batched workspace samples. Entries that could not satisfy bounds
+            have ``valid=False`` and ``indices=-1``.
+
+        Raises:
+            ValueError: If sampling arguments are invalid.
+        """
+        if num_samples <= 0:
+            raise ValueError(f"num_samples must be positive; got {num_samples}.")
+        if max_attempts < num_samples:
+            raise ValueError(
+                "max_attempts must be at least num_samples; "
+                f"got {max_attempts} and {num_samples}."
+            )
+
+        if env_ids is None:
+            local_env_ids = self._all_indices
+        elif isinstance(env_ids, slice):
+            local_env_ids = self._all_indices[env_ids]
+        else:
+            local_env_ids = env_ids
+        if not isinstance(local_env_ids, torch.Tensor):
+            local_env_ids = torch.as_tensor(
+                local_env_ids, dtype=torch.long, device=self.device
+            )
+        else:
+            local_env_ids = local_env_ids.to(device=self.device, dtype=torch.long)
+        batch_size = len(local_env_ids)
+
+        workspace = self.get_workspace(name)
+        workspace_cfgs = self.cfg.workspace_cfg or {}
+        workspace_key = name or "default"
+        if name is None and workspace_key not in workspace_cfgs:
+            configured_keys = set(workspace_cfgs) | set(self._workspaces)
+            if len(configured_keys) == 1:
+                workspace_key = next(iter(configured_keys))
+        fk_name = name
+        if fk_name is None and workspace_key != "default":
+            fk_name = workspace_key
+        workspace_cfg = workspace_cfgs.get(workspace_key)
+        selected_strategy = strategy or (
+            workspace_cfg.strategy if workspace_cfg is not None else "voxel_uniform"
+        )
+        selected_min_score = (
+            min_score
+            if min_score is not None
+            else (workspace_cfg.min_score if workspace_cfg is not None else None)
+        )
+
+        candidate_count = max_attempts if position_bounds is not None else num_samples
+        candidate_indices = workspace.sample_indices(
+            batch_size * candidate_count,
+            strategy=selected_strategy,
+            min_score=selected_min_score,
+            generator=generator,
+        ).reshape(batch_size, candidate_count)
+        candidate_qpos = workspace.qpos[candidate_indices]
+        candidate_poses = self.compute_batch_fk(
+            qpos=candidate_qpos,
+            name=fk_name,
+            env_ids=local_env_ids,
+            to_matrix=True,
+        )
+
+        candidate_valid = torch.ones(
+            (batch_size, candidate_count), dtype=torch.bool, device=self.device
+        )
+        if position_bounds is not None:
+            bounds = torch.as_tensor(
+                position_bounds, dtype=torch.float32, device=self.device
+            )
+            if bounds.shape != (2, 3):
+                raise ValueError(
+                    "position_bounds must have shape (2, 3); "
+                    f"got {tuple(bounds.shape)}."
+                )
+            positions = candidate_poses[:, :, :3, 3]
+            candidate_valid = torch.logical_and(
+                positions >= bounds[0], positions <= bounds[1]
+            ).all(dim=-1)
+
+        pose_result = (
+            torch.eye(4, dtype=candidate_poses.dtype, device=self.device)
+            .reshape(1, 1, 4, 4)
+            .repeat(batch_size, num_samples, 1, 1)
+        )
+        qpos_result = torch.zeros(
+            (batch_size, num_samples, workspace.qpos.shape[1]),
+            dtype=workspace.qpos.dtype,
+            device=self.device,
+        )
+        index_result = torch.full(
+            (batch_size, num_samples), -1, dtype=torch.long, device=self.device
+        )
+        valid_result = torch.zeros(
+            (batch_size, num_samples), dtype=torch.bool, device=self.device
+        )
+        score_result = (
+            torch.zeros(
+                (batch_size, num_samples),
+                dtype=workspace.scores.dtype,
+                device=self.device,
+            )
+            if workspace.scores is not None
+            else None
+        )
+
+        for batch_index in range(batch_size):
+            valid_candidates = torch.where(candidate_valid[batch_index])[0][
+                :num_samples
+            ]
+            count = len(valid_candidates)
+            if count == 0:
+                continue
+            pose_result[batch_index, :count] = candidate_poses[
+                batch_index, valid_candidates
+            ]
+            qpos_result[batch_index, :count] = candidate_qpos[
+                batch_index, valid_candidates
+            ]
+            selected_indices = candidate_indices[batch_index, valid_candidates]
+            index_result[batch_index, :count] = selected_indices
+            valid_result[batch_index, :count] = True
+            if score_result is not None:
+                score_result[batch_index, :count] = workspace.scores[selected_indices]
+
+        return WorkspaceSample(
+            eef_pose=pose_result,
+            qpos=qpos_result,
+            indices=index_result,
+            valid=valid_result,
+            score=score_result,
+        )
 
     def get_joint_ids(
         self, name: str | None = None, remove_mimic: bool = False
@@ -128,7 +360,7 @@ class Robot(Articulation):
             else [i for i in self._joint_ids[name] if i not in self.mimic_ids]
         )
 
-    def get_link_names(self, name: str | None = None) -> Union[List[str], None]:
+    def get_link_names(self, name: str | None = None) -> List[str] | None:
         """Get the link names of the robot for a specific control part.
 
         If no control part is specified, return all link names.
@@ -148,8 +380,33 @@ class Robot(Articulation):
             )
         return self._control_groups[name].link_names
 
+    def _resolve_limit_joint_ids(
+        self,
+        name: str | None,
+        joint_ids: Sequence[int] | None,
+    ) -> Sequence[int] | None:
+        """Resolve joint selection for robot limit APIs.
+
+        When `name` is specified, the control-part joint ids take precedence over
+        explicit `joint_ids` to preserve the existing Robot setter/getter behavior.
+        """
+        if name is None:
+            return joint_ids
+
+        if not self.control_parts or name not in self.control_parts:
+            logger.log_error(
+                f"The control part '{name}' does not exist in the robot's control parts."
+            )
+        if joint_ids is not None:
+            logger.log_warning("`joint_ids` is ignored when `name` is specified.")
+        return self.get_joint_ids(name=name)
+
     def get_qpos_limits(
-        self, name: str | None = None, env_ids: Sequence[int] | None = None
+        self,
+        name: str | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Get the joint position limits (qpos) of the robot for a specific control part.
 
@@ -157,26 +414,25 @@ class Robot(Articulation):
 
         Args:
             name (str | None): The name of the control part to get the qpos limits for.
-            env_ids (Sequence[int] | None): The environment ids to get the qpos limits for. If None, all environments are used.
+            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to get the qpos limits for. If None, all environments are used.
+            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to get the qpos limits for.
+                Must be passed as a keyword argument.
 
         Returns:
             torch.Tensor: Joint position limits with shape (N, dof, 2), where N is the number of environments.
         """
-        local_env_ids = self._all_indices if env_ids is None else env_ids
-
-        qpos_limits = self.body_data.qpos_limits
-        if name is None:
-            return qpos_limits[local_env_ids, :]
-        else:
-            if not self.control_parts or name not in self.control_parts:
-                logger.log_error(
-                    f"The control part '{name}' does not exist in the robot's control parts."
-                )
-            part_joint_ids = self.get_joint_ids(name=name)
-            return qpos_limits[local_env_ids][:, part_joint_ids, :]
+        resolved_joint_ids = self._resolve_limit_joint_ids(name, joint_ids)
+        return super().get_qpos_limits(
+            joint_ids=resolved_joint_ids,
+            env_ids=env_ids,
+        )
 
     def get_qvel_limits(
-        self, name: str | None = None, env_ids: Sequence[int] | None = None
+        self,
+        name: str | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Get the joint velocity limits (qvel) of the robot for a specific control part.
 
@@ -184,26 +440,25 @@ class Robot(Articulation):
 
         Args:
             name (str | None): The name of the control part to get the qvel limits for.
-            env_ids (Sequence[int] | None): The environment ids to get the qvel limits for. If None, all environments are used.
+            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to get the qvel limits for. If None, all environments are used.
+            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to get the qvel limits for.
+                Must be passed as a keyword argument.
 
         Returns:
             torch.Tensor: Joint velocity limits with shape (N, dof), where N is the number of environments.
         """
-        local_env_ids = self._all_indices if env_ids is None else env_ids
-
-        qvel_limits = self.body_data.qvel_limits
-        if name is None:
-            return qvel_limits[local_env_ids, :]
-        else:
-            if not self.control_parts or name not in self.control_parts:
-                logger.log_error(
-                    f"The control part '{name}' does not exist in the robot's control parts."
-                )
-            part_joint_ids = self.get_joint_ids(name=name)
-            return qvel_limits[local_env_ids][:, part_joint_ids]
+        resolved_joint_ids = self._resolve_limit_joint_ids(name, joint_ids)
+        return super().get_qvel_limits(
+            joint_ids=resolved_joint_ids,
+            env_ids=env_ids,
+        )
 
     def get_qf_limits(
-        self, name: str | None = None, env_ids: Sequence[int] | None = None
+        self,
+        name: str | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Get the joint effort limits (qf) of the robot for a specific control part.
 
@@ -211,23 +466,91 @@ class Robot(Articulation):
 
         Args:
             name (str | None): The name of the control part to get the qf limits for.
-            env_ids (Sequence[int] | None): The environment ids to get the qf limits for. If None, all environments are used.
+            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to get the qf limits for. If None, all environments are used.
+            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to get the qf limits for.
+                Must be passed as a keyword argument.
 
         Returns:
             torch.Tensor: Joint effort limits with shape (N, dof), where N is the number of environments.
         """
-        local_env_ids = self._all_indices if env_ids is None else env_ids
+        resolved_joint_ids = self._resolve_limit_joint_ids(name, joint_ids)
+        return super().get_qf_limits(
+            joint_ids=resolved_joint_ids,
+            env_ids=env_ids,
+        )
 
-        qf_limits = self.body_data.qf_limits
-        if name is None:
-            return qf_limits[local_env_ids, :]
-        else:
-            if not self.control_parts or name not in self.control_parts:
-                logger.log_error(
-                    f"The control part '{name}' does not exist in the robot's control parts."
-                )
-            part_joint_ids = self.get_joint_ids(name=name)
-            return qf_limits[local_env_ids][:, part_joint_ids]
+    def set_qpos_limits(
+        self,
+        qpos_limits: torch.Tensor,
+        name: str | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Set the joint position limits (qpos) of the robot.
+
+        Args:
+            qpos_limits: Joint position limits with shape (N, num_joints, 2).
+            name (str | None): The name of the control part to set the qpos limits for.
+            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to set the qpos limits for.
+            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to set the qpos limits for.
+                Must be passed as a keyword argument; ignored when ``name`` is provided.
+        """
+        resolved_joint_ids = self._resolve_limit_joint_ids(name, joint_ids)
+        super().set_qpos_limits(
+            qpos_limits=qpos_limits,
+            joint_ids=resolved_joint_ids,
+            env_ids=env_ids,
+        )
+        self._sync_solver_limits(name=name)
+
+    def set_qvel_limits(
+        self,
+        qvel_limits: torch.Tensor,
+        name: str | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Set the joint velocity limits (qvel) of the robot.
+
+        Args:
+            qvel_limits: Joint velocity limits with shape (N, num_joints).
+            name (str | None): The name of the control part to set the qvel limits for.
+            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to set the qvel limits for.
+            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to set the qvel limits for.
+                Must be passed as a keyword argument; ignored when ``name`` is provided.
+        """
+        resolved_joint_ids = self._resolve_limit_joint_ids(name, joint_ids)
+        super().set_qvel_limits(
+            qvel_limits=qvel_limits,
+            joint_ids=resolved_joint_ids,
+            env_ids=env_ids,
+        )
+
+    def set_qf_limits(
+        self,
+        qf_limits: torch.Tensor,
+        name: str | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Set the joint effort limits (qf) of the robot.
+
+        Args:
+            qf_limits: Joint effort limits with shape (N, num_joints).
+            name (str | None): The name of the control part to set the qf limits for.
+            env_ids (Sequence[int] | torch.Tensor | None): The environment ids to set the qf limits for.
+            joint_ids (Sequence[int] | torch.Tensor | None): Joint indices to set the qf limits for.
+                Must be passed as a keyword argument; ignored when ``name`` is provided.
+        """
+        resolved_joint_ids = self._resolve_limit_joint_ids(name, joint_ids)
+        super().set_qf_limits(
+            qf_limits=qf_limits,
+            joint_ids=resolved_joint_ids,
+            env_ids=env_ids,
+        )
 
     def get_proprioception(self) -> TensorDict[str, torch.Tensor]:
         """Gets robot proprioception information, primarily for agent state representation in robot learning scenarios.
@@ -447,21 +770,25 @@ class Robot(Articulation):
         root_link_name: str | None = None,
         env_ids: Sequence[int] | None = None,
         to_matrix: bool = False,
+        *,
+        qpos_joint_names: Sequence[str] | None = None,
     ) -> torch.Tensor:
         """Compute the forward kinematics of the robot given joint positions and optionally a specific part name.
         The output pose will be in the local arena frame.
 
         Args:
-            qpos (torch.Tensor | np.ndarray | None): Joint positions of the robot, (n_envs, num_joints).
+            qpos (torch.Tensor | np.ndarray | None): Joint positions of the robot, (num_envs, num_joints).
             name (str | None): The name of the control part to compute the FK for. If None, the default part is used.
             link_names (List[str] | None): The names of the links to compute the FK for. If None, all links are used.
             end_link_name (str | None): The name of the end link to compute the FK for. If None, the default end link is used.
             root_link_name (str | None): The name of the root link to compute the FK for. If None, the default root link is used.
             env_ids (Sequence[int] | None): The environment ids to compute the FK for. If None, all environments are used.
             to_matrix (bool): If True, returns the transformation in the form of a 4x4 matrix.
+            qpos_joint_names: Optional names corresponding to the last dimension
+                of ``qpos`` for full-articulation FK.
 
         Returns:
-            torch.Tensor: The forward kinematics result with shape (n_envs, 7) or (n_envs, 4, 4) if `to_matrix` is True.
+            torch.Tensor: The forward kinematics result with shape (num_envs, 7) or (num_envs, 4, 4) if `to_matrix` is True.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -471,6 +798,12 @@ class Robot(Articulation):
                 link_names=link_names,
                 end_link_name=end_link_name,
                 root_link_name=root_link_name,
+                qpos_joint_names=qpos_joint_names,
+            )
+
+        if qpos_joint_names is not None:
+            raise ValueError(
+                "qpos_joint_names cannot be combined with named robot control-part FK."
             )
 
         if not self._solvers:
@@ -525,15 +858,15 @@ class Robot(Articulation):
         The input pose should be in the local arena frame.
 
         Args:
-            pose (torch.Tensor): The end effector pose of the robot, (n_envs, 7) or (n_envs, 4, 4).
-            joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (n_envs, dof).
+            pose (torch.Tensor): The end effector pose of the robot, (num_envs, 7) or (num_envs, 4, 4).
+            joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (num_envs, dof).
                 If None, the zero joint positions will be used as the seed.
             name (str | None): The name of the control part to compute the IK for. If None, the default part is used.
             env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.
             return_all_solutions (bool): Whether to return all IK solutions or just the best one. Defaults to False.
 
         Returns:
-            Tuple[torch.Tensor, torch.Tensor] | None: The success Tensor with shape (n_envs, ) and qpos Tensor with shape (n_envs, max_results, dof), or None if solver not found.
+            Tuple[torch.Tensor, torch.Tensor] | None: The success Tensor with shape (num_envs, ) and qpos Tensor with shape (num_envs, max_results, dof), or None if solver not found.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -603,13 +936,13 @@ class Robot(Articulation):
         The output pose will be in the local arena frame.
 
         Args:
-            qpos (torch.Tensor | np.ndarray | None): Joint positions of the robot, (n_envs, n_batch, num_joints).
+            qpos (torch.Tensor | np.ndarray | None): Joint positions of the robot, (num_envs, n_batch, num_joints).
             name (str | None): The name of the control part to compute the FK for. If None, the default part is used.
             env_ids (Sequence[int] | None): The environment ids to compute the FK for. If None, all environments are used.
             to_matrix (bool): If True, returns the transformation in the form of a 4x4 matrix.
 
         Returns:
-            torch.Tensor: The forward kinematics result with shape (n_envs, batch, 7) or (n_envs, batch, 4, 4) if `to_matrix` is True.
+            torch.Tensor: The forward kinematics result with shape (num_envs, batch, 7) or (num_envs, batch, 4, 4) if `to_matrix` is True.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         if not self._solvers:
@@ -669,15 +1002,15 @@ class Robot(Articulation):
         The input pose should be in the local arena frame.
 
         Args:
-            pose (torch.Tensor): The end effector pose of the robot, (n_envs, n_batch, 7) or (n_envs, n_batch, 4, 4).
-            joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (n_envs, n_batch, dof). If None, the zero joint positions will be used as the seed.
+            pose (torch.Tensor): The end effector pose of the robot, (num_envs, n_batch, 7) or (num_envs, n_batch, 4, 4).
+            joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (num_envs, n_batch, dof). If None, the zero joint positions will be used as the seed.
             name (str | None): The name of the control part to compute the IK for. If None, the default part is used.
             env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor]:
-                Success Tensor with shape (n_envs, n_batch)
-                Qpos Tensor with shape (n_envs, n_batch, dof).
+                Success Tensor with shape (num_envs, n_batch)
+                Qpos Tensor with shape (num_envs, n_batch, dof).
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -719,7 +1052,7 @@ class Robot(Articulation):
             )
 
         if pose.shape[-1] == 7 and pose.dim() == 3:
-            # Convert pose from (n_envs, n_batch, 7) to (n_envs * n_batch, 4, 4)
+            # Convert pose from (num_envs, n_batch, 7) to (num_envs * n_batch, 4, 4)
             pose_batch = pose.reshape(-1, 7)
             pos = pose_batch[:, :3]
             quat = pose_batch[:, 3:]
@@ -732,7 +1065,7 @@ class Robot(Articulation):
             pose_batch[:, :3, :3] = rot
             pose_batch[:, :3, 3] = pos
         else:
-            # Convert pose from (n_envs, n_batch, 4, 4) to (n_envs * n_batch, 4, 4)
+            # Convert pose from (num_envs, n_batch, 4, 4) to (num_envs * n_batch, 4, 4)
             pose_batch = pose.reshape(-1, 4, 4)
 
         # get xpos from link root
@@ -904,11 +1237,31 @@ class Robot(Articulation):
             drive_type=drive_type,
         )
 
-    def init_solver(self, cfg: Union[SolverCfg, Dict[str, SolverCfg]]) -> None:
+    def _sync_solver_limits(self, name: str | None = None) -> None:
+        """Synchronize solver joint limits with the robot's effective qpos limits."""
+        if not self._solvers:
+            return
+
+        if not self.control_parts:
+            solver = self._solvers.get("default")
+            if solver is not None:
+                solver.update_with_robot_limit(self._data.qpos_limits[0])
+            return
+
+        part_names = [name] if name is not None else list(self.control_parts.keys())
+        for part_name in part_names:
+            solver = self._solvers.get(part_name)
+            if solver is None:
+                continue
+            joint_ids = self.get_joint_ids(name=part_name)
+            joint_limits = self._data.qpos_limits[0][joint_ids]
+            solver.update_with_robot_limit(joint_limits)
+
+    def init_solver(self, cfg: SolverCfg | Dict[str, SolverCfg]) -> None:
         """Initialize the kinematic solver for the robot.
 
         Args:
-            cfg (Union[SolverCfg, Dict[str, SolverCfg]]): The configuration for the kinematic solver.
+            cfg (SolverCfg | Dict[str, SolverCfg]): The configuration for the kinematic solver.
         """
         self.cfg: RobotCfg
 
@@ -921,6 +1274,7 @@ class Robot(Articulation):
             if cfg.urdf_path is None:
                 cfg.urdf_path = self.cfg.fpath
             self._solvers["default"] = cfg.init_solver(device=self.device)
+            self._sync_solver_limits()
         elif isinstance(cfg, Dict):
             if isinstance(self.cfg.control_parts, Dict) is False:
                 logger.log_error(
@@ -940,10 +1294,10 @@ class Robot(Articulation):
                         or solver_cfg.joint_names is None
                     ):
                         solver_cfg.joint_names = self.cfg.control_parts[part_name]
-                    self._solvers[name] = solver_cfg.init_solver(device=self.device)
-                    joint_ids = self.get_joint_ids(name=part_name)
-                    joint_limits = self._data.qpos_limits[0][joint_ids]
-                    self._solvers[name].update_with_robot_limit(joint_limits)
+                    self._solvers[part_name] = solver_cfg.init_solver(
+                        device=self.device
+                    )
+            self._sync_solver_limits()
 
     def get_solver(self, name: str | None = None) -> BaseSolver | None:
         """Get the kinematic solver for a specific control part.
@@ -1112,3 +1466,6 @@ class Robot(Articulation):
 
     def destroy(self) -> None:
         return super().destroy()
+
+
+__all__ = ["ControlGroup", "Robot"]

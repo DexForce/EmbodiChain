@@ -40,9 +40,11 @@ sim_config = SimulationManagerCfg(
 | `num_envs` | `int` | `1` | The number of parallel environments (arenas) to simulate. |
 | `arena_space` | `float` | `5.0` | The distance between each arena when building multiple arenas. |
 | `physics_dt` | `float` | `0.01` | The time step for the physics simulation. |
+| `profiler` | `ProfilerCfg` \| `None` | `None` | Optional hierarchical wall-time profiler for simulation updates. |
 | `sim_device` | `str` \| `torch.device` | `"cpu"` | The device for the physics simulation. |
 | `physics_config` | `PhysicsCfg` | `PhysicsCfg()` | The physics configuration parameters. |
 | `gpu_memory_config` | `GPUMemoryCfg` | `GPUMemoryCfg()` | The GPU memory configuration parameters. |
+| `visualization` | `VisualizationCfg` | `VisualizationCfg()` | Browser visualization, opt-in Gizmo commands, and Viser server settings. |
 
 ### Physics Configuration
 
@@ -56,7 +58,9 @@ The {class}`~cfg.PhysicsCfg` class controls the global physics simulation parame
 | `length_tolerance` | `float` | `0.05` | The length tolerance for the simulation. Larger values increase speed. |
 | `speed_tolerance` | `float` | `0.25` | The speed tolerance for the simulation. Larger values increase speed. |
 
-For more parameters and details, refer to the [PhysicsCfg](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.cfg.PhysicsCfg) documentation.
+PCM and TGS remain enabled, enhanced determinism remains disabled, and friction
+is evaluated on every solver iteration. These solver implementation details use
+fixed defaults and are not exposed by `PhysicsCfg`.
 
 ### Render Configuration
 
@@ -65,8 +69,13 @@ The {class}`~cfg.RenderCfg` class controls the rendering backend and quality set
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `renderer` | `str` | `"auto"` | Renderer backend to use. Options are `'auto'` (pick a default based on the detected GPU), `'hybrid'` (ray tracing for shadows/reflections + rasterization), `'fast-rt'` (full ray tracing), and `'rt'` (offline ray-traced renderer for maximum visual fidelity). |
-| `enable_denoiser` | `bool` | `True` | Whether to enable denoising. Only valid when `renderer` is `'hybrid'`, `'fast-rt'` or `'rt'`. |
-| `spp` | `int` | `64` | Samples per pixel for ray tracing rendering. Only valid when `renderer` is `'hybrid'`, `'fast-rt'` or `'rt'` and `enable_denoiser` is `False`. |
+| `spp` | `int` | `1` | Samples per pixel for ray-traced rendering. Must be at least 1. |
+| `tone_mapping_enabled` | `bool` | `False` | Whether to map HDR RGB output with the modified Reinhard curve. |
+| `tone_mapping_exposure` | `float` | `1.0` | Non-negative fixed linear exposure multiplier applied before tone mapping. |
+
+Ray-traced output always uses DexSim's default OptiX denoiser. Tone mapping
+affects RGB output only; depth, segmentation masks, normals, and position
+buffers remain unchanged.
 
 #### Automatic Renderer Selection
 
@@ -96,85 +105,104 @@ from embodichain.lab.sim.cfg import RenderCfg
 
 sim_config = SimulationManagerCfg(
     render_cfg=RenderCfg(
-        renderer="fast-rt",    # Use full ray tracing (overrides auto-selection)
-        enable_denoiser=True,  # Enable denoising
-        spp=64,                # Samples per pixel (used when denoiser is off)
+        renderer="fast-rt",         # Override automatic renderer selection
+        spp=4,                      # Render four samples per pixel
+        tone_mapping_enabled=True,  # Convert HDR RGB to display-referred RGB
+        tone_mapping_exposure=1.0,  # Fixed exposure for reproducible frames
     )
 )
 ```
 
-### DLSS 3.5 (OfflineRT Only)
+### NVIDIA DLSS
 
-When `render_cfg.renderer="rt"` (OfflineRT) and the simulation is running with a visible window, you can enable NVIDIA DLSS 3.5 for AI-powered denoising and upscaling through `render_cfg.dlss`.
+`RenderCfg.dlss` exposes DexSim's DLSS settings for the `hybrid`, `fast-rt`,
+and `rt` renderers, including `auto` after renderer selection. The configuration
+follows the DexSim v0.5.0 API. Ray Reconstruction (RR) denoises the image; Super
+Resolution (SR) upscales it. The two features have independent switches.
 
-DLSS 3.5 combines two features:
+| Parameter | Default | Description |
+| :--- | :--- | :--- |
+| `dlss_enabled` | `True` | Master switch; disabling it explicitly selects the standard renderer path. |
+| `offscreen_dlss_enabled` | `False` | Opt offscreen cameras into DLSS, including headless simulations. Also requires the master switch. |
+| `rayreconstruction_enabled` | `True` | Enable RR denoising. |
+| `upscale_enabled` | `True` | Enable SR upscaling; disable for RR at the target resolution. |
+| `dlss_quality` | `2` | Quality mode and default internal render scale; see below. |
+| `render_width`, `render_height` | `0` | Internal FastRT/OfflineRT window dimensions; zero lets DexSim derive them from quality. |
+| `target_width`, `target_height` | `0` | DexSim compatibility fields. The actual window or camera configuration owns output size. These fields do not resize the window. |
+| `upsample_ratio` | `None` | Optional window output/internal ratio, finite and at least 1.0. Computes each zero render dimension from the actual window size; explicit render dimensions take precedence. |
+| `exposure_compensation` | `1.0` | Positive, finite exposure multiplier for the RR bridge. |
 
-- **Ray Reconstruction (RR)** — replaces the OptiX denoiser for the window camera.
-- **Super Resolution (SR)** — upscales the RR output from render resolution to the target/display resolution.
+The defaults match DexSim: window DLSS is enabled and offscreen cameras keep
+the standard OptiX denoiser until explicitly enabled. Each enabled offscreen
+camera needs its own temporal history and Vulkan exchange images, so account
+for additional GPU memory when configuring camera batches.
 
-Both features are enabled together when `dlss_enabled=True`. The exact upscale ratio can be controlled either with the `dlss_quality` preset or with the `upsample_ratio` convenience parameter.
+#### Quality and resolution
 
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `dlss_enabled` | `bool` | `True` | Master DLSS enable toggle. |
-| `dlss_quality` | `int` | `-1` | DLSS quality preset. `-1`=auto, `0`=UltraPerformance (~3.0×), `1`=Performance (~2.25×), `2`=Balanced (~1.75×), `3`=Quality (~1.5×), `4`=UltraQuality (~1.3×), `5`=DLAA (1.0×). |
-| `upsample_ratio` | `float` | `1.0` | Convenience ratio `target_width / render_width` (and height). When `render_width`/`render_height` are `0`, the render resolution is computed as `target / upsample_ratio`. Defaults to `1.0` (1:1 / DLAA mode). Must be `>= 1.0`. |
-| `render_width` | `int` | `0` | Internal render resolution width. `0` means use the effective target width. |
-| `render_height` | `int` | `0` | Internal render resolution height. `0` means use the effective target height. |
-| `target_width` | `int` | `0` | Target/display resolution width. `0` means use the window width. |
-| `target_height` | `int` | `0` | Target/display resolution height. `0` means use the window height. |
-| `exposure_compensation` | `float` | `1.0` | Multiplier on the DLSS-RR pre-exposure scalar. `>1` brightens the HDR input to RR, which helps reject ghosting in dark areas; `<1` darkens. Typical range `0.5–8.0`. |
+| Value | Mode | Derived internal size relative to output |
+| :--- | :--- | :--- |
+| `-1` | Auto | 58% balanced-safe scale, then ratio-based NGX mode selection |
+| `0` | Ultra Performance | About 33% |
+| `1` | Performance | 50% |
+| `2` | Balanced | 58% |
+| `3` | Quality | About 67% |
+| `4` | Ultra Quality | 77% |
+| `5` | DLAA | 100% |
 
-#### Resolution selection rules
+Set the window output size with `SimulationManagerCfg.width/height`, or set the
+sensor's output resolution in its camera configuration. With SR enabled,
+FastRT/OfflineRT windows accept explicit internal dimensions or
+`upsample_ratio`. Hybrid and offscreen targets always derive internal size from
+their own output size and quality; window dimension overrides do not control
+those targets. With SR disabled, RR runs at the target resolution.
 
-- The **target** resolution defaults to the window size unless `target_width`/`target_height` are set explicitly.
-- The **render** resolution defaults to the target resolution (1:1 / DLAA mode) unless overridden.
-- If `upsample_ratio > 1.0` and `render_width`/`render_height` are `0`, the render resolution is computed as `target / upsample_ratio`. At `1.0`, render defaults to the target resolution (1:1 / DLAA mode).
-- Explicit `render_width`/`render_height` or `target_width`/`target_height` take precedence over computed values.
-- The window is always resized to match the effective target resolution when DLSS is active.
+Leave `upsample_ratio=None` and render dimensions at zero to use the quality
+preset. Setting `upsample_ratio=1.0` explicitly requests native internal
+resolution for FastRT/OfflineRT windows. Very small dimensions computed from a
+ratio are clamped to one pixel.
 
 #### Examples
 
-Use the `upsample_ratio` shortcut to render at half resolution and upscale to the window size:
+Enable DLSS for offscreen camera observations in a headless simulation:
 
 ```python
-from embodichain.lab.sim import SimulationManagerCfg
-from embodichain.lab.sim.cfg import DLSSCfg, RenderCfg
+from embodichain.lab.sim import DLSSCfg, SimulationManagerCfg
+from embodichain.lab.sim.cfg import RenderCfg
 
+sim_config = SimulationManagerCfg(
+    headless=True,
+    render_cfg=RenderCfg(
+        renderer="hybrid",
+        dlss=DLSSCfg(
+            dlss_enabled=True,
+            offscreen_dlss_enabled=True,
+            dlss_quality=3,
+        ),
+    ),
+)
+```
+
+Configure an OfflineRT window with an explicit internal resolution:
+
+```python
 sim_config = SimulationManagerCfg(
     width=1920,
     height=1080,
     render_cfg=RenderCfg(
         renderer="rt",
-        dlss=DLSSCfg(
-            dlss_enabled=True,
-            upsample_ratio=2.0,  # render at 960x540, upscale to 1920x1080
-        ),
+        dlss=DLSSCfg(render_width=1280, render_height=720),
     ),
 )
 ```
 
-Set explicit render and target resolutions:
+The same settings are available in task JSON/YAML under
+`render_cfg.dlss` (decoded into `env_cfg.sim_cfg.render_cfg.dlss`). To disable DLSS, set `dlss_enabled: false` explicitly.
 
-```python
-from embodichain.lab.sim import SimulationManagerCfg
-from embodichain.lab.sim.cfg import DLSSCfg, RenderCfg
-
-sim_config = SimulationManagerCfg(
-    render_cfg=RenderCfg(
-        renderer="rt",
-        dlss=DLSSCfg(
-            dlss_enabled=True,
-            render_width=1280,
-            render_height=720,
-            target_width=1920,
-            target_height=1080,
-        ),
-    ),
-)
-```
-
-> **Note:** Offscreen cameras always use the OptiX denoiser regardless of DLSS settings. DLSS only affects the interactive viewer window when the OfflineRT renderer is used.
+DLSS requires Vulkan, a compatible NVIDIA GPU/driver, and a DexSim build with
+the NGX runtime libraries. Initialization is lazy: render an eligible frame and
+check the engine log for `DLSS initialized`. Successful configuration conversion
+or world construction alone does not verify DLSS availability. DexSim owns
+feature initialization and its fallback rendering behavior.
 
 
 ## Initialization
@@ -188,6 +216,97 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 sim_config = SimulationManagerCfg()
 sim = SimulationManager(sim_config)
 ```
+
+## Profiling simulation updates
+
+Configure {class}`ProfilerCfg` directly on the simulation manager when using
+the simulation without a Gym environment:
+
+```python
+from embodichain.lab.sim import ProfilerCfg, SimulationManager, SimulationManagerCfg
+
+sim = SimulationManager(
+    SimulationManagerCfg(
+        profiler=ProfilerCfg(enable_time=True, warmup_steps=0),
+    )
+)
+sim.update(step=4)
+sim.profiler.report()
+```
+
+Each standalone {meth}`SimulationManager.update` call creates a `sim_update`
+root. The `manual_update` section contains one `gizmo_update` and one
+`world_update` sample per physics substep, plus optional
+`window_record_capture` and `visualization_capture` samples when those features
+are enabled. Consequently, `world_update.calls` is the total number of physics
+substeps, its mean is the mean cost of one substep, and its total is the
+aggregate physics-update time.
+
+When a Gym environment owns the manager, it reuses the same profiler instance.
+Simulation sections compose below `step.sim_update` without adding another
+`sim_update` path component, so existing environment reports remain compatible.
+
+## Browser visualization
+
+{class}`SimulationManager` owns the optional Viser runtime. Configure it through
+{attr}`SimulationManagerCfg.visualization`:
+
+```python
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import VisualizationCfg
+
+sim = SimulationManager(
+    SimulationManagerCfg(
+        headless=True,
+        visualization=VisualizationCfg(
+            backend="viser",
+            env_ids=[0],
+        ),
+    )
+)
+print(sim.visualization_health.endpoint)
+```
+
+When `backend="viser"`, the manager starts the server during construction.
+Assets added or removed later are published automatically on the next
+{meth}`SimulationManager.update`. The runtime is stopped by
+{meth}`SimulationManager.destroy`, or explicitly with
+{meth}`SimulationManager.stop_visualization`.
+
+The browser supports rigid objects and groups, robot and articulation links,
+cloth, soft bodies, camera frustums, low-frequency RGB preview, overlays, and a
+1 m ground grid. For configuration, performance behavior, deformable-object
+limitations, remote access, and troubleshooting, see
+{doc}`viser_visualization`.
+
+## Native point-cloud visualization
+
+Use {meth}`SimulationManager.visualize_point_cloud` to add static point-based
+debug or analysis data to the native DexSim viewer. It accepts NumPy arrays or
+Torch tensors with point positions shaped `(N, 3)`, plus optional per-point RGB
+or RGBA colors. Colors can be normalized floats or `uint8` values in `[0, 255]`;
+the manager converts them to renderer-ready RGB values. Omitting `colors`
+renders the point cloud in green.
+
+```python
+import numpy as np
+
+points = np.array([[0.0, 0.0, 0.2], [0.1, 0.0, 0.2]], dtype=np.float32)
+colors = np.array([[255, 0, 0], [0, 255, 0]], dtype=np.uint8)
+
+point_cloud = sim.visualize_point_cloud(
+    points,
+    colors=colors,
+    point_size=6.0,
+    name="debug_points",
+)
+```
+
+The returned native point-cloud handle can be queried or modified with the
+DexSim point-cloud API. This method targets the native window; use the
+browser-overlay APIs documented in {doc}`viser_visualization` for Viser.
+See {doc}`/tutorial/point_cloud_visualization` for a runnable color-and-position
+verification example.
 
 ## Assets Management
 
@@ -271,6 +390,14 @@ In this mode, the physics simulation stepping is automatically handling by the p
 - **`SimulationManager.update(physics_dt=None, step=1)`**: Steps the physics simulation with optional custom time step and number of steps. If `physics_dt` is None, uses the configured physics time step.
 - **`SimulationManager.enable_physics(enable: bool)`**: Enable or disable physics simulation.
 - **`SimulationManager.set_manual_update(enable: bool)`**: Set manual update mode for physics.
+- **`SimulationManager.start_visualization()`**: Start or return the configured visualization runtime.
+- **`SimulationManager.refresh_visualization()`**: Immediately republish scene topology.
+- **`SimulationManager.capture_visualization(force=False)`**: Capture the current scene state.
+- **`SimulationManager.capture_visualization_safely(force=False)`**: Capture without allowing a visualization failure to interrupt simulation progress.
+- **`SimulationManager.stop_visualization()`**: Stop Viser and release its server port.
+- **`SimulationManager.visualize_point_cloud(points, colors=None, point_size=2.0, name="point_cloud")`**: Add a static colored point cloud to the native DexSim viewer.
+- **`SimulationManager.visualization_health`**: Return endpoint, client count, revision, and worker status.
+- **`SimulationManager.visualization_stats`**: Return capture, queue, payload, and upload telemetry.
 
 
 ## Multiple instances
@@ -283,9 +410,10 @@ In this mode, the physics simulation stepping is automatically handling by the p
 > Currently, multiple instances are not supported for ray tracing rendering backend. Good news is that we are working on adding this feature in future releases.
 
 
-For more methods and details, refer to the [SimulationManager](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.SimulationManager) documentation.
+For more methods and details, see the {doc}`SimulationManager API </api_reference/embodichain/embodichain.lab.sim.sim_manager>`.
 
-### Related Tutorials
+### Related Documentation
 
-- [Basic scene creation](https://dexforce.github.io/EmbodiChain/tutorial/create_scene.html)
-- [Interactive simulation with Gizmo](https://dexforce.github.io/EmbodiChain/tutorial/gizmo.html)
+- {doc}`Basic scene creation </tutorial/create_scene>`
+- {doc}`Interactive Gizmos </features/interaction/gizmo>`
+- {doc}`Viser browser visualization <viser_visualization>`

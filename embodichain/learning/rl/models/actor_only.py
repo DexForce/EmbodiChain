@@ -23,6 +23,8 @@ from tensordict import TensorDict
 
 from .policy import Policy
 
+__all__ = ["ActorOnly"]
+
 
 class ActorOnly(Policy):
     """Actor-only policy for algorithms that do not use a value function (e.g., GRPO).
@@ -59,12 +61,42 @@ class ActorOnly(Policy):
     def forward(
         self, tensordict: TensorDict, deterministic: bool = False
     ) -> TensorDict:
+        return self._sample_action(
+            tensordict,
+            deterministic=deterministic,
+            reparameterized=False,
+        )
+
+    def get_differentiable_action(
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
+        """Sample an action with pathwise gradients."""
+        return self._sample_action(
+            tensordict,
+            deterministic=deterministic,
+            reparameterized=True,
+        )
+
+    def _sample_action(
+        self,
+        tensordict: TensorDict,
+        *,
+        deterministic: bool,
+        reparameterized: bool,
+    ) -> TensorDict:
         obs = tensordict["obs"]
         dist = self._distribution(obs)
         mean = dist.mean
-        action = mean if deterministic else dist.sample()
+        if deterministic:
+            action = mean
+        elif reparameterized:
+            action = dist.rsample()
+        else:
+            action = dist.sample()
         tensordict["action"] = action
         tensordict["sample_log_prob"] = dist.log_prob(action).sum(dim=-1)
+        if reparameterized:
+            tensordict["entropy"] = dist.entropy().sum(dim=-1)
         tensordict["value"] = torch.zeros(
             obs.shape[0], device=self.device, dtype=obs.dtype
         )

@@ -18,7 +18,7 @@
 
 Measures MoveHeldObject-only planning latency and memory usage once a held
 object state has been produced by PickUp.
-Run: python -m scripts.benchmark.atomic_action.move_held_object_benchmark
+Run: embodichain benchmark atomic-action --action move_held_object
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from scripts.benchmark.atomic_action.common import (
     build_single_action_leaderboard,
     build_video_output_path,
     create_antipodal_object_semantics,
+    create_benchmark_grasp_pose_generator,
     create_benchmark_object,
     describe_object_preset,
     ensure_repo_root,
@@ -175,68 +176,87 @@ def _prepare_held_state(
 ):
     """Run PickUp precondition outside the timed MoveHeldObject block."""
     from embodichain.lab.sim.atomic_actions import (
+        ActionInvocation,
         AtomicActionEngine,
-        EndEffectorPoseTarget,
-        GraspTarget,
-        MoveEndEffector,
-        MoveEndEffectorCfg,
-        PickUp,
-        PickUpCfg,
+        ControlPartCommandProfile,
+        EndEffectorPoseGoal,
+        EntityState,
+        GraspGoal,
+        MotionPolicy,
+        PickUpOptions,
+        SceneSnapshot,
     )
     from scripts.tutorials.atomic_action.move_held_object import (
-        build_grasp_generator_cfg,
-        build_gripper_collision_cfg,
         get_hand_open_close_qpos,
         make_pre_pick_eef_pose,
     )
 
     hand_open, hand_close = get_hand_open_close_qpos(robot, sim.device)
-    atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(
-        MoveEndEffector(
-            motion_gen,
-            cfg=MoveEndEffectorCfg(
-                control_part="arm",
-                sample_interval=MOVE_SAMPLE_INTERVAL,
-            ),
-        )
-    )
-    atomic_engine.register(
-        PickUp(
-            motion_gen,
-            cfg=PickUpCfg(
-                control_part="arm",
-                hand_control_part="hand",
-                hand_open_qpos=hand_open,
-                hand_close_qpos=hand_close,
-                approach_direction=resolve_pickup_approach_direction(
-                    pickup_approach, position_case, sim.device
-                ),
-                pre_grasp_distance=0.15,
-                lift_height=0.16,
-                sample_interval=PICK_SAMPLE_INTERVAL,
-                hand_interp_steps=HAND_INTERP_STEPS,
-            ),
-        )
+    pickup_args = _make_pickup_args(args, object_preset, profile)
+    atomic_engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=hand_open,
+                grasp=hand_close,
+            )
+        },
+        grasp_pose_generators={
+            "hand": create_benchmark_grasp_pose_generator(pickup_args)
+        },
     )
     semantics = create_antipodal_object_semantics(
         obj=obj,
         preset=object_preset,
-        args=_make_pickup_args(args, object_preset, profile),
-        build_gripper_collision_cfg=build_gripper_collision_cfg,
-        build_grasp_generator_cfg=build_grasp_generator_cfg,
     )
     obj_pose = obj.get_local_pose(to_matrix=True)
     move_position = obj_pose[0, :3, 3].clone()
     move_position[2] = 0.36
     move_target = make_pre_pick_eef_pose(robot, move_position)
-    is_success, traj, state = atomic_engine.run(
-        steps=[
-            ("move_end_effector", EndEffectorPoseTarget(xpos=move_target)),
-            ("pick_up", GraspTarget(semantics=semantics)),
-        ]
+    move_binding = atomic_engine.bind_control_parts(
+        "move_end_effector",
+        {"primary": {"motion": "arm"}},
     )
-    if not is_success or state.held_object is None:
+    pick_binding = atomic_engine.bind_control_parts(
+        "pick_up",
+        {"primary": {"motion": "arm", "grasp": "hand"}},
+    )
+    result = atomic_engine.compile(
+        (
+            ActionInvocation(
+                "move_end_effector",
+                EndEffectorPoseGoal(xpos=move_target),
+                move_binding,
+                MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
+            ),
+            ActionInvocation(
+                "pick_up",
+                GraspGoal(semantics=semantics),
+                pick_binding,
+                MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                skill_options=PickUpOptions(
+                    approach_direction=resolve_pickup_approach_direction(
+                        pickup_approach, position_case, sim.device
+                    ),
+                    pre_grasp_distance=0.15,
+                    lift_height=0.16,
+                    hand_interp_steps=HAND_INTERP_STEPS,
+                ),
+            ),
+        ),
+        atomic_engine.initial_context(
+            scene=SceneSnapshot(
+                timestamp=0.0,
+                version=0,
+                entities={obj.uid: EntityState(obj.get_local_pose(to_matrix=True))},
+            ),
+            control_dt=sim.sim_config.physics_dt,
+        ),
+    )
+    is_success = bool(result.plan_success.all().item())
+    traj = result.trajectory.positions
+    state = result.projected_context
+    if not is_success or state.get_held_object("arm") is None:
         raise RuntimeError(
             "Failed to prepare held-object state for MoveHeldObject benchmark."
         )
@@ -262,10 +282,11 @@ def _run_case(
 ):
     """Run one MoveHeldObject benchmark case."""
     from embodichain.lab.sim.atomic_actions import (
+        ActionInvocation,
         AtomicActionEngine,
-        HeldObjectPoseTarget,
-        MoveHeldObject,
-        MoveHeldObjectCfg,
+        ControlPartCommandProfile,
+        HeldObjectPoseGoal,
+        MotionPolicy,
     )
     from scripts.tutorials.atomic_action.move_held_object import (
         compute_pick_close_end_step,
@@ -301,31 +322,37 @@ def _run_case(
             pickup_approach_direction_tuple(pickup_approach, position_case)
         )
         precondition_waypoints = int(precondition_traj.shape[1])
-        atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-        atomic_engine.register(
-            MoveHeldObject(
-                motion_gen,
-                cfg=MoveHeldObjectCfg(
-                    control_part="arm",
-                    hand_control_part="hand",
-                    hand_close_qpos=hand_close,
-                    sample_interval=MOVE_HELD_OBJECT_SAMPLE_INTERVAL,
-                ),
-            )
+        atomic_engine = AtomicActionEngine(
+            motion_generator=motion_gen,
+            control_profiles={
+                "hand": ControlPartCommandProfile.joint_positions(
+                    grasp=hand_close,
+                )
+            },
         )
         target_pose = _make_object_target_pose(sim.device, case.xyz)
+        binding = atomic_engine.bind_control_parts(
+            "move_held_object",
+            {"primary": {"motion": "arm", "grasp": "hand"}},
+        )
         elapsed, mem_delta, peak_gpu, result = timed_call(
-            lambda: atomic_engine.run(
-                steps=[
-                    (
-                        "move_held_object",
-                        HeldObjectPoseTarget(object_target_pose=target_pose),
-                    )
-                ],
-                state=state,
+            lambda: atomic_engine.compile(
+                (
+                    ActionInvocation(
+                        skill_id="move_held_object",
+                        goal=HeldObjectPoseGoal(object_target_pose=target_pose),
+                        binding=binding,
+                        motion_policy=MotionPolicy(
+                            sample_count=MOVE_HELD_OBJECT_SAMPLE_INTERVAL
+                        ),
+                    ),
+                ),
+                context=state,
             )
         )
-        is_success, traj, final_state = result
+        is_success = bool(result.plan_success.all().item())
+        traj = result.trajectory.positions
+        final_state = result.projected_context
         torch = ensure_torch()
         precondition_obj_position = None
         final_obj_position = None
@@ -380,7 +407,7 @@ def _run_case(
             reset_robot(robot, initial_qpos)
             reset_rigid_object(obj, initial_obj_pose)
 
-        still_held = bool(is_success and final_state.held_object is not None)
+        still_held = bool(is_success and final_state.get_held_object("arm") is not None)
         physical_pick_success = bool(
             object_lift_delta_m is not None
             and object_lift_delta_m >= PHYSICAL_PICK_MIN_LIFT_M

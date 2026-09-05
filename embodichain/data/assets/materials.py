@@ -152,3 +152,23 @@ class CocoBackground(EmbodiChainDataset):
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+
+
+class BackgroundTexture(EmbodiChainDataset):
+    """Download the bundled background-texture collection.
+
+    Args:
+        data_root: Optional root directory for downloaded and extracted assets.
+    """
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(
+                EMBODICHAIN_DOWNLOAD_PREFIX, material_assets, "BackgroundTexture.zip"
+            ),
+            "09cbde19f9e29d09c9aadf93b5dcf45d",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)

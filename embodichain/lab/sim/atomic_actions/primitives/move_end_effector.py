@@ -18,122 +18,109 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import ClassVar
 
-import torch
-
-from embodichain.lab.sim.planners import MoveType, PlanState
-from embodichain.utils import configclass
-
-from ._helpers import arm_qpos_from_state
-from ..core import (
-    ActionCfg,
-    ActionResult,
-    AtomicAction,
-    EndEffectorPoseTarget,
-    WorldState,
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.goals import (
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
 )
-from ..trajectory import TrajectoryBuilder
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.requirements import (
+    CARTESIAN_POSE_CAPABILITY,
+    SkillBindingContract,
+)
+from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    build_pose_plan_states,
+    resolve_pose_target,
+    to_full_robot_trajectory,
+)
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_motion_slot,
+)
 
 
-@configclass
-class MoveEndEffectorCfg(ActionCfg):
-    name: str = "move_end_effector"
-    """Name of the action, used for identification and logging."""
+@dataclass(frozen=True, slots=True, eq=False)
+class EndEffectorPoseGoal:
+    """End-effector pose goal with optional batched intermediate waypoints."""
 
-    sample_interval: int = 50
-    """Number of waypoints in the planned trajectory."""
+    xpos: PoseGoalValue
+    """Homogeneous pose with shape ``(4,4)``, ``(B,4,4)`` or ``(B,N,4,4)``."""
+
+    def __post_init__(self) -> None:
+        validate_pose_goal(self.xpos, "xpos", allow_waypoints=True)
 
 
-class MoveEndEffector(AtomicAction):
-    """Plan a free-space end-effector move to a target pose.
+@dataclass(frozen=True, slots=True, eq=False)
+class MoveEndEffectorOptions(ActionOptions):
+    """Per-invocation behavior for :class:`MoveEndEffector`."""
 
-    The :class:`EndEffectorPoseTarget` may carry either a single waypoint
-    ``(n_envs, 4, 4)`` (or a broadcastable ``(4, 4)``) or a multi-waypoint
-    trajectory ``(n_envs, n_waypoint, 4, 4)``. In the multi-waypoint case the
-    action plans a single trajectory that visits every waypoint in order,
-    starting from the inherited ``WorldState.last_qpos``; IK is solved for each
-    waypoint with the previous waypoint's solution as the seed.
-    """
 
-    TargetType: ClassVar[type] = EndEffectorPoseTarget
+class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions]):
+    """Plan a free-space move for a bound manipulator."""
 
-    def __init__(
-        self,
-        motion_generator,
-        cfg: MoveEndEffectorCfg | None = None,
-    ) -> None:
-        super().__init__(motion_generator, cfg or MoveEndEffectorCfg())
-        self.builder = TrajectoryBuilder(motion_generator)
-        self.n_envs = self.robot.get_qpos().shape[0]
-        self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
-        self.arm_dof = len(self.arm_joint_ids)
-        self.robot_dof = self.robot.dof
-
-    def execute(self, target: EndEffectorPoseTarget, state: WorldState) -> ActionResult:
-        move_xpos = self.builder.resolve_pose_target(target.xpos, n_envs=self.n_envs)
-        start_qpos = self.builder.resolve_start_qpos(
-            arm_qpos_from_state(state, self.arm_joint_ids),
-            n_envs=self.n_envs,
-            arm_dof=self.arm_dof,
-            control_part=self.cfg.control_part,
-        )
-        target_states_list = self._build_target_states(move_xpos)
-        success, arm_traj = self.builder.plan_arm_traj(
-            target_states_list,
-            start_qpos,
-            self.cfg.sample_interval,
-            control_part=self.cfg.control_part,
-            arm_dof=self.arm_dof,
-            cfg=self.cfg,
-        )
-        full = self._embed(arm_traj, state.last_qpos)
-        return ActionResult(
-            success=success,
-            trajectory=full,
-            next_state=WorldState(
-                last_qpos=full[:, -1, :].clone(),
-                held_object=state.held_object,
-                coordinated_held_object=state.coordinated_held_object,
+    skill_id: ClassVar[str] = "move_end_effector"
+    GoalType: ClassVar[type] = EndEffectorPoseGoal
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            make_motion_slot(
+                "primary",
+                capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
             ),
+        ),
+    )
+    OptionsType: ClassVar[type] = MoveEndEffectorOptions
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, MoveEndEffectorOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        """Plan an end-effector pose goal from the observed joint state."""
+        goal = request.goal
+        motion_target = request.binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
         )
-
-    def _build_target_states(self, move_xpos: torch.Tensor) -> list[list[PlanState]]:
-        """Build per-env PlanState lists from a single- or multi-waypoint target."""
-        if move_xpos.dim() == 3:
-            move_xpos = move_xpos.unsqueeze(1)
-        n_waypoint = move_xpos.shape[1]
-        return [
-            [
-                PlanState(xpos=move_xpos[i, j], move_type=MoveType.EEF_MOVE)
-                for j in range(n_waypoint)
-            ]
-            for i in range(self.n_envs)
-        ]
-
-    def _embed(
-        self, arm_traj: torch.Tensor, last_full_qpos: torch.Tensor
-    ) -> torch.Tensor:
-        n_wp = arm_traj.shape[1]
-        full = torch.empty(
-            (self.n_envs, n_wp, self.robot_dof),
-            dtype=torch.float32,
+        control_part = motion_target.control_part
+        joint_ids = list(motion_target.joint_ids)
+        move_xpos = resolve_pose_target(
+            resolve_pose_goal(goal.xpos, context, name="xpos"),
+            num_envs=context.batch_size,
             device=self.device,
         )
-        full[:, :, :] = last_full_qpos.unsqueeze(1)
-        full[:, :, self.arm_joint_ids] = arm_traj
-        return full
-
-    def _fail(self, state: WorldState) -> ActionResult:
-        return ActionResult(
-            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
-            trajectory=torch.empty(
-                (self.n_envs, 0, self.robot_dof),
-                dtype=torch.float32,
-                device=self.device,
+        start_qpos = context.robot.qpos[:, joint_ids]
+        result = self.motion_generator.generate(
+            build_pose_plan_states(move_xpos),
+            options=request.motion_policy.to_motion_gen_options(
+                start_qpos=start_qpos,
+                control_part=control_part,
+                interpolation_dt=context.control_dt,
             ),
-            next_state=state,
+        )
+        success, trajectory = to_full_robot_trajectory(
+            result,
+            base_qpos=context.robot.qpos,
+            joint_ids=joint_ids,
+            env_ids=context.env_ids,
+        )
+        return self.build_plan(
+            request,
+            context,
+            success=success,
+            trajectory=trajectory,
         )
 
 
-__all__ = ["MoveEndEffector", "MoveEndEffectorCfg"]
+__all__ = [
+    "EndEffectorPoseGoal",
+    "MoveEndEffector",
+    "MoveEndEffectorOptions",
+]

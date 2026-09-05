@@ -13,11 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+from __future__ import annotations
 
-import torch
+from abc import ABCMeta, abstractmethod
+from dataclasses import fields
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union
+
 import numpy as np
-from typing import List, Dict, Any, Union, TYPE_CHECKING, Tuple
-from abc import abstractmethod, ABCMeta
+import torch
 
 from embodichain.utils import configclass, logger
 
@@ -98,22 +101,39 @@ class SolverCfg:
 
     @classmethod
     def from_dict(cls, init_dict: Dict[str, Any]) -> "SolverCfg":
-        """Initialize the configuration from a dictionary."""
+        """Initialize the concrete solver configuration from a dictionary.
+
+        The concrete config receives all recognized dataclass init fields in its
+        constructor so initialization and ``__post_init__`` observe the final
+        inputs exactly once. Legacy unannotated config attributes are applied
+        afterward. Unknown fields preserve the historical behavior: they are
+        ignored with a warning.
+        """
         from embodichain.utils.utility import get_class_instance
 
         if "class_type" not in init_dict:
             logger.log_error("class type must be specified in the configuration.")
 
-        cfg = get_class_instance(
+        cfg_type = get_class_instance(
             "embodichain.lab.sim.solvers", init_dict["class_type"] + "Cfg"
-        )()
+        )
+        concrete_fields = {field.name: field for field in fields(cfg_type)}
+        kwargs: Dict[str, Any] = {}
+        deferred: Dict[str, Any] = {}
         for key, value in init_dict.items():
-            if hasattr(cfg, key):
-                setattr(cfg, key, value)
+            field = concrete_fields.get(key)
+            if field is not None and field.init:
+                kwargs[key] = value
+            elif field is not None or hasattr(cfg_type, key):
+                # A few legacy solver configs expose configurable class
+                # attributes without dataclass annotations. They cannot be
+                # constructor arguments, but remain valid serialized fields.
+                deferred[key] = value
             else:
-                logger.log_warning(
-                    f"Key '{key}' not found in {cfg.__class__.__name__}."
-                )
+                logger.log_warning(f"Key '{key}' not found in {cfg_type.__name__}.")
+        cfg = cfg_type(**kwargs)
+        for key, value in deferred.items():
+            setattr(cfg, key, value)
         return cfg
 
 
@@ -285,14 +305,19 @@ class BaseSolver(metaclass=ABCMeta):
             )
 
     def update_with_robot_limit(self, robot_qpos_limits: torch.Tensor):
-        """Update with robot joint limits.
-            Make sure the solver's joint limits are within the robot's joint limits.
+        """Intersect solver joint limits with the robot's effective qpos limits.
+
+        Robot-side articulation limits are the hard physical bound. Solver-specific
+        limits from ``SolverCfg.user_qpos_limits`` may be even tighter for planning.
+        The final solver limits must satisfy both constraints.
 
         Args:
-            robot_qpos_limits (torch.Tensor): [DOF, 2] tensor of joint limits from the robot data
+            robot_qpos_limits (torch.Tensor): [DOF, 2] tensor of joint limits from
+                the robot data.
         """
         robot_lower_limits = robot_qpos_limits[:, 0]
         robot_upper_limits = robot_qpos_limits[:, 1]
+
         if self.lower_qpos_limits is not None:
             if torch.any(self.lower_qpos_limits < robot_lower_limits):
                 logger.log_warning(
@@ -303,6 +328,7 @@ class BaseSolver(metaclass=ABCMeta):
                 )
         else:
             self.lower_qpos_limits = robot_lower_limits
+
         if self.upper_qpos_limits is not None:
             if torch.any(self.upper_qpos_limits > robot_upper_limits):
                 logger.log_warning(

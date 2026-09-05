@@ -10,7 +10,7 @@
 | Reward manager + built-in functors | `managers/reward_manager.py`, `managers/rewards.py` |
 | Event manager + built-in functors | `managers/event_manager.py`, `managers/events.py` |
 | Action manager + built-in terms | `managers/action_manager.py`, `managers/actions.py` |
-| Dataset manager + built-in recorders | `managers/dataset_manager.py`, `managers/datasets.py` |
+| Dataset manager + built-in recorders | `managers/dataset_manager.py`, `managers/datasets.py`, `managers/async_datasets.py` |
 | Randomization functors (event sub-type) | `managers/randomization/` (spatial, visual, physics, geometry) |
 
 All paths relative to `embodichain/lab/gym/envs/`.
@@ -34,8 +34,52 @@ At init, the manager resolves every `FunctorCfg.func` (string → callable or cl
 | `ObservationManager` | `ObservationCfg` | `modify`, `add` | `compute(obs) → EnvObs` |
 | `RewardManager` | `RewardCfg` | `add`, `replace` | `compute(obs, action, info) → (reward, info_dict)` |
 | `EventManager` | `EventCfg` | `startup`, `reset`, `interval`, user-defined | `apply(mode, env_ids)` |
-| `ActionManager` | `ActionTermCfg` | `pre`, `post` | `process_actions(actions) → EnvAction` |
+| `ActionManager` | `ActionTermCfg` | `pre`, `post` | `process_action(action, mode) → EnvAction` |
 | `DatasetManager` | `DatasetFunctorCfg` | `save` | `step(obs, action, done, info)` |
+
+---
+
+## Dataset Saving (LeRobot)
+
+`DatasetManager` runs in the `save` mode on `env.reset()` (`_initialize_episode`) and persists completed episodes via a recorder functor. Two recorders ship:
+
+| Recorder | File | Behavior |
+|----------|------|----------|
+| `LeRobotRecorder` | `managers/datasets.py` | Synchronous. `__call__` runs convert + `add_frame` + `save_episode` inline, blocking `env.reset()`. Default; base class for the async variant. |
+| `AsyncLeRobotRecorder` | `managers/async_datasets.py` | Subclass. `__call__` clones the rollout-buffer slice (obs+actions) to CPU, enqueues it, and returns immediately. A single daemon worker thread drains the queue through the same `_persist_episode_payload` path. `finalize()` drains then calls `dataset.finalize()`. |
+
+**Save flow**: `env.step` writes each frame into `rollout_buffer` (`_hook_after_sim_step`). On truncation the caller does `env.reset(options={"save_data": True})` -> `_initialize_episode` -> `DatasetManager.apply("save", env_ids)`. For a final partial vector batch, `run-env` performs one full reset with `save_data=False` and `commit_env_ids`, so only selected **dataset** rows are persisted while whole-world reset events remain safe; camera and trajectory recorders retain their normal discard behavior. `DatasetFunctorCfg.save_failed_episodes=True` saves every env on every ordinary reset (not only successes). `env.close()` -> `dataset_manager.finalize()` drains explicitly committed async work; it never commits the live rollout implicitly.
+
+`DemoExecutionCfg(mode="segment_fragments")` changes one buffered Task Program
+row into independent natural-segment payloads. Accepted segments are retained
+by default; failed segments require `save_failed_fragments=True`. Every
+fragment carries dense `segment_accepted`, `segment_attempt_id`, and
+`continuity_id` features plus Task Program provenance in the JSONL sidecar.
+Fragment commits are append-only: failure of a later fragment does not roll
+back earlier ones. The recorder-local deterministic `fragment_id` registry
+deduplicates same-run retries. A LeRobot commit followed by sidecar/depth
+failure is sticky and rejects retry rather than writing a duplicate. This is
+not a cross-process recovery journal.
+
+**Two independent speed levers** (both honor `image_writer_threads` / `image_writer_processes` in `params`, wired through to `LeRobotDataset.create()` -> lerobot `AsyncImageWriter`):
+- Opt A: `LeRobotRecorder` + `image_writer_threads=4` - per-frame PNG writes offloaded to a thread pool. ~2.5x faster, no background thread, bounded memory.
+- Opt B: `AsyncLeRobotRecorder` - whole-episode save offloaded to a worker; sim never blocks. Use for `num_envs > 1` collection.
+
+**When to use which**:
+- Single env / debug / memory-constrained -> `LeRobotRecorder` (sync).
+- Parallel collection (`num_envs > 1`) -> `AsyncLeRobotRecorder` + `image_writer_threads=4`.
+
+**Correctness invariants for the async recorder** (do not break these when editing):
+- The buffer slice is **cloned in the caller thread** before enqueue - the worker must not hold a view into `rollout_buffer` (it is cleared/reused on reset).
+- **Single worker** only - `LeRobotDataset` is not thread-safe and FIFO order must be preserved for `episode_index`.
+- Duplicate fragment ids pass through `_persist_episode_payload` so sync and
+  async writers share the same idempotency rule.
+- `finalize()` must drain the queue before `dataset.finalize()`.
+- `__call__` accepts `**kwargs` because `DatasetManager.apply` passes `**functor_cfg.params` (includes construction-only params like `image_writer_threads`); `manager_base._resolve_common_functor_cfg` tolerates `**kwargs`.
+
+**Gotcha**: `env.close()` calls `sim.destroy()`, which exits the process without returning to Python. To finalize the dataset without killing the process, call `env.dataset_manager.finalize()` directly. Scripts running multiple envs must use one subprocess per env.
+
+Benchmark: `scripts/benchmark/data_pipeline/benchmark_lerobot_save.py` (uses the `StayStillSave-v1` env). At 4 envs x 2 eps x 100 steps / 480x640 / 800 frames: sync 57.4s -> Opt A 22.0s (2.6x) -> Opt B 56.6s total but sim unblocked -> Opt A+B 20.8s (2.8x) + sim unblocked. Sync sim-stall grows linearly with `num_envs`; async sim-stall stays near zero.
 
 ---
 
@@ -142,15 +186,33 @@ class compute_exteroception(Functor):
    - Groups functors by `mode` into `_mode_functor_names` / `_mode_functor_cfgs`.
 
 ### Per-step execution (env `step`)
-1. **Actions**: `ActionManager.process_actions(raw_actions)` → robot control commands.
+1. **Actions**: raw actions use `ActionManager.process_action(..., mode="pre")`;
+   explicit `ControllerAction` values skip `pre`. Both paths then pass through
+   `EmbodiedEnv._prepare_controller_action()` before robot control.
 2. **Sim step**: physics advances.
 3. **Observations**: `ObservationManager.compute(obs)` → updated obs dict.
 4. **Rewards**: `RewardManager.compute(obs, action, info)` → `(total_reward, reward_info)`.
 5. **Events**: `EventManager.apply("interval")` for interval-mode functors (step counter checked internally).
 
+After robot control and simulation, configured action terms in `post` mode run
+for both raw and `ControllerAction` inputs. `ControllerAction` is therefore not
+an alternate action manager; it marks that only the raw-policy preprocessing
+stage has already completed.
+
 ### On reset
 1. `EventManager.apply("reset", env_ids)` — domain randomization etc.
 2. All managers' `.reset(env_ids)` — resets class-style functors via `functor.reset(env_ids)`.
+
+### Per-functor profiling
+
+Event and observation functors are timed individually and automatically:
+`EventManager.apply` / `ObservationManager.compute` invoke each functor through
+`ManagerBase._call_functor(name, cfg, *args)`, which opens an
+`env._profiler.section(name)` around `cfg.func(*args, **cfg.params)`. The
+section name is the functor's config attribute name and nests under the active
+call site (e.g. `step.update_sim_state.event_interval.record_camera`). No-op
+when env profiling is disabled. See the `env-framework` topic's *Profiling*
+section. Reward/action/dataset functors are not yet wired through the helper.
 
 ---
 

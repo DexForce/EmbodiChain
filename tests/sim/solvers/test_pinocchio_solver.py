@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import torch
 import pytest
@@ -107,6 +109,7 @@ class BaseSolverTest:
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()
+        SimulationManager.flush_cleanup_queue()
 
 
 class TestPinocchioSolver(BaseSolverTest):

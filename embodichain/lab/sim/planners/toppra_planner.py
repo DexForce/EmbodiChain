@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 
 import torch
@@ -21,7 +23,7 @@ import numpy as np
 from concurrent.futures.process import BrokenProcessPool
 
 from embodichain.utils import logger, configclass
-from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
+from embodichain.lab.sim.planners.utils import MoveType, TrajectorySampleMethod
 from embodichain.lab.sim.planners.base_planner import (
     validate_plan_options,
     BasePlanner,
@@ -72,7 +74,7 @@ def _toppra_solve_one_env(
 
     Returns:
         dict with ``positions`` ``(N_b, DOF)``, ``velocities``, ``accelerations``,
-        ``dt`` ``(N_b,)``, ``success`` bool, ``n`` int, ``duration`` float.
+        ``dt`` ``(N_b,)``, ``success`` bool, and ``n`` int.
     """
     dofs = waypoints.shape[1]
     vlims, alims = _build_constraint_arrays(vel_constraint, acc_constraint, dofs)
@@ -105,7 +107,6 @@ def _toppra_solve_one_env(
             "dt": np.array([0.0, 0.0], dtype=np.float32),
             "success": True,
             "n": 2,
-            "duration": 0.0,
         }
 
     ss = np.linspace(0.0, 1.0, len(waypoints))
@@ -147,7 +148,6 @@ def _toppra_solve_one_env(
         "dt": dt,
         "success": True,
         "n": len(ts),
-        "duration": duration,
     }
 
 
@@ -160,7 +160,6 @@ def _empty_failure(dofs: int) -> dict:
         "dt": np.array([0.0, 0.0], dtype=np.float32),
         "success": False,
         "n": 2,
-        "duration": 0.0,
     }
 
 
@@ -284,6 +283,10 @@ class ToppraPlanOptions(PlanOptions):
 
 
 class ToppraPlanner(BasePlanner):
+    """Time-optimal joint-space planner backed by TOPPRA."""
+
+    supported_move_types = frozenset({MoveType.JOINT_MOVE})
+
     def __init__(self, cfg: ToppraPlannerCfg):
         r"""Initialize the TOPPRA trajectory planner.
 
@@ -304,6 +307,10 @@ class ToppraPlanner(BasePlanner):
         # moment the parent process dies — including the os._exit(0) path taken
         # by SimulationManager.destroy(), which skips every Python finalizer.
         # __del__ below only handles in-process GC of an abandoned planner.
+
+    def default_plan_options(self) -> ToppraPlanOptions:
+        """Return backend-default planning options."""
+        return ToppraPlanOptions()
 
     @staticmethod
     def _resolve_mp_context(mp_context: str | None, device: torch.device) -> str:
@@ -386,13 +393,17 @@ class ToppraPlanner(BasePlanner):
 
         self._pool = None
 
+    def close(self) -> None:
+        """Release TOPPRA worker processes owned by this planner."""
+        self._shutdown_pool()
+
     def __del__(self):
         # Only matters for in-process GC of an abandoned planner (and as a
         # non-Linux fallback).  Process-exit cleanup is handled by the kernel
         # via PR_SET_PDEATHSIG installed in each worker, which survives the
         # os._exit(0) path that SimulationManager.destroy() takes.
         try:
-            self._shutdown_pool()
+            self.close()
         except Exception:
             pass
 
@@ -504,7 +515,6 @@ class ToppraPlanner(BasePlanner):
         velocities = np.zeros((b, max_n, dofs), dtype=np.float32)
         accelerations = np.zeros((b, max_n, dofs), dtype=np.float32)
         dt = np.zeros((b, max_n), dtype=np.float32)
-        duration = np.zeros((b,), dtype=np.float32)
         success = np.zeros((b,), dtype=bool)
         for i, r in enumerate(results):
             n = r["n"]
@@ -512,7 +522,6 @@ class ToppraPlanner(BasePlanner):
             velocities[i, :n] = r["velocities"]
             accelerations[i, :n] = r["accelerations"]
             dt[i, :n] = r["dt"]
-            duration[i] = r["duration"]
             success[i] = r["success"]
             # tail-pad: repeat final waypoint for held-pose rows
             if n < max_n:
@@ -525,5 +534,4 @@ class ToppraPlanner(BasePlanner):
             velocities=torch.as_tensor(velocities, device=self.device),
             accelerations=torch.as_tensor(accelerations, device=self.device),
             dt=torch.as_tensor(dt, device=self.device),
-            duration=torch.as_tensor(duration, device=self.device),
         )

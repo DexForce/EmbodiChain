@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import torch
 import pytest
@@ -34,6 +36,8 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.data import get_data_path
 
 NUM_ENVS = 10
+
+pytestmark = pytest.mark.requires_sim
 
 
 @register_env("RandomReach-v1", max_episode_steps=100, override=True)
