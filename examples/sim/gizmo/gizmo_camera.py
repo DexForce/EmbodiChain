@@ -97,29 +97,30 @@ def main():
     # Add camera to simulation
     camera = sim.add_sensor(sensor_cfg=camera_cfg)
 
-    # Wait for initialization
-    sim.update(step=round(0.2 / sim.sim_config.physics_dt))
+    if sim.is_use_gpu_physics:
+        sim.init_gpu_physics()
+    sim.update(step=1)
 
     native_window_opened = False
     if not args.headless:
         native_window_opened = sim.open_window()
 
-    # Enable gizmo for interactive camera control using the new unified API
-    if native_window_opened or args.viser:
+    if args.viser:
         sim.enable_gizmo(
             uid="gizmo_camera",
-            enable_native=native_window_opened,
         )
         if not sim.has_gizmo("gizmo_camera"):
             logger.log_error("Failed to enable gizmo for camera!")
             return
-    else:
+    elif not native_window_opened:
         logger.log_warning(
             "Gizmo interaction is disabled in headless mode without Viser."
         )
+    else:
+        logger.log_warning("Camera Gizmo control is available through Viser only.")
 
     logger.log_info("Gizmo-Camera tutorial started!")
-    if native_window_opened or args.viser:
+    if args.viser:
         logger.log_info(
             "Use the gizmo to interactively control the camera position and orientation"
         )
@@ -140,11 +141,11 @@ def run_simulation(
 ) -> None:
     """Run the simulation loop with gizmo updates."""
     step_count = 0
-    last_time = time.time()
+    last_time = time.perf_counter()
     last_step = 0
 
     if show_camera_window:
-        logger.log_info("Camera view window will open. Press Ctrl+C or 'q' to exit")
+        logger.log_info("Camera view window will open. Press Ctrl+C to exit")
     if sim.has_gizmo("gizmo_camera"):
         logger.log_info(
             "Use the gizmo in the 3D view to control camera position and orientation"
@@ -152,7 +153,8 @@ def run_simulation(
 
     try:
         while True:
-            step_start = time.perf_counter()
+            frame_start = time.perf_counter()
+            # update() applies Gizmo commands before advancing one physics step.
             sim.update(step=1)
 
             # Update camera to get latest sensor data
@@ -175,25 +177,20 @@ def run_simulation(
                     # Convert RGB to BGR for OpenCV
                     bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
 
-                # Add text overlay
-                cv2.putText(
-                    bgr_image,
-                    "Press 'h' to toggle camera gizmo visibility",
-                    (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    2,
-                )
+                    # Add text overlay
+                    cv2.putText(
+                        bgr_image,
+                        "Camera sensor preview",
+                        (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (0, 255, 0),
+                        2,
+                    )
 
-                # Display the image
-                cv2.imshow("Gizmo Camera View", bgr_image)
-
-                # Check for key press
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord("h"):
-                    # Toggle the camera gizmo visibility using SimulationManager API
-                    sim.toggle_gizmo_visibility("gizmo_camera")
+                    # Display the image
+                    cv2.imshow("Gizmo Camera View", bgr_image)
+                    cv2.waitKey(1)
 
             # Example: Destroy gizmo after certain steps to test cleanup
             if step_count == 30000 and sim.has_gizmo("gizmo_camera"):
@@ -202,7 +199,7 @@ def run_simulation(
 
             # Print simulation statistics and camera info
             if step_count % 1000 == 0:
-                current_time = time.time()
+                current_time = time.perf_counter()
                 elapsed = current_time - last_time
                 fps = (
                     sim.num_envs * (step_count - last_step) / elapsed
@@ -223,9 +220,8 @@ def run_simulation(
                 last_time = current_time
                 last_step = step_count
 
-            time.sleep(
-                max(0.0, sim.sim_config.physics_dt - (time.perf_counter() - step_start))
-            )
+            elapsed = time.perf_counter() - frame_start
+            time.sleep(max(0.0, sim.sim_config.physics_dt - elapsed))
 
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")
