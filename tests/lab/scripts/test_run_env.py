@@ -128,8 +128,10 @@ def test_legacy_action_list_displays_episode_and_segment_indices(
 
     assert generated
     assert progress.call_args.kwargs["desc"] == (
-        f"Executing episode #{EPISODE_INDEX}, segment #{ACTION_LIST_INDEX + 1}: legacy"
+        f"Executing episode #{EPISODE_INDEX}, segment {ACTION_LIST_INDEX + 1}/1: "
+        "legacy"
     )
+    assert len(progress.call_args.args[0]) == 1
     assert progress.call_args.kwargs["file"] is sys.stdout
     assert progress.call_args.kwargs["dynamic_ncols"] is True
     assert progress.call_args.kwargs["disable"] is False

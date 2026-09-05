@@ -206,6 +206,13 @@ Keep these boundaries separate:
 reward, reset, and persistence. Final success is published only after every
 segment lifecycle completes normally.
 
+The bridge declares `progress_total_steps` only for deterministic open-loop
+Pick/Place segments with fixed interpolation samples and no recovery, runner
+holds, feedback settling, post-policies, or parallel execution. Handwritten
+trajectory tasks use the same `DemoSegment` field for a known fixed trajectory
+and settle suffix; paths whose emitted action count depends on runtime state
+remain indeterminate in both execution styles.
+
 ## Demonstration outcome and persistence
 
 The bridge's accepted mask remains the sole segment-quality authority. The

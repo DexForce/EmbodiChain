@@ -120,6 +120,19 @@ gym.Env
 - Environments without a Task Program keep the ordinary `BaseEnv.is_task_success()`
   behavior and task-specific overrides.
 
+### Segment terminal progress (`demo.py`, `run_env.py`)
+
+Every demo path reaches the same terminal `tqdm` wrapper through
+`execute_demo_episode()`. A `DemoSegment` can declare an exact
+`progress_total_steps` without materializing its lazy action iterable; the
+executor exposes that total through `__len__` only to the progress wrapper.
+Task Program bridges and handwritten trajectory tasks must set it only when
+the emitted action count is fixed. Dynamic recovery, feedback settling, or
+data-dependent waits retain an unknown total rather than reporting a false
+percentage. Segment metadata `program_segment_count` or `segment_count`
+selects the `segment N/M` label; legacy action-list tasks receive
+`segment_count=1` automatically.
+
 ---
 
 ## Task Registration

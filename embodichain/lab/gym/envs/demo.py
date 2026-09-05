@@ -664,7 +664,17 @@ def resolve_demo_segments(env: Any, **kwargs: Any) -> Iterable[DemoSegment]:
                 "create_demo_action_list()."
             )
         actions = legacy_creator(**kwargs)
-        segments = None if actions is None else (DemoSegment(actions, name="legacy"),)
+        segments = (
+            None
+            if actions is None
+            else (
+                DemoSegment(
+                    actions,
+                    name="legacy",
+                    metadata={"segment_count": 1},
+                ),
+            )
+        )
 
     if segments is None:
         return ()
