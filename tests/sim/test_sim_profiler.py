@@ -32,9 +32,6 @@ class _WorldUpdateProbe:
     def __init__(self) -> None:
         self.update_calls = 0
 
-    def is_physics_manually_update(self) -> bool:
-        return True
-
     def update(self, physics_dt: float) -> None:
         del physics_dt
         self.update_calls += 1
@@ -69,9 +66,9 @@ def test_standalone_sim_update_is_profile_root() -> None:
 
     assert "sim_update" in profiler._stats
     assert "sim_update.gpu_physics_check" in profiler._stats
-    assert "sim_update.manual_update" in profiler._stats
-    assert profiler._stats["sim_update.manual_update.gizmo_update"].n == 2
-    assert profiler._stats["sim_update.manual_update.world_update"].n == 2
+    assert "sim_update.physics_steps" in profiler._stats
+    assert profiler._stats["sim_update.physics_steps.gizmo_update"].n == 2
+    assert profiler._stats["sim_update.physics_steps.world_update"].n == 2
 
 
 def test_sim_update_composes_with_env_profile_hierarchy() -> None:
@@ -85,8 +82,8 @@ def test_sim_update_composes_with_env_profile_hierarchy() -> None:
             sim.update(step=1)
 
     assert "step.sim_update.gpu_physics_check" in profiler._stats
-    assert "step.sim_update.manual_update.gizmo_update" in profiler._stats
-    assert "step.sim_update.manual_update.world_update" in profiler._stats
+    assert "step.sim_update.physics_steps.gizmo_update" in profiler._stats
+    assert "step.sim_update.physics_steps.world_update" in profiler._stats
     assert "step.sim_update.sim_update" not in profiler._stats
     assert "sim_update" not in profiler._stats
 
@@ -104,6 +101,6 @@ def test_visualization_capture_is_profiled_per_sim_step() -> None:
 
     sim.update(step=2)
 
-    stats = profiler._stats["sim_update.manual_update.visualization_capture"]
+    stats = profiler._stats["sim_update.physics_steps.visualization_capture"]
     assert stats.n == 2
     assert camera_capture_flags == [False, True]

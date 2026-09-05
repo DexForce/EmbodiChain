@@ -28,7 +28,7 @@ topics:
       - sim update
       - scene object
       - asset registry
-      - manual update
+      - explicit physics stepping
       - GPU physics
       - simulation lifecycle
       - ArticulationJointKinematics

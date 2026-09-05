@@ -27,6 +27,7 @@ import pytest
 import torch
 
 import embodichain.lab.sim.sim_manager as sim_manager_module
+from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.profiler import Profiler
 from embodichain.lab.sim.sim_manager import (
     SimulationManager,
@@ -115,9 +116,6 @@ class FakeWorld:
 
     def thread_rt(self) -> FakeThreadRuntime:
         return self.thread_runtime
-
-    def is_physics_manually_update(self) -> bool:
-        return True
 
     def update(self, physics_dt: float) -> None:
         self.physics_updates.append(physics_dt)
@@ -281,6 +279,51 @@ def test_sim_update_refreshes_dirty_visualization_and_captures_current_state() -
         True,
     ]
     assert all(call["overlays"] is None for call in runtime.capture_calls)
+
+
+@pytest.mark.parametrize("step", [0, 1, 3])
+def test_sim_update_owns_physics_and_visualization_time(step: int) -> None:
+    sim, runtime = _make_visualization_sim_manager()
+    physics_dt = 0.02
+    events: list[str] = []
+    sim.update_gizmos = lambda: events.append("control")
+    world_update = sim._world.update
+    capture = runtime.capture
+
+    def update_world(dt: float) -> None:
+        events.append("physics")
+        world_update(dt)
+
+    def capture_state(**kwargs: object) -> bool:
+        events.append("capture")
+        return capture(**kwargs)
+
+    sim._world.update = update_world
+    runtime.capture = capture_state
+
+    sim.update(physics_dt=physics_dt, step=step)
+
+    assert events == ["control", "physics", "capture"] * step
+    assert sim._world.physics_updates == [physics_dt] * step
+    assert sim._visualization_sim_step == step
+    assert sim._visualization_sim_time == pytest.approx(step * physics_dt)
+
+
+def test_drawing_markers_and_publishing_visualization_do_not_step_physics() -> None:
+    sim, runtime = _make_visualization_sim_manager()
+    sim._markers = {}
+    sim._env = MagicMock()
+    cfg = MarkerCfg(name="target", marker_type="axis", axis_xpos=np.eye(4))
+
+    handles = sim.draw_marker(cfg)
+    sim.capture_visualization(force=True)
+
+    assert handles == [sim._env.create_axis.return_value]
+    assert sim._world.physics_updates == []
+    assert sim._visualization_sim_step == 0
+    assert sim._visualization_sim_time == 0.0
+    assert runtime.capture_calls[-1]["sim_step"] == 0
+    assert runtime.capture_calls[-1]["sim_time"] == 0.0
 
 
 def test_sim_manager_persists_overlays_across_automatic_captures() -> None:
@@ -478,6 +521,9 @@ def test_start_visualization_rejects_open_native_window() -> None:
 def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> None:
     lifecycle: list[str] = []
     world = MagicMock()
+    world.set_manual_update.side_effect = lambda _enable: lifecycle.append(
+        "explicit_physics"
+    )
     world.get_physics_scene.return_value = MagicMock()
     world.get_env.return_value = MagicMock()
 
@@ -498,7 +544,9 @@ def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> No
         SimulationManager, "_convert_sim_config", lambda _self, _cfg: object()
     )
     monkeypatch.setattr(
-        SimulationManager, "enable_physics", lambda _self, _enable: None
+        SimulationManager,
+        "enable_physics",
+        lambda _self, _enable: lifecycle.append("enable_physics"),
     )
     monkeypatch.setattr(
         SimulationManager,
@@ -538,7 +586,10 @@ def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> No
     sim = object.__new__(SimulationManager)
     SimulationManager.__init__(sim, SimulationManagerCfg(num_envs=3))
 
+    world.set_manual_update.assert_called_once_with(True)
     assert lifecycle == [
+        "explicit_physics",
+        "enable_physics",
         "resources",
         "plane",
         "background",

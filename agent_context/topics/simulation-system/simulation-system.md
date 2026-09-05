@@ -59,9 +59,10 @@ EnvCfg.sim_cfg
 the scene can be assembled before a native window is opened. It sets
 `SimulationManagerCfg.num_envs` from `EnvCfg.num_envs`.
 
-`SimulationManager` enables physics, selects manual physics updates, creates
-the configured arenas, installs default plane/background/lighting resources,
-and starts configured visualization during initialization. A Viser backend
+`SimulationManager` fixes the native world to explicit physics updates before
+enabling physics or assembling scene resources. It creates the configured arenas,
+installs default plane/background/lighting resources, and starts configured
+visualization during initialization. A Viser backend
 forces `headless=True`; Viser and the native DexSim window are mutually
 exclusive.
 
@@ -144,8 +145,11 @@ corresponding robot/sensor module. Scene composition belongs in
 - Keep batched object and sensor state aligned with the manager's arena count.
 - Build scene assets before explicitly initializing GPU physics. The manager
   will warn and initialize lazily on the first update if this was missed.
-- Manual update is the default; normal environment stepping must advance
-  physics through `SimulationManager.update()`.
+- Physics advances only through explicit `SimulationManager.update()` calls;
+  there is no public automatic/manual mode switch. Interactive loops own their
+  fixed physics timestep and optional wall-clock pacing.
+- Drawing markers and publishing visualization do not advance physics.
+  Use `capture_visualization(force=True)` to publish marker edits while paused.
 - Reset only the requested environment rows and honor
   `excluded_uids` for resources detached from automatic reset.
 - `destroy()` queues deferred cleanup. Tests and non-exiting standalone

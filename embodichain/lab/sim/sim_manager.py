@@ -291,6 +291,8 @@ class SimulationManager:
         # Initialize warp runtime context before creating the world.
         wp.init()
         self._world: dexsim.World = dexsim.World(world_config)
+        # The caller owns physics time, including while the scene is assembled.
+        self._world.set_manual_update(True)
 
         self._window: Windows | None = None
         self._window_record_state: _WindowRecordState | None = None
@@ -371,8 +373,6 @@ class SimulationManager:
         self.set_default_background()
         self.set_default_global_lighting()
 
-        # Set physics to manual update mode by default.
-        self.set_manual_update(True)
         self._build_multiple_arenas(sim_config.num_envs)
         self.start_visualization()
 
@@ -481,10 +481,6 @@ class SimulationManager:
     def is_use_gpu_physics(self) -> bool:
         """Check if the physics simulation is using GPU."""
         return self.device.type == "cuda"
-
-    @property
-    def is_physics_manually_update(self) -> bool:
-        return self._world.is_physics_manually_update()
 
     @property
     def asset_uids(self) -> List[str]:
@@ -760,17 +756,6 @@ class SimulationManager:
         """
         self._world.enable_physics(enable)
 
-    def set_manual_update(self, enable: bool) -> None:
-        """Set manual update for physics simulation.
-
-        If enable is True, the physics simulation will be updated manually by calling :meth:`update`.
-        If enable is False, the physics simulation will be updated automatically by the engine thread loop.
-
-        Args:
-            enable (bool): whether to enable manual update.
-        """
-        self._world.set_manual_update(enable)
-
     def init_gpu_physics(self) -> None:
         """Initialize the GPU physics simulation."""
         if self.device.type != "cuda":
@@ -807,7 +792,11 @@ class SimulationManager:
         self._world.render_camera_group(group_ids)
 
     def update(self, physics_dt: float | None = None, step: int = 10) -> None:
-        """Update the physics.
+        """Advance physics explicitly and publish the resulting simulation state.
+
+        Each substep applies pending Gizmo controls before advancing the world,
+        then updates simulation time, recording, and browser visualization.
+        Physics does not advance in the background while the caller is idle.
 
         Args:
             physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
@@ -823,35 +812,30 @@ class SimulationManager:
                     with self.profiler.section("gpu_physics_init"):
                         self.init_gpu_physics()
 
-            if self.is_physics_manually_update:
-                with self.profiler.section("manual_update"):
-                    if physics_dt is None:
-                        with self.profiler.section("resolve_physics_dt"):
-                            physics_dt = self.sim_config.physics_dt
-                    for i in range(step):
-                        with self.profiler.section("gizmo_update"):
-                            self.update_gizmos()
-                        with self.profiler.section("world_update"):
-                            self._world.update(physics_dt)
-                        self._visualization_sim_step += 1
-                        self._visualization_sim_time += physics_dt
-                        if (
-                            self._window_record_state is not None
-                            and self._window_record_state.capture_from_sim_update
-                        ):
-                            with self.profiler.section("window_record_capture"):
-                                self._step_window_record_from_sim_update(
-                                    self._window_record_state, physics_dt
-                                )
-                        if self.sim_config.visualization.backend == "viser":
-                            with self.profiler.section("visualization_capture"):
-                                self.capture_visualization_safely(
-                                    capture_camera_images=i == step - 1
-                                )
-
-            else:
-                with self.profiler.section("manual_update_disabled"):
-                    logger.log_warning("Physics simulation is not manually updated.")
+            with self.profiler.section("physics_steps"):
+                if physics_dt is None:
+                    with self.profiler.section("resolve_physics_dt"):
+                        physics_dt = self.sim_config.physics_dt
+                for i in range(step):
+                    with self.profiler.section("gizmo_update"):
+                        self.update_gizmos()
+                    with self.profiler.section("world_update"):
+                        self._world.update(physics_dt)
+                    self._visualization_sim_step += 1
+                    self._visualization_sim_time += physics_dt
+                    if (
+                        self._window_record_state is not None
+                        and self._window_record_state.capture_from_sim_update
+                    ):
+                        with self.profiler.section("window_record_capture"):
+                            self._step_window_record_from_sim_update(
+                                self._window_record_state, physics_dt
+                            )
+                    if self.sim_config.visualization.backend == "viser":
+                        with self.profiler.section("visualization_capture"):
+                            self.capture_visualization_safely(
+                                capture_camera_images=i == step - 1
+                            )
 
     def get_env(self, arena_index: int = -1) -> dexsim.environment.Arena:
         """Get the arena or env by index.
@@ -2356,6 +2340,9 @@ class SimulationManager:
     ) -> MeshObject:
         """Draw visual markers in the simulation scene for debugging and visualization.
 
+        Drawing markers does not advance physics. Call
+        :meth:`capture_visualization` to publish them to Viser without stepping.
+
         Args:
             cfg (MarkerCfg): Marker configuration with the following key parameters:
                 - name (str): Unique identifier for the marker group
@@ -2462,9 +2449,6 @@ class SimulationManager:
             axis_length=cfg.axis_len,
             axis_radius=cfg.axis_size,
         )
-
-        if self.is_physics_manually_update:
-            self.update(step=1)
 
         return marker_handles
 

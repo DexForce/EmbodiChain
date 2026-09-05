@@ -164,10 +164,12 @@ the update loop or optional `--preview` REPL.
 | `stop_visualization()` | Stops the worker/backend and releases the server port |
 | `destroy()` | Stops visualization before queuing deferred simulation cleanup |
 
-During manual `SimulationManager.update()`, each physics step increments the
+During explicit `SimulationManager.update()`, each physics step increments the
 visualization step/time counters and attempts a rate-limited capture. A topology
 revision mismatch publishes a fresh manifest before its first matching frame.
 `BaseEnv.reset()` also requests a forced capture after resetting scene state.
+Drawing markers and capturing visualization do not advance physics; interactive
+loops call `SimulationManager.update(step=1)` to process Gizmos and step the world.
 
 Manager add methods mark topology dirty for rigid objects, rigid-object groups,
 soft bodies, cloth, robots, articulations, and `Camera` sensors. Supported
