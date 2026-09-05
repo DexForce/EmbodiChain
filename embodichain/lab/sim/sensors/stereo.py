@@ -277,6 +277,8 @@ class StereoCamera(Camera):
                 ][:, :, config.width :, :]
 
         self.cfg: CameraCfg = config
+        if self.cfg.extrinsics.parent is not None:
+            self._attach_to_entity()
 
     def update(self, **kwargs) -> None:
         """Update the sensor data.

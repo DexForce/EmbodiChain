@@ -37,7 +37,6 @@ topics:
       - simulation lifecycle
       - ArticulationJointKinematics
       - get_parent_joint_chain
-      - get_link_render_nodes
       - ArticulationCfg
       - enable_gravity
     paths:
@@ -299,17 +298,13 @@ topics:
       - rgb
       - depth
       - pointcloud
-      - resolve_parent_nodes
     paths:
       - topics/sensor-system/sensor-system.md
     source_of_truth:
       - embodichain/lab/sim/sensors/base_sensor.py
       - embodichain/lab/sim/sensors/camera.py
       - embodichain/lab/sim/sensors/stereo.py
-      - embodichain/lab/sim/sensors/attachment.py
       - embodichain/lab/sim/sensors/contact_sensor.py
-      - embodichain/lab/sim/sim_manager.py
-      - embodichain/lab/sim/objects/articulation.py
       - embodichain/lab/gym/utils/gym_utils.py
       - embodichain/lab/gym/utils/_component_composition.py
       - embodichain/lab/task_program/integrations/_configured_composition.py

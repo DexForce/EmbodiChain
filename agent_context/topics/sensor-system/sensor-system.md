@@ -9,9 +9,6 @@
 | Camera | `embodichain/lab/sim/sensors/camera.py` → `Camera`, `CameraCfg` |
 | Stereo camera | `embodichain/lab/sim/sensors/stereo.py` → `StereoCamera`, `StereoCameraCfg` |
 | Contact sensor | `embodichain/lab/sim/sensors/contact_sensor.py` → `ContactSensor`, `ContactSensorCfg` |
-| Sensor creation and attachment coordination | `embodichain/lab/sim/sim_manager.py` → `SimulationManager.add_sensor()` |
-| Camera parent resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_nodes()` |
-| Native link render nodes | `embodichain/lab/sim/objects/articulation.py` → `Articulation.get_link_render_nodes()` |
 
 ## Overview
 
@@ -106,30 +103,6 @@ Extends `SensorCfg.OffsetCfg` with look-at support:
 
 When `eye` is provided, the transformation is computed via `look_at_to_pose()`. Otherwise falls back to `pos`/`quat`.
 
-### Camera attachment
-
-- `SimulationManager.add_sensor()` passes the registered Robots/Articulations and
-  expected environment count to `sensors.attachment.resolve_parent_nodes()` before
-  allocating camera views. The manager only coordinates creation and attachment.
-- The resolver owns `extrinsics.parent` parsing, link-name disambiguation, and
-  instance-count validation. It uses public asset queries, not a manager singleton
-  or native handles. A plain canonical link name remains valid; use
-  `"<asset_uid>/<link_name>"` to disambiguate shared names.
-- `Articulation.get_link_render_nodes()` encapsulates per-arena topology checks and
-  `get_render_body(link_name).render_node()`; Robot inherits this query. Do not
-  access `asset._entities` from the resolver, use global `Env.find_node()`, or
-  infer backend clone suffixes such as `.0` and `.1`.
-- `Camera.attach_to_parent_nodes()` attaches one resolved node per camera instance,
-  reapplies parent-relative extrinsics, and then sets `is_attached` to `True`.
-  Stereo cameras use the same method, forwarding attachment to both views.
-- Directly constructed cameras require an explicit `attach_to_parent_nodes()`
-  call. With `parent=None`, cameras added through the manager remain in arena space.
-- Focused validation: `tests/sim/sensors/test_attachment.py` for resolution,
-  `tests/sim/objects/test_articulation.py` for native queries,
-  `tests/sim/sensors/test_camera.py` for attachment, and
-  `tests/sim/test_sim_manager.py` for coordination. Pure logic tests do not
-  initialize a renderer.
-
 ### StereoCameraCfg
 
 Extends `CameraCfg` with stereo-specific fields:
@@ -158,7 +131,7 @@ Properties `left_to_right` and `right_to_left` return `4×4` transform tensors. 
 
 - **`sensor_type` string mismatch** — `SensorCfg.from_dict()` looks up `sensor_type + "Cfg"` in the sensors module. A typo (e.g. `"camera"` instead of `"Camera"`) causes `AttributeError`.
 - **Depth not enabled** — `enable_depth` defaults to `False`. Accessing depth data without enabling it returns empty tensors.
-- **Invalid camera parent** — Missing or ambiguous registered links raise `ValueError`; missing per-arena links or render nodes raise `RuntimeError`. Parent nodes must resolve in every arena before attachment.
+- **Parent frame not found** — `OffsetCfg.parent` must exactly match a link name in the scene. A wrong name silently places the sensor at the arena origin.
 - **Stereo baseline sign** — `left_to_right_pos` defines translation from left to right camera. Flipping the sign inverts the disparity.
 - **Contact sensor buffer overflow** — `max_contacts_per_env` caps the contact count. Exceeding it silently drops contacts; increase if the scene has dense collisions.
 - **View attribute flags** — `Camera.get_view_attrib()` computes `dr.ViewFlags` from enabled booleans. Adding a new data type requires both the `enable_*` flag and the corresponding `ViewFlags` bit.

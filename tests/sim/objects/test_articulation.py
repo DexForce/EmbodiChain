@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import os
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -28,7 +27,7 @@ from embodichain.lab.sim import (
     SimulationManagerCfg,
     VisualMaterialCfg,
 )
-from embodichain.lab.sim.objects import Articulation, ArticulationJointKinematics, Robot
+from embodichain.lab.sim.objects import Articulation, ArticulationJointKinematics
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     JointDrivePropertiesCfg,
@@ -182,65 +181,6 @@ def test_get_parent_joint_chain_returns_backend_neutral_child_to_root_values():
     assert [joint.joint_type for joint in chain] == ["fixed", "revolute"]
     assert chain[1].joint_limits == (0.0, 2.0)
     assert chain[0].origin_pose[0, 3].item() == 0.0
-
-
-def _make_render_node_articulation(
-    asset_type: type[Articulation] = Articulation, num_envs: int = 2
-) -> tuple[Articulation, list[object]]:
-    asset = object.__new__(asset_type)
-    asset.uid = "arm"
-    asset._data = SimpleNamespace(link_names=["wrist"])
-    nodes = [object() for _ in range(num_envs)]
-    asset._entities = []
-    for node in nodes:
-        entity = MagicMock(spec=["get_link_names", "get_render_body"])
-        entity.get_link_names.return_value = ["wrist"]
-        entity.get_render_body.return_value.render_node.return_value = node
-        asset._entities.append(entity)
-    return asset, nodes
-
-
-@pytest.mark.no_sim
-@pytest.mark.parametrize("asset_type", [Articulation, Robot])
-@pytest.mark.parametrize("num_envs", [1, 3])
-def test_get_link_render_nodes_uses_canonical_link_in_each_arena(
-    asset_type: type[Articulation], num_envs: int
-) -> None:
-    asset, nodes = _make_render_node_articulation(asset_type, num_envs)
-
-    assert asset.get_link_render_nodes("wrist") == nodes
-    for entity in asset._entities:
-        entity.get_render_body.assert_called_once_with("wrist")
-
-
-@pytest.mark.no_sim
-def test_get_link_render_nodes_rejects_unknown_link_before_native_access() -> None:
-    asset, _ = _make_render_node_articulation()
-
-    with pytest.raises(ValueError, match="has no link 'missing'"):
-        asset.get_link_render_nodes("missing")
-
-    for entity in asset._entities:
-        entity.get_render_body.assert_not_called()
-
-
-@pytest.mark.no_sim
-@pytest.mark.parametrize("failure", ["missing_link", "missing_body", "missing_node"])
-def test_get_link_render_nodes_rejects_incomplete_arena_topology(failure: str) -> None:
-    asset, _ = _make_render_node_articulation()
-    entity = asset._entities[1]
-    if failure == "missing_link":
-        entity.get_link_names.return_value = []
-        error = "missing link 'wrist' in arena 1"
-    else:
-        if failure == "missing_body":
-            entity.get_render_body.return_value = None
-        else:
-            entity.get_render_body.return_value.render_node.return_value = None
-        error = "no render node in arena 1"
-
-    with pytest.raises(RuntimeError, match=error):
-        asset.get_link_render_nodes("wrist")
 
 
 def _link_static_friction(art: Articulation, link_name: str, env_idx: int = 0) -> float:

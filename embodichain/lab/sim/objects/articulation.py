@@ -1201,43 +1201,6 @@ class Articulation(BatchEntity):
         verts, faces = self.body_data.link_vert_face[link_name]
         return verts, faces
 
-    def get_link_render_nodes(self, link_name: str) -> list[dexsim.engine.Node]:
-        """Get a link's native render node for every articulation instance.
-
-        This is the render-attachment boundary for cameras and other scene
-        integrations. Returned nodes belong to this articulation and must not
-        be used after the owning asset is destroyed.
-
-        Args:
-            link_name: Canonical link name, without backend clone suffixes.
-
-        Returns:
-            Render nodes ordered by environment index.
-
-        Raises:
-            ValueError: If the link is not part of this articulation.
-            RuntimeError: If any instance is missing the link or its render node.
-        """
-        if link_name not in self.link_names:
-            raise ValueError(f"Articulation {self.uid!r} has no link {link_name!r}.")
-
-        nodes: list[dexsim.engine.Node] = []
-        for env_idx, entity in enumerate(self._entities):
-            if link_name not in entity.get_link_names():
-                raise RuntimeError(
-                    f"Articulation {self.uid!r} is missing link "
-                    f"{link_name!r} in arena {env_idx}."
-                )
-            render_body = entity.get_render_body(link_name)
-            node = None if render_body is None else render_body.render_node()
-            if node is None:
-                raise RuntimeError(
-                    f"Articulation {self.uid!r} link {link_name!r} has "
-                    f"no render node in arena {env_idx}."
-                )
-            nodes.append(node)
-        return nodes
-
     def get_link_pose(
         self, link_name: str, env_ids: Sequence[int] | None = None, to_matrix=False
     ) -> torch.Tensor:
