@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Control a UR10 end effector with a native DexSim or Viser Gizmo."""
+"""Control a UR10 end effector with a Gizmo and manual physics stepping."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def main():
     )
 
     sim = SimulationManager(sim_cfg)
-    sim.set_manual_update(False)
+    sim.set_manual_update(True)
 
     # Get UR10 URDF path
     urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
@@ -92,17 +92,21 @@ def main():
         ),
     )
     robot = sim.add_robot(cfg=robot_cfg)
+    if sim.is_use_gpu_physics:
+        sim.init_gpu_physics()
 
     # Set initial joint positions
     initial_qpos = torch.tensor(
         [[0, -np.pi / 2, np.pi / 2, 0.0, np.pi / 2, 0.0]],
         dtype=torch.float32,
-        device="cpu",
+        device=sim.device,
     )
     joint_ids = robot.get_joint_ids("arm")
+    robot.set_qpos(qpos=initial_qpos, joint_ids=joint_ids, target=False)
     robot.set_qpos(qpos=initial_qpos, joint_ids=joint_ids)
 
-    time.sleep(0.2)  # Wait for a moment to ensure everything is set up
+    if sim.is_physics_manually_update:
+        sim.update(step=1)  # Refresh link poses before creating the IK target.
 
     native_window_opened = False
     if not args.headless:
@@ -145,20 +149,27 @@ def main():
 
 
 def run_simulation(sim: SimulationManager, native_control=None):
+    """Update IK before each manual physics step, or poll automatic physics."""
     step_count = 0
     try:
-        last_time = time.time()
+        last_time = time.perf_counter()
         last_step = 0
         while True:
-            time.sleep(0.033)  # 30Hz
+            frame_start = time.perf_counter()
             if native_control is not None:
                 native_control[0].update()
-            sim.update_gizmos()
-            sim.capture_visualization_safely()
+            if sim.is_physics_manually_update:
+                # update() also processes Viser commands and publishes the frame.
+                sim.update(step=1)
+                frame_dt = sim.sim_config.physics_dt
+            else:
+                sim.update_gizmos()
+                sim.capture_visualization_safely()
+                frame_dt = 1.0 / 30.0
             step_count += 1
 
             if step_count % 100 == 0:
-                current_time = time.time()
+                current_time = time.perf_counter()
                 elapsed = current_time - last_time
                 fps = (
                     sim.num_envs * (step_count - last_step) / elapsed
@@ -168,6 +179,9 @@ def run_simulation(sim: SimulationManager, native_control=None):
                 logger.log_info(f"Simulation step: {step_count}, FPS: {fps:.2f}")
                 last_time = current_time
                 last_step = step_count
+
+            elapsed = time.perf_counter() - frame_start
+            time.sleep(max(0.0, frame_dt - elapsed))
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")
     finally:

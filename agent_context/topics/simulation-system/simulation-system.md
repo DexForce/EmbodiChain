@@ -70,6 +70,13 @@ then advances the world for the requested number of physics steps. Each
 environment control step normally calls it with
 `sim_steps_per_control`.
 
+`scripts/tutorials/sim/gizmo_robot.py` defaults to manual physics. It initializes
+GPU physics after robot creation when needed, sets both current and target
+joint positions, and advances once before creating the IK target. In its loop,
+the native IK controller updates before `sim.update(step=1)`, which also handles
+Viser commands/capture. The loop is paced by `physics_dt`; automatic physics
+instead polls gizmos and visualization at 30 Hz without advancing the world.
+
 `ArticulationCfg.enable_gravity` defaults to `True`. During articulation
 construction, `Articulation` applies this explicit runtime flag to every native
 entity before the first physics update, including when
