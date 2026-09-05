@@ -11,6 +11,12 @@ Package exports
 .. automodule:: embodichain.gen_sim.task_engine
    :members:
 
+Semantic frontend
+-----------------
+
+.. automodule:: embodichain.gen_sim.task_engine.agent
+   :members:
+
 Contracts
 ---------
 

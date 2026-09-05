@@ -18,6 +18,12 @@
 
 from __future__ import annotations
 
+from .agent import (
+    TaskAgent,
+    TaskGenerationError,
+    derive_scene_request,
+    derive_success_spec,
+)
 from .contracts import (
     SCENE_REQUEST_SCHEMA,
     SUCCESS_SPEC_SCHEMA,
@@ -68,11 +74,15 @@ __all__ = [
     "TASK_DRAFT_SCHEMA",
     "TERMINAL_BEHAVIORS",
     "TRANSPORT_DIRECTIONS",
+    "TaskAgent",
     "TaskCandidate",
     "TaskCandidateSet",
     "TaskContract",
     "TaskDraft",
+    "TaskGenerationError",
     "canonical_hash",
+    "derive_scene_request",
+    "derive_success_spec",
     "interpret_instruction_draft",
     "task_contract",
     "task_success_type",
