@@ -2,7 +2,7 @@
 
 ## 1. Install the documentation dependencies
 
-Build the docs from a source checkout in a Python 3.10 or 3.11 virtual
+Build the docs from a source checkout in a Python 3.10, 3.11, or 3.12 virtual
 environment. API generation imports EmbodiChain modules, so install the project
 runtime and the documentation toolchain from the repository root:
 

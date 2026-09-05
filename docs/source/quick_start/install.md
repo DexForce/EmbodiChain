@@ -21,7 +21,7 @@ After installation, continue with the [Quick Start Tutorial](../tutorial/index.r
 | **NVIDIA driver** | ≥ 535 (tested on driver branches up to 595.x) |
 | **CUDA** | 12.x (aligned with the Docker image and `dexsim_engine` wheels) |
 | **Vulkan** | Host ICD/layer files for GPU rendering (see Docker notes) |
-| **Python** | 3.10 or 3.11 |
+| **Python** | 3.10, 3.11, or 3.12 |
 | **Display** (optional) | X11 `DISPLAY` for interactive viewer windows |
 
 NVIDIA drivers are backward compatible with applications built against older

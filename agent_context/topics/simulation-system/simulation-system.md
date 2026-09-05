@@ -123,6 +123,10 @@ Object-specific configuration belongs in `lab/sim/cfg.py` or the
 corresponding robot/sensor module. Scene composition belongs in
 `EmbodiedEnv` or a task config, not in `SimulationManagerCfg`.
 
+For mesh collision decomposition, `MeshCfg.acd_method` defaults to `"visacd"`
+with DexSim 0.5.0; it requires CUDA support. `"coacd"` and `"vhacd"` remain
+supported explicit options.
+
 ## Where to Make Changes
 
 | Change | Primary location |
