@@ -251,8 +251,8 @@ class DexforceW1Cfg(RobotCfg):
             Dictionary containing physics configuration parameters
         """
         DEFAULT_EEF_JOINT_DRIVE_PARAMS = {
-            "stiffness": 1e2,
-            "damping": 1e1,
+            "stiffness": 1e3,
+            "damping": 2e1,
             "max_effort": 1e3,
         }
 
@@ -269,7 +269,7 @@ class DexforceW1Cfg(RobotCfg):
                 BODY_JOINTS: 1e7,
                 HEAD_JOINTS: 1e4,
             },
-            "damping": {ARM_JOINTS: 1e3, BODY_JOINTS: 1e4, HEAD_JOINTS: 1e3},
+            "damping": {ARM_JOINTS: 1e2, BODY_JOINTS: 1e4, HEAD_JOINTS: 1e2},
             "max_effort": {ARM_JOINTS: 1e5, BODY_JOINTS: 1e10, HEAD_JOINTS: 1e5},
         }
         drive_pros = JointDrivePropertiesCfg(**joint_params)

@@ -147,8 +147,8 @@ class FrankaPandaCfg(RobotCfg):
                 "fr3_finger_joint[1-2]": 1e3,
             },
             damping={
-                "fr3_joint[1-7]": 1e3,
-                "fr3_finger_joint[1-2]": 1e2,
+                "fr3_joint[1-7]": 1e2,
+                "fr3_finger_joint[1-2]": 2e1,
             },
             max_effort={
                 "fr3_joint[1-7]": 1e5,

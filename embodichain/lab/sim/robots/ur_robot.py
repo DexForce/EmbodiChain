@@ -57,6 +57,17 @@ _UR_MAX_EFFORT: Dict[str, float] = {
     "ur10e": 330.0,
 }
 
+# The qpos-only 60 Hz tracking qualification covers UR10e. Keep the established
+# damping for other UR variants until they receive the same qualification.
+_UR_DEFAULT_DAMPING: Dict[str, float] = {
+    "ur3": 1e3,
+    "ur3e": 1e3,
+    "ur5": 1e3,
+    "ur5e": 1e3,
+    "ur10": 1e3,
+    "ur10e": 1e2,
+}
+
 
 @configclass
 class URRobotCfg(RobotCfg):
@@ -141,7 +152,7 @@ class URRobotCfg(RobotCfg):
 
         self.drive_pros = JointDrivePropertiesCfg(
             stiffness={"arm": 1e4},
-            damping={"arm": 1e3},
+            damping={"arm": _UR_DEFAULT_DAMPING[robot_type]},
             max_effort={"arm": _UR_MAX_EFFORT[robot_type]},
         )
 
