@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -26,6 +27,7 @@ import torch
 from embodichain.lab.gym.envs.demo import (
     DemoEpisodeResult,
     DemoExecutionCfg,
+    DemoSegment,
     DemoSegmentResult,
 )
 from embodichain.lab.task_program.language.loader import (
@@ -46,6 +48,8 @@ ACTION_LIST_INDEX = 0
 REPLAY_NUM_STEPS = 5
 REPLAY_TARGET_STEP = 3
 VISER_POLL_INTERVAL = 0.05
+REPEATED_PICK_PLACE_SEGMENT_COUNT = 3
+REPEATED_PICK_PLACE_SEGMENT_STEP_COUNT = 80
 
 
 def _task_program_payload() -> dict[str, object]:
@@ -84,6 +88,26 @@ class _LegacyProgressEnv:
         return True
 
 
+class _TaskProgramProgressEnv(_LegacyProgressEnv):
+    """Three-segment Task Program stand-in matching repeated pick/place."""
+
+    def create_demo_segments(self, **kwargs):
+        del kwargs
+        return tuple(
+            DemoSegment(
+                actions=(
+                    object() for _ in range(REPEATED_PICK_PLACE_SEGMENT_STEP_COUNT)
+                ),
+                name="move_cube",
+                metadata={
+                    "segment_count": REPEATED_PICK_PLACE_SEGMENT_COUNT,
+                },
+                progress_total_steps=REPEATED_PICK_PLACE_SEGMENT_STEP_COUNT,
+            )
+            for _ in range(REPEATED_PICK_PLACE_SEGMENT_COUNT)
+        )
+
+
 def test_legacy_action_list_displays_episode_and_segment_indices(
     monkeypatch,
 ) -> None:
@@ -101,8 +125,34 @@ def test_legacy_action_list_displays_episode_and_segment_indices(
 
     assert generated
     assert progress.call_args.kwargs["desc"] == (
-        f"Executing episode #{EPISODE_INDEX}, segment #{ACTION_LIST_INDEX}: legacy"
+        f"Executing episode #{EPISODE_INDEX}, segment {ACTION_LIST_INDEX + 1}/1: "
+        "legacy"
     )
+    assert len(progress.call_args.args[0]) == 1
+    assert progress.call_args.kwargs["file"] is sys.stdout
+    assert progress.call_args.kwargs["dynamic_ncols"] is True
+
+
+def test_task_program_progress_displays_repeated_segment_position(capsys) -> None:
+    """Each lazy segment renders its position, percentage, and exact step count."""
+    env = _TaskProgramProgressEnv()
+
+    generated = run_env.generate_and_execute_action_list(
+        env,
+        ACTION_LIST_INDEX,
+        debug_mode=False,
+        episode_idx=EPISODE_INDEX,
+    )
+
+    assert generated
+    output = capsys.readouterr().out
+    for index in range(1, REPEATED_PICK_PLACE_SEGMENT_COUNT + 1):
+        assert (
+            f"Executing episode #{EPISODE_INDEX}, segment {index}/"
+            f"{REPEATED_PICK_PLACE_SEGMENT_COUNT}: move_cube: 100%|"
+        ) in output
+    total = REPEATED_PICK_PLACE_SEGMENT_STEP_COUNT
+    assert output.count(f"{total}/{total}") == REPEATED_PICK_PLACE_SEGMENT_COUNT
 
 
 def test_run_env_syncs_viser_images_each_step_by_default() -> None:
