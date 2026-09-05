@@ -31,13 +31,6 @@ from embodichain.lab.sim.cfg import ArticulationCfg, LightCfg, MeshCfg, RigidObj
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.visualization import VisualizationCfg
 
-__all__ = [
-    "build_scene_usd",
-    "load_scene_export_into_sim",
-    "load_scene_usd_into_sim",
-]
-
-
 _SCENE_EXPORT_FORMAT = "embodichain.scene-export/v1"
 _SCENE_USD_FORMAT = "embodichain.scene-usd/v1"
 
