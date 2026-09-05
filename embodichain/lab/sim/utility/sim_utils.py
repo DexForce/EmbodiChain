@@ -41,21 +41,19 @@ from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     ArticulationRootPropertiesCfg,
     LinkPhysicsOverrideCfg,
-    RigidBodyAttributesCfg,
-    RigidBodyAttributesOverrideCfg,
     RigidBodyPhysicsCfg,
     RigidObjectCfg,
     SoftObjectCfg,
     ClothObjectCfg,
 )
 from embodichain.utils.string import resolve_matching_names
-from embodichain.lab.sim.shapes import MeshCfg, CubeCfg, SphereCfg
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg, SphereCfg
 from embodichain.utils import logger
 from dexsim.kit.meshproc import get_mesh_auto_uv
 import numpy as np
 
 if TYPE_CHECKING:
-    from dexsim.spawn import SpawnedArticulation
+    from dexsim.scene import SpawnedArticulation
 
 
 def _is_newton_backend_active() -> bool:
@@ -96,13 +94,9 @@ def get_dexsim_arena_num() -> int:
 
 def _resolve_mesh_collision_params(
     cfg: RigidObjectCfg,
-) -> tuple[int, str, int]:
+) -> MeshCollisionCfg:
     """Resolve mesh collision parameters from the shape configuration."""
-    return (
-        cfg.shape.max_convex_hull_num,
-        cfg.shape.acd_method,
-        cfg.shape.sdf_resolution,
-    )
+    return cfg.shape.collision or MeshCollisionCfg()
 
 
 def get_dexsim_drive_type(drive_type: str) -> DriveType:
@@ -159,19 +153,17 @@ def _apply_link_physics_overrides(
         group_cfg = link_to_group.get(name)
         if group_cfg is None:
             continue
-        if not isinstance(group_cfg.attrs, RigidBodyAttributesOverrideCfg):
-            raise TypeError(
-                "The deprecated raw articulation path does not support grouped "
-                "link_attrs; use SimulationManager.add_articulation()."
-            )
-        base_attrs = cfg.attrs
-        if isinstance(base_attrs, RigidBodyPhysicsCfg):
-            base_attrs = RigidBodyAttributesCfg.from_grouped(base_attrs)
-        physical_attr = group_cfg.attrs.merge_with(base_attrs)
-        replace_inertial = group_cfg.replace_inertial or (
-            group_cfg.attrs.mass is not None
+        base_attr = cfg.attrs.to_dexsim_physical_attr()
+        physical_attr = group_cfg.attrs.to_dexsim_physical_attr(base=base_attr)
+        mass_props = group_cfg.attrs.mass_props
+        recompute_inertia = bool(
+            mass_props is not None and mass_props.recompute_inertia
         )
-        art.set_physical_attr(physical_attr, name, is_replace_inertial=replace_inertial)
+        art.set_physical_attr(
+            physical_attr,
+            name,
+            is_replace_inertial=recompute_inertia,
+        )
 
 
 def _warn_legacy_articulation_api(name: str) -> None:
@@ -376,10 +368,10 @@ def _set_dexsim_articulation_cfg(
         art.set_body_scale(cfg.body_scale)
 
     link_names = art.get_link_names()
-    physical_attr = cfg.attrs.attr()
+    physical_attr = cfg.attrs.to_dexsim_physical_attr()
     art.set_physical_attr(physical_attr)
     _apply_link_physics_overrides(art, cfg, link_names)
-    root_props = cfg.articulation_props
+    root_props = cfg.root_props
     fixed_base = True if root_props.fixed_base is None else bool(root_props.fixed_base)
     self_collision_enabled = (
         False
@@ -533,7 +525,11 @@ def _configure_primitive_rigidbody(
             "RigidBodyPhysicsCfg properties for Newton."
         )
     obj.set_body_scale(*cfg.body_scale)
-    obj.add_rigidbody(body_type, shape_type, cfg.attrs.attr())
+    obj.add_rigidbody(
+        body_type,
+        shape_type,
+        cfg.attrs.to_dexsim_physical_attr(),
+    )
 
 
 def _import_usd_rigid_prototype(
@@ -572,11 +568,9 @@ def _load_rigid_mesh_prototype(
         )
     option = _mesh_load_option_from_cfg(cfg)
     fpath = cfg.shape.fpath
-    max_convex_hull_num, acd_method, sdf_resolution = _resolve_mesh_collision_params(
-        cfg
-    )
+    collision_cfg = _resolve_mesh_collision_params(cfg)
 
-    if max_convex_hull_num > 1:
+    if collision_cfg.approximation == "convex_decomposition":
         obj = env.load_actor_with_acd(
             fpath,
             duplicate=True,
@@ -584,10 +578,15 @@ def _load_rigid_mesh_prototype(
             option=option,
             cache_path=cache_dir,
             actor_type=body_type,
-            max_convex_hull_num=max_convex_hull_num,
-            method=acd_method,
+            max_convex_hull_num=collision_cfg.max_hulls,
+            method=collision_cfg.acd_method or "coacd",
         )
-    elif sdf_resolution > 0:
+    elif collision_cfg.approximation == "sdf":
+        if collision_cfg.sdf_resolution is None:
+            raise ValueError(
+                "The deprecated raw Default path requires sdf_resolution for "
+                "MeshCollisionCfg(approximation='sdf')."
+            )
         if cfg.body_scale not in [
             (1.0, 1.0, 1.0),
             [1.0, 1.0, 1.0],
@@ -598,16 +597,29 @@ def _load_rigid_mesh_prototype(
                 "collision."
             )
         obj = env.load_actor(fpath, duplicate=True, attach_scene=True, option=option)
-        sdf_cfg = SDFConfig(resolution=sdf_resolution)
+        sdf_cfg = SDFConfig(resolution=collision_cfg.sdf_resolution)
         obj.add_physical_body(
             body_type,
             RigidBodyShape.SDF,
             config=sdf_cfg,
-            attr=cfg.attrs.attr(),
+            attr=cfg.attrs.to_dexsim_physical_attr(),
         )
     else:
+        if collision_cfg.approximation == "triangle_mesh" and cfg.body_type != "static":
+            raise ValueError(
+                "triangle_mesh collision is supported only for static rigid objects."
+            )
         obj = env.load_actor(fpath, duplicate=True, attach_scene=True, option=option)
-        obj.add_rigidbody(body_type, RigidBodyShape.CONVEX, cfg.attrs.attr())
+        shape_type = (
+            RigidBodyShape.MESH
+            if collision_cfg.approximation == "triangle_mesh"
+            else RigidBodyShape.CONVEX
+        )
+        obj.add_rigidbody(
+            body_type,
+            shape_type,
+            cfg.attrs.to_dexsim_physical_attr(),
+        )
 
     _apply_mesh_uv_mapping(obj, cfg)
     return obj
@@ -684,7 +696,6 @@ def spawn_rigid_object_entities(
             prototype = _import_usd_rigid_prototype(source_env, fpath, prototype_name)
         else:
             cfg.asset_physics_mode = "overlay"
-            cfg.use_usd_properties = None
             prototype = _load_rigid_mesh_prototype(
                 source_env,
                 cfg,

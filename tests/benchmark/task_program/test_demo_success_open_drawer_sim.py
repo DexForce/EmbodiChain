@@ -1,0 +1,181 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Live OpenDrawer regression coverage for the Task Program benchmark."""
+
+from __future__ import annotations
+
+from pathlib import Path
+import subprocess
+import sys
+
+import pytest
+
+from embodichain.utils.utility import load_config, save_config
+from scripts.benchmark.task_program.demo_success import (
+    aggregate_demo_success_trials,
+    load_raw_trials,
+)
+
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+_TASK_CONFIG_ROOT = _REPOSITORY_ROOT / "embodichain_tasks/configs"
+_OPEN_DRAWER_GYM_CONFIG = (
+    _TASK_CONFIG_ROOT / "tasks/manipulation/open_drawer/task.ur5.yaml"
+)
+_OPEN_DRAWER_TASK_PROGRAM = (
+    _TASK_CONFIG_ROOT / "tasks/manipulation/open_drawer/task_program/program.yaml"
+)
+_CASE_ID = "open_drawer_live"
+_SEED = 0
+_NUM_ENVS = 1
+_SUBPROCESS_TIMEOUT_SECONDS = 180
+_RUN_PUBLIC_MAIN = (
+    "from scripts.benchmark.task_program.demo_success import main; "
+    "raise SystemExit(main())"
+)
+
+
+def _write_headless_cpu_gym_config(tmp_path: Path) -> Path:
+    """Write a deterministic copy of the canonical live-physics config."""
+    payload = load_config(_OPEN_DRAWER_GYM_CONFIG)
+    if type(payload) is not dict:
+        raise TypeError("The packaged OpenDrawer Gym config must be a mapping.")
+    environment_selection = payload["environment"]
+    assert type(environment_selection) is dict
+    environment_path = (
+        _OPEN_DRAWER_GYM_CONFIG.parent / environment_selection["component"]
+    ).resolve()
+    environment = load_config(environment_path)
+    assert type(environment) is dict
+    env_config = environment.get("env")
+    if type(env_config) is not dict:
+        raise TypeError("The packaged OpenDrawer env config must be a mapping.")
+
+    env_config["events"] = {}
+    env_config["observations"] = {}
+    env_config["dataset"] = {}
+    task_program = payload["task_program"]
+    assert type(task_program) is dict
+    for field_name in ("program", "integration", "execution_policy"):
+        task_program[field_name] = str(
+            (_OPEN_DRAWER_GYM_CONFIG.parent / task_program[field_name]).resolve()
+        )
+    environment_output = tmp_path / "env.yaml"
+    save_config(environment_output, environment)
+    environment_selection["component"] = str(environment_output)
+    embodiment = payload["embodiment"]
+    assert type(embodiment) is dict
+    embodiment["component"] = str(
+        (_OPEN_DRAWER_GYM_CONFIG.parent / embodiment["component"]).resolve()
+    )
+
+    output = tmp_path / "open_drawer_headless_cpu.yaml"
+    save_config(output, payload)
+    return output
+
+
+@pytest.mark.requires_sim
+@pytest.mark.slow
+def test_live_open_drawer_benchmark_writes_successful_decodable_artifacts(
+    tmp_path: Path,
+) -> None:
+    """Run one no-retry seed through the public live benchmark entry point."""
+    gym_config_path = _write_headless_cpu_gym_config(tmp_path)
+    raw_path = tmp_path / "open_drawer_raw.json"
+    report_path = tmp_path / "open_drawer_report.md"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _RUN_PUBLIC_MAIN,
+            "--run-simulation",
+            "--gym_config",
+            str(gym_config_path),
+            "--task-program",
+            str(_OPEN_DRAWER_TASK_PROGRAM),
+            "--case-id",
+            _CASE_ID,
+            "--seeds",
+            str(_SEED),
+            "--raw-json",
+            str(raw_path),
+            "--report",
+            str(report_path),
+            "--headless",
+            "--device",
+            "cpu",
+            "--num_envs",
+            str(_NUM_ENVS),
+            "--filter_dataset_saving",
+        ],
+        cwd=_REPOSITORY_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+        check=False,
+    )
+
+    # main() returns zero only after the live runner's default closer completes;
+    # the process boundary also isolates native simulator teardown from pytest.
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert f"Raw JSON saved: {raw_path}" in completed.stdout
+    assert f"Markdown report saved: {report_path}" in completed.stdout
+
+    decoded_trials = load_raw_trials(raw_path)
+    assert len(decoded_trials) == 1
+    trial = decoded_trials[0]
+    assert trial.case_id == _CASE_ID
+    assert trial.seed == _SEED
+    assert len(trial.rows) == _NUM_ENVS
+    row = trial.rows[0]
+    assert row.success
+    assert row.terminal_reason == "success"
+    assert row.length > 0
+
+    segments = trial.episode_result["segments"]
+    assert isinstance(segments, list)
+    assert len(segments) == 1
+    segment = segments[0]
+    assert isinstance(segment, dict)
+    assert segment["name"] == "open_drawer"
+    runtime = segment["metadata"]["runtime"]
+    assert runtime["kind"] == "skill_result"
+    assert runtime["status"] == "completed"
+    calls = runtime["calls"]
+    assert isinstance(calls, list)
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["semantic_id"] == "simulation.articulation_link_slide"
+    assert call["skill_id"] == "slide"
+    assert call["status"] == "completed"
+    assert call["effects"] == []
+    assert segment["metadata"]["post_policies"] == []
+    validation = segment["metadata"]["validation"]
+    assert validation["accepted_mask"] == [True]
+    assert validation["validators"] == []
+
+    aggregates = aggregate_demo_success_trials(decoded_trials)
+    assert len(aggregates.success_and_metrics) == 1
+    metrics = aggregates.success_and_metrics[0]
+    assert metrics["attempted"] == 1
+    assert metrics["successes"] == 1
+    assert metrics["success_rate"] == 1.0
+
+    report = report_path.read_text(encoding="utf-8")
+    assert report.count("\n## ") == 3
+    assert "## Success & Other Metrics" in report
+    assert "## Leaderboard" in report
+    assert _CASE_ID in report

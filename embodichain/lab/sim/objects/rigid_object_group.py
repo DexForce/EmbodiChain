@@ -21,11 +21,12 @@ from typing import TYPE_CHECKING, Sequence
 
 import numpy as np
 import torch
+from dexsim.scene import Scene
 
 from embodichain.lab.sim import BatchEntity
 from embodichain.lab.sim.cfg import RigidObjectGroupCfg
 from embodichain.lab.sim.material import VisualMaterial
-from embodichain.lab.sim.objects.backends.spawn import SpawnRigidBodyView
+from embodichain.lab.sim.objects.backends.scene import SceneRigidBodyView
 from embodichain.utils.math import (
     matrix_from_euler,
     matrix_from_quat,
@@ -35,17 +36,17 @@ from embodichain.utils.math import (
 from ._mesh_utils import get_combined_triangles, get_combined_vertices
 
 if TYPE_CHECKING:
-    from dexsim.spawn import SpawnResult, SpawnedObject
+    from dexsim.scene import SpawnedRigidBody
 
 __all__ = ["RigidBodyGroupData", "RigidObjectGroup", "RigidObjectGroupCfg"]
 
 
 class RigidBodyGroupData:
-    """Expose one flat Spawn rigid-body batch as ``[env, object, ...]`` tensors."""
+    """Expose one flat Scene rigid-body batch as ``[env, object, ...]`` tensors."""
 
     def __init__(
         self,
-        body_view: SpawnRigidBodyView,
+        body_view: SceneRigidBodyView,
         *,
         num_instances: int,
         num_objects: int,
@@ -188,61 +189,48 @@ class RigidObjectGroup(BatchEntity):
     def __init__(
         self,
         cfg: RigidObjectGroupCfg,
-        entities: Sequence[Sequence[SpawnedObject]] | None = None,
         device: torch.device = torch.device("cpu"),
-        *,
-        spawn_result: SpawnResult | None = None,
-        declared_num_instances: int | None = None,
     ) -> None:
-        self.body_type = cfg.body_type
-        self._declared_num_objects = len(cfg.rigid_objects)
+        """Create an unregistered rigid-object-group facade.
 
-        if entities is None:
-            if declared_num_instances is None or declared_num_instances <= 0:
-                raise ValueError(
-                    "A declared RigidObjectGroup requires declared_num_instances > 0."
+        ``SpawnScene`` supplies the replicated instance count at declaration
+        time and the finalized ``Scene`` at binding time.
+        """
+        self.cfg = deepcopy(cfg)
+        self.uid = self.cfg.uid
+        self.device = device
+        self.body_type = self.cfg.body_type
+        self._declared_num_objects = len(self.cfg.rigid_objects)
+        self._entities: list[list[SpawnedRigidBody]] = []
+        self._declared_num_instances: int | None = None
+        self._spawn_result: Scene | None = None
+        self._data: RigidBodyGroupData | None = None
+        self._all_indices: list[int] = []
+        self._all_obj_indices = list(range(self._declared_num_objects))
+
+    def _initialize_spawn_declaration(self, num_instances: int) -> None:
+        """Initialize instance-dependent declaration state from ``SpawnScene``."""
+        if num_instances <= 0:
+            raise ValueError("A declared RigidObjectGroup requires num_instances > 0.")
+        if self._declared_num_instances is not None:
+            if self._declared_num_instances != num_instances:
+                raise RuntimeError(
+                    f"RigidObjectGroup {self.uid!r} is already declared for "
+                    f"{self._declared_num_instances} instances."
                 )
-            self.cfg = deepcopy(cfg)
-            self.uid = self.cfg.uid
-            self.device = device
-            self._entities: list[list[SpawnedObject]] = []
-            self._declared_num_instances = declared_num_instances
-            self._spawn_result = None
-            self._data = None
-            self._all_indices = list(range(declared_num_instances))
-            self._all_obj_indices = list(range(self._declared_num_objects))
             return
 
-        rows = [list(instance) for instance in entities]
-        if not rows or any(
-            len(instance) != self._declared_num_objects for instance in rows
-        ):
-            raise ValueError(
-                "RigidObjectGroup Spawn handles must have shape "
-                "[num_instances, num_objects]."
-            )
-        if spawn_result is None:
-            raise ValueError(
-                "RigidObjectGroup entities must be owned by a SpawnResult."
-            )
+        self._declared_num_instances = num_instances
+        self._all_indices = list(range(num_instances))
 
-        self._declared_num_instances = len(rows)
-        self._spawn_result = spawn_result
-        self._all_indices = list(range(len(rows)))
-        self._all_obj_indices = list(range(self._declared_num_objects))
-        flat_entities = [entity for instance in rows for entity in instance]
-        batch = spawn_result.create_rigid_body_batch(flat_entities)
-        body_view = SpawnRigidBodyView(spawn_result, batch, device)
-        self._data = RigidBodyGroupData(
-            body_view,
-            num_instances=len(rows),
-            num_objects=self._declared_num_objects,
-            device=device,
-        )
-
-        super().__init__(cfg, rows, device)
-        self._capture_default_physical_properties()
-        self.reset()
+    def _require_declared_num_instances(self) -> int:
+        """Return the Spawn-provided instance count or raise a lifecycle error."""
+        if self._declared_num_instances is None:
+            raise RuntimeError(
+                f"RigidObjectGroup {self.uid!r} must be registered through "
+                "SpawnScene before it can be used."
+            )
+        return self._declared_num_instances
 
     @property
     def is_declared(self) -> bool:
@@ -251,12 +239,16 @@ class RigidObjectGroup(BatchEntity):
 
     @property
     def is_spawn_bound(self) -> bool:
-        """Whether this facade is bound to a SpawnResult."""
+        """Whether this facade is bound to a finalized Scene."""
         return self._spawn_result is not None
 
     @property
     def num_instances(self) -> int:
-        return len(self._entities) if self._entities else self._declared_num_instances
+        return (
+            len(self._entities)
+            if self._entities
+            else self._require_declared_num_instances()
+        )
 
     @property
     def num_objects(self) -> int:
@@ -321,13 +313,13 @@ class RigidObjectGroup(BatchEntity):
     def is_non_dynamic(self) -> bool:
         return self.body_type in ("static", "kinematic")
 
-    def attach_spawn_handles(self, entities: Sequence[SpawnedObject]) -> None:
+    def attach_spawn_handles(self, entities: Sequence[SpawnedRigidBody]) -> None:
         """Store env-major handles without initializing the group's Batch data.
 
         ``bind_spawn()`` creates the result-dependent runtime view after Spawn
         finalization.
         """
-        expected = self._declared_num_instances * self.num_objects
+        expected = self._require_declared_num_instances() * self.num_objects
         if len(entities) != expected:
             raise ValueError(
                 f"RigidObjectGroup {self.uid!r} expected {expected} Spawn handles, "
@@ -338,7 +330,41 @@ class RigidObjectGroup(BatchEntity):
             for start in range(0, len(entities), self.num_objects)
         ]
 
-    def bind_spawn(self, result: SpawnResult) -> None:
+    def _initialize_spawn_bound(self, result: Scene) -> None:
+        """Create result-dependent runtime state on this declared facade."""
+        if not isinstance(result, Scene):
+            raise TypeError(
+                "RigidObjectGroup binding requires a finalized DexSim Scene; use "
+                "SimulationManager.prepare()."
+            )
+
+        rows = [list(row) for row in self._entities]
+        expected = self._require_declared_num_instances()
+        if len(rows) != expected or any(len(row) != self.num_objects for row in rows):
+            raise ValueError(
+                f"RigidObjectGroup {self.uid!r} expected "
+                f"{expected}x{self.num_objects} Spawn handles."
+            )
+
+        cfg = deepcopy(self.cfg)
+        self._spawn_result = result
+        self.body_type = cfg.body_type
+        self._all_indices = list(range(len(rows)))
+        self._all_obj_indices = list(range(self._declared_num_objects))
+        flat_entities = [entity for row in rows for entity in row]
+        body_view = SceneRigidBodyView.from_entities(result, flat_entities, self.device)
+        self._data = RigidBodyGroupData(
+            body_view,
+            num_instances=len(rows),
+            num_objects=self._declared_num_objects,
+            device=self.device,
+        )
+
+        super().__init__(cfg, rows, self.device)
+        self._capture_default_physical_properties()
+        self.reset()
+
+    def bind_spawn(self, result: Scene) -> None:
         """Atomically bind the declaration facade to env-major Spawn handles."""
         if self.is_spawn_bound:
             raise RuntimeError(f"RigidObjectGroup {self.uid!r} is already Spawn-bound.")
@@ -347,25 +373,13 @@ class RigidObjectGroup(BatchEntity):
                 f"RigidObjectGroup {self.uid!r} was not created as a Spawn declaration."
             )
 
-        cfg = self.cfg
-        device = self.device
-        rows = [list(row) for row in self._entities]
-        if len(rows) != self._declared_num_instances or any(
-            len(row) != self.num_objects for row in rows
-        ):
-            raise ValueError(
-                f"RigidObjectGroup {self.uid!r} expected "
-                f"{self._declared_num_instances}x{self.num_objects} Spawn handles."
-            )
-
-        bound = type(self)(
-            cfg,
-            rows,
-            device,
-            spawn_result=result,
-        )
-        self.__dict__.clear()
-        self.__dict__.update(bound.__dict__)
+        declared_state = self.__dict__.copy()
+        try:
+            self._initialize_spawn_bound(result)
+        except Exception:
+            self.__dict__.clear()
+            self.__dict__.update(declared_state)
+            raise
 
     def __str__(self) -> str:
         if self.is_declared:
@@ -669,4 +683,4 @@ class RigidObjectGroup(BatchEntity):
                 entity.set_visible(visible)
 
     def destroy(self) -> None:
-        """Leave topology destruction to SimulationManager and SpawnResult."""
+        """Leave topology destruction to SimulationManager and Scene."""

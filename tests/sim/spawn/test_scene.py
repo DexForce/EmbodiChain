@@ -16,13 +16,20 @@
 
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from embodichain.lab.sim.cfg import ArticulationRootPropertiesCfg
-from embodichain.lab.sim.objects.articulation import Articulation
+from embodichain.lab.sim.cfg import ArticulationRootPropertiesCfg, RigidObjectCfg
+from embodichain.lab.sim.objects import (
+    Articulation,
+    DeformableObject,
+    RigidObject,
+    RigidObjectGroup,
+    Robot,
+)
 from embodichain.lab.sim.spawn.scene import SpawnScene
 
 pytestmark = pytest.mark.no_sim
@@ -30,6 +37,7 @@ pytestmark = pytest.mark.no_sim
 
 def _make_scene(handles: dict[str, object]) -> SpawnScene:
     scene = object.__new__(SpawnScene)
+    scene._num_envs = 1
     scene.builder = SimpleNamespace(
         is_finalized=True,
         result=SimpleNamespace(handles=handles),
@@ -42,8 +50,12 @@ class _RetryableFacade:
     def __init__(self, *, fail_first: bool = False) -> None:
         self._entities: list[object] = []
         self.is_declared = True
+        self.declared_num_instances: int | None = None
         self.fail_first = fail_first
         self.bind_attempts = 0
+
+    def _initialize_spawn_declaration(self, num_instances: int) -> None:
+        self.declared_num_instances = num_instances
 
     def attach_spawn_handles(self, entities: tuple[object, ...]) -> None:
         self._entities = list(entities)
@@ -95,8 +107,69 @@ def test_bind_retries_only_incomplete_declarations() -> None:
 
     assert first._entities == [first_handle]
     assert second._entities == [second_handle]
+    assert first.declared_num_instances == 1
+    assert second.declared_num_instances == 1
     assert first.bind_attempts == 1
     assert second.bind_attempts == 2
+
+
+def test_declare_initializes_facade_with_spawn_instance_count() -> None:
+    scene = object.__new__(SpawnScene)
+    scene._num_envs = 3
+    scene.builder = SimpleNamespace(
+        is_finalized=False,
+        result=None,
+        add_object=lambda descriptor: descriptor,
+    )
+    scene._assets = {}
+    facade = _RetryableFacade()
+
+    scene.declare(
+        "rigid_object",
+        "cube",
+        SimpleNamespace(name="cube", per_env=True),
+        facade=facade,
+    )
+
+    assert facade.declared_num_instances == 3
+
+
+def test_rigid_object_receives_instance_count_only_when_declared() -> None:
+    scene = object.__new__(SpawnScene)
+    scene._num_envs = 3
+    scene.builder = SimpleNamespace(
+        is_finalized=False,
+        result=None,
+        add_object=lambda descriptor: descriptor,
+    )
+    scene._assets = {}
+    facade = RigidObject(RigidObjectCfg(uid="cube"))
+
+    with pytest.raises(RuntimeError, match="registered through SpawnScene"):
+        _ = facade.num_instances
+
+    scene.declare(
+        "rigid_object",
+        "cube",
+        SimpleNamespace(name="cube", per_env=True),
+        facade=facade,
+    )
+
+    assert facade.num_instances == 3
+    assert facade._all_indices == [0, 1, 2]
+
+
+@pytest.mark.parametrize(
+    "facade_type",
+    [RigidObject, Articulation, Robot, RigidObjectGroup, DeformableObject],
+)
+def test_object_constructors_hide_spawn_lifecycle_parameters(
+    facade_type: type[object],
+) -> None:
+    parameters = inspect.signature(facade_type.__init__).parameters
+
+    assert "declared_num_instances" not in parameters
+    assert "spawn_result" not in parameters
 
 
 def test_runtime_config_attaches_articulation_before_preparing_it() -> None:
@@ -122,7 +195,7 @@ def test_default_root_properties_prepare_once_per_topology_revision() -> None:
     native_articulation = MagicMock()
     articulation = object.__new__(Articulation)
     articulation.cfg = SimpleNamespace(
-        articulation_props=ArticulationRootPropertiesCfg(
+        root_props=ArticulationRootPropertiesCfg(
             min_position_iters=32,
             min_velocity_iters=8,
         )
@@ -148,7 +221,7 @@ def test_newton_skips_default_root_runtime_properties() -> None:
     native_articulation = MagicMock()
     articulation = object.__new__(Articulation)
     articulation.cfg = SimpleNamespace(
-        articulation_props=ArticulationRootPropertiesCfg(
+        root_props=ArticulationRootPropertiesCfg(
             min_position_iters=32,
             min_velocity_iters=8,
         )
@@ -350,21 +423,22 @@ class _RetryableArticulation(Articulation):
     def __init__(
         self,
         cfg: object,
-        entities: list[object] | None = None,
         device: object = "cpu",
-        *,
-        spawn_result: object | None = None,
-        declared_num_instances: int | None = None,
     ) -> None:
         self.cfg = cfg
         self.uid = cfg.uid
         self.device = device
-        self._entities = [] if entities is None else entities
-        self._spawn_result = spawn_result
-        self._world = None if spawn_result is None else object()
-        self._declared_num_instances = (
-            len(entities) if entities is not None else int(declared_num_instances or 0)
-        )
+        self._entities: list[object] = []
+        self._spawn_result = None
+        self._world = None
+        self._declared_num_instances: int | None = None
+
+    def _initialize_spawn_declaration(self, num_instances: int) -> None:
+        self._declared_num_instances = num_instances
+
+    def _initialize_spawn_bound(self, result: object) -> None:
+        self._spawn_result = result
+        self._world = object()
 
     def attach_spawn_handles(self, entities: list[object]) -> None:
         self._entities = list(entities)
@@ -384,8 +458,8 @@ def test_articulation_binding_is_atomic_and_retryable() -> None:
     _RetryableArticulation.reset_attempts = 0
     facade = _RetryableArticulation(
         SimpleNamespace(uid="robot"),
-        declared_num_instances=1,
     )
+    facade._initialize_spawn_declaration(1)
     result = object()
     handles = [object()]
     facade.attach_spawn_handles(handles)

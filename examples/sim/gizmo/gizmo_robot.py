@@ -95,7 +95,7 @@ def main():
                 num_samples=30,
             )
         },
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             stiffness={"JOINT[0-9]": 1e4, "FINGER[1-2]": 1e2},
             damping={"JOINT[0-9]": 1e3, "FINGER[1-2]": 1e1},
             max_effort={"JOINT[0-9]": 1e5, "FINGER[1-2]": 1e3},

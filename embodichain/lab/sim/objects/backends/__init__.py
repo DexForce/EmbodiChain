@@ -15,26 +15,13 @@
 # ----------------------------------------------------------------------------
 
 from .base import ArticulationViewBase, RigidBodyViewBase
-from .default import DefaultArticulationView, DefaultRigidBodyView
-from .newton import (
-    NewtonArticulationView,
-    NewtonRigidBodyView,
-    apply_collision_filter_for_entities,
-    apply_collision_filter_for_envs,
-    is_newton_scene,
-)
-from .spawn import SpawnArticulationView, SpawnRigidBodyView
+from .newton import is_newton_scene
+from .scene import SceneArticulationView, SceneRigidBodyView
 
 __all__ = [
     "ArticulationViewBase",
     "RigidBodyViewBase",
-    "DefaultArticulationView",
-    "DefaultRigidBodyView",
-    "NewtonArticulationView",
-    "NewtonRigidBodyView",
-    "apply_collision_filter_for_entities",
-    "apply_collision_filter_for_envs",
     "is_newton_scene",
-    "SpawnArticulationView",
-    "SpawnRigidBodyView",
+    "SceneArticulationView",
+    "SceneRigidBodyView",
 ]

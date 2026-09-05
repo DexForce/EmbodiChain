@@ -69,6 +69,8 @@ def _overlay_optional_properties(
 def _overlay_rigid_body_properties(
     source: RigidBodyPhysicsDesc | None,
     configured: RigidBodyPhysicsDesc,
+    *,
+    recompute_inertia: bool = False,
 ) -> RigidBodyPhysicsDesc:
     """Merge a partial body config into properties parsed from USD."""
     if source is None:
@@ -82,6 +84,8 @@ def _overlay_rigid_body_properties(
     elif configured.density is not None:
         source.mass = None
         source.density = configured.density
+    if recompute_inertia:
+        source.inertia = None
     for name in ("inertia", "com_position", "com_quaternion"):
         value = getattr(configured, name)
         if value is not None:
@@ -132,7 +136,11 @@ def rigid_desc_from_usd(
         newton_solver_type=newton_solver_type,
     )
     configured_body = _compile_rigid_physics(physics, cfg.body_type)
-    desc.physics = _overlay_rigid_body_properties(desc.physics, configured_body)
+    desc.physics = _overlay_rigid_body_properties(
+        desc.physics,
+        configured_body,
+        recompute_inertia=bool(physics.recompute_inertia),
+    )
     desc.body_scale = _vector3(cfg.body_scale, field_name="body_scale")
     for collision in desc.collisions:
         _overlay_collision_properties(

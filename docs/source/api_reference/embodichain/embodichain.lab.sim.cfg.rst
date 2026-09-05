@@ -24,12 +24,18 @@ Public backend selectors use only ``default`` and ``newton``. Nested physical
 property groups may additionally use ``common`` for backend-neutral intent;
 DexSim names belong to the runtime and Spawn SDK adapter boundary.
 
+.. rubric:: Type aliases
+
+.. autosummary::
+
+   AssetPhysicsMode
+   MeshCollisionApproximation
+
 .. rubric:: Classes
 
 .. autosummary::
 
    RenderCfg
-   PhysicsCfg
    PhysicsBackendCfg
    DefaultPhysicsCfg
    NewtonPhysicsCfg
@@ -39,18 +45,14 @@ DexSim names belong to the runtime and Spawn SDK adapter boundary.
    WindowCameraPoseCfg
    GPUMemoryCfg
    MassPropertiesCfg
-   RigidBodyPropertiesCfg
    DefaultRigidBodyPropertiesCfg
-   NewtonRigidBodyPropertiesCfg
    CollisionPropertiesCfg
    DefaultCollisionPropertiesCfg
    NewtonCollisionPropertiesCfg
    RigidBodyMaterialCfg
-   DefaultRigidBodyMaterialCfg
    NewtonRigidBodyMaterialCfg
+   MeshCollisionCfg
    RigidBodyPhysicsCfg
-   RigidBodyAttributesCfg
-   RigidBodyAttributesOverrideCfg
    ArticulationRootPropertiesCfg
    LinkPhysicsOverrideCfg
    SoftbodyVoxelAttributesCfg

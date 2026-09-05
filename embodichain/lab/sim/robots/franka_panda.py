@@ -140,7 +140,7 @@ class FrankaPandaCfg(RobotCfg):
             ),
         }
 
-        self.drive_pros = JointDrivePropertiesCfg(
+        self.joint_drive_props = JointDrivePropertiesCfg(
             drive_type="force",
             stiffness={
                 "fr3_joint[1-7]": 1e4,
@@ -202,11 +202,17 @@ if __name__ == "__main__":
         default="default",
         help="Physics backend to launch (default: default).",
     )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Runtime device override; otherwise the selected backend default is used.",
+    )
     args = parser.parse_args()
 
     config = SimulationManagerCfg(
         headless=True,
-        device="cpu",
+        device=args.device,
         num_envs=1,
         physics_cfg=physics_cfg_for_backend(args.physics),
         render_cfg=RenderCfg(renderer="hybrid"),

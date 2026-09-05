@@ -58,6 +58,7 @@ class SpawnScene:
         from dexsim.spawn import SceneBuilder
 
         self.builder = SceneBuilder(world)
+        self._num_envs = num_envs
         self.builder.replicate(
             count=num_envs,
             spacing=spacing,
@@ -86,6 +87,7 @@ class SpawnScene:
         """Add a descriptor and associate it with an EmbodiChain facade."""
         if uid in self._assets:
             raise ValueError(f"Spawn asset uid is already declared: {uid!r}.")
+        self._initialize_facade_declaration(facade)
         declaration = _AssetDeclaration(
             kind=kind,
             descriptor=descriptor,
@@ -156,6 +158,7 @@ class SpawnScene:
         """Track a descriptor that was already added to ``SceneBuilder``."""
         if uid in self._assets:
             raise ValueError(f"Spawn asset uid is already declared: {uid!r}.")
+        self._initialize_facade_declaration(facade)
         declaration = _AssetDeclaration(kind, descriptor, facade)
         self._assets[uid] = declaration
         handles = self.handles(uid)
@@ -184,7 +187,7 @@ class SpawnScene:
         del self._assets[uid]
 
     def commit(self) -> Any:
-        """Finalize once or let ``SpawnResult`` consume pending changes."""
+        """Finalize once or let the current ``Scene`` consume pending changes."""
         if not self.builder.is_finalized:
             self.resolve_sources()
             result = self.builder.finalize()
@@ -269,6 +272,19 @@ class SpawnScene:
             return ()
         return tuple(result.handles[path] for path in paths)
 
+    def _initialize_facade_declaration(self, facade: Any | None) -> None:
+        """Give a Spawn facade the instance count owned by this scene.
+
+        The duck-typed fallback keeps ``SpawnScene`` usable by lightweight
+        callers that only need descriptor tracking and do not expose an
+        EmbodiChain object facade.
+        """
+        if facade is None:
+            return
+        initialize = getattr(facade, "_initialize_spawn_declaration", None)
+        if initialize is not None:
+            initialize(self._num_envs)
+
     def _resolve_articulation_source(self, descriptor: Any) -> None:
         """Resolve one descriptor through the available DexSim boundary."""
         builder_resolver = getattr(
@@ -278,6 +294,11 @@ class SpawnScene:
         )
         if builder_resolver is not None:
             builder_resolver(descriptor)
+            # Keep the invalid-source COM policy identical when a newer
+            # SceneBuilder supplies its own resolver implementation.
+            from embodichain.lab.sim.spawn.source import _clear_invalid_source_com
+
+            _clear_invalid_source_com(descriptor)
             return
 
         from embodichain.lab.sim.spawn.source import resolve_articulation_source
@@ -316,7 +337,23 @@ class SpawnScene:
             if getattr(prototype, "links", None) or getattr(prototype, "joints", None)
             else handles[0].articulation_desc
         )
+        # The Default URDF loader owns the native source mass properties but
+        # does not copy them into ``LinkDesc``. Capture them before compiling
+        # the sparse overlay, then apply only explicitly configured link
+        # physics. This keeps the source tensor intact by default while still
+        # presenting both backends with one resolved descriptor contract.
+        from embodichain.lab.sim.spawn.source import (
+            _apply_dexsim_source_overlay,
+            _capture_dexsim_source_physics,
+            _retain_dexsim_source_descriptor,
+        )
+
+        _capture_dexsim_source_physics(handles[0], source)
         configure(source)
-        for handle in handles:
-            handle.apply_dexsim_properties(source)
+        if getattr(source, "_embodichain_preserve_source_physics", False):
+            for handle in handles:
+                _retain_dexsim_source_descriptor(handle, source)
+        else:
+            for handle in handles:
+                _apply_dexsim_source_overlay(handle, source)
         declaration.source_configurator = None

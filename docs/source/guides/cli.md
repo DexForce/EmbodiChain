@@ -74,10 +74,24 @@ joint controls, the interactive terminal, and worked examples.
 
 ---
 
+(cli-list-tasks)=
+## List Tasks
+
+Discover installed tasks and show their environment IDs and supported expert
+demo or RL capabilities:
+
+```bash
+embodichain list-task
+```
+
+---
+
 (cli-run-environment)=
 ## Run Environment
 
 Launch a Gymnasium environment for data generation, interactive preview, or trajectory replay.
+``embodichain run-task`` is an exact alias of ``embodichain run-env`` and accepts
+the same arguments.
 
 For an end-to-end explanation of mode selection, preview, the differences
 between dataset/video/trajectory recording, and all three replay modes, see
@@ -89,7 +103,9 @@ environments via ``@register_env``. The main ``embodichain`` distribution
 already includes and registers the official ``embodichain_tasks`` import
 package, so no separate task installation is needed. Repository-style task
 config paths resolve from the source checkout or installed wheel. The task to
-launch is selected by the ``"id"`` field of the gym config.
+launch is selected by the ``"id"`` field of the gym config. Pass a runnable
+config (for example ``task.ur5.yaml``), not a pure reusable ``env.yaml``
+component that has only ``environment_id``.
 
 ```bash
 # Run an environment with a gym config file
@@ -140,12 +156,13 @@ embodichain run-env --gym_config config.yaml \
 
 | Argument | Default | Description |
 |---|---|---|
-| ``--gym_config`` | *(required)* | Path to gym config file (``.json``, ``.yaml``, or ``.yml``) |
+| ``--gym_config`` | *(required)* | Path to a runnable gym config with ``id`` (``.json``, ``.yaml``, or ``.yml``) |
 | ``--action_config`` | ``None`` | Path to action config file (``.json``, ``.yaml``, or ``.yml``) |
 | ``--num_envs`` | ``1`` | Number of parallel environments |
-| ``--device`` | ``cpu`` | Device (``cpu`` or ``cuda``) |
+| ``--device`` | *(config/backend default)* | Explicit device override (for example ``cpu`` or ``cuda:0``); omission preserves the configured or selected-backend default |
+| ``--physics`` | *(from config)* | File-owned physics backend (``default`` or ``newton``); this option may confirm the same value but cannot switch a Gym config to another backend |
 | ``--headless`` | ``False`` | Run in headless mode |
-| ``--renderer`` | ``auto`` | Renderer backend: ``auto``, ``hybrid``, ``fast-rt`` or ``rt`` |
+| ``--renderer`` | *(config; ``auto`` if absent)* | Renderer backend: ``auto``, ``hybrid``, ``fast-rt`` or ``rt`` |
 | ``--arena_space`` | ``5.0`` | Arena space size |
 | ``--gpu_id`` | ``0`` | GPU ID to use |
 | ``--preview`` | ``False`` | Enter interactive preview mode |
@@ -309,7 +326,7 @@ simulator:
 
 ```bash
 embodichain preview_lerobot_data \
-    outputs/lerobot/expert_program \
+    outputs/lerobot/task_program \
     --latest \
     --episode 0 \
     --expect-segments 3

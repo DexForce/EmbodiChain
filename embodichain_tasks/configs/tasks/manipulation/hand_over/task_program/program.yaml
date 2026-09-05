@@ -1,0 +1,30 @@
+program_id: dual_ur5_hand_over
+targets:
+  delivery_pose:
+    kind: cyclic_pose
+    values:
+      - position: [0.0, -0.2, 0.6]
+        quaternion_xyzw: [0.7071067812, 0.0, 0.0, 0.7071067812]
+
+program:
+  kind: segment
+  name: hand_over_can
+  steps:
+    kind: sequence
+    items:
+      - kind: invoke
+        call:
+          kind: hand_over
+          object: can
+          final_target:
+            kind: target_ref
+            target: delivery_pose
+  post:
+    - kind: wait_stable
+      entity: can
+      preset: rigid_object
+  validators:
+    - kind: object_near_target
+      object: can
+      target: delivery_pose
+      position_tolerance: 0.12

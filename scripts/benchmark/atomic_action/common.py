@@ -95,7 +95,10 @@ class MeshObjectPreset:
     min_velocity_iters: int = 1
     max_linear_velocity: float = 100.0
     max_angular_velocity: float = 100.0
-    max_convex_hull_num: int = 16
+    collision_approximation: Literal["convex_hull", "convex_decomposition"] = (
+        "convex_decomposition"
+    )
+    max_hulls: int | None = 16
     enable_ccd: bool = False
 
 
@@ -154,7 +157,8 @@ MESH_OBJECT_PRESETS: dict[str, MeshObjectPreset] = {
         max_depenetration_velocity=10.0,
         min_position_iters=32,
         min_velocity_iters=8,
-        max_convex_hull_num=1,
+        collision_approximation="convex_hull",
+        max_hulls=None,
     ),
     "paper_cup": MeshObjectPreset(
         object_type="paper_cup",
@@ -177,7 +181,7 @@ MESH_OBJECT_PRESETS: dict[str, MeshObjectPreset] = {
         min_velocity_iters=8,
         max_linear_velocity=5.0,
         max_angular_velocity=10.0,
-        max_convex_hull_num=8,
+        max_hulls=8,
     ),
     "scanned_bottle": MeshObjectPreset(
         object_type="scanned_bottle",
@@ -518,13 +522,16 @@ def create_benchmark_object(
 ):
     """Create one benchmark object at a selected initial position."""
     from embodichain.data import get_data_path
-    from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
-    from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
+    from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg, RigidObjectCfg
+    from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
 
     if preset.shape_type == "mesh":
         shape = MeshCfg(
             fpath=get_data_path(preset.mesh_path),
-            max_convex_hull_num=preset.max_convex_hull_num,
+            collision=MeshCollisionCfg(
+                approximation=preset.collision_approximation,
+                max_hulls=preset.max_hulls,
+            ),
         )
     elif preset.shape_type == "cube":
         if preset.cube_size is None:
@@ -538,21 +545,29 @@ def create_benchmark_object(
     cfg = RigidObjectCfg(
         uid=f"benchmark_{preset.label}_{position_case.name}_{uid_suffix}",
         shape=shape,
-        attrs=RigidBodyAttributesCfg(
-            mass=preset.mass,
-            dynamic_friction=preset.dynamic_friction,
-            static_friction=preset.static_friction,
-            restitution=preset.restitution,
-            contact_offset=preset.contact_offset,
-            rest_offset=preset.rest_offset,
-            linear_damping=preset.linear_damping,
-            angular_damping=preset.angular_damping,
-            max_depenetration_velocity=preset.max_depenetration_velocity,
-            min_position_iters=preset.min_position_iters,
-            min_velocity_iters=preset.min_velocity_iters,
-            max_linear_velocity=preset.max_linear_velocity,
-            max_angular_velocity=preset.max_angular_velocity,
-            enable_ccd=preset.enable_ccd,
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {"mass": preset.mass},
+                "rigid_props": {
+                    "linear_damping": preset.linear_damping,
+                    "angular_damping": preset.angular_damping,
+                    "max_depenetration_velocity": preset.max_depenetration_velocity,
+                    "min_position_iters": preset.min_position_iters,
+                    "min_velocity_iters": preset.min_velocity_iters,
+                    "max_linear_velocity": preset.max_linear_velocity,
+                    "max_angular_velocity": preset.max_angular_velocity,
+                    "enable_ccd": preset.enable_ccd,
+                },
+                "collision_props": {
+                    "contact_offset": preset.contact_offset,
+                    "rest_offset": preset.rest_offset,
+                },
+                "material_props": {
+                    "dynamic_friction": preset.dynamic_friction,
+                    "static_friction": preset.static_friction,
+                    "restitution": preset.restitution,
+                },
+            }
         ),
         init_pos=[position_case.xy[0], position_case.xy[1], preset.initial_z],
         init_rot=preset.init_rot,

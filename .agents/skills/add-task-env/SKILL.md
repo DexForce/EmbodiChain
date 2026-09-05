@@ -1,155 +1,184 @@
 ---
 name: add-task-env
-description: Use when creating a new task environment for EmbodiChain, including expert demonstration tasks, RL tasks or any EmbodiedEnv subclass
+description: "Route and scaffold a new EmbodiChain task by solution type: handwritten expert trajectory, Task Program expert trajectory, simulator RL, lightweight RL, or an environment-only baseline. Use when creating a task, environment, expert demo, or RL task."
 ---
 
 # Add Task Environment
 
-Scaffold a new task environment following EmbodiChain's conventions and patterns.
+Own the task identity, task-first layout, physical environment, registration
+boundary, and solution routing. Do not assume every new task needs a Python
+environment subclass.
 
-## When to Use
+## Route from the user's prompt
 
-- User asks to create a new task or environment
-- User says "add a task", "new env", "create environment for X"
+Classify the requested solution before creating files. Read only the matching
+reference files.
 
-## Steps
+| Prompt signal | Route | Required reference |
+|---|---|---|
+| `handwritten`, `scripted`, `demo segments`, `create_demo_segments`, custom Python planning | Handwritten expert trajectory | `references/handwritten-expert.md` |
+| `Task Program`, `program.yaml`, `integration.yaml`, declarative task, Semantic Call, MLLM-generated program | Task Program expert trajectory | `references/task-program-expert.md` |
+| Generic `expert trajectory` or `expert demo` with no implementation signal | Resolve handwritten versus Task Program from required behavior; ask only if still ambiguous | One selected expert reference |
+| `RL`, `PPO`, `GRPO`, `APG`, policy, reward learning, training config | Reinforcement learning | `references/rl.md` |
+| Task/environment/scene only, with no requested solution | Environment-only baseline | This file only |
 
-### 1. Determine Task Identity
+Routing rules:
 
-Ask the user:
+- If the prompt names multiple solutions, read every matching reference and
+  keep all artifacts under one task-first directory.
+- If the prompt merely says `expert trajectory` and provides no signal for
+  handwritten versus Task Program, determine whether the requested behavior
+  is declarative and supported by existing Semantic Calls. Ask only when that
+  choice materially changes the requested deliverables.
+- Treat environment-only as the shared baseline, not as a fourth solution
+  implementation.
+- Task Program authoring and integration composition are owned by
+  `$add-task-program`. New reusable robot/skill-profile declarations are owned
+  by `$add-embodiment-component`.
 
-- **Top-level task family**: `manipulation`, `classic_control`, or `special`
-- **Optional subdomain**: a narrower category such as `tableware` under
-  `manipulation`
-- **Task name** (snake_case, e.g. `pick_place`)
-- **Gym ID** (e.g. `PickPlace-v1`)
-- **Optional solutions**: scripted expert, Expert Program, or RL policy configs
-- **Config format**: JSON or YAML
+## Load current project context
 
-Combine the task family and optional subdomain into `<category_path>`. Do not
-use a solution method such as `rl` or `expert_program` as a category.
+Read `agent_context/MAP.yaml`, then load `env-framework`. Also load:
 
-### 2. Create the Task Module
+- `task-programs` for the Task Program route;
+- `rl-learning` for the RL route; and
+- any matched robot, sensor, manager, or randomization topic needed by the
+  requested environment.
 
-Place the environment and its registration at:
+Verify paths and configuration fields against the current source of truth.
+Do not infer schemas from older task examples alone.
+
+## Establish task identity
+
+Resolve from the prompt or nearby conventions:
+
+- `<category_path>`: a task family plus optional subdomain, such as
+  `manipulation/tableware`;
+- `<task_name>`: snake case;
+- one unique runnable environment ID per deployment;
+- intended embodiment variants; and
+- selected solution routes.
+
+Organize by task identity, never by solution method. Use:
 
 ```text
 embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py
+embodichain_tasks/configs/tasks/<category_path>/<task_name>/
 ```
 
-Do not add a same-named task directory or `__init__.py` for a single Python
-entry point. Lightweight pure-PyTorch tasks use the same flat
-category/task-module layout and register through `@register_learning_env` when
-they are not `EmbodiedEnv` subclasses.
+Keep a single task Python entry point flat at `<task_name>.py`. Do not create a
+same-named Python package, `scenario` package, `mdp` package, or a task-local
+`task_program` Python package when configuration and manager functors express
+the behavior.
 
-Template:
+## Build the shared environment baseline
 
-```python
-# ----------------------------------------------------------------------------
-# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ----------------------------------------------------------------------------
+Choose the narrowest representation that supports the requested routes.
 
-from __future__ import annotations
+### Reusable physical environment
 
-from typing import Any
-
-from embodichain.lab.gym.utils.registration import register_env
-from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
-
-__all__ = ["<CamelCaseName>Env"]
-
-
-@register_env("<GymId>")
-class <CamelCaseName>Env(EmbodiedEnv):
-    """<One-line description of the task>.
-
-    <Longer description of what the task involves and its reward structure.>
-    """
-
-    def __init__(self, cfg: EmbodiedEnvCfg, **kwargs: Any) -> None:
-        """Initialize the task from its decoded environment config.
-
-        Args:
-            cfg: Environment configuration loaded from task-local JSON/YAML.
-            **kwargs: Additional arguments forwarded to :class:`EmbodiedEnv`.
-        """
-        super().__init__(cfg, **kwargs)
-
-    # Keep only task behavior that cannot be expressed by env config here.
-```
-
-Keep `@register_env` in the task-named module; do not create a separate
-registration module.
-
-### 3. Add the Environment Config
-
-Create the scene and MDP configuration at:
+For new task-first compositions, prefer:
 
 ```text
-embodichain_tasks/configs/tasks/<category_path>/<task_name>/env.json
+<task config>/env.yaml
 ```
 
-Use `env.yaml` when YAML was selected. Robot, scene, sensors, observations,
-events, rewards, actions, randomization, and dataset settings belong in this
-config. Add Python functors only when the existing registries cannot express
-the required behavior.
+This is a component, not a runnable deployment. It owns:
 
-Optional solution artifacts stay below the same task:
+- `environment_id`;
+- exactly one explicit `physics: default|newton` backend and its optional,
+  backend-matching `physics_config`;
+- ordinary environment values such as episode limits and environment count;
+- physical simulation entities under `simulation`; and
+- manager configuration under `env`.
+
+It must not contain a runnable `id`, Task Program fields, semantic scene
+bindings, a robot, or sensors. Task Program semantic roots and affordances
+belong to `integration.yaml.scene_binding`.
+
+### Runnable deployment
+
+Prefer one thin deployment per embodiment or execution variant:
 
 ```text
-<task config>/expert/program.yaml           # declarative Expert Program
-<task config>/agents/<algorithm>.yaml       # RL training configuration
+<task config>/task.<variant>.yaml
 ```
 
-Prefer the declarative Expert Program runtime for expert behavior. Do not
-scaffold a task-local Action Bank, `BaseAgentEnv`, or expert Python package.
-Recorded trajectories are data assets, not Python integration modules.
+It owns the runnable `id` and selects reusable components. A typical physical
+deployment selects:
 
-### 4. Update Exports
+```yaml
+id: MyTask-v1
 
-Task modules under `embodichain_tasks` are auto-imported via
-`import_packages()`. Define exports directly in the task module:
+environment:
+  component: env.yaml
 
-```python
-__all__ = ["<CamelCaseName>Env"]
+embodiment:
+  component: ../../../components/embodiments/<embodiment>.yaml
 ```
 
-The domain `__init__.py` does not need to re-export each task.
+The original inline Gym format remains supported. When extending an existing
+inline `env.json` or `env.yaml`, preserve that representation unless the user
+asked for component extraction. Every inline runnable config declares exactly
+one `physics: default|newton` backend. Never select a component and repeat its
+owned inline fields, including `physics` or `physics_config`, in the same
+deployment. Use separate environment files for backend-specific settings.
 
-### 5. Create Test Stub
+### Optional Python entry point
 
-Place at `tests/gym/envs/tasks/test_<name>.py` (or `tests/learning/` for
-lightweight learning environments).
+Create
+`embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py` when the
+route requires import-owned behavior or registration:
 
-### 6. Format
+- an environment-only registered Gym task;
+- handwritten expert behavior;
+- simulator RL registration, even when managers/config own its behavior; or
+- a lightweight learning environment.
 
-```bash
-black embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py
-black tests/gym/envs/tasks/test_<name>.py
-```
+A supported configuration-defined Task Program is the exception: it normally
+omits the task module and dynamically registers the common `EmbodiedEnv` while
+loading its runnable deployment.
 
-## Checklist
+Keep `@register_env` or `@register_learning_env` in the task-named module. Task
+discovery recursively imports these modules, so category `__init__.py` files do
+not need per-task re-exports.
 
-- [ ] File has Apache 2.0 header
-- [ ] Uses `from __future__ import annotations`
-- [ ] Registration lives in `<task_name>.py` with a unique ID
-- [ ] `__all__` defined in the task module
-- [ ] No same-named per-task package was created for a single module
-- [ ] Python and config paths use the same category hierarchy
-- [ ] Scene and MDP are declared in task-local JSON/YAML
-- [ ] Expert/RL artifacts exist only when the task provides that solution
-- [ ] No task-local Action Bank or `BaseAgentEnv` was introduced
-- [ ] Test stub created
-- [ ] `black` run on changed Python files
+## Implement the selected route
+
+After the shared baseline exists, follow the selected specialized reference:
+
+- `references/handwritten-expert.md`
+- `references/task-program-expert.md`
+- `references/rl.md`
+
+Reuse existing manager functors and registered components. Invoke
+`$add-functor` only when a missing observation, reward, event, action, dataset,
+or randomization term is required. Use `$add-test` for test structure.
+
+## Validate proportionally
+
+At minimum:
+
+1. parse every new or changed runnable config;
+2. prove registration/discovery for Python-owned tasks;
+3. run the route-specific focused tests;
+4. run `embodichain list-task` when task-discovery metadata changed; and
+5. format changed Python files with the pinned project Black version.
+
+Do not claim an expert trajectory is qualified from schema validation alone.
+Physical expert behavior requires an environment run with its validators and
+persisted completion result. Do not claim an RL task works from config parsing
+alone; at least construct/reset the selected environment and run a minimal
+trainer-routing smoke test when dependencies permit.
+
+## Completion checklist
+
+- [ ] Prompt was routed to the correct specialized reference(s)
+- [ ] Task family, optional subdomain, task name, and runnable IDs are stable
+- [ ] Python and config paths share the same task-first hierarchy
+- [ ] Environment component and runnable deployment ownership are not mixed
+- [ ] Each environment file declares one backend and only matching physics fields
+- [ ] A Python task module exists only when the selected route needs it
+- [ ] No solution-method directory or same-named task package was introduced
+- [ ] Existing components and manager functors were reused where possible
+- [ ] Route-specific tests and focused validation passed

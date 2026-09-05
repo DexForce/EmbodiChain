@@ -92,6 +92,7 @@ def create_pick_object(sim) -> RigidObject:
                 mass=0.05,
                 dynamic_friction=0.97,
                 static_friction=0.99,
+                newton_contact=sim.is_newton_backend,
             ),
             init_pos=[*OBJECT_XY, OBJECT_SIZE[2]],
         )

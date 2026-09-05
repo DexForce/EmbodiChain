@@ -29,7 +29,7 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
     JointDrivePropertiesCfg,
     RigidObjectCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -77,7 +77,7 @@ class RandomReachEnv(BaseEnv):
                 fpath=file_path,
                 init_pos=(0, 0, 1),
                 init_qpos=self.robot_init_qpos,
-                drive_pros=JointDrivePropertiesCfg(drive_type=self.drive_type),
+                joint_drive_props=JointDrivePropertiesCfg(drive_type=self.drive_type),
             )
         )
 
@@ -101,7 +101,9 @@ class RandomReachEnv(BaseEnv):
             cfg=RigidObjectCfg(
                 uid="cube",
                 shape=CubeCfg(size=[size, size, size]),
-                attrs=RigidBodyAttributesCfg(enable_collision=False),
+                attrs=RigidBodyPhysicsCfg.from_dict(
+                    {"collision_props": {"collision_enabled": False}}
+                ),
                 init_pos=(0.0, 0.0, 0.5),
                 body_type="kinematic",
             ),

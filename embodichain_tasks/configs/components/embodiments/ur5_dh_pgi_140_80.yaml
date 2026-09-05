@@ -1,0 +1,62 @@
+embodiment_id: ur5_dh_pgi_140_80
+
+simulation:
+  class_type: URRobot
+  robot_type: ur5
+  uid: UR5
+  urdf_cfg:
+    components:
+      - component_type: hand
+        urdf_path: DH_PGI_140_80/DH_PGI_140_80.urdf
+  control_parts:
+    hand:
+      - gripper_finger1_joint_1
+  joint_drive_props:
+    stiffness:
+      gripper_finger1_joint_1: 1000.0
+    damping:
+      gripper_finger1_joint_1: 100.0
+    max_effort:
+      gripper_finger1_joint_1: 10000.0
+  solver_cfg:
+    arm:
+      tcp:
+        - [1.0, 0.0, 0.0, 0.0]
+        - [0.0, 1.0, 0.0, 0.0]
+        - [0.0, 0.0, 1.0, 0.15]
+        - [0.0, 0.0, 0.0, 1.0]
+
+sensor: []
+
+skill_profile:
+  contract_id: single_arm_parallel_gripper
+  profile_id: ur5_dh_pgi_140_80
+  resources:
+    - resource_id: primary_manipulator
+      endpoints:
+        - endpoint_id: motion
+          control_part: arm
+          capabilities:
+            - kinematics.batch_inverse
+            - motion.cartesian_pose
+            - kinematics.forward
+        - endpoint_id: grasp
+          control_part: hand
+          capabilities:
+            - interaction.grasp
+          command_preset: parallel_jaw_commands
+  command_presets:
+    - preset_id: parallel_jaw_commands
+      control_part: hand
+      commands:
+        open: [0.0]
+        grasp: [0.024]
+  runtime_services:
+    grasp_pose_generators:
+      hand:
+        kind: antipodal_parallel_jaw
+        sample_count: 1000
+        opening_margin: 0.002
+        point_sample_density: 0.012
+        filter_ground_collision: false
+        model: dh_pgi_140_80

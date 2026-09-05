@@ -25,7 +25,7 @@ from typing import Any, Literal, Sequence, TYPE_CHECKING
 import dexsim
 import numpy as np
 import torch
-from dexsim.types import DenoiserType, Renderer, ToneMappingType
+from dexsim.types import Renderer, ToneMappingType
 
 from embodichain.utils import configclass, logger
 
@@ -180,7 +180,13 @@ class PhysicsBackendCfg:
     """
 
     device: str | torch.device = "cpu"
-    """Compute device used to build and step the selected physics backend."""
+    """Compute device used to build and step the selected physics backend.
+
+    Concrete backend configurations may redeclare this field when their native
+    runtime has a different default.  In particular,
+    :class:`NewtonPhysicsCfg` intentionally shadows this CPU default with
+    ``"cuda:0"``.  Callers can still provide an explicit device override.
+    """
 
     gravity: Sequence[float] | np.ndarray = field(
         default_factory=lambda: np.array([0.0, 0.0, -9.81])
@@ -189,13 +195,8 @@ class PhysicsBackendCfg:
 
 
 @configclass
-class PhysicsCfg(PhysicsBackendCfg):
-    """Configuration for the Default physics backend.
-
-    ``DefaultPhysicsCfg`` is the explicit backend-selecting subclass used by
-    new code. This base name remains concrete for compatibility with existing
-    configurations that instantiate ``PhysicsCfg`` directly.
-    """
+class DefaultPhysicsCfg(PhysicsBackendCfg):
+    """Configuration selector for the Default physics backend."""
 
     bounce_threshold: float = 2.0
     """Relative normal-speed threshold below which contacts do not bounce [m/s]."""
@@ -224,11 +225,11 @@ class PhysicsCfg(PhysicsBackendCfg):
     gpu_memory: GPUMemoryCfg = field(default_factory=GPUMemoryCfg)
     """Fixed-capacity GPU buffers used by Default-backend CUDA simulation."""
 
-    def to_dexsim_args(self) -> Dict[str, Any]:
+    def to_dexsim_args(self) -> dict[str, Any]:
         """Convert to DexSim physics arguments.
 
-        Solver implementation details that are not exposed by :class:`PhysicsCfg`
-        retain their established defaults here.
+        Solver implementation details that are not exposed by
+        :class:`DefaultPhysicsCfg` retain their established defaults here.
         """
         args = {
             "gravity": _gravity_vector(self.gravity),
@@ -241,18 +242,15 @@ class PhysicsCfg(PhysicsBackendCfg):
 
 
 @configclass
-class DefaultPhysicsCfg(PhysicsCfg):
-    """Explicit configuration selector for the default physics backend."""
-
-
-@configclass
 class NewtonCollisionPipelineCfg:
     """Newton collision-pipeline settings owned at scene scope.
 
-    These values map to DexSim's ``NewtonCollisionPipelineCfg``.  Per-shape
-    contact and SDF values belong to :class:`NewtonCollisionPropertiesCfg`
-    instead.  The pipeline performs broad-phase pair selection, narrow-phase
-    contact generation, and optional contact reduction for the complete scene.
+    Construction values map to DexSim's ``NewtonCollisionPipelineCfg``.
+    ``update_interval`` controls the DexSim-side scheduling of that external
+    pipeline. Per-shape contact and SDF values belong to
+    :class:`NewtonCollisionPropertiesCfg` instead. The pipeline performs
+    broad-phase pair selection, narrow-phase contact generation, and optional
+    contact reduction for the complete scene.
 
     See the `Newton collision guide
     <https://newton-physics.github.io/newton/latest/concepts/collisions.html>`_
@@ -313,9 +311,27 @@ class NewtonCollisionPipelineCfg:
     """Optional Newton ``HydroelasticSDF.Config``-compatible object.
 
     ``None`` disables the hydroelastic pipeline.  Individual participating
-    shapes must also opt in through
-    :attr:`NewtonCollisionPropertiesCfg.is_hydroelastic`.
+    procedural meshes must also opt in through
+    :attr:`~embodichain.lab.sim.shapes.MeshCollisionCfg.is_hydroelastic`.
     """
+
+    update_interval: int | None = 1
+    """External-pipeline updates within one EmbodiChain physics step.
+
+    ``None`` (the default) updates once at the first solver substep. An integer
+    ``k >= 1`` updates at substeps ``0, k, 2k, ...``; ``1`` updates before
+    every solver substep.
+    """
+
+    def __post_init__(self) -> None:
+        """Validate external collision-pipeline scheduling."""
+        if self.update_interval is not None and (
+            type(self.update_interval) is not int or self.update_interval < 1
+        ):
+            raise ValueError(
+                "NewtonCollisionPipelineCfg.update_interval must be a positive "
+                "integer or None."
+            )
 
 
 @configclass
@@ -329,7 +345,12 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     """
 
     device: str | torch.device = "cuda:0"
-    """Warp device used to build and step Newton, for example ``"cuda:0"``."""
+    """Warp device used to build and step Newton, for example ``"cuda:0"``.
+
+    This redeclaration intentionally takes precedence over
+    :class:`PhysicsBackendCfg.device`, so ``NewtonPhysicsCfg()`` always starts
+    on CUDA unless the caller explicitly supplies another device.
+    """
 
     num_substeps: int = 10
     """Number of Newton solver substeps per EmbodiChain physics step.
@@ -364,20 +385,20 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
 
     A mapping is converted to the matching DexSim Newton solver config. Include
     ``solver_type`` or ``class_type`` to select the solver, then add any
-    parameters accepted by that DexSim solver config. If omitted, the Newton
-    backend uses DexSim's MuJoCo Warp solver config by default.
+    parameters accepted by that DexSim solver config. If omitted, EmbodiChain
+    preserves DexSim's scene-aware ``AutoSolverCfg`` default. A DexSim build
+    exporting ``AutoSolverCfg`` is required; no concrete-solver fallback is used.
     """
 
-    collision_cfg: NewtonCollisionPipelineCfg | Mapping[str, Any] = field(
+    collision_cfg: NewtonCollisionPipelineCfg | Mapping[str, Any] | None = field(
         default_factory=NewtonCollisionPipelineCfg
     )
-    """Scene-level Newton collision-pipeline configuration."""
+    """Optional external collision-pipeline configuration.
 
-    enable_collision_pipeline: bool = True
-    """Whether Newton generates rigid contacts before each solver substep.
-
-    Disable this only for a solver/workflow that deliberately obtains contacts
-    elsewhere; ordinary rigid-body scenes require it.
+    The default preserves external contact generation for ordinary rigid-body
+    scenes. Set to ``None`` to avoid constructing or executing the external
+    pipeline, for example when particle solvers use rigid shapes solely as
+    one-way SDF boundaries.
     """
 
     broad_phase: Literal["nxn", "sap", "explicit"] | None = None
@@ -393,17 +414,28 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
         """Normalize dictionary collision settings at the config boundary."""
         if isinstance(self.collision_cfg, Mapping):
             self.collision_cfg = NewtonCollisionPipelineCfg(**self.collision_cfg)
+        self._validate_collision_pipeline_configuration()
+
+    def _validate_collision_pipeline_configuration(self) -> None:
+        """Keep the deprecated broad-phase shortcut meaningful."""
+        if self.collision_cfg is None and self.broad_phase is not None:
+            logger.log_error(
+                "NewtonPhysicsCfg.broad_phase requires collision_cfg to be configured.",
+                ValueError,
+            )
 
     def to_dexsim_cfg(
         self,
         gpu_id: int,
     ) -> NewtonCfg:
         """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
+        self._validate_collision_pipeline_configuration()
         from dexsim.engine.newton_physics import (
+            AutoSolverCfg,
             FeatherstoneSolverCfg,
             MJWarpSolverCfg,
             NewtonCfg,
-            NewtonCollisionPipelineCfg,
+            NewtonCollisionPipelineCfg as DexsimNewtonCollisionPipelineCfg,
             SemiImplicitSolverCfg,
             VBDSolverCfg,
             XPBDSolverCfg,
@@ -418,7 +450,8 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             else str(torch_device)
         )
 
-        solver_cfg_map = {
+        solver_cfg_map: dict[str, type] = {
+            "auto": AutoSolverCfg,
             "mujoco_warp": MJWarpSolverCfg,
             "xpbd": XPBDSolverCfg,
             "semi_implicit": SemiImplicitSolverCfg,
@@ -430,31 +463,44 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             solver_cfg_map=solver_cfg_map,
         )
 
-        if self.requires_grad and solver_cfg.solver_type != "semi_implicit":
+        if self.requires_grad and (
+            solver_cfg is None or solver_cfg.solver_type != "semi_implicit"
+        ):
             logger.log_error(
-                "Newton gradient mode requires solver_type='semi_implicit'."
+                "Newton gradient mode requires an explicit "
+                "solver_type='semi_implicit'; AutoSolver does not select a "
+                "differentiable solver."
             )
 
-        collision_values = {
-            item.name: getattr(self.collision_cfg, item.name)
-            for item in fields(self.collision_cfg)
+        collision_pipeline_cfg = None
+        if self.collision_cfg is not None:
+            collision_values = {
+                item.name: getattr(self.collision_cfg, item.name)
+                for item in fields(self.collision_cfg)
+            }
+            if collision_values["broad_phase"] is None:
+                collision_values["broad_phase"] = self.broad_phase
+            collision_values["requires_grad"] = self.requires_grad
+            collision_pipeline_cfg = DexsimNewtonCollisionPipelineCfg(
+                **collision_values
+            )
+
+        newton_cfg_args: dict[str, Any] = {
+            "dt": self.physics_dt,
+            "num_substeps": self.num_substeps,
+            "device": device,
+            "gravity": _gravity_vector(self.gravity),
+            "debug_mode": self.debug_mode,
+            "requires_grad": self.requires_grad,
+            "suppress_warp_kernel_logs": self.suppress_warp_kernel_logs,
+            "collision_pipeline_cfg": collision_pipeline_cfg,
+            "sync_to_dexsim": True,
         }
-        if collision_values["broad_phase"] is None:
-            collision_values["broad_phase"] = self.broad_phase
-        collision_values["requires_grad"] = self.requires_grad
+        if solver_cfg is not None:
+            newton_cfg_args["solver_cfg"] = solver_cfg
 
         cfg = NewtonCfg(
-            dt=self.physics_dt,
-            num_substeps=self.num_substeps,
-            device=device,
-            gravity=_gravity_vector(self.gravity),
-            debug_mode=self.debug_mode,
-            requires_grad=self.requires_grad,
-            suppress_warp_kernel_logs=self.suppress_warp_kernel_logs,
-            solver_cfg=solver_cfg,
-            collision_pipeline_cfg=NewtonCollisionPipelineCfg(**collision_values),
-            enable_collision_pipeline=self.enable_collision_pipeline,
-            sync_to_dexsim=True,
+            **newton_cfg_args,
         )
         cfg.use_cuda_graph = self.use_cuda_graph and not self.requires_grad
         cfg._visualizer_enabled = self.visualizer_enabled
@@ -465,6 +511,11 @@ def _normalize_newton_solver_type(solver_type: str) -> str:
     """Normalize public EmbodiChain and DexSim Newton solver aliases."""
     key = solver_type.replace("-", "_").lower()
     aliases = {
+        "auto": "auto",
+        "autosolver": "auto",
+        "autosolvercfg": "auto",
+        "auto_solver": "auto",
+        "auto_solver_cfg": "auto",
         "mjwarp": "mujoco_warp",
         "mjwarpsolver": "mujoco_warp",
         "mjwarpsolvercfg": "mujoco_warp",
@@ -491,7 +542,7 @@ def _normalize_newton_solver_type(solver_type: str) -> str:
     if key not in aliases:
         logger.log_error(
             f"Unsupported Newton solver type '{solver_type}'. "
-            "Expected one of 'mjwarp', 'xpbd', 'semi_implicit', "
+            "Expected one of 'auto', 'mjwarp', 'xpbd', 'semi_implicit', "
             "'featherstone', or 'vbd'."
         )
     return aliases[key]
@@ -500,10 +551,10 @@ def _normalize_newton_solver_type(solver_type: str) -> str:
 def _newton_solver_cfg_to_dexsim(
     solver_cfg: Mapping[str, Any] | object | None,
     solver_cfg_map: Mapping[str, type],
-) -> object:
+) -> object | None:
     """Convert EmbodiChain Newton solver config input to a DexSim config."""
     if solver_cfg is None:
-        return solver_cfg_map["mujoco_warp"]()
+        return None
 
     if not isinstance(solver_cfg, Mapping):
         if not hasattr(solver_cfg, "solver_type"):
@@ -517,15 +568,16 @@ def _newton_solver_cfg_to_dexsim(
     configured_solver_type = (
         solver_cfg_data.pop("solver_type", None)
         or solver_cfg_data.pop("class_type", None)
-        or "mujoco_warp"
+        or "auto"
     )
     normalized_solver_type = _normalize_newton_solver_type(str(configured_solver_type))
-    return solver_cfg_map[normalized_solver_type](**solver_cfg_data)
+    solver_cfg_type = solver_cfg_map[normalized_solver_type]
+    return solver_cfg_type(**solver_cfg_data)
 
 
 def physics_cfg_for_backend(
     backend: Literal["default", "newton"],
-) -> PhysicsBackendCfg:
+) -> DefaultPhysicsCfg | NewtonPhysicsCfg:
     """Return a default physics configuration instance for the given backend."""
     if backend == "newton":
         return NewtonPhysicsCfg()
@@ -542,11 +594,11 @@ def physics_backend_from_cfg(
     """Infer the physics backend name from a physics configuration instance."""
     if isinstance(physics_cfg, NewtonPhysicsCfg):
         return "newton"
-    if isinstance(physics_cfg, PhysicsCfg):
+    if isinstance(physics_cfg, DefaultPhysicsCfg):
         return "default"
     logger.log_error(
         f"Unsupported physics_cfg type '{type(physics_cfg).__name__}'. "
-        "Expected PhysicsCfg, DefaultPhysicsCfg, or NewtonPhysicsCfg."
+        "Expected DefaultPhysicsCfg or NewtonPhysicsCfg."
     )
 
 

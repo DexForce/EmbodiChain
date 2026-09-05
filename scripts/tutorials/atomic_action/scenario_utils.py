@@ -42,6 +42,7 @@ from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     ROBOTIQ_2F_140_TCP,
     TutorialRobot,
+    configure_newton_gripper_contacts,
     create_tutorial_rigid_body_physics,
     create_tutorial_robot_cfg,
 )
@@ -150,6 +151,7 @@ def create_dual_tutorial_robot_cfg(
             root_link_name=base_solver.root_link_name,
             tcp=tcp,
             num_samples=pytorch_num_samples,
+            user_qpos_limits=base_solver.user_qpos_limits,
         )
         base_cfg.solver_cfg["arm"] = base_solver
 
@@ -159,7 +161,7 @@ def create_dual_tutorial_robot_cfg(
         ("damping", hand_damping),
         ("max_effort", hand_max_effort),
     ):
-        getattr(base_cfg.drive_pros, property_name)[hand_joint_pattern] = value
+        getattr(base_cfg.joint_drive_props, property_name)[hand_joint_pattern] = value
 
     arm_facing_rotation = make_yaw_transform(
         (0.0, 0.0, 0.0),
@@ -256,24 +258,24 @@ def add_dual_tutorial_robot(
     Returns:
         The added dual-arm robot instance.
     """
-    return sim.add_robot(
-        cfg=create_dual_tutorial_robot_cfg(
-            robot_type=robot_type,
-            uid=uid,
-            urdf_name=urdf_name,
-            tcp_z=tcp_z,
-            solver=solver,
-            ur_ik_nearest_weight=ur_ik_nearest_weight,
-            pytorch_num_samples=pytorch_num_samples,
-            init_pos=init_pos,
-            init_rot=init_rot,
-            left_arm_home=left_arm_home,
-            right_arm_home=right_arm_home,
-            hand_stiffness=hand_stiffness,
-            hand_damping=hand_damping,
-            hand_max_effort=hand_max_effort,
-        )
+    robot_cfg = create_dual_tutorial_robot_cfg(
+        robot_type=robot_type,
+        uid=uid,
+        urdf_name=urdf_name,
+        tcp_z=tcp_z,
+        solver=solver,
+        ur_ik_nearest_weight=ur_ik_nearest_weight,
+        pytorch_num_samples=pytorch_num_samples,
+        init_pos=init_pos,
+        init_rot=init_rot,
+        left_arm_home=left_arm_home,
+        right_arm_home=right_arm_home,
+        hand_stiffness=hand_stiffness,
+        hand_damping=hand_damping,
+        hand_max_effort=hand_max_effort,
     )
+    configure_newton_gripper_contacts(sim, robot_cfg)
+    return sim.add_robot(cfg=robot_cfg)
 
 
 def add_support_surface(

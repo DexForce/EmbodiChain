@@ -68,7 +68,7 @@ The grid mesh generated earlier is saved to disk and then passed to :meth:`Simul
 Adding a rigid body for interaction
 -------------------------------------
 
-A small cubic rigid body (``padding_box``) is placed beneath the cloth so the cloth drapes over it. It is added with :meth:`SimulationManager.add_rigid_object` using :class:`cfg.RigidObjectCfg` and :class:`cfg.RigidBodyAttributesCfg`:
+A small cubic rigid body (``padding_box``) is placed beneath the cloth so the cloth drapes over it. It is added with :meth:`SimulationManager.add_rigid_object` using :class:`cfg.RigidObjectCfg` and :class:`cfg.RigidBodyPhysicsCfg`:
 
 - :class:`cfg.CubeCfg` — defines the box dimensions
 - ``body_type="dynamic"`` — the box responds to physics; change to ``"static"`` for a fixed obstacle

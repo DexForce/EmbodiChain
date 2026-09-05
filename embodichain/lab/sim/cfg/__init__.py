@@ -26,14 +26,12 @@ from typing import Literal
 
 from embodichain.data import get_data_path
 
-from .._legacy_cfg import RigidBodyAttributesCfg, RigidBodyAttributesOverrideCfg
-from ..shapes import MeshCfg, ShapeCfg
+from ..shapes import MeshCfg, MeshCollisionApproximation, MeshCollisionCfg, ShapeCfg
 from ..workspace.cfg import RobotWorkspaceCfg
 from .articulation import (
     ArticulationCfg,
     ArticulationRootPropertiesCfg,
     JointDrivePropertiesCfg,
-    JointDynamicsPropertiesCfg,
     LinkPhysicsOverrideCfg,
     NewtonJointDrivePropertiesCfg,
     _normalize_joint_target_mode,
@@ -54,19 +52,12 @@ from .deformable import (
 from .rigid import (
     CollisionPropertiesCfg,
     DefaultCollisionPropertiesCfg,
-    DefaultRigidBodyPhysicsCfg,
-    DefaultRigidBodyMaterialCfg,
     DefaultRigidBodyPropertiesCfg,
     MassPropertiesCfg,
-    MeshCollisionPropertiesCfg,
     NewtonCollisionPropertiesCfg,
-    NewtonMeshCollisionPropertiesCfg,
-    NewtonRigidBodyPhysicsCfg,
     NewtonRigidBodyMaterialCfg,
-    NewtonRigidBodyPropertiesCfg,
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
-    RigidBodyPropertiesCfg,
 )
 from .rigid_object import RigidObjectCfg, RigidObjectGroupCfg
 from .scene import LightCfg, RigidConstraintCfg
@@ -76,7 +67,6 @@ from .simulation import (
     NewtonCollisionPipelineCfg,
     NewtonPhysicsCfg,
     PhysicsBackendCfg,
-    PhysicsCfg,
     RenderCfg,
     physics_backend_from_cfg,
     physics_cfg_for_backend,
@@ -98,7 +88,6 @@ __all__ = [
     "RenderCfg",
     "GPUMemoryCfg",
     "PhysicsBackendCfg",
-    "PhysicsCfg",
     "DefaultPhysicsCfg",
     "NewtonCollisionPipelineCfg",
     "NewtonPhysicsCfg",
@@ -110,23 +99,16 @@ __all__ = [
     "WindowCameraPoseCfg",
     "ShapeCfg",
     "MeshCfg",
+    "MeshCollisionApproximation",
+    "MeshCollisionCfg",
     "MassPropertiesCfg",
-    "RigidBodyPropertiesCfg",
     "DefaultRigidBodyPropertiesCfg",
-    "NewtonRigidBodyPropertiesCfg",
     "CollisionPropertiesCfg",
     "DefaultCollisionPropertiesCfg",
     "NewtonCollisionPropertiesCfg",
-    "MeshCollisionPropertiesCfg",
-    "NewtonMeshCollisionPropertiesCfg",
     "RigidBodyMaterialCfg",
-    "DefaultRigidBodyMaterialCfg",
     "NewtonRigidBodyMaterialCfg",
-    "DefaultRigidBodyPhysicsCfg",
-    "NewtonRigidBodyPhysicsCfg",
     "RigidBodyPhysicsCfg",
-    "RigidBodyAttributesCfg",
-    "RigidBodyAttributesOverrideCfg",
     "ObjectBaseCfg",
     "LightCfg",
     "RigidObjectCfg",
@@ -144,7 +126,6 @@ __all__ = [
     "LinkPhysicsOverrideCfg",
     "link_attrs_from_dict",
     "JointDrivePropertiesCfg",
-    "JointDynamicsPropertiesCfg",
     "NewtonJointDrivePropertiesCfg",
     "ArticulationCfg",
     "URDFCfg",

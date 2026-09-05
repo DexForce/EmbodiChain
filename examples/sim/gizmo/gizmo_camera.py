@@ -33,7 +33,7 @@ from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.sensors import Camera, CameraCfg
 from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
     RenderCfg,
     physics_cfg_for_backend,
 )
@@ -74,11 +74,15 @@ def main():
             uid=f"cube_{i}",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
             body_type="dynamic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.3,
+            attrs=RigidBodyPhysicsCfg.from_dict(
+                {
+                    "mass_props": {"mass": 1.0},
+                    "material_props": {
+                        "dynamic_friction": 0.5,
+                        "static_friction": 0.5,
+                        "restitution": 0.3,
+                    },
+                }
             ),
             init_pos=[0.5 + i * 0.3, 0.0, 0.5],
         )

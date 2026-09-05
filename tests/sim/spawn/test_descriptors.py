@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import copy
+import warnings
 from dataclasses import fields, is_dataclass
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -54,20 +55,14 @@ from embodichain.lab.sim.cfg import (
     ClothPhysicalAttributesCfg,
     CollisionPropertiesCfg,
     DefaultCollisionPropertiesCfg,
-    DefaultRigidBodyPhysicsCfg,
     DefaultRigidBodyPropertiesCfg,
     JointDrivePropertiesCfg,
-    JointDynamicsPropertiesCfg,
     LinkPhysicsOverrideCfg,
     MassPropertiesCfg,
-    MeshCollisionPropertiesCfg,
+    MeshCollisionCfg,
     NewtonCollisionPropertiesCfg,
-    NewtonMeshCollisionPropertiesCfg,
-    NewtonRigidBodyPhysicsCfg,
     NewtonJointDrivePropertiesCfg,
     NewtonRigidBodyMaterialCfg,
-    RigidBodyAttributesCfg,
-    RigidBodyAttributesOverrideCfg,
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
     RigidObjectCfg,
@@ -259,10 +254,10 @@ def test_rigid_descriptor_projects_restitution_only_to_supported_solvers(
     )
 
     newton = descriptor.collisions[0].newton
-    if expected_restitution is None:
-        assert newton is None
-    else:
-        assert newton.restitution == expected_restitution
+    assert newton is not None
+    assert newton.margin == pytest.approx(0.001)
+    assert newton.gap == pytest.approx(0.001)
+    assert newton.restitution == expected_restitution
 
 
 def test_rigid_descriptor_preserves_default_backend_restitution() -> None:
@@ -282,22 +277,24 @@ def test_rigid_descriptor_preserves_default_backend_restitution() -> None:
     assert descriptor.collisions[0].dexsim.restitution == RESTITUTION
 
 
-def test_newton_backend_rejects_legacy_flat_rigid_physics() -> None:
-    cfg = RigidObjectCfg(
-        uid="cube",
-        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
-        attrs=RigidBodyAttributesCfg(mass=2.0),
-    )
-
-    with pytest.raises(TypeError, match="Default-backend-only"):
-        rigid_desc_from_cfg(cfg, newton_solver_type="xpbd")
+def test_flat_rigid_physics_is_rejected_at_config_boundary() -> None:
+    with pytest.raises(ValueError, match="Removed flat rigid-body attrs fields"):
+        RigidObjectCfg.from_dict(
+            {
+                "uid": "cube",
+                "shape": {"shape_type": "Cube", "size": [0.1, 0.1, 0.1]},
+                "attrs": {"mass": 2.0},
+            }
+        )
 
 
 def test_rigid_descriptor_authors_mass_or_density_exclusively() -> None:
     cfg = RigidObjectCfg(
         uid="cube",
         shape=CubeCfg(size=(0.1, 0.1, 0.1)),
-        attrs=RigidBodyAttributesCfg(mass=1.0, density=1.0),
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {"mass_props": {"mass": 1.0, "density": 1.0}}
+        ),
     )
 
     descriptor, _ = rigid_desc_from_cfg(cfg)
@@ -337,17 +334,20 @@ def test_rigid_descriptor_forwards_explicit_mass_properties() -> None:
     ("attrs", "error_match"),
     [
         (
-            RigidBodyAttributesCfg(mass=0.0, inertia=[1.0, 2.0, 3.0]),
-            "requires a positive mass",
+            RigidBodyPhysicsCfg.from_dict(
+                {"mass_props": {"mass": 0.0, "inertia": [1.0, 2.0, 3.0]}}
+            ),
+            "density is required when mass is zero",
         ),
         (
-            RigidBodyAttributesCfg(mass=1.0, inertia=[1.0, 2.0]),
+            RigidBodyPhysicsCfg.from_dict(
+                {"mass_props": {"mass": 1.0, "inertia": [1.0, 2.0]}}
+            ),
             "inertia must contain",
         ),
         (
-            RigidBodyAttributesCfg(
-                mass=1.0,
-                com_quaternion=[0.0, 0.0, 0.0, 0.0],
+            RigidBodyPhysicsCfg.from_dict(
+                {"mass_props": {"mass": 1.0, "com_quaternion": [0.0, 0.0, 0.0, 0.0]}}
             ),
             "com_quaternion cannot be zero",
         ),
@@ -355,7 +355,7 @@ def test_rigid_descriptor_forwards_explicit_mass_properties() -> None:
     ids=["inertia-without-mass", "invalid-inertia-shape", "zero-com-quaternion"],
 )
 def test_rigid_descriptor_rejects_invalid_mass_properties(
-    attrs: RigidBodyAttributesCfg,
+    attrs: RigidBodyPhysicsCfg,
     error_match: str,
 ) -> None:
     cfg = RigidObjectCfg(
@@ -373,11 +373,15 @@ def test_static_rigid_descriptor_omits_mass_properties() -> None:
         uid="cube",
         shape=CubeCfg(size=(0.1, 0.1, 0.1)),
         body_type="static",
-        attrs=RigidBodyAttributesCfg(
-            mass=2.0,
-            density=3.0,
-            inertia=[1.0, 2.0, 3.0],
-            com_position=[0.1, 0.2, 0.3],
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {
+                    "mass": 2.0,
+                    "density": 3.0,
+                    "inertia": [1.0, 2.0, 3.0],
+                    "com_position": [0.1, 0.2, 0.3],
+                }
+            }
         ),
     )
 
@@ -394,7 +398,9 @@ def test_kinematic_rigid_descriptor_honors_mass_priority() -> None:
         uid="cube",
         shape=CubeCfg(size=(0.1, 0.1, 0.1)),
         body_type="kinematic",
-        attrs=RigidBodyAttributesCfg(mass=2.0, density=3.0),
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {"mass_props": {"mass": 2.0, "density": 3.0}}
+        ),
     )
 
     descriptor, _ = rigid_desc_from_cfg(cfg)
@@ -434,6 +440,8 @@ def test_grouped_rigid_physics_routes_common_and_backend_properties() -> None:
     assert collision.enable_collision is False
     assert collision.dexsim.dynamic_friction == 0.4
     assert collision.dexsim.static_friction is None
+    assert collision.dexsim.contact_offset is None
+    assert collision.dexsim.rest_offset is None
     assert collision.newton.margin == 0.01
     assert collision.newton.mu == 0.4
     assert collision.newton.ke == 1000.0
@@ -462,6 +470,24 @@ def test_portable_collision_envelope_compiles_to_both_backends() -> None:
     assert collision.dexsim.rest_offset == pytest.approx(0.005)
     assert collision.newton.margin == pytest.approx(0.005)
     assert collision.newton.gap == pytest.approx(0.01)
+
+
+def test_procedural_rigid_collision_defaults_compile_to_both_backends() -> None:
+    cfg = RigidObjectCfg(
+        uid="cube",
+        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+    )
+
+    descriptor, _ = rigid_desc_from_cfg(
+        cfg,
+        newton_solver_type="mujoco_warp",
+    )
+
+    collision = descriptor.collisions[0]
+    assert collision.dexsim.contact_offset == pytest.approx(0.002)
+    assert collision.dexsim.rest_offset == pytest.approx(0.001)
+    assert collision.newton.margin == pytest.approx(0.001)
+    assert collision.newton.gap == pytest.approx(0.001)
 
 
 def test_newton_native_collision_envelope_overrides_portable_translation() -> None:
@@ -506,20 +532,25 @@ def test_portable_collision_envelope_rejects_invalid_ordering() -> None:
         rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
 
 
-def test_newton_rejects_ambiguous_portable_contact_offset() -> None:
+def test_newton_fills_missing_portable_rest_offset_from_the_default_profile() -> None:
     cfg = RigidObjectCfg(
         uid="cube",
         shape=CubeCfg(size=(0.1, 0.1, 0.1)),
         attrs=RigidBodyPhysicsCfg(
-            collision_props=CollisionPropertiesCfg(contact_offset=0.001)
+            collision_props=CollisionPropertiesCfg(contact_offset=0.003)
         ),
     )
 
-    with pytest.raises(ValueError, match="requires rest_offset"):
-        rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
+    descriptor, _ = rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
+
+    collision = descriptor.collisions[0]
+    assert collision.dexsim.contact_offset == pytest.approx(0.003)
+    assert collision.dexsim.rest_offset == pytest.approx(0.001)
+    assert collision.newton.margin == pytest.approx(0.001)
+    assert collision.newton.gap == pytest.approx(0.002)
 
 
-def test_grouped_rigid_physics_keeps_unset_backend_blocks_absent() -> None:
+def test_procedural_collision_defaults_apply_when_only_collision_is_enabled() -> None:
     cfg = RigidObjectCfg(
         uid="cube",
         shape=CubeCfg(size=(0.1, 0.1, 0.1)),
@@ -532,8 +563,11 @@ def test_grouped_rigid_physics_keeps_unset_backend_blocks_absent() -> None:
 
     assert descriptor.physics.dexsim is None
     assert descriptor.physics.newton is None
-    assert descriptor.collisions[0].dexsim is None
-    assert descriptor.collisions[0].newton is None
+    assert descriptor.collisions[0].enable_collision is True
+    assert descriptor.collisions[0].dexsim.contact_offset == pytest.approx(0.002)
+    assert descriptor.collisions[0].dexsim.rest_offset == pytest.approx(0.001)
+    assert descriptor.collisions[0].newton.margin == pytest.approx(0.001)
+    assert descriptor.collisions[0].newton.gap == pytest.approx(0.001)
 
 
 def test_grouped_rigid_physics_overlays_usd_without_erasing_source(
@@ -594,6 +628,39 @@ def test_grouped_rigid_physics_overlays_usd_without_erasing_source(
     assert collision.newton.gap == 0.07
 
 
+def test_rigid_usd_can_recompute_source_inertia(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = ObjectDesc(
+        name="source",
+        physics=RigidBodyPhysicsDesc.dynamic(
+            mass=7.0,
+            inertia=np.array([1.0, 2.0, 3.0], dtype=np.float32),
+        ),
+        collisions=[CollisionDesc()],
+    )
+    monkeypatch.setattr(
+        "embodichain.lab.sim.spawn.usd._parse_singleton",
+        lambda path, collection, label: (SimpleNamespace(materials={}), source),
+    )
+    cfg = RigidObjectCfg(
+        uid="cube",
+        shape=MeshCfg(fpath="cube.usd"),
+        asset_physics_mode="overlay",
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(
+                mass=2.0,
+                recompute_inertia=True,
+            )
+        ),
+    )
+
+    descriptor, _ = rigid_desc_from_usd(cfg)
+
+    assert descriptor.physics.mass == 2.0
+    assert descriptor.physics.inertia is None
+
+
 def test_rigid_usd_preserves_asset_physics_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -629,13 +696,13 @@ def test_rigid_usd_preserves_asset_physics_by_default(
 
 def test_rigid_descriptor_forwards_newton_sdf_options() -> None:
     cfg = RigidObjectCfg(
-        uid="cube",
-        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
-        attrs=RigidBodyPhysicsCfg(
-            collision_props=NewtonCollisionPropertiesCfg(
-                force_sdf=True,
+        uid="mesh",
+        shape=MeshCfg(
+            fpath="mesh.glb",
+            collision=MeshCollisionCfg(
+                approximation="sdf",
                 sdf_padding=0.02,
-            )
+            ),
         ),
     )
 
@@ -645,34 +712,20 @@ def test_rigid_descriptor_forwards_newton_sdf_options() -> None:
     assert descriptor.collisions[0].newton.sdf_padding == pytest.approx(0.02)
 
 
-def test_explicit_backend_and_mesh_collision_blocks_take_precedence() -> None:
+def test_mesh_collision_and_backend_property_slots_compile_independently() -> None:
     cfg = RigidObjectCfg(
         uid="mesh",
         shape=MeshCfg(
             fpath="mesh.glb",
-            max_convex_hull_num=2,
-            sdf_resolution=8,
+            collision=MeshCollisionCfg(
+                approximation="sdf",
+                sdf_target_voxel_size=0.005,
+                sdf_padding=0.02,
+            ),
         ),
         attrs=RigidBodyPhysicsCfg(
-            rigid_props=DefaultRigidBodyPropertiesCfg(linear_damping=0.9),
-            collision_props=NewtonCollisionPropertiesCfg(
-                margin=0.03,
-                sdf_padding=0.01,
-            ),
-            mesh_collision_props=MeshCollisionPropertiesCfg(
-                max_convex_hull_num=4,
-                sdf_resolution=32,
-            ),
-            default_props=DefaultRigidBodyPhysicsCfg(
-                rigid_props=DefaultRigidBodyPropertiesCfg(linear_damping=0.2)
-            ),
-            newton_props=NewtonRigidBodyPhysicsCfg(
-                collision_props=NewtonCollisionPropertiesCfg(margin=0.04),
-                mesh_collision_props=NewtonMeshCollisionPropertiesCfg(
-                    sdf_target_voxel_size=0.005,
-                    sdf_padding=0.02,
-                ),
-            ),
+            rigid_props=DefaultRigidBodyPropertiesCfg(linear_damping=0.2),
+            collision_props=NewtonCollisionPropertiesCfg(margin=0.04),
         ),
     )
 
@@ -681,22 +734,26 @@ def test_explicit_backend_and_mesh_collision_blocks_take_precedence() -> None:
 
     assert descriptor.physics.dexsim.linear_damping == pytest.approx(0.2)
     assert collision.approximation == CollisionApproximation.SDF
-    assert collision.decomp_max_hulls == 4
+    assert collision.decomp_max_hulls == 1
     assert collision.newton.margin == pytest.approx(0.04)
     assert collision.newton.sdf_target_voxel_size == pytest.approx(0.005)
     assert collision.newton.sdf_max_resolution is None
     assert collision.newton.sdf_padding == pytest.approx(0.02)
 
 
-def test_mesh_cfg_collision_fields_remain_compatibility_fallbacks() -> None:
-    cfg = RigidObjectCfg(
-        uid="mesh",
-        shape=MeshCfg(
-            fpath="mesh.glb",
-            max_convex_hull_num=3,
-            acd_method="coacd",
-        ),
-    )
+def test_mesh_cfg_legacy_collision_fields_normalize_before_compilation() -> None:
+    with pytest.warns(DeprecationWarning):
+        cfg = RigidObjectCfg.from_dict(
+            {
+                "uid": "mesh",
+                "shape": {
+                    "shape_type": "Mesh",
+                    "fpath": "mesh.glb",
+                    "max_convex_hull_num": 3,
+                    "acd_method": "coacd",
+                },
+            }
+        )
 
     descriptor, _ = rigid_desc_from_cfg(cfg)
 
@@ -707,19 +764,72 @@ def test_mesh_cfg_collision_fields_remain_compatibility_fallbacks() -> None:
     assert descriptor.collisions[0].decomp_max_hulls == 3
 
 
-def test_backend_blocks_reject_portable_fields() -> None:
+def test_static_triangle_mesh_collision_compiles_without_convex_cooking() -> None:
+    cfg = RigidObjectCfg(
+        uid="mesh",
+        body_type="static",
+        shape=MeshCfg(
+            fpath="mesh.glb",
+            collision=MeshCollisionCfg(approximation="triangle_mesh"),
+        ),
+    )
+
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+
+    assert descriptor.collisions[0].approximation == CollisionApproximation.NONE
+
+
+def test_dynamic_triangle_mesh_collision_is_rejected_before_spawn() -> None:
+    cfg = RigidObjectCfg(
+        uid="mesh",
+        shape=MeshCfg(
+            fpath="mesh.glb",
+            collision=MeshCollisionCfg(approximation="triangle_mesh"),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="only for static"):
+        rigid_desc_from_cfg(cfg)
+
+
+def test_spawn_rejects_unsupported_convex_decomposition_method() -> None:
+    cfg = RigidObjectCfg(
+        uid="mesh",
+        shape=MeshCfg(
+            fpath="mesh.glb",
+            collision=MeshCollisionCfg(
+                approximation="convex_decomposition",
+                max_hulls=4,
+                acd_method="vhacd",
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="only acd_method='coacd'"):
+        rigid_desc_from_cfg(cfg)
+
+
+def test_default_collision_solver_fields_compile_from_collision_slot() -> None:
     cfg = RigidObjectCfg(
         uid="cube",
         shape=CubeCfg(size=(0.1, 0.1, 0.1)),
         attrs=RigidBodyPhysicsCfg(
-            default_props=DefaultRigidBodyPhysicsCfg(
-                collision_props=DefaultCollisionPropertiesCfg(contact_offset=0.01)
+            collision_props=DefaultCollisionPropertiesCfg(
+                contact_offset=0.01,
+                torsional_patch_radius=0.02,
+                min_torsional_patch_radius=0.005,
+                disable_strong_friction=True,
             )
         ),
     )
 
-    with pytest.raises(ValueError, match="place them in the common"):
-        rigid_desc_from_cfg(cfg)
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+
+    default_collision = descriptor.collisions[0].dexsim
+    assert default_collision.contact_offset == pytest.approx(0.01)
+    assert default_collision.torsional_patch_radius == pytest.approx(0.02)
+    assert default_collision.min_torsional_patch_radius == pytest.approx(0.005)
+    assert default_collision.disable_strong_friction is True
 
 
 def test_mesh_descriptor_passes_load_options_to_spawn() -> None:
@@ -777,23 +887,22 @@ def test_articulation_constructor_defers_newton_properties_until_configure() -> 
     assert descriptor.links[0].collisions[0].newton is None
 
 
-def test_newton_backend_rejects_legacy_flat_articulation_physics() -> None:
-    cfg = ArticulationCfg(
-        uid="robot",
-        fpath="robot.urdf",
-        asset_physics_mode="overlay",
-        attrs=RigidBodyAttributesCfg(mass=2.0),
-    )
-
-    with pytest.raises(TypeError, match="Default-backend-only"):
-        articulation_desc_from_cfg(cfg, newton_solver_type="xpbd")
+def test_flat_articulation_physics_is_rejected_at_config_boundary() -> None:
+    with pytest.raises(ValueError, match="Removed flat rigid-body attrs fields"):
+        ArticulationCfg.from_dict(
+            {
+                "uid": "robot",
+                "fpath": "robot.urdf",
+                "attrs": {"mass": 2.0},
+            }
+        )
 
 
 def test_articulation_root_properties_compile_to_common_descriptor() -> None:
     cfg = ArticulationCfg(
         uid="robot",
         fpath="robot.urdf",
-        articulation_props=ArticulationRootPropertiesCfg(
+        root_props=ArticulationRootPropertiesCfg(
             fixed_base=False,
             self_collision_enabled=True,
         ),
@@ -826,7 +935,7 @@ def test_explicit_root_properties_override_usd_in_preserve_mode() -> None:
         uid="robot",
         fpath="robot.usd",
         asset_physics_mode="preserve",
-        articulation_props=ArticulationRootPropertiesCfg(
+        root_props=ArticulationRootPropertiesCfg(
             fixed_base=True,
             self_collision_enabled=False,
         ),
@@ -842,7 +951,7 @@ def test_explicit_root_properties_override_usd_in_preserve_mode() -> None:
     assert descriptor.enable_self_collision is False
 
 
-def test_unset_root_properties_preserve_usd_values() -> None:
+def test_default_root_properties_override_usd_values() -> None:
     source = ArticulationDesc(
         name="source",
         fixed_base=False,
@@ -860,6 +969,32 @@ def test_unset_root_properties_preserve_usd_values() -> None:
     ):
         descriptor, _ = articulation_desc_from_usd(cfg)
 
+    assert descriptor.fixed_base is True
+    assert descriptor.enable_self_collision is False
+
+
+def test_explicit_none_root_properties_preserve_usd_values() -> None:
+    source = ArticulationDesc(
+        name="source",
+        fixed_base=False,
+        enable_self_collision=True,
+    )
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.usd",
+        asset_physics_mode="preserve",
+        root_props=ArticulationRootPropertiesCfg(
+            fixed_base=None,
+            self_collision_enabled=None,
+        ),
+    )
+
+    with patch(
+        "embodichain.lab.sim.spawn.usd._parse_singleton",
+        return_value=(SimpleNamespace(materials={}), source),
+    ):
+        descriptor, _ = articulation_desc_from_usd(cfg)
+
     assert descriptor.fixed_base is False
     assert descriptor.enable_self_collision is True
 
@@ -869,7 +1004,7 @@ def test_articulation_descriptor_rejects_newton_acceleration_drive() -> None:
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             drive_type="acceleration",
         ),
     )
@@ -913,7 +1048,7 @@ def test_portable_joint_target_modes_compile_for_both_backends(
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             drive_type="force",
             target_mode=target_mode,  # type: ignore[arg-type]
             stiffness=12.0,
@@ -942,7 +1077,7 @@ def test_force_drive_defaults_newton_target_to_position_velocity() -> None:
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        drive_pros=JointDrivePropertiesCfg(drive_type="force"),
+        joint_drive_props=JointDrivePropertiesCfg(drive_type="force"),
     )
     descriptor = _resolved_articulation_desc()
 
@@ -974,7 +1109,7 @@ def test_non_mode_aware_newton_solver_uses_gain_fallbacks(
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             target_mode=target_mode,  # type: ignore[arg-type]
             stiffness=12.0,
             damping=4.0,
@@ -994,7 +1129,7 @@ def test_non_mode_aware_newton_position_fallback_is_explicit() -> None:
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             target_mode="position",
             stiffness=12.0,
             damping=4.0,
@@ -1004,6 +1139,26 @@ def test_non_mode_aware_newton_position_fallback_is_explicit() -> None:
 
     with pytest.warns(UserWarning, match="POSITION is emulated"):
         configure_articulation_desc(descriptor, cfg, newton_solver_type="xpbd")
+
+
+def test_auto_solver_defers_position_mode_compatibility_warning() -> None:
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        joint_drive_props=JointDrivePropertiesCfg(
+            target_mode="position",
+            stiffness=12.0,
+            damping=4.0,
+        ),
+    )
+    descriptor = _resolved_articulation_desc()
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        configure_articulation_desc(descriptor, cfg, newton_solver_type="auto")
+
+    assert not caught
 
 
 def test_default_articulation_body_properties_compile_per_link() -> None:
@@ -1039,18 +1194,23 @@ def test_articulation_config_applies_to_exact_source_resolved_names() -> None:
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        attrs=RigidBodyAttributesCfg(mass=1.0, dynamic_friction=0.4),
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(mass=1.0),
+            material_props=RigidBodyMaterialCfg(dynamic_friction=0.4),
+        ),
         link_attrs={
             "fingers": LinkPhysicsOverrideCfg(
                 link_names_expr=["finger_.*"],
-                attrs=RigidBodyAttributesOverrideCfg(
-                    mass=2.0,
-                    dynamic_friction=0.8,
+                attrs=RigidBodyPhysicsCfg(
+                    mass_props=MassPropertiesCfg(
+                        mass=2.0,
+                        recompute_inertia=True,
+                    ),
+                    material_props=RigidBodyMaterialCfg(dynamic_friction=0.8),
                 ),
-                replace_inertial=True,
             )
         },
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             drive_type="force",
             stiffness={"arm_.*": 10.0},
             damping=3.0,
@@ -1113,20 +1273,15 @@ def test_articulation_config_applies_to_exact_source_resolved_names() -> None:
     assert joint.upper_limit == 1.0
 
 
-def test_joint_dynamics_override_legacy_drive_aliases() -> None:
+def test_joint_drive_properties_compile_joint_dynamics() -> None:
     cfg = ArticulationCfg(
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             stiffness=10.0,
-            max_effort=5.0,
-            max_velocity=2.0,
-            friction=0.1,
-            armature=0.2,
-        ),
-        joint_props=JointDynamicsPropertiesCfg(
             max_effort=20.0,
+            max_velocity=2.0,
             friction=0.4,
             armature=0.7,
         ),
@@ -1165,7 +1320,7 @@ def test_robot_control_part_drive_rule_expands_before_spawn() -> None:
         uid="robot",
         fpath="robot.urdf",
         control_parts={"arm": ["arm_joint"]},
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             drive_type="force",
             stiffness={"arm": 10.0, "arm_joint": 20.0},
         ),
@@ -1184,7 +1339,7 @@ def test_newton_joint_compatibility_subclass_uses_portable_target_mode() -> None
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        drive_pros=NewtonJointDrivePropertiesCfg(
+        joint_drive_props=NewtonJointDrivePropertiesCfg(
             drive_type="force",
             stiffness={"arm_.*": 12.0},
             damping=4.0,
@@ -1222,10 +1377,12 @@ def test_grouped_link_physics_overrides_compose_after_source_resolution() -> Non
             "fingers": LinkPhysicsOverrideCfg(
                 link_names_expr=["finger_.*"],
                 attrs=RigidBodyPhysicsCfg(
-                    mass_props=MassPropertiesCfg(mass=2.0),
+                    mass_props=MassPropertiesCfg(
+                        mass=2.0,
+                        recompute_inertia=True,
+                    ),
                     material_props=RigidBodyMaterialCfg(dynamic_friction=0.8),
                 ),
-                replace_inertial=True,
             )
         },
     )
@@ -1240,6 +1397,143 @@ def test_grouped_link_physics_overrides_compose_after_source_resolution() -> Non
     assert finger.rigid_body.mass == 2.0
     assert finger.collisions[0].newton.mu == 0.8
     assert finger.rigid_body.inertia is None
+
+
+def test_global_articulation_mass_properties_can_recompute_inertia() -> None:
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(recompute_inertia=True)),
+    )
+    descriptor = _resolved_articulation_desc()
+
+    configure_articulation_desc(descriptor, cfg)
+
+    for link in descriptor.links:
+        assert link.rigid_body.inertia is None
+        assert link.replace_inertial is True
+        assert link._embodichain_apply_physics
+
+
+def test_invalid_source_inertia_uses_geometry_fallback_without_an_overlay() -> None:
+    """All-zero asset inertia is not a physical value to preserve."""
+    descriptor = _resolved_articulation_desc()
+    for link in descriptor.links:
+        link._embodichain_source_inertia_valid = False
+        link._embodichain_has_collision_geometry = True
+        link.rigid_body.inertia = None
+        link.rigid_body.com_position = None
+        link.rigid_body.com_quaternion = None
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+    )
+
+    configure_articulation_desc(descriptor, cfg)
+
+    for link in descriptor.links:
+        assert link._embodichain_apply_physics
+        assert link.replace_inertial is True
+        assert link.rigid_body.inertia is None
+
+
+def test_joint_only_overlay_does_not_author_link_physics() -> None:
+    """A robot drive overlay must not trigger native inertia derivation."""
+    descriptor = _resolved_articulation_desc()
+    before = copy.deepcopy(descriptor)
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        joint_drive_props=JointDrivePropertiesCfg(stiffness=10.0),
+    )
+
+    configure_articulation_desc(descriptor, cfg)
+
+    for link, source_link in zip(descriptor.links, before.links, strict=True):
+        assert not link._embodichain_apply_physics
+        _assert_property_tree_equal(link.rigid_body, source_link.rigid_body)
+
+
+def test_density_override_requires_explicit_source_inertia_recomputation() -> None:
+    descriptor = _resolved_articulation_desc()
+    for link in descriptor.links:
+        link._embodichain_source_inertia_valid = True
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(density=1000.0)),
+    )
+
+    with pytest.raises(ValueError, match="Density override.*recompute_inertia=True"):
+        configure_articulation_desc(descriptor, cfg)
+
+
+def test_per_link_mass_properties_can_preserve_global_source_inertia() -> None:
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(recompute_inertia=True)),
+        link_attrs={
+            "fingers": LinkPhysicsOverrideCfg(
+                link_names_expr=["finger_.*"],
+                attrs=RigidBodyPhysicsCfg(
+                    mass_props=MassPropertiesCfg(recompute_inertia=False)
+                ),
+            )
+        },
+    )
+    descriptor = _resolved_articulation_desc()
+
+    configure_articulation_desc(descriptor, cfg)
+
+    base = descriptor.get_link_desc("base")
+    finger = descriptor.get_link_desc("finger_left")
+    assert base.rigid_body.inertia is None
+    assert base.replace_inertial is True
+    np.testing.assert_array_equal(
+        finger.rigid_body.inertia,
+        np.ones(3, dtype=np.float32),
+    )
+    assert finger.replace_inertial is False
+
+
+def test_explicit_and_recomputed_inertia_are_mutually_exclusive() -> None:
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(
+                mass=2.0,
+                inertia=[1.0, 2.0, 3.0],
+                recompute_inertia=True,
+            )
+        ),
+    )
+
+    with pytest.raises(ValueError, match="recompute_inertia"):
+        configure_articulation_desc(_resolved_articulation_desc(), cfg)
+
+
+def test_recompute_inertia_rejects_non_boolean_values() -> None:
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(
+                recompute_inertia="yes",  # type: ignore[arg-type]
+            )
+        ),
+    )
+
+    with pytest.raises(TypeError, match="recompute_inertia"):
+        configure_articulation_desc(_resolved_articulation_desc(), cfg)
 
 
 def test_grouped_link_zero_mass_falls_back_to_inherited_density() -> None:
@@ -1281,7 +1575,7 @@ def test_articulation_preserve_mode_keeps_source_physics(source_path: str) -> No
         fpath=source_path,
         asset_physics_mode="preserve",
         attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(mass=9.0)),
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             drive_type="force",
             stiffness=10.0,
             damping=20.0,
@@ -1291,7 +1585,7 @@ def test_articulation_preserve_mode_keeps_source_physics(source_path: str) -> No
 
     with pytest.warns(
         UserWarning,
-        match="preserve.*attrs, drive_pros, qpos_limits",
+        match="preserve.*attrs, joint_drive_props, qpos_limits",
     ):
         configure_articulation_desc(descriptor, cfg)
 
@@ -1319,7 +1613,7 @@ def test_articulation_drive_overlay_preserves_unspecified_source_fields() -> Non
         uid="robot",
         fpath="robot.urdf",
         asset_physics_mode="overlay",
-        drive_pros=JointDrivePropertiesCfg(stiffness=configured_stiffness),
+        joint_drive_props=JointDrivePropertiesCfg(stiffness=configured_stiffness),
     )
 
     configure_articulation_desc(descriptor, cfg)
@@ -1379,12 +1673,15 @@ def test_articulation_overlay_does_not_invent_collision_geometry() -> None:
                 link_attrs={
                     "first": LinkPhysicsOverrideCfg(
                         link_names_expr=["finger_.*"],
-                        attrs=RigidBodyAttributesOverrideCfg(mass=2.0),
-                        replace_inertial=True,
+                        attrs=RigidBodyPhysicsCfg(
+                            mass_props=MassPropertiesCfg(mass=2.0)
+                        ),
                     ),
                     "second": LinkPhysicsOverrideCfg(
                         link_names_expr=["finger_left"],
-                        attrs=RigidBodyAttributesOverrideCfg(mass=3.0),
+                        attrs=RigidBodyPhysicsCfg(
+                            mass_props=MassPropertiesCfg(mass=3.0)
+                        ),
                     ),
                 },
             ),
@@ -1394,7 +1691,9 @@ def test_articulation_overlay_does_not_invent_collision_geometry() -> None:
             ArticulationCfg(
                 uid="robot",
                 fpath="robot.urdf",
-                drive_pros=JointDrivePropertiesCfg(stiffness={"missing_.*": 10.0}),
+                joint_drive_props=JointDrivePropertiesCfg(
+                    stiffness={"missing_.*": 10.0}
+                ),
             ),
             ValueError,
         ),
@@ -1402,7 +1701,7 @@ def test_articulation_overlay_does_not_invent_collision_geometry() -> None:
             ArticulationCfg(
                 uid="robot",
                 fpath="robot.urdf",
-                drive_pros=JointDrivePropertiesCfg(
+                joint_drive_props=JointDrivePropertiesCfg(
                     stiffness={"arm_.*": "not-a-number"}
                 ),
             ),
@@ -1428,7 +1727,7 @@ def test_articulation_overlay_does_not_invent_collision_geometry() -> None:
             ArticulationCfg(
                 uid="robot",
                 fpath="robot.urdf",
-                drive_pros=NewtonJointDrivePropertiesCfg(
+                joint_drive_props=NewtonJointDrivePropertiesCfg(
                     target_mode={"arm_.*": "servo"}
                 ),
             ),
@@ -1476,7 +1775,7 @@ def test_usd_articulation_uses_the_same_exact_name_configuration() -> None:
                 attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(mass=2.0)),
             )
         },
-        drive_pros=JointDrivePropertiesCfg(stiffness={"arm_.*": 10.0}),
+        joint_drive_props=JointDrivePropertiesCfg(stiffness={"arm_.*": 10.0}),
     )
     source = ArticulationDesc(
         name="source",
@@ -1523,11 +1822,17 @@ def test_usd_articulation_uses_the_same_exact_name_configuration() -> None:
 def test_spawn_post_config_only_applies_render_uv() -> None:
     render_body = Mock()
     entity = Mock()
+    entity.joint_dof_layout = []
     entity.get_render_body.return_value = render_body
     articulation = object.__new__(Articulation)
     articulation.cfg = SimpleNamespace(compute_uv=True)
     articulation._entities = [entity]
     articulation.__dict__["link_names"] = ["base"]
+    articulation._prepared_default_root_topology_revision = -1
+    articulation._mimic_info = SimpleNamespace(
+        mimic_id=np.array([], dtype=np.int32),
+        mimic_parent=np.array([], dtype=np.int32),
+    )
     articulation._set_default_joint_drive = Mock()
 
     articulation._apply_spawn_config()
@@ -1539,17 +1844,25 @@ def test_spawn_post_config_only_applies_render_uv() -> None:
 
 def test_spawn_post_config_applies_default_only_root_properties() -> None:
     native_articulation = Mock()
-    entity = SimpleNamespace(_physics_binding=native_articulation)
+    entity = SimpleNamespace(
+        _physics_binding=native_articulation,
+        joint_dof_layout=[],
+    )
     articulation = object.__new__(Articulation)
     articulation.cfg = ArticulationCfg(
-        articulation_props=ArticulationRootPropertiesCfg(
+        root_props=ArticulationRootPropertiesCfg(
             sleep_threshold=0.005,
             min_position_iters=8,
             min_velocity_iters=2,
         )
     )
-    articulation._spawn_result = SimpleNamespace(backend="dexsim")
+    articulation._spawn_result = SimpleNamespace(backend="dexsim", topology_revision=0)
     articulation._entities = [entity]
+    articulation._prepared_default_root_topology_revision = -1
+    articulation._mimic_info = SimpleNamespace(
+        mimic_id=np.array([], dtype=np.int32),
+        mimic_parent=np.array([], dtype=np.int32),
+    )
 
     articulation._apply_spawn_config()
 
@@ -1562,17 +1875,25 @@ def test_spawn_post_config_applies_default_only_root_properties() -> None:
 
 def test_newton_skips_default_only_articulation_root_properties() -> None:
     native_articulation = Mock()
-    entity = SimpleNamespace(_physics_binding=native_articulation)
+    entity = SimpleNamespace(
+        _physics_binding=native_articulation,
+        joint_dof_layout=[],
+    )
     articulation = object.__new__(Articulation)
     articulation.cfg = ArticulationCfg(
-        articulation_props=ArticulationRootPropertiesCfg(
+        root_props=ArticulationRootPropertiesCfg(
             sleep_threshold=0.005,
             min_position_iters=8,
             min_velocity_iters=2,
         )
     )
-    articulation._spawn_result = SimpleNamespace(backend="newton")
+    articulation._spawn_result = SimpleNamespace(backend="newton", topology_revision=0)
     articulation._entities = [entity]
+    articulation._prepared_default_root_topology_revision = -1
+    articulation._mimic_info = SimpleNamespace(
+        mimic_id=np.array([], dtype=np.int32),
+        mimic_parent=np.array([], dtype=np.int32),
+    )
 
     articulation._apply_spawn_config()
 

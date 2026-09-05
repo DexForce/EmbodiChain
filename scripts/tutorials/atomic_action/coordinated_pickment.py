@@ -45,7 +45,7 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_euler
 from scripts.tutorials.atomic_action.scenario_utils import (
@@ -175,7 +175,6 @@ def parse_arguments() -> argparse.Namespace:
             "headless_play",
             "visualize_axes",
         ),
-        default_device="cpu",
         default_renderer="hybrid",
     )
     parser.add_argument(
@@ -222,7 +221,10 @@ def create_pickment_object(
             shape=MeshCfg(
                 fpath=resolve_cached_data_path(preset.mesh_path),
                 compute_uv=False,
-                max_convex_hull_num=16,
+                collision=MeshCollisionCfg(
+                    approximation="convex_decomposition",
+                    max_hulls=16,
+                ),
             ),
             attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
@@ -236,6 +238,7 @@ def create_pickment_object(
                 min_position_iters=32,
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
+                newton_contact=sim.is_newton_backend,
             ),
             init_pos=[preset.init_xy[0], preset.init_xy[1], SUPPORT_SURFACE_Z],
             init_rot=list(preset.init_rot),

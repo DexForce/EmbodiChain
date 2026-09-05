@@ -66,6 +66,14 @@ class _Data(DeformableObjectData):
     def default_nodal_state_w(self) -> torch.Tensor:
         return torch.cat((self._pos, torch.zeros_like(self._vel)), dim=-1)
 
+    def apply_nodal_state_w(
+        self,
+        positions: torch.Tensor,
+        velocities: torch.Tensor,
+    ) -> None:
+        self._pos = positions
+        self._vel = velocities
+
 
 def test_legacy_configs_specialize_common_deformable_config() -> None:
     assert issubclass(SoftObjectCfg, VolumeDeformableObjectCfg)

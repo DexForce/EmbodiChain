@@ -221,6 +221,7 @@ def _create_moving_target(sim: SimulationManager) -> RigidObject:
                 dynamic_friction=0.97,
                 static_friction=0.99,
                 enable_ccd=True,
+                newton_contact=sim.is_newton_backend,
             ),
             body_type="kinematic" if sim.is_newton_backend else "dynamic",
             init_pos=INITIAL_TARGET_POSITION,

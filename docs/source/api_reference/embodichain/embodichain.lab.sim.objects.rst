@@ -202,9 +202,11 @@ Rigid Constraint
 Backend Views
 -------------
 
-Backend views normalize tensor layouts and row selection across the default,
-Newton, and DexSim Spawn runtimes. The package import path exposes the common
-contracts, concrete adapters, and Newton collision-filter helpers.
+Backend views normalize tensor layouts and row selection over backend-neutral
+DexSim Scene batches. The package import path exposes the common contracts,
+Scene adapters, and the Newton Scene predicate. ``Scene*View.from_entities()``
+owns Scene batch creation so object facades do not depend directly on DexSim's
+batch-factory signatures.
 
 .. currentmodule:: embodichain.lab.sim.objects.backends
 
@@ -212,15 +214,9 @@ contracts, concrete adapters, and Newton collision-filter helpers.
 
     ArticulationViewBase
     RigidBodyViewBase
-    DefaultArticulationView
-    DefaultRigidBodyView
-    NewtonArticulationView
-    NewtonRigidBodyView
-    apply_collision_filter_for_entities
-    apply_collision_filter_for_envs
     is_newton_scene
-    SpawnArticulationView
-    SpawnRigidBodyView
+    SceneArticulationView
+    SceneRigidBodyView
 
 .. autoclass:: ArticulationViewBase
     :members:
@@ -228,33 +224,13 @@ contracts, concrete adapters, and Newton collision-filter helpers.
 .. autoclass:: RigidBodyViewBase
     :members:
 
-.. autoclass:: DefaultArticulationView
+.. autoclass:: SceneArticulationView
     :members:
     :show-inheritance:
 
-.. autoclass:: DefaultRigidBodyView
+.. autoclass:: SceneRigidBodyView
     :members:
     :show-inheritance:
-
-.. autoclass:: NewtonArticulationView
-    :members:
-    :show-inheritance:
-
-.. autoclass:: NewtonRigidBodyView
-    :members:
-    :show-inheritance:
-
-.. autoclass:: SpawnArticulationView
-    :members:
-    :show-inheritance:
-
-.. autoclass:: SpawnRigidBodyView
-    :members:
-    :show-inheritance:
-
-.. autofunction:: apply_collision_filter_for_entities
-
-.. autofunction:: apply_collision_filter_for_envs
 
 .. autofunction:: is_newton_scene
 
@@ -268,29 +244,18 @@ Backend implementation import paths
     RigidBodyViewBase
     ArticulationViewBase
 
-.. currentmodule:: embodichain.lab.sim.objects.backends.default
-
-.. autosummary::
-
-    DefaultRigidBodyView
-    DefaultArticulationView
-
 .. currentmodule:: embodichain.lab.sim.objects.backends.newton
 
 .. autosummary::
 
-    NewtonRigidBodyView
-    NewtonArticulationView
-    apply_collision_filter_for_entities
-    apply_collision_filter_for_envs
     is_newton_scene
 
-.. currentmodule:: embodichain.lab.sim.objects.backends.spawn
+.. currentmodule:: embodichain.lab.sim.objects.backends.scene
 
 .. autosummary::
 
-    SpawnArticulationView
-    SpawnRigidBodyView
+    SceneArticulationView
+    SceneRigidBodyView
 
 Unified Deformable Objects
 --------------------------

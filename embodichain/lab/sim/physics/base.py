@@ -20,7 +20,7 @@ This module defines the contract that every physics backend (Default, Newton,
 holds a single :class:`PhysicsBackend` instance as ``self.physics`` and
 delegates backend-specific world configuration, compatibility scene access,
 and capability queries to it. Scene topology and runtime readiness are owned
-by DexSim's ``SceneBuilder`` and ``SpawnResult``.
+by DexSim's ``SceneBuilder`` and finalized ``Scene``.
 
 The design deliberately mirrors IsaacLab's split of an orchestrator
 (``SimulationContext``) from a swappable physics manager (``PhysicsManager``),
@@ -55,10 +55,10 @@ class PhysicsBackend(ABC):
     A backend is constructed with a back-reference to its owning
     :class:`SimulationManager` (from which it reaches the dexsim world, the
     resolved device, the asset registries and the physics config). All
-    backend-specific behaviour is expressed as overrides of the methods and
-    properties below; the manager never inspects ``self.physics.name`` to
-    decide what to do (it only exposes it for backwards-compatible public
-    properties).
+    Manager-level backend behavior is expressed as overrides of the methods
+    and properties below. The backend name remains available for diagnostics
+    and backwards-compatible public predicates, but operational decisions use
+    hooks and capability flags.
     """
 
     #: Backend identifier, e.g. ``"default"`` or ``"newton"``.
@@ -96,7 +96,19 @@ class PhysicsBackend(ABC):
         additional activation work.
         """
 
-    def sync_render_state(self, result: "dexsim.spawn.SpawnResult") -> None:
+    def prepare_spawn_runtime(self, result: "dexsim.scene.Scene") -> None:
+        """Prepare runtime buffers for one committed Spawn topology revision.
+
+        :class:`SimulationManager` calls this hook once per topology revision,
+        after source configuration and before facade binding. Backends that do
+        not need a separate runtime-preparation step keep the default no-op.
+
+        Args:
+            result: The committed Spawn result being prepared.
+        """
+        del result
+
+    def sync_render_state(self, result: "dexsim.scene.Scene") -> None:
         """Publish the current physics state to render resources without stepping.
 
         Backends whose physics and render state share native storage require no
@@ -140,6 +152,11 @@ class PhysicsBackend(ABC):
         """Return no differentiable runtime for non-Newton backends."""
         return None
 
+    @property
+    def solver_type(self) -> str | None:
+        """Return the configured or resolved backend solver type, if exposed."""
+        return None
+
     # ------------------------------------------------------------------ #
     # Capabilities (override in subclasses; defaults are conservative)
     # ------------------------------------------------------------------ #
@@ -171,6 +188,16 @@ class PhysicsBackend(ABC):
     @property
     def supports_robot(self) -> bool:
         """Whether this backend supports robots (articulated URDF assets)."""
+        return False
+
+    @property
+    def supports_rigid_constraints(self) -> bool:
+        """Whether this backend supports native rigid constraints."""
+        return False
+
+    @property
+    def supports_contact_sensor(self) -> bool:
+        """Whether this backend supports the native contact sensor."""
         return False
 
     @property

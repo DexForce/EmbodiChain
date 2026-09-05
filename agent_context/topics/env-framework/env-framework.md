@@ -9,13 +9,16 @@
 
 | File | Role |
 |---|---|
-| `embodichain/__main__.py` | Unified CLI dispatch, including `list-env` environment discovery |
+| `embodichain/__main__.py` | Unified CLI dispatch, including `list-task` discovery and the `run-task` alias |
 | `embodichain/lab/gym/envs/base_env.py` | `BaseEnv(gym.Env)` + `EnvCfg` — low-level env loop |
 | `embodichain/lab/gym/envs/types.py` | `ControllerAction` — owned controller-ready action boundary |
 | `embodichain/lab/gym/envs/embodied_env.py` | `EmbodiedEnv(BaseEnv)` + `EmbodiedEnvCfg` — modular task base class |
 | `embodichain/lab/gym/utils/registration.py` | `@register_env` decorator + `REGISTERED_ENVS` registry + `make()` |
 | `embodichain/lab/gym/utils/gym_utils.py` | Gym config parsing and config-owned runtime registration |
-| `embodichain/lab/gym/envs/expert_program/configured_runtime.py` | Strict built-in Expert Program runtime decoder |
+| `embodichain/lab/gym/utils/_component_composition.py` | Reusable physical environment, embodiment, and standalone scene resolution |
+| `embodichain/lab/task_program/integrations/configured.py` | Strict built-in Task Program integration decoder |
+| `embodichain/lab/task_program/integrations/_configured_composition.py` | Task Program semantic component and contract composition |
+| `embodichain/lab/gym/envs/task_program/registration.py` | Config-owned Gym ID registration |
 | `embodichain_tasks/embodichain_tasks/__init__.py` | Recursively imports official tasks to trigger registration |
 | `embodichain/lab/gym/envs/managers/__init__.py` | Manager re-exports: `EventManager`, `ObservationManager`, `RewardManager`, `ActionManager`, `DatasetManager` |
 | `embodichain/lab/gym/envs/wrapper/no_fail.py` | `NoFailWrapper` — forces `is_task_success() → True` |
@@ -82,23 +85,23 @@ gym.Env
   vector batch, control keys (`qpos`, `qvel`, `qf`), active/full joint width,
   floating dtype, and environment device before robot control.
 - `ControllerAction` does not bypass `env.step()` or `ActionManager` terms in
-  `post` mode. Expert Program uses this boundary so runtime commands, wait
+  `post` mode. Task Program uses this boundary so runtime commands, wait
   holds, and abort-safe holds retain the normal Gym lifecycle.
 - A structured controller `TensorDict` may carry auxiliary fields such as
   `ik_success`, but it must contain at least one supported control key.
 
-### Expert Program completion (`embodied_env.py`, `expert_program/bridge.py`)
+### Task Program completion (`embodied_env.py`, `task_program/bridge.py`)
 
-- `EmbodiedEnvCfg.expert_program` remains opt-in. A registered task may attach
-  an `ExpertProgramAdapterFactory` to its `EnvSpec`; `EmbodiedEnv` binds the
+- `EmbodiedEnvCfg.task_program` remains opt-in. A registered task may attach
+  an `TaskProgramAdapterFactory` to its `EnvSpec`; `EmbodiedEnv` binds the
   exact adapter after `BaseEnv` has initialized the live scene and robot.
 - A standard simulation adapter factory exposes its immutable registration, so
   `EnvSpec` derives the catalog used by `config_to_cfg()` preflight from the
   same declaration that later creates the live adapter.
-- `create_demo_segments(expert_program=...)` accepts a config or trusted
-  `CompiledProgram` for one episode, allowing an MLLM frontend to use the same
+- `create_demo_segments(task_program=...)` accepts a config or trusted
+  `CompiledTaskProgram` for one episode, allowing an MLLM frontend to use the same
   bridge without mutating the environment's static config.
-- `create_demo_segments()` retains the active `AtomicDemoBridge` while its lazy
+- `create_demo_segments()` retains the active `TaskProgramDemoBridge` while its lazy
   segments execute.
 - For an enabled program, `is_task_success()` returns all false until the bridge
   iterator completes normally. It then returns the bridge's final row-local
@@ -106,7 +109,7 @@ gym.Env
   results.
 - `reset()` lets `BaseEnv` read that final mask before clearing the active
   bridge, preventing completed state from leaking into the next episode.
-- Non-Expert environments keep the ordinary `BaseEnv.is_task_success()`
+- Environments without a Task Program keep the ordinary `BaseEnv.is_task_success()`
   behavior and task-specific overrides.
 
 ---
@@ -142,29 +145,77 @@ class MyTaskEnv(EmbodiedEnv):
 Format: `<TaskName>-v<N>` (e.g. `PourWater-v1`, `PushCubeRL`).
 RL tasks sometimes drop the `-v<N>` suffix (`CartPoleRL`, `PushCubeRL`).
 
-### Configuration-owned Expert Program environment
+### Reusable Gym deployment components
 
-A simple supported Expert Program does not require a task subclass. Its Gym
-config can include an `expert_program_runtime` declaration; `config_to_cfg()`
-strictly decodes the declaration, uses its immutable catalog to preflight the
-program, parses the remaining environment config, and then calls
+`config_to_cfg()` resolves optional `environment.component`,
+`embodiment.component`, and `scene.component` selections before ordinary Gym
+parsing. This is not
+coupled to Task Program: an import-registered handwritten-demo task can reuse
+an embodiment's simulation robot and sensor suite while keeping its events,
+observations, objects, and Python demo logic task-local. All deployment-owned
+component paths resolve relative to the runnable config that declares them
+(conventionally `task.<embodiment>.yaml`). Component-owned fields and their
+inline counterparts are mutually exclusive; without a selector, the original
+inline `robot`, `sensor`, and scene fields continue to parse unchanged.
+`build_env_cfg_from_args()` expands `environment.component` before applying
+launcher arguments so environment-owned run controls such as `max_episodes`
+remain visible to the run loop while explicit CLI values retain precedence.
+An inline runnable config must declare exactly one
+`physics: default|newton` backend. A reusable environment component must also
+declare exactly one backend and owns its optional `physics_config`; the thin
+deployment cannot repeat either field. `config_to_cfg()` constructs the
+backend-specific typed physics config and rejects fields from the other
+backend. Launcher `--physics` may confirm the declared value but cannot switch
+the file-owned backend. Use separate environment files when the same logical
+task needs both backends.
+
+Device selection is one shared runtime value. The selected typed physics config
+provides the backend default (`cpu` for Default and `cuda:0` for Newton), an
+optional top-level Gym `device` overrides it, and an explicitly supplied CLI
+`--device` wins last. A config-backed launcher leaves `--device` unset by
+default, so omission preserves the authored/backend value. `config_to_cfg()`
+passes the resolved value through `SimulationManagerCfg`, and `BaseEnv` tensors
+use the manager's resulting device; there is no separate environment-device
+setting.
+
+The component boundary is implemented in
+`gym/utils/_component_composition.py`. An embodiment's optional `skill_profile`
+is consumed only by a configured Task Program deployment. Scene components are
+always physical-only; semantic entity mappings and affordances live in the
+task integration's nested `scene_binding`. The shared
+`cobotmagic.yaml` component owns a top-view RGB camera, two wrist
+RGB cameras, and an optional right-arm skill profile. Tableware handwritten and
+configured Task Program deployments reuse that same embodiment.
+
+### Configuration-owned Task Program environment
+
+A simple supported Task Program does not require a task subclass. Its thin Gym
+deployment selects a reusable environment and embodiment and declares all
+three Task Program component paths. The environment component owns the
+physical scene, one physics backend and its settings, and ordinary environment
+values. After the generic resolver
+lowers the environment, robot, and sensors into the existing
+`EmbodiedEnvCfg` fields, it checks every semantic root's `simulation_uid`
+against the physical scene. The Task Program layer then checks
+scene/embodiment contracts, composes the immutable catalog, preflights the
+deployment-bound program, and calls
 `register_env_function(EmbodiedEnv, config["id"], ...)`.
 
 The ID is selected by the config and may be any free valid Gym ID. Loading the
-same ID with the same runtime and episode limit is idempotent. Reusing it for a
-different class, runtime declaration, or limit fails closed; the loader does
-not use `override=True`. Registration is process-local, so callers must load
-the Gym config before calling `gym.make(id)`. Such an ID is not present merely
-because task-package discovery ran.
+same ID with the same integration and episode limit is idempotent. Reusing it
+for a different class, integration declaration, or limit fails closed; the
+loader does not use `override=True`. Registration is process-local, so callers
+must load the Gym config before calling `gym.make(id)`. Such an ID is not
+present merely because task-package discovery ran.
 
-The runtime has no task-level kind. It composes a typed scene and robot profile
-with optional allowlisted live-service declarations. The built-in service
+The integration has no task-level kind. It composes a typed scene and robot
+profile with optional allowlisted live-service declarations. The built-in service
 leaves currently cover antipodal parallel-jaw grasp generation, configured
 hand-over poses, articulation-link Slide lowering, and joint-position
 constraint evidence. New executable provider families require a core
 allowlisted implementation and decoder entry; never serialize dotted imports
-or arbitrary callables into this config boundary. The three official Expert
-Program examples use this path and have no task environment subclass.
+or arbitrary callables into this config boundary. The official Task Program
+examples use this path and have no task environment subclass.
 
 ### Instantiation
 
@@ -175,15 +226,22 @@ env = make("MyTask-v1", cfg=my_cfg)
 
 Or via gymnasium: `gym.make("MyTask-v1")`.
 
-### Listing registered environments
+### Listing registered tasks
 
-`embodichain list-env` calls `discover_task_packages()` and prints a stable
+`embodichain list-task` calls `discover_task_packages()` and prints a stable
 table whose `Task` column is a directory tree derived from task-first modules
-and packaged `configs/tasks/` paths. The other columns show the environment ID
-and supported use:
+and packaged `configs/tasks/` paths. Deployments for the same logical task are
+kept together, with one divider between task groups; the title reports both
+logical-task and environment counts. The other columns show the environment ID,
+selected embodiment, supported use, and runnable config filename:
 
-- `[Expert Demo: Expert Program]` comes from a task-local Gym config declaring
-  `expert_program_path` or `expert_program_runtime`;
+- the embodiment is the selected component filename without its extension, or
+  an inline robot's `robot_type` with `uid` as the fallback;
+- `Config` lists every top-level runnable config that declares the environment
+  ID; `-` means that metadata does not come from a Gym deployment config;
+
+- `[Expert Demo: Task Program]` comes from a task-local Gym config declaring
+  the `task_program` component mapping;
 - `[Expert Demo: Handwritten Trajectory]` means the registered task class
   overrides `create_demo_segments()` or `create_demo_action_list()`;
 - `[RL]` comes from explicit simulator `supports_rl`, a task-local agents
@@ -191,10 +249,14 @@ and supported use:
 - `[Environment Only]` means none of those supported execution paths is
   currently declared.
 
-Configuration-owned Expert Program IDs are included from their packaged task
-configs without eagerly building or registering the runtime. Duplicate
+Configuration-owned Task Program IDs are included from their packaged task
+configs without eagerly building or registering the integration. Duplicate
 JSON/YAML variants and registry entries merge case-insensitively into one task
-leaf. The framework-level `EmbodiedEnv-v1` registration is omitted because it
+leaf. Discovery is schema-driven: it scans top-level JSON/YAML resources in a
+task directory and treats only mappings with a non-empty `id` as runnable
+deployments. A pure `env.yaml` component has `environment_id` but no `id`, so
+it is not listed and deployment filenames do not need an `env*` prefix. The
+framework-level `EmbodiedEnv-v1` registration is omitted because it
 is a reusable base environment rather than an installed task-package entry.
 
 ---
@@ -214,7 +276,7 @@ EmbodiedEnv.__init__(cfg)
   │     │     ├── _setup_robot()  → Robot + single_action_space
   │     │     ├── _prepare_scene()  → lights, background, objects
   │     │     └── _setup_sensors() → sensors dict
-  │     ├── init GPU physics (if CUDA)
+  │     ├── SimulationManager.prepare() (backend-neutral readiness boundary)
   │     ├── open window (if not headless)
   │     └── _init_sim_state()
   │           ├── _apply_functor_filter() (strip visual rand if configured)
@@ -300,22 +362,26 @@ from the event config before the event manager is created.
 
 ## Creating a New Task
 
-Use the `/add-task-env` skill. It scaffolds:
+Use the `/add-task-env` skill. It first selects one of two registration paths:
 
-1. A task-named module at
-   `embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`.
-2. The `@register_env("<GymId>")` decorator in that module.
-3. A task-local `configs/tasks/<category-path>/<task>/env.{json,yaml}`
-   containing the scene and MDP configuration.
-4. Optional task-local Expert Program or RL configuration artifacts.
-5. A module `__all__` declaration and focused test stub.
+1. Import-backed handwritten or RL tasks add a task-named module at
+   `embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`, keep
+   `@register_env("<GymId>")` and `__all__` there, and add a runnable config.
+2. Supported configuration-defined Task Programs omit the Python module. They
+   add a reusable physical `env.yaml`, one or more runnable
+   `task.<embodiment>.yaml` deployments, and
+   `task_program/{program,integration}.yaml`; semantic scene bindings are
+   nested under `integration.yaml.scene_binding`.
+
+Both paths add focused tests. A componentized import-backed task may also reuse
+the same environment and embodiment owners while omitting `task_program`.
 
 The category path starts with a top-level task family and may include a
 subdomain. Tableware tasks use `manipulation/tableware`; general manipulation
 tasks can stay directly under `manipulation`.
 
 Do not organize task ownership around a solution method such as `rl` or
-`expert_program`. Keep registration in the task-named module and do not create
+`task_program`. Keep registration in the task-named module and do not create
 a same-named Python package for a task that has only one Python entry point.
 
 ### Minimal manual skeleton
@@ -449,8 +515,8 @@ parent; the first `warmup_steps` samples are discarded.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `KeyError: "Env X not found in registry"` | Task entry-point package not imported → `@register_env` never ran | Check the `embodichain.tasks` entry point and package import |
-| Config-owned Expert Program ID is missing | `gym.make(id)` ran before its Gym config passed through `config_to_cfg()` | Load/build the environment config first, then construct the registered ID |
-| Config-owned ID reports a different runtime | The same process already registered that ID with different runtime data or episode limit | Choose a new ID or keep the declaration identical; do not override it |
+| Config-owned Task Program ID is missing | `gym.make(id)` ran before its Gym config passed through `config_to_cfg()` | Load/build the environment config first, then construct the registered ID |
+| Config-owned ID reports a different integration | The same process already registered that ID with different integration data or episode limit | Choose a new ID or keep the declaration identical; do not override it |
 | `RuntimeError: non json dumpable kwargs` | Passing class/type objects to `@register_env(…, kwarg=SomeClass)` | Use string keys + lookup mapping instead |
 | `single_action_space is None` | `_setup_robot()` didn't set `self.single_action_space` | Set it before returning the Robot |
 | `_setup_robot()` returns `None` | Forgot to return the Robot instance | Ensure `return robot` |

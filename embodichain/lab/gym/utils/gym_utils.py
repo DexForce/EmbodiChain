@@ -25,6 +25,7 @@ import argparse
 import gymnasium
 import gymnasium as gym
 
+from collections.abc import Mapping
 from typing import Callable, Dict, Any, List, Tuple, Union, Sequence
 from gymnasium import spaces
 from copy import deepcopy
@@ -50,6 +51,22 @@ DEFAULT_MANAGER_MODULES = [
 
 # Extra manager modules registered by third-party packages via init hooks
 _EXTRA_MANAGER_MODULES: list[str] = []
+_PHYSICS_BACKENDS = frozenset({"default", "newton"})
+
+
+def _declared_physics_backend(config: Mapping[str, object]) -> str:
+    """Return the single physics backend explicitly owned by a Gym config."""
+    if "physics" not in config:
+        raise ValueError(
+            "Gym config must explicitly declare physics as 'default' or 'newton'."
+        )
+    backend = config["physics"]
+    if type(backend) is not str or backend not in _PHYSICS_BACKENDS:
+        raise ValueError(
+            "Gym config physics must be exactly 'default' or 'newton', "
+            f"got {backend!r}."
+        )
+    return backend
 
 
 def register_manager_modules(modules: list[str]) -> None:
@@ -399,27 +416,35 @@ def config_to_cfg(
     manager_modules: list | None = None,
     *,
     source_path: str | os.PathLike[str] | None = None,
-    expert_program_path_override: str | os.PathLike[str] | None = None,
+    task_program_path_override: str | os.PathLike[str] | None = None,
 ) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
-    A config containing ``expert_program_runtime`` is decoded before the
-    serialized Expert Program is loaded. After the remaining environment
-    values parse successfully, the existing
+    Any config may select reusable ``environment.component``,
+    ``embodiment.component``, and ``scene.component`` files before the remaining
+    environment values parse. An environment component owns only reusable Gym
+    and physical-scene values. A runnable deployment independently selects its
+    embodiment and, when used, its Task Program components and execution
+    policy. Inline ``robot``, ``sensor``, and scene fields remain valid when
+    their corresponding component selector is absent. A resolved config
+    containing ``task_program`` composes its semantic and policy components.
+    Every resolved environment explicitly owns one ``physics`` backend and an
+    optional ``physics_config`` mapping whose fields must belong to that backend.
+    The existing
     :class:`~embodichain.lab.gym.envs.EmbodiedEnv` class is registered under
-    the config's ``id`` with the decoded runtime factory.
+    the config's ``id`` with the decoded integration factory.
     Re-loading an identical declaration is idempotent; an ID collision with a
     different declaration fails closed.
 
     Args:
-        config (dict): The configuration dictionary containing robot, sensor, light, background, and interactive objects.
+        config (dict): The configuration dictionary containing an optional
+            environment component plus an embodiment component or inline robot.
         manager_modules (list): List of module paths for dataset, event, observation, and reward managers.
             If not provided, uses default module paths.
-        source_path: Optional path of the Gym configuration source file. A
-            relative top-level ``expert_program_path`` is resolved from this
-            file's directory. Without it, relative paths use the current
-            working directory.
-        expert_program_path_override: Optional explicit program path. This is
+        source_path: Optional path of the Gym configuration source file.
+            Relative component paths resolve from this file's directory.
+            Without it, relative paths use the current working directory.
+        task_program_path_override: Optional explicit program path. This is
             selected instead of the Gym-config path and resolves from the
             process working directory.
 
@@ -462,78 +487,152 @@ def config_to_cfg(
 
     env_cfg = EmbodiedEnvCfg()
 
-    # check all necessary keys
-    required_keys = ["id", "env", "robot"]
+    removed_task_program_fields = sorted(
+        field
+        for field in (
+            "task_program_dir",
+            "task_program_path",
+            "task_program_integration_path",
+        )
+        if field in config
+    )
+    if removed_task_program_fields:
+        raise ValueError(
+            f"Removed Task Program fields {removed_task_program_fields}; "
+            "use the task_program component mapping instead."
+        )
+
+    from embodichain.lab.gym.utils._component_composition import (
+        _resolve_gym_components,
+        _validate_scene_binding_targets,
+    )
+
+    base_dir = (
+        Path.cwd() if source_path is None else Path(source_path).expanduser().parent
+    )
+    component_resolution = _resolve_gym_components(config, base_dir=base_dir)
+    config = component_resolution.config
+
+    physics_backend = _declared_physics_backend(config)
+    physics_config_value = config.get("physics_config", {})
+    if not isinstance(physics_config_value, Mapping):
+        raise TypeError("Gym config physics_config must be a mapping.")
+    if not all(type(key) is str for key in physics_config_value):
+        raise TypeError("Gym config physics_config keys must be exact strings.")
+    physics_config = deepcopy(dict(physics_config_value))
+    if "gravity" in physics_config:
+        physics_config["gravity"] = np.asarray(physics_config["gravity"])
+    physics_cfg = physics_cfg_for_backend(physics_backend)
+    try:
+        physics_cfg = type(physics_cfg)(**physics_config)
+    except TypeError as exc:
+        raise ValueError(
+            f"physics_config does not match declared physics backend "
+            f"{physics_backend!r}: {exc}"
+        ) from exc
+
+    # Check required fields after reusable task expansion.
+    required_keys = ["id", "env"]
     for key in required_keys:
         if key not in config:
             log_error(f"Missing required config key: {key}")
 
-    configured_expert_program_runtime = None
-    if "expert_program_runtime" in config:
-        if expert_program_path_override is None and "expert_program_path" not in config:
+    configured_task_program_integration = None
+    configured_task_program_selection = None
+    configured_task_program_id: str | None = None
+    configured_task_program_path: Path | None = None
+    if "task_program" in config:
+        if not component_resolution.embodiment_selected:
             raise ValueError(
-                "expert_program_runtime requires expert_program_path or an "
-                "expert_program_path_override."
+                "A configured Task Program environment must declare "
+                "embodiment.component."
             )
-        from embodichain.lab.gym.envs.expert_program.configured_runtime import (
-            _decode_configured_expert_program_runtime,
+        if component_resolution.embodiment_skill_profile is None:
+            raise ValueError(
+                "A configured Task Program embodiment component must declare "
+                "skill_profile metadata."
+            )
+        if not component_resolution.scene_selected:
+            raise ValueError(
+                "A configured Task Program deployment must declare a physical "
+                "environment."
+            )
+        if component_resolution.scene_config is None:
+            raise ValueError(
+                "A configured Task Program deployment must resolve a physical "
+                "environment."
+            )
+        from embodichain.lab.task_program.integrations._configured_composition import (
+            _load_configured_task_program_deployment,
         )
 
-        configured_expert_program_runtime = _decode_configured_expert_program_runtime(
-            config["expert_program_runtime"]
+        deployment = _load_configured_task_program_deployment(
+            task_program=config["task_program"],
+            skill_profile=component_resolution.embodiment_skill_profile,
+            base_dir=base_dir,
         )
+        _validate_scene_binding_targets(
+            deployment.scene_binding,
+            simulation=component_resolution.scene_config,
+        )
+        configured_task_program_integration = deployment.integration
+        configured_task_program_selection = deployment.selection
+        configured_task_program_id = deployment.program_id
+        configured_task_program_path = deployment.program_path
+    elif "robot" not in config:
+        log_error("Missing required config key: robot")
 
-    configured_expert_program_path = config.get("expert_program_path")
-    if expert_program_path_override is not None or "expert_program_path" in config:
-        if expert_program_path_override is not None:
-            expert_program_path = expert_program_path_override
-            expert_program_base_dir = None
-            if not isinstance(expert_program_path, (str, os.PathLike)):
-                raise TypeError("expert_program_path must be a string or path.")
+    if (
+        task_program_path_override is not None
+        or configured_task_program_path is not None
+    ):
+        if task_program_path_override is not None:
+            task_program_path = task_program_path_override
+            if not isinstance(task_program_path, (str, os.PathLike)):
+                raise TypeError("task_program_path must be a string or path.")
         else:
-            expert_program_path = configured_expert_program_path
-            expert_program_base_dir = (
-                None if source_path is None else Path(source_path).expanduser().parent
-            )
-            if type(expert_program_path) is not str:
-                raise TypeError("expert_program_path must be an exact string.")
-        expert_program_path_text = os.fspath(expert_program_path)
-        if not expert_program_path_text or (
-            expert_program_path_text != expert_program_path_text.strip()
+            assert configured_task_program_path is not None
+            task_program_path = configured_task_program_path
+        task_program_path_text = os.fspath(task_program_path)
+        if not task_program_path_text or (
+            task_program_path_text != task_program_path_text.strip()
         ):
             raise ValueError(
-                "expert_program_path must be a non-empty string without outer "
+                "task_program_path must be a non-empty string without outer "
                 "whitespace."
             )
-        from embodichain.lab.gym.envs.expert_program.loader import (
-            load_expert_program,
+        from embodichain.lab.task_program.language.loader import (
+            load_task_program,
         )
 
-        if configured_expert_program_runtime is None:
+        if configured_task_program_integration is None:
             from embodichain.lab.gym.utils.registration import get_env_spec
 
-            registration = get_env_spec(config["id"]).expert_program_registration
+            registration = get_env_spec(config["id"]).task_program_registration
         else:
-            registration = configured_expert_program_runtime.registration
+            registration = configured_task_program_integration.registration
         if registration is not None:
             registration.assert_unchanged()
-        expert_program = load_expert_program(
-            expert_program_path_text,
-            base_dir=expert_program_base_dir,
+        task_program = load_task_program(
+            task_program_path_text,
+            integration=configured_task_program_selection,
             validation_context=(None if registration is None else registration.catalog),
         )
+        if (
+            configured_task_program_id is not None
+            and task_program.program_id != configured_task_program_id
+        ):
+            raise ValueError(
+                f"Task integration expects program_id "
+                f"{configured_task_program_id!r}, got "
+                f"{task_program.program_id!r}."
+            )
         if registration is not None:
-            registration.catalog.preflight(expert_program)
-        env_cfg.expert_program = expert_program
+            registration.catalog.preflight(task_program)
+        env_cfg.task_program = task_program
 
     env_cfg.max_episode_steps = config.get("max_episode_steps", 300)
     env_cfg.num_envs = config.get("num_envs", 1)
-
-    physics_config = deepcopy(config.get("physics_config", {}))
-    if "gravity" in physics_config:
-        physics_config["gravity"] = np.asarray(physics_config["gravity"])
-    physics_cfg = physics_cfg_for_backend(config.get("physics", "default"))
-    physics_cfg = type(physics_cfg)(**physics_config)
 
     render_config = deepcopy(config.get("render_cfg", {}))
     if "renderer" in config:
@@ -553,7 +652,7 @@ def config_to_cfg(
 
     env_cfg.sim_cfg = SimulationManagerCfg(
         headless=config.get("headless", False),
-        device=config.get("device", "cpu"),
+        device=config.get("device"),
         render_cfg=RenderCfg(**render_config),
         gpu_id=config.get("gpu_id", 0),
         arena_space=config.get("arena_space", 5.0),
@@ -797,14 +896,14 @@ def config_to_cfg(
             )
             setattr(env_cfg.actions, term_name, action_term)
 
-    if configured_expert_program_runtime is not None:
-        from embodichain.lab.gym.envs.expert_program.configured_runtime import (
-            _register_configured_expert_program_runtime,
+    if configured_task_program_integration is not None:
+        from embodichain.lab.gym.envs.task_program.registration import (
+            _register_configured_task_program_integration,
         )
 
-        _register_configured_expert_program_runtime(
+        _register_configured_task_program_integration(
             config["id"],
-            configured_expert_program_runtime,
+            configured_task_program_integration,
             max_episode_steps=env_cfg.max_episode_steps,
         )
 
@@ -914,7 +1013,8 @@ def add_env_launcher_args_to_parser(
 
     This function adds the following arguments to the provided parser:
         --num_envs: Number of environments to run in parallel (default: 1)
-        --device: Device to run the environment on (default: 'cpu')
+        --device: Runtime device override. When omitted, the selected backend
+            supplies its own default (CPU for Default, CUDA for Newton).
         --headless: Whether to perform the simulation in headless mode (default: False)
         --renderer: Renderer backend to use for the simulation. Options are 'hybrid', 'fast-rt', and 'rt'. (default: 'hybrid')
         --physics: Physics backend configuration to use. Options are 'default' and 'newton'. (default: 'default')
@@ -946,8 +1046,10 @@ def add_env_launcher_args_to_parser(
     parser.add_argument(
         "--device",
         type=str,
-        default="cpu",
-        help="Device to run the environment on, e.g., 'cpu' or 'cuda'.",
+        default=None,
+        help="Device used by environment tensors and the selected physics "
+        "backend, e.g. 'cpu' or 'cuda:0'. When omitted, the selected backend "
+        "default is preserved unless this option is set.",
     )
     parser.add_argument(
         "--headless",
@@ -969,9 +1071,9 @@ def add_env_launcher_args_to_parser(
         type=str,
         choices=["default", "newton"],
         default=None if require_gym_config else "default",
-        help="Physics backend configuration to use for the simulation. When "
-        "loading a gym config, the configured backend is used unless this "
-        "option is provided.",
+        help="Physics backend to use for standalone simulation. Gym configs "
+        "declare their backend in the file; this option may only confirm the "
+        "same value.",
     )
     parser.add_argument(
         "--arena_space",
@@ -1060,7 +1162,8 @@ def add_env_launcher_args_to_parser(
 def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> dict:
     """Merge command-line arguments with gym configuration.
 
-    Command-line arguments will override the corresponding values in the gym configuration.
+    Command-line arguments override runtime values in the Gym configuration.
+    The physics backend is file-owned and cannot be changed by the launcher.
 
     Args:
         args (argparse.Namespace): The parsed command-line arguments.
@@ -1070,15 +1173,22 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         dict: The merged gym configuration dictionary.
     """
     merged_config = deepcopy(gym_config)
+    configured_physics = _declared_physics_backend(merged_config)
     if args.num_envs is not None:
         merged_config["num_envs"] = args.num_envs
-    merged_config["device"] = args.device
+    if args.device is not None:
+        merged_config["device"] = args.device
     viser_enabled = bool(getattr(args, "viser", False))
     merged_config["headless"] = args.headless or viser_enabled
     if args.renderer is not None:
         merged_config["renderer"] = args.renderer
-    if getattr(args, "physics", None) is not None:
-        merged_config["physics"] = args.physics
+    requested_physics = getattr(args, "physics", None)
+    if requested_physics is not None and requested_physics != configured_physics:
+        raise ValueError(
+            f"Gym config declares physics={configured_physics!r}; "
+            f"--physics={requested_physics!r} cannot override a file-owned "
+            "backend. Select a Gym config for the requested backend."
+        )
     merged_config["gpu_id"] = args.gpu_id
     merged_config["arena_space"] = args.arena_space
     if args.max_episodes is not None:
@@ -1132,6 +1242,15 @@ def build_env_cfg_from_args(
 
     gym_config_source_path = resolve_config_path(args.gym_config)
     gym_config = load_config(gym_config_source_path)
+    if "environment" in gym_config:
+        from embodichain.lab.gym.utils._component_composition import (
+            _resolve_environment_component,
+        )
+
+        gym_config = _resolve_environment_component(
+            gym_config,
+            base_dir=gym_config_source_path.parent,
+        )
     gym_config = merge_args_with_gym_config(args, gym_config)
     if gym_config_modifier is not None:
         gym_config_modifier(gym_config)
@@ -1140,7 +1259,7 @@ def build_env_cfg_from_args(
         gym_config,
         manager_modules=get_manager_modules(),
         source_path=gym_config_source_path,
-        expert_program_path_override=getattr(args, "expert_program", None),
+        task_program_path_override=getattr(args, "task_program", None),
     )
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving

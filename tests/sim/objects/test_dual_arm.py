@@ -165,7 +165,7 @@ def test_build_dual_arm_dual_part_toggle():
 
 def test_build_dual_arm_mirrors_newton_joint_overrides():
     base = URRobotCfg.from_dict({"robot_type": "ur5"})
-    base.drive_pros = NewtonJointDrivePropertiesCfg(
+    base.joint_drive_props = NewtonJointDrivePropertiesCfg(
         stiffness={"joint[1-6]": 12.0},
         target_mode={"joint[1-6]": "position"},
         friction=0.2,
@@ -174,16 +174,16 @@ def test_build_dual_arm_mirrors_newton_joint_overrides():
 
     cfg = build_dual_arm_cfg(base, mounts)
 
-    assert isinstance(cfg.drive_pros, NewtonJointDrivePropertiesCfg)
-    assert cfg.drive_pros.stiffness == {
+    assert isinstance(cfg.joint_drive_props, NewtonJointDrivePropertiesCfg)
+    assert cfg.joint_drive_props.stiffness == {
         "left_joint[1-6]": 12.0,
         "right_joint[1-6]": 12.0,
     }
-    assert cfg.drive_pros.target_mode == {
+    assert cfg.joint_drive_props.target_mode == {
         "left_joint[1-6]": "position",
         "right_joint[1-6]": "position",
     }
-    assert cfg.drive_pros.friction == 0.2
+    assert cfg.joint_drive_props.friction == 0.2
 
 
 # --------------------------------------------------------------------------- #

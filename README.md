@@ -59,9 +59,12 @@ embodichain run-env --gym_config path/to/gym_config.json
 
 To build your own task environments, start from the
 [embodichain_task_template](https://github.com/DexForce/embodichain_task_template)
-repository: fork it, implement an `EmbodiedEnv` subclass with `@register_env`,
-add a gym config, `pip install -e .`, then launch with `embodichain run-env`.
-See the
+repository. Tasks with custom Python behavior implement an `EmbodiedEnv`
+subclass with `@register_env`; supported configuration-defined Task Programs
+may instead compose the common environment from reusable `env.yaml`,
+embodiment, integration, and policy components. In either case, add a runnable
+gym config with `id`, install with `pip install -e .`, and launch it with
+`embodichain run-env`. See the
 [embodichain_tasks README](https://github.com/DexForce/EmbodiChain/blob/main/embodichain_tasks/README.md)
 for details.
 

@@ -27,11 +27,32 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     DefaultPhysicsCfg,
     NewtonPhysicsCfg,
+    PhysicsBackendCfg,
     WindowCameraPoseCfg,
 )
-from embodichain.lab.sim.physics import NewtonPhysicsBackend
+from embodichain.lab.sim.physics import DefaultPhysicsBackend, NewtonPhysicsBackend
 from embodichain.lab.sim.physics import newton as newton_physics
 from embodichain.lab.sim import sim_manager
+
+
+def test_simulation_manager_cfg_uses_default_physics_cfg() -> None:
+    cfg = SimulationManagerCfg()
+
+    assert type(cfg.physics_cfg) is DefaultPhysicsCfg
+
+
+@pytest.mark.no_sim
+def test_newton_physics_cfg_owns_backend_device_default() -> None:
+    """The concrete Newton default shadows the generic backend default."""
+    assert PhysicsBackendCfg().device == "cpu"
+    assert DefaultPhysicsCfg().device == "cpu"
+    assert NewtonPhysicsCfg().device == "cuda:0"
+    assert SimulationManagerCfg(physics_cfg=NewtonPhysicsCfg()).device == "cuda:0"
+    assert (
+        SimulationManagerCfg(physics_cfg=NewtonPhysicsCfg(), sim_device=None).device
+        == "cuda:0"
+    )
+    assert SimulationManagerCfg(physics_config=NewtonPhysicsCfg()).device == "cuda:0"
 
 
 def test_physics_runtime_fields_are_stored_on_physics_cfg() -> None:
@@ -63,6 +84,17 @@ def test_simulation_manager_cfg_keeps_legacy_physics_accessors() -> None:
     assert cfg.physics_cfg.device == "cuda:0"
 
 
+def test_simulation_manager_cfg_explicit_cpu_overrides_newton_default() -> None:
+    """An explicit runtime device has the same meaning for every backend."""
+    cfg = SimulationManagerCfg(
+        physics_cfg=NewtonPhysicsCfg(device="cuda:0"),
+        device="cpu",
+    )
+
+    assert cfg.device == "cpu"
+    assert cfg.physics_cfg.device == "cpu"
+
+
 def test_simulation_manager_cfg_initializes_window_camera_pose() -> None:
     window_camera_pose = WindowCameraPoseCfg(
         enable_hotkey=False,
@@ -91,15 +123,49 @@ def test_newton_physics_cfg_uses_device() -> None:
     assert "solver_type" not in serialized
 
 
-def test_newton_physics_cfg_uses_mujoco_warp_solver_by_default() -> None:
-    from dexsim.engine.newton_physics import MJWarpSolverCfg
+@pytest.mark.no_sim
+def test_newton_physics_cfg_preserves_dexsim_auto_solver_default() -> None:
+    from dexsim.engine.newton_physics import AutoSolverCfg
 
     cfg = NewtonPhysicsCfg()
 
     dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
 
-    assert isinstance(dexsim_cfg.solver_cfg, MJWarpSolverCfg)
-    assert dexsim_cfg.solver_cfg.solver_type == "mujoco_warp"
+    assert isinstance(dexsim_cfg.solver_cfg, AutoSolverCfg)
+    assert dexsim_cfg.solver_cfg.solver_type == "auto"
+
+
+@pytest.mark.no_sim
+def test_newton_physics_cfg_forwards_cuda_default_to_dexsim() -> None:
+    """The concrete Newton device default reaches the native config unchanged."""
+    cfg = NewtonPhysicsCfg()
+
+    dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
+
+    assert dexsim_cfg.device == "cuda:0"
+
+
+@pytest.mark.no_sim
+def test_newton_physics_cfg_requires_dexsim_auto_solver_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dexsim.engine import newton_physics
+
+    monkeypatch.delattr(newton_physics, "AutoSolverCfg")
+
+    with pytest.raises(
+        ImportError,
+        match="AutoSolverCfg.*dexsim_engine build pinned by EmbodiChain",
+    ):
+        NewtonPhysicsCfg().to_dexsim_cfg(gpu_id=0)
+
+
+@pytest.mark.no_sim
+def test_newton_gradient_mode_rejects_auto_solver() -> None:
+    cfg = NewtonPhysicsCfg(requires_grad=True)
+
+    with pytest.raises(RuntimeError, match="explicit.*semi_implicit"):
+        cfg.to_dexsim_cfg(gpu_id=0)
 
 
 def test_newton_physics_cfg_passes_warp_log_suppression() -> None:
@@ -108,6 +174,21 @@ def test_newton_physics_cfg_passes_warp_log_suppression() -> None:
     dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
 
     assert dexsim_cfg.suppress_warp_kernel_logs is False
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("update_interval", [None, 4])
+def test_newton_physics_cfg_forwards_collision_pipeline_update_interval(
+    update_interval: int | None,
+) -> None:
+    cfg = NewtonPhysicsCfg(collision_cfg={"update_interval": update_interval})
+
+    dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
+
+    assert dexsim_cfg.collision_pipeline_cfg is not None
+    assert dexsim_cfg.collision_pipeline_cfg.update_interval == update_interval
+    assert not hasattr(cfg, "enable_collision_pipeline")
+    assert not hasattr(cfg, "collision_pipeline_update_interval")
 
 
 @pytest.mark.parametrize(
@@ -176,6 +257,7 @@ def test_newton_warp_log_suppression_covers_world_update() -> None:
         sim_manager.wp.config.log_level = previous_log_level
 
 
+@pytest.mark.no_sim
 def test_newton_backend_exposes_resolved_solver_type() -> None:
     backend = NewtonPhysicsBackend(SimpleNamespace())
     world_config = SimpleNamespace(newton_cfg=None)
@@ -190,6 +272,27 @@ def test_newton_backend_exposes_resolved_solver_type() -> None:
 
     assert backend.solver_type == "xpbd"
     assert world_config.newton_cfg.solver_cfg.solver_type == "xpbd"
+
+
+@pytest.mark.no_sim
+def test_newton_backend_reports_scene_resolved_auto_solver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = object()
+    native_backend = SimpleNamespace(solver_type="mujoco_warp")
+    manager = SimpleNamespace(_world=world)
+    backend = NewtonPhysicsBackend(manager)
+    world_config = SimpleNamespace(newton_cfg=None)
+    sim_config = SimulationManagerCfg(physics_cfg=NewtonPhysicsCfg())
+    monkeypatch.setattr(
+        "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
+        lambda candidate: native_backend if candidate is world else None,
+    )
+
+    backend.configure_world(world_config, sim_config)
+
+    assert world_config.newton_cfg.solver_cfg.solver_type == "auto"
+    assert backend.solver_type == "mujoco_warp"
 
 
 def test_newton_teardown_releases_render_views_on_the_resolved_device(
@@ -275,6 +378,27 @@ def test_newton_backend_syncs_render_state_without_physics_step(
     native_backend.sync_particle_fluids.assert_called_once_with(world)
 
 
+@pytest.mark.parametrize(
+    ("device", "initializes_direct_gpu"),
+    [(torch.device("cpu"), False), (torch.device("cuda"), True)],
+)
+def test_default_backend_prepares_runtime_for_device(
+    device: torch.device,
+    initializes_direct_gpu: bool,
+) -> None:
+    manager = SimpleNamespace(device=device, _world=MagicMock())
+    backend = DefaultPhysicsBackend(manager)
+    result = object()
+
+    backend.prepare_spawn_runtime(result)
+
+    if initializes_direct_gpu:
+        manager._world.init_gpu_physics.assert_called_once_with()
+    else:
+        manager._world.init_gpu_physics.assert_not_called()
+
+
+@pytest.mark.no_sim
 def test_newton_physics_cfg_converts_mapping_solver_cfg_to_dexsim_cfg() -> None:
     from dexsim.engine.newton_physics import MJWarpSolverCfg
 
@@ -285,6 +409,7 @@ def test_newton_physics_cfg_converts_mapping_solver_cfg_to_dexsim_cfg() -> None:
             "iterations": 12,
             "ls_iterations": 4,
             "use_mujoco_contacts": False,
+            "enable_multiccd": True,
         },
     )
 
@@ -295,8 +420,21 @@ def test_newton_physics_cfg_converts_mapping_solver_cfg_to_dexsim_cfg() -> None:
     assert dexsim_cfg.solver_cfg.iterations == 12
     assert dexsim_cfg.solver_cfg.ls_iterations == 4
     assert dexsim_cfg.solver_cfg.use_mujoco_contacts is False
+    assert dexsim_cfg.solver_cfg.enable_multiccd is True
 
 
+@pytest.mark.no_sim
+def test_newton_physics_cfg_accepts_explicit_auto_solver_mapping() -> None:
+    from dexsim.engine.newton_physics import AutoSolverCfg
+
+    cfg = NewtonPhysicsCfg(solver_cfg={"class_type": "AutoSolverCfg"})
+
+    dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
+
+    assert isinstance(dexsim_cfg.solver_cfg, AutoSolverCfg)
+
+
+@pytest.mark.no_sim
 def test_newton_physics_cfg_directly_accepts_dexsim_solver_cfg_object() -> None:
     from dexsim.engine.newton_physics import XPBDSolverCfg
 

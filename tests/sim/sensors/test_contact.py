@@ -26,7 +26,7 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     RenderCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.lab.sim.sensors import (
     ContactSensorCfg,
@@ -91,12 +91,16 @@ class ContactTest:
                 uid=uid,
                 shape=CubeCfg(size=cube_size),
                 body_type="dynamic",
-                attrs=RigidBodyAttributesCfg(
-                    mass=0.1,
-                    dynamic_friction=0.9,
-                    static_friction=0.95,
-                    restitution=0.01,
-                    sleep_threshold=0.0,
+                attrs=RigidBodyPhysicsCfg.from_dict(
+                    {
+                        "mass_props": {"mass": 0.1},
+                        "rigid_props": {"sleep_threshold": 0.0},
+                        "material_props": {
+                            "dynamic_friction": 0.9,
+                            "static_friction": 0.95,
+                            "restitution": 0.01,
+                        },
+                    }
                 ),
                 init_pos=position,
             )
@@ -127,7 +131,7 @@ class ContactTest:
             },
             "init_pos": position,
             "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
-            "drive_pros": {
+            "joint_drive_props": {
                 "stiffness": {"finger[1-2]_joint": 1e2},
                 "damping": {"finger[1-2]_joint": 1e1},
                 "max_effort": {"finger[1-2]_joint": 1e3},
@@ -226,17 +230,7 @@ class ContactTest:
                 # Remaining slots should be False
                 assert not contact_report["is_valid"][env_id, num_contacts:].any()
 
-        cube2_user_ids = self.sim.get_rigid_object("cube2").get_user_ids()
-        finger1_user_ids = (
-            self.sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1)
-        )
-        filter_user_ids = torch.cat(
-            [
-                cube2_user_ids,
-                self.sim.get_robot("UR10_PGI").get_user_ids("finger1_link").reshape(-1),
-                self.sim.get_robot("UR10_PGI").get_user_ids("finger2_link").reshape(-1),
-            ]
-        )
+        filter_user_ids = self.contact_sensor.item_user_ids
         filter_contact_report = self.contact_sensor.filter_by_user_ids(filter_user_ids)
         n_filtered_contact = filter_contact_report["position"].shape[0]
         assert n_filtered_contact > 0, "No contact detected between gripper and cube."

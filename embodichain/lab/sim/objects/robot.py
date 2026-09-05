@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING, Dict, List, Literal, Sequence, Tuple
 from dataclasses import dataclass, field
 from tensordict import TensorDict
 
-from dexsim.engine import Articulation as _Articulation
 from embodichain.lab.sim.cfg import RobotCfg, RobotWorkspaceCfg
 from embodichain.lab.sim.solvers import SolverCfg, BaseSolver
 from embodichain.lab.sim.objects import Articulation
@@ -40,7 +39,7 @@ from embodichain.utils.string import (
 from embodichain.utils import logger
 
 if TYPE_CHECKING:
-    from dexsim.spawn import SpawnResult, SpawnedArticulation
+    from dexsim.scene import SpawnedArticulation
 
 
 @dataclass
@@ -74,15 +73,9 @@ class Robot(Articulation):
     def __init__(
         self,
         cfg: RobotCfg,
-        entities: List[_Articulation | SpawnedArticulation] | None = None,
         device: torch.device = torch.device("cpu"),
-        *,
-        spawn_result: SpawnResult | None = None,
-        declared_num_instances: int | None = None,
     ) -> None:
-
-        self._entities = [] if entities is None else entities
-        self.cfg = cfg
+        """Create an unregistered robot facade."""
 
         # Initialize joint ids for control parts.
         self._joint_ids: Dict[str, List[int]] = {}
@@ -97,19 +90,7 @@ class Robot(Articulation):
         # cache I/O unless a task actually requests workspace sampling.
         self._workspaces: Dict[str, RobotWorkspace] = {}
 
-        if entities is not None and self.cfg.control_parts:
-            self._init_control_parts(self.cfg.control_parts)
-
-        super().__init__(
-            cfg,
-            entities,
-            device,
-            spawn_result=spawn_result,
-            declared_num_instances=declared_num_instances,
-        )
-
-        if entities is not None and self.cfg.solver_cfg:
-            self.init_solver(self.cfg.solver_cfg)
+        super().__init__(cfg, device)
 
     def __str__(self) -> str:
         parent_str = super().__str__()
@@ -130,6 +111,13 @@ class Robot(Articulation):
         super().attach_spawn_handles(entities)
         if self.cfg.control_parts:
             self._init_control_parts(self.cfg.control_parts)
+
+    def _initialize_spawn_bound_extension(self) -> None:
+        """Initialize robot-specific runtime state after Scene binding."""
+        if self.cfg.control_parts:
+            self._init_control_parts(self.cfg.control_parts)
+        if self.cfg.solver_cfg:
+            self.init_solver(self.cfg.solver_cfg)
 
     @property
     def control_parts(self) -> Dict[str, List[str]] | None:
@@ -1196,7 +1184,7 @@ class Robot(Articulation):
         import numbers
         from embodichain.utils.string import resolve_matching_names_values
 
-        drive_props = [
+        joint_property_targets = [
             ("damping", self.default_joint_damping),
             ("stiffness", self.default_joint_stiffness),
             ("max_effort", self.default_joint_max_effort),
@@ -1205,8 +1193,8 @@ class Robot(Articulation):
             ("armature", self.default_joint_armature),
         ]
 
-        for prop_name, default_array in drive_props:
-            value = getattr(self.cfg.drive_pros, prop_name, None)
+        for prop_name, default_array in joint_property_targets:
+            value = getattr(self.cfg.joint_drive_props, prop_name, None)
             if value is None:
                 continue
             if isinstance(value, numbers.Number):
@@ -1246,13 +1234,13 @@ class Robot(Articulation):
                 except Exception as e:
                     logger.log_error(f"Failed to set {prop_name}: {e}")
 
-        drive_pros = self.cfg.drive_pros
-        if isinstance(drive_pros, dict):
-            drive_type = drive_pros.get("drive_type")
-            target_mode = drive_pros.get("target_mode")
+        joint_drive_props = self.cfg.joint_drive_props
+        if isinstance(joint_drive_props, dict):
+            drive_type = joint_drive_props.get("drive_type")
+            target_mode = joint_drive_props.get("target_mode")
         else:
-            drive_type = getattr(drive_pros, "drive_type", None)
-            target_mode = getattr(drive_pros, "target_mode", None)
+            drive_type = getattr(joint_drive_props, "drive_type", None)
+            target_mode = getattr(joint_drive_props, "target_mode", None)
         if isinstance(target_mode, dict):
             logger.log_warning(
                 "Per-joint target_mode mappings require a Spawn-bound robot; "

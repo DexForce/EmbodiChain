@@ -32,7 +32,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
     physics_cfg_for_backend,
 )
-from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.visualization import visualization_cfg_from_args
@@ -110,13 +110,19 @@ def main() -> None:
     chair: RigidObject = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="chair",
-            shape=MeshCfg(fpath=path, max_convex_hull_num=32),
+            shape=MeshCfg(
+                fpath=path,
+                collision=MeshCollisionCfg(
+                    approximation="convex_decomposition",
+                    max_hulls=32,
+                ),
+            ),
             body_type="dynamic",
             attrs=RigidBodyPhysicsCfg(
                 mass_props=MassPropertiesCfg(mass=10.0),
             ),
             body_scale=[0.5, 0.5, 0.5],
-            init_pos=[0.0, 0.0, 0.5],
+            init_pos=[0.0, 0.0, 0.51],
             init_rot=[0.0, 0.0, 0.0],
         )
     )

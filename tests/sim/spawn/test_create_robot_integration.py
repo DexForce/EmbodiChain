@@ -22,6 +22,7 @@ import numpy as np
 import pytest
 
 import dexsim
+from embodichain.lab.sim.cfg import NewtonPhysicsCfg
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
     configure_articulation_desc,
@@ -42,6 +43,18 @@ ARM_MAX_EFFORT = 1.0e4
 class _ConfigCapture:
     def add_robot(self, cfg):
         return cfg
+
+
+def _make_world(*, backend: str) -> dexsim.World:
+    """Build one headless world for a source-physics integration check."""
+    config = dexsim.WorldConfig()
+    config.open_windows = False
+    config.renderer = dexsim.types.Renderer.HYBRID
+    if backend == "newton":
+        config.newton_cfg = NewtonPhysicsCfg(num_substeps=1).to_dexsim_cfg(gpu_id=0)
+    elif backend != "default":
+        raise ValueError(f"Unsupported test backend: {backend!r}.")
+    return dexsim.World(config)
 
 
 def _resolve_tutorial_properties(world, cfg):
@@ -77,11 +90,7 @@ def test_create_robot_preserves_source_inertia_and_arm_drive() -> None:
     cfg = create_robot(_ConfigCapture())
     cfg.fpath = cfg.urdf_cfg.assemble_urdf()
 
-    config = dexsim.WorldConfig()
-    config.open_windows = False
-    config.renderer = dexsim.types.Renderer.HYBRID
-    config.backend = dexsim.types.Backend.VULKAN
-    world = dexsim.World(config)
+    world = _make_world(backend="default")
 
     (
         mass,
@@ -108,22 +117,55 @@ def test_create_robot_preserves_source_inertia_and_arm_drive() -> None:
     assert common_max_effort == pytest.approx(ARM_MAX_EFFORT)
 
 
+def test_create_robot_newton_preserves_source_inertia_and_arm_drive() -> None:
+    """The deferred Newton build uses the same source property contract."""
+    cfg = create_robot(_ConfigCapture())
+    cfg.fpath = cfg.urdf_cfg.assemble_urdf()
+
+    (
+        mass,
+        inertia,
+        stiffness,
+        damping,
+        max_effort,
+        newton_ke,
+        newton_kd,
+        common_max_effort,
+    ) = _resolve_tutorial_properties(_make_world(backend="newton"), cfg)
+
+    assert mass == pytest.approx(ARM_BASE_MASS)
+    np.testing.assert_allclose(inertia, ARM_BASE_INERTIA, rtol=1.0e-5)
+    assert (
+        stiffness,
+        damping,
+        max_effort,
+        newton_ke,
+        newton_kd,
+        common_max_effort,
+    ) == pytest.approx(
+        (
+            ARM_STIFFNESS,
+            ARM_DAMPING,
+            ARM_MAX_EFFORT,
+            ARM_STIFFNESS,
+            ARM_DAMPING,
+            ARM_MAX_EFFORT,
+        )
+    )
+
+
 def test_create_sensor_uses_the_matched_arm_drive() -> None:
     """Keep the sensor tutorial's arm controller aligned across backends."""
     cfg = create_sensor_robot(_ConfigCapture())
 
-    assert cfg.drive_pros is not None
-    assert cfg.drive_pros.max_effort == {
+    assert cfg.joint_drive_props is not None
+    assert cfg.joint_drive_props.max_effort == {
         "joint[1-6]": ARM_MAX_EFFORT,
         "LEFT_.*": ARM_MAX_EFFORT,
     }
     cfg.fpath = cfg.urdf_cfg.assemble_urdf()
 
-    config = dexsim.WorldConfig()
-    config.open_windows = False
-    config.renderer = dexsim.types.Renderer.HYBRID
-    config.backend = dexsim.types.Backend.VULKAN
-    world = dexsim.World(config)
+    world = _make_world(backend="default")
 
     (
         _,

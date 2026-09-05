@@ -67,8 +67,8 @@ def create_articulation(sim: SimulationManager) -> Articulation:
         fpath=get_data_path(DRAWER_ASSET),
         asset_physics_mode="overlay",
         init_pos=(0.0, 0.0, 0.05),
-        articulation_props=ArticulationRootPropertiesCfg(fixed_base=True),
-        drive_pros=JointDrivePropertiesCfg(drive_type="none"),
+        root_props=ArticulationRootPropertiesCfg(fixed_base=True),
+        joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
         # The asset limit is [0.0, 0.2]; keep 90% of its travel range.
         qpos_limits=DRAWER_USER_QPOS_LIMITS,
         # Newton currently has no body-level damping setting. Remove the
@@ -99,7 +99,7 @@ def create_articulation(sim: SimulationManager) -> Articulation:
     print(f"[INFO]: Loaded articulation with {articulation.dof} joint(s)", flush=True)
     print(f"[INFO]: Joint names: {articulation.joint_names}", flush=True)
     print(
-        f"[INFO]: Config drive type: {articulation.cfg.drive_pros.drive_type}",
+        f"[INFO]: Config drive type: {articulation.cfg.joint_drive_props.drive_type}",
         flush=True,
     )
     print(f"[INFO]: Backend drive types: {backend_drive_types}", flush=True)

@@ -58,7 +58,7 @@ class MockRigidObject:
         self.cfg.shape = Mock()
         self.cfg.shape.fpath = "test.obj"
         self.cfg.attrs = Mock()
-        self.cfg.attrs.mass = 1.0
+        self.cfg.attrs.mass_props = Mock(mass=1.0)
 
         # Default pose at origin
         self._pose = torch.eye(4).unsqueeze(0).repeat(num_envs, 1, 1)
@@ -581,7 +581,7 @@ class TestRandomizeRigidObjectMass:
         env = MockEnv(num_envs=4)
         env_ids = torch.tensor([0, 1, 2, 3])
         # The backend-resolved mass is the baseline, not stale config metadata.
-        env.test_object.cfg.attrs.mass = 10.0
+        env.test_object.cfg.attrs.mass_props.mass = 10.0
 
         for _ in range(2):
             randomize_rigid_object_mass(

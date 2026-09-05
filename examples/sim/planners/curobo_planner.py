@@ -108,9 +108,10 @@ def parse_args() -> argparse.Namespace:
     )
     add_env_launcher_args_to_parser(parser)
     # This standalone example does not merge a gym config after parsing, so
-    # override the launcher's ``None`` sentinel with a concrete single-world
-    # default.
-    parser.set_defaults(arena_space=2.0, num_envs=1)
+    # override the launcher's ``None`` sentinels with concrete defaults. cuRobo
+    # itself requires CUDA; keeping that default explicit avoids passing the
+    # shared parser's omission sentinel into ``torch.device``.
+    parser.set_defaults(device="cuda", arena_space=2.0, num_envs=1)
     # Backward-compatible aliases used by older versions of this example.
     parser.add_argument(
         "--step-repeat",
@@ -328,7 +329,7 @@ def _build_scene(
                             "LEFT_HAND_PINKY",
                         ],
                     },
-                    "drive_pros": {
+                    "joint_drive_props": {
                         "stiffness": {"LEFT_[A-Z|_]+[0-9]?": 1e2},
                         "damping": {"LEFT_[A-Z|_]+[0-9]?": 1e1},
                         "max_effort": {"LEFT_[A-Z|_]+[0-9]?": 1e3},

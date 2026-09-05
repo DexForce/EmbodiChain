@@ -3,7 +3,7 @@ Supported Tasks
 
 The official task environments are bundled in the ``embodichain`` wheel under
 the ``embodichain_tasks`` import package. Import-backed tasks register during
-package discovery; configuration-defined Expert Program tasks register when
+package discovery; configuration-defined Task Program tasks register when
 their gym config is loaded. No second package installation is needed.
 
 Run a task by passing one of its gym configuration files to the unified CLI:
@@ -11,7 +11,7 @@ Run a task by passing one of its gym configuration files to the unified CLI:
 .. code-block:: bash
 
    embodichain run-env \
-       --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.json
+       --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
 
 Use ``--preview`` to inspect a configured environment without starting a data
 generation run. See :doc:`/guides/run_env` for all launch options and
@@ -34,8 +34,11 @@ Environment catalog
      - ``PushCubeRL``
      - ``embodichain_tasks/configs/tasks/manipulation/push_cube/env.json``
    * - Manipulation
-     - ``ExpertProgramRepeatedPickPlace-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.json``
+     - ``TaskProgramRepeatedPickPlace-v1``
+     - ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml``
+   * - Manipulation
+     - ``TaskProgramRepeatedPickPlace-Franka-v1``
+     - ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml``
    * - Special
      - ``SimpleTask-v1``
      - ``embodichain_tasks/configs/tasks/special/simple_task/env_ur10.json``
@@ -52,17 +55,20 @@ Environment catalog
      - ``MatchObjectContainer-v1``
      - ``embodichain_tasks/configs/tasks/manipulation/tableware/match_object_container/env.json``
    * - Manipulation
-     - ``ExpertProgramOpenDrawer-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/open_drawer/env.json``
+     - ``TaskProgramOpenDrawer-v1``
+     - ``embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml``
+   * - Manipulation
+     - ``TaskProgramOpenDrawer-Franka-v1``
+     - ``embodichain_tasks/configs/tasks/manipulation/open_drawer/task.franka.yaml``
    * - Manipulation
      - ``HandOver-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/hand_over/env.json``
+     - ``embodichain_tasks/configs/tasks/manipulation/hand_over/task.dual_ur5_dh_pgi_140_80.yaml``
    * - Tableware
      - ``PlaceObjectDrawer-v1``
      - ``embodichain_tasks/configs/tasks/manipulation/tableware/place_object_drawer/env.json``
    * - Tableware
      - ``PourWater-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.json``
+     - ``embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml``
    * - Tableware
      - ``ScoopIce-v1``
      - ``embodichain_tasks/configs/tasks/manipulation/tableware/scoop_ice/env.json``
@@ -74,6 +80,11 @@ Environment catalog
      - ``embodichain_tasks/configs/tasks/manipulation/tableware/stack_cups/env.json``
 
 The value of ``id`` inside a conventional gym config must match a registered
-environment ID. A supported ``expert_program_runtime`` config registers its own
-free ID while loading. When adding a task, update this catalog together with
-its runnable config.
+environment ID. A supported configuration-defined Task Program deployment
+declares ``environment.component``,
+``task_program.{program,integration,execution_policy}``, and
+``embodiment.component``; loading it registers its free ``id`` against the
+common ``EmbodiedEnv``. A pure ``env.yaml`` component has ``environment_id``
+but no runnable ``id``, so task discovery does not list it. Discovery is based
+on the top-level ``id`` schema rather than an ``env*`` filename prefix.
+When adding a task, update this catalog together with its runnable config.

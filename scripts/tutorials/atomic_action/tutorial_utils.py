@@ -22,9 +22,10 @@ import argparse
 import math
 import re
 import time
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import Literal
 
+import numpy as np
 import torch
 
 from embodichain.data import get_data_path
@@ -37,11 +38,16 @@ from embodichain.lab.sim.atomic_actions import (
     TimedTrajectory,
 )
 from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
     CollisionPropertiesCfg,
     DefaultRigidBodyPropertiesCfg,
     LightCfg,
+    LinkPhysicsOverrideCfg,
     MassPropertiesCfg,
     MarkerCfg,
+    NewtonPhysicsCfg,
+    NewtonRigidBodyMaterialCfg,
+    PhysicsBackendCfg,
     RenderCfg,
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
@@ -89,6 +95,12 @@ ROBOTIQ_2F_140_TCP = (
     (0.0, 0.0, 1.0, 0.21),
     (0.0, 0.0, 0.0, 1.0),
 )
+# DexSim canonicalizes the UR source URDF's rounded +/-6.2832 limits to +/-2*pi.
+# Configure the solver with that physical range up front to avoid a no-op limit-sync
+# warning during tutorial robot construction.
+_UR_TUTORIAL_QPOS_LIMITS: tuple[tuple[float, float], ...] = tuple(
+    (-2.0 * math.pi, 2.0 * math.pi) for _ in range(6)
+)
 TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
     model_id="dh_pgi_140_80",
     min_opening_width=0.003,
@@ -99,9 +111,22 @@ TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
     palm_depth=0.096,
 )
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.024
+NEWTON_GRASP_CONTACT_STIFFNESS = 4.0e4
+NEWTON_GRASP_CONTACT_DAMPING = 4.0e2
+# The official Newton native-contact grasp example uses condim=4 to retain
+# torsional friction. The tutorial profile applies it just before replay.
+NEWTON_NATIVE_CONTACT_DIMENSION = 4
+# Native MuJoCo contacts need a short hold after the gripper first reaches its
+# commanded grasp position. Keep this as a duration rather than a raw number of
+# updates so the helper remains correct if a tutorial changes its control rate.
+NEWTON_NATIVE_CONTACT_SETTLE_DURATION = 0.24
 DEFAULT_TUTORIAL_LIGHT_POS = (1.0, 0.0, 3.0)
 _FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
 _DEFAULT_GRIPPER_TCP_Z = 0.17
+_GRIPPER_CONTACT_LINK_PATTERN = (
+    r"(?:.*_)?(?:gripper_finger[12]_link_1|"
+    r"(?:left|right)_(?:outer|inner)_(?:finger(?:_pad)?|knuckle))"
+)
 _GRIPPER_TCP = (
     (1.0, 0.0, 0.0, 0.0),
     (0.0, 1.0, 0.0, 0.0),
@@ -188,6 +213,39 @@ def create_tutorial_argument_parser(
     return parser
 
 
+def _tutorial_physics_cfg(
+    backend: Literal["default", "newton"],
+) -> PhysicsBackendCfg:
+    """Build the shared physics configuration for atomic-action tutorials.
+
+    Newton tutorials intentionally use MuJoCo Warp's native collision path.
+    It generates contacts inside every solver substep, so an external Newton
+    collision pipeline would be unused and would only allocate unnecessary
+    contact buffers.
+    """
+    physics_cfg = physics_cfg_for_backend(backend)
+    if isinstance(physics_cfg, NewtonPhysicsCfg):
+        # Keep 1 ms internal solver steps for stable robot contacts. Match the
+        # official Newton cube-stacking solver profile: nconmax and njmax
+        # size MuJoCo Warp's native per-world contact and constraint buffers.
+        # MultiCCD retains up to four contacts per gripper-mesh/object pair,
+        # which prevents a marginal two-finger grasp from sliding away.
+        physics_cfg.num_substeps = 10
+        physics_cfg.collision_cfg = None
+        physics_cfg.solver_cfg = {
+            "solver_type": "mujoco_warp",
+            "solver": "newton",
+            "integrator": "implicitfast",
+            "iterations": 20,
+            "ls_iterations": 100,
+            "cone": "elliptic",
+            "impratio": 1_000.0,
+            "use_mujoco_contacts": True,
+            "enable_multiccd": True,
+        }
+    return physics_cfg
+
+
 def create_tutorial_simulation(
     args: argparse.Namespace,
     *,
@@ -212,7 +270,7 @@ def create_tutorial_simulation(
             headless=True,
             num_envs=args.num_envs,
             device=args.device,
-            physics_cfg=physics_cfg_for_backend(args.physics),
+            physics_cfg=_tutorial_physics_cfg(args.physics),
             render_cfg=RenderCfg(renderer=args.renderer),
             physics_dt=1.0 / 100.0,
             arena_space=arena_space,
@@ -282,13 +340,13 @@ def add_ur5_gripper_robot(
     Returns:
         The added robot instance.
     """
-    return sim.add_robot(
-        cfg=create_ur5_gripper_robot_cfg(
-            init_pos=init_pos,
-            init_qpos=init_qpos,
-            tcp_z=tcp_z,
-        )
+    robot_cfg = create_ur5_gripper_robot_cfg(
+        init_pos=init_pos,
+        init_qpos=init_qpos,
+        tcp_z=tcp_z,
     )
+    configure_newton_gripper_contacts(sim, robot_cfg)
+    return sim.add_robot(cfg=robot_cfg)
 
 
 def add_tutorial_robot(
@@ -312,14 +370,14 @@ def add_tutorial_robot(
     Raises:
         ValueError: If ``robot_type`` is not supported.
     """
-    return sim.add_robot(
-        cfg=create_tutorial_robot_cfg(
-            robot_type,
-            init_pos=init_pos,
-            init_qpos=init_qpos,
-            **kwargs,
-        )
+    robot_cfg = create_tutorial_robot_cfg(
+        robot_type,
+        init_pos=init_pos,
+        init_qpos=init_qpos,
+        **kwargs,
     )
+    configure_newton_gripper_contacts(sim, robot_cfg)
+    return sim.add_robot(cfg=robot_cfg)
 
 
 def create_toppra_motion_generator(robot: Robot) -> MotionGenerator:
@@ -350,12 +408,19 @@ def create_tutorial_rigid_body_physics(
     min_velocity_iters: int | None = None,
     contact_offset: float | None = None,
     rest_offset: float | None = None,
+    newton_contact: bool = False,
 ) -> RigidBodyPhysicsCfg:
     """Create portable rigid-body physics for an atomic-action tutorial.
 
     Material and mass values apply to both physics backends. The remaining
     values are retained in the Default-backend configuration group; Newton
     safely ignores those properties because it has no equivalent controls.
+    Set ``newton_contact`` only for a manipulation contact surface in a Newton
+    scene to use the same less-compliant response as the drawer tutorial.
+
+    Args:
+        newton_contact: Whether to add the Newton-only contact stiffness and
+            damping used on grasped or directly manipulated objects.
 
     Returns:
         Grouped physics configuration accepted by both tutorial backends.
@@ -393,14 +458,68 @@ def create_tutorial_rigid_body_physics(
             else None
         ),
         material_props=(
-            RigidBodyMaterialCfg(
-                static_friction=static_friction,
-                dynamic_friction=dynamic_friction,
-                restitution=restitution,
+            (
+                NewtonRigidBodyMaterialCfg(
+                    static_friction=static_friction,
+                    dynamic_friction=dynamic_friction,
+                    restitution=restitution,
+                    ke=NEWTON_GRASP_CONTACT_STIFFNESS,
+                    kd=NEWTON_GRASP_CONTACT_DAMPING,
+                )
+                if newton_contact
+                else RigidBodyMaterialCfg(
+                    static_friction=static_friction,
+                    dynamic_friction=dynamic_friction,
+                    restitution=restitution,
+                )
             )
-            if any(value is not None for value in material_values)
+            if newton_contact or any(value is not None for value in material_values)
             else None
         ),
+    )
+
+
+def configure_newton_link_contacts(
+    sim: SimulationManager,
+    articulation_cfg: ArticulationCfg,
+    *,
+    group_name: str,
+    link_names_expr: list[str],
+) -> None:
+    """Apply the tutorial Newton contact material to selected articulation links."""
+    if not sim.is_newton_backend:
+        return
+
+    articulation_cfg.link_attrs = {
+        **(articulation_cfg.link_attrs or {}),
+        group_name: LinkPhysicsOverrideCfg(
+            link_names_expr=link_names_expr,
+            attrs=RigidBodyPhysicsCfg(
+                material_props=NewtonRigidBodyMaterialCfg(
+                    ke=NEWTON_GRASP_CONTACT_STIFFNESS,
+                    kd=NEWTON_GRASP_CONTACT_DAMPING,
+                )
+            ),
+        ),
+    }
+
+
+def configure_newton_gripper_contacts(
+    sim: SimulationManager,
+    robot_cfg: RobotCfg,
+) -> None:
+    """Configure Newton gripper contacts and recompute their source inertia."""
+    if not sim.is_newton_backend:
+        return
+
+    configure_newton_link_contacts(
+        sim,
+        robot_cfg,
+        group_name="newton_gripper_contacts",
+        link_names_expr=[_GRIPPER_CONTACT_LINK_PATTERN],
+    )
+    robot_cfg.link_attrs["newton_gripper_contacts"].attrs.mass_props = (
+        MassPropertiesCfg(recompute_inertia=True)
     )
 
 
@@ -727,7 +846,9 @@ def replay_trajectory(
         hold_steps: Number of final-pose simulation updates after the trajectory.
         trajectory_sim_steps: Optional fixed physics steps per waypoint. When
             omitted for a ``TimedTrajectory``, its arrival intervals determine
-            the synchronized physics-step count. Legacy tensors default to four.
+            the synchronized physics-step count. Native Newton replays add one
+            short contact-settling hold after each hand transition. Legacy
+            tensors otherwise default to four.
         hold_sim_steps: Physics steps for each final-pose update.
         joint_ids: Optional joint IDs when controlling a robot subset.
         on_trajectory_step: Optional callback run after each trajectory update.
@@ -742,6 +863,13 @@ def replay_trajectory(
         raise ValueError("trajectory positions must have shape (B, N, D).")
     if positions.shape[1] == 0:
         raise ValueError("trajectory must contain at least one waypoint.")
+
+    _configure_newton_native_contact_dimension(sim)
+    native_contact_settle_steps = _newton_native_contact_settle_steps(
+        sim,
+        robot,
+        positions,
+    )
 
     recording_started = (
         start_auto_play_recording(
@@ -779,6 +907,14 @@ def replay_trajectory(
                         else math.ceil(step_ratio)
                     ),
                 )
+            if step_idx in native_contact_settle_steps:
+                settle_steps = math.ceil(
+                    NEWTON_NATIVE_CONTACT_SETTLE_DURATION
+                    / float(sim.sim_config.physics_dt)
+                )
+                waypoint_sim_steps = (
+                    4 if waypoint_sim_steps is None else waypoint_sim_steps
+                ) + max(1, settle_steps)
             sim.update(step=4 if waypoint_sim_steps is None else waypoint_sim_steps)
             if on_trajectory_step is not None:
                 on_trajectory_step(step_idx, total_steps)
@@ -794,6 +930,121 @@ def replay_trajectory(
             time.sleep(1e-2)
     finally:
         stop_auto_play_recording(sim, recording_started)
+
+
+def _configure_newton_native_contact_dimension(
+    sim: SimulationManager,
+) -> bool:
+    """Enable torsional friction for the native MuJoCo tutorial contact model.
+
+    Newton's cube-stacking native-contact example configures ``condim=4`` on
+    the gripper and grasped cubes. Atomic-action tutorials share one native
+    contact profile, so this applies the same dimension to the finalized
+    MuJoCo scene immediately before replay. It is intentionally limited to
+    MuJoCo Warp's internally generated contacts; external Newton collision
+    pipelines and other solvers retain their authored settings.
+    """
+    if getattr(sim, "is_newton_backend", False) is not True:
+        return False
+    world = getattr(sim, "_world", None)
+    if world is None:
+        return False
+
+    from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+    backend = get_newton_backend(world)
+    if backend is None or backend.solver_type != "mujoco_warp":
+        return False
+    solver_cfg = getattr(getattr(backend, "cfg", None), "solver_cfg", None)
+    if solver_cfg is None or not getattr(solver_cfg, "use_mujoco_contacts", False):
+        return False
+    if getattr(getattr(backend, "cfg", None), "requires_grad", False):
+        return False
+    if getattr(getattr(backend, "model", None), "requires_grad", False):
+        return False
+
+    solver = getattr(backend, "solver", None)
+    mjc_model = getattr(solver, "mj_model", None)
+    mjw_model = getattr(solver, "mjw_model", None)
+    mjw_geom_condim = getattr(mjw_model, "geom_condim", None)
+    mjc_geom_condim = getattr(mjc_model, "geom_condim", None)
+    if mjw_geom_condim is None or mjc_geom_condim is None:
+        return False
+
+    current = np.asarray(mjw_geom_condim.numpy())
+    if current.size == 0:
+        return False
+    mjw_geom_condim.assign(
+        np.full_like(current, NEWTON_NATIVE_CONTACT_DIMENSION),
+    )
+    mjc_geom_condim[...] = NEWTON_NATIVE_CONTACT_DIMENSION
+    return True
+
+
+def _newton_native_contact_settle_steps(
+    sim: SimulationManager,
+    robot: Robot,
+    positions: torch.Tensor,
+) -> frozenset[int]:
+    """Return endpoints for contiguous native-MuJoCo hand-motion intervals.
+
+    MuJoCo-Warp creates contacts internally, rather than retaining the
+    external Newton pipeline's contact set. Each hand transition needs a brief
+    integration hold before subsequent object motion. This also covers the
+    receiving-hand close in the HandOver tutorial. Detect every contiguous
+    hand-motion interval generically from tutorial control parts so arm-only
+    trajectories retain their authored timing.
+    """
+    if getattr(sim, "is_newton_backend", False) is not True:
+        return frozenset()
+    control_parts = getattr(robot, "control_parts", None)
+    if not isinstance(control_parts, Mapping):
+        return frozenset()
+
+    hand_joint_ids: set[int] = set()
+    for part_name in control_parts:
+        if "hand" not in part_name.lower() and "gripper" not in part_name.lower():
+            continue
+        joint_ids = robot.get_joint_ids(name=part_name)
+        hand_joint_ids.update(
+            joint_id
+            for joint_id in joint_ids
+            if isinstance(joint_id, int) and 0 <= joint_id < positions.shape[2]
+        )
+    if not hand_joint_ids:
+        return frozenset()
+
+    hand_positions = positions[:, :, sorted(hand_joint_ids)]
+    changed_from_previous = ~torch.isclose(
+        hand_positions[:, 1:, :],
+        hand_positions[:, :-1, :],
+        rtol=0.0,
+        atol=1.0e-6,
+    )
+    changed_intervals = torch.nonzero(
+        changed_from_previous.any(dim=2).any(dim=0),
+        as_tuple=False,
+    ).flatten()
+    if changed_intervals.numel() == 0:
+        return frozenset()
+
+    # A changed interval i is the command transition from waypoint i to i + 1.
+    # Hold at each contiguous interval's endpoint, where its hand has reached
+    # the requested qpos. Separate hand phases arise in multi-arm handovers.
+    settle_steps: set[int] = set()
+    previous_interval: int | None = None
+    for interval_value in changed_intervals.tolist():
+        interval = int(interval_value)
+        if previous_interval is not None and interval != previous_interval + 1:
+            settle_step = previous_interval + 1
+            if settle_step < positions.shape[1]:
+                settle_steps.add(settle_step)
+        previous_interval = interval
+    if previous_interval is not None:
+        settle_step = previous_interval + 1
+        if settle_step < positions.shape[1]:
+            settle_steps.add(settle_step)
+    return frozenset(settle_steps)
 
 
 def make_clear_dynamics_callback(
@@ -1008,7 +1259,7 @@ def create_ur5_gripper_robot_cfg(
             "control_parts": {
                 "hand": [GRIPPER_HAND_JOINT_PATTERN],
             },
-            "drive_pros": {
+            "joint_drive_props": {
                 "stiffness": {
                     GRIPPER_HAND_JOINT_PATTERN: 1e3,
                 },
@@ -1026,7 +1277,8 @@ def create_ur5_gripper_robot_cfg(
                         [0.0, 1.0, 0.0, 0.0],
                         [0.0, 0.0, 1.0, tcp_z],
                         [0.0, 0.0, 0.0, 1.0],
-                    ]
+                    ],
+                    "user_qpos_limits": _UR_TUTORIAL_QPOS_LIMITS,
                 }
             },
             "init_qpos": qpos,
@@ -1072,7 +1324,7 @@ def create_franka_panda_robot_cfg(
             ],
         },
         "control_parts": {"hand": [GRIPPER_HAND_JOINT_PATTERN]},
-        "drive_pros": {
+        "joint_drive_props": {
             "stiffness": {GRIPPER_HAND_JOINT_PATTERN: 1e3},
             "damping": {GRIPPER_HAND_JOINT_PATTERN: 1e2},
             "max_effort": {GRIPPER_HAND_JOINT_PATTERN: 1e4},
@@ -1090,9 +1342,9 @@ def create_franka_panda_robot_cfg(
     if init_qpos is None:
         cfg.init_qpos[-2:] = [0.0, 0.0]
     for drive_values in (
-        cfg.drive_pros.stiffness,
-        cfg.drive_pros.damping,
-        cfg.drive_pros.max_effort,
+        cfg.joint_drive_props.stiffness,
+        cfg.joint_drive_props.damping,
+        cfg.joint_drive_props.max_effort,
     ):
         drive_values.pop("fr3_finger_joint[1-2]", None)
     return cfg
@@ -1143,12 +1395,17 @@ def create_ur10_robotiq_robot_cfg(
             "control_parts": {
                 "hand": [ROBOTIQ_HAND_JOINT_PATTERN],
             },
-            "drive_pros": {
+            "joint_drive_props": {
                 "stiffness": {ROBOTIQ_HAND_JOINT_PATTERN: 1e3},
                 "damping": {ROBOTIQ_HAND_JOINT_PATTERN: 1e2},
                 "max_effort": {ROBOTIQ_HAND_JOINT_PATTERN: 1e3},
             },
-            "solver_cfg": {"arm": {"tcp": ROBOTIQ_2F_140_TCP}},
+            "solver_cfg": {
+                "arm": {
+                    "tcp": ROBOTIQ_2F_140_TCP,
+                    "user_qpos_limits": _UR_TUTORIAL_QPOS_LIMITS,
+                }
+            },
             "init_qpos": qpos,
             "init_pos": init_pos,
         }
@@ -1209,6 +1466,10 @@ __all__ = [
     "ROBOTIQ_2F_140_TCP",
     "ROBOTIQ_2F_140_URDF_PATH",
     "ROBOTIQ_HAND_JOINT_PATTERN",
+    "NEWTON_GRASP_CONTACT_DAMPING",
+    "NEWTON_GRASP_CONTACT_STIFFNESS",
+    "NEWTON_NATIVE_CONTACT_DIMENSION",
+    "NEWTON_NATIVE_CONTACT_SETTLE_DURATION",
     "TOP_DOWN_EEF_ROTATION",
     "TutorialCliFeature",
     "TutorialRobot",
@@ -1218,6 +1479,8 @@ __all__ = [
     "broadcast_pose_batch",
     "broadcast_waypoint_pose_batch",
     "clone_local_pose_from_first_env",
+    "configure_newton_gripper_contacts",
+    "configure_newton_link_contacts",
     "create_antipodal_semantics",
     "create_parallel_jaw_grasp_pose_generator",
     "create_curobo_motion_generator",

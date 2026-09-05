@@ -511,7 +511,7 @@ class BaseRobotTest:
         cfg = deepcopy(self.robot.cfg)
 
         cfg_dict = {
-            "drive_pros": {
+            "joint_drive_props": {
                 "max_effort": {
                     "(LEFT|RIGHT)_HAND_(THUMB[12]|INDEX|MIDDLE|RING|PINKY)": 1.0,
                 },
@@ -526,7 +526,7 @@ class BaseRobotTest:
         cfg = merge_robot_cfg(cfg, cfg_dict)
 
         assert (
-            cfg.drive_pros.max_effort[
+            cfg.joint_drive_props.max_effort[
                 "(LEFT|RIGHT)_HAND_(THUMB[12]|INDEX|MIDDLE|RING|PINKY)"
             ]
             == 1.0

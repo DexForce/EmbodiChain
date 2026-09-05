@@ -38,7 +38,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
     RigidConstraintCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.lab.sim.shapes import MeshCfg
 
@@ -74,9 +74,9 @@ class BaseRigidConstraintTest:
         duck_path = get_data_path(DUCK_PATH)
         # Two dynamic ducks at different heights; with default (None) local
         # frames the constraint welds them at their current relative pose.
-        attrs_a = RigidBodyAttributesCfg()
+        attrs_a = RigidBodyPhysicsCfg()
         attrs_a.mass = 0.2
-        attrs_b = RigidBodyAttributesCfg()
+        attrs_b = RigidBodyPhysicsCfg()
         attrs_b.mass = 0.1
         self.duck_a = self.sim.add_rigid_object(
             cfg=RigidObjectCfg(

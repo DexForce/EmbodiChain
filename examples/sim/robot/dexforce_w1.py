@@ -60,7 +60,7 @@ def main(visualization: VisualizationCfg | None = None) -> None:
                     },
                 ]
             },
-            "drive_pros": {
+            "joint_drive_props": {
                 "max_effort": {
                     "left_eef": 10.0,
                     "right_eef": 10.0,

@@ -23,15 +23,28 @@ import math
 from pathlib import Path
 import time
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import LightCfg, MeshCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    ArticulationRootPropertiesCfg,
+    LightCfg,
+    MeshCfg,
+    MeshCollisionCfg,
+    RigidObjectCfg,
+)
 from embodichain.lab.visualization import (
     VisualizationCfg,
     add_viser_args_to_parser,
     visualization_cfg_from_args,
 )
+
+if TYPE_CHECKING:
+    from embodichain.lab.scripts.preview_joint_control import (
+        ArticulationPreviewController,
+    )
+    from embodichain.lab.sim.objects import Articulation
 
 
 def preview_scene_export(
@@ -40,6 +53,7 @@ def preview_scene_export(
     device: str = "cpu",
     headless: bool = False,
     visualization: VisualizationCfg | None = None,
+    joint_control: bool = True,
 ) -> None:
     """Load ``scene_export/scene_config.json`` and preview its table and assets.
 
@@ -48,6 +62,7 @@ def preview_scene_export(
         device: Simulation device, for example ``"cpu"`` or ``"cuda"``.
         headless: Load and validate the scene without an interactive preview.
         visualization: Optional live-visualization configuration.
+        joint_control: Expose supported articulation joints in Viser.
     """
     resolved_output_root = Path(output_root).expanduser().resolve()
     config_path = resolved_output_root / "scene_export" / "scene_config.json"
@@ -92,23 +107,37 @@ def preview_scene_export(
             config_dir=config_path.parent,
             label="asset",
         )
+        articulations = _add_articulations(
+            sim=sim,
+            entries=_config_entries(scene_config, "articulation"),
+            config_dir=config_path.parent,
+        )
         sim.prepare()
 
         is_viser = sim.sim_config.visualization.backend == "viser"
+        joint_controller = _setup_viser_joint_control(
+            sim=sim,
+            articulations=articulations,
+            enabled=is_viser and joint_control,
+        )
         if headless and not is_viser:
             sim.update(step=1)
             print(f"Loaded scene export headlessly: {config_path}")
             return
 
         if is_viser:
-            sim.update(step=1)
             print(f"Previewing in Viser: {config_path}")
         else:
             print(f"Previewing: {config_path}")
             sim.open_window()
         print("Close with Ctrl-C.")
         while True:
-            time.sleep(0.1)
+            if is_viser:
+                # Browser commands are applied on the simulation thread before capture.
+                if joint_controller is not None:
+                    joint_controller.update()
+                sim.update(step=1)
+            time.sleep(0.01)
     except KeyboardInterrupt:
         print("Stopping preview.")
     finally:
@@ -184,14 +213,22 @@ def _add_objects(
             field_name=f"{uid}.body_scale",
         )
         max_convex_hull_num = max(1, int(entry.get("max_convex_hull_num", 32)))
+        mesh_collision = MeshCollisionCfg(approximation="convex_hull")
+        if max_convex_hull_num > 1:
+            # The exported preview schema still carries the legacy hull budget;
+            # normalize it at this input boundary into the explicit Lab schema.
+            mesh_collision = MeshCollisionCfg(
+                approximation="convex_decomposition",
+                max_hulls=max_convex_hull_num,
+                acd_method="coacd",
+            )
 
         sim.add_rigid_object(
             RigidObjectCfg(
                 uid=uid,
                 shape=MeshCfg(
                     fpath=str(mesh_path),
-                    max_convex_hull_num=max_convex_hull_num,
-                    acd_method="vhacd",  # Use VHACD by default.
+                    collision=mesh_collision,
                 ),
                 # Keep every preview body static: exported poses are already the
                 # final gravity-settled poses and should not be simulated again.
@@ -202,6 +239,91 @@ def _add_objects(
             )
         )
         print(f"[{label}] {uid}: pos={init_pos} rot={init_rot} scale={body_scale}")
+
+
+def _add_articulations(
+    *,
+    sim: SimulationManager,
+    entries: list[dict[str, Any]],
+    config_dir: Path,
+) -> list[Articulation]:
+    """Add exported USDC articulations without also loading their GLB proxies."""
+    resolved_config_dir = config_dir.resolve()
+    articulations: list[Articulation] = []
+    for entry in entries:
+        uid = entry.get("uid")
+        raw_fpath = entry.get("fpath")
+        if not isinstance(uid, str) or not uid:
+            raise ValueError("Articulation entry has no valid uid.")
+        if not isinstance(raw_fpath, str):
+            raise ValueError(f"Articulation entry {uid!r} has no fpath.")
+        fpath = Path(raw_fpath)
+        if fpath.is_absolute() or fpath.suffix.lower() != ".usdc":
+            raise ValueError(
+                f"Articulation entry {uid!r} fpath must be a relative USDC path."
+            )
+        usdc_path = (resolved_config_dir / fpath).resolve()
+        if resolved_config_dir not in usdc_path.parents:
+            raise ValueError(
+                f"Articulation entry {uid!r} fpath must stay within "
+                f"{resolved_config_dir}."
+            )
+        if not usdc_path.is_file():
+            raise FileNotFoundError(
+                f"Articulation USDC for {uid!r} not found: {usdc_path}"
+            )
+        init_pos = _vector3(entry.get("init_pos"), field_name=f"{uid}.init_pos")
+        init_rot = _vector3(entry.get("init_rot"), field_name=f"{uid}.init_rot")
+        body_scale = _vector3(
+            entry.get("body_scale", [1.0, 1.0, 1.0]),
+            field_name=f"{uid}.body_scale",
+        )
+        if entry.get("fix_base", True) is not True:
+            raise ValueError(f"Articulation entry {uid!r} must set fix_base=true.")
+        # SimulationManager converts this y-up USDC to z-up with its bottom on XY.
+        articulations.append(
+            sim.add_articulation(
+                ArticulationCfg(
+                    uid=uid,
+                    fpath=str(usdc_path),
+                    init_pos=tuple(init_pos),
+                    init_rot=tuple(init_rot),
+                    body_scale=tuple(body_scale),
+                    root_props=ArticulationRootPropertiesCfg(fixed_base=True),
+                    # Generated USDC is not URDF, so it cannot build a PK chain.
+                    build_pk_chain=False,
+                )
+            )
+        )
+        print(f"[articulation] {uid}: pos={init_pos} rot={init_rot} scale={body_scale}")
+    return articulations
+
+
+def _setup_viser_joint_control(
+    *,
+    sim: SimulationManager,
+    articulations: list[Articulation],
+    enabled: bool,
+) -> ArticulationPreviewController | None:
+    """Expose supported exported-articulation joints through the Viser runtime."""
+    if not enabled or not articulations:
+        return None
+    runtime = sim.visualization_runtime
+    if runtime is None:
+        raise RuntimeError(
+            "Viser joint control requires an active visualization runtime."
+        )
+    from embodichain.lab.scripts.preview_joint_control import (
+        ArticulationPreviewController,
+    )
+
+    controller = ArticulationPreviewController(articulations, runtime)
+    if not controller.has_controls:
+        return None
+    controller.update()
+    runtime.set_joint_control_provider(controller)
+    print("Viser articulation joint controls enabled.")
+    return controller
 
 
 def _vector3(value: object, *, field_name: str) -> list[float]:
@@ -234,6 +356,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         action="store_true",
         help="Load and validate the exported scene without opening a window.",
     )
+    parser.add_argument(
+        "--joint-control",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Expose supported articulation joints in Viser (default: enabled).",
+    )
     add_viser_args_to_parser(parser)
     args = parser.parse_args(argv)
     preview_scene_export(
@@ -241,6 +369,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         device=args.device,
         headless=args.headless,
         visualization=visualization_cfg_from_args(args),
+        joint_control=args.joint_control,
     )
 
 

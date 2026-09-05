@@ -49,6 +49,11 @@ class RigidBodyViewBase(ABC):
         """Whether world poses can be read through the backend view."""
         return self.is_ready
 
+    @property
+    def is_newton_backend(self) -> bool:
+        """Whether this view targets the DexSim Newton backend."""
+        return False
+
     # -- Body ID Management -------------------------------------------------
 
     @cached_property
@@ -249,6 +254,18 @@ class ArticulationViewBase(ABC):
     Public root/link poses use EmbodiChain convention:
     ``(x, y, z, qx, qy, qz, qw)``.
     """
+
+    dof: int
+    """Scalar degree-of-freedom width exposed by the view."""
+
+    num_links: int
+    """Link width exposed by the view."""
+
+    joint_names: list[str]
+    """Active joint names in public flattened-DOF order."""
+
+    link_names: list[str]
+    """Link names in public link-buffer order."""
 
     @property
     @abstractmethod

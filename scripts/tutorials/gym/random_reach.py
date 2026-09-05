@@ -48,7 +48,7 @@ class RandomReachEnv(BaseEnv):
         self,
         num_envs=1,
         headless=False,
-        device="cpu",
+        device: str | torch.device | None = None,
         renderer="hybrid",
         physics_cfg="default",
         visualization: VisualizationCfg | None = None,

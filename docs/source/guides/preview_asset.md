@@ -146,7 +146,7 @@ asset.set_local_pose(pose)
 | `--init_pos X Y Z` | `0 0 0.5` | Initial position of the first asset. |
 | `--init_rot RX RY RZ` | `0 0 0` | Initial rotation in degrees. |
 | `--body_type` | `kinematic` | Rigid body type: `dynamic`, `kinematic`, or `static`. |
-| `--use_usd_properties` | disabled | Use physical properties stored in the USD file. |
+| `--asset-physics-mode {preserve,overlay}` | `overlay` | Preserve source-authored physics or overlay explicitly configured values. |
 | `--fix_base` / `--no-fix_base` | fixed | Fix or unfix articulation bases. |
 | `--sim_device` | `cpu` | Simulation device. |
 | `--renderer` | `hybrid` | Renderer: `hybrid`, `fast-rt`, or `rt`. |

@@ -143,7 +143,7 @@ class SkillDescriptor:
     open_loop: bool = False
     """Whether completion reports motion execution without physical-effect proof."""
     binding_contract: SkillBindingContract | None = None
-    """Explicit generic resource contract used by the semantic skill layer."""
+    """Explicit generic resource contract used by Task Program lowering."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.skill_id, str) or not self.skill_id:

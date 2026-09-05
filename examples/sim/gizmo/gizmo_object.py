@@ -26,7 +26,7 @@ import time
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
     RenderCfg,
     physics_cfg_for_backend,
 )
@@ -70,11 +70,15 @@ def main():
             uid="cube1",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
             body_type="kinematic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.1,
+            attrs=RigidBodyPhysicsCfg.from_dict(
+                {
+                    "mass_props": {"mass": 1.0},
+                    "material_props": {
+                        "dynamic_friction": 0.5,
+                        "static_friction": 0.5,
+                        "restitution": 0.1,
+                    },
+                }
             ),
             init_pos=[0.0, 0.0, 1.0],
         )
@@ -84,11 +88,15 @@ def main():
             uid="cube2",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
             body_type="kinematic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.1,
+            attrs=RigidBodyPhysicsCfg.from_dict(
+                {
+                    "mass_props": {"mass": 1.0},
+                    "material_props": {
+                        "dynamic_friction": 0.5,
+                        "static_friction": 0.5,
+                        "restitution": 0.1,
+                    },
+                }
             ),
             init_pos=[0.3, 0.0, 1.0],
         )

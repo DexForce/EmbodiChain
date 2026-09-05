@@ -27,10 +27,18 @@ from argparse import Namespace
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
+import numpy as np
 import pytest
 import torch
 
 from embodichain.lab.sim.atomic_actions import TimedTrajectory
+from embodichain.lab.sim.cfg import (
+    DefaultPhysicsCfg,
+    NewtonPhysicsCfg,
+    NewtonRigidBodyMaterialCfg,
+    RigidBodyMaterialCfg,
+)
+from embodichain.lab.sim.solvers import BaseSolver
 from scripts.tutorials.atomic_action.dynamic_obstacle_recovery import (
     _animate_obstacle_to_pose,
     _blocking_obstacle_pose,
@@ -44,12 +52,18 @@ from scripts.tutorials.atomic_action.scenario_utils import (
     create_dual_tutorial_robot_cfg,
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    NEWTON_GRASP_CONTACT_DAMPING,
+    NEWTON_GRASP_CONTACT_STIFFNESS,
+    NEWTON_NATIVE_CONTACT_DIMENSION,
     ROBOTIQ_2F_140_TCP,
     ROBOTIQ_HAND_JOINT_PATTERN,
     TUTORIAL_ROBOTS,
+    add_tutorial_robot,
     broadcast_pose_batch,
     broadcast_waypoint_pose_batch,
     clone_local_pose_from_first_env,
+    configure_newton_gripper_contacts,
+    configure_newton_link_contacts,
     create_antipodal_semantics,
     create_curobo_motion_generator,
     create_franka_panda_robot_cfg,
@@ -76,6 +90,7 @@ STRICT_RECOVERY_SPHERE_DENSITY = 0.3
 STRICT_RECOVERY_MINIMUM_CLEARANCE = 0.01
 FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
 DUAL_FRANKA_MOUNT_X_AXIS = torch.tensor([0.0, -1.0, 0.0])
+UR_RUNTIME_QPOS_LIMITS = torch.tensor([[-2.0 * math.pi, 2.0 * math.pi]] * 6)
 PGI_TUTORIAL_TCP = torch.tensor(
     [
         [1.0, 0.0, 0.0, 0.0],
@@ -153,6 +168,118 @@ def _run_obstacle_animation(*, pace_wall_time: bool) -> tuple[MagicMock, MagicMo
     assert torch.equal(result, target_pose)
     assert result.data_ptr() != target_pose.data_ptr()
     return obstacle, adapter
+
+
+def test_atomic_action_tutorial_uses_native_mujoco_contact_settings() -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.tutorial_utils")
+
+    default_cfg = module._tutorial_physics_cfg("default")
+    newton_cfg = module._tutorial_physics_cfg("newton")
+
+    assert isinstance(default_cfg, DefaultPhysicsCfg)
+    assert isinstance(newton_cfg, NewtonPhysicsCfg)
+    assert newton_cfg.num_substeps == 10
+    assert newton_cfg.collision_cfg is None
+    assert newton_cfg.solver_cfg == {
+        "solver_type": "mujoco_warp",
+        "solver": "newton",
+        "integrator": "implicitfast",
+        "iterations": 20,
+        "ls_iterations": 100,
+        "nconmax": 1_000,
+        "njmax": 2_000,
+        "cone": "elliptic",
+        "impratio": 1_000.0,
+        "use_mujoco_contacts": True,
+        "enable_multiccd": True,
+    }
+
+    dexsim_cfg = newton_cfg.to_dexsim_cfg(gpu_id=0)
+    assert dexsim_cfg.solver_cfg.solver_type == "mujoco_warp"
+    assert dexsim_cfg.solver_cfg.solver == "newton"
+    assert dexsim_cfg.solver_cfg.integrator == "implicitfast"
+    assert dexsim_cfg.solver_cfg.iterations == 20
+    assert dexsim_cfg.solver_cfg.ls_iterations == 100
+    assert dexsim_cfg.solver_cfg.nconmax == 1_000
+    assert dexsim_cfg.solver_cfg.njmax == 2_000
+    assert dexsim_cfg.solver_cfg.cone == "elliptic"
+    assert dexsim_cfg.solver_cfg.impratio == pytest.approx(1_000.0)
+    assert dexsim_cfg.solver_cfg.use_mujoco_contacts is True
+    assert dexsim_cfg.solver_cfg.enable_multiccd is True
+    assert dexsim_cfg.collision_pipeline_cfg is None
+
+
+class _WarpArray:
+    """Small in-memory stand-in for a writable Warp array."""
+
+    def __init__(self, values: list[int]) -> None:
+        self.values = np.asarray(values, dtype=np.int32)
+
+    def numpy(self) -> np.ndarray:
+        return self.values
+
+    def assign(self, values: np.ndarray) -> None:
+        self.values = np.asarray(values, dtype=np.int32).copy()
+
+
+def test_atomic_action_tutorial_enables_native_mujoco_torsional_friction() -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.tutorial_utils")
+    mjc_geom_condim = np.asarray([3, 3, 3], dtype=np.int32)
+    mjw_geom_condim = _WarpArray([3, 3, 3])
+    backend = SimpleNamespace(
+        solver_type="mujoco_warp",
+        cfg=SimpleNamespace(
+            requires_grad=False,
+            solver_cfg=SimpleNamespace(use_mujoco_contacts=True),
+        ),
+        model=SimpleNamespace(requires_grad=False),
+        solver=SimpleNamespace(
+            mj_model=SimpleNamespace(geom_condim=mjc_geom_condim),
+            mjw_model=SimpleNamespace(geom_condim=mjw_geom_condim),
+        ),
+    )
+    sim = SimpleNamespace(is_newton_backend=True, _world=object())
+
+    with patch(
+        "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
+        return_value=backend,
+    ):
+        configured = module._configure_newton_native_contact_dimension(sim)
+
+    expected = np.full(3, NEWTON_NATIVE_CONTACT_DIMENSION, dtype=np.int32)
+    assert configured is True
+    assert np.array_equal(mjc_geom_condim, expected)
+    assert np.array_equal(mjw_geom_condim.numpy(), expected)
+
+
+def test_atomic_action_tutorial_leaves_external_newton_contacts_unchanged() -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.tutorial_utils")
+    mjc_geom_condim = np.asarray([3, 3], dtype=np.int32)
+    mjw_geom_condim = _WarpArray([3, 3])
+    backend = SimpleNamespace(
+        solver_type="mujoco_warp",
+        cfg=SimpleNamespace(
+            requires_grad=False,
+            solver_cfg=SimpleNamespace(use_mujoco_contacts=False),
+        ),
+        model=SimpleNamespace(requires_grad=False),
+        solver=SimpleNamespace(
+            mj_model=SimpleNamespace(geom_condim=mjc_geom_condim),
+            mjw_model=SimpleNamespace(geom_condim=mjw_geom_condim),
+        ),
+    )
+    sim = SimpleNamespace(is_newton_backend=True, _world=object())
+
+    with patch(
+        "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
+        return_value=backend,
+    ):
+        configured = module._configure_newton_native_contact_dimension(sim)
+
+    expected = np.full(2, 3, dtype=np.int32)
+    assert configured is False
+    assert np.array_equal(mjc_geom_condim, expected)
+    assert np.array_equal(mjw_geom_condim.numpy(), expected)
 
 
 def test_should_wait_for_tutorial_input_is_disabled_for_headless_modes() -> None:
@@ -299,8 +426,8 @@ def test_franka_tutorial_config_uses_ur5_gripper_component() -> None:
     assert franka_cfg.init_qpos[-2:] == [0.0, 0.0]
     assert franka_cfg.init_rot == FRANKA_TUTORIAL_BASE_ROTATION
     for property_name in ("stiffness", "damping", "max_effort"):
-        ur5_values = getattr(ur5_cfg.drive_pros, property_name)
-        franka_values = getattr(franka_cfg.drive_pros, property_name)
+        ur5_values = getattr(ur5_cfg.joint_drive_props, property_name)
+        franka_values = getattr(franka_cfg.joint_drive_props, property_name)
         assert franka_values["gripper_finger1_joint_1"] == (
             ur5_values["gripper_finger1_joint_1"]
         )
@@ -343,6 +470,37 @@ def test_ur10_robotiq_config_matches_six_active_hand_joints_and_tcp() -> None:
         torch.as_tensor(cfg.solver_cfg["arm"].tcp),
         torch.as_tensor(ROBOTIQ_2F_140_TCP),
     )
+
+
+@pytest.mark.parametrize(
+    "factory",
+    (create_ur5_gripper_robot_cfg, create_ur10_robotiq_robot_cfg),
+)
+def test_ur_tutorial_solvers_use_runtime_joint_limits(factory) -> None:
+    cfg = factory()
+
+    assert torch.allclose(
+        torch.as_tensor(cfg.solver_cfg["arm"].user_qpos_limits),
+        UR_RUNTIME_QPOS_LIMITS,
+    )
+
+
+@pytest.mark.parametrize(
+    "factory",
+    (create_ur5_gripper_robot_cfg, create_ur10_robotiq_robot_cfg),
+)
+def test_ur_tutorial_solver_limits_skip_noop_hard_limit_warning(factory) -> None:
+    cfg = factory()
+    solver_limits = torch.as_tensor(cfg.solver_cfg["arm"].user_qpos_limits)
+    solver = SimpleNamespace(
+        lower_qpos_limits=solver_limits[:, 0].clone(),
+        upper_qpos_limits=solver_limits[:, 1].clone(),
+    )
+
+    with patch("embodichain.lab.sim.solvers.base_solver.logger.log_warning") as warning:
+        BaseSolver.update_with_robot_limit(solver, UR_RUNTIME_QPOS_LIMITS)
+
+    assert not warning.called
 
 
 @pytest.mark.parametrize(
@@ -397,10 +555,30 @@ def test_dual_tutorial_configs_share_hand_binding_contract(
         solver = dual_cfg.solver_cfg[f"{side}_arm"]
         assert type(solver).__name__ == solver_name
         assert torch.allclose(torch.as_tensor(solver.tcp), expected_tcp_tensor)
+        assert solver.user_qpos_limits == single_cfg.solver_cfg["arm"].user_qpos_limits
 
     if robot_type == "ur10":
         assert len(dual_cfg.init_qpos) == 24
         assert dual_cfg.init_qpos[-12:] == [0.0] * 12
+
+
+@pytest.mark.parametrize("robot_type", ("ur5", "ur10"))
+def test_dual_pytorch_ur_tutorial_solvers_preserve_runtime_joint_limits(
+    robot_type: str,
+) -> None:
+    cfg = create_dual_tutorial_robot_cfg(
+        robot_type=robot_type,
+        uid=f"test_{robot_type}_pytorch",
+        urdf_name=f"test_dual_{robot_type}_pytorch",
+        tcp_z=0.121,
+        solver="pytorch",
+    )
+
+    for side in ("left", "right"):
+        assert torch.allclose(
+            torch.as_tensor(cfg.solver_cfg[f"{side}_arm"].user_qpos_limits),
+            UR_RUNTIME_QPOS_LIMITS,
+        )
 
 
 def test_dual_franka_mount_preserves_single_arm_facing_direction() -> None:
@@ -518,6 +696,31 @@ def test_tutorial_rigid_body_physics_groups_backend_specific_properties() -> Non
     assert physics.collision_props.rest_offset == 0.001
 
 
+def test_tutorial_rigid_body_physics_adds_only_newton_contact_response() -> None:
+    empty_physics = create_tutorial_rigid_body_physics()
+    default_physics = create_tutorial_rigid_body_physics(
+        static_friction=0.8,
+        dynamic_friction=0.4,
+    )
+    newton_physics = create_tutorial_rigid_body_physics(
+        static_friction=0.8,
+        dynamic_friction=0.4,
+        newton_contact=True,
+    )
+
+    assert empty_physics.material_props is None
+    assert type(default_physics.material_props) is RigidBodyMaterialCfg
+    assert type(newton_physics.material_props) is NewtonRigidBodyMaterialCfg
+    assert newton_physics.material_props.static_friction == pytest.approx(0.8)
+    assert newton_physics.material_props.dynamic_friction == pytest.approx(0.4)
+    assert newton_physics.material_props.ke == pytest.approx(
+        NEWTON_GRASP_CONTACT_STIFFNESS
+    )
+    assert newton_physics.material_props.kd == pytest.approx(
+        NEWTON_GRASP_CONTACT_DAMPING
+    )
+
+
 def test_run_tutorial_uses_deferred_simulation_cleanup() -> None:
     sim = MagicMock()
     sim.is_window_recording.return_value = False
@@ -555,6 +758,24 @@ def test_shared_robot_selection_keeps_ur5_default_and_accepts_all_variants() -> 
     assert default_args.robot == "ur5"
     assert franka_args.robot == "franka"
     assert ur10_args.robot == "ur10"
+
+
+def test_handover_tutorial_defaults_to_cpu_for_grasp_planning() -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.hand_over")
+
+    with patch("sys.argv", ["hand_over.py"]):
+        args = module.parse_arguments()
+
+    assert args.device == "cpu"
+
+
+def test_assemble_tutorial_uses_center_grasp_for_laid_soda_can() -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.assemble")
+
+    assert module.PICKUP_OBJECT_PART == "center"
+    assert "pick_object_part=PICKUP_OBJECT_PART" in inspect.getsource(
+        module.run_assemble_demo
+    )
 
 
 def test_arm_direction_uses_selected_robot_solver_roots() -> None:
@@ -603,6 +824,7 @@ def test_place_tutorial_registers_pick_object_with_simulation_engine_factory() -
     )
     sim = MagicMock()
     sim.device = torch.device("cpu")
+    sim.is_newton_backend = False
     sim.sim_config.physics_dt = PHYSICS_DT
     robot = MagicMock()
     robot.get_qpos.return_value = torch.zeros(1, 8)
@@ -640,6 +862,165 @@ def test_place_tutorial_registers_pick_object_with_simulation_engine_factory() -
 
     assert engine_factory.call_args.kwargs["scene_entities"] == (obj,)
     engine.initial_context.assert_called_once_with(control_dt=PHYSICS_DT)
+
+
+@pytest.mark.parametrize(
+    "link_name",
+    (
+        "gripper_finger1_link_1",
+        "left_gripper_finger2_link_1",
+        "right_gripper_finger1_link_1",
+        "left_inner_finger_pad",
+        "right_left_outer_knuckle",
+    ),
+)
+def test_shared_tutorial_gripper_uses_newton_contact_material(
+    link_name: str,
+) -> None:
+    sim = SimpleNamespace(is_newton_backend=True)
+    robot_cfg = SimpleNamespace(link_attrs=None)
+
+    configure_newton_gripper_contacts(sim, robot_cfg)
+
+    override = robot_cfg.link_attrs["newton_gripper_contacts"]
+    material = override.attrs.material_props
+    assert isinstance(material, NewtonRigidBodyMaterialCfg)
+    assert material.ke == pytest.approx(NEWTON_GRASP_CONTACT_STIFFNESS)
+    assert material.kd == pytest.approx(NEWTON_GRASP_CONTACT_DAMPING)
+    assert override.attrs.mass_props.recompute_inertia is True
+    assert re.fullmatch(override.link_names_expr[0], link_name)
+
+
+def test_shared_tutorial_preserves_default_gripper_contact_config() -> None:
+    existing_link_attrs = {"existing": MagicMock()}
+    sim = SimpleNamespace(is_newton_backend=False)
+    robot_cfg = SimpleNamespace(link_attrs=existing_link_attrs)
+
+    configure_newton_gripper_contacts(sim, robot_cfg)
+
+    assert robot_cfg.link_attrs is existing_link_attrs
+
+
+def test_add_tutorial_robot_authors_newton_contacts_before_spawn() -> None:
+    sim = MagicMock()
+    sim.is_newton_backend = True
+    robot_cfg = SimpleNamespace(link_attrs=None)
+
+    with patch(
+        "scripts.tutorials.atomic_action.tutorial_utils.create_tutorial_robot_cfg",
+        return_value=robot_cfg,
+    ):
+        result = add_tutorial_robot(sim, "ur5")
+
+    assert result is sim.add_robot.return_value
+    sim.add_robot.assert_called_once_with(cfg=robot_cfg)
+    material = robot_cfg.link_attrs["newton_gripper_contacts"].attrs.material_props
+    assert material.ke == pytest.approx(NEWTON_GRASP_CONTACT_STIFFNESS)
+    assert material.kd == pytest.approx(NEWTON_GRASP_CONTACT_DAMPING)
+
+
+def test_shared_tutorial_tunes_selected_newton_articulation_link() -> None:
+    sim = SimpleNamespace(is_newton_backend=True)
+    articulation_cfg = SimpleNamespace(link_attrs={"existing": MagicMock()})
+
+    configure_newton_link_contacts(
+        sim,
+        articulation_cfg,
+        group_name="newton_handle_contacts",
+        link_names_expr=["door_handle"],
+    )
+
+    assert "existing" in articulation_cfg.link_attrs
+    override = articulation_cfg.link_attrs["newton_handle_contacts"]
+    assert override.link_names_expr == ["door_handle"]
+    assert override.attrs.material_props.ke == pytest.approx(
+        NEWTON_GRASP_CONTACT_STIFFNESS
+    )
+    assert override.attrs.material_props.kd == pytest.approx(
+        NEWTON_GRASP_CONTACT_DAMPING
+    )
+
+
+@pytest.mark.parametrize(
+    ("module_name", "factory_name", "group_name", "contact_link"),
+    (
+        ("slide", "create_drawer", "newton_handle_contacts", "large_handle_bar"),
+        ("open_door", "create_microwave", "newton_handle_contacts", "door_handle"),
+        ("twist", "create_microwave", "newton_knob_contacts", "cap_1"),
+        ("press", "create_microwave", "newton_button_contacts", "button_cap"),
+    ),
+)
+def test_articulation_contact_tutorials_author_newton_material_before_spawn(
+    module_name: str,
+    factory_name: str,
+    group_name: str,
+    contact_link: str,
+) -> None:
+    module = importlib.import_module(f"scripts.tutorials.atomic_action.{module_name}")
+    sim = MagicMock()
+    sim.is_newton_backend = True
+
+    with patch.object(module, "get_data_path", return_value="/tmp/tutorial.urdf"):
+        result = getattr(module, factory_name)(sim)
+
+    assert result is sim.add_articulation.return_value
+    cfg = sim.add_articulation.call_args.kwargs["cfg"]
+    assert cfg.asset_physics_mode == "overlay"
+    assert cfg.root_props.fixed_base is True
+    override = cfg.link_attrs[group_name]
+    assert override.link_names_expr == [contact_link]
+    assert override.attrs.material_props.ke == pytest.approx(
+        NEWTON_GRASP_CONTACT_STIFFNESS
+    )
+    assert override.attrs.material_props.kd == pytest.approx(
+        NEWTON_GRASP_CONTACT_DAMPING
+    )
+
+
+@pytest.mark.parametrize(
+    ("is_newton_backend", "expected_material_type"),
+    (
+        (False, RigidBodyMaterialCfg),
+        (True, NewtonRigidBodyMaterialCfg),
+    ),
+)
+def test_place_cube_uses_backend_scoped_contact_material(
+    is_newton_backend: bool,
+    expected_material_type: type[RigidBodyMaterialCfg],
+) -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.place")
+    sim = MagicMock()
+    sim.is_newton_backend = is_newton_backend
+    obj = MagicMock()
+    sim.add_rigid_object.return_value = obj
+
+    with patch.object(module, "clone_local_pose_from_first_env"):
+        result = module.create_pick_object(sim)
+
+    cfg = sim.add_rigid_object.call_args.kwargs["cfg"]
+    material = cfg.attrs.material_props
+    assert type(material) is expected_material_type
+    assert material.dynamic_friction == pytest.approx(0.97)
+    assert material.static_friction == pytest.approx(0.99)
+    if is_newton_backend:
+        assert material.ke == pytest.approx(NEWTON_GRASP_CONTACT_STIFFNESS)
+        assert material.kd == pytest.approx(NEWTON_GRASP_CONTACT_DAMPING)
+    result.clear_dynamics.assert_called_once_with()
+
+
+def test_move_held_object_cup_starts_above_the_ground() -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.move_held_object")
+    sim = MagicMock()
+    sim.is_newton_backend = True
+    obj = MagicMock()
+    sim.add_rigid_object.return_value = obj
+
+    with patch.object(module, "clone_local_pose_from_first_env"):
+        module.create_pick_object(sim)
+
+    cfg = sim.add_rigid_object.call_args.kwargs["cfg"]
+    assert cfg.init_pos == [*module.OBJECT_XY, module.OBJECT_INITIAL_Z]
+    assert module.OBJECT_INITIAL_Z == pytest.approx(0.05)
 
 
 def test_atomic_action_tutorial_scene_strategies_cover_every_entry_point() -> None:
@@ -735,6 +1116,77 @@ def test_replay_timed_trajectory_uses_arrival_intervals() -> None:
 
     assert sim.update.call_args_list == [call(step=2), call(step=3), call(step=3)]
     assert robot.set_qpos.call_count == 3
+
+
+def test_replay_timed_trajectory_settles_once_after_newton_native_grasp() -> None:
+    sim = MagicMock()
+    sim.is_newton_backend = True
+    sim.sim_config.physics_dt = 0.1
+    robot = MagicMock()
+    robot.control_parts = {"arm": ["joint1"], "hand": ["finger_joint"]}
+    robot.get_joint_ids.side_effect = lambda *, name: [2] if name == "hand" else [0, 1]
+    trajectory = TimedTrajectory.from_positions(
+        torch.tensor([[[0.0, 0.0, 0.0], [0.1, 0.0, 0.02], [0.2, 0.0, 0.02]]]),
+        env_ids=torch.tensor([0], dtype=torch.long),
+        dt=torch.tensor([[0.0, 0.1, 0.1]]),
+    )
+
+    with patch("scripts.tutorials.atomic_action.tutorial_utils.time.sleep"):
+        replay_trajectory(
+            sim,
+            robot,
+            trajectory,
+            Namespace(auto_play=False),
+            video_prefix="unused",
+            hold_steps=0,
+        )
+
+    assert sim.update.call_args_list == [call(step=1), call(step=4), call(step=1)]
+    robot.get_joint_ids.assert_called_once_with(name="hand")
+
+
+def test_replay_timed_trajectory_settles_after_each_native_hand_phase() -> None:
+    sim = MagicMock()
+    sim.is_newton_backend = True
+    sim.sim_config.physics_dt = 0.1
+    robot = MagicMock()
+    robot.control_parts = {"arm": ["joint1"], "hand": ["finger_joint"]}
+    robot.get_joint_ids.side_effect = lambda *, name: [2] if name == "hand" else [0, 1]
+    trajectory = TimedTrajectory.from_positions(
+        torch.tensor(
+            [
+                [
+                    [0.0, 0.0, 0.0],
+                    [0.1, 0.0, 0.01],
+                    [0.2, 0.0, 0.02],
+                    [0.3, 0.0, 0.02],
+                    [0.4, 0.0, 0.01],
+                    [0.5, 0.0, 0.0],
+                ]
+            ]
+        ),
+        env_ids=torch.tensor([0], dtype=torch.long),
+        dt=torch.tensor([[0.0, 0.1, 0.1, 0.1, 0.1, 0.1]]),
+    )
+
+    with patch("scripts.tutorials.atomic_action.tutorial_utils.time.sleep"):
+        replay_trajectory(
+            sim,
+            robot,
+            trajectory,
+            Namespace(auto_play=False),
+            video_prefix="unused",
+            hold_steps=0,
+        )
+
+    assert sim.update.call_args_list == [
+        call(step=1),
+        call(step=1),
+        call(step=4),
+        call(step=1),
+        call(step=1),
+        call(step=4),
+    ]
 
 
 def test_broadcast_pose_batch_rejects_wrong_env_count() -> None:

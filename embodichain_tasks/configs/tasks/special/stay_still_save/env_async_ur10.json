@@ -1,5 +1,6 @@
 {
     "id": "StayStillSave-v1",
+    "physics": "default",
     "max_episodes": 4,
     "num_envs": 4,
     "env": {
@@ -67,10 +68,14 @@
                 "compute_uv": true
             },
             "attrs": {
-                "mass": 10.0,
-                "static_friction": 0.95,
-                "dynamic_friction": 0.9,
-                "restitution": 0.01
+                "mass_props": {
+                    "mass": 10.0
+                },
+                "material_props": {
+                    "static_friction": 0.95,
+                    "dynamic_friction": 0.9,
+                    "restitution": 0.01
+                }
             },
             "body_scale": [1, 1, 1],
             "body_type": "kinematic",

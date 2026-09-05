@@ -1,0 +1,48 @@
+integration_id: dual_ur5_hand_over_v1
+program_id: dual_ur5_hand_over
+
+requires:
+  scene_contract: hand_over_scene_v1
+  embodiment_contract: dual_arm_parallel_gripper
+
+scene_binding:
+  contract_id: hand_over_scene_v1
+  registry_id: dual_ur5_handover_v1
+  rigid_objects:
+    - entity_id: can
+      simulation_uid: handover_object
+      dynamics: dynamic
+      semantic_type: soda_can
+      affordances:
+        - entity_id: can_antipodal_grasp
+          kind: antipodal_grasp
+    - entity_id: support_surface
+      simulation_uid: support_surface
+      dynamics: static
+      semantic_type: support_surface
+
+profile:
+  defaults:
+    hand_over:
+      source: left
+      destination: right
+  action_options:
+    hand_over:
+      kind: hand_over
+      pre_grasp_distance: 0.08
+      lift_height: 0.08
+      hand_interp_steps: 10
+  effect_monitors:
+    hand_over:
+      monitor_id: builtin.composite_effect
+      revision: "1"
+      params:
+        consecutive_samples: 10
+  grounding_providers:
+    hand_over: simulation.configured_handover_pose
+
+runtime_services:
+  handover_pose_providers:
+    - kind: configured_pose
+      final_position: [0.0, -0.2, 0.6]
+      final_quaternion_xyzw: [0.7071067812, 0.0, 0.0, 0.7071067812]

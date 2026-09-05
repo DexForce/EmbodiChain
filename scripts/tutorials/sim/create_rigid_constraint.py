@@ -30,8 +30,9 @@ from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
     RigidConstraintCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
     RenderCfg,
+    physics_cfg_for_backend,
 )
 from embodichain.lab.sim.shapes import CubeCfg
 
@@ -68,17 +69,22 @@ def main():
         render_cfg=RenderCfg(renderer=args.renderer),
         num_envs=args.num_envs,
         arena_space=3.0,
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
 
     sim = SimulationManager(sim_cfg)
 
     # Shared physics attributes for the two cubes.
-    physics_attrs = RigidBodyAttributesCfg(
-        mass=0.2,
-        dynamic_friction=0.5,
-        static_friction=0.5,
-        restitution=0.1,
+    physics_attrs = RigidBodyPhysicsCfg.from_dict(
+        {
+            "mass_props": {"mass": 0.2},
+            "material_props": {
+                "dynamic_friction": 0.5,
+                "static_friction": 0.5,
+                "restitution": 0.1,
+            },
+        }
     )
 
     # Add two dynamic cubes to the scene. cube_a starts higher than cube_b so

@@ -41,7 +41,7 @@ from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     RobotCfg,
     RigidObjectCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.data import get_data_path
 from embodichain.utils import configclass
@@ -134,11 +134,15 @@ class ExampleCfg(EmbodiedEnvCfg):
                 fpath=get_data_path("CircleTableSimple/circle_table_simple.ply"),
                 compute_uv=True,
             ),
-            attrs=RigidBodyAttributesCfg(
-                mass=10.0,
-                static_friction=0.95,
-                dynamic_friction=0.85,
-                restitution=0.01,
+            attrs=RigidBodyPhysicsCfg.from_dict(
+                {
+                    "mass_props": {"mass": 10.0},
+                    "material_props": {
+                        "static_friction": 0.95,
+                        "dynamic_friction": 0.85,
+                        "restitution": 0.01,
+                    },
+                }
             ),
             body_type="kinematic",
             init_pos=(0.80, 0, 0.8),

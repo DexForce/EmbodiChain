@@ -54,7 +54,6 @@ from dexsim.spawn import (
     MaterialDesc,
     NewtonCollisionDesc,
     NewtonJointDesc,
-    NewtonPhysicsDesc,
     ObjectDesc,
     RenderDesc,
     RigidBodyPhysicsDesc,
@@ -71,27 +70,18 @@ from embodichain.lab.sim.cfg import (
     ClothObjectCfg,
     CollisionPropertiesCfg,
     DefaultCollisionPropertiesCfg,
-    DefaultRigidBodyPhysicsCfg,
-    DefaultRigidBodyMaterialCfg,
     DefaultRigidBodyPropertiesCfg,
     MassPropertiesCfg,
-    MeshCollisionPropertiesCfg,
     NewtonCollisionPropertiesCfg,
-    NewtonMeshCollisionPropertiesCfg,
-    NewtonRigidBodyPhysicsCfg,
     NewtonRigidBodyMaterialCfg,
-    NewtonRigidBodyPropertiesCfg,
-    RigidBodyAttributesCfg,
-    RigidBodyAttributesOverrideCfg,
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
-    RigidBodyPropertiesCfg,
     RigidObjectCfg,
     SoftObjectCfg,
     SurfaceDeformableObjectCfg,
     VolumeDeformableObjectCfg,
 )
-from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, SphereCfg
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg, SphereCfg
 from embodichain.utils import logger
 from embodichain.utils.math import convert_quat
 from embodichain.utils.string import (
@@ -118,46 +108,36 @@ class _RigidPhysicsSpec:
     """Canonical, backend-partitioned rigid-physics values."""
 
     mass_props: dict[str, object] = field(default_factory=dict)
+    recompute_inertia: bool | None = None
     default_rigid_props: dict[str, object] = field(default_factory=dict)
-    newton_rigid_props: dict[str, object] = field(default_factory=dict)
     collision_enabled: bool | None = None
     contact_offset: float | None = None
     rest_offset: float | None = None
     default_collision_props: dict[str, object] = field(default_factory=dict)
     newton_collision_props: dict[str, object] = field(default_factory=dict)
-    mesh_collision_props: dict[str, object] = field(default_factory=dict)
-    newton_mesh_collision_props: dict[str, object] = field(default_factory=dict)
     material_props: dict[str, object] = field(default_factory=dict)
-    default_material_props: dict[str, object] = field(default_factory=dict)
     newton_material_props: dict[str, object] = field(default_factory=dict)
 
     def merged(self, override: _RigidPhysicsSpec) -> _RigidPhysicsSpec:
         """Return ``override`` layered onto this spec using non-None values."""
         result = _RigidPhysicsSpec(
             mass_props=dict(self.mass_props),
+            recompute_inertia=self.recompute_inertia,
             default_rigid_props=dict(self.default_rigid_props),
-            newton_rigid_props=dict(self.newton_rigid_props),
             collision_enabled=self.collision_enabled,
             contact_offset=self.contact_offset,
             rest_offset=self.rest_offset,
             default_collision_props=dict(self.default_collision_props),
             newton_collision_props=dict(self.newton_collision_props),
-            mesh_collision_props=dict(self.mesh_collision_props),
-            newton_mesh_collision_props=dict(self.newton_mesh_collision_props),
             material_props=dict(self.material_props),
-            default_material_props=dict(self.default_material_props),
             newton_material_props=dict(self.newton_material_props),
         )
         for name in (
             "mass_props",
             "default_rigid_props",
-            "newton_rigid_props",
             "default_collision_props",
             "newton_collision_props",
-            "mesh_collision_props",
-            "newton_mesh_collision_props",
             "material_props",
-            "default_material_props",
             "newton_material_props",
         ):
             getattr(result, name).update(getattr(override, name))
@@ -169,6 +149,8 @@ class _RigidPhysicsSpec:
                 result.mass_props.pop("mass", None)
         elif "density" in override.mass_props:
             result.mass_props.pop("mass", None)
+        if override.recompute_inertia is not None:
+            result.recompute_inertia = override.recompute_inertia
         if override.collision_enabled is not None:
             result.collision_enabled = override.collision_enabled
         if override.contact_offset is not None:
@@ -189,51 +171,24 @@ def _configured_values(cfg: object | None) -> dict[str, object]:
     }
 
 
-_NEWTON_MESH_COLLISION_FIELDS = {
-    item.name for item in fields(NewtonMeshCollisionPropertiesCfg)
-}
-
-
-def _native_extension_values(
-    cfg: object | None,
-    *,
-    common_type: type,
-    field_name: str,
-) -> dict[str, object]:
-    """Return native fields and reject portable values in an explicit block."""
-    values = _configured_values(cfg)
-    common_fields = {item.name for item in fields(common_type)}
-    configured_common = common_fields.intersection(values)
-    if configured_common:
-        raise ValueError(
-            f"{field_name} contains portable field(s) {sorted(configured_common)}; "
-            "place them in the common RigidBodyPhysicsCfg slot."
-        )
-    return values
-
-
-def _split_newton_collision_values(
-    values: dict[str, object],
-) -> tuple[dict[str, object], dict[str, object]]:
-    """Separate ordinary Newton shape values from mesh/SDF compatibility aliases."""
-    mesh_values = {
-        name: values.pop(name)
-        for name in tuple(values)
-        if name in _NEWTON_MESH_COLLISION_FIELDS
-    }
-    return values, mesh_values
-
-
 def _resolve_rigid_physics(
-    cfg: RigidBodyAttributesCfg | RigidBodyAttributesOverrideCfg | RigidBodyPhysicsCfg,
+    cfg: RigidBodyPhysicsCfg,
     *,
     newton_solver_type: str | None = None,
 ) -> _RigidPhysicsSpec:
-    """Normalize grouped and legacy rigid-body configs into one internal spec."""
+    """Normalize grouped rigid-body configuration into one internal spec."""
     if isinstance(cfg, RigidBodyPhysicsCfg):
+        mass_props = _configured_values(cfg.mass_props)
+        recompute_inertia = mass_props.pop("recompute_inertia", None)
+        if recompute_inertia is not None and not isinstance(
+            recompute_inertia, (bool, np.bool_)
+        ):
+            raise TypeError("recompute_inertia must be a boolean or None.")
         spec = _RigidPhysicsSpec(
-            mass_props=_configured_values(cfg.mass_props),
-            mesh_collision_props=_configured_values(cfg.mesh_collision_props),
+            mass_props=mass_props,
+            recompute_inertia=(
+                None if recompute_inertia is None else bool(recompute_inertia)
+            ),
             collision_enabled=(
                 None
                 if cfg.collision_props is None
@@ -258,11 +213,7 @@ def _resolve_rigid_physics(
         rigid_props = cfg.rigid_props
         if isinstance(rigid_props, DefaultRigidBodyPropertiesCfg):
             spec.default_rigid_props = _configured_values(rigid_props)
-        elif isinstance(rigid_props, NewtonRigidBodyPropertiesCfg):
-            spec.newton_rigid_props = _configured_values(rigid_props)
-        elif (
-            rigid_props is not None and type(rigid_props) is not RigidBodyPropertiesCfg
-        ):
+        elif rigid_props is not None:
             raise TypeError(
                 f"Unsupported rigid_props type {type(rigid_props).__name__!r}."
             )
@@ -276,10 +227,7 @@ def _resolve_rigid_physics(
             values = _configured_values(collision_props)
             for name in ("collision_enabled", "contact_offset", "rest_offset"):
                 values.pop(name, None)
-            (
-                spec.newton_collision_props,
-                spec.newton_mesh_collision_props,
-            ) = _split_newton_collision_values(values)
+            spec.newton_collision_props = values
         elif (
             collision_props is not None
             and type(collision_props) is not CollisionPropertiesCfg
@@ -289,11 +237,7 @@ def _resolve_rigid_physics(
             )
 
         material_props = cfg.material_props
-        if isinstance(material_props, DefaultRigidBodyMaterialCfg):
-            spec.default_material_props = _configured_values(material_props)
-            for name in ("static_friction", "dynamic_friction", "restitution"):
-                spec.default_material_props.pop(name, None)
-        elif isinstance(material_props, NewtonRigidBodyMaterialCfg):
+        if isinstance(material_props, NewtonRigidBodyMaterialCfg):
             values = _configured_values(material_props)
             for name in ("static_friction", "dynamic_friction", "restitution"):
                 values.pop(name, None)
@@ -310,125 +254,34 @@ def _resolve_rigid_physics(
                 f"Unsupported material_props type {type(material_props).__name__!r}."
             )
 
-        default_props = cfg.default_props
-        if default_props is not None:
-            if not isinstance(default_props, DefaultRigidBodyPhysicsCfg):
-                raise TypeError("default_props must be a DefaultRigidBodyPhysicsCfg.")
-            spec.default_rigid_props.update(
-                _native_extension_values(
-                    default_props.rigid_props,
-                    common_type=RigidBodyPropertiesCfg,
-                    field_name="default_props.rigid_props",
-                )
-            )
-            spec.default_collision_props.update(
-                _native_extension_values(
-                    default_props.collision_props,
-                    common_type=CollisionPropertiesCfg,
-                    field_name="default_props.collision_props",
-                )
-            )
-            spec.default_material_props.update(
-                _native_extension_values(
-                    default_props.material_props,
-                    common_type=RigidBodyMaterialCfg,
-                    field_name="default_props.material_props",
-                )
-            )
-
-        newton_props = cfg.newton_props
-        if newton_props is not None:
-            if not isinstance(newton_props, NewtonRigidBodyPhysicsCfg):
-                raise TypeError("newton_props must be a NewtonRigidBodyPhysicsCfg.")
-            spec.newton_rigid_props.update(
-                _native_extension_values(
-                    newton_props.rigid_props,
-                    common_type=RigidBodyPropertiesCfg,
-                    field_name="newton_props.rigid_props",
-                )
-            )
-            collision_values = _native_extension_values(
-                newton_props.collision_props,
-                common_type=CollisionPropertiesCfg,
-                field_name="newton_props.collision_props",
-            )
-            collision_values, legacy_mesh_values = _split_newton_collision_values(
-                collision_values
-            )
-            spec.newton_collision_props.update(collision_values)
-            spec.newton_mesh_collision_props.update(legacy_mesh_values)
-            spec.newton_mesh_collision_props.update(
-                _configured_values(newton_props.mesh_collision_props)
-            )
-            material_values = _native_extension_values(
-                newton_props.material_props,
-                common_type=RigidBodyMaterialCfg,
-                field_name="newton_props.material_props",
-            )
-            if "torsional_friction" in material_values:
-                material_values["mu_torsional"] = material_values.pop(
-                    "torsional_friction"
-                )
-            if "rolling_friction" in material_values:
-                material_values["mu_rolling"] = material_values.pop("rolling_friction")
-            spec.newton_material_props.update(material_values)
         return spec
 
-    if not isinstance(cfg, (RigidBodyAttributesCfg, RigidBodyAttributesOverrideCfg)):
-        raise TypeError(
-            f"Unsupported rigid-body physics config {type(cfg).__name__!r}."
-        )
-    if newton_solver_type is not None:
-        raise TypeError(
-            f"{type(cfg).__name__} is a deprecated Default-backend-only "
-            "configuration. Newton assets must use RigidBodyPhysicsCfg with "
-            "grouped mass_props, rigid_props, collision_props, and "
-            "material_props."
-        )
+    raise AssertionError("Unhandled grouped rigid-body physics configuration.")
 
-    legacy_values = _configured_values(cfg)
-    mass_names = {
-        "mass",
-        "density",
-        "inertia",
-        "com_position",
-        "com_quaternion",
-    }
-    default_rigid_names = {
-        "angular_damping",
-        "linear_damping",
-        "max_depenetration_velocity",
-        "sleep_threshold",
-        "min_position_iters",
-        "min_velocity_iters",
-        "max_linear_velocity",
-        "max_angular_velocity",
-        "enable_ccd",
-    }
-    default_collision_names = {"contact_offset", "rest_offset"}
-    material_names = {"restitution", "dynamic_friction", "static_friction"}
-    spec = _RigidPhysicsSpec(
-        mass_props={
-            name: legacy_values[name] for name in mass_names if name in legacy_values
-        },
-        default_rigid_props={
-            name: legacy_values[name]
-            for name in default_rigid_names
-            if name in legacy_values
-        },
-        collision_enabled=legacy_values.get("enable_collision"),
-        default_collision_props={
-            name: legacy_values[name]
-            for name in default_collision_names
-            if name in legacy_values
-        },
-        material_props={
-            name: legacy_values[name]
-            for name in material_names
-            if name in legacy_values
-        },
-    )
-    return spec
+
+def _with_procedural_collision_defaults(
+    physics: _RigidPhysicsSpec,
+) -> _RigidPhysicsSpec:
+    """Apply the shared envelope to a newly authored shape when needed.
+
+    Source USD/URDF descriptors retain sparse-overlay semantics. A procedural
+    shape with no portable or native envelope has no authored value to inherit,
+    so it receives the common portable defaults instead. Any explicit portable
+    offset or Newton ``margin``/``gap`` deliberately owns that envelope and is
+    left unchanged.
+    """
+    if (
+        physics.contact_offset is not None
+        or physics.rest_offset is not None
+        or physics.newton_collision_props.get("margin") is not None
+        or physics.newton_collision_props.get("gap") is not None
+    ):
+        return physics
+    defaults = CollisionPropertiesCfg()
+    return _RigidPhysicsSpec(
+        contact_offset=defaults.contact_offset,
+        rest_offset=defaults.rest_offset,
+    ).merged(physics)
 
 
 def rigid_desc_from_cfg(
@@ -445,11 +298,13 @@ def rigid_desc_from_cfg(
             "select the sole rigid object."
         )
 
-    physics = _resolve_rigid_physics(
-        cfg.attrs,
-        newton_solver_type=newton_solver_type,
+    physics = _with_procedural_collision_defaults(
+        _resolve_rigid_physics(
+            cfg.attrs,
+            newton_solver_type=newton_solver_type,
+        )
     )
-    geometry, approximation, max_hulls = _compile_geometry(cfg, physics=physics)
+    geometry, approximation, max_hulls = _compile_geometry(cfg)
     material_ref, material_entry = _compile_visual_material(
         uid, cfg.shape.visual_material
     )
@@ -464,10 +319,8 @@ def rigid_desc_from_cfg(
         physics,
         newton_solver_type=newton_solver_type,
         author_shape_defaults=True,
-        sdf_resolution=(
-            _resolved_mesh_collision_settings(cfg, physics=physics)[2]
-            if isinstance(cfg.shape, MeshCfg)
-            else 0
+        mesh_collision=(
+            cfg.shape.collision if isinstance(cfg.shape, MeshCfg) else None
         ),
     )
     collision.render_source_index = 0
@@ -621,8 +474,8 @@ def articulation_desc_from_cfg(
         enable_self_collision=self_collision_enabled,
         urdf_fix_root_link=fixed_base,
         # EmbodiChain's preserve/overlay policy starts from source-authored
-        # inertia. Individual link groups can still request recomputation via
-        # ``replace_inertial`` after exact source names are available.
+        # inertia. MassPropertiesCfg can request geometry-based recomputation
+        # after exact source names are available.
         urdf_read_inertia=True,
         per_env=per_env,
         body_scale=_vector3(cfg.body_scale, field_name="body_scale"),
@@ -653,7 +506,7 @@ def _articulation_root_values(
     self_collision_default: bool = False,
 ) -> tuple[bool, bool]:
     """Resolve articulation-root values over source/import defaults."""
-    props = cfg.articulation_props
+    props = cfg.root_props
     fixed_base = (
         fixed_base_default if props.fixed_base is None else bool(props.fixed_base)
     )
@@ -668,28 +521,20 @@ def _articulation_root_values(
 def _configured_articulation_overlay_fields(cfg: ArticulationCfg) -> list[str]:
     """Return physics overlay fields that preserve mode would ignore."""
     configured: list[str] = []
-    if isinstance(cfg.attrs, RigidBodyPhysicsCfg):
-        if any(
-            _configured_values(group)
-            for group in (
-                cfg.attrs.mass_props,
-                cfg.attrs.rigid_props,
-                cfg.attrs.collision_props,
-                cfg.attrs.mesh_collision_props,
-                cfg.attrs.material_props,
-                cfg.attrs.default_props,
-                cfg.attrs.newton_props,
-            )
-        ):
-            configured.append("attrs")
-    else:
+    if any(
+        _configured_values(group)
+        for group in (
+            cfg.attrs.mass_props,
+            cfg.attrs.rigid_props,
+            cfg.attrs.collision_props,
+            cfg.attrs.material_props,
+        )
+    ):
         configured.append("attrs")
     if cfg.link_attrs:
         configured.append("link_attrs")
-    if _configured_values(cfg.drive_pros):
-        configured.append("drive_pros")
-    if _configured_values(cfg.joint_props):
-        configured.append("joint_props")
+    if _configured_values(cfg.joint_drive_props):
+        configured.append("joint_drive_props")
     if cfg.qpos_limits is not None:
         configured.append("qpos_limits")
     return configured
@@ -700,7 +545,7 @@ def _compile_link_properties(
     *,
     newton_solver_type: str | None,
     author_newton_shape_defaults: bool,
-) -> tuple[RigidBodyPhysicsDesc, CollisionDesc]:
+) -> tuple[RigidBodyPhysicsDesc, CollisionDesc, bool]:
     collision = CollisionDesc(
         enable_collision=physics.collision_enabled,
         dexsim=_compile_default_collision(physics),
@@ -710,7 +555,11 @@ def _compile_link_properties(
             author_shape_defaults=author_newton_shape_defaults,
         ),
     )
-    return _compile_rigid_physics(physics, "dynamic"), collision
+    return (
+        _compile_rigid_physics(physics, "dynamic"),
+        collision,
+        bool(physics.recompute_inertia),
+    )
 
 
 def configure_articulation_desc(
@@ -729,7 +578,16 @@ def configure_articulation_desc(
             f"Articulation source {desc.name!r} must be resolved before "
             "configuration."
         )
-    if cfg.resolve_asset_physics_mode() == "preserve":
+    preserve_source_physics = cfg.resolve_asset_physics_mode() == "preserve"
+    setattr(desc, "_embodichain_preserve_source_physics", preserve_source_physics)
+    for link in desc.links:
+        # The Default adapter receives a source snapshot for descriptor/query
+        # parity, but it must only call its native physical-attribute setter
+        # for an actual user overlay. Keep that decision attached to the exact
+        # resolved link so both backends share the same ownership boundary.
+        setattr(link, "_embodichain_apply_physics", False)
+        setattr(link, "_embodichain_mass_override", False)
+    if preserve_source_physics:
         configured_fields = _configured_articulation_overlay_fields(cfg)
         if configured_fields:
             warnings.warn(
@@ -750,9 +608,7 @@ def configure_articulation_desc(
         newton_solver_type=newton_solver_type,
         author_newton_shape_defaults=author_newton_shape_defaults,
     )
-    link_properties = {
-        link.name: (*default_link_properties, False) for link in desc.links
-    }
+    link_properties = {link.name: default_link_properties for link in desc.links}
 
     claimed_links: dict[str, str] = {}
     link_names = [link.name for link in desc.links]
@@ -761,7 +617,7 @@ def configure_articulation_desc(
             group.link_names_expr,
             link_names,
         )
-        group_body, group_collision = _compile_link_properties(
+        group_properties = _compile_link_properties(
             default_physics.merged(
                 _resolve_rigid_physics(
                     group.attrs,
@@ -779,11 +635,7 @@ def configure_articulation_desc(
                     f"{group_name!r}."
                 )
             claimed_links[link_name] = group_name
-            link_properties[link_name] = (
-                group_body,
-                group_collision,
-                group.replace_inertial,
-            )
+            link_properties[link_name] = group_properties
 
     (
         joint_properties,
@@ -798,8 +650,55 @@ def configure_articulation_desc(
 
     # Commit only after every regex, value, and limit has been validated. Each
     # source-resolved item receives one exact-name update.
-    for link_name, (rigid_body, collision, replace_inertial) in link_properties.items():
+    for link_name, (
+        rigid_body,
+        collision,
+        recompute_inertia,
+    ) in link_properties.items():
         link = desc.get_link_desc(link_name)
+        source_inertia_invalid = (
+            getattr(link, "_embodichain_source_inertia_valid", None) is False
+        )
+        source_has_collision_geometry = (
+            getattr(link, "_embodichain_has_collision_geometry", None) is True
+        )
+        # An all-zero/invalid source tensor is not an asset value that either
+        # backend can safely preserve. Newton already derives its fallback
+        # from shapes; make that fallback explicit in the shared descriptor so
+        # Default does the same instead of retaining its native epsilon tensor.
+        source_geometry_fallback = (
+            source_inertia_invalid and source_has_collision_geometry
+        )
+        # A source link without collision geometry has no quantity from which
+        # to recompute inertia. Keep its source/fallback tensor instead of
+        # asking Newton to apply a mass override to an empty shape set. The
+        # marker is attached by the URDF source resolver; explicit descriptors
+        # without the marker retain the historical, caller-controlled behavior.
+        effective_recompute = recompute_inertia or source_geometry_fallback
+        if (
+            effective_recompute
+            and getattr(link, "_embodichain_has_collision_geometry", None) is False
+        ):
+            effective_recompute = False
+        apply_physics = _has_articulation_link_physics_overlay(
+            rigid_body,
+            collision,
+            recompute_inertia=effective_recompute,
+        )
+        setattr(link, "_embodichain_apply_physics", apply_physics)
+        setattr(link, "_embodichain_mass_override", rigid_body.mass is not None)
+        if not apply_physics:
+            continue
+        if (
+            rigid_body.density is not None
+            and not effective_recompute
+            and getattr(link, "_embodichain_source_inertia_valid", None) is True
+        ):
+            raise ValueError(
+                f"Density override for source-backed link {link_name!r} requires "
+                "mass_props.recompute_inertia=True. Density derives mass "
+                "properties and cannot preserve the source inertia."
+            )
         desc.set_link_properties(
             link_name,
             rigid_body=rigid_body,
@@ -811,7 +710,7 @@ def configure_articulation_desc(
             collision=(
                 collision if link.collisions or desc.urdf_path is not None else None
             ),
-            replace_inertial=replace_inertial,
+            replace_inertial=effective_recompute,
         )
     for joint_name, (default_desc, newton_desc) in joint_properties.items():
         lower_limit, upper_limit = joint_limits.get(joint_name, (None, None))
@@ -830,6 +729,41 @@ def configure_articulation_desc(
     return desc
 
 
+def _has_articulation_link_physics_overlay(
+    rigid_body: RigidBodyPhysicsDesc,
+    collision: CollisionDesc,
+    *,
+    recompute_inertia: bool,
+) -> bool:
+    """Return whether an exact link needs a native physics write.
+
+    ``RigidBodyPhysicsDesc.dynamic()`` is the compilation container for a
+    sparse configuration; its actor type alone is not an authored override.
+    Avoiding a no-op native setter matters for source URDFs because the
+    Default backend otherwise derives a new tensor from collision geometry.
+    """
+    if recompute_inertia:
+        return True
+    if any(
+        getattr(rigid_body, name) is not None
+        for name in (
+            "mass",
+            "density",
+            "inertia",
+            "com_position",
+            "com_quaternion",
+            "collision_filter_data",
+            "dexsim",
+            "newton",
+        )
+    ):
+        return True
+    return any(
+        getattr(collision, name) is not None
+        for name in ("enable_collision", "dexsim", "newton")
+    )
+
+
 def _compile_joint_properties(
     desc: ArticulationDesc,
     cfg: ArticulationCfg,
@@ -845,8 +779,8 @@ def _compile_joint_properties(
     control_parts = getattr(cfg, "control_parts", None)
     target_mode_cfg: object = None
     drive_type: str | None = None
-    if cfg.drive_pros is not None:
-        target_mode_cfg, drive_type = cfg.drive_pros._resolve_modes()
+    if cfg.joint_drive_props is not None:
+        target_mode_cfg, drive_type = cfg.joint_drive_props._resolve_modes()
 
     joint_target_modes: dict[str, int] = {}
     if target_mode_cfg is not None:
@@ -919,9 +853,9 @@ def _compile_joint_properties(
         "friction": ("joint_friction", "friction"),
     }
     for property_name in ("stiffness", "damping"):
-        if cfg.drive_pros is None:
+        if cfg.joint_drive_props is None:
             continue
-        configured = getattr(cfg.drive_pros, property_name)
+        configured = getattr(cfg.joint_drive_props, property_name)
         if configured is None:
             continue
         matches = _joint_property_matches(
@@ -942,11 +876,8 @@ def _compile_joint_properties(
             setattr(default_desc, default_field, scalar)
             setattr(newton_desc, newton_field, scalar)
 
-    # Compile compatibility aliases first, then layer the canonical independent
-    # joint-dynamics config so its matching rules take precedence.
-    for source in (cfg.drive_pros, cfg.joint_props):
-        if source is None:
-            continue
+    if cfg.joint_drive_props is not None:
+        source = cfg.joint_drive_props
         for property_name in (
             "max_effort",
             "max_velocity",
@@ -1002,7 +933,7 @@ def _compile_joint_properties(
         if newton_solver_type is None
         else newton_solver_type.replace("-", "_").lower()
     )
-    if normalized_solver not in {None, "mujoco_warp", "mjwarp"} and any(
+    if normalized_solver not in {None, "auto", "mujoco_warp", "mjwarp"} and any(
         mode == 1 for mode in joint_target_modes.values()
     ):
         warnings.warn(
@@ -1184,6 +1115,10 @@ def _compile_rigid_physics(
         field_name="inertia",
         allowed_sizes=(3, 9),
     )
+    if inertia is not None and physics.recompute_inertia:
+        raise ValueError(
+            "Rigid-body inertia cannot be explicit when recompute_inertia is true."
+        )
     com_position = _rigid_array(
         physics.mass_props.get("com_position"),
         field_name="com_position",
@@ -1241,11 +1176,6 @@ def _compile_rigid_physics(
         default_desc = DexsimPhysicsDesc(**default_values)
     else:
         default_desc = None
-    newton = (
-        NewtonPhysicsDesc(**physics.newton_rigid_props)
-        if physics.newton_rigid_props
-        else None
-    )
     return RigidBodyPhysicsDesc(
         actor_type=actor_type,
         mass=mass,
@@ -1254,7 +1184,7 @@ def _compile_rigid_physics(
         com_position=com_position,
         com_quaternion=com_quaternion,
         dexsim=default_desc,
-        newton=newton,
+        newton=None,
     )
 
 
@@ -1315,7 +1245,6 @@ def _compile_default_collision(
     if rest_offset is not None:
         values["rest_offset"] = rest_offset
     values.update(physics.default_collision_props)
-    values.update(physics.default_material_props)
     if not values:
         return None
     configured = {item.name: None for item in fields(DexsimCollisionDesc)}
@@ -1326,7 +1255,7 @@ def _compile_default_collision(
 def _compile_newton_collision(
     physics: _RigidPhysicsSpec,
     *,
-    sdf_resolution: int = 0,
+    mesh_collision: MeshCollisionCfg | None = None,
     newton_solver_type: str | None = None,
     author_shape_defaults: bool = False,
 ) -> NewtonCollisionDesc | None:
@@ -1362,7 +1291,20 @@ def _compile_newton_collision(
                 )
             values["gap"] = gap
     values.update(physics.newton_collision_props)
-    values.update(physics.newton_mesh_collision_props)
+    if mesh_collision is not None and mesh_collision.approximation == "sdf":
+        values["force_sdf"] = True
+        for field_name in (
+            "is_hydroelastic",
+            "sdf_narrow_band_range",
+            "sdf_target_voxel_size",
+            "sdf_texture_format",
+            "sdf_padding",
+        ):
+            value = getattr(mesh_collision, field_name)
+            if value is not None:
+                values[field_name] = value
+        if mesh_collision.sdf_resolution is not None:
+            values["sdf_max_resolution"] = int(mesh_collision.sdf_resolution)
     values.update(physics.newton_material_props)
     dynamic_friction = physics.material_props.get("dynamic_friction")
     if dynamic_friction is not None:
@@ -1373,13 +1315,6 @@ def _compile_newton_collision(
         solver_contact_fields is None or "restitution" in solver_contact_fields
     ):
         values["restitution"] = float(restitution)
-    if sdf_resolution > 0:
-        values["force_sdf"] = True
-        if (
-            values["sdf_target_voxel_size"] is None
-            and values["sdf_max_resolution"] is None
-        ):
-            values["sdf_max_resolution"] = int(sdf_resolution)
     if all(value is None for value in values.values()):
         return None
     if author_shape_defaults:
@@ -1393,35 +1328,39 @@ def _compile_newton_collision(
 
 def _compile_geometry(
     cfg: RigidObjectCfg,
-    *,
-    physics: _RigidPhysicsSpec,
 ) -> tuple[GeometryDesc, CollisionApproximation, int]:
     shape = cfg.shape
     if isinstance(shape, MeshCfg):
         if _is_missing(shape.fpath) or not str(shape.fpath).strip():
             raise ValueError("MeshCfg.fpath must be a non-empty path.")
-        max_hulls, acd_method, sdf_resolution = _resolved_mesh_collision_settings(
-            cfg,
-            physics=physics,
-        )
-        if sdf_resolution > 0:
-            approximation = CollisionApproximation.SDF
-        elif max_hulls > 1:
-            approximation = CollisionApproximation.CONVEX_DECOMPOSITION
-        else:
-            approximation = CollisionApproximation.CONVEX_HULL
+        collision_cfg = shape.collision or MeshCollisionCfg()
+        approximation = {
+            "convex_hull": CollisionApproximation.CONVEX_HULL,
+            "convex_decomposition": CollisionApproximation.CONVEX_DECOMPOSITION,
+            "triangle_mesh": CollisionApproximation.NONE,
+            "sdf": CollisionApproximation.SDF,
+        }[collision_cfg.approximation]
+        max_hulls = collision_cfg.max_hulls or 1
+        acd_method = collision_cfg.acd_method or "coacd"
+
+        if collision_cfg.approximation == "triangle_mesh" and cfg.body_type != "static":
+            raise ValueError(
+                "triangle_mesh collision is supported only for static rigid objects."
+            )
 
         if shape.compute_uv:
             logger.log_warning(
                 "Mesh UV projection is not represented by GeometryDesc and was "
                 "not applied."
             )
-        if max_hulls > 1 and str(acd_method).lower() != "coacd":
-            logger.log_warning(
-                f"Spawn preserves max_convex_hull_num={max_hulls}, but does not "
-                f"expose the requested ACD method {acd_method!r}."
+        if (
+            collision_cfg.approximation == "convex_decomposition"
+            and acd_method != "coacd"
+        ):
+            raise ValueError(
+                "Spawn supports only acd_method='coacd' for convex_decomposition."
             )
-        if sdf_resolution > 0:
+        if collision_cfg.sdf_resolution is not None:
             logger.log_warning(
                 "CollisionApproximation.SDF is preserved and Newton receives "
                 "sdf_max_resolution, but the DexSim descriptor does not expose "
@@ -1499,25 +1438,6 @@ def _compile_visual_material(
         ior=float(cfg.ior),
     )
     return key, (key, desc)
-
-
-def _resolved_mesh_collision_settings(
-    cfg: RigidObjectCfg,
-    *,
-    physics: _RigidPhysicsSpec,
-) -> tuple[int, str, int]:
-    if not isinstance(cfg.shape, MeshCfg):
-        return 1, "coacd", 0
-
-    values = physics.mesh_collision_props
-    max_hulls = int(values.get("max_convex_hull_num", cfg.shape.max_convex_hull_num))
-    acd_method = str(values.get("acd_method", cfg.shape.acd_method))
-    sdf_resolution = int(values.get("sdf_resolution", cfg.shape.sdf_resolution))
-    if max_hulls < 1:
-        raise ValueError("max_convex_hull_num must be at least 1.")
-    if sdf_resolution < 0:
-        raise ValueError("sdf_resolution cannot be negative.")
-    return max_hulls, acd_method, sdf_resolution
 
 
 def _pose_from_cfg(cfg: object) -> np.ndarray:
