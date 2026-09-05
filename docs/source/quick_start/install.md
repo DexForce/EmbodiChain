@@ -21,8 +21,15 @@ After installation, continue with the [Quick Start Tutorial](../tutorial/index.r
 | **NVIDIA driver** | ≥ 535 (tested on driver branches up to 595.x) |
 | **CUDA** | 12.x (aligned with the Docker image and `dexsim_engine` wheels) |
 | **Vulkan** | Host ICD/layer files for GPU rendering (see Docker notes) |
-| **Python** | 3.10, 3.11, or 3.12 |
+| **Python** | Core: 3.10, 3.11, or 3.12; `gensim` / `bpy`: 3.11 |
 | **Display** (optional) | X11 `DISPLAY` for interactive viewer windows |
+
+> [!IMPORTANT]
+> Python 3.12 is supported for the core EmbodiChain installation. The optional
+> `gensim` extra includes Blender's ABI-specific `bpy` package and must run in a
+> Python 3.11 environment. If your core installation uses Python 3.12, create a
+> separate Python 3.11 environment for `gensim` and start its commands from that
+> environment; there is no automatic cross-environment handoff.
 
 NVIDIA drivers are backward compatible with applications built against older
 CUDA toolkits. A 595-series host driver therefore works with the current CUDA
@@ -106,6 +113,9 @@ Inside the container, install or update EmbodiChain with the [local installation
 ## Local installation
 
 Use a dedicated virtual environment to avoid conflicts with system Python packages.
+For the core package, choose Python 3.10, 3.11, or 3.12. The examples below use
+Python 3.12; choose Python 3.11 instead if you plan to install `gensim` in the
+same environment.
 
 ### 1. Create a virtual environment
 
@@ -113,14 +123,14 @@ Use a dedicated virtual environment to avoid conflicts with system Python packag
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-uv venv --python 3.11 .venv
+uv venv --python 3.12 .venv
 source .venv/bin/activate
 ```
 
 **With pip:**
 
 ```bash
-python3.11 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 ```
@@ -141,7 +151,7 @@ Set the index variables from [Package indexes](#package-indexes), then pick one 
 ```bash
 git clone https://github.com/DexForce/EmbodiChain.git
 cd EmbodiChain
-uv venv --python 3.11 .venv && source .venv/bin/activate
+uv venv --python 3.12 .venv && source .venv/bin/activate
 uv pip install -e . \
   --extra-index-url http://pyp.open3dv.site:2345/simple/ \
   --trusted-host pyp.open3dv.site
@@ -234,7 +244,14 @@ SimulationManager physics device may be either CPU or CUDA.
 
 ## Optional: generative simulation (`gensim`)
 
-Install the `gensim` extra for SimReady asset pipelines, Blender-based mesh processing, and `pyrender`. The `bpy` wheel is hosted on Blender's index and must be included in the install command.
+Install the `gensim` extra for SimReady asset pipelines, Blender-based mesh
+processing, and `pyrender`. It requires a Python 3.11 environment because its
+`bpy` wheel is ABI-specific. Use the Blender index in the install command.
+
+If your core installation uses Python 3.12, create and activate a separate
+Python 3.11 environment before running any of the commands below. The current
+GenSim launchers use the interpreter that starts them, so start Blender-based
+commands from this Python 3.11 environment.
 
 | Source | Tool | Command |
 |--------|------|---------|
@@ -243,9 +260,11 @@ Install the `gensim` extra for SimReady asset pipelines, Blender-based mesh proc
 | Git clone | uv | `uv pip install -e ".[gensim]" ${GENSIM_EXTRA_ARGS}` |
 | Git clone | pip | `pip install -e ".[gensim]" ${GENSIM_EXTRA_ARGS}` |
 
-**Example:**
+**Example — separate Python 3.11 environment:**
 
 ```bash
+uv venv --python 3.11 .venv-gensim
+source .venv-gensim/bin/activate
 pip install -e ".[gensim]" \
   --extra-index-url http://pyp.open3dv.site:2345/simple/ \
   --trusted-host pyp.open3dv.site \
@@ -319,7 +338,7 @@ Press `Ctrl+C` to stop; the script cleans up the simulation on exit.
 | Viewer does not open | Export `DISPLAY`, allow X11 access (`xhost +local:` on the host), and ensure `~/.Xauthority` is mounted (the run script does this by default). |
 | PyTorch / CUDA errors at runtime | Reinstall a PyTorch build that matches your driver/CUDA from [pytorch.org](https://pytorch.org/get-started/locally/). |
 | `No module named 'curobo'` | Install the CUDA-matched cuRobo source requirement separately, such as `uv pip install "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"`. |
-| `bpy` install fails | Include the Blender index (`https://download.blender.org/pypi/`) and use Python 3.10 or 3.11. |
+| `bpy` install fails | Include the Blender index (`https://download.blender.org/pypi/`) and use Python 3.11. `bpy` is not available for the core Python 3.12 environment. |
 
 ## Next steps
 
