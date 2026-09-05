@@ -203,3 +203,54 @@ Supporting planning utilities
 
 .. automodule:: embodichain.gen_sim.action_engine.runtime.state
    :members:
+
+Execution and agent runtime
+---------------------------
+
+.. automodule:: embodichain.gen_sim.action_engine.agent
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.unbound
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.environment
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.environment.agent_env
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.runtime.dynamic
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.runtime.executor
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.runtime.grasp_debug
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.runtime.recording
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.runtime.recovery
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.runtime.reporting
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.cli.run_agent
+   :members:
+
+Evaluation
+----------
+
+.. automodule:: embodichain.gen_sim.action_engine.evaluation
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.evaluation.ab
+   :members:
+
+.. automodule:: embodichain.gen_sim.action_engine.evaluation.e1_e2_scene_action
+   :members:
+
+.. automodule:: embodichain.gen_sim.video_archive
+   :members:

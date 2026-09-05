@@ -14,9 +14,22 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Capability-driven planning for generated simulations."""
+"""Capability-driven planning and live execution for generated simulations.
+
+Action Engine deliberately exposes a small public surface. Natural-language
+goals become a typed TaskSpec, deterministic planning lowers them into a
+coordinate-free SeedGraph, and the runtime grounds that graph only against live
+simulator state.
+"""
 
 from __future__ import annotations
+
+from .unbound import (
+    UNBOUND_ACTION_PLAN_SCHEMA,
+    UnboundActionPlan,
+    build_unbound_action_plan,
+    validate_unbound_action_plan,
+)
 
 from .protocol import (
     ACTION_ENGINE_CONFIG_SCHEMA,
@@ -30,4 +43,8 @@ __all__ = [
     "ACTION_ENGINE_ENV_ID",
     "EXECUTION_PROGRAM_SCHEMA",
     "TASK_AGENT_SCHEMA",
+    "UNBOUND_ACTION_PLAN_SCHEMA",
+    "UnboundActionPlan",
+    "build_unbound_action_plan",
+    "validate_unbound_action_plan",
 ]
