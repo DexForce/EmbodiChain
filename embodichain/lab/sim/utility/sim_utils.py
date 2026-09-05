@@ -307,6 +307,16 @@ def load_mesh_objects_from_cfg(
         option.rebuild_3rdnormal = cfg.shape.load_option.rebuild_3rdnormal
         option.rebuild_3rdtangent = cfg.shape.load_option.rebuild_3rdtangent
         option.smooth = cfg.shape.load_option.smooth
+        if cfg.shape.load_option.gltfloader:
+            # Older DexSim builds do not expose this optional loader switch.
+            # Do not make ordinary mesh loading depend on it.
+            if hasattr(option, "gltfloader"):
+                option.gltfloader = True
+            else:
+                logger.log_warning(
+                    "DexSim LoadOption does not support gltfloader; using its "
+                    "default glTF import path."
+                )
 
         cfg: RigidObjectCfg
         max_convex_hull_num, acd_method, sdf_resolution = (

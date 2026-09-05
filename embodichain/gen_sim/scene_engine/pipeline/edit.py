@@ -36,6 +36,7 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import (
     SceneExporter,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import build_scene_usd
 from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_understanding import (
     understand_scene_edit,
 )
@@ -45,7 +46,7 @@ from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparat
 from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_layout_generation import (
     edit_layout,
 )
-from embodichain.utils.logger import log_info
+from embodichain.utils.logger import log_info, log_warning
 
 
 def edit_scene(
@@ -120,6 +121,12 @@ def edit_scene(
         output_root=resolved_output_root,
     )
     scene_exporter.export()
+    try:
+        build_scene_usd(output_root=resolved_output_root)
+    except RuntimeError as exc:
+        # Keep the editable GLB/USDC export usable when a DexSim release cannot
+        # serialize one of its texture-backed materials into USD.
+        log_warning(f"Skipped whole-scene USD export: {exc}")
     log_info("Completed Scene Export")
 
     return None
