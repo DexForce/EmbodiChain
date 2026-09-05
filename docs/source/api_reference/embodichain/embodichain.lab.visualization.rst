@@ -103,6 +103,14 @@ Scene Export
    :members:
    :undoc-members:
 
+``PickCommand`` identifies a node in a specific simulation run and scene
+revision. An empty selection releases only the gizmo created by click picking;
+explicitly configured gizmos retain their ownership.
+
+.. autoclass:: PickCommand
+   :members:
+   :undoc-members:
+
 .. autoclass:: JointControlSpec
    :members:
    :undoc-members:

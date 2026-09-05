@@ -17,8 +17,10 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from dataclasses import replace
 
 import numpy as np
+import pytest
 
 from embodichain.lab.visualization import (
     CameraImage,
@@ -982,6 +984,7 @@ def test_viser_backend_pick_enqueues_command_when_enabled() -> None:
             ray_direction=np.array([0.0, 0.0, -1.0], dtype=np.float32),
         )
     )
+    backend.poll()
     assert pick_commands == []
 
     server.gui.checkboxes["Enable click-to-pick Gizmo"].callback(
@@ -997,6 +1000,7 @@ def test_viser_backend_pick_enqueues_command_when_enabled() -> None:
         )
     )
 
+    backend.poll()
     assert len(pick_commands) == 1
     command = pick_commands[0]
     assert command.node_id == "env:0/rigid:cube"
@@ -1027,9 +1031,53 @@ def test_viser_backend_pick_miss_enqueues_empty_command() -> None:
         )
     )
 
+    backend.poll()
     assert len(pick_commands) == 1
     assert pick_commands[0].node_id is None
     backend.stop()
+
+
+@pytest.mark.parametrize("node_count", [1, 2])
+def test_picker_waits_for_matching_frame_after_topology_change(node_count: int) -> None:
+    backend, server, commands = _make_pick_backend()
+    manifest, frame = _make_pickable_scene()
+    backend.start()
+    try:
+        backend.publish_manifest(manifest)
+        assert backend.publish_frame(frame)
+        backend._pick_enabled = True
+        event = SimpleNamespace(
+            client_id="client-a",
+            ray_origin=np.array([0.0, 0.0, 5.0]),
+            ray_direction=np.array([0.0, 0.0, -1.0]),
+        )
+        nodes = tuple(
+            replace(manifest.nodes[0], node_id=f"env:0/rigid:new{index}")
+            for index in range(node_count)
+        )
+        backend.publish_manifest(replace(manifest, scene_revision=2, nodes=nodes))
+        server.scene.pointer_callbacks[0][1](event)
+        backend.poll()
+        # Neither select a new node using old transforms nor detach an active
+        # gizmo as if this temporary absence of pose data were an empty click.
+        assert commands == []
+        assert not backend.publish_frame(frame)
+        backend.publish_frame(
+            replace(
+                frame,
+                scene_revision=2,
+                node_ids=tuple(node.node_id for node in nodes),
+                positions=np.zeros((node_count, 3), dtype=np.float32),
+                wxyz=np.tile([1.0, 0.0, 0.0, 0.0], (node_count, 1)),
+                visible=np.ones(node_count, dtype=np.bool_),
+            )
+        )
+        server.scene.pointer_callbacks[0][1](event)
+        backend.poll()
+        assert commands[-1].node_id == nodes[0].node_id
+        assert commands[-1].scene_revision == 2
+    finally:
+        backend.stop()
 
 
 def test_viser_backend_disabling_pick_clears_picker_gizmo() -> None:
@@ -1053,6 +1101,7 @@ def test_viser_backend_disabling_pick_clears_picker_gizmo() -> None:
 
     assert backend._pick_enabled is False
     # Disabling emits an empty pick so the simulation releases the gizmo.
+    backend.poll()
     assert len(pick_commands) == 1
     assert pick_commands[0].node_id is None
     backend.stop()

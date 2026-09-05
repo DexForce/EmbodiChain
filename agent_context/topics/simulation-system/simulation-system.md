@@ -110,6 +110,23 @@ do not belong to the simulation object; use
 
 ## Configuration Flow
 
+### Gizmo ownership
+
+Native entity manipulation belongs to DexSim 0.5.0. Call
+`SimulationManager.enable_entity_gizmo(config)` to obtain the world-owned
+`EntityGizmoManipulator`; the manager only registers its default plane as a
+static external target. Opening a window does not implicitly enable entity
+gizmos. Query/disable through `sim.get_world().get_entity_gizmo()` and
+`disable_entity_gizmo()`; DexSim owns window detach/reopen and controller state.
+
+`create_robot_ik_gizmo_controller()` in `objects/gizmo.py` returns the native
+DexSim IK controller and input controller. The caller retains both and calls
+the IK controller's `update()` per frame. `SimulationManager.enable_gizmo()`
+creates Viser controls for robots, rigid objects, or cameras. Both robot paths
+default to native Newton IK; `GizmoCfg(ik_solver="embodichain")` adapts the
+control part's existing solver, such as PinkSolver. Both support one environment
+and write only selected non-mimic joint drive targets through `Robot`.
+
 `SimulationManagerCfg` owns window size, headless mode, rendering, GPU/CPU
 selection, arena count and spacing, physics timestep, physics and GPU-memory
 settings, recording, profiling, and browser visualization.

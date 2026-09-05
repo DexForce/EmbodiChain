@@ -250,6 +250,21 @@ Soft bodies and cloth require GPU physics. Their live vertices are sampled at
 
 ## Browser Controls and Overlays
 
+Gizmo implementation lives in `embodichain/lab/sim/objects/gizmo.py`. Native
+windows delegate object picking/manipulation to DexSim's entity gizmo and robot
+targets to its `IKGizmoController`. Viser transports poses to the simulation
+thread. Both robot paths use Newton IK by default or, with
+`GizmoCfg(ik_solver="embodichain")`, reuse the configured control-part solver
+(including Pink). Chain roots follow the live robot link, including upstream
+joint motion; TCP overrides adapt targets without changing the shared solver.
+
+Viser click picking runs on the visualization worker via the existing GUI
+event queue. A manifest invalidates cached pick poses until its matching frame
+arrives; stale clicks are dropped. The manager validates `PickCommand` run and
+revision before attaching a gizmo and tracks picker ownership independently
+from explicitly created gizmos. Clearing selection releases only the picker
+gizmo. Native entity selection remains entirely DexSim-owned.
+
 The browser GUI has:
 
 - **Environments** — visibility per exported environment;

@@ -16,6 +16,8 @@
 
 """Helper utilities for simulation state conversion, mesh/geometry handling, configuration transforms, keyboard interaction, and action/solver adaptation."""
 
+from __future__ import annotations
+
 from .sim_utils import *
 from .mesh_utils import *
 from .keyboard_utils import *

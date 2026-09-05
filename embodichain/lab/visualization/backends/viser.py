@@ -244,7 +244,9 @@ class ViserBackend(VisualizationBackend):
 
             @self._server.scene.on_pointer_event("click")
             def _on_pick_click(event: object) -> None:
-                self._handle_pick_click(event)
+                self._gui_events.put(
+                    _GuiEvent("pick", (self._run_id, self._scene_revision, event))
+                )
 
             self._pointer_handler = _on_pick_click
 
@@ -392,7 +394,7 @@ class ViserBackend(VisualizationBackend):
         empty space (no hit) clears the picker-owned Gizmo. The command is
         processed on the simulation thread.
         """
-        if not self._pick_enabled:
+        if not self._pick_enabled or self._frame_positions is None:
             return
         sink = getattr(self, "_pick_command_sink", None)
         if sink is None or self._run_id is None:
@@ -1123,6 +1125,11 @@ class ViserBackend(VisualizationBackend):
         geometry_by_id = {
             geometry.geometry_id: geometry for geometry in manifest.geometries
         }
+        # Pick topology and poses must always come from the same revision.
+        # Defer clicks until a matching frame arrives after this manifest.
+        self._frame_positions = None
+        self._frame_wxyz = None
+        self._frame_visible = None
         self._frame_node_ids = tuple(node.node_id for node in manifest.nodes)
         node_indices = {
             node_id: index for index, node_id in enumerate(self._frame_node_ids)
@@ -1279,6 +1286,11 @@ class ViserBackend(VisualizationBackend):
                 event = self._gui_events.get_nowait()
             except queue.Empty:
                 break
+            if event.category == "pick":
+                run_id, revision, click = event.value
+                if (run_id, revision) == (self._run_id, self._scene_revision):
+                    self._handle_pick_click(click)
+                continue
             if event.category == "environment":
                 env_id, visible = event.value
                 self._env_visibility[int(env_id)] = bool(visible)

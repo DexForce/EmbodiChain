@@ -24,7 +24,7 @@ import argparse
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.sim.solvers import PytorchSolverCfg
+from embodichain.lab.sim.solvers import PinkSolverCfg, PytorchSolverCfg
 from embodichain.lab.sim.objects import (
     GizmoCfg,
     create_robot_ik_gizmo_controller,
@@ -48,6 +48,12 @@ def main():
         description="Create a simulation scene with SimulationManager"
     )
     add_env_launcher_args_to_parser(parser)
+    parser.add_argument(
+        "--ik-solver",
+        choices=("dexsim", "pytorch", "pink"),
+        default="dexsim",
+        help="IK solver; the native window always uses DexSim's IKGizmoController.",
+    )
     args = parser.parse_args()
 
     # Configure the simulation
@@ -68,6 +74,30 @@ def main():
     ur10_urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
     gripper_urdf_path = get_data_path("DH_PGC_140_50_M/DH_PGC_140_50_M.urdf")
 
+    # Native IK needs only chain metadata. Build an EmbodiChain solver only
+    # when explicitly selected, and share the same TCP configuration.
+    gizmo_cfg = GizmoCfg(
+        ik_solver="dexsim" if args.ik_solver == "dexsim" else "embodichain",
+        ik_root_link_name="base_link",
+        ik_end_link_name="ee_link",
+        ik_tcp_pose=[
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.12],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    )
+    solver_cfg = None
+    if args.ik_solver != "dexsim":
+        solver_type = PinkSolverCfg if args.ik_solver == "pink" else PytorchSolverCfg
+        solver_cfg = {
+            "arm": solver_type(
+                root_link_name=gizmo_cfg.ik_root_link_name,
+                end_link_name=gizmo_cfg.ik_end_link_name,
+                tcp=gizmo_cfg.ik_tcp_pose,
+            )
+        }
+
     # Create UR10 robot
     robot_cfg = RobotCfg(
         uid="ur10_gizmo_test",
@@ -78,26 +108,14 @@ def main():
             ]
         ),
         control_parts={
-            "arm": ["JOINT[0-9]"],
+            "arm": ["Joint[0-9]"],
             "hand": ["FINGER[1-2]"],
         },
-        solver_cfg={
-            "arm": PytorchSolverCfg(
-                end_link_name="ee_link",
-                root_link_name="base_link",
-                tcp=[
-                    [0.0, 1.0, 0.0, 0.0],
-                    [-1.0, 0.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, 0.12],
-                    [0.0, 0.0, 0.0, 1.0],
-                ],
-                num_samples=30,
-            )
-        },
+        solver_cfg=solver_cfg,
         drive_pros=JointDrivePropertiesCfg(
-            stiffness={"JOINT[0-9]": 1e4, "FINGER[1-2]": 1e2},
-            damping={"JOINT[0-9]": 1e3, "FINGER[1-2]": 1e1},
-            max_effort={"JOINT[0-9]": 1e5, "FINGER[1-2]": 1e3},
+            stiffness={"Joint[0-9]": 1e4, "FINGER[1-2]": 1e2},
+            damping={"Joint[0-9]": 1e3, "FINGER[1-2]": 1e1},
+            max_effort={"Joint[0-9]": 1e5, "FINGER[1-2]": 1e3},
             drive_type="force",
         ),
         init_qpos=[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0, 0.0, 0.0],
@@ -119,16 +137,6 @@ def main():
     if not args.headless:
         native_window_opened = sim.open_window()
 
-    gizmo_cfg = GizmoCfg(
-        ik_root_link_name="base_link",
-        ik_end_link_name="ee_link",
-        ik_tcp_pose=[
-            [0.0, 1.0, 0.0, 0.0],
-            [-1.0, 0.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.12],
-            [0.0, 0.0, 0.0, 1.0],
-        ],
-    )
     native_control = None
     if native_window_opened:
         native_control = create_robot_ik_gizmo_controller(
