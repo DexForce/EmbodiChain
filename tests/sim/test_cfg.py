@@ -244,10 +244,19 @@ def test_render_cfg_instances_do_not_share_dlss_settings() -> None:
         ("upsample_ratio", 0.5),
         ("upsample_ratio", float("inf")),
         ("upsample_ratio", float("nan")),
+        ("upsample_ratio", "2.0"),
+        ("upsample_ratio", True),
+        ("upsample_ratio", []),
+        ("upsample_ratio", {}),
         ("exposure_compensation", 0.0),
         ("exposure_compensation", -1.0),
         ("exposure_compensation", float("inf")),
         ("exposure_compensation", float("nan")),
+        ("exposure_compensation", "1.0"),
+        ("exposure_compensation", True),
+        ("exposure_compensation", None),
+        ("exposure_compensation", []),
+        ("exposure_compensation", {}),
     ],
 )
 def test_dlss_rejects_invalid_settings(field_name: str, invalid_value: object) -> None:
@@ -256,10 +265,53 @@ def test_dlss_rejects_invalid_settings(field_name: str, invalid_value: object) -
         DLSSCfg(**{field_name: invalid_value})
 
 
-def test_dlss_conversion_revalidates_mutated_settings() -> None:
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "dlss_enabled",
+        "offscreen_dlss_enabled",
+        "rayreconstruction_enabled",
+        "upscale_enabled",
+    ],
+)
+@pytest.mark.parametrize("invalid_value", ["false", 0, 1, None])
+def test_dlss_rejects_non_boolean_switches(
+    field_name: str, invalid_value: object
+) -> None:
+    """Switches require booleans instead of silently coercing task config values."""
+    with pytest.raises(ValueError, match=field_name):
+        DLSSCfg(**{field_name: invalid_value})
+
+
+@pytest.mark.parametrize("value", [2, 2.0])
+def test_dlss_accepts_integer_and_float_numeric_settings(value: int | float) -> None:
+    """Both JSON/YAML numeric representations remain valid for real-valued settings."""
+    converted = DLSSCfg(
+        upsample_ratio=value, exposure_compensation=value
+    ).to_dexsim_cfg(1920, 1080)
+
+    assert (converted.render_width, converted.render_height) == (960, 540)
+    assert converted.exposure_compensation == pytest.approx(2.0)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("upsample_ratio", 0.0),
+        ("upsample_ratio", "2.0"),
+        ("exposure_compensation", "1.0"),
+        ("dlss_enabled", "false"),
+        ("offscreen_dlss_enabled", 0),
+        ("rayreconstruction_enabled", 1),
+        ("upscale_enabled", None),
+    ],
+)
+def test_dlss_conversion_revalidates_mutated_settings(
+    field_name: str, invalid_value: object
+) -> None:
     """Mutable config edits are checked before entering the native binding."""
     config = DLSSCfg()
-    config.upsample_ratio = 0.0
+    setattr(config, field_name, invalid_value)
 
-    with pytest.raises(ValueError, match="upsample_ratio"):
+    with pytest.raises(ValueError, match=field_name):
         config.to_dexsim_cfg(1920, 1080)

@@ -141,8 +141,11 @@ size from their own output and quality. DexSim initializes DLSS lazily on a
 rendered frame, so config tests do not qualify GPU/NGX support.
 
 `gym/utils/gym_utils.py:config_to_cfg()` decodes task `render_cfg.dlss`
-mappings into `DLSSCfg` before constructing `RenderCfg`. Focused coverage
-lives in `tests/sim/test_cfg.py`, `tests/sim/test_sim_manager.py`, and
+mappings into `DLSSCfg` before constructing `RenderCfg`. DLSS switches require
+booleans; ratio/exposure settings require real numbers, excluding booleans.
+Malformed scalar types raise a field-specific `ValueError` during construction
+and are rechecked before native conversion after mutable config edits. Focused
+coverage lives in `tests/sim/test_cfg.py`, `tests/sim/test_sim_manager.py`, and
 `tests/gym/utils/test_gym_utils.py`.
 
 Object-specific configuration belongs in `lab/sim/cfg.py` or the

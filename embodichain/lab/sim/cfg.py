@@ -27,6 +27,7 @@ import torch
 
 from typing import Sequence, Dict, Literal, List, Any, Optional
 from dataclasses import field, MISSING
+from numbers import Real
 
 from dexsim.types import (
     DenoiserType,
@@ -146,7 +147,15 @@ class DLSSCfg:
     """Positive, finite exposure multiplier used by the RR bridge."""
 
     def __post_init__(self) -> None:
-        """Validate quality, dimensions, ratio, and exposure settings."""
+        """Validate scalar types and the ranges of numeric settings."""
+        for name in (
+            "dlss_enabled",
+            "offscreen_dlss_enabled",
+            "rayreconstruction_enabled",
+            "upscale_enabled",
+        ):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"DLSSCfg.{name} must be a boolean.")
         if type(self.dlss_quality) is not int or not -1 <= self.dlss_quality <= 5:
             raise ValueError("DLSSCfg.dlss_quality must be an integer from -1 to 5.")
         for name in ("render_width", "render_height", "target_width", "target_height"):
@@ -154,15 +163,22 @@ class DLSSCfg:
             if type(value) is not int or value < 0:
                 raise ValueError(f"DLSSCfg.{name} must be a non-negative integer.")
         if self.upsample_ratio is not None and (
-            not math.isfinite(self.upsample_ratio) or self.upsample_ratio < 1.0
+            isinstance(self.upsample_ratio, bool)
+            or not isinstance(self.upsample_ratio, Real)
+            or not math.isfinite(self.upsample_ratio)
+            or self.upsample_ratio < 1.0
         ):
-            raise ValueError("DLSSCfg.upsample_ratio must be finite and at least 1.0.")
+            raise ValueError(
+                "DLSSCfg.upsample_ratio must be a finite number of at least 1.0."
+            )
         if (
-            not math.isfinite(self.exposure_compensation)
+            isinstance(self.exposure_compensation, bool)
+            or not isinstance(self.exposure_compensation, Real)
+            or not math.isfinite(self.exposure_compensation)
             or self.exposure_compensation <= 0.0
         ):
             raise ValueError(
-                "DLSSCfg.exposure_compensation must be positive and finite."
+                "DLSSCfg.exposure_compensation must be a positive, finite number."
             )
 
     def to_dexsim_cfg(self, window_width: int, window_height: int) -> dexsim.DLSSConfig:

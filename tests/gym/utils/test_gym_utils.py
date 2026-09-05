@@ -1385,6 +1385,44 @@ class TestConfigToCfgFromFile:
                 source_path=tmp_path / "env.yaml",
             )
 
+    @pytest.mark.parametrize("extension", ["json", "yaml"])
+    @pytest.mark.parametrize(
+        ("field_name", "invalid_value"),
+        [
+            ("dlss_enabled", "false"),
+            ("offscreen_dlss_enabled", 0),
+            ("rayreconstruction_enabled", 1),
+            ("upscale_enabled", None),
+            ("upsample_ratio", "2.0"),
+            ("exposure_compensation", "1.0"),
+        ],
+    )
+    def test_gym_config_rejects_wrongly_typed_dlss_scalars(
+        self,
+        tmp_path: Path,
+        extension: str,
+        field_name: str,
+        invalid_value: object,
+    ) -> None:
+        """Malformed file values fail at DLSS decoding with the offending field name."""
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "env": {},
+            "robot": {
+                "class_type": "URRobot",
+                "robot_type": "ur5",
+                "uid": "TestUR5",
+            },
+            "render_cfg": {"dlss": {field_name: invalid_value}},
+        }
+        config_path = tmp_path / f"gym_config.{extension}"
+        save_config(config_path, config)
+
+        with pytest.raises(ValueError, match=field_name):
+            config_to_cfg(
+                load_config(config_path), manager_modules=DEFAULT_MANAGER_MODULES
+            )
+
     def test_yaml_gym_config_parses_to_cfg(self, tmp_path):
         config = {
             "id": "EmbodiedEnv-v1",
