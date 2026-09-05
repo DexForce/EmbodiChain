@@ -145,9 +145,9 @@ corresponding robot/sensor module. Scene composition belongs in
 - Keep batched object and sensor state aligned with the manager's arena count.
 - Build scene assets before explicitly initializing GPU physics. The manager
   will warn and initialize lazily on the first update if this was missed.
-- Physics advances only through explicit `SimulationManager.update()` calls;
-  there is no public automatic/manual mode switch. Interactive loops own their
-  fixed physics timestep and optional wall-clock pacing.
+- Physics advances through explicit `SimulationManager.update()` calls.
+  Interactive loops own their fixed physics timestep and optional wall-clock
+  pacing.
 - Drawing markers and publishing visualization do not advance physics.
   Use `capture_visualization(force=True)` to publish marker edits while paused.
 - Reset only the requested environment rows and honor

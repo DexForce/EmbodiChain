@@ -291,11 +291,7 @@ timestep. Waiting at a REPL or breakpoint pauses physics. Drawing markers and
 calling `capture_visualization(force=True)` publish visual changes without
 advancing physics.
 
-The `set_manual_update()` method and `is_physics_manually_update` property have
-been removed. Delete mode-selection calls from existing scripts and replace
-sleeps that relied on background physics with explicit `sim.update(step=N)`
-calls. Pure IK/FK queries do not require a physics loop. The profiler's former
-`manual_update` section is now named `physics_steps`.
+Pure IK/FK queries do not require a physics loop.
 
 ## Mainly used methods
 
