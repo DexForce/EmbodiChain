@@ -116,6 +116,7 @@ class StackBlocksTwoEnv(EmbodiedEnv):
                 name="stack_block_2_on_block_1",
                 target_uid=STACK_BLOCK_UID,
                 instruction="Pick up block 2 and place it on top of block 1.",
+                progress_total_steps=int(trajectory.shape[1]) + SETTLE_STEPS,
                 metadata={
                     "segment_index": 0,
                     "segment_count": 1,

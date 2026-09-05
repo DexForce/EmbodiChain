@@ -41,6 +41,8 @@ from embodichain.lab.sim.atomic_actions.bindings import (
     JointPositionTarget,
     RuntimeEndpointTarget,
 )
+from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
+from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
 from embodichain.lab.sim.atomic_actions.runner import (
     CommandAcknowledgement,
     ExecutionClock,
@@ -64,6 +66,9 @@ from embodichain.lab.task_program.runtime.results import (
     SemanticExecutionResult,
     SemanticExecutionStatus,
 )
+from embodichain.lab.task_program.semantics.calls import Pick, Place
+from embodichain.lab.task_program.semantics.integration import SemanticValidationError
+from embodichain.lab.task_program.semantics.profiles import EffectAssurance
 from embodichain.lab.sim.types import EnvAction
 
 _SAFE_HOLD_ACTION_KINDS = frozenset(
@@ -1003,6 +1008,7 @@ class TaskProgramDemoBridge:
                 validator=validator,
                 abort_actions=self._segment_abort_actions(segment, lifecycle),
                 failure_policy="row_independent",
+                progress_total_steps=self._segment_progress_total_steps(segment),
             )
             self._require_consumed_segment_lifecycle(segment, lifecycle)
         if self._eligible_mask is None:
@@ -1037,12 +1043,62 @@ class TaskProgramDemoBridge:
                 "compiled segment."
             )
 
+    def _segment_progress_total_steps(self, segment: Any) -> int | None:
+        """Count fixed Pick/Place samples without analyzing downstream calls."""
+        if (
+            getattr(segment, "parallel_block", None) is not None
+            or segment.post_policies
+            or self._runner_cfg.minimum_cycle_time != 0.0
+            or self._runner_cfg.hold_on_completion
+            or self._runner_cfg.hold_during_effect_verification
+        ):
+            return None
+
+        compiler = getattr(self._runtime, "compiler", None)
+        integration = getattr(compiler, "integration", None)
+        if integration is None:
+            return None
+
+        total = 0
+        try:
+            for compiled_call in segment.calls:
+                call = compiled_call.call
+                if type(call) not in (Pick, Place):
+                    return None
+                preset = integration.link_call(call).preset
+                motion = preset.motion_policy
+                recovery = preset.recovery_policy
+                tracking = preset.tracking_policy
+                if (
+                    preset.effect_assurance is not EffectAssurance.PROJECTED
+                    or motion.strategy != "ik_interp"
+                    or type(motion.sample_count) is not int
+                    or recovery.max_replans != 0
+                    or recovery.max_action_retries != 0
+                    or preset.workflow_recovery_policy.max_recovery_attempts != 0
+                    or tracking.in_flight is not None
+                    or getattr(tracking.terminal, "settle_duration", None) != 0.0
+                ):
+                    return None
+                options = preset.action_option_template(call.semantic_id)
+                if type(options) is PickUpOptions:
+                    total += motion.sample_count + options.grasp_settle_steps
+                elif type(options) is PlaceOptions:
+                    total += motion.sample_count + options.release_settle_steps
+                else:
+                    return None
+        except SemanticValidationError:
+            # Let ordinary execution report linking failures through its lifecycle.
+            return None
+        return total or None
+
     def _segment_metadata(self, segment: Any) -> dict[str, Any]:
         """Build mutable JSON-safe metadata completed at lifecycle boundaries."""
         return {
             "task_program_id": self._program.program_id,
             "program_segment_id": segment.segment_id,
             "program_segment_index": segment.segment_index,
+            "segment_count": getattr(self._program, "segment_count", None),
             "program_segment_source_path": list(segment.source_path),
             "program_segment_implicit": bool(segment.implicit),
             "semantic_call_indices": [call.call_index for call in segment.calls],
