@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import threading
 from typing import TYPE_CHECKING, Literal
+from weakref import WeakValueDictionary
 
 import dexsim
 import numpy as np
@@ -44,10 +45,16 @@ if TYPE_CHECKING:
 
 __all__ = ["Gizmo", "GizmoCfg", "create_robot_ik_gizmo_controller"]
 
+# Explicit factory users retain ownership; automatic controls must not create
+# a second controller for the same robot/control part.
+_NATIVE_IK_CONTROLLERS: WeakValueDictionary[tuple[int, str], IKGizmoController] = (
+    WeakValueDictionary()
+)
+
 
 @configclass
 class GizmoCfg:
-    """Configure Viser Gizmo appearance and robot IK behavior."""
+    """Configure Gizmo appearance and native or Viser robot IK behavior."""
 
     axis_length_x: float = 0.2
     """Length of the X-axis arrow."""
@@ -435,22 +442,23 @@ def create_robot_ik_gizmo_controller(
         name=f"{robot.uid}_{control_part}_ik",
     )
     window.add_input_control(input_controller)
+    _NATIVE_IK_CONTROLLERS[id(robot), control_part] = controller
     return controller, input_controller
 
 
 class Gizmo:
-    """Apply Viser Gizmo commands to one simulation target.
+    """Manage native robot IK or Viser control for one simulation target.
 
     Native-window entity manipulation is owned by DexSim. Use
-    :meth:`SimulationManager.enable_entity_gizmo` for entity roots and
-    :func:`create_robot_ik_gizmo_controller` for a native robot TCP target.
+    :meth:`SimulationManager.enable_entity_gizmo` for entity roots. The manager
+    discovers robot TCP controls and owns their updates and cleanup.
 
     .. attention::
-        Viser Gizmo control supports exactly one simulation environment.
+        Gizmo control supports exactly one simulation environment.
 
     Args:
-        target: Rigid object, robot, or camera controlled from Viser.
-        cfg: Viser appearance and robot IK configuration.
+        target: Robot, or a rigid object or camera controlled from Viser.
+        cfg: Gizmo appearance and robot IK configuration.
         control_part: Robot control part used for FK and IK.
     """
 
@@ -479,11 +487,19 @@ class Gizmo:
         self._robot_adapter: _RobotGizmoAdapter | None = None
         self._robot_end_link: str | None = None
         self._robot_tcp_pose: np.ndarray | None = None
+        self._native_controller: IKGizmoController | None = None
+        self._native_input_controller: GizmoController | None = None
+        self._native_window = None
+
+        from dexsim.kit.ik.interactive import KeyPressTracker
+
+        self._native_toggle = KeyPressTracker(self.cfg.ik_toggle_key)
 
         if self._target_type == "robot":
             self._control_part = _resolve_control_part(target, control_part)
-            self._setup_robot_ik_solver()
-            self._desired_target_transform = self._read_robot_pose()
+            _, self._robot_end_link, self._robot_tcp_pose = _resolve_robot_ik_chain(
+                target, self._control_part, self.cfg
+            )
         else:
             self._desired_target_transform = self._read_target_pose()
 
@@ -526,16 +542,61 @@ class Gizmo:
 
     def _read_robot_pose(self) -> torch.Tensor:
         if (
-            self._robot_adapter is None
+            self.target is None
             or self._robot_end_link is None
             or self._robot_tcp_pose is None
         ):
             raise RuntimeError("Robot Gizmo IK is not configured.")
-        link_pose = self._robot_adapter.get_link_pose(self._robot_end_link)
+        link_pose = self.target.get_link_pose(
+            self._robot_end_link, env_ids=[0], to_matrix=True
+        )[0]
         return self._as_pose_matrix(
-            link_pose @ self._robot_tcp_pose,
+            link_pose
+            @ torch.as_tensor(
+                self._robot_tcp_pose, dtype=link_pose.dtype, device=link_pose.device
+            ),
             self._target_device(),
         )
+
+    def update_native(self, world: dexsim.World) -> None:
+        """Activate robot IK on the first toggle, then update DexSim's controller.
+
+        Registration and window reopening never write robot drive targets.
+        Explicit factory-created controllers remain owned by their caller.
+
+        Args:
+            world: Simulation world with an open native window.
+        """
+        if self._target_type != "robot" or self.target is None:
+            return
+        window = world.get_windows()
+        if window is None:
+            return
+        if self._native_controller is None:
+            existing = _NATIVE_IK_CONTROLLERS.get((id(self.target), self._control_part))
+            if existing is not None or not self._native_toggle.pressed(world):
+                return
+            self._native_controller, self._native_input_controller = (
+                create_robot_ik_gizmo_controller(
+                    self.target, self._control_part, self.cfg, world=world
+                )
+            )
+            self._native_window = window
+            # The activation press created a visible target. Consume it so the
+            # controller's own toggle does not immediately hide that target.
+            self._native_controller.toggle.pressed(world)
+            return
+        if self._native_window is not window:
+            self.detach_native_window()
+            window.add_input_control(self._native_input_controller)
+            self._native_window = window
+        self._native_controller.update()
+
+    def detach_native_window(self) -> None:
+        """Detach input before window close while retaining IK state and visibility."""
+        if self._native_window is not None:
+            self._native_window.remove_input_control(self._native_input_controller)
+            self._native_window = None
 
     def _target_device(self) -> torch.device:
         if self.target is None:
@@ -621,9 +682,11 @@ class Gizmo:
 
         if pending is None or self.target is None:
             return
-        if self._robot_adapter is None:
+        if self._target_type != "robot":
             self.target.set_local_pose(pending, env_ids=[0])
             return
+        if self._ik_solver is None:
+            self._setup_robot_ik_solver()
         adapter, solver = self._robot_adapter, self._ik_solver
         base_local = local_pose_from_world(
             adapter.get_world_pose(), pending[0].detach().cpu().numpy()
@@ -637,20 +700,36 @@ class Gizmo:
         adapter.set_target_qpos(solver.qpos_for_joint_names(joint_names, current_qpos))
 
     def toggle_visibility(self) -> bool:
-        """Toggle Viser visibility and return the new state."""
-        self._is_visible = not self._is_visible
-        return self._is_visible
+        """Toggle Gizmo visibility and return the new state."""
+        visible = not self.is_visible()
+        self.set_visible(visible)
+        return visible
 
     def set_visible(self, visible: bool) -> None:
-        """Set Viser Gizmo visibility."""
+        """Set Gizmo visibility, including an activated native controller."""
         self._is_visible = bool(visible)
+        if self._native_controller is not None:
+            self._native_controller._set_visible(self._is_visible)
 
     def is_visible(self) -> bool:
-        """Return whether the Viser Gizmo should be visible."""
+        """Return the active native visibility or configured Viser visibility."""
+        if self._native_controller is not None:
+            return self._native_controller.enabled
         return self._is_visible
 
     def destroy(self) -> None:
         """Release target and IK references."""
+        self.detach_native_window()
+        if self._native_controller is not None:
+            controller = self._native_controller
+            env = controller.world.get_env()
+            env.remove_gizmo(controller.target_gizmo.gizmo)
+            env.remove_dummy_node(controller.target_gizmo.target_node)
+            key = (id(self.target), self._control_part)
+            if _NATIVE_IK_CONTROLLERS.get(key) is controller:
+                _NATIVE_IK_CONTROLLERS.pop(key)
+            self._native_controller = None
+            self._native_input_controller = None
         with self._state_lock:
             self._interaction_owner = None
             self._pending_target_transform = None

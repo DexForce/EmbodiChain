@@ -270,7 +270,12 @@ def test_headless_robot_gizmo_uses_dexsim_newton_ik(monkeypatch) -> None:
 
     monkeypatch.setattr(Gizmo, "_setup_robot_ik_solver", _inject_solver)
 
-    gizmo = Gizmo(target, control_part="arm")
+    gizmo = Gizmo(
+        target,
+        GizmoCfg(ik_root_link_name="base_link", ik_end_link_name="tool_link"),
+        control_part="arm",
+    )
+    assert gizmo._ik_solver is None
     pose = torch.eye(4, dtype=torch.float32).unsqueeze(0)
     pose[0, 0, 3] = 0.5
 

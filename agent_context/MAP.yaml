@@ -24,6 +24,7 @@ topics:
       - EntityGizmoManipulator
       - enable_entity_gizmo
       - disable_entity_gizmo
+      - robot_ik_gizmo
       - DexSim
       - world
       - arena

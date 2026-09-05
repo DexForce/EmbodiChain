@@ -255,9 +255,14 @@ windows delegate object picking/manipulation to DexSim's entity gizmo and robot
 targets to its `IKGizmoController`. Entity interaction defaults on at the first
 native window open; `SimulationManagerCfg.enable_entity_gizmo=False` or
 `sim.disable_entity_gizmo()` opts out and reopening preserves the choice.
-Pure headless and Viser runs do not automatically create native controls, and
-robot IK targets require explicit creation. Viser's `allow_commands` remains
-independent of the native startup preference. Viser transports poses to the
+Pure headless and Viser runs do not automatically create native controls.
+`SimulationManagerCfg.robot_ik_gizmo` automatically registers robot parts with
+solver chain/TCP metadata: native IK activates on I and Viser builds IK on the
+first drag. The manager updates both and preserves native controls across window
+reopen. Explicit configuration and disable calls take precedence; caller-owned
+native factory controllers are not duplicated. Automatic Viser registration
+requires `allow_commands`, independently of native interaction preferences.
+Viser transports poses to the
 simulation thread. Both robot paths use Newton IK by default or, with
 `GizmoCfg(ik_solver="embodichain")`, reuse the configured control-part solver
 (including Pink). Chain roots follow the live robot link, including upstream

@@ -12,7 +12,8 @@ Native entity interaction is enabled by default when the first native window
 opens. Select an object and press **G** to attach its gizmo. Set
 `SimulationManagerCfg(enable_entity_gizmo=False)` or call
 `sim.disable_entity_gizmo()` to opt out; reopening preserves that choice.
-Robot IK controls require explicit creation for a selected control part.
+Robot IK controls are discovered automatically from configured control parts
+and their solver's root link, end link, and TCP.
 See {doc}`native window controls <window>` for native entity configuration.
 
 ## Supported Targets
@@ -24,8 +25,9 @@ See {doc}`native window controls <window>` for native entity configuration.
 | Camera | Sets the camera's local pose. |
 
 Registered Viser controls and robot IK controls currently require `num_envs=1`.
-Robot targets require a valid `control_part`; an EmbodiChain solver configuration
-is needed only when selecting `GizmoCfg(ik_solver="embodichain")`.
+Automatic discovery requires robot solver metadata for each supported control
+part. IK computation still defaults to DexSim. Robots without this metadata
+can use explicit `GizmoCfg` chain settings instead; no end link or TCP is guessed.
 
 ## Quick Start
 
@@ -41,41 +43,53 @@ Use the same target through Viser:
 python scripts/tutorials/sim/gizmo_robot.py --viser
 ```
 
-For Viser, register controls through the manager:
+The tutorial does not create or update a controller explicitly. After adding
+the robot, its ordinary manual-physics loop is sufficient:
 
 ```python
-sim.enable_gizmo(
-    uid="robot",
-    control_part="arm",
-)
-
-if not sim.has_gizmo("robot", control_part="arm"):
-    raise RuntimeError("Gizmo setup failed")
+sim.open_window()  # Safely skipped when Viser is configured.
+while True:
+    sim.update(step=1)
 ```
 
-`SimulationManager.update()` drains pending Gizmo commands during a normal
-manual-physics loop. An automatic-physics loop that does not call `update()`
-must continue calling:
+In the native window, the first **I** press creates the eligible robot IK
+controllers; later presses toggle their visibility. Opening a window alone
+does not construct an IK solver or change existing drive targets. Viser displays
+the TCP handles and constructs the solver on the first drag. Both paths update
+through `SimulationManager.update()`.
+
+The default `SimulationManagerCfg.robot_ik_gizmo` is `GizmoCfg()`. To use each
+control part's configured solver (including Pink), or disable automatic setup:
 
 ```python
-sim.update_gizmos()
-sim.capture_visualization_safely()  # Publish the authoritative pose to Viser.
+SimulationManagerCfg(robot_ik_gizmo=GizmoCfg(ik_solver="embodichain"))
+SimulationManagerCfg(robot_ik_gizmo=None)
 ```
 
-Use `disable_gizmo()`, `set_gizmo_visibility()`, and
-`toggle_gizmo_visibility()` for lifecycle and visibility changes.
+Gym JSON/YAML deployments accept the same `robot_ik_gizmo` mapping or `null`.
+`sim.enable_gizmo(uid, control_part, gizmo_cfg)` provides an explicit per-part
+override. `sim.disable_gizmo(uid, control_part)` prevents automatic recreation,
+including across window reopen; omit the part to disable all parts of a robot.
+Use `set_gizmo_visibility()` and `toggle_gizmo_visibility()` for visibility.
+Activated native controls retain their IK and visibility state across window
+close/reopen. Removing a robot or destroying the manager releases their input
+handlers and native target nodes.
 
 ## Frontend Behavior
 
 - Native entity interaction starts with the first native window; pure headless
   and Viser runs do not automatically create native controllers. Native robot
-  targets use `create_robot_ik_gizmo_controller()` explicitly.
+  targets activate on **I** without a script-level controller call.
 - Viser exports browser-native transform controls when
   `VisualizationCfg.allow_commands=True`; otherwise it shows read-only frames.
 - The standard `--viser` launcher enables registered commands for trusted
   clients. EmbodiChain does not add authentication to the Viser endpoint.
 - A Viser Gizmo is owned by one browser client from drag start until drag end
   or disconnect. Other clients continue receiving authoritative poses.
+
+Advanced callers may still use `create_robot_ik_gizmo_controller()` directly
+and retain/update its returned objects. Automatic setup detects an existing
+factory-created controller and does not create or update a duplicate.
 
 For the complete robot setup and IK walkthrough, continue with the
 {doc}`Gizmo tutorial </tutorial/gizmo>`. See

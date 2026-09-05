@@ -98,9 +98,10 @@ controller = sim.get_world().get_entity_gizmo()
 sim.disable_entity_gizmo()
 ```
 
-Robot TCP IK controllers still require explicit creation for a robot control
-part. When both controllers are active, **G** controls entity roots and **I**
-shows or hides the Robot TCP target.
+Robot TCP IK controls are registered automatically for parts with configured
+IK chain/TCP metadata. The first **I** press activates them; later presses show
+or hide their targets. **G** continues to control entity roots. Normal
+`sim.update()` calls handle IK updates; no controller-specific call is needed.
 
 The entity gizmo is native-window only. The Viser backend offers an analogous
 **click-to-pick** flow (an *Enable click-to-pick Gizmo* checkbox instead of the

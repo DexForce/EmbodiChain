@@ -72,9 +72,9 @@ environment control step normally calls it with
 
 `scripts/tutorials/sim/gizmo_robot.py` supports only manual physics. It initializes
 GPU physics after robot creation when needed, sets both current and target
-joint positions, and advances once before creating the IK target. In its loop,
-the native IK controller updates before `sim.update(step=1)`, which also handles
-Viser commands/capture. The loop is paced by `physics_dt` and has no automatic
+joint positions, and advances once before opening the window. Its loop only
+calls `sim.update(step=1)`; the manager owns native IK updates and Viser
+commands/capture. The loop is paced by `physics_dt` and has no automatic
 physics polling path.
 
 `ArticulationCfg.enable_gravity` defaults to `True`. During articulation
@@ -134,11 +134,21 @@ detach/reopen and controller state; reopening never reapplies the default or
 overwrites an explicit native disable. Pure headless and Viser runs do not
 automatically create a native entity controller.
 
-`create_robot_ik_gizmo_controller()` in `objects/gizmo.py` returns the native
-DexSim IK controller and input controller. The caller retains both and calls
-the IK controller's `update()` per frame. `SimulationManager.enable_gizmo()`
-creates Viser controls for robots, rigid objects, or cameras. Robot IK controls
-are always created explicitly for a control part. Both robot paths
+`SimulationManagerCfg.robot_ik_gizmo` defaults to `GizmoCfg()`. During normal
+updates the manager registers robot control parts with complete solver chain/TCP
+metadata in single-environment interactive runs. Pure headless, read-only Viser, and
+multi-environment runs do not register automatic controls. The first native I
+press creates DexSim's `IKGizmoController`; Viser constructs IK on its first drag.
+Registration never writes drive targets. `Gizmo` owns managed native input and
+target-node cleanup, detaches input on window close, and reattaches the same
+controller on reopen. Robot removal releases all its managed controls.
+
+Set `robot_ik_gizmo=None` to opt out or supply `GizmoCfg` overrides; Gym
+JSON/YAML accepts the same mapping/null. `enable_gizmo()` can override one part,
+and `disable_gizmo()` prevents automatic recreation (all parts when omitted).
+The explicit `create_robot_ik_gizmo_controller()` factory still returns
+caller-owned controllers; a weak registry prevents automatic duplicates.
+Both robot paths
 default to native Newton IK; `GizmoCfg(ik_solver="embodichain")` adapts the
 control part's existing solver, such as PinkSolver. Both support one environment
 and write only selected non-mimic joint drive targets through `Robot`.

@@ -24,10 +24,6 @@ import argparse
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.sim.objects import (
-    GizmoCfg,
-    create_robot_ik_gizmo_controller,
-)
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
     RenderCfg,
@@ -111,28 +107,7 @@ def main():
     if not args.headless:
         native_window_opened = sim.open_window()
 
-    gizmo_cfg = GizmoCfg(
-        ik_root_link_name="base_link",
-        ik_end_link_name="ee_link",
-    )
-    native_control = None
-    if native_window_opened:
-        native_control = create_robot_ik_gizmo_controller(
-            robot,
-            control_part="arm",
-            cfg=gizmo_cfg,
-            world=sim.get_world(),
-        )
-    elif args.viser:
-        sim.enable_gizmo(
-            uid="ur10_gizmo_test",
-            control_part="arm",
-            gizmo_cfg=gizmo_cfg,
-        )
-        if not sim.has_gizmo("ur10_gizmo_test", control_part="arm"):
-            logger.log_error("Failed to enable gizmo!")
-            return
-    else:
+    if not native_window_opened and not args.viser:
         logger.log_warning(
             "Gizmo interaction is disabled in headless mode without Viser."
         )
@@ -141,23 +116,21 @@ def main():
     if native_window_opened or args.viser:
         logger.log_info("Use the gizmo to drag the robot end-effector (EE)")
     if native_window_opened:
-        logger.log_info("Press I to show or hide the native robot IK Gizmo")
+        logger.log_info("Press I to activate or toggle the native robot IK Gizmo")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
-    run_simulation(sim, native_control)
+    run_simulation(sim)
 
 
-def run_simulation(sim: SimulationManager, native_control=None):
-    """Update IK and advance one manual physics step per frame."""
+def run_simulation(sim: SimulationManager) -> None:
+    """Advance physics; the manager owns native and Viser IK interaction."""
     step_count = 0
     try:
         last_time = time.perf_counter()
         last_step = 0
         while True:
             frame_start = time.perf_counter()
-            if native_control is not None:
-                native_control[0].update()
-            # update() also processes Viser commands and publishes the frame.
+            # update() owns IK interaction, physics stepping, and Viser capture.
             sim.update(step=1)
             step_count += 1
 
