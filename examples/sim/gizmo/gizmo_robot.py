@@ -68,7 +68,7 @@ def main():
     )
 
     sim = SimulationManager(sim_cfg)
-    sim.set_manual_update(False)
+    sim.set_manual_update(True)
 
     # Get UR10 URDF path
     ur10_urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
@@ -121,17 +121,19 @@ def main():
         init_qpos=[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0, 0.0, 0.0],
     )
     robot = sim.add_robot(cfg=robot_cfg)
+    if sim.is_use_gpu_physics:
+        sim.init_gpu_physics()
 
     # Set initial joint positions
     initial_qpos = torch.tensor(
         [[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0]],
         dtype=torch.float32,
-        device="cpu",
+        device=sim.device,
     )
     joint_ids = robot.get_joint_ids("arm")
+    robot.set_qpos(qpos=initial_qpos, joint_ids=joint_ids, target=False)
     robot.set_qpos(qpos=initial_qpos, joint_ids=joint_ids)
-
-    time.sleep(0.2)  # Wait for a moment to ensure everything is set up
+    sim.update(step=1)
 
     native_window_opened = False
     if not args.headless:
@@ -172,18 +174,17 @@ def main():
 def run_simulation(sim: SimulationManager, native_control=None):
     step_count = 0
     try:
-        last_time = time.time()
+        last_time = time.perf_counter()
         last_step = 0
         while True:
-            time.sleep(0.033)  # 30Hz
+            frame_start = time.perf_counter()
             if native_control is not None:
                 native_control[0].update()
-            sim.update_gizmos()
-            sim.capture_visualization_safely()
+            sim.update(step=1)
             step_count += 1
 
             if step_count % 100 == 0:
-                current_time = time.time()
+                current_time = time.perf_counter()
                 elapsed = current_time - last_time
                 fps = (
                     sim.num_envs * (step_count - last_step) / elapsed
@@ -193,6 +194,9 @@ def run_simulation(sim: SimulationManager, native_control=None):
                 logger.log_info(f"Simulation step: {step_count}, FPS: {fps:.2f}")
                 last_time = current_time
                 last_step = step_count
+
+            elapsed = time.perf_counter() - frame_start
+            time.sleep(max(0.0, sim.sim_config.physics_dt - elapsed))
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")
     finally:

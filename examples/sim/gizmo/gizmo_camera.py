@@ -60,7 +60,7 @@ def main():
 
     # Create simulation context
     sim = SimulationManager(sim_cfg)
-    sim.set_manual_update(False)
+    sim.set_manual_update(True)
 
     # Add some objects to the scene for camera to observe
     for i in range(5):
@@ -98,8 +98,9 @@ def main():
     # Add camera to simulation
     camera = sim.add_sensor(sensor_cfg=camera_cfg)
 
-    # Wait for initialization
-    time.sleep(0.2)
+    if sim.is_use_gpu_physics:
+        sim.init_gpu_physics()
+    sim.update(step=1)
 
     native_window_opened = False
     if not args.headless:
@@ -141,7 +142,7 @@ def run_simulation(
 ) -> None:
     """Run the simulation loop with gizmo updates."""
     step_count = 0
-    last_time = time.time()
+    last_time = time.perf_counter()
     last_step = 0
 
     if show_camera_window:
@@ -153,9 +154,9 @@ def run_simulation(
 
     try:
         while True:
-            # Update all gizmos managed by sim (including camera gizmo)
-            sim.update_gizmos()
-            sim.capture_visualization_safely()
+            frame_start = time.perf_counter()
+            # update() applies Gizmo commands before advancing one physics step.
+            sim.update(step=1)
 
             # Update camera to get latest sensor data
             camera.update()
@@ -199,7 +200,7 @@ def run_simulation(
 
             # Print simulation statistics and camera info
             if step_count % 1000 == 0:
-                current_time = time.time()
+                current_time = time.perf_counter()
                 elapsed = current_time - last_time
                 fps = (
                     sim.num_envs * (step_count - last_step) / elapsed
@@ -219,6 +220,9 @@ def run_simulation(
 
                 last_time = current_time
                 last_step = step_count
+
+            elapsed = time.perf_counter() - frame_start
+            time.sleep(max(0.0, sim.sim_config.physics_dt - elapsed))
 
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")

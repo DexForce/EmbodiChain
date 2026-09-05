@@ -57,6 +57,7 @@ def main():
 
     # Create the simulation instance
     sim = SimulationManager(sim_cfg)
+    sim.set_manual_update(True)
 
     # Add two cubes to the scene
     cube1: RigidObject = sim.add_rigid_object(
@@ -134,9 +135,10 @@ def run_simulation(sim: SimulationManager):
     step_count = 0
     gizmo_enabled = True
     try:
-        last_time = time.time()
+        last_time = time.perf_counter()
         last_step = 0
         while True:
+            frame_start = time.perf_counter()
             sim.update(step=1)
 
             step_count += 1
@@ -153,7 +155,7 @@ def run_simulation(sim: SimulationManager):
 
             # Print FPS every second
             if step_count % 1000 == 0:
-                current_time = time.time()
+                current_time = time.perf_counter()
                 elapsed = current_time - last_time
                 fps = (
                     sim.num_envs * (step_count - last_step) / elapsed
@@ -163,6 +165,9 @@ def run_simulation(sim: SimulationManager):
                 logger.log_info(f"Simulation step: {step_count}, FPS: {fps:.2f}")
                 last_time = current_time
                 last_step = step_count
+
+            elapsed = time.perf_counter() - frame_start
+            time.sleep(max(0.0, sim.sim_config.physics_dt - elapsed))
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")
     finally:
