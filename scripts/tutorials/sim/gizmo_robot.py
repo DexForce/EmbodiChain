@@ -105,8 +105,7 @@ def main():
     robot.set_qpos(qpos=initial_qpos, joint_ids=joint_ids, target=False)
     robot.set_qpos(qpos=initial_qpos, joint_ids=joint_ids)
 
-    if sim.is_physics_manually_update:
-        sim.update(step=1)  # Refresh link poses before creating the IK target.
+    sim.update(step=1)  # Refresh link poses before creating the IK target.
 
     native_window_opened = False
     if not args.headless:
@@ -149,7 +148,7 @@ def main():
 
 
 def run_simulation(sim: SimulationManager, native_control=None):
-    """Update IK before each manual physics step, or poll automatic physics."""
+    """Update IK and advance one manual physics step per frame."""
     step_count = 0
     try:
         last_time = time.perf_counter()
@@ -158,14 +157,8 @@ def run_simulation(sim: SimulationManager, native_control=None):
             frame_start = time.perf_counter()
             if native_control is not None:
                 native_control[0].update()
-            if sim.is_physics_manually_update:
-                # update() also processes Viser commands and publishes the frame.
-                sim.update(step=1)
-                frame_dt = sim.sim_config.physics_dt
-            else:
-                sim.update_gizmos()
-                sim.capture_visualization_safely()
-                frame_dt = 1.0 / 30.0
+            # update() also processes Viser commands and publishes the frame.
+            sim.update(step=1)
             step_count += 1
 
             if step_count % 100 == 0:
@@ -181,7 +174,7 @@ def run_simulation(sim: SimulationManager, native_control=None):
                 last_step = step_count
 
             elapsed = time.perf_counter() - frame_start
-            time.sleep(max(0.0, frame_dt - elapsed))
+            time.sleep(max(0.0, sim.sim_config.physics_dt - elapsed))
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")
     finally:

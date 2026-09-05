@@ -26,12 +26,10 @@ from scripts.tutorials.sim import gizmo_robot
 pytestmark = pytest.mark.no_sim
 
 
-@pytest.mark.parametrize("manual", [True, False])
 @pytest.mark.parametrize("native", [True, False])
 @pytest.mark.parametrize("work_duration", [0.002, 0.050])
 def test_gizmo_loop_advances_manual_physics_and_paces_frames(
     monkeypatch: pytest.MonkeyPatch,
-    manual: bool,
     native: bool,
     work_duration: float,
 ) -> None:
@@ -39,7 +37,6 @@ def test_gizmo_loop_advances_manual_physics_and_paces_frames(
     physics_dt = 0.01
     calls = Mock()
     sim = calls.sim
-    sim.is_physics_manually_update = manual
     sim.sim_config = SimpleNamespace(physics_dt=physics_dt)
     native_control = (calls.ik, object()) if native else None
     clock = Mock(side_effect=[0.0, 0.0, work_duration])
@@ -50,13 +47,6 @@ def test_gizmo_loop_advances_manual_physics_and_paces_frames(
     gizmo_robot.run_simulation(sim, native_control)
 
     expected_calls = [call.ik.update()] if native else []
-    if manual:
-        expected_calls.append(call.sim.update(step=1))
-    else:
-        expected_calls.extend(
-            [call.sim.update_gizmos(), call.sim.capture_visualization_safely()]
-        )
-    expected_calls.append(call.sim.destroy())
+    expected_calls.extend([call.sim.update(step=1), call.sim.destroy()])
     assert calls.mock_calls == expected_calls
-    frame_dt = physics_dt if manual else 1.0 / 30.0
-    sleep.assert_called_once_with(pytest.approx(max(0.0, frame_dt - work_duration)))
+    sleep.assert_called_once_with(pytest.approx(max(0.0, physics_dt - work_duration)))
