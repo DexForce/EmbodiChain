@@ -51,9 +51,11 @@ from embodichain.utils.math import pose_inv, quat_from_matrix
 from embodichain.lab.sim.planners.base_planner import (
     BasePlanner,
     BasePlannerCfg,
+    CollisionWorldInfo,
     PlanOptions,
     validate_plan_options,
 )
+from embodichain.lab.sim.planners.curobo.curobo_yaml import _named_rigid_objects
 from embodichain.lab.sim.planners.utils import MoveType, PlanResult, PlanState
 
 if TYPE_CHECKING:
@@ -136,6 +138,13 @@ class _RigidObjectRefList(list):
         return _RigidObjectRefList(self)
 
 
+class _RigidObjectRefMapping(dict):
+    """Registry IDs mapped to live objects without deepcopying their handles."""
+
+    def __deepcopy__(self, memo: dict) -> "_RigidObjectRefMapping":  # noqa: ARG002
+        return _RigidObjectRefMapping(self)
+
+
 @configclass
 class CuroboWorldCfg:
     """Static collision-world configuration for the cuRobo backend.
@@ -144,16 +153,19 @@ class CuroboWorldCfg:
     meshes (see :attr:`rigid_objects`); there is no external scene-YAML path.
     """
 
-    rigid_objects: list[RigidObject] | None = None
-    """Live :class:`RigidObject` obstacles to bake into the auto-generated world YAML.
+    rigid_objects: list[RigidObject] | Mapping[str, RigidObject] | None = None
+    """Live :class:`RigidObject` obstacles to bake into the generated world YAML.
 
     The adapter reads each object's mesh (``get_vertices`` / ``get_triangles``)
     and world pose (``get_local_pose``) and writes a cuRobo V2 scene YAML (cached
-    on disk by content hash). Poses are written in the cuRobo world/base frame,
-    so this is exact when the robot base sits at the simulator world origin. For
-    obstacles that move or live in an offset base frame, also list their names in
-    :attr:`dynamic_obstacle_names` to update poses at plan time. ``None`` yields an
-    initially empty collision world.
+    on disk by content hash). A mapping is the registry-backed path: its keys are
+    authoritative obstacle IDs even when they differ from ``RigidObject.uid``.
+    The list form remains available for advanced callers and derives names from
+    ``uid`` (or ``obstacle_<index>`` when absent). Poses are written in the cuRobo
+    world/base frame, so this is exact when the robot base sits at the simulator
+    world origin. For obstacles that move or live in an offset base frame, also
+    list their canonical names in :attr:`dynamic_obstacle_names` to update poses
+    at plan time. ``None`` yields an initially empty collision world.
     """
 
     obstacle_representation: str = "sphere"
@@ -178,7 +190,7 @@ class CuroboWorldCfg:
     """
 
     dynamic_obstacle_names: list[str] = []
-    """Obstacle names whose poses may be updated between plans."""
+    """Canonical obstacle IDs whose poses may be updated between plans."""
 
     multi_env: bool = False
     """Whether cuRobo allocates one collision-world instance per environment.
@@ -211,10 +223,65 @@ class CuroboWorldCfg:
     """
 
     def __post_init__(self) -> None:
+        if isinstance(self.dynamic_obstacle_names, (str, bytes)):
+            raise TypeError(
+                "dynamic_obstacle_names must be an iterable of obstacle IDs, "
+                "not a string."
+            )
+        try:
+            dynamic_names = list(self.dynamic_obstacle_names)
+        except TypeError as exc:
+            raise TypeError(
+                "dynamic_obstacle_names must be an iterable of obstacle IDs."
+            ) from exc
+        if not all(
+            isinstance(name, str) and name and name == name.strip()
+            for name in dynamic_names
+        ):
+            raise ValueError(
+                "dynamic_obstacle_names must contain unique non-empty names "
+                "without outer whitespace."
+            )
+        if len(set(dynamic_names)) != len(dynamic_names):
+            raise ValueError(
+                "dynamic_obstacle_names must contain unique non-empty names "
+                "without outer whitespace."
+            )
+
+        if self.rigid_objects is not None and not isinstance(
+            self.rigid_objects,
+            (list, Mapping),
+        ):
+            raise TypeError("rigid_objects must be a list, mapping, or None.")
+        named_rigid_objects = _named_rigid_objects(self.rigid_objects)
+        rigid_names = [name for name, _ in named_rigid_objects]
+        if not all(
+            isinstance(name, str) and name and name == name.strip()
+            for name in rigid_names
+        ):
+            raise ValueError(
+                "CuroboWorldCfg.rigid_objects must have non-empty string obstacle "
+                "IDs without outer whitespace."
+            )
+        if len(set(rigid_names)) != len(rigid_names):
+            raise ValueError(
+                "CuroboWorldCfg.rigid_objects must have unique obstacle names."
+            )
+        missing = set(dynamic_names).difference(rigid_names)
+        if missing:
+            raise ValueError(
+                "dynamic_obstacle_names reference objects not present in "
+                f"rigid_objects: {sorted(missing)}."
+            )
+        self.dynamic_obstacle_names = dynamic_names
+
         # Wrap live RigidObjects so the @configclass field-deepcopy (run right
         # after this by custom_post_init) shares references instead of trying to
         # pickle non-pickleable C++ dexsim handles held by each RigidObject.
-        if self.rigid_objects is not None and not isinstance(
+        if isinstance(self.rigid_objects, Mapping):
+            if not isinstance(self.rigid_objects, _RigidObjectRefMapping):
+                self.rigid_objects = _RigidObjectRefMapping(self.rigid_objects)
+        elif self.rigid_objects is not None and not isinstance(
             self.rigid_objects, _RigidObjectRefList
         ):
             self.rigid_objects = _RigidObjectRefList(self.rigid_objects)
@@ -417,7 +484,7 @@ class CuroboPlanOptions(PlanOptions):
     """EmbodiChain control-part name to plan for."""
 
     dynamic_obstacle_poses: dict[str, torch.Tensor] | None = None
-    """Per-obstacle world poses ``(B, 4, 4)`` keyed by configured name."""
+    """World poses ``(B, 4, 4)`` keyed by canonical dynamic-obstacle ID."""
 
     max_attempts: int | None = None
     """Per-plan override of ``CuroboPlannerCfg.max_attempts``."""
@@ -464,8 +531,8 @@ def _validate_dynamic_obstacles(
     """Validate dynamic-obstacle pose names and shapes.
 
     Args:
-        poses: Mapping of obstacle name -> pose tensor. ``None`` is a no-op.
-        allowed_names: Obstacle names declared in :class:`CuroboWorldCfg`.
+        poses: Mapping of canonical obstacle ID -> pose tensor. ``None`` is a no-op.
+        allowed_names: Canonical IDs declared in :class:`CuroboWorldCfg`.
 
     Raises:
         ValueError: If a name is not configured, or a pose is not ``(B, 4, 4)``.
@@ -649,6 +716,7 @@ def _require_curobo(log_level: str = "error") -> "Any":
     try:
         planner_mod = importlib.import_module("curobo.motion_planner")
         batch_mod = importlib.import_module("curobo.batch_motion_planner")
+        collision_mod = importlib.import_module("curobo.collision_checking")
         types_mod = importlib.import_module("curobo.types")
     except ModuleNotFoundError as exc:
         raise ImportError(
@@ -663,6 +731,8 @@ def _require_curobo(log_level: str = "error") -> "Any":
         MotionPlanner=planner_mod.MotionPlanner,
         MotionPlannerCfg=planner_mod.MotionPlannerCfg,
         BatchMotionPlanner=batch_mod.BatchMotionPlanner,
+        RobotCollisionChecker=collision_mod.RobotCollisionChecker,
+        RobotCollisionCheckerCfg=collision_mod.RobotCollisionCheckerCfg,
         JointState=types_mod.JointState,
         Pose=types_mod.Pose,
         GoalToolPose=types_mod.GoalToolPose,
@@ -750,6 +820,7 @@ class CuroboPlanner(BasePlanner):
 
     supported_move_types = frozenset({MoveType.EEF_MOVE, MoveType.JOINT_MOVE})
     supports_collision_world_updates = True
+    supports_joint_trajectory_validation = True
 
     @property
     def preserve_plan_samples(self) -> bool:
@@ -760,6 +831,117 @@ class CuroboPlanner(BasePlanner):
         trajectory to the action's ``sample_interval``.
         """
         return self.cfg.preserve_plan_samples
+
+    @property
+    def collision_world_info(self) -> CollisionWorldInfo:
+        """Return the configured collision-world integration contract."""
+        return CollisionWorldInfo(
+            entity_ids=tuple(
+                name for name, _ in _named_rigid_objects(self.cfg.world.rigid_objects)
+            ),
+            dynamic_entity_ids=tuple(self.cfg.world.dynamic_obstacle_names),
+            batch_mode="per_env" if self.cfg.world.multi_env else "shared",
+            supports_updates=True,
+        )
+
+    def validate_joint_trajectory(
+        self,
+        trajectory: torch.Tensor,
+        *,
+        control_part: str,
+        obstacle_poses: Mapping[str, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        """Validate every supplied joint sample with cuRobo collision models.
+
+        The samples are not replanned or replaced. They are mapped from the
+        simulator's control-part order into the exact cuRobo model, then checked
+        against joint bounds, self-collision, and the live world collision
+        checker. Calling the configuration validator once per horizon sample
+        works around cuRobo 0.8's configuration-only ``validate`` contract while
+        retaining batched environments.
+        """
+        if (
+            not isinstance(trajectory, torch.Tensor)
+            or not trajectory.is_floating_point()
+            or trajectory.dim() != 3
+            or 0 in trajectory.shape
+            or not bool(torch.isfinite(trajectory).all().item())
+        ):
+            raise ValueError("trajectory must be finite floating shape (B, T, D).")
+        batch_size, horizon, dof = trajectory.shape
+        backend = self._get_backend(
+            control_part,
+            batch_size,
+            MoveType.JOINT_MOVE,
+        )
+        if dof != len(backend.sim_joint_names):
+            raise ValueError(
+                f"Trajectory for {control_part!r} has {dof} joints, expected "
+                f"{len(backend.sim_joint_names)}."
+            )
+
+        dynamic_ids = tuple(self.cfg.world.dynamic_obstacle_names)
+        if dynamic_ids and obstacle_poses is None:
+            raise ValueError(
+                "Live dynamic-obstacle poses are required for exact trajectory "
+                "validation."
+            )
+        poses = None if obstacle_poses is None else dict(obstacle_poses)
+        if poses is not None:
+            _validate_dynamic_obstacles(poses, list(dynamic_ids))
+            missing = sorted(set(dynamic_ids).difference(poses))
+            extra = sorted(set(poses).difference(dynamic_ids))
+            if missing or extra:
+                raise ValueError(
+                    "Dynamic collision obstacle IDs do not match the planner "
+                    f"configuration; missing={missing}, extra={extra}."
+                )
+            if poses:
+                base_pose_inv = pose_inv(self._get_sim_base_pose(backend, batch_size))
+                self.update_dynamic_obstacles(
+                    poses,
+                    backend,
+                    base_pose_inv,
+                )
+
+        if backend.collision_checker is None:
+            checker_cfg = self._bindings.RobotCollisionCheckerCfg.load_from_config(
+                robot_config=backend.profile.robot_config_path,
+                scene_collision_checker=backend.planner.scene_collision_checker,
+                device_cfg=self._bindings.DeviceCfg(device=self._curobo_device),
+                num_envs=batch_size,
+                collision_activation_distance=self.cfg.collision_activation_distance,
+            )
+            backend.collision_checker = self._bindings.RobotCollisionChecker(
+                checker_cfg
+            )
+
+        self._to_curobo_joint_state(trajectory[:, 0], backend)
+        assert backend.sim_to_curobo_col_idx is not None
+        curobo_trajectory = trajectory.to(
+            device=self._curobo_device,
+            dtype=torch.float32,
+        ).index_select(-1, backend.sim_to_curobo_col_idx)
+        env_query_idx = (
+            torch.arange(batch_size, device=self._curobo_device, dtype=torch.int32)
+            if self.cfg.world.multi_env
+            else None
+        )
+        samples: list[torch.Tensor] = []
+        device_context = (
+            torch.cuda.device(self._curobo_device)
+            if self._curobo_device.type == "cuda"
+            else nullcontext()
+        )
+        with device_context:
+            for sample_index in range(horizon):
+                sample = curobo_trajectory[:, sample_index : sample_index + 1]
+                valid = backend.collision_checker.validate(
+                    sample,
+                    env_query_idx=env_query_idx,
+                )
+                samples.append(valid[:, 0].to(torch.bool))
+        return torch.stack(samples, dim=1).to(trajectory.device)
 
     def __init__(self, cfg: CuroboPlannerCfg) -> None:
         super().__init__(cfg)
@@ -1638,8 +1820,7 @@ class CuroboPlanner(BasePlanner):
         hasher.update(str(auto.surface_radius).encode("utf-8"))
         hasher.update(str(auto.iterations).encode("utf-8"))
         hasher.update(str(auto.collision_sphere_buffer).encode("utf-8"))
-        for idx, obj in enumerate(world_cfg.rigid_objects or []):
-            name = getattr(obj, "uid", None) or f"obstacle_{idx}"
+        for name, obj in _named_rigid_objects(world_cfg.rigid_objects):
             hasher.update(name.encode("utf-8"))
             vertices = obj.get_vertices(env_ids=[0], scale=True)[0]
             faces = obj.get_triangles(env_ids=[0])[0]
@@ -2002,12 +2183,10 @@ class CuroboPlanner(BasePlanner):
             else:
                 positions[b, :1] = start[b]
                 positions[b, 1:] = start[b]
-        duration = dt.sum(dim=1)
         return PlanResult(
             success=alive.to(self.device),
             positions=positions.to(self.device),
             dt=dt.to(self.device),
-            duration=duration.to(self.device),
         )
 
     # ------------------------------------------------------------------
@@ -2219,8 +2398,8 @@ class CuroboPlanner(BasePlanner):
         """Update named dynamic obstacle poses on cached cuRobo collision worlds.
 
         Args:
-            poses: Mapping of obstacle name -> ``(B, 4, 4)`` world pose. ``None``
-                is a no-op.
+            poses: Mapping of canonical obstacle ID -> ``(B, 4, 4)`` world pose.
+                ``None`` is a no-op.
             backend: Specific cached backend to update. If ``None``, updates all
                 cached backends.
             sim_base_pose_inv: Precomputed inverse of the live sim base pose for
@@ -2348,6 +2527,7 @@ class _CuroboBackend:
     batch_size: int
     use_cuda_graph: bool
     planning_mode: MoveType
+    collision_checker: "Any | None" = None
     # Lazily-built device-tensor caches for the shared post-processing. The
     # cuRobo joint order and the profile's fixed transforms are stable for a
     # planner's life, so these are built once on first use and reused across

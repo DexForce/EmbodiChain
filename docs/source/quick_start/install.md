@@ -18,11 +18,17 @@ After installation, continue with the [Quick Start Tutorial](../tutorial/index.r
 |-----------|-------------|
 | **OS** | Linux x86_64 (Ubuntu 20.04+ recommended) |
 | **GPU** | NVIDIA GPU with compute capability 7.0+ |
-| **NVIDIA driver** | ≥ 535 (tested on driver branches up to 580.x) |
+| **NVIDIA driver** | ≥ 535 (tested on driver branches up to 595.x) |
 | **CUDA** | 12.x (aligned with the Docker image and `dexsim_engine` wheels) |
 | **Vulkan** | Host ICD/layer files for GPU rendering (see Docker notes) |
 | **Python** | 3.10 or 3.11 |
 | **Display** (optional) | X11 `DISPLAY` for interactive viewer windows |
+
+NVIDIA drivers are backward compatible with applications built against older
+CUDA toolkits. A 595-series host driver therefore works with the current CUDA
+12.8 Docker image and wheels; installing a CUDA 13 toolkit on the host is not
+required. See NVIDIA's [CUDA compatibility documentation](https://docs.nvidia.com/deploy/cuda-compatibility/latest/index.html)
+for details.
 
 > [!NOTE]
 > **PyTorch:** EmbodiChain depends on PyTorch transitively (for example via `dexsim_engine` and `pytorch_kinematics`). If you install or upgrade PyTorch separately, match the wheel to your CUDA version using the [official PyTorch install selector](https://pytorch.org/get-started/locally/).
@@ -169,9 +175,9 @@ pip install -e .
 ```
 
 Commands can continue to use repository-style paths such as
-`embodichain_tasks/configs/gym/pour_water/gym_config.json`. EmbodiChain resolves
-these paths from the checkout when present and otherwise from the installed
-wheel.
+`embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml`.
+EmbodiChain resolves these paths from the checkout when present and otherwise
+from the installed wheel.
 
 ## Optional: cuRobo V2 motion planning
 
@@ -179,7 +185,15 @@ Install cuRobo separately to use EmbodiChain's CUDA-accelerated,
 collision-aware motion planner. cuRobo is intentionally not part of the core
 dependency set, and its Git source requirement cannot be included in metadata
 published to PyPI. Select exactly one command that matches the CUDA version
-reported by `nvidia-smi`.
+used by PyTorch in the active environment:
+
+```bash
+python -c "import torch; print(torch.version.cuda)"
+```
+
+`nvidia-smi` reports the newest CUDA version supported by the installed driver,
+which can be newer than the CUDA runtime used by PyTorch and is therefore not
+the value to use when choosing the cuRobo extra.
 
 The normal EmbodiChain environment already provides PyTorch, so prefer one of
 the non-`torch` variants:
@@ -187,13 +201,11 @@ the non-`torch` variants:
 ```bash
 # CUDA 12.x
 uv pip install \
-  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
-  ${PIP_EXTRA_ARGS}
+  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
 
 # CUDA 13.x
 uv pip install \
-  "nvidia-curobo[cu13] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
-  ${PIP_EXTRA_ARGS}
+  "nvidia-curobo[cu13] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
 ```
 
 For a fresh environment that also needs cuRobo to select and install PyTorch,
@@ -204,9 +216,7 @@ requirements work with `pip`; replace `uv pip install` with `pip install`.
 
 ```bash
 uv pip install \
-  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
-  --extra-index-url http://pyp.open3dv.site:2345/simple/ \
-  --trusted-host pyp.open3dv.site
+  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
 
 python -c "import curobo; print(curobo.__version__)"
 pytest --pyargs curobo.tests

@@ -1,7 +1,7 @@
 .. _tutorial_simulate_robot:
 
 Simulating a Robot
-================
+==================
 
 .. currentmodule:: embodichain.lab.sim
 

@@ -59,64 +59,30 @@ The generated output contains the canonical source mesh under ``asset_source/``,
 
 ---
 
+(cli-preview-asset)=
 ## Preview Asset
 
-Preview a USD or mesh asset in the simulation without writing code.
+Load one or more USD, mesh, or URDF assets without writing a simulation script:
 
 ```bash
-# Preview a rigid object
-embodichain preview-asset \
-    --asset_path /path/to/sugar_box.usda \
-    --asset_type rigid \
-    --preview
-
-# Preview an articulation
-embodichain preview-asset \
-    --asset_path /path/to/robot.usd \
-    --asset_type articulation \
-    --preview
-
-# Headless check (no render window)
-embodichain preview-asset \
-    --asset_path /path/to/asset.usda \
-    --headless
-
-# Control articulation joints in Viser
-embodichain preview-asset \
-    --asset_path /path/to/robot.urdf \
-    --viser
+embodichain preview-asset --asset_path /path/to/robot.urdf --viser
 ```
 
-### Arguments
+Run `embodichain preview-asset --help` for the authoritative option list. See
+{doc}`preview_asset` for visualization modes, multi-asset placement, Viser
+joint controls, the interactive terminal, and worked examples.
 
-| Argument | Default | Description |
-|---|---|---|
-| ``--asset_path`` | *(required)* | One or more asset paths (``.usd``/``.usda``/``.usdc``/``.obj``/``.stl``/``.glb``/``.urdf``) |
-| ``--asset_type`` | ``rigid`` | Asset type: ``rigid`` or ``articulation``. URDF files are auto-detected as articulation. |
-| ``--uid`` | *(from filename)* | Unique identifier for the asset in the scene |
-| ``--init_pos X Y Z`` | ``0 0 0.5`` | Initial position |
-| ``--init_rot RX RY RZ`` | ``0 0 0`` | Initial rotation in degrees |
-| ``--body_type`` | ``kinematic`` | Body type for rigid objects: ``dynamic``, ``kinematic``, or ``static`` |
-| ``--use_usd_properties`` | ``False`` | Use physical properties from the USD file |
-| ``--fix_base`` | ``True`` | Fix the base of articulations |
-| ``--sim_device`` | ``cpu`` | Simulation device |
-| ``--headless`` | ``False`` | Run without rendering window |
-| ``--renderer`` | ``hybrid`` | Renderer backend: ``hybrid``, ``fast-rt``, or ``rt`` |
-| ``--preview`` | ``False`` | Enter interactive embed mode after loading |
-| ``--joint-control`` / ``--no-joint-control`` | ``True`` | Enable or disable articulation joint controls in Viser previews |
+---
 
-The Viser articulation panel displays rotational joints in degrees and
-prismatic joints in meters. It excludes mimic joints, leaves articulations with
-unsupported multi-DOF mappings read-only, and provides per-articulation reset
-buttons. The native DexSim window does not yet expose these controls.
+(cli-list-tasks)=
+## List Tasks
 
-### Preview Mode
+Discover installed tasks and show their environment IDs and supported expert
+demo or RL capabilities:
 
-When ``--preview`` is enabled, an interactive REPL is available:
-
-- **``p``** — enter an IPython embed session with ``sim`` and ``asset`` in scope
-- **``s <N>``** — step the simulation *N* times (default 10)
-- **``q``** — quit
+```bash
+embodichain list-task
+```
 
 ---
 
@@ -124,6 +90,8 @@ When ``--preview`` is enabled, an interactive REPL is available:
 ## Run Environment
 
 Launch a Gymnasium environment for data generation, interactive preview, or trajectory replay.
+``embodichain run-task`` is an exact alias of ``embodichain run-env`` and accepts
+the same arguments.
 
 For an end-to-end explanation of mode selection, preview, the differences
 between dataset/video/trajectory recording, and all three replay modes, see
@@ -135,7 +103,9 @@ environments via ``@register_env``. The main ``embodichain`` distribution
 already includes and registers the official ``embodichain_tasks`` import
 package, so no separate task installation is needed. Repository-style task
 config paths resolve from the source checkout or installed wheel. The task to
-launch is selected by the ``"id"`` field of the gym config.
+launch is selected by the ``"id"`` field of the gym config. Pass a runnable
+config (for example ``task.ur5.yaml``), not a pure reusable ``env.yaml``
+component that has only ``environment_id``.
 
 ```bash
 # Run an environment with a gym config file
@@ -186,7 +156,7 @@ embodichain run-env --gym_config config.yaml \
 
 | Argument | Default | Description |
 |---|---|---|
-| ``--gym_config`` | *(required)* | Path to gym config file (``.json``, ``.yaml``, or ``.yml``) |
+| ``--gym_config`` | *(required)* | Path to a runnable gym config with ``id`` (``.json``, ``.yaml``, or ``.yml``) |
 | ``--action_config`` | ``None`` | Path to action config file (``.json``, ``.yaml``, or ``.yml``) |
 | ``--num_envs`` | ``1`` | Number of parallel environments |
 | ``--device`` | ``cpu`` | Device (``cpu`` or ``cuda``) |
@@ -355,7 +325,7 @@ simulator:
 
 ```bash
 embodichain preview_lerobot_data \
-    outputs/lerobot/multi_segments \
+    outputs/lerobot/task_program \
     --latest \
     --episode 0 \
     --expect-segments 3
@@ -388,21 +358,21 @@ Launch reinforcement learning training from a JSON or YAML config file.
 
 ```bash
 # Train with a config file (JSON or YAML)
-embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
+embodichain train-rl --config embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
 
 # JSON configs remain supported
-embodichain train-rl --config embodichain_tasks/configs/agents/rl/push_cube/train_config.json
+embodichain train-rl --config embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.json
 
 # Multi-GPU distributed training
 torchrun --nproc_per_node=2 -m embodichain train-rl \
-    --config embodichain_tasks/configs/agents/rl/push_cube/train_config.yaml \
+    --config embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.json \
     --distributed
 ```
 
 The module entry point remains available for compatibility:
 
 ```bash
-python -m embodichain.learning.rl.train --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
+python -m embodichain.learning.rl.train --config embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml
 ```
 
 ### Arguments

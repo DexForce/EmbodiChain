@@ -25,6 +25,7 @@ from embodichain.lab.visualization import (
     CameraImageFrame,
     CameraSpec,
     DynamicMeshUpdate,
+    FrameOverlay,
     GizmoSpec,
     GizmoState,
     JointControlSpec,
@@ -33,6 +34,7 @@ from embodichain.lab.visualization import (
     SceneFrame,
     SceneManifest,
     SceneNode,
+    SceneOverlays,
     ViserServerCfg,
 )
 from embodichain.lab.visualization.backends.viser import ViserBackend
@@ -222,6 +224,7 @@ class _Scene:
         self.mesh_handles: list[_Handle] = []
         self.dynamic_mesh_handles: list[_Handle] = []
         self.camera_handles: list[_Handle] = []
+        self.frame_handles: list[_Handle] = []
         self.grid_handles: list[_Handle] = []
         self.transform_controls: list[_TransformControls] = []
 
@@ -233,7 +236,9 @@ class _Scene:
 
     def add_frame(self, name: str, **kwargs: object) -> _Handle:
         kwargs.setdefault("visible", True)
-        return _Handle(name=name, **kwargs)
+        handle = _Handle(name=name, removed=False, **kwargs)
+        self.frame_handles.append(handle)
+        return handle
 
     def add_batched_meshes_simple(self, name: str, **kwargs: object) -> _Handle:
         self.mesh_uploads += 1
@@ -329,6 +334,47 @@ def test_viser_backend_adds_one_meter_default_ground_grid() -> None:
     assert grid.cell_size == 1.0
     assert grid.section_size == 10.0
 
+    backend.stop()
+
+
+def test_viser_backend_renders_axis_marker_frame_overlay() -> None:
+    server = _Server()
+    backend = ViserBackend(ViserServerCfg(port=8765), server_factory=lambda **_: server)
+    marker = FrameOverlay(
+        overlay_id="marker:place_target_axis:0",
+        position=np.array([-0.4, 0.48, 0.1], dtype=np.float32),
+        wxyz=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+        axes_length=0.2,
+        axes_radius=0.01,
+    )
+    frame = SceneFrame(
+        run_id="run",
+        scene_revision=1,
+        sequence=1,
+        sim_step=1,
+        sim_time=0.01,
+        node_ids=(),
+        positions=np.empty((0, 3), dtype=np.float32),
+        wxyz=np.empty((0, 4), dtype=np.float32),
+        visible=np.empty((0,), dtype=np.bool_),
+        overlays=SceneOverlays(frames=(marker,)),
+    )
+
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (), ()))
+    assert backend.publish_frame(frame)
+
+    handle = next(
+        handle
+        for handle in server.scene.frame_handles
+        if handle.name.startswith("/overlays/frames/")
+    )
+    assert handle.name == "/overlays/frames/marker%3Aplace_target_axis%3A0"
+    assert handle.axes_length == 0.2
+    assert handle.axes_radius == 0.01
+    np.testing.assert_allclose(handle.position, marker.position)
+    np.testing.assert_allclose(handle.wxyz, marker.wxyz)
+    assert handle.visible
     backend.stop()
 
 

@@ -349,6 +349,9 @@ class Trainer:
     def _eval_once(self, num_episodes: int = 5) -> dict[str, float]:
         """Evaluate ``num_episodes`` completed asynchronous episodes."""
 
+        if hasattr(self, "eval_event_manager") and self.eval_seed is not None:
+            self.eval_event_manager.set_seed(self.eval_seed)
+
         def on_step(_: dict[str, Any]) -> None:
             if hasattr(self, "eval_event_manager"):
                 if "interval" in self.eval_event_manager.available_modes:

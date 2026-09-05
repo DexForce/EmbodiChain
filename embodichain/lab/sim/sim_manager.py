@@ -214,6 +214,16 @@ class _WindowRecordState:
     loop_handle: object | None = None
 
 
+@dataclass(frozen=True)
+class _AxisMarkerGroup:
+    """Native axis handles and their backend-neutral display dimensions."""
+
+    handles: tuple[MeshObject, ...]
+    arena_index: int
+    axis_length: float
+    axis_radius: float
+
+
 class SimulationManager:
     r"""Global Embodied AI simulation manager.
 
@@ -247,6 +257,7 @@ class SimulationManager:
         instance = super(SimulationManager, cls).__new__(cls)
         # Store sim_config in the instance for use in __init__ or elsewhere
         instance.sim_config = sim_config
+        instance._is_constructed = False
         cls._instances[n_instance] = instance
         return instance
 
@@ -332,7 +343,7 @@ class SimulationManager:
         self._picker_gizmo: tuple[str, str | None] | None = None
 
         # marker management
-        self._markers: Dict[str, MeshObject] = dict()
+        self._markers: dict[str, _AxisMarkerGroup] = {}
 
         self._rigid_objects: Dict[str, RigidObject] = dict()
         self._constraints: Dict[str, RigidConstraint] = dict()
@@ -373,6 +384,8 @@ class SimulationManager:
 
         if sim_config.headless is False:
             self._window = self._world.get_windows()
+
+        self._is_constructed = True
 
     @classmethod
     def get_instance(cls, instance_id: int = 0) -> SimulationManager:
@@ -868,6 +881,80 @@ class SimulationManager:
             return self._arenas[arena_index]
         else:
             return self._env
+
+    def visualize_point_cloud(
+        self,
+        points: torch.Tensor | np.ndarray,
+        colors: torch.Tensor | np.ndarray | None = None,
+        point_size: float = 2.0,
+        name: str = "point_cloud",
+    ) -> dexsim.models.PointCloud:
+        """Visualize a static point cloud in the native simulation viewer.
+
+        Each invocation creates a separate native point-cloud object. This
+        convenience API is intended for static data, not incremental or
+        streaming updates.
+
+        Args:
+            points: Point positions with shape ``(N, 3)``.
+            colors: Optional per-point RGB or RGBA colors with shape ``(N, 3)``
+                or ``(N, 4)``. Values in ``[0, 255]`` are normalized to
+                ``[0, 1]``. The alpha channel of RGBA input is ignored by the
+                native renderer. Defaults to green.
+            point_size: Native renderer point size. Defaults to ``2.0``.
+            name: Name assigned to the native point-cloud object.
+
+        Returns:
+            The native DexSim point-cloud handle.
+
+        Raises:
+            RuntimeError: If there is no active simulation environment.
+            ValueError: If the points or colors do not have a supported shape.
+        """
+        if isinstance(points, torch.Tensor):
+            points = points.detach().cpu().numpy()
+        points = np.asarray(points, dtype=np.float32)
+        if points.ndim != 2 or points.shape[1] != 3:
+            raise ValueError(f"Points must have shape (N, 3), got {points.shape}")
+        if len(points) == 0:
+            raise ValueError("Points array is empty")
+
+        if colors is None:
+            colors = np.tile(
+                np.array((0.0, 1.0, 0.0), dtype=np.float32), (len(points), 1)
+            )
+        else:
+            if isinstance(colors, torch.Tensor):
+                colors = colors.detach().cpu().numpy()
+            colors = np.asarray(colors)
+            if colors.ndim != 2 or colors.shape[0] != len(points):
+                raise ValueError(
+                    f"Colors must have shape ({len(points)}, 3) or ({len(points)}, 4), "
+                    f"got {colors.shape}"
+                )
+            if colors.shape[1] not in (3, 4):
+                raise ValueError(
+                    "Colors must have 3 (RGB) or 4 (RGBA) channels, "
+                    f"got {colors.shape[1]}"
+                )
+            if colors.max() > 1.0:
+                colors = colors / 255.0
+            colors = np.asarray(colors[:, :3], dtype=np.float32)
+
+        env = self.get_env()
+        if env is None:
+            raise RuntimeError("Simulation manager has no active simulation")
+
+        point_cloud = env.create_point_cloud(name=name)
+        point_cloud.add_points(points)
+        point_cloud.set_colors(colors)
+        point_cloud.set_point_size(point_size)
+
+        logger.log_info(
+            f"Created point cloud '{name}' with {len(points)} points "
+            f"(point_size={point_size})"
+        )
+        return point_cloud
 
     def get_world(self) -> dexsim.World:
         return self._world
@@ -2446,7 +2533,12 @@ class SimulationManager:
         #     # Create point markers
         #     pass
 
-        self._markers[name] = (marker_handles, cfg.arena_index)
+        self._markers[name] = _AxisMarkerGroup(
+            handles=tuple(marker_handles),
+            arena_index=cfg.arena_index,
+            axis_length=cfg.axis_len,
+            axis_radius=cfg.axis_size,
+        )
 
         if self.is_physics_manually_update:
             self.update(step=1)
@@ -2465,9 +2557,9 @@ class SimulationManager:
             logger.log_warning(f"Marker {name} not found.")
             return False
         try:
-            env = self.get_env(self._markers[name][1])
-            marker_handles, arena_index = self._markers[name]
-            for marker_handle in marker_handles:
+            marker_group = self._markers[name]
+            env = self.get_env(marker_group.arena_index)
+            for marker_handle in marker_group.handles:
                 if marker_handle is not None:
                     env.remove_actor(marker_handle.get_name())
             self._markers.pop(name)
@@ -2475,6 +2567,25 @@ class SimulationManager:
         except Exception as e:
             logger.log_warning(f"Failed to remove marker {name}: {str(e)}")
             return False
+
+    def get_axis_marker_items(
+        self,
+    ) -> tuple[tuple[str, tuple[MeshObject, ...], float, float], ...]:
+        """Return active axes for backend-neutral visualization.
+
+        Returns:
+            Tuples containing the marker name, native handles, axis length, and
+            axis radius for each active marker group.
+        """
+        return tuple(
+            (
+                name,
+                group.handles,
+                group.axis_length,
+                group.axis_radius,
+            )
+            for name, group in self._markers.items()
+        )
 
     def add_custom_window_control(self, controls: list[ObjectManipulator]) -> None:
         """Add one or more custom window input controls.
@@ -3159,6 +3270,12 @@ class SimulationManager:
         if self.is_window_recording():
             self.stop_window_record()
         self.wait_window_record_saves()
+
+        # Stop the render loop before releasing scene resources. Vulkan window
+        # presentation may otherwise continue acquiring swapchain images while
+        # Env::Clean tears down render objects used by the in-flight frame.
+        if getattr(self, "is_window_opened", False):
+            self.close_window()
 
         import sys, gc
 

@@ -163,16 +163,12 @@ included in the scene manifest and its authoritative values in each scene
 frame. Browser callbacks enqueue immutable scalar commands; the preview loop
 validates their run and scene revision before writing articulation state.
 
-The **Articulation joints** panel uses degree sliders for bounded revolute
-joints, meter sliders for bounded prismatic joints, and numeric inputs when one
-or both limits are absent. Mimic joints are omitted. The controller writes both
-current and target positions and clears velocity and effort before each step,
-which makes the preview independent of drive configuration. Use
-`--no-joint-control` to disable it.
-
 This controller is currently specific to the Viser asset-preview path. The
 protocol and backend command sink are kept separate from the controller so a
 native DexSim GUI can reuse the simulation-side behavior later.
+
+See {doc}`Previewing Assets </guides/preview_asset>` for the complete command
+workflow, panel behavior, and option reference.
 
 ## Deformable objects
 
@@ -319,5 +315,7 @@ Viser port behind an authenticated gateway.
 - {doc}`sim_manager`
 - {doc}`sim_assets`
 - {doc}`sim_sensor`
+- {doc}`/features/interaction/gizmo`
+- {doc}`/guides/preview_asset`
 - {doc}`/tutorial/create_scene`
 - {doc}`/tutorial/sensor`

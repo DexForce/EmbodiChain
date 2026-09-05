@@ -30,7 +30,8 @@ Inheritance chain:
 ```
 ObjectBaseCfg          uid, init_pos, init_rot, init_local_pose
   └─ ArticulationCfg   fpath, drive_pros, attrs, link_attrs, fix_base,
-  │                     disable_self_collision, init_qpos, body_scale,
+  │                     disable_self_collision, enable_gravity, init_qpos,
+  │                     body_scale,
   │                     build_pk_chain, use_usd_properties
       └─ RobotCfg      control_parts, urdf_cfg, solver_cfg, drive_pros (override default to "force")
           ├─ DexforceW1Cfg   version, hand_versions, with_default_eef

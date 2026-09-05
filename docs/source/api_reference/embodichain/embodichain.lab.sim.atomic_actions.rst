@@ -2,20 +2,23 @@ embodichain.lab.sim.atomic_actions
 ==================================
 
 .. automodule:: embodichain.lab.sim.atomic_actions
+   :members:
+   :no-index:
 
    .. rubric:: Planning contracts
 
    .. autosummary::
 
-      ActionGoal
       ActionBinding
-      ResolvedActionBinding
-      ResolvedControlPart
+      EndpointBinding
+      RuntimeEndpointTarget
+      JointPositionTarget
       ControlCommand
       JointPositionCommand
       ControlPartCommandProfile
       ActionControlOverrides
       ActionInvocation
+      PhaseEffectGateRequirement
       ResolvedActionRequest
       ActionOptions
       MotionPolicy
@@ -27,10 +30,36 @@ embodichain.lab.sim.atomic_actions
       PlanningContext
       StateDelta
       TimedTrajectory
+      RuntimeCommandPayload
+      JointPositionPayload
+      EndpointCommand
+      RuntimeCommandFrame
+      TimedCommandSequence
       TrajectorySegment
       PlannerDiagnostics
+      PlanningFailure
       ActionPlan
       CompiledTrajectory
+
+   .. rubric:: Articulation geometry adaptation
+
+   .. autosummary::
+
+      ArticulationAffordanceGeometry
+      ArticulationGeometryProvider
+      ArticulationJointGeometry
+      sample_initial_articulation_geometry
+
+   .. rubric:: Semantic resource contracts
+
+   .. autosummary::
+
+      SkillDescriptor
+      SkillBindingContract
+      SkillResourceSlot
+      SkillEndpointRequirement
+      DisjointSlotEndpoints
+      DisjointResourceSlots
 
    .. rubric:: Execution contracts
 
@@ -45,15 +74,24 @@ embodichain.lab.sim.atomic_actions
       RunnerStatus
       ObservationProvider
       CommandSink
+      EndpointCommandTransport
+      EndpointCommandRouter
       CommandAcknowledgement
       CommandAckStatus
       CommandDispatch
       CommandOperation
       ExecutionClock
+      create_simulation_atomic_action_engine
       SimulationExecutionAdapter
       ExecutionTick
       EffectVerificationRequest
-      JointCommand
+      EffectVerificationRequirement
+      EffectVerificationResult
+      PhaseEffectGateRequest
+      PhaseEffectGateResult
+      HeldObjectGuardRequest
+      HeldObjectGuardResult
+      ExecutionPlanAttempt
       ExecutionEvent
       ExecutionEventKind
       ExecutionStatus
@@ -65,18 +103,44 @@ embodichain.lab.sim.atomic_actions
       EndEffectorPoseGoal
       JointPositionGoal
       GraspGoal
+      HandOverGoal
+      AxisAlignGoal
+      AxisAlignOptions
+      AxisAlignAffordance
       HeldObjectPoseGoal
+      PourGoal
+      PourOptions
+      PushObjectGoal
+      PushObjectOptions
+      PushObjectToolCalibration
       PlaceGoal
       AssembleGoal
       PressGoal
+      PressOptions
+      PressAffordance
+      SlideGoal
+      SlideOptions
+      SlideAffordance
+      OpenDoorGoal
+      OpenDoorOptions
+      OpenDoorAffordance
+      TwistGoal
+      TwistOptions
+      TwistAffordance
       CoordinatedPickGoal
       CoordinatedPlacementGoal
       MoveEndEffector
       MoveJoints
       PickUp
+      AxisAlign
       MoveHeldObject
+      Pour
+      PushObject
       Place
       Press
+      Slide
+      OpenDoor
+      Twist
       CoordinatedPickment
       CoordinatedPlacement
       HandOver
@@ -86,8 +150,68 @@ embodichain.lab.sim.atomic_actions
    :hidden:
 
    embodichain.lab.sim.atomic_actions.primitives
+   embodichain.lab.sim.atomic_actions.tracking
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions
+
+Articulation geometry adaptation
+--------------------------------
+
+The adapter converts deterministic articulation meshes, FK, and parent-joint
+topology into sampled Atomic Action affordance geometry. Initial state and scale
+are explicit inputs; the simulation object does not own sampling or semantic
+geometry keys.
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.articulation_geometry
+
+.. autoclass:: ArticulationGeometryProvider
+   :members:
+
+.. autoclass:: ArticulationJointGeometry
+   :members:
+
+.. autoclass:: ArticulationAffordanceGeometry
+   :members:
+
+.. autofunction:: sample_initial_articulation_geometry
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions
+
+Semantic resource contracts
+---------------------------
+
+.. autoclass:: SkillDescriptor
+   :members:
+
+.. autoclass:: SkillBindingContract
+   :members:
+
+.. autoclass:: SkillResourceSlot
+   :members:
+
+.. autoclass:: SkillEndpointRequirement
+   :members:
+
+.. autoclass:: DisjointSlotEndpoints
+   :members:
+
+.. autoclass:: DisjointResourceSlots
+   :members:
+
+Standard capability identifiers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autodata:: JOINT_POSITION_CAPABILITY
+
+.. autodata:: CARTESIAN_POSE_CAPABILITY
+
+.. autodata:: FORWARD_KINEMATICS_CAPABILITY
+
+.. autodata:: INVERSE_KINEMATICS_CAPABILITY
+
+.. autodata:: BATCH_INVERSE_KINEMATICS_CAPABILITY
+
+.. autodata:: GRASP_CAPABILITY
 
 Planning and state
 ------------------
@@ -95,10 +219,13 @@ Planning and state
 .. autoclass:: ActionBinding
    :members:
 
-.. autoclass:: ResolvedActionBinding
+.. autoclass:: EndpointBinding
    :members:
 
-.. autoclass:: ResolvedControlPart
+.. autoclass:: RuntimeEndpointTarget
+   :members:
+
+.. autoclass:: JointPositionTarget
    :members:
 
 .. autoclass:: ControlCommand
@@ -151,6 +278,24 @@ Planning and state
 .. autoclass:: TimedTrajectory
    :members:
 
+.. autoclass:: PlanningFailure
+   :members:
+
+.. autoclass:: RuntimeCommandPayload
+   :members:
+
+.. autoclass:: JointPositionPayload
+   :members:
+
+.. autoclass:: EndpointCommand
+   :members:
+
+.. autoclass:: RuntimeCommandFrame
+   :members:
+
+.. autoclass:: TimedCommandSequence
+   :members:
+
 .. autoclass:: ActionPlan
    :members:
 
@@ -179,11 +324,19 @@ Engine and execution
 .. autoclass:: CommandSink
    :members:
 
+.. autoclass:: EndpointCommandTransport
+   :members:
+
+.. autoclass:: EndpointCommandRouter
+   :members:
+
 .. autoclass:: ExecutionClock
    :members:
 
 .. autoclass:: MonotonicExecutionClock
    :members:
+
+.. autofunction:: create_simulation_atomic_action_engine
 
 .. autoclass:: SimulationExecutionAdapter
    :members:
@@ -209,9 +362,6 @@ Engine and execution
 .. autoclass:: ExecutionTick
    :members:
 
-.. autoclass:: JointCommand
-   :members:
-
 .. autoclass:: ExecutionEvent
    :members:
 
@@ -219,6 +369,18 @@ Engine and execution
    :members:
 
 .. autoclass:: ExecutionStatus
+   :members:
+
+.. autoclass:: EffectVerificationRequest
+   :members:
+
+.. autoclass:: EffectVerificationRequirement
+   :members:
+
+.. autoclass:: EffectVerificationResult
+   :members:
+
+.. autoclass:: ExecutionPlanAttempt
    :members:
 
 Semantic objects and helpers
@@ -230,5 +392,17 @@ Semantic objects and helpers
 .. autoclass:: HeldObjectState
    :members:
 
-.. autoclass:: CoordinatedHeldObjectState
-   :members:
+Verification implementation module
+----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.verification
+
+.. autosummary::
+
+   EffectExpectationResult
+   EffectVerificationRequest
+   EffectVerificationResult
+   HeldObjectGuardRequest
+   HeldObjectGuardResult
+   PhaseEffectGateRequest
+   PhaseEffectGateResult

@@ -18,14 +18,26 @@
 
 from __future__ import annotations
 
+import math
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Mapping, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 
 if TYPE_CHECKING:
     from .core import ObjectSemantics
+
+
+def _same_physical_object(
+    first: ObjectSemantics,
+    second: ObjectSemantics,
+) -> bool:
+    """Return whether two semantic records identify one physical object."""
+    from .core import _same_object_identity
+
+    return _same_object_identity(first, second)
 
 
 def _resolve_runtime_device(device: torch.device | str) -> torch.device:
@@ -44,7 +56,7 @@ def _validate_pose(value: torch.Tensor, name: str) -> int | None:
         return None
     if value.dim() != 3 or value.shape[-2:] != (4, 4) or value.shape[0] == 0:
         raise ValueError(
-            f"{name} must have shape (4, 4) or (n_envs, 4, 4), "
+            f"{name} must have shape (4, 4) or (num_envs, 4, 4), "
             f"got {tuple(value.shape)}."
         )
     return int(value.shape[0])
@@ -89,6 +101,75 @@ def _broadcast_pose(
             f"{name} batch size must be {batch_size}, got {pose_batch_size}."
         )
     return value.clone()
+
+
+def _broadcast_joint_position(
+    value: torch.Tensor,
+    *,
+    batch_size: int,
+    device: torch.device,
+    name: str,
+) -> torch.Tensor:
+    """Resolve an optionally batched joint-position value to a task batch."""
+    if not isinstance(value, torch.Tensor):
+        raise TypeError(f"{name} must be a torch.Tensor.")
+    if value.dim() == 1:
+        if value.numel() == 0:
+            raise ValueError(f"{name} must contain at least one joint value.")
+        value = value.unsqueeze(0).expand(batch_size, -1)
+    elif value.dim() != 2 or value.shape[0] != batch_size or value.shape[1] == 0:
+        raise ValueError(
+            f"{name} must have shape (n_joints,) or " f"({batch_size}, n_joints)."
+        )
+    if not value.is_floating_point():
+        raise TypeError(f"{name} must use a floating-point dtype.")
+    if value.device != device:
+        raise ValueError(f"{name} must use task-state device {device}.")
+    if not torch.isfinite(value).all():
+        raise ValueError(f"{name} must contain only finite values.")
+    return value.clone()
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class ArticulationJointState:
+    """Verified symbolic state for one named articulation joint."""
+
+    position: torch.Tensor
+    """Joint positions with shape ``(J,)`` or ``(B, J)``."""
+
+    env_mask: torch.Tensor | None = None
+    """Rows for which the verified state is present."""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.position, torch.Tensor):
+            raise TypeError("ArticulationJointState.position must be a tensor.")
+        if self.position.dim() not in (1, 2) or self.position.numel() == 0:
+            raise ValueError(
+                "ArticulationJointState.position must have shape (J,) or (B, J)."
+            )
+        if not self.position.is_floating_point():
+            raise TypeError("ArticulationJointState.position must be floating point.")
+        if not torch.isfinite(self.position).all():
+            raise ValueError("ArticulationJointState.position must be finite.")
+        object.__setattr__(self, "position", self.position.clone())
+        if self.env_mask is not None:
+            batch_size = int(self.position.shape[0]) if self.position.dim() == 2 else -1
+            if batch_size <= 0:
+                if self.env_mask.dim() != 1 or self.env_mask.numel() == 0:
+                    raise ValueError(
+                        "ArticulationJointState.env_mask must be a non-empty vector."
+                    )
+                batch_size = int(self.env_mask.shape[0])
+            object.__setattr__(
+                self,
+                "env_mask",
+                _normalize_mask(
+                    self.env_mask,
+                    batch_size=batch_size,
+                    device=self.position.device,
+                    name="ArticulationJointState.env_mask",
+                ),
+            )
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -251,6 +332,29 @@ def _normalize_coordinated_held(
     )
 
 
+def _normalize_articulation_joint(
+    value: ArticulationJointState,
+    *,
+    batch_size: int,
+    device: torch.device,
+) -> ArticulationJointState:
+    """Normalize one articulation-joint state to a task-state batch."""
+    return ArticulationJointState(
+        position=_broadcast_joint_position(
+            value.position,
+            batch_size=batch_size,
+            device=device,
+            name="ArticulationJointState.position",
+        ),
+        env_mask=_normalize_mask(
+            value.env_mask,
+            batch_size=batch_size,
+            device=device,
+            name="ArticulationJointState.env_mask",
+        ),
+    )
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class TaskState:
     """Symbolic task state, separate from measured robot state."""
@@ -267,7 +371,12 @@ class TaskState:
     coordinated_held_objects: Mapping[tuple[str, str], CoordinatedHeldObjectState] = (
         field(default_factory=dict)
     )
-    """Two-manipulator held-object relations keyed by ordered resource pairs."""
+    """Coordinated relations keyed by ordered logical task-state resource pairs."""
+
+    articulation_joints: Mapping[tuple[str, str], ArticulationJointState] = field(
+        default_factory=dict
+    )
+    """Verified articulation states keyed by canonical articulation and joint IDs."""
 
     def __post_init__(self) -> None:
         if self.batch_size <= 0:
@@ -299,7 +408,33 @@ class TaskState:
                     "CoordinatedHeldObjectState objects."
                 )
             normalized_coordinated[resources] = _normalize_coordinated_held(
-                value, batch_size=self.batch_size, device=device
+                value,
+                batch_size=self.batch_size,
+                device=device,
+            )
+
+        normalized_articulation: dict[tuple[str, str], ArticulationJointState] = {}
+        for key, value in self.articulation_joints.items():
+            if (
+                not isinstance(key, tuple)
+                or len(key) != 2
+                or not all(
+                    type(item) is str and item and item == item.strip() for item in key
+                )
+            ):
+                raise TypeError(
+                    "articulation_joints keys must be pairs of non-empty "
+                    "canonical identifiers."
+                )
+            if not isinstance(value, ArticulationJointState):
+                raise TypeError(
+                    "articulation_joints values must be ArticulationJointState "
+                    "objects."
+                )
+            normalized_articulation[key] = _normalize_articulation_joint(
+                value,
+                batch_size=self.batch_size,
+                device=device,
             )
 
         object.__setattr__(self, "device", device)
@@ -308,6 +443,11 @@ class TaskState:
             self,
             "coordinated_held_objects",
             MappingProxyType(normalized_coordinated),
+        )
+        object.__setattr__(
+            self,
+            "articulation_joints",
+            MappingProxyType(normalized_articulation),
         )
 
     @classmethod
@@ -339,6 +479,61 @@ class TaskState:
         """Return the relation for an ordered resource pair, if any."""
         return self.coordinated_held_objects.get((first_resource, second_resource))
 
+    def get_articulation_joint_state(
+        self,
+        articulation_id: str,
+        joint_id: str,
+    ) -> ArticulationJointState | None:
+        """Return verified state for one canonical articulation joint."""
+        return self.articulation_joints.get((articulation_id, joint_id))
+
+    def held_object_mask(self, resource: str) -> torch.Tensor:
+        """Return environments where ``resource`` holds an object.
+
+        Args:
+            resource: Manipulator control-resource name.
+
+        Returns:
+            Owned boolean mask with shape ``(batch_size,)``. Missing resources
+            produce an all-false mask.
+        """
+        held = self.get_held_object(resource)
+        if held is None:
+            return torch.zeros(
+                self.batch_size,
+                dtype=torch.bool,
+                device=self.device,
+            )
+        assert held.env_mask is not None
+        return held.env_mask.clone()
+
+    def exclusive_held_object_mask(self, resource: str) -> torch.Tensor:
+        """Return environments where only ``resource`` holds its object.
+
+        Object identity is established by the exact semantic record or by a
+        shared non-null simulation entity. Labels and structural equality are
+        deliberately ignored because distinct physical objects may look alike.
+
+        Args:
+            resource: Manipulator control-resource name.
+
+        Returns:
+            Owned boolean mask with shape ``(batch_size,)``.
+        """
+        held = self.get_held_object(resource)
+        if held is None:
+            return self.held_object_mask(resource)
+
+        exclusive = self.held_object_mask(resource)
+        for other_resource, other in self.held_objects.items():
+            if other_resource == resource:
+                continue
+            if not _same_physical_object(held.semantics, other.semantics):
+                continue
+            assert other.env_mask is not None
+            exclusive &= ~other.env_mask
+        return exclusive
+
 
 @dataclass(frozen=True, slots=True, eq=False)
 class RobotObservation:
@@ -356,7 +551,7 @@ class RobotObservation:
             raise ValueError("RobotObservation.timestamp must be non-negative.")
         if not isinstance(self.qpos, torch.Tensor) or self.qpos.dim() != 2:
             raise ValueError(
-                "RobotObservation.qpos must have shape (n_envs, robot_dof)."
+                "RobotObservation.qpos must have shape (num_envs, robot_dof)."
             )
         if self.qpos.shape[0] == 0 or self.qpos.shape[1] == 0:
             raise ValueError("RobotObservation.qpos dimensions must be non-zero.")
@@ -371,6 +566,38 @@ class RobotObservation:
                 raise ValueError("RobotObservation.qeffort must match qpos shape.")
             if self.qeffort.device != self.qpos.device:
                 raise ValueError("RobotObservation.qeffort must share the qpos device.")
+        if self.root_pose is not None:
+            if not isinstance(self.root_pose, torch.Tensor):
+                raise TypeError("RobotObservation.root_pose must be a tensor or None.")
+            if self.root_pose.shape != (self.qpos.shape[0], 4, 4):
+                raise ValueError(
+                    "RobotObservation.root_pose must have shape "
+                    f"({self.qpos.shape[0]}, 4, 4)."
+                )
+            if not self.root_pose.is_floating_point():
+                raise TypeError("RobotObservation.root_pose must be floating point.")
+            if self.root_pose.device != self.qpos.device:
+                raise ValueError(
+                    "RobotObservation.root_pose must share the qpos device."
+                )
+            if not torch.isfinite(self.root_pose).all():
+                raise ValueError("RobotObservation.root_pose must be finite.")
+        if self.root_twist is not None:
+            if not isinstance(self.root_twist, torch.Tensor):
+                raise TypeError("RobotObservation.root_twist must be a tensor or None.")
+            if self.root_twist.shape != (self.qpos.shape[0], 6):
+                raise ValueError(
+                    "RobotObservation.root_twist must have shape "
+                    f"({self.qpos.shape[0]}, 6)."
+                )
+            if not self.root_twist.is_floating_point():
+                raise TypeError("RobotObservation.root_twist must be floating point.")
+            if self.root_twist.device != self.qpos.device:
+                raise ValueError(
+                    "RobotObservation.root_twist must share the qpos device."
+                )
+            if not torch.isfinite(self.root_twist).all():
+                raise ValueError("RobotObservation.root_twist must be finite.")
         object.__setattr__(self, "qpos", self.qpos.clone())
         object.__setattr__(self, "qvel", self.qvel.clone())
         if self.qeffort is not None:
@@ -424,6 +651,116 @@ class EntityState:
 
 
 @dataclass(frozen=True, slots=True, eq=False)
+class ObservedArticulationJointState:
+    """Live measured state for one scene articulation joint."""
+
+    position: torch.Tensor
+    """Measured joint position with shape ``(J,)`` or ``(B, J)``."""
+
+    valid_mask: torch.Tensor | None = None
+    """Optional row-validity mask for a batched observation."""
+
+    def __post_init__(self) -> None:
+        position = self.position
+        if not isinstance(position, torch.Tensor):
+            raise TypeError("ObservedArticulationJointState.position must be a tensor.")
+        if position.dim() not in (1, 2) or position.numel() == 0:
+            raise ValueError(
+                "ObservedArticulationJointState.position must have shape (J,) "
+                "or (B, J)."
+            )
+        if not position.is_floating_point():
+            raise TypeError(
+                "ObservedArticulationJointState.position must be floating point."
+            )
+        if not torch.isfinite(position).all():
+            raise ValueError(
+                "ObservedArticulationJointState.position must contain only "
+                "finite values."
+            )
+        object.__setattr__(self, "position", position.clone())
+        if self.valid_mask is None:
+            return
+        valid_mask = self.valid_mask
+        if not isinstance(valid_mask, torch.Tensor):
+            raise TypeError(
+                "ObservedArticulationJointState.valid_mask must be a tensor or None."
+            )
+        if position.dim() != 2:
+            raise ValueError(
+                "ObservedArticulationJointState.valid_mask requires a batched "
+                "position."
+            )
+        if valid_mask.dtype != torch.bool or valid_mask.shape != (position.shape[0],):
+            raise ValueError(
+                "ObservedArticulationJointState.valid_mask must have shape (B,) "
+                "and dtype torch.bool."
+            )
+        if valid_mask.device != position.device:
+            raise ValueError(
+                "ObservedArticulationJointState position and valid_mask must "
+                "share a device."
+            )
+        object.__setattr__(self, "valid_mask", valid_mask.clone())
+
+    def snapshot(self) -> ObservedArticulationJointState:
+        """Return an independently owned observation value."""
+        return ObservedArticulationJointState(self.position, self.valid_mask)
+
+
+class _ImmutableEntityMapping(Mapping[str, EntityState]):
+    """Own entity states and return defensive copies on every public read."""
+
+    __slots__ = ("_states",)
+
+    def __init__(self, states: Mapping[str, EntityState]) -> None:
+        self._states = MappingProxyType(
+            {
+                entity_id: EntityState(state.pose, confidence=state.confidence)
+                for entity_id, state in states.items()
+            }
+        )
+
+    def __getitem__(self, entity_id: str) -> EntityState:
+        state = self._states[entity_id]
+        return EntityState(state.pose, confidence=state.confidence)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._states)
+
+    def __len__(self) -> int:
+        return len(self._states)
+
+
+class _ImmutableObservedArticulationJointMapping(
+    Mapping[tuple[str, str], ObservedArticulationJointState]
+):
+    """Own live joint observations and copy values on every public read."""
+
+    __slots__ = ("_states",)
+
+    def __init__(
+        self,
+        states: Mapping[tuple[str, str], ObservedArticulationJointState],
+    ) -> None:
+        self._states = MappingProxyType(
+            {key: state.snapshot() for key, state in states.items()}
+        )
+
+    def __getitem__(
+        self,
+        key: tuple[str, str],
+    ) -> ObservedArticulationJointState:
+        return self._states[key].snapshot()
+
+    def __iter__(self) -> Iterator[tuple[str, str]]:
+        return iter(self._states)
+
+    def __len__(self) -> int:
+        return len(self._states)
+
+
+@dataclass(frozen=True, slots=True, eq=False)
 class SceneSnapshot:
     """Versioned scene state used to ground dynamic goals and obstacles."""
 
@@ -435,6 +772,11 @@ class SceneSnapshot:
 
     collision_entity_ids: tuple[str, ...] = ()
     """Entity IDs whose poses update a planner's dynamic collision world."""
+
+    articulation_joints: Mapping[tuple[str, str], ObservedArticulationJointState] = (
+        field(default_factory=dict)
+    )
+    """Live physical joint observations keyed by articulation and joint ID."""
 
     def __post_init__(self) -> None:
         if self.timestamp < 0.0:
@@ -473,6 +815,28 @@ class SceneSnapshot:
                     "SceneSnapshot entities must contain EntityState values."
                 )
             normalized[entity_id] = state
+        normalized_joints: dict[tuple[str, str], ObservedArticulationJointState] = {}
+        for key, state in self.articulation_joints.items():
+            if (
+                not isinstance(key, tuple)
+                or len(key) != 2
+                or not all(
+                    type(identifier) is str
+                    and identifier
+                    and identifier == identifier.strip()
+                    for identifier in key
+                )
+            ):
+                raise TypeError(
+                    "SceneSnapshot articulation_joints keys must be canonical "
+                    "(articulation_id, joint_id) pairs."
+                )
+            if not isinstance(state, ObservedArticulationJointState):
+                raise TypeError(
+                    "SceneSnapshot articulation_joints values must be "
+                    "ObservedArticulationJointState objects."
+                )
+            normalized_joints[key] = state
         collision_entity_ids = tuple(self.collision_entity_ids)
         if len(set(collision_entity_ids)) != len(collision_entity_ids) or not all(
             isinstance(entity_id, str) and entity_id
@@ -487,8 +851,29 @@ class SceneSnapshot:
                 "collision_entity_ids reference missing scene entities: "
                 f"{sorted(missing)}."
             )
-        object.__setattr__(self, "entities", MappingProxyType(normalized))
+        object.__setattr__(self, "entities", _ImmutableEntityMapping(normalized))
+        object.__setattr__(
+            self,
+            "articulation_joints",
+            _ImmutableObservedArticulationJointMapping(normalized_joints),
+        )
         object.__setattr__(self, "collision_entity_ids", collision_entity_ids)
+
+    def get_articulation_joint_state(
+        self,
+        articulation_id: str,
+        joint_id: str,
+    ) -> ObservedArticulationJointState | None:
+        """Return an owned live joint observation for a canonical address."""
+        for value, field_name in (
+            (articulation_id, "articulation_id"),
+            (joint_id, "joint_id"),
+        ):
+            if type(value) is not str or not value or value != value.strip():
+                raise ValueError(
+                    f"{field_name} must be a non-empty canonical identifier."
+                )
+        return self.articulation_joints.get((articulation_id, joint_id))
 
     def collision_world_revisions(self, batch_size: int) -> tuple[int, ...]:
         """Expand the collision revision to one value per environment.
@@ -560,6 +945,8 @@ class PlanningContext:
     task: TaskState
     scene: SceneSnapshot
     env_ids: torch.Tensor
+    control_dt: float | None = None
+    """Explicit command period used by action-owned interpolation."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.robot, RobotObservation):
@@ -579,6 +966,18 @@ class PlanningContext:
                     f"Scene entity {entity_id!r} pose batch must match the "
                     "planning context."
                 )
+        for (
+            articulation_id,
+            joint_id,
+        ), state in self.scene.articulation_joints.items():
+            if (
+                state.position.dim() == 2
+                and state.position.shape[0] != self.robot.batch_size
+            ):
+                raise ValueError(
+                    f"Scene articulation joint ({articulation_id!r}, {joint_id!r}) "
+                    "position batch must match the planning context."
+                )
         if not isinstance(self.env_ids, torch.Tensor):
             raise TypeError("env_ids must be a torch.Tensor.")
         if self.env_ids.dtype != torch.long:
@@ -592,6 +991,14 @@ class PlanningContext:
             raise ValueError("env_ids and robot tensors must share a device.")
         if torch.unique(self.env_ids).numel() != self.env_ids.numel():
             raise ValueError("env_ids must be unique.")
+        if self.control_dt is not None:
+            if isinstance(self.control_dt, bool) or not isinstance(
+                self.control_dt, (int, float)
+            ):
+                raise TypeError("control_dt must be a real number or None.")
+            if not math.isfinite(self.control_dt) or self.control_dt <= 0.0:
+                raise ValueError("control_dt must be finite and greater than zero.")
+            object.__setattr__(self, "control_dt", float(self.control_dt))
         object.__setattr__(self, "env_ids", self.env_ids.clone())
 
     @property
@@ -628,6 +1035,34 @@ class PlanningContext:
         """Return a coordinated held-object relation, if any."""
         return self.task.get_coordinated_held_object(first_resource, second_resource)
 
+    @property
+    def articulation_joints(
+        self,
+    ) -> Mapping[tuple[str, str], ArticulationJointState]:
+        """Verified articulation-joint states."""
+        return self.task.articulation_joints
+
+    def get_articulation_joint_state(
+        self,
+        articulation_id: str,
+        joint_id: str,
+    ) -> ArticulationJointState | None:
+        """Return verified state for one canonical articulation joint."""
+        return self.task.get_articulation_joint_state(articulation_id, joint_id)
+
+    def require_control_dt(self) -> float:
+        """Return the explicit command period required for interpolation.
+
+        Raises:
+            ValueError: If the caller did not provide ``control_dt``.
+        """
+        if self.control_dt is None:
+            raise ValueError(
+                "This action performs interpolation and requires an explicit "
+                "PlanningContext.control_dt."
+            )
+        return self.control_dt
+
     def project(
         self,
         *,
@@ -648,13 +1083,16 @@ class PlanningContext:
             task=task,
             scene=self.scene,
             env_ids=self.env_ids,
+            control_dt=self.control_dt,
         )
 
 
 __all__ = [
+    "ArticulationJointState",
     "CoordinatedHeldObjectState",
     "EntityState",
     "HeldObjectState",
+    "ObservedArticulationJointState",
     "PlanningContext",
     "RobotObservation",
     "SceneSnapshot",

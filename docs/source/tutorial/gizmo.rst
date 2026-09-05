@@ -9,6 +9,9 @@ This tutorial demonstrates native DexSim and browser-based Viser Gizmo control.
 DexSim owns native entity and robot IK controllers; EmbodiChain keeps only the
 robot control-part adapter and the Viser command path.
 
+For the cross-frontend capability summary, supported targets, lifecycle rules,
+and security boundary, see :doc:`/features/interaction/gizmo`.
+
 The Code
 ~~~~~~~~
 
@@ -94,7 +97,7 @@ First, we configure a UR10 robot with an IK solver for end-effector control:
 
 .. literalinclude:: ../../../scripts/tutorials/sim/gizmo_robot.py
    :language: python
-   :start-at: # Create UR10 robot configuration
+   :start-at: # Create UR10 robot
    :end-at: robot = sim.add_robot(cfg=robot_cfg)
 
 Key components of the robot configuration:

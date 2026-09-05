@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import numpy as np
 import torch
 import dexsim
@@ -393,13 +394,40 @@ def cat_tensor_with_ids(
     return out
 
 
-def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg":
+def config_to_cfg(
+    config: dict,
+    manager_modules: list | None = None,
+    *,
+    source_path: str | os.PathLike[str] | None = None,
+    task_program_path_override: str | os.PathLike[str] | None = None,
+) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
+    Any config may select reusable ``environment.component``,
+    ``embodiment.component``, and ``scene.component`` files before the remaining
+    environment values parse. An environment component owns only reusable Gym
+    and physical-scene values. A runnable deployment independently selects its
+    embodiment and, when used, its Task Program components and execution
+    policy. Inline ``robot``, ``sensor``, and scene fields remain valid when
+    their corresponding component selector is absent. A resolved config
+    containing ``task_program`` composes its semantic and policy components.
+    The existing
+    :class:`~embodichain.lab.gym.envs.EmbodiedEnv` class is registered under
+    the config's ``id`` with the decoded integration factory.
+    Re-loading an identical declaration is idempotent; an ID collision with a
+    different declaration fails closed.
+
     Args:
-        config (dict): The configuration dictionary containing robot, sensor, light, background, and interactive objects.
+        config (dict): The configuration dictionary containing an optional
+            environment component plus an embodiment component or inline robot.
         manager_modules (list): List of module paths for dataset, event, observation, and reward managers.
             If not provided, uses default module paths.
+        source_path: Optional path of the Gym configuration source file.
+            Relative component paths resolve from this file's directory.
+            Without it, relative paths use the current working directory.
+        task_program_path_override: Optional explicit program path. This is
+            selected instead of the Gym-config path and resolves from the
+            process working directory.
 
     Returns:
         EmbodiedEnvCfg: A configuration object for initializing the environment.
@@ -440,14 +468,135 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
 
     env_cfg = EmbodiedEnvCfg()
 
-    # check all necessary keys
-    required_keys = ["id", "env", "robot"]
+    removed_task_program_fields = sorted(
+        field
+        for field in (
+            "task_program_dir",
+            "task_program_path",
+            "task_program_integration_path",
+        )
+        if field in config
+    )
+    if removed_task_program_fields:
+        raise ValueError(
+            f"Removed Task Program fields {removed_task_program_fields}; "
+            "use the task_program component mapping instead."
+        )
+
+    from embodichain.lab.gym.utils._component_composition import (
+        _resolve_gym_components,
+        _validate_scene_binding_targets,
+    )
+
+    base_dir = (
+        Path.cwd() if source_path is None else Path(source_path).expanduser().parent
+    )
+    component_resolution = _resolve_gym_components(config, base_dir=base_dir)
+    config = component_resolution.config
+
+    # Check required fields after reusable task expansion.
+    required_keys = ["id", "env"]
     for key in required_keys:
         if key not in config:
             log_error(f"Missing required config key: {key}")
 
+    configured_task_program_integration = None
+    configured_task_program_selection = None
+    configured_task_program_id: str | None = None
+    configured_task_program_path: Path | None = None
+    if "task_program" in config:
+        if not component_resolution.embodiment_selected:
+            raise ValueError(
+                "A configured Task Program environment must declare "
+                "embodiment.component."
+            )
+        if component_resolution.embodiment_skill_profile is None:
+            raise ValueError(
+                "A configured Task Program embodiment component must declare "
+                "skill_profile metadata."
+            )
+        if not component_resolution.scene_selected:
+            raise ValueError(
+                "A configured Task Program deployment must declare a physical "
+                "environment."
+            )
+        if component_resolution.scene_config is None:
+            raise ValueError(
+                "A configured Task Program deployment must resolve a physical "
+                "environment."
+            )
+        from embodichain.lab.task_program.integrations._configured_composition import (
+            _load_configured_task_program_deployment,
+        )
+
+        deployment = _load_configured_task_program_deployment(
+            task_program=config["task_program"],
+            skill_profile=component_resolution.embodiment_skill_profile,
+            base_dir=base_dir,
+        )
+        _validate_scene_binding_targets(
+            deployment.scene_binding,
+            simulation=component_resolution.scene_config,
+        )
+        configured_task_program_integration = deployment.integration
+        configured_task_program_selection = deployment.selection
+        configured_task_program_id = deployment.program_id
+        configured_task_program_path = deployment.program_path
+    elif "robot" not in config:
+        log_error("Missing required config key: robot")
+
+    if (
+        task_program_path_override is not None
+        or configured_task_program_path is not None
+    ):
+        if task_program_path_override is not None:
+            task_program_path = task_program_path_override
+            if not isinstance(task_program_path, (str, os.PathLike)):
+                raise TypeError("task_program_path must be a string or path.")
+        else:
+            assert configured_task_program_path is not None
+            task_program_path = configured_task_program_path
+        task_program_path_text = os.fspath(task_program_path)
+        if not task_program_path_text or (
+            task_program_path_text != task_program_path_text.strip()
+        ):
+            raise ValueError(
+                "task_program_path must be a non-empty string without outer "
+                "whitespace."
+            )
+        from embodichain.lab.task_program.language.loader import (
+            load_task_program,
+        )
+
+        if configured_task_program_integration is None:
+            from embodichain.lab.gym.utils.registration import get_env_spec
+
+            registration = get_env_spec(config["id"]).task_program_registration
+        else:
+            registration = configured_task_program_integration.registration
+        if registration is not None:
+            registration.assert_unchanged()
+        task_program = load_task_program(
+            task_program_path_text,
+            integration=configured_task_program_selection,
+            validation_context=(None if registration is None else registration.catalog),
+        )
+        if (
+            configured_task_program_id is not None
+            and task_program.program_id != configured_task_program_id
+        ):
+            raise ValueError(
+                f"Task integration expects program_id "
+                f"{configured_task_program_id!r}, got "
+                f"{task_program.program_id!r}."
+            )
+        if registration is not None:
+            registration.catalog.preflight(task_program)
+        env_cfg.task_program = task_program
+
     env_cfg.max_episode_steps = config.get("max_episode_steps", 300)
     env_cfg.num_envs = config.get("num_envs", 1)
+    env_cfg.seed = config.get("seed", None)
 
     physics_config = deepcopy(config.get("physics_config", {}))
     if "gravity" in physics_config:
@@ -630,6 +779,7 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
                 mode=event_params_modified["mode"],
                 params=event_params_modified["params"],
                 interval_step=interval_step,
+                is_global=event_params_modified.get("is_global", False),
             )
             setattr(env_cfg.events, event_name, event)
 
@@ -714,6 +864,17 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
                 params=term_params_modified.get("params", {}),
             )
             setattr(env_cfg.actions, term_name, action_term)
+
+    if configured_task_program_integration is not None:
+        from embodichain.lab.gym.envs.task_program.registration import (
+            _register_configured_task_program_integration,
+        )
+
+        _register_configured_task_program_integration(
+            config["id"],
+            configured_task_program_integration,
+            max_episode_steps=env_cfg.max_episode_steps,
+        )
 
     return env_cfg
 
@@ -821,6 +982,7 @@ def add_env_launcher_args_to_parser(
 
     This function adds the following arguments to the provided parser:
         --num_envs: Number of environments to run in parallel (default: 1)
+        --seed: Task-environment seed. The task config is used when omitted.
         --device: Device to run the environment on (default: 'cpu')
         --headless: Whether to perform the simulation in headless mode (default: False)
         --renderer: Renderer backend to use for the simulation. Options are 'hybrid', 'fast-rt', and 'rt'. (default: 'hybrid')
@@ -847,6 +1009,12 @@ def add_env_launcher_args_to_parser(
         help="The number of environments to run in parallel. "
         "If not given, falls back to the gym config's `num_envs` (default 1).",
         default=1,
+        type=int,
+    )
+    parser.add_argument(
+        "--seed",
+        help="Task-environment seed. Overrides the gym config when provided.",
+        default=None,
         type=int,
     )
     parser.add_argument(
@@ -969,6 +1137,8 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     merged_config = deepcopy(gym_config)
     if args.num_envs is not None:
         merged_config["num_envs"] = args.num_envs
+    if getattr(args, "seed", None) is not None:
+        merged_config["seed"] = args.seed
     merged_config["device"] = args.device
     viser_enabled = bool(getattr(args, "viser", False))
     merged_config["headless"] = args.headless or viser_enabled
@@ -1021,16 +1191,30 @@ def build_env_cfg_from_args(
         tuple[EmbodiedEnvCfg, dict, dict]: A tuple containing the environment configuration object,
             the merged gym configuration dictionary, and the action configuration dictionary.
     """
+    from embodichain.utils.config_paths import resolve_config_path
     from embodichain.utils.utility import load_config
     from embodichain.lab.gym.envs import EmbodiedEnvCfg
 
-    gym_config = load_config(args.gym_config)
+    gym_config_source_path = resolve_config_path(args.gym_config)
+    gym_config = load_config(gym_config_source_path)
+    if "environment" in gym_config:
+        from embodichain.lab.gym.utils._component_composition import (
+            _resolve_environment_component,
+        )
+
+        gym_config = _resolve_environment_component(
+            gym_config,
+            base_dir=gym_config_source_path.parent,
+        )
     gym_config = merge_args_with_gym_config(args, gym_config)
     if gym_config_modifier is not None:
         gym_config_modifier(gym_config)
 
     cfg: EmbodiedEnvCfg = config_to_cfg(
-        gym_config, manager_modules=get_manager_modules()
+        gym_config,
+        manager_modules=get_manager_modules(),
+        source_path=gym_config_source_path,
+        task_program_path_override=getattr(args, "task_program", None),
     )
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving
@@ -1157,6 +1341,21 @@ def init_rollout_buffer_from_gym_space(
             ),
             "segment_end": torch.zeros(
                 (num_envs, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "segment_accepted": torch.zeros(
+                (num_envs, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "segment_attempt_id": torch.full(
+                (num_envs, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "continuity_id": torch.full(
+                (num_envs, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
             ),
             "terminated": torch.zeros(
                 (num_envs, max_episode_steps), dtype=torch.bool, device=device
@@ -1383,6 +1582,21 @@ def init_rollout_buffer_from_config(
             ),
             "segment_end": torch.zeros(
                 (batch_size, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "segment_accepted": torch.zeros(
+                (batch_size, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "segment_attempt_id": torch.full(
+                (batch_size, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "continuity_id": torch.full(
+                (batch_size, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
             ),
             "terminated": torch.zeros(
                 (batch_size, max_episode_steps), dtype=torch.bool, device=device

@@ -25,6 +25,51 @@ The environment is defined by inheriting from {class}`~envs.EmbodiedEnvCfg`. Thi
 
 {class}`~envs.EmbodiedEnvCfg` inherits from {class}`~envs.EnvCfg` (the base environment configuration class, sometimes referred to as `BaseEnvCfg`), which provides fundamental environment parameters. The following sections describe both the base class parameters and the additional parameters specific to {class}`~envs.EmbodiedEnvCfg`.
 
+### File-Based Component Ownership
+
+File-based deployments may build the same in-memory configuration from
+reusable physical owners. A task-local `env.yaml` component combines simulation
+scene entities with ordinary environment and manager values, while an
+embodiment component combines one robot with its sensors:
+
+```yaml
+# env.yaml: reusable and not directly runnable
+environment_id: repeated_pick_place
+simulation:
+  rigid_object:
+    - uid: cube
+      # Physical object configuration.
+env:
+  events: {}
+  dataset: {}
+```
+
+A separate runnable config supplies `id` and selects those owners:
+
+```yaml
+# task.ur5.yaml
+id: TaskProgramRepeatedPickPlace-v1
+environment:
+  component: env.yaml
+embodiment:
+  component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+```
+
+This split lets one environment support several embodiments and lets one
+embodiment run across several environments. It is independent of how expert
+behavior is authored: a registered handwritten task can select the same two
+components, while a configuration-defined Task Program adds
+`task_program.{program,integration,execution_policy}` only to its runnable
+deployment. The pure `env.yaml` has `environment_id` but no runnable `id` or
+Task Program fields.
+
+Component references resolve relative to the runnable config. A deployment
+must not declare component-owned fields inline at the same time. The original
+fully inline Gym format remains supported; a standalone physical
+`scene.component` also remains available when `environment.component` is not
+selected. See {doc}`/guides/configuration` for the full file schemas and
+{doc}`/tutorial/task_program` for a complete Task Program composition.
+
 ### BaseEnvCfg Parameters
 
 Since {class}`~envs.EmbodiedEnvCfg` inherits from {class}`~envs.EnvCfg`, it includes the following base parameters:
@@ -63,6 +108,45 @@ If configuration is easier in hertz, set ``target_control_frequency``. For examp
 
 * **max_episode_steps** (int): 
   Maximum number of steps per episode. If set to ``-1``, episodes will not have a step limit and will only end due to success/failure conditions. Defaults to ``300``.
+
+### Reproducible Event Randomization
+
+Configuration-defined tasks can set a top-level ``seed`` before the scene and
+event managers are constructed:
+
+```yaml
+id: EmbodiedEnv-v1
+seed: 2026
+num_envs: 4
+env:
+  events:
+    randomize_light:
+      func: randomize_emission_light
+      mode: interval
+      interval_step: 10
+      is_global: true
+      params:
+        intensity_range: [0.5, 2.0]
+```
+
+The common environment launcher can override this value with
+``--seed 2026``. When a seed is configured, the Event Manager derives a stable
+random stream for every functor name, mode, and invocation. Function-style and
+class-style event functors using Python ``random``, NumPy's process RNG, or
+Torch's CPU/simulation-device RNG are therefore reproducible and isolated from
+policy-side random draws. Class construction is also scoped because visual
+randomizers may create random palettes during initialization.
+
+Calling ``env.reset(seed=2026)`` rewinds the event streams and interval
+counters. Calling ``reset()`` without a seed continues the existing sequence.
+If the environment seed is ``None``, events retain the process-global RNG
+behavior from earlier releases. Custom functors that own an explicitly created
+generator remain responsible for seeding that generator.
+
+Reproducibility assumes the same task configuration, event call/reset schedule,
+assets, software versions, and device class. A seed controls randomization; it
+does not promise bitwise-identical physics or rendering across different
+hardware or simulator versions.
 
 ### EmbodiedEnvCfg Parameters
 
@@ -374,7 +458,9 @@ In a gym config file, use the ``actions`` section:
 ````{tip}
 **Using an AI coding agent?** The following skills can scaffold boilerplate for you:
 
-- **`/add-task-env`** — Generate a new task environment with the correct file structure, `@register_env` decorator, base class methods, `__init__.py` update, and test stub.
+- **`/add-task-env`** — Generate either an import-registered task module or a
+  configuration-defined Task Program deployment, with the matching config
+  layout and test stub.
 - **`/add-functor`** — Add observation, reward, event, or randomization functors with the correct signature and module placement.
 - **`/add-test`** — Write tests following project conventions (pytest or class style, mock patterns, correct file placement).
 - **`/pre-commit-check`** — Run all local CI checks (black, headers, `__all__`, type annotations) before committing.

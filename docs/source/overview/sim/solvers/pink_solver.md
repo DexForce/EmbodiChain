@@ -18,8 +18,13 @@
 
 ```python
 from embodichain.data import get_data_path
-from embodichain.lab.sim.solvers.pink_solver import PinkSolver
 from embodichain.lab.sim.solvers.pink_solver import PinkSolverCfg
+from embodichain.lab.sim.solvers.null_space_posture_task import NullSpacePostureTask
+
+posture_task = NullSpacePostureTask(
+    cost=1e-3,
+    controlled_frames=["ee_link"],
+)
 
 cfg = PinkSolverCfg(
     urdf_path=get_data_path("UniversalRobots/UR5/UR5.urdf"),
@@ -35,10 +40,11 @@ cfg = PinkSolverCfg(
     fail_on_joint_limit_violation=True,
     solver_type="osqp",
     variable_input_tasks=None,
-    fixed_input_tasks=None,
+    fixed_input_tasks=[posture_task],
 )
 
-solver = PinkSolver(cfg)
+solver = cfg.init_solver(device="cpu")
+solver.update_null_space_joint_targets([0.0] * 6)
 ```
 
 
@@ -65,19 +71,19 @@ solver = PinkSolver(cfg)
   #          [ 0.0,      0.0,      0.0,      1.0     ]]])
 ```
 
-* `get_ik(self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor = None, return_all_solutions: bool = False, jacobian: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]`  
+* `get_ik(self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor = None, return_all_solutions: bool = False) -> Tuple[torch.Tensor, torch.Tensor]`
   Computes joint positions (inverse kinematics) for the given target end-effector pose.
 
   **Parameters:**
-  + `target_xpos` (`torch.Tensor`): Target end-effector pose(s), shape `(num_envs, 4, 4)`.
-  + `qpos_seed` (`torch.Tensor`, optional): Initial guess for joint positions, shape `(num_envs, num_joints)`. If `None`, a default is used.
-  + `return_all_solutions` (`bool`, optional): If `True`, returns all possible solutions. Default is `False`.
-  + `jacobian` (`torch.Tensor`, optional): Custom Jacobian. Usually not required.
+  + `target_xpos` (`torch.Tensor`): Target TCP pose(s), shape `(4, 4)` or `(num_envs, 4, 4)`.
+  + `qpos_seed` (`torch.Tensor`, optional): Initial guess(es) for joint positions, shape `(num_joints,)`, `(1, num_joints)` (broadcast), `(num_envs, num_joints)`, or `(num_envs, 1, num_joints)`. If `None`, a default is used.
+  + `return_all_solutions` (`bool`, optional): Accepted for solver-interface compatibility. Pink returns one locally optimal solution per target even when this is `True`. Default is `False`.
 
   **Returns:**
   + `Tuple[torch.Tensor, torch.Tensor]`:
-    - First element: Joint positions, shape `(num_envs, num_joints)`.
-    - Second element: Convergence info or error for each environment.
+    - First element: Success flags, shape `(num_envs,)`.
+    - Second element: Joint solutions, shape `(num_envs, 1, num_joints)`.
+      Failed targets preserve their corresponding seeds.
 
   **Example:**
 
@@ -88,11 +94,9 @@ solver = PinkSolver(cfg)
                         [ 1.0,      0.0,      0.0,      0.079159],
                         [ 0.0,      0.0,      0.0,      1.0     ]]])
   qpos_seed = torch.zeros((1, 6))
-  qpos_sol, info = solver.get_ik(target_xpos=xpos)
-  print("IK solution:", qpos_sol)
-  print("Convergence info:", info)
-  # IK solution: tensor([True])
-  # Convergence info: tensor([[0.0, -0.231429, 0.353367, 0.893100, 0.0, 0.555758]])
+  success, qpos_sol = solver.get_ik(target_xpos=xpos)
+  print("Success:", success)
+  print("IK solution:", qpos_sol[:, 0])
 ```
 
 
@@ -100,4 +104,4 @@ solver = PinkSolver(cfg)
 
 - [Pinocchio Library](https://github.com/stack-of-tasks/pinocchio)
 - [Pink Library](https://github.com/stephane-caron/pink)
-- [Null Space Posture Task](https://github.com/stephane-caron/pink#null-space-posture-task)
+- [Pink documentation](https://stephane-caron.github.io/pink/)

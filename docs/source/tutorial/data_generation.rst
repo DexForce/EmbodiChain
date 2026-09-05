@@ -1,423 +1,471 @@
 .. _tutorial_data_generation:
 
-Data Generation
-===============
+Expert Data Generation
+======================
 
 .. currentmodule:: embodichain.lab.gym
 
-This tutorial shows how to generate synthetic expert demonstration datasets using EmbodiChain's built-in environment rollout and dataset manager. You will learn how to configure LeRobot recording in a gym config file (``.json``, ``.yaml``, or ``.yml``), how ``run_env.py`` builds an environment from configuration files, and how completed episodes are automatically saved to disk.
-
-Overview
-~~~~~~~~
-
-EmbodiChain provides a built-in data generation workflow for imitation-learning and manipulation tasks:
-
-- **Gym Configuration**: Describes the scene, robot, sensors, randomization events, observations, dataset recorder, and rollout settings.
-- **Action Configuration**: Describes the task-specific expert action graph for tasks that use the action bank.
-- **Environment Rollout**: Builds the environment directly from configuration files and executes offline generation.
-- **Expert Policy**: Each task provides ``create_demo_segments()`` or the
-  legacy ``create_demo_action_list()`` entry to generate expert actions.
-- **Dataset Manager**: Records observation-action pairs during ``env.step()``
-  and transactionally commits selected successful or configured failed rows.
-- **LeRobotRecorder**: Converts completed episodes into LeRobot-compatible datasets, with optional video export.
-
-What This Tutorial Records
---------------------------
-
-This page documents the full path from task configuration to saved dataset:
-
-1. Prepare a task gym config (e.g. ``gym_config.json`` or ``gym_config.yaml``).
-2. Prepare an action config if the task uses the action bank (same supported extensions).
-3. Launch the environment rollout with ``run-env``.
-4. Let the dataset manager automatically save completed episodes.
-
-Example Task
-------------
-
-As a concrete example, this tutorial uses a real action-bank task shipped in the repository:
-
-- ``embodichain_tasks/configs/gym/pour_water/gym_config.json`` defines the simulation scene and dataset recording behavior (YAML equivalents such as ``embodichain_tasks/configs/gym/cobotmagic.yaml`` are also supported).
-- ``embodichain_tasks/configs/gym/pour_water/action_config.json`` defines the action-bank graph used to solve the task.
-
-The Code
-~~~~~~~~
-
-The tutorial corresponds to the ``run_env.py`` script in ``embodichain/lab/scripts``.
-
-.. dropdown:: Code for run_env.py
-   :icon: code
-
-   .. literalinclude:: ../../../embodichain/lab/scripts/run_env.py
-      :language: python
-      :linenos:
-
-
-The Code Explained
-~~~~~~~~~~~~~~~~~~
-
-The rollout script builds the environment from configuration, generates expert trajectories, executes them step by step, and relies on the dataset manager to auto-save valid episodes.
-
-Step 1: Prepare the Task Configuration
---------------------------------------
-
-The first input to the pipeline is the task gym config file. In the example below, the same file contains rollout settings, scene randomization, observations, dataset recording, and robot or sensor definitions.
-
-The rollout settings include the episode count:
-
-.. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/gym_config.json
-   :language: json
-   :lines: 2-4
-
-The dataset-related part looks like this:
-
-.. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/gym_config.json
-   :language: json
-   :start-at: "dataset": {
-   :end-before: "control_parts":
-
-Important parameters are:
-
-- **max_episodes**: Exact number of persisted per-environment episodes. It is
-  not the number of vector batches; a final partial batch commits only the rows
-  still needed to reach this count.
-- **num_envs**: Maximum number of episodes generated concurrently in one
-  vector batch.
-- **max_episode_steps**: Maximum number of environment steps per episode.
-- **dataset.lerobot.save_failed_episodes**: When ``true``, persist failed or
-  truncated attempts that contain frames. It belongs beside ``func`` and
-  ``mode``, not inside ``params``. A saved failure counts toward
-  ``max_episodes``. The default is ``false``.
-- **dataset.lerobot.params.robot_meta**: Robot identity metadata such as robot type. Dataset frequency is derived from the environment timestep.
-- **dataset.lerobot.params.instruction**: Task language instruction stored together with the dataset.
-- **dataset.lerobot.params.extra**: Additional metadata such as scene type and task description.
-- **dataset.lerobot.params.use_videos**: Whether camera observations should be stored as videos.
-- **env.control_parts**: Controlled robot parts in the environment.
-
-
-``LeRobotRecorder`` stores robot state and action features following the LeRobot
-format: ``observation.state`` for joint positions, ``action`` for applied
-actions, and ``observation.images.{sensor_name}`` for RGB camera images. The
-episode-level instruction remains in LeRobot's ``task`` field. Segment-aware
-demonstrations additionally store a per-frame ``subtask_index`` and the
-corresponding descriptions in ``meta/subtasks.parquet``; precise boundaries
-and terminal state are stored in ``annotation.episode_step``,
-``annotation.segment_id``, ``annotation.segment_step``,
-``annotation.segment_start``, ``annotation.segment_end``,
-``annotation.terminated``, and ``annotation.truncated``. The internal expert
-``valid`` mask selects the real per-environment prefix but is not exported as
-an ``annotation.valid`` column. When a camera also produces
-depth or segmentation data, the recorder preserves those arrays: masks are
-always stored as exact numeric features under
-``observation.mask.{sensor_name}``, while depth is stored either as a numeric
-feature (``observation.depth.{sensor_name}``, the default) or as compressed
-``gray12le``/HEVC sidecar videos when ``dataset.lerobot.params.depth_video.enable``
-is set (issue #424, Path A). Stereo-camera keys use the ``_right`` suffix. The
-``use_videos`` option applies only to RGB images; see
-:doc:`/overview/gym/dataset_functors` for the depth sidecar configuration.
-
-Step 2: Prepare the Action Configuration
-----------------------------------------
-
-For tasks that use the action bank, the second input is ``action_config.json``. This file defines the expert action graph consumed by ``create_demo_action_list()``. In the example below, the file is organized around ``scope``, ``node``, ``edge``, and ``sync``.
-
-.. dropdown:: Action bank structure in the example task Pour_Water
-   :icon: code
-
-   **Scope Configuration**
-
-   .. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/action_config.json
-      :language: json
-      :lines: 2-57
-
-   **Node Configuration**
-
-   .. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/action_config.json
-      :language: json
-      :lines: 96-177
-
-   **Edge Configuration**
-
-   .. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/action_config.json
-      :language: json
-      :lines: 763-790
-
-   **Synchronization**
-
-   .. literalinclude:: ../../../embodichain_tasks/configs/gym/pour_water/action_config.json
-      :language: json
-      :lines: 906-932
-
-This structure defines the expert rollout as follows:
-
-- **Scope**: Defines controllable sub-graphs such as ``right_arm``, ``left_arm``, ``right_eef``, and ``left_eef``.
-- **Node**: Defines key poses, targets computed from object affordances, and IK-generated joint targets.
-- **Edge**: Defines executable transitions between nodes, including duration and execution function.
-- **Sync**: Defines execution order rules between independently configured sub-actions.
-
-Note: Action bank is not the only way to generate demonstrations. Depending on the task design, trajectories can also be produced by other scripted generation methods.
-
-Step 3: Launch the Environment Rollout
---------------------------------------
-
-The rollout script parses command-line arguments, loads the gym and action config files, converts them into environment configuration objects, creates the environment instance, and then runs offline rollout for ``max_episodes`` episodes:
-
-.. literalinclude:: ../../../embodichain/lab/scripts/run_env.py
-   :language: python
-   :start-at: def cli(
-   :end-at:     main(args, env, gym_config)
-
-Each rollout asks the task for ``create_demo_segments()``. Legacy
-``create_demo_action_list()`` tasks are wrapped as one segment. The runner
-validates and executes every action with ``env.step(action)``. By default an
-invalid rollout is discarded with ``save_data=False`` and retried. If the
-dataset functor sets ``save_failed_episodes: true``, a failed or truncated
-attempt with recorded frames is committed with ``success=false`` metadata and
-counts toward ``max_episodes``. Empty plans and exceptions are still discarded.
-
-``generate_function(num_traj=...)`` no longer controls how many sub-actions
-belong to an episode. Direct callers may pass only ``None`` or ``1``; larger
-values raise ``ValueError``. Represent repeated subtasks by yielding multiple
-``DemoSegment`` objects from ``create_demo_segments()`` instead.
-
-The recommended CLI entrypoint is:
-
-.. code-block:: bash
-
-   embodichain run-env \
-       --gym_config embodichain_tasks/configs/gym/pour_water/gym_config.json \
-       --action_config embodichain_tasks/configs/gym/pour_water/action_config.json \
-       --headless
-
-For interactive inspection, you can use preview mode: replace ``--headless`` with ``--preview``.
-When ``--preview`` is enabled, the script opens the environment in an interactive debugging mode. This mode is for inspection and does not save datasets.
-
-For a detailed comparison of preview, structured dataset recording, debug-video
-recording, trajectory recording, and the three replay modes, see
-:doc:`Run Environment </guides/run_env>`.
-
-
-Useful CLI arguments:
-
-- **--gym_config**: Path to the task config file (``.json``, ``.yaml``, or ``.yml``).
-- **--action_config**: Path to the action-bank config file (``.json``, ``.yaml``, or ``.yml``).
-- **--num_envs**: Number of environments to run in parallel. ``run-env`` uses
-  as many vector batches as needed and trims the last commit so that the
-  persisted episode count equals ``max_episodes``.
-- **--device**: Simulation device, such as ``cpu`` or ``cuda``.
-- **--headless**: Run without GUI for faster generation.
-- **--enable_rt**: Enable ray tracing for higher-quality visual observations.
-- **--preview**: Launch the environment in interactive preview mode.
-- **--filter_dataset_saving**: Disable dataset saving for debugging.
-
-For the complete CLI argument list, see :doc:`CLI Reference </guides/cli>`.
-
-Outputs
-~~~~~~~
-
-After execution, committed episodes are saved under the configured dataset
-root. They are successful episodes by default and may include explicitly
-configured failed episodes. A LeRobot dataset typically contains:
-
-If no explicit save path is provided and ``EMBODICHAIN_DATASET_ROOT`` is not set, ``LeRobotRecorder`` uses ``~/.cache/embodichain_datasets`` as the default dataset root.
-
-- **data/**: Recorded action and state data.
-- **videos/**: Camera observations saved as videos when ``use_videos=True``.
-- **meta/**: Dataset metadata such as task information and robot description.
-
-Dataset folders are automatically numbered, which makes it easy to run repeated generations without overwriting previous results.
-
-In a practical workflow, the output of this stage is the synthesized dataset itself. Later training scripts typically consume these saved LeRobot episodes instead of regenerating trajectories each time.
-
-
-Multi-Segment UR5 Example
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The repository includes a complete repeated pick-and-place example at
-``embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json``. It uses
-the specified UR5 robot and parallel gripper to pick up the same cube and place
-it three times in one episode. No separate action-bank config is required.
-
-Each pick/place cycle is one lazy demonstration segment. After placing the
-cube, the task waits for its free-fall motion to settle. Only then does it read
-the cube's measured pose and plan the next pickup. This avoids assuming that
-the previous release position is still the cube's current position.
-
-Generate one episode with:
-
-.. code-block:: bash
-
-   embodichain run-env \
-       --gym_config embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json \
-       --headless \
-       --device cuda \
-       --max_episodes 1
-
-Use ``--device cpu`` instead when the simulator is configured for CPU
-execution. The config writes an auto-numbered dataset below:
+EmbodiChain supports two expert-authoring paradigms for synthetic demonstration
+data:
+
+1. **Handwritten trajectories** implement the expert in a registered Python
+   task, using ``MotionGenerator`` directly or composing reusable Atomic Skills.
+2. **Task Program** declares the task flow in typed YAML and lets the configured
+   environment integration lower Semantic Calls to the same Atomic Skills.
+
+The two paradigms differ only in how the expert plan is authored. Both produce
+lazy :class:`~embodichain.lab.gym.envs.DemoSegment` objects, and both use the
+same Gym executor, ``env.step()`` path, validation rules, dataset manager, and
+transactional commit boundary.
+
+Choose an Expert-Authoring Paradigm
+-----------------------------------
+
+.. list-table:: Handwritten trajectories and Task Program
+   :header-rows: 1
+   :widths: 19 38 43
+
+   * - Concern
+     - Handwritten trajectory
+     - Task Program
+   * - Authoring surface
+     - A registered Python task module implementing
+       ``create_demo_segments()``.
+     - ``program.yaml`` plus a trusted integration, reusable physical
+       environment, embodiment, execution policy, and runnable task deployment.
+   * - Planning level
+     - Call ``MotionGenerator`` for task-specific waypoints, or construct typed
+       ``ActionInvocation`` values for ``AtomicActionEngine``.
+     - Declare Pick, Place, HandOver, registered Semantic Calls, control flow,
+       post-policies, and validators; the adapter lowers them to Atomic Skills.
+   * - Best fit
+     - Custom geometry, unusual control logic, experimental skills, or logic
+       that needs unrestricted Python.
+     - Reusable object-centric workflows whose task intent should remain
+       independent of a particular robot and simulator assembly.
+   * - Responsibility
+     - The task owns planning, command assembly, lazy segment boundaries, and
+       physical validation.
+     - The program owns intent; trusted integration and deployment components
+       own physical identities, resources, policies, and services.
+   * - Environment entry
+     - A task-specific registered ``EmbodiedEnv`` subclass.
+     - A supported configuration-defined task can use the common
+       ``EmbodiedEnv`` without a task-specific Python module.
+
+Use handwritten Python while the behavior itself is still changing rapidly or
+does not have a reusable semantic contract. Use Task Program when the behavior
+can be expressed as stable semantic operations and should be portable across
+compatible embodiments. A common progression is to prototype in Python, move
+reusable motion behavior into Atomic Skills, and then expose stable task flows
+through Task Program.
+
+The Shared Rollout Contract
+---------------------------
+
+The rollout path is deliberately shared:
 
 .. code-block:: text
 
-   outputs/lerobot/multi_segments/
-   `-- ur5_multi_segments_three_cycle_cube_pick_place_NNN/
+   registered Python task                 configured Task Program
+   create_demo_segments()                 compile + Gym bridge
+                \                           /
+                 +---- Iterable[DemoSegment]
+                                |
+                     execute_demo_episode()
+                                |
+                         env.step(action)
+                                |
+                  observation/action buffers
+                                |
+               reset(commit) or reset(discard)
+                                |
+                       LeRobot dataset
 
-The example has no configured camera sensor and sets ``use_videos`` to
-``false``. Its dataset therefore contains robot state, action, task, subtask,
-and segment annotations, but no RGB video. Add a sensor and record its image
-observation when visual playback of the cube is required.
+A :class:`~embodichain.lab.gym.envs.DemoSegment` contains an action iterable
+and may also contain a stable name, target, instruction, JSON-compatible
+metadata, and a validator. Its actions may be lazy: the next segment can be
+planned only after the previous segment has executed and changed the scene.
 
+The expert planner must **not** call ``env.step()`` itself. The common executor
+owns stepping so observations, actions, terminal signals, segment annotations,
+and dataset frames stay causally aligned.
+
+Paradigm 1: Handwritten Trajectories
+------------------------------------
+
+A handwritten expert lives beside its registered task entry point, for example:
+
+* ``embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py``;
+* ``embodichain_tasks/embodichain_tasks/manipulation/tableware/blocks_ranking_rgb.py``.
+
+Both examples build a ``MotionGenerator`` backed by TOPPRA and pass it to an
+``AtomicActionEngine``. The engine then plans reusable PickUp and Place
+invocations while the task retains control over scene queries, command timing,
+segment metadata, and success checks.
+
+Direct Motion Generator or Atomic Skills
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+These are two abstraction levels, not two unrelated planning engines:
+
+* Use ``MotionGenerator.generate()`` directly when the task already owns the
+  joint or Cartesian waypoints and only needs a planned joint trajectory. Wrap
+  ``PlanResult.positions`` as a ``DemoSegment`` action iterable and combine
+  ``PlanResult.success`` with a physical validator. See :doc:`motion_gen` for
+  the complete planning API.
+* Use ``AtomicActionEngine`` when the behavior matches reusable skills such as
+  PickUp, Place, MoveEndEffector, Pour, or HandOver. The engine owns the shared
+  motion generator, command profiles, typed goals, and projected semantic
+  context. See :doc:`atomic_actions` for the action contracts.
+
+When using ``MotionGenerator`` directly, its planned positions are ordered for
+the selected ``control_part``. The actions yielded to the environment must
+match its active action space. If the environment controls more joints than
+the planned arm, merge the arm plan with hold or gripper commands before
+yielding it; do not silently rely on incompatible dimensions.
+
+Build the planning services
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The two-block stacking task demonstrates the recommended Atomic Skills setup:
+
+.. dropdown:: Motion Generator and AtomicActionEngine setup
+   :icon: code
+
+   .. literalinclude:: ../../../embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py
+      :language: python
+      :start-at:     def _initialize_atomic_actions(self) -> None:
+      :end-before:     def create_demo_segments(self, **kwargs: Any) -> tuple[DemoSegment]:
+      :linenos:
+
+The task constructs the motion generator once, declares command profiles for
+the gripper, and reuses the engine for every episode. Object semantics are
+explicit inputs to the skills rather than being inferred from simulator names.
+
+Return semantic demonstration segments
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``create_demo_segments()`` is the preferred handwritten expert API:
+
+.. literalinclude:: ../../../embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py
+   :language: python
+   :start-at:     def create_demo_segments(self, **kwargs: Any) -> tuple[DemoSegment]:
+   :end-before:     def _plan_stack(
+   :linenos:
+
+This segment keeps three outcomes separate:
+
+* ``actions`` is the controller-command stream consumed by the common runner;
+* ``planning_success`` records whether PickUp and Place were planned; and
+* ``validator`` checks both planning success and the physical stack after all
+  commands and settling actions have executed.
+
+The task creates typed PickUp and Place requests and threads the projected
+held-object state from the first plan into the second:
+
+.. dropdown:: Compile the PickUp and Place trajectory
+   :icon: code
+
+   .. literalinclude:: ../../../embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py
+      :language: python
+      :start-at:         pick_compiled = self._action_engine.compile(
+      :end-before:     def _insert_grasp_hold(self, trajectory: torch.Tensor) -> torch.Tensor:
+      :linenos:
+
+For a multi-object episode, yield segments lazily. The
+``BlocksRankingRGBEnv.create_demo_segments()`` example yields the red-block
+segment first, then queries the updated reference-block pose before planning
+the blue-block segment. This avoids planning later subtasks against stale
+scene state.
+
+Legacy tasks implementing ``create_demo_action_list()`` remain supported and
+are wrapped as one segment named ``legacy``. New tasks should implement
+``create_demo_segments()`` so subtask boundaries, language, metadata, and
+validators remain explicit.
+
+Try the handwritten expert
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The shipped stacking config currently defines the scene and rollout but does
+not configure a dataset recorder. First smoke-test the expert without writing
+data:
+
+.. code-block:: bash
+
+   embodichain run-env \
+       --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.json \
+       --headless \
+       --filter_dataset_saving \
+       --max_episodes 1
+
+To collect it, copy that config, add the recorder from
+`Configure Dataset Recording`_, and run the copied config without
+``--filter_dataset_saving``:
+
+.. code-block:: bash
+
+   embodichain run-env \
+       --gym_config path/to/stack_blocks_two_recording.json \
+       --headless \
+       --max_episodes 5
+
+Paradigm 2: Task Program
+------------------------
+
+Task Program replaces the task-specific expert method with declarative task
+intent. It does not introduce a second rollout or recording API: the configured
+adapter compiles the program, creates lazy demonstration segments, and returns
+them to the same executor used by handwritten tasks.
+
+The current Pour Water example is a complete configuration-defined task:
+
+* ``env.yaml`` owns the physical scene, environment values, and dataset
+  recorder, without any Task Program fields;
+* ``task.cobotmagic.yaml`` is the runnable deployment that selects the
+  environment, Task Program, embodiment, and execution policy;
+* ``program.yaml`` owns embodiment-independent intent and targets;
+* ``integration.yaml`` owns task-specific contracts, scene binding, semantic
+  defaults, action options, and allowlisted runtime services;
+* the embodiment component owns the robot, sensors, endpoints, and compatible
+  skill profile.
+
+Compose the deployment
+~~~~~~~~~~~~~~~~~~~~~~
+
+The runnable deployment is intentionally thin:
+
+.. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
+   :language: yaml
+   :linenos:
+
+Its selected ``env.yaml`` is reusable outside Task Program because it contains
+only physical simulation and ordinary Gym values:
+
+.. dropdown:: Pour Water reusable environment
+   :icon: code
+
+   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
+      :language: yaml
+      :linenos:
+
+During ``config_to_cfg()``, component paths are resolved relative to
+``task.cobotmagic.yaml``. The resolver expands the physical environment and
+embodiment, checks scene-binding UIDs and semantic contracts, and binds trusted
+provider identities into the otherwise embodiment-independent program.
+
+Declare the semantic workflow
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The program describes Pick, transport, Pour, and Place without importing
+Python callables or naming simulator joints:
+
+.. dropdown:: Pour Water Task Program
+   :icon: code
+
+   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/program.yaml
+      :language: yaml
+      :linenos:
+
+The trusted integration maps ``bottle`` and ``cup`` to physical scene objects,
+selects the primary manipulator, configures action options, and allowlists the
+registered transport and pour lowerers:
+
+.. dropdown:: Pour Water integration
+   :icon: code
+
+   .. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task_program/integration.yaml
+      :language: yaml
+      :linenos:
+
+The program remains provider-independent. Simulation UIDs, grasp affordances,
+fixed object-to-end-effector transforms, and live target resolution stay in the
+trusted integration. For a detailed deployment walkthrough, see
+:doc:`task_program`; for constructing and compiling the language directly in
+Python, see :doc:`task_program_python`.
+
+Run the configured Task Program
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Pour Water already configures ``LeRobotRecorder`` in ``env.yaml``, so its
+runnable deployment can record directly:
+
+.. code-block:: bash
+
+   embodichain run-env \
+       --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml \
+       --headless \
+       --max_episodes 1
+
+The Task Program bridge plans and yields actions lazily. It never calls
+``env.step()``; stepping, annotations, validation, commit, retry, and discard
+remain owned by the shared environment rollout.
+
+Configure Dataset Recording
+---------------------------
+
+The expert paradigm and recorder configuration are independent. Add a dataset
+functor under ``env.dataset`` in an inline Gym config or in a reusable
+``env.yaml`` environment component:
+
+.. code-block:: yaml
+
+   max_episodes: 5
+   max_episode_steps: 600
+
+   env:
+     dataset:
+       lerobot:
+         func: LeRobotRecorder
+         mode: save
+         save_failed_episodes: false
+         params:
+           save_path: outputs/lerobot/expert_demos
+           robot_meta:
+             robot_type: CobotMagic
+           instruction:
+             lang: Pick and place the object
+           extra:
+             scene_type: tabletop
+             task_description: pick_and_place
+             data_type: sim
+           use_videos: true
+
+Important fields are:
+
+* ``max_episodes`` is the exact number of persisted per-environment episodes,
+  not the number of vector batches.
+* ``max_episode_steps`` must exceed the longest valid expert execution,
+  including gripper holds and settling actions.
+* ``save_failed_episodes`` belongs beside ``func`` and ``mode``. It defaults to
+  ``false``; when enabled, a failed or truncated attempt with recorded frames
+  is committed with ``success=false`` metadata and counts toward
+  ``max_episodes``.
+* ``params.save_path`` is the parent directory for auto-numbered datasets. If
+  omitted, the default is ``~/.cache/embodichain_datasets`` or the value of
+  ``EMBODICHAIN_DATASET_ROOT``.
+* ``params.use_videos`` controls RGB dataset videos. It has an effect only when
+  image observations from configured sensors are present.
+* Dataset frequency is derived from ``env.step_dt`` and must be an integer
+  number of frames per second for LeRobot.
+
+The real Pour Water recorder block can be inspected directly:
+
+.. literalinclude:: ../../../embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml
+   :language: yaml
+   :start-at: dataset:
+   :end-at: control_parts: [left_arm, left_eef, right_arm, right_eef]
+   :linenos:
+
+Execution, Validation, and Persistence
+--------------------------------------
+
+Without ``--preview`` or ``--replay``, ``embodichain run-env`` performs offline
+data generation:
+
+1. Resolve ``create_demo_segments()`` from the handwritten task or configured
+   Task Program bridge.
+2. Execute every yielded action through ``env.step(action)`` and record the
+   resulting transition.
+3. Run the segment validator after its action iterable is exhausted.
+4. Check episode termination and final task success.
+5. Commit selected environment rows with an explicit reset, or discard the
+   attempt with ``reset(options={"save_data": False})``.
+
+Failed attempts are discarded and retried by default, up to
+``demo_max_attempts`` (default: 3). Empty plans and exceptions are always
+discarded because they do not form a complete dataset transaction. With
+``save_failed_episodes: true``, a failed or truncated attempt is retained only
+when every selected row contains recorded frames.
+
+``num_envs`` controls collection parallelism. If ``max_episodes=10`` and
+``num_envs=4``, the runner uses three vector batches and commits only two rows
+from the final batch, so it never overshoots the requested episode count.
+
+An episode is the complete task; a segment is one semantic subtask. Do not use
+``generate_function(num_traj=...)`` to repeat subtasks: direct callers may pass
+only ``None`` or ``1``. Yield multiple ``DemoSegment`` objects instead so the
+task owns their order, live-state dependencies, and validation.
+
+Useful modes and options are:
+
+* ``--headless`` disables the GUI for collection throughput.
+* ``--preview`` opens interactive inspection and does not save a dataset.
+* ``--filter_dataset_saving`` executes the expert while suppressing structured
+  dataset writes.
+* ``--num_envs`` overrides collection parallelism.
+* ``--max_episodes`` overrides the configured episode target.
+
+See :doc:`/guides/run_env` for preview, dataset recording, debug video,
+trajectory recording, and replay modes, and :doc:`/guides/cli` for the complete
+argument list.
+
+Recorded Data
+-------------
+
+``LeRobotRecorder`` creates an auto-numbered dataset directory containing:
+
+* ``data/`` for Parquet action, state, and annotation features;
+* ``videos/`` for RGB observations when ``use_videos`` is enabled;
+* ``meta/`` for LeRobot metadata, task/subtask mappings, and EmbodiChain episode
+  metadata.
+
+The primary fields include ``observation.state``, ``action``, and
+``observation.images.{sensor_name}``. Segment-aware episodes additionally
+record ``subtask_index`` and ``annotation.segment_*`` boundaries, plus terminal
+and truncation annotations. Depth and segmentation observations have their own
+numeric or configured sidecar representation; see
+:doc:`/overview/gym/dataset_functors` for the complete schema.
 
 .. _tutorial_data_generation_preview:
 
 Inspect Recorded LeRobot Data
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-----------------------------
 
-EmbodiChain provides a terminal-oriented structural preview, while LeRobot
-provides an interactive Rerun visualization. They are complementary:
-
-.. list-table:: Dataset preview tools
-   :header-rows: 1
-   :widths: 23 37 40
-
-   * - Tool
-     - Best for
-     - Important limitation
-   * - EmbodiChain terminal preview
-     - Verifying frame/timestamp continuity, episode task, subtask mapping,
-       segment boundaries, and the EmbodiChain sidecar.
-     - Prints summaries and validation results; it does not render images or
-       time-series plots.
-   * - LeRobot ``lerobot-dataset-viz``
-     - Interactively scrubbing standard camera, state, and action streams in
-       Rerun.
-     - LeRobot 0.4.4 does not plot EmbodiChain's ``subtask_index`` or
-       ``annotation.segment_*`` fields.
-
-EmbodiChain terminal preview
-----------------------------
-
-Use the parent output directory with ``--latest`` to inspect the most recently
-generated auto-numbered dataset:
+Use EmbodiChain's structural preview on the parent directory of auto-numbered
+datasets:
 
 .. code-block:: bash
 
    embodichain preview_lerobot_data \
-       outputs/lerobot/multi_segments \
+       outputs/lerobot/expert_demos \
+       --latest \
+       --episode 0
+
+For Pour Water without an explicit ``save_path``, use the default parent:
+
+.. code-block:: bash
+
+   embodichain preview_lerobot_data \
+       ~/.cache/embodichain_datasets \
        --latest \
        --episode 0 \
-       --expect-segments 3
+       --expect-segments 1
 
-The command loads the selected episode through LeRobot's official
-``LeRobotDataset`` API, then checks:
+The command validates frame and timestamp continuity, one episode-level task,
+subtask mappings, contiguous segment ranges, terminal annotations, and the
+EmbodiChain metadata sidecar. ``--expect-segments`` is an optional assertion;
+omit it when the expert's segment count is data-dependent.
 
-- required state, action, task, subtask, and segment features;
-- contiguous ``frame_index``, ``episode_index``, and
-  ``annotation.episode_step`` values;
-- timestamps against ``frame_index / fps``;
-- one constant episode-level task;
-- monotonic contiguous segment ranges, per-segment step counters, and exactly
-  one start/end marker per segment;
-- final-frame-only ``annotation.terminated`` and ``annotation.truncated``
-  values, including agreement with the sidecar;
-- stable ``subtask_index`` to description mappings; and
-- agreement with ``meta/embodichain_episodes.jsonl`` when the sidecar exists.
-
-A deliberately saved failed episode may still pass these structural checks.
-The preview then reports ``Sidecar : success=False``; failure classification is
-data, not a malformed-dataset error.
-
-The CLI arguments are:
-
-.. list-table:: EmbodiChain preview arguments
-   :header-rows: 1
-   :widths: 28 72
-
-   * - Argument
-     - Meaning
-   * - ``dataset_root``
-     - Exact LeRobot dataset root containing ``meta/info.json``. It may instead
-       be a parent directory when ``--latest`` is supplied.
-   * - ``--latest``
-     - Select the newest direct child dataset below ``dataset_root``.
-   * - ``--episode N``
-     - Inspect episode index ``N``; defaults to episode 0.
-   * - ``--expect-segments N``
-     - Add an optional assertion that the episode contains exactly ``N``
-       contiguous segments. It does not change or generate data. A mismatch
-       makes validation fail; omit it when the segment count is not known.
-
-A representative successful result ends with:
-
-.. code-block:: text
-
-   Segments:
-     #0: frames [0, 304) (304), subtask_index=0
-     #1: frames [304, 608) (304), subtask_index=1
-     #2: frames [608, 912) (304), subtask_index=2
-   Sidecar : success=True
-   [PASS] Dataset structure and segment metadata are consistent.
-
-The exact frame ranges can change with motion planning and settling time. Exit
-status 0 means validation passed, status 1 means the dataset loaded but failed
-one or more checks, and status 2 means the path, episode, or dataset could not
-be loaded.
-
-LeRobot official Rerun preview
-------------------------------
-
-The supported LeRobot 0.4.x release installs the official
-``lerobot-dataset-viz`` command. Unlike the EmbodiChain preview, its ``--root``
-must be the exact auto-numbered dataset directory:
-
-.. code-block:: bash
-
-   lerobot-dataset-viz \
-       --repo-id DexForce/ur5_multi_segments_three_cycle_cube_pick_place_000 \
-       --root outputs/lerobot/multi_segments/ur5_multi_segments_three_cycle_cube_pick_place_000 \
-       --mode local \
-       --episode-index 0 \
-       --num-workers 0
-
-Replace the ``_000`` suffix with the dataset directory produced by your run.
-``--repo-id`` remains required for a local dataset and gives the recording its
-identifier inside Rerun; supplying ``--root`` makes the CLI load the local
-directory. The viewer displays one curve per dimension under ``state`` and
-``action`` and displays camera streams when standard LeRobot image features
-are present. For the camera-free example above, seeing only the eight UR5 and
-gripper state curves plus the eight action curves is expected.
-
-To create a portable Rerun recording without opening a viewer, add
-``--save 1`` and ``--output-dir``:
-
-.. code-block:: bash
-
-   lerobot-dataset-viz \
-       --repo-id DexForce/ur5_multi_segments_three_cycle_cube_pick_place_000 \
-       --root outputs/lerobot/multi_segments/ur5_multi_segments_three_cycle_cube_pick_place_000 \
-       --episode-index 0 \
-       --num-workers 0 \
-       --save 1 \
-       --output-dir outputs/lerobot/previews
-
-   rerun outputs/lerobot/previews/DexForce_ur5_multi_segments_three_cycle_cube_pick_place_000_episode_0.rrd
-
-``--save 1`` disables automatic viewer spawning and writes the ``.rrd`` file;
-the second command opens that saved recording. You can validate the container
-itself with ``rerun rrd verify path/to/recording.rrd``.
-
-This repository constrains LeRobot to ``>=0.4.4,<0.5`` for Python 3.10 and
-3.11 compatibility. Use ``lerobot-dataset-viz --help`` for the flags available
-in the installed version; options documented only for later LeRobot releases
-may not exist here. See the `official LeRobot dataset visualization guide
-<https://huggingface.co/docs/lerobot/en/using_dataset_tools#dataset-visualization>`_
-for the upstream workflow.
+Use LeRobot's ``lerobot-dataset-viz`` with the exact auto-numbered dataset
+directory when interactive Rerun plots and camera playback are needed. The
+EmbodiChain preview focuses on structure and annotations; it does not render
+images or time-series plots.
 
 Best Practices
-~~~~~~~~~~~~~~
+--------------
 
-- **Keep the config pair together**: Version gym and action configs together for action-bank tasks (either JSON or YAML).
-- **Use valid scripted policies**: Make sure ``create_demo_segments()`` (or
-  legacy ``create_demo_action_list()``) returns executable trajectories for
-  the current scene.
-- **Use ``--headless`` for throughput**: Disable the GUI when generating large datasets.
-- **Use ``--preview`` and ``--filter_dataset_saving`` for debugging**: Inspect task logic without writing datasets.
-- **Discard invalid rollouts**: Keep the default validation logic so failed trajectories are not saved.
+* Keep planning and stepping separate: experts yield actions; the runner calls
+  ``env.step()``.
+* Validate physical outcomes from live simulator state, not only planner
+  success or projected semantic state.
+* Yield later subtasks lazily when they depend on object poses changed by
+  earlier segments.
+* Smoke-test with ``--filter_dataset_saving`` before a long collection run,
+  then inspect one committed episode before scaling ``num_envs``.
+* Keep each task's ``env.yaml``, ``task.<embodiment>.yaml``, and
+  ``task_program/{program,integration}.yaml`` together so physical UIDs,
+  contracts, and canonical IDs stay aligned. Keep reusable embodiment and
+  execution-policy components under ``configs/components/``.
+* Move reusable motion behavior into Atomic Skills instead of copying
+  task-local trajectory logic across Python tasks or registered Semantic Calls.

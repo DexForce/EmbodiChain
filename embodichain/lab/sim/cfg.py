@@ -1634,6 +1634,12 @@ class ArticulationCfg(ObjectBaseCfg):
     disable_self_collision: bool = True
     """Whether to enable or disable self-collisions."""
 
+    enable_gravity: bool = True
+    """Whether gravity is enabled for the articulation.
+
+    This runtime flag is applied regardless of :attr:`use_usd_properties`.
+    """
+
     init_qpos: torch.Tensor | np.ndarray | Sequence[float] = None
     """Initial joint positions of the articulation.
 

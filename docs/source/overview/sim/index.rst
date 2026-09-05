@@ -9,7 +9,8 @@ designed around a small set of composable components: a
 :class:`SimulationManager` owns the simulation lifecycle, asset classes
 represent objects in the scene, sensors produce batched observations, solvers
 convert between joint space and task space, planners generate feasible
-trajectories, and atomic actions package common manipulation skills.
+trajectories, and atomic actions package common manipulation primitives.
+Task Program builds on this runtime without becoming a simulation submodule.
 
 Like EmbodiChain's environment and learning modules, the simulation framework is
 configuration driven. Scene elements are declared through config classes, spawned
@@ -24,8 +25,9 @@ The simulation stack can be read from the bottom up:
 
 .. code-block:: text
 
-    SimulationManager
-    |-- global physics, rendering, arenas, stepping, USD import/export
+    embodichain.lab.sim
+    |-- SimulationManager
+    |   `-- global physics, rendering, arenas, stepping, USD import/export
     |-- assets
     |   |-- rigid objects and rigid object groups
     |   |-- articulations and robots
@@ -45,6 +47,16 @@ The simulation stack can be read from the bottom up:
     |   `-- time parameterization and sampling utilities
     `-- atomic actions
         `-- reusable manipulation primitives built from assets, solvers, and planners
+
+Semantic task declarations and execution sit above that runtime:
+
+.. code-block:: text
+
+    Task Program source
+        -> decode / validate / compile
+        -> Semantic Calls
+        -> Atomic Skills
+        -> simulation controllers
 
 The :class:`SimulationManager` is the entry point for most workflows. It creates
 the physics world, configures rendering and time stepping, lays out multiple
@@ -106,6 +118,12 @@ planner calls. An action engine receives semantic targets or poses, resolves the
 motion primitive sequence, and returns a trajectory that can be replayed in the
 simulation.
 
+For robot-independent task code, Task Program declares typed calls, scene
+identity, robot profiles, effects, and evidence. It owns program
+validation, compilation, live grounding, task segmentation, and structured
+results before delegating physical planning and execution to the same action
+engine.
+
 Choosing Where to Start
 -----------------------
 
@@ -120,8 +138,16 @@ Choosing Where to Start
   kinematics.
 - Use :doc:`planners/index` when a target pose or joint goal must become a
   time-ordered trajectory.
-- Use :doc:`atomic actions <atomic_actions/index>` when building scripted manipulation from reusable
-  motion primitives.
+- Use :doc:`atomic actions <atomic_actions/index>` when building scripted
+  manipulation from reusable motion primitives.
+- Use :doc:`/overview/task_program/scene_registry` when Semantic Calls,
+  snapshots, and planner obstacles must share one authoritative entity
+  namespace.
+- Use :doc:`/overview/task_program/robot_profiles` to declare reusable
+  embodiment resources, policy presets, and effect assurance.
+- Use :doc:`/overview/task_program/index` when a task should declare semantic
+  calls, settling, validation, or parallel barriers from JSON/YAML without
+  implementing task-local motion generation.
 
 Documentation Quality Notes
 ---------------------------

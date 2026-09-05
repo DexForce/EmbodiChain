@@ -28,7 +28,6 @@ Table of Contents
    quick_start/install.md
    tutorial/index
    guides/index
-   quick_start/docs.md
 
 .. toctree::
    :maxdepth: 1
@@ -36,6 +35,7 @@ Table of Contents
    :glob:
 
    overview/sim/index
+   overview/task_program/index
    overview/gym/index
    overview/rl/index
 
@@ -60,6 +60,12 @@ Table of Contents
    resources/task/index*
    resources/roadmap.md
    resources/publications/README.md
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Development
+
+   quick_start/docs.md
 
 .. toctree::
    :maxdepth: 2
