@@ -36,6 +36,9 @@ from embodichain.gen_sim.task_engine.agent import (
     derive_success_spec,
 )
 from embodichain.gen_sim.task_engine.interpretation import InstructionDraftResult
+from embodichain.gen_sim.task_engine.orchestration.coordinator import (
+    lower_task_candidate,
+)
 
 _TEST_INSTRUCTION = "test-instruction"
 
@@ -176,6 +179,32 @@ def test_target_requirements_describe_capabilities_not_concrete_roles(
     )
     assert target["source_structure"] == expected_structure
     assert target["affordances"] == expected_affordances
+
+
+def test_lower_task_candidate_expands_success_for_all_binding():
+    def interpreter(_instruction, **_kwargs):
+        step = _step(reference="all cans")
+        step["object"].update(quantifier="all")
+        return _result(step)
+
+    candidate = TaskAgent(interpreter=interpreter).generate(
+        "upright", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    grounded = lower_task_candidate(
+        candidate,
+        {"step_01.object": ["can_a", "can_b"]},
+        [
+            {"uid": "can_a", "role": "rigid_object", "description": "A can."},
+            {"uid": "can_b", "role": "rigid_object", "description": "A can."},
+        ],
+        "dual_franka",
+    )
+
+    assert grounded.task_spec["level"] == "L2"
+    assert [term["type"] for term in grounded.task_spec["success"]["terms"]] == [
+        "object_upright",
+        "object_upright",
+    ]
 
 
 def test_draft_rejects_grounded_fields_and_task_agent_fails_closed():
