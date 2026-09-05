@@ -48,7 +48,6 @@ def main(visualization: VisualizationCfg | None = None) -> None:
         visualization=visualization or VisualizationCfg(),
     )
     sim = SimulationManager(config)
-    sim.set_manual_update(False)
 
     # Load robot URDF file
     urdf = get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")
@@ -132,8 +131,11 @@ def main(visualization: VisualizationCfg | None = None) -> None:
     else:
         robot.set_qpos(qpos=ik_qpos, joint_ids=robot.get_joint_ids(arm_name))
 
+    sim.update(step=round(1.0 / sim.sim_config.physics_dt))
     sim.capture_visualization(force=True)
-    embed(header="Test PinocchioSolver example. Press Ctrl+D to exit.")
+    embed(
+        header="Test PinocchioSolver example. Physics is paused; call sim.update(step=N) to advance. Press Ctrl+D to exit."
+    )
 
 
 if __name__ == "__main__":

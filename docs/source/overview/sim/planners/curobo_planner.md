@@ -39,8 +39,8 @@ pytest --pyargs curobo.tests
 These commands follow [NVIDIA's official cuRobo installation
 guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html)
 and pin the source dependency to the cuRobo V2 `v0.8.0` release. Although
-cuRobo supports Python 3.10--3.13, use EmbodiChain's supported Python 3.10 or
-3.11 environment on Linux with a supported NVIDIA GPU and driver. The
+cuRobo supports Python 3.10--3.13, use EmbodiChain's supported Python 3.10,
+3.11, or 3.12 environment on Linux with a supported NVIDIA GPU and driver. The
 non-`torch` variants are preferred for EmbodiChain because the simulation
 environment normally already provides PyTorch; the `-torch` variants delegate
 the PyTorch version requirement to cuRobo. Keep cuRobo in the same Python

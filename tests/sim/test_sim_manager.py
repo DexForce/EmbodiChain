@@ -28,12 +28,14 @@ import pytest
 import torch
 
 import embodichain.lab.sim.sim_manager as sim_manager_module
+from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.profiler import Profiler
 from embodichain.lab.sim.sim_manager import (
     SimulationManager,
     SimulationManagerCfg,
     _WindowRecordState,
 )
+from embodichain.lab.sim.sensors import Camera, CameraCfg, StereoCamera, StereoCameraCfg
 from embodichain.lab.visualization import (
     GizmoCommand,
     PickCommand,
@@ -140,9 +142,6 @@ class FakeWorld:
 
     def thread_rt(self) -> FakeThreadRuntime:
         return self.thread_runtime
-
-    def is_physics_manually_update(self) -> bool:
-        return True
 
     def update(self, physics_dt: float) -> None:
         self.physics_updates.append(physics_dt)
@@ -347,6 +346,51 @@ def test_sim_update_refreshes_dirty_visualization_and_captures_current_state() -
         True,
     ]
     assert all(call["overlays"] is None for call in runtime.capture_calls)
+
+
+@pytest.mark.parametrize("step", [0, 1, 3])
+def test_sim_update_owns_physics_and_visualization_time(step: int) -> None:
+    sim, runtime = _make_visualization_sim_manager()
+    physics_dt = 0.02
+    events: list[str] = []
+    sim.update_gizmos = lambda: events.append("control")
+    world_update = sim._world.update
+    capture = runtime.capture
+
+    def update_world(dt: float) -> None:
+        events.append("physics")
+        world_update(dt)
+
+    def capture_state(**kwargs: object) -> bool:
+        events.append("capture")
+        return capture(**kwargs)
+
+    sim._world.update = update_world
+    runtime.capture = capture_state
+
+    sim.update(physics_dt=physics_dt, step=step)
+
+    assert events == ["control", "physics", "capture"] * step
+    assert sim._world.physics_updates == [physics_dt] * step
+    assert sim._visualization_sim_step == step
+    assert sim._visualization_sim_time == pytest.approx(step * physics_dt)
+
+
+def test_drawing_markers_and_publishing_visualization_do_not_step_physics() -> None:
+    sim, runtime = _make_visualization_sim_manager()
+    sim._markers = {}
+    sim._env = MagicMock()
+    cfg = MarkerCfg(name="target", marker_type="axis", axis_xpos=np.eye(4))
+
+    handles = sim.draw_marker(cfg)
+    sim.capture_visualization(force=True)
+
+    assert handles == [sim._env.create_axis.return_value]
+    assert sim._world.physics_updates == []
+    assert sim._visualization_sim_step == 0
+    assert sim._visualization_sim_time == 0.0
+    assert runtime.capture_calls[-1]["sim_step"] == 0
+    assert runtime.capture_calls[-1]["sim_time"] == 0.0
 
 
 def test_sim_manager_persists_overlays_across_automatic_captures() -> None:
@@ -878,6 +922,9 @@ def test_constructor_starts_visualization_after_default_scene(
 ) -> None:
     lifecycle: list[str] = []
     world = MagicMock()
+    world.set_manual_update.side_effect = lambda _enable: lifecycle.append(
+        "explicit_physics"
+    )
     world.get_physics_scene.return_value = MagicMock()
     world.get_env.return_value = MagicMock()
 
@@ -898,7 +945,9 @@ def test_constructor_starts_visualization_after_default_scene(
         SimulationManager, "_convert_sim_config", lambda _self, _cfg: object()
     )
     monkeypatch.setattr(
-        SimulationManager, "enable_physics", lambda _self, _enable: None
+        SimulationManager,
+        "enable_physics",
+        lambda _self, _enable: lifecycle.append("enable_physics"),
     )
     monkeypatch.setattr(
         SimulationManager,
@@ -951,7 +1000,10 @@ def test_constructor_starts_visualization_after_default_scene(
         ),
     )
 
+    world.set_manual_update.assert_called_once_with(True)
     assert lifecycle == [
+        "explicit_physics",
+        "enable_physics",
         "resources",
         "plane",
         "background",
@@ -1006,6 +1058,73 @@ def test_add_stereo_camera_marks_visualization_topology_dirty() -> None:
 
     assert sim.add_sensor(cfg) is sensor
     assert sim._visualization_topology_revision == 3
+
+
+def _make_camera_parent_asset(
+    num_envs: int = 2, link_name: str = "wrist"
+) -> tuple[SimpleNamespace, list[object]]:
+    """Expose only the public articulation API used by attachment resolution."""
+    nodes = [object() for _ in range(num_envs)]
+    return (
+        SimpleNamespace(
+            link_names=[link_name],
+            num_instances=num_envs,
+            get_link_render_nodes=MagicMock(return_value=nodes),
+        ),
+        nodes,
+    )
+
+
+def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
+    sim = object.__new__(SimulationManager)
+    sim.num_envs = num_envs
+    sim.device = torch.device("cpu")
+    sim._robots = {}
+    sim._articulations = {}
+    sim._sensors = {}
+    sim._visualization_topology_revision = 0
+    return sim
+
+
+@pytest.mark.parametrize("registry", ["_robots", "_articulations"])
+@pytest.mark.parametrize("stereo", [False, True])
+@pytest.mark.parametrize("parent", [None, "wrist", "arm/wrist"])
+def test_add_camera_attaches_resolved_nodes_only_when_parent_is_configured(
+    registry: str, stereo: bool, parent: str | None
+) -> None:
+    sim = _make_camera_attachment_manager()
+    asset, nodes = _make_camera_parent_asset()
+    getattr(sim, registry)["arm"] = asset
+    cfg_type = StereoCameraCfg if stereo else CameraCfg
+    camera_type = StereoCamera if stereo else Camera
+    cfg = cfg_type(uid="camera", extrinsics=CameraCfg.ExtrinsicsCfg(parent=parent))
+    camera = object.__new__(camera_type)
+    camera.attach_to_parent_nodes = MagicMock()
+    sim.SUPPORTED_SENSOR_TYPES = {cfg.sensor_type: lambda cfg, device: camera}
+
+    assert sim.add_sensor(cfg) is camera
+    assert sim._sensors["camera"] is camera
+    assert sim._visualization_topology_revision == 1
+    if parent is None:
+        camera.attach_to_parent_nodes.assert_not_called()
+        asset.get_link_render_nodes.assert_not_called()
+    else:
+        camera.attach_to_parent_nodes.assert_called_once_with(nodes)
+        asset.get_link_render_nodes.assert_called_once_with("wrist")
+
+
+def test_add_camera_validates_parent_before_allocating_views() -> None:
+    sim = _make_camera_attachment_manager()
+    factory = MagicMock()
+    sim.SUPPORTED_SENSOR_TYPES = {"Camera": factory}
+    cfg = CameraCfg(uid="camera", extrinsics=CameraCfg.ExtrinsicsCfg(parent="missing"))
+
+    with pytest.raises(ValueError, match="was not found"):
+        sim.add_sensor(cfg)
+
+    factory.assert_not_called()
+    assert sim._sensors == {}
+    assert sim._visualization_topology_revision == 0
 
 
 def test_window_camera_pose_to_look_at_uses_dexsim_world_up() -> None:

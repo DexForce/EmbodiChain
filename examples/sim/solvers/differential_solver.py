@@ -53,7 +53,6 @@ def main(
         visualization=visualization or VisualizationCfg(),
     )
     sim = SimulationManager(config)
-    sim.set_manual_update(False)
 
     # Load robot URDF file
     urdf = get_data_path("Rokae/SR5/SR5.urdf")
@@ -94,7 +93,7 @@ def main(
     qpos = qpos.unsqueeze(0).repeat(num_envs, 1)
     robot.set_qpos(qpos=qpos, joint_ids=robot.get_joint_ids(arm_name))
 
-    time.sleep(3.0)
+    sim.update(step=round(3.0 / sim.sim_config.physics_dt))
     fk_xpos = robot.compute_fk(
         qpos=qpos, name=arm_name, to_matrix=True
     )  # (num_envs, 4, 4)
@@ -256,10 +255,14 @@ def main(
                 robot.set_qpos(
                     qpos=ik_qpos_new, joint_ids=robot.get_joint_ids(arm_name)
                 )
-        time.sleep(0.005)
+        sim.update(step=1)
+        time.sleep(sim.sim_config.physics_dt)
 
+    sim.update(step=round(1.0 / sim.sim_config.physics_dt))
     sim.capture_visualization(force=True)
-    embed(header="Test DifferentialSolver example. Press Ctrl+D to exit.")
+    embed(
+        header="Test DifferentialSolver example. Physics is paused; call sim.update(step=N) to advance. Press Ctrl+D to exit."
+    )
 
 
 if __name__ == "__main__":

@@ -68,7 +68,6 @@ def main():
     )
 
     sim = SimulationManager(sim_cfg)
-    sim.set_manual_update(True)
 
     # Get UR10 URDF path
     ur10_urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")

@@ -60,7 +60,6 @@ def main():
 
     # Create simulation context
     sim = SimulationManager(sim_cfg)
-    sim.set_manual_update(True)
 
     # Add some objects to the scene for camera to observe
     for i in range(5):
