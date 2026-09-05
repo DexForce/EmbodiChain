@@ -960,6 +960,29 @@ embodichain.lab.sim.planners.motion_generator
    MotionGenCfg
    MotionGenOptions
 
+embodichain.lab.sim.planners.bezier
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.planners.bezier
+
+Differentiable quadratic and quintic Bézier geometry, including
+HolisticMotion-compatible waypoint blending and path-constraint projection.
+Use ``BezierPath.parameter_at_arc_length(distance)`` to convert a scalar
+time law's geometric distances to polynomial parameters. Reuse those parameters
+for ``evaluate``, ``arc_tangent``, and ``arc_curvature``; normalized arc length
+is generally different from the Bézier parameter. Lookup accuracy is controlled
+by ``table_count`` independently of the output sample count.
+
+.. autosummary::
+
+   BezierPath
+   bezier_arc_length
+   bezier_derivative
+   bezier_evaluate
+   sample_bezier_path
+
+.. automethod:: BezierPath.parameter_at_arc_length
+
 embodichain.lab.sim.planners.neural_planner
 -------------------------------------------
 
@@ -981,6 +1004,44 @@ embodichain.lab.sim.planners.toppra_planner
    ToppraPlanner
    ToppraPlannerCfg
    ToppraPlanOptions
+
+embodichain.lab.sim.planners.se3
+--------------------------------
+
+.. currentmodule:: embodichain.lab.sim.planners.se3
+
+SE(3) screw interpolation and constrained Cartesian line trajectories with
+explicit twist, acceleration, jerk, and timing outputs.
+
+.. autosummary::
+
+   SE3LineResult
+   plan_se3_line
+
+embodichain.lab.sim.planners.trapezoidal_planner
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.planners.trapezoidal_planner
+
+.. autosummary::
+
+   TrapezoidalPlanOptions
+   TrapezoidalPlanner
+   TrapezoidalPlannerCfg
+
+embodichain.utils.warp.kinematics.trapezoidal_warp
+--------------------------------------------------
+
+.. currentmodule:: embodichain.utils.warp.kinematics.trapezoidal_warp
+
+Warp-accelerated helpers construct scalar trapezoidal or Double-S motion
+profiles and compose their sampled path derivatives into batched joint-space
+trajectories.
+
+.. autosummary::
+
+   build_profile_warp
+   compose_profile_samples_warp
 
 embodichain.lab.sim.planners.utils
 ----------------------------------
@@ -1225,6 +1286,21 @@ embodichain.lab.task_program.semantics.scene
    :members:
    :no-index:
 
+embodichain.lab.sim.solvers.base_solver
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.solvers.base_solver
+
+Shared solver configuration and runtime contracts for IK, FK, joint limits,
+and optional continuous batch IK. Continuous selection defaults to unsupported;
+implementations opt in through ``supports_continuous_batch_ik`` and implement
+the protected ``_select_continuous_ik_path`` hook for batched candidates.
+
+.. autosummary::
+
+   BaseSolver
+   SolverCfg
+
 embodichain.lab.sim.solvers.neural_ik_solver
 --------------------------------------------
 
@@ -1243,6 +1319,19 @@ embodichain.lab.sim.solvers.null_space_posture_task
 .. autosummary::
 
    NullSpacePostureTask
+
+embodichain.lab.sim.solvers.opw_solver
+--------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.solvers.opw_solver
+
+Configuration and runtime solver for analytic OPW forward and inverse
+kinematics of compatible six-axis manipulators.
+
+.. autosummary::
+
+   OPWSolver
+   OPWSolverCfg
 
 embodichain.lab.sim.solvers.pink_solver
 ---------------------------------------

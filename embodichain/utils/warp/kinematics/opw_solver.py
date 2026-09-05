@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import warp as wp
 import numpy as np
 from typing import Tuple
@@ -44,6 +46,26 @@ def is_within_limit(
     if angle < lower + safe_margin or angle > upper - safe_margin:
         return False
     return True
+
+
+@wp.func
+def nearest_equivalent_in_limit(
+    solution: float,
+    seed: float,
+    lower: float,
+    upper: float,
+    safe_margin: float,
+) -> Tuple[float, bool]:
+    """Return the seed-nearest periodic equivalent inside the safe limits."""
+    two_pi = 2.0 * wp.pi
+    lower_turn = wp.ceil((lower + safe_margin - solution) / two_pi)
+    upper_turn = wp.floor((upper - safe_margin - solution) / two_pi)
+    if lower_turn > upper_turn:
+        return solution, False
+    nearest_turn = wp.round((seed - solution) / two_pi)
+    if nearest_turn < lower_turn or nearest_turn > upper_turn:
+        return solution, False
+    return solution + nearest_turn * two_pi, True
 
 
 @wp.func
@@ -522,3 +544,71 @@ def opw_ik_select_kernel(
     else:
         # no valid solution
         best_ik_valid[i] = 0
+
+
+@wp.kernel
+def opw_ik_path_select_kernel(
+    full_ik_result: wp.array(dtype=float, ndim=4),  # [B, N, N_SOL, DOF]
+    full_ik_valid: wp.array(dtype=int, ndim=3),  # [B, N, N_SOL]
+    initial_seed: wp.array(dtype=float, ndim=2),  # [B, DOF]
+    joint_weights: wp_vec6f,
+    lower_limits: wp_vec6f,
+    upper_limits: wp_vec6f,
+    safe_margin: float,
+    path_result: wp.array(dtype=float, ndim=3),  # [B, N, DOF]
+    path_valid: wp.array(dtype=int, ndim=2),  # [B, N]
+):
+    """Select a temporally continuous OPW branch for one environment."""
+    batch = wp.tid()
+    sample_count = full_ik_result.shape[1]
+    for sample in range(sample_count):
+        best_distance = float(1.0e10)
+        best_solution = int(-1)
+        for candidate in range(8):
+            if full_ik_valid[batch, sample, candidate] == 0:
+                continue
+            distance = float(0.0)
+            is_continuous = bool(True)
+            for joint in range(6):
+                seed = initial_seed[batch, joint]
+                if sample > 0:
+                    seed = path_result[batch, sample - 1, joint]
+                solution = full_ik_result[batch, sample, candidate, joint]
+                solution, equivalent_valid = nearest_equivalent_in_limit(
+                    solution,
+                    seed,
+                    lower_limits[joint],
+                    upper_limits[joint],
+                    safe_margin,
+                )
+                if not equivalent_valid:
+                    is_continuous = False
+                error = (solution - seed) * joint_weights[joint]
+                distance += error * error
+            if is_continuous and distance < best_distance:
+                best_distance = distance
+                best_solution = candidate
+        if best_solution >= 0:
+            path_valid[batch, sample] = 1
+            for joint in range(6):
+                seed = initial_seed[batch, joint]
+                if sample > 0:
+                    seed = path_result[batch, sample - 1, joint]
+                solution = full_ik_result[batch, sample, best_solution, joint]
+                nearest, _ = nearest_equivalent_in_limit(
+                    solution,
+                    seed,
+                    lower_limits[joint],
+                    upper_limits[joint],
+                    safe_margin,
+                )
+                path_result[batch, sample, joint] = nearest
+        else:
+            path_valid[batch, sample] = 0
+            for joint in range(6):
+                if sample == 0:
+                    path_result[batch, sample, joint] = initial_seed[batch, joint]
+                else:
+                    path_result[batch, sample, joint] = path_result[
+                        batch, sample - 1, joint
+                    ]

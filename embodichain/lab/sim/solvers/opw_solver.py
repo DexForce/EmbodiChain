@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import numpy as np
 import warp as wp
@@ -29,6 +31,7 @@ from embodichain.utils.warp.kinematics.opw_solver import (
     OPWparam,
     opw_fk_kernel,
     opw_ik_kernel,
+    opw_ik_path_select_kernel,
     opw_ik_select_kernel,
     wp_vec6f,
 )
@@ -36,6 +39,8 @@ from embodichain.utils.device_utils import standardize_device_string
 
 if TYPE_CHECKING:
     from typing import Self
+
+__all__ = ["OPWSolver", "OPWSolverCfg"]
 
 
 def normalize_to_pi(angle):
@@ -366,6 +371,60 @@ class OPWSolver(BaseSolver):
         )
         best_ik_valid = wp.to_torch(best_ik_valid_wp).to(self.device)
         return best_ik_valid, best_ik_result
+
+    @property
+    def supports_continuous_batch_ik(self) -> bool:
+        """Return whether OPW supports batched candidates and continuous selection."""
+        return True
+
+    def _select_continuous_ik_path(
+        self,
+        candidate_qpos: torch.Tensor,
+        candidate_valid: torch.Tensor,
+        qpos_seed: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Select a continuous branch from precomputed OPW candidates."""
+        if candidate_qpos.ndim != 4 or candidate_qpos.shape[-2:] != (8, 6):
+            raise ValueError("candidate_qpos must have shape (B, N, 8, 6).")
+        batch_size, sample_count = candidate_qpos.shape[:2]
+        if candidate_valid.shape != (batch_size, sample_count, 8):
+            raise ValueError(
+                f"candidate_valid must have shape ({batch_size}, {sample_count}, 8)."
+            )
+        if qpos_seed.shape != (batch_size, 6):
+            raise ValueError(f"qpos_seed must have shape ({batch_size}, 6).")
+        kernel_device = standardize_device_string(self.device)
+        lower_limits = self.lower_qpos_limits.detach().cpu().tolist()
+        upper_limits = self.upper_qpos_limits.detach().cpu().tolist()
+        path_qpos = wp.zeros(
+            (batch_size, sample_count, 6), dtype=float, device=kernel_device
+        )
+        path_valid = wp.zeros(
+            (batch_size, sample_count), dtype=int, device=kernel_device
+        )
+        joint_weight = self.ik_nearest_weight.detach().cpu().tolist()
+        wp.launch(
+            kernel=opw_ik_path_select_kernel,
+            dim=batch_size,
+            inputs=[
+                wp.from_torch(candidate_qpos.to(kernel_device).contiguous()),
+                wp.from_torch(
+                    candidate_valid.to(
+                        device=kernel_device, dtype=torch.int32
+                    ).contiguous()
+                ),
+                wp.from_torch(
+                    qpos_seed.to(device=kernel_device, dtype=torch.float32).contiguous()
+                ),
+                wp_vec6f(*joint_weight),
+                wp_vec6f(*lower_limits),
+                wp_vec6f(*upper_limits),
+                self.cfg.safe_margin,
+            ],
+            outputs=[path_qpos, path_valid],
+            device=kernel_device,
+        )
+        return wp.to_torch(path_valid).bool(), wp.to_torch(path_qpos)
 
     def _calculate_dynamic_weights(
         self, current_joints, joint_limits, base_weights=None

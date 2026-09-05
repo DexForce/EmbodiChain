@@ -34,6 +34,9 @@ from embodichain.lab.sim.planners import (
     ToppraPlanner,
     ToppraPlannerCfg,
     ToppraPlanOptions,
+    TrapezoidalPlanner,
+    TrapezoidalPlannerCfg,
+    TrapezoidalPlanOptions,
     NeuralPlanner,
     NeuralPlannerCfg,
     CuroboPlanner,
@@ -63,7 +66,6 @@ __all__ = ["MotionGenerator", "MotionGenCfg", "MotionGenOptions"]
 
 @configclass
 class MotionGenCfg:
-
     planner_cfg: BasePlannerCfg = MISSING
     """Configuration for the underlying planner. Must include 'planner_type' attribute to specify 
     which planner to use, and any additional parameters required by that planner.
@@ -74,7 +76,6 @@ class MotionGenCfg:
 
 @configclass
 class MotionGenOptions:
-
     strategy: Literal["motion_gen", "ik_interp"] = "motion_gen"
     """Motion strategy: backend planning or deterministic IK interpolation."""
 
@@ -168,6 +169,7 @@ class MotionGenerator:
 
     _support_planner_dict = {
         "toppra": (ToppraPlanner, ToppraPlannerCfg),
+        "trapezoidal": (TrapezoidalPlanner, TrapezoidalPlannerCfg),
         "neural": (NeuralPlanner, NeuralPlannerCfg),
         "curobo": (CuroboPlanner, CuroboPlannerCfg),
     }
@@ -237,8 +239,7 @@ class MotionGenerator:
             for entity_id in entity_ids
         ):
             raise TypeError(
-                f"{field_name} keys must be non-empty strings without outer "
-                "whitespace."
+                f"{field_name} keys must be non-empty strings without outer whitespace."
             )
         return set(entity_ids)
 
@@ -414,17 +415,32 @@ class MotionGenerator:
             raise ValueError("sample_count must be at least 2.")
         if plan_opts is not None:
             return deepcopy(plan_opts)
-        if sample_count is not None and self.planner.cfg.planner_type == "toppra":
-            return ToppraPlanOptions(
-                sample_method=TrajectorySampleMethod.QUANTITY,
-                sample_interval=sample_count,
-                constraints={
-                    "velocity": 0.2 if velocity_limit is None else velocity_limit,
-                    "acceleration": (
-                        0.5 if acceleration_limit is None else acceleration_limit
-                    ),
-                },
+        planner_type = getattr(getattr(self.planner, "cfg", None), "planner_type", None)
+        if planner_type in {"toppra", "trapezoidal"} and (
+            sample_count is not None
+            or velocity_limit is not None
+            or acceleration_limit is not None
+        ):
+            options_type = (
+                ToppraPlanOptions
+                if planner_type == "toppra"
+                else TrapezoidalPlanOptions
             )
+            constraints: dict[str, float] = {
+                "velocity": 0.2 if velocity_limit is None else velocity_limit,
+                "acceleration": (
+                    0.5 if acceleration_limit is None else acceleration_limit
+                ),
+            }
+            if planner_type == "trapezoidal":
+                constraints["jerk"] = 2.0
+            options_kwargs: dict[str, object] = {"constraints": constraints}
+            if sample_count is not None:
+                options_kwargs.update(
+                    sample_method=TrajectorySampleMethod.QUANTITY,
+                    sample_interval=sample_count,
+                )
+            return options_type(**options_kwargs)
         return self.planner.default_plan_options()
 
     @classmethod
@@ -868,7 +884,11 @@ class MotionGenerator:
 
         velocities = normalize_derivative(result.velocities, "velocities")
         accelerations = normalize_derivative(result.accelerations, "accelerations")
+        constraint_report = None if resampled else result.constraint_report
         if start_qpos is not None and not success.all():
+            # The backend report describes the original failed rows. A generic
+            # facade cannot recompute arbitrary planner-specific diagnostics.
+            constraint_report = None
             held = (
                 start_qpos.to(dtype=positions.dtype).unsqueeze(1).expand_as(positions)
             )
@@ -893,6 +913,7 @@ class MotionGenerator:
             velocities=velocities,
             accelerations=accelerations,
             dt=dt,
+            constraint_report=constraint_report,
         )
 
     def _runtime_device(self) -> torch.device:
@@ -1085,7 +1106,7 @@ class MotionGenerator:
             alpha = 1.0 if batch_size == 1 else max(0.2, 1.0 / np.sqrt(batch_size))
 
             for i in range(self.dofs):
-                label = f"Joint {i+1}" if b == 0 else ""
+                label = f"Joint {i + 1}" if b == 0 else ""
                 axs[0].plot(
                     time_steps,
                     positions[b, :, i].numpy(),

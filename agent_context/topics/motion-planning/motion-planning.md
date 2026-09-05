@@ -7,6 +7,12 @@
 | Planner registry | `embodichain/lab/sim/planners/__init__.py` |
 | Base planner class & config | `embodichain/lab/sim/planners/base_planner.py` → `BasePlanner`, `BasePlannerCfg`, `CollisionWorldInfo`, `PlanOptions`, `validate_plan_options` |
 | TOPPRA planner | `embodichain/lab/sim/planners/toppra_planner.py` → `ToppraPlanner`, `ToppraPlannerCfg`, `ToppraPlanOptions` |
+| Trapezoidal planner | `embodichain/lab/sim/planners/trapezoidal_planner.py` → `TrapezoidalPlanner`, `TrapezoidalPlannerCfg`, `TrapezoidalPlanOptions` |
+| Bézier path geometry | `embodichain/lab/sim/planners/bezier.py` → `BezierPath` and internal quintic waypoint blending helpers |
+| Cartesian SE(3) line | `embodichain/lab/sim/planners/se3.py` → `plan_se3_line`, `SE3LineResult` |
+| Shared scalar timing | `embodichain/lab/sim/planners/_scalar_time_law.py` → `ScalarTimeLaw`, `ScalarState` |
+| Continuous blend constraints | `embodichain/lab/sim/planners/_blend_constraints.py` → Bernstein derivative bounds and phase interval bounds |
+| Trapezoidal Warp kernels | `embodichain/utils/warp/kinematics/trapezoidal_warp.py` → batched profile construction and sampling kernels |
 | Neural planner | `embodichain/lab/sim/planners/neural_planner.py` → `NeuralPlanner`, `NeuralPlannerCfg`, `NeuralPlanOptions` |
 | cuRobo planner | `embodichain/lab/sim/planners/curobo/curobo_planner.py` → `CuroboPlanner`, `CuroboPlannerCfg`, `CuroboWorldCfg`, `CuroboPlanOptions` |
 | Planner assets | `embodichain/data/assets/planner_assets.py` → `download_neural_planner_checkpoint()` |
@@ -30,6 +36,7 @@ The entire stack is **env-batched** (`B = num_envs`). `PlanState` / `PlanResult`
 ```
 BasePlanner (ABC)
   ├─ ToppraPlanner        Time-optimal path parameterization (fork-pool fan-out)
+  ├─ TrapezoidalPlanner   Batched trapezoidal or jerk-limited Double-S timing
   ├─ NeuralPlanner (experimental)   APG waypoint rollout (native batching)
   └─ CuroboPlanner        CUDA collision-aware planning (native batching)
 
@@ -40,12 +47,15 @@ Config hierarchy:
 ```
 BasePlannerCfg            robot_uid (MISSING), planner_type
   ├─ ToppraPlannerCfg     planner_type = "toppra", max_workers, mp_context
+  ├─ TrapezoidalPlannerCfg planner_type = "trapezoidal"
   └─ NeuralPlannerCfg     planner_type = "neural", checkpoint_path (MISSING)
 
 MotionGenCfg              planner_cfg (MISSING — must be a BasePlannerCfg subclass)
 
 PlanOptions               (empty base)
   ├─ ToppraPlanOptions    constraints, sample_method, sample_interval
+  ├─ TrapezoidalPlanOptions profile, constraints, sample_method, sample_interval,
+  │                        minimum_duration, stop_at_waypoints, blend_tolerance, backend
   └─ NeuralPlanOptions    control_part, start_qpos, max_steps
 
 MotionGenOptions          strategy, sample_count, velocity/acceleration limits,
@@ -84,6 +94,123 @@ Worker details:
 - `B == 1` or `max_workers == 1` uses an inline fallback (no IPC).
 - `TIME` sampling can produce per-env waypoint counts; shorter trajectories are tail-padded by repeating the final waypoint and `duration` records the real endpoint per env.
 - Per-env failures set `success[b] = False` and fill the env's trajectory with its start qpos; other envs continue. `BrokenProcessPool` tears the pool down and rebuilds it on the next call.
+
+### TrapezoidalPlanner
+
+The trapezoidal planner is a dependency-free, batched Torch backend for
+piecewise-linear joint paths. Each input waypoint is a rest point. The default
+profile is acceleration-limited trapezoidal timing (with triangular fallback
+for short moves); ``profile="double_s"`` selects the rest-to-rest linear-path
+subset of the seven-phase Double-S time law. It preserves that
+implementation's discrete ``amax *= 0.9`` feasibility search for moves without
+a cruise phase and its 1% ``EnforceJointLimits`` margin. Scalar or per-joint
+velocity, acceleration, and jerk limits are projected onto each linear path
+segment. Golden tests cover durations and sampled position, velocity, and
+acceleration against the reference trajectory implementation. It supports fixed
+quantity and approximate fixed-time sampling and returns explicit ``dt``.
+``minimum_duration`` applies one uniform per-environment time scale, preserving
+the path while reducing velocity, acceleration, and jerk. The minimal
+``scripts/tutorials/sim/planner/trapezoidal_profile.py`` example plots scalar position,
+velocity, acceleration, and jerk without starting simulation. A runnable
+batched robot example lives in ``scripts/tutorials/sim/planner/trapezoidal_planner.py``.
+The tutorial names the two diagnostics ``velocity_trapezoidal`` (the
+``trapezoidal`` backend profile) and ``acceleration_trapezoidal`` (the
+jerk-limited ``double_s`` backend profile). It can save diagnostic plots with
+``--plot-output`` and supports headless execution with ``--no-show-plot``.
+Multi-path/profile runs finish planning before showing all figures together.
+``--path joint`` generates synchronized, limit-clamped motion on every arm
+joint. ``--path cartesian`` is Cartesian-first rather than joint-first: the
+trapezoidal backend time-parameterizes metric line arclength ``s(t)`` under
+``--cartesian-velocity``, ``--cartesian-acceleration``, and
+``--cartesian-jerk``; every resulting sample becomes an exact
+fixed-orientation point on the line before continuous-seed IK. The joint
+trajectory is never resampled afterward, so its desired EEF path retains the
+planned Cartesian geometry and time law. ``--path both`` runs both diagnostics
+and reports the scalar Cartesian derivative peaks plus maximum FK line error.
+``--cartesian-distance`` controls line length and ``--cartesian-step`` sets a
+minimum IK sample density. For a six-axis arm the tutorial uses the same
+non-singular seed as the TOPPRA demo before solving the default 0.10 m downward
+line. Joint derivatives used by the diagnostic and replay come from
+second-order differential kinematics. The solver Jacobian gives ``dq/ds`` for
+the fixed-orientation Cartesian tangent, its path derivative gives
+``d²q/ds²``, and the Double-S outputs are composed by the chain rule as
+``dq/dt = dq/ds * ds/dt`` and
+``d²q/dt² = d²q/ds² * (ds/dt)² + dq/ds * d²s/dt²``. The implementation does
+not numerically differentiate sampled IK positions in time. Cartesian derivative constraints
+apply to ``s(t)`` and do not imply identical joint-space jerk bounds after the
+nonlinear IK mapping. No display filtering is applied. Before derivative
+evaluation,
+each analytic IK sample is replaced only by the joint-limit-valid ``2π``
+equivalent nearest to the previous seed, removing representation wrap jumps
+without changing the physical configuration or Cartesian path.
+For OPW robots the Cartesian tutorial submits the complete pose path through
+``Robot.compute_batch_ik(..., continuous=True)``. This reuses the existing batch
+IK boundary and checks the typed `BaseSolver.supports_continuous_batch_ik`
+capability before requesting all candidates. OPW opts in and overrides the
+base `_select_continuous_ik_path` hook; unsupported solvers are rejected before
+candidate generation or pose-frame conversion.
+Interactive replay consumes ``PlanResult.dt`` rather than submitting all
+samples as fast as Python can loop: every command advances enough physics steps
+for its scaled interval and windowed runs are wall-clock paced. The
+``--replay-speed`` multiplier controls playback speed; headless runs retain
+unthrottled wall-clock execution while preserving physics-step timing. Before
+each run, both current joint state and drive target are reset to the planned
+start pose.
+By default every input waypoint remains a rest point. Set
+``stop_at_waypoints=False`` to remove duplicate and straight, same-direction
+interior points before timing; genuine direction changes remain explicit rest
+points, and batch rows with fewer retained points are final-pose padded.
+``backend="auto"`` uses Warp profile construction and sampling for CUDA float32
+inputs and the Torch reference path otherwise. ``backend="warp"`` also permits
+explicit CPU Warp execution but requires float32. Path compression and limit
+projection remain shared Torch tensor operations. Warp then constructs each
+trapezoidal or Double-S scalar segment profile in parallel, including the
+Double-S no-cruise acceleration reduction and phase integration. Shared
+post-processing applies minimum-duration scaling and the Double-S duration
+margin consistently across backends.
+Set ``blend_tolerance>0`` to replace rest-to-rest corners with internal
+fifth-order Bézier blends. The planner projects per-joint limits onto the
+curved path and composes derivatives analytically through jerk; zero preserves
+piecewise-linear behavior. All-stationary inputs take the hold fast path before
+blend construction.
+Blended constraints are enforced before caller-requested sampling. Derivative
+control-point convex hulls bound each linear/quintic path segment, while exact
+scalar extrema bound each constant-jerk phase interval. Subdivision tightens
+these bounds without relying on samples hitting a peak. Third-order chain-rule
+bounds determine one uniform time stretch per environment; changing output
+quantity or time step cannot change the continuous trajectory duration.
+`constraint_report` retains sampled peaks and additionally exposes continuous
+`velocity_upper_bound_per_joint`, `acceleration_upper_bound_per_joint`, and
+`jerk_upper_bound_per_joint`. Blended `within_limits` uses these bounds;
+trapezoidal acceleration jumps are not jerk constrained and their jerk bound
+is infinite. Geometry bounds are reused for initial projection and enforcement.
+Both joint and Cartesian planners use `ScalarTimeLaw` for construction,
+minimum-duration scaling, and evaluation. `plan_se3_line` accepts only
+`trapezoidal` and `double_s` and validates `minimum_duration` as `None` or a
+finite non-negative number; zero leaves natural timing unchanged. Joint
+`TrapezoidalPlanOptions` retains its positive-only minimum-duration contract.
+SE(3) logarithm and exponential translation coefficients use stable half-angle
+expressions and dtype-aware small-angle series, including float32 motions.
+For Cartesian Bézier timing, `BezierPath.parameter_at_arc_length` maps metric
+distance to polynomial parameters using an independent lookup resolution.
+Positions, arc tangents, and arc curvature must all use these same parameters;
+normalized arc length is not the polynomial parameter. The Cartesian tutorial
+uses this mapping directly instead of interpolating a second dense point table.
+Torch uses batched ``searchsorted`` for segment lookup without materializing a
+``(B, N, segments)`` comparison tensor. Warp uses binary segment search once
+per ``(B, N)`` sample, then a separate ``(B, N, DOF)`` composition kernel so
+joint dimensions do not repeat profile lookup work.
+Torch phase lookup also uses ``searchsorted`` and expands only selected phase
+durations. Position, velocity, acceleration, and jerk coefficients are gathered
+directly by ``(batch, segment, phase)``, avoiding four additional
+``(B, N, phases)`` temporary tensors.
+An all-stationary batch takes a dedicated hold fast path: it generates only
+sample times and zero-derivative outputs, skipping constraint projection,
+profile construction, segment lookup, and Warp dispatch.
+The reproducible microbenchmark at
+``scripts/benchmark/motion_generation/trapezoidal_planner.py`` measures Torch
+and Warp time, CPU/GPU memory, endpoint success, and cross-backend error, then
+writes the required three-table Markdown report under ``outputs/benchmarks``.
 
 ### NeuralPlanner (experimental)
 
@@ -179,7 +306,7 @@ import or branch on concrete planner option types.
 Unified interface for trajectory planning with optional pre-interpolation.
 
 - Wraps a `BasePlanner` instance (resolved from `planner_cfg.planner_type`).
-- Supported planner types: TOPPRA, NeuralPlanner, and cuRobo.
+- Supported planner types: TOPPRA, TrapezoidalPlanner, NeuralPlanner, and cuRobo.
 - `MotionGenCfg.planner_cfg` is **MISSING** — must be provided.
 - `generate()` and `interpolate_trajectory()` are env-batched (`B, N, DOF`).
 - `generate()` always returns a normalized `PlanResult`; failed rows hold the
@@ -250,6 +377,7 @@ Convenience constructors:
 | `velocities` | `torch.Tensor \| None` | Joint velocities `(B, N, DOF)` |
 | `accelerations` | `torch.Tensor \| None` | Joint accelerations `(B, N, DOF)` |
 | `dt` | `torch.Tensor \| None` | Per-step arrival intervals `(B, N)`; required whenever `positions` is present |
+| `constraint_report` | `dict[str, torch.Tensor] \| None` | Optional derivative peaks, utilization, and limit status |
 | `duration` | `torch.Tensor \| None` | Read-only total trajectory time `(B,)`, derived as `dt.sum(dim=1)` |
 
 Helper: `PlanResult.is_all_success() -> bool` returns `True` only when every env succeeded.
@@ -257,6 +385,10 @@ Helper: `PlanResult.is_all_success() -> bool` returns `True` only when every env
 A failed result may omit the trajectory entirely by leaving `positions=None`.
 When `MotionGenerator` resamples a fully timed result, it preserves each row's
 total duration and emits new explicit arrival intervals.
+`MotionGenerator.generate()` preserves the backend `constraint_report` for
+unchanged trajectories, including backends that preserve samples. Resampling
+or replacing failed rows with a start-pose hold invalidates the entire report
+to `None`; planner-specific diagnostics cannot be generically recomputed.
 
 ### MoveType enum
 

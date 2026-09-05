@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
@@ -27,6 +27,7 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Articulation, Robot
 from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
+from embodichain.lab.sim.solvers.base_solver import BaseSolver
 from embodichain.data import get_data_path
 
 # Define control parts
@@ -64,6 +65,74 @@ def test_get_qf_selects_control_part_joint_efforts():
     actual_qf = robot.get_qf(name="arm")
 
     assert torch.equal(actual_qf, full_qf[:, [3, 1]])
+
+
+@pytest.mark.no_sim
+def test_compute_batch_ik_continuous_reuses_all_solver_candidates() -> None:
+    """Continuous batch IK uses the existing batch boundary and one candidate call."""
+    robot = object.__new__(Robot)
+    robot.device = torch.device("cpu")
+    robot._all_indices = [0, 1]
+    solver = Mock(spec=BaseSolver, dof=2, root_link_name="base")
+    solver.supports_continuous_batch_ik = True
+    candidate_valid = torch.ones(6, 8, dtype=torch.bool)
+    candidate_qpos = torch.zeros(6, 8, 2)
+    selected = torch.ones(2, 3, dtype=torch.bool)
+    selected_qpos = torch.full((2, 3, 2), 0.25)
+    solver.get_ik.return_value = (candidate_valid, candidate_qpos)
+    solver._select_continuous_ik_path.return_value = (selected, selected_qpos)
+    robot._solvers = {"arm": solver}
+    robot.get_link_pose = Mock(return_value=torch.eye(4).repeat(2, 1, 1))
+    poses = torch.eye(4).repeat(2, 3, 1, 1)
+    seed = torch.zeros(2, 2)
+
+    success, qpos = robot.compute_batch_ik(poses, seed, "arm", continuous=True)
+
+    assert torch.equal(success, selected)
+    assert torch.equal(qpos, selected_qpos)
+    solver.get_ik.assert_called_once()
+    assert solver.get_ik.call_args.kwargs["return_all_solutions"] is True
+    solver._select_continuous_ik_path.assert_called_once()
+
+
+@pytest.mark.no_sim
+def test_compute_batch_ik_rejects_unsupported_continuity_before_solving() -> None:
+    robot = object.__new__(Robot)
+    robot.device = torch.device("cpu")
+    robot._all_indices = [0]
+    solver = Mock(spec=BaseSolver, dof=2, root_link_name="base")
+    solver.supports_continuous_batch_ik = False
+    robot._solvers = {"arm": solver}
+    robot.get_link_pose = Mock()
+
+    with pytest.raises(ValueError, match="does not support continuous batch IK"):
+        robot.compute_batch_ik(
+            torch.eye(4).repeat(1, 3, 1, 1), torch.zeros(1, 2), "arm", continuous=True
+        )
+
+    solver.get_ik.assert_not_called()
+    robot.get_link_pose.assert_not_called()
+
+
+@pytest.mark.no_sim
+def test_compute_batch_ik_without_continuity_uses_ordinary_solver() -> None:
+    robot = object.__new__(Robot)
+    robot.device = torch.device("cpu")
+    robot._all_indices = [0]
+    solver = Mock(spec=BaseSolver, dof=2, root_link_name="base")
+    solver.supports_continuous_batch_ik = False
+    solver.get_ik.return_value = (torch.ones(3, dtype=torch.bool), torch.ones(3, 2))
+    robot._solvers = {"arm": solver}
+    robot.get_link_pose = Mock(return_value=torch.eye(4)[None])
+
+    success, qpos = robot.compute_batch_ik(
+        torch.eye(4).repeat(1, 3, 1, 1), torch.zeros(1, 3, 2), "arm"
+    )
+
+    assert success.shape == (1, 3)
+    assert qpos.shape == (1, 3, 2)
+    assert solver.get_ik.call_args.kwargs["return_all_solutions"] is False
+    solver._select_continuous_ik_path.assert_not_called()
 
 
 @pytest.mark.no_sim
