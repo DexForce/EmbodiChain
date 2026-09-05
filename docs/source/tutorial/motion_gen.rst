@@ -3,7 +3,7 @@
 Motion Generator
 ================
 
-.. currentmodule:: embodichain.lab.sim.planners.motion_generator
+.. currentmodule:: embodichain.lab.sim.motion.planners.motion_generator
 
 The ``MotionGenerator`` class in EmbodiChain provides a unified and extensible interface for robot trajectory planning. It supports time-optimal trajectory generation (currently via TOPPRA), joint/Cartesian interpolation, and is designed for easy integration with RL, imitation learning, and classical control scenarios.
 
@@ -34,9 +34,9 @@ Typical Usage
 
 .. code-block:: python
 
-   from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
-   from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
-   from embodichain.lab.sim.planners.utils import PlanState, TrajectorySampleMethod, MoveType
+   from embodichain.lab.sim.motion.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
+   from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanOptions
+   from embodichain.lab.sim.motion.planners.utils import PlanState, TrajectorySampleMethod, MoveType
 
    # Assume you have a robot instance and arm_name
    # Constraints are now specified in ToppraPlanOptions, not in ToppraPlannerCfg
@@ -87,7 +87,7 @@ API Reference
 
 .. code-block:: python
 
-   from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
+   from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanOptions
 
    motion_cfg = MotionGenCfg(
        planner_cfg=ToppraPlannerCfg(

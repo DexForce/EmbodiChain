@@ -1267,7 +1267,7 @@ class GeneralActionBank(ActionBank):
         vis: bool = False,
         **kwargs,
     ) -> np.ndarray:
-        from embodichain.lab.sim.planners import (
+        from embodichain.lab.sim.motion.planners import (
             MoveType,
             PlanState,
             MotionGenerator,

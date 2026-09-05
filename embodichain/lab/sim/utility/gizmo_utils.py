@@ -81,7 +81,7 @@ def run_gizmo_robot_control_loop(
 
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.objects import Robot
-    from embodichain.lab.sim.solvers import PinkSolverCfg
+    from embodichain.lab.sim.motion.solvers import PinkSolverCfg
 
     from embodichain.utils.logger import log_info, log_warning, log_error
 

@@ -28,7 +28,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.planners import (
+from embodichain.lab.sim.motion.planners import (
     MotionGenCfg,
     MotionGenOptions,
     MotionGenerator,
@@ -36,7 +36,7 @@ from embodichain.lab.sim.planners import (
     ToppraPlanOptions,
     ToppraPlannerCfg,
 )
-from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
+from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.robots import CobotMagicCfg
 
 RECORD_WIDTH = 1920

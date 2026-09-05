@@ -33,7 +33,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.objects import Articulation, Robot
-from embodichain.lab.sim.planners import (
+from embodichain.lab.sim.motion.planners import (
     MotionGenCfg,
     MotionGenerator,
     MotionGenOptions,

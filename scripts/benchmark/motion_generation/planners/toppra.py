@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import importlib.util
 
-from embodichain.lab.sim.planners import (
+from embodichain.lab.sim.motion.planners import (
     MotionGenCfg,
     MotionGenOptions,
     MotionGenerator,
@@ -29,7 +29,7 @@ from embodichain.lab.sim.planners import (
     ToppraPlannerCfg,
     ToppraPlanOptions,
 )
-from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
+from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 
 from ..config import PlannerSpecCfg
 from ..models import BenchmarkCase

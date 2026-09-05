@@ -43,7 +43,7 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.sensors import CameraCfg
-from embodichain.lab.sim.solvers import PinkSolverCfg
+from embodichain.lab.sim.motion.solvers import PinkSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 

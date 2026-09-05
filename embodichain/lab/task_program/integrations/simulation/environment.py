@@ -50,7 +50,7 @@ from embodichain.lab.sim.atomic_actions import (
     SceneSnapshot,
     TaskState,
 )
-from embodichain.lab.sim.planners import (
+from embodichain.lab.sim.motion.planners import (
     BasePlannerCfg,
     MotionGenCfg,
     MotionGenerator,

@@ -13,6 +13,9 @@ topics:
       - sim system
       - lab sim
       - simulation manager
+      - motion module
+      - sim motion
+      - 运动能力模块
       - 仿真系统
       - 仿真核心
       - 仿真管理器
@@ -48,9 +51,11 @@ topics:
       - embodichain/lab/sim/objects/__init__.py
       - embodichain/lab/sim/objects/articulation.py
       - embodichain/lab/sim/sensors/__init__.py
-      - embodichain/lab/sim/solvers/__init__.py
-      - embodichain/lab/sim/planners/__init__.py
-      - embodichain/lab/sim/workspace/__init__.py
+      - embodichain/lab/sim/motion/__init__.py
+      - embodichain/lab/sim/motion/solvers/__init__.py
+      - embodichain/lab/sim/motion/planners/__init__.py
+      - embodichain/lab/sim/motion/workspace/__init__.py
+      - embodichain/lab/sim/motion/trajectory_augmentation/__init__.py
       - embodichain/lab/gym/envs/base_env.py
       - embodichain/lab/gym/envs/embodied_env.py
     related_topics:
@@ -218,13 +223,16 @@ topics:
     paths:
       - topics/ik-solvers/ik-solvers.md
     source_of_truth:
-      - embodichain/lab/sim/solvers/base_solver.py
-      - embodichain/lab/sim/solvers/srs_solver.py
-      - embodichain/lab/sim/solvers/opw_solver.py
-      - embodichain/lab/sim/solvers/pink_solver.py
-      - embodichain/lab/sim/solvers/pinocchio_solver.py
-      - embodichain/lab/sim/solvers/pytorch_solver.py
-      - embodichain/lab/sim/solvers/differential_solver.py
+      - embodichain/lab/sim/cfg.py
+      - embodichain/lab/sim/motion/__init__.py
+      - embodichain/lab/sim/motion/solvers/__init__.py
+      - embodichain/lab/sim/motion/solvers/base_solver.py
+      - embodichain/lab/sim/motion/solvers/srs_solver.py
+      - embodichain/lab/sim/motion/solvers/opw_solver.py
+      - embodichain/lab/sim/motion/solvers/pink_solver.py
+      - embodichain/lab/sim/motion/solvers/pinocchio_solver.py
+      - embodichain/lab/sim/motion/solvers/pytorch_solver.py
+      - embodichain/lab/sim/motion/solvers/differential_solver.py
     related_topics:
       - simulation-system
       - robot-system
@@ -242,12 +250,20 @@ topics:
       - cobotmagic
       - control parts
       - drive properties
+      - robot workspace
+      - workspace analysis
+      - 机器人工作空间
       - 机器人系统
       - 机器人配置
     keywords:
       - robot
       - RobotCfg
       - Robot
+      - workspace
+      - RobotWorkspaceCfg
+      - RobotWorkspace
+      - WorkspaceAnalyzer
+      - reachability
       - control
       - drive
       - joint
@@ -263,6 +279,10 @@ topics:
       - embodichain/lab/sim/objects/robot.py
       - embodichain/lab/sim/robots/
       - embodichain/lab/sim/cfg.py
+      - embodichain/lab/sim/motion/workspace/__init__.py
+      - embodichain/lab/sim/motion/workspace/cfg.py
+      - embodichain/lab/sim/motion/workspace/runtime.py
+      - embodichain/lab/sim/motion/workspace/analyzer.py
     related_topics:
       - simulation-system
       - ik-solvers
@@ -377,6 +397,9 @@ topics:
       - toppra
       - motion generator
       - trajectory planning
+      - trajectory augmentation
+      - fixed scene trajectory augmentation
+      - 轨迹扩增
       - curobo collision world
       - dynamic collision integration
       - 运动生成
@@ -386,6 +409,10 @@ topics:
       - planner
       - planning
       - trajectory
+      - trajectory_augmentation
+      - GenerationSession
+      - TrajectoryAugmentationCfg
+      - CandidateTrajectoryBatch
       - toppra
       - motion generator
       - resolve_plan_options
@@ -413,13 +440,20 @@ topics:
     paths:
       - topics/motion-planning/motion-planning.md
     source_of_truth:
-      - embodichain/lab/sim/planners/base_planner.py
-      - embodichain/lab/sim/planners/toppra_planner.py
-      - embodichain/lab/sim/planners/curobo/curobo_planner.py
-      - embodichain/lab/sim/planners/curobo/curobo_yaml.py
-      - embodichain/lab/sim/planners/motion_generator.py
-      - embodichain/lab/sim/planners/neural_planner.py
-      - embodichain/lab/sim/planners/utils.py
+      - embodichain/lab/sim/motion/__init__.py
+      - embodichain/lab/sim/motion/planners/base_planner.py
+      - embodichain/lab/sim/motion/planners/toppra_planner.py
+      - embodichain/lab/sim/motion/planners/curobo/curobo_planner.py
+      - embodichain/lab/sim/motion/planners/curobo/curobo_yaml.py
+      - embodichain/lab/sim/motion/planners/motion_generator.py
+      - embodichain/lab/sim/motion/planners/neural_planner.py
+      - embodichain/lab/sim/motion/planners/utils.py
+      - embodichain/lab/sim/motion/trajectory_augmentation/__init__.py
+      - embodichain/lab/sim/motion/trajectory_augmentation/contracts.py
+      - embodichain/lab/sim/motion/trajectory_augmentation/cfg.py
+      - embodichain/lab/sim/motion/trajectory_augmentation/operators.py
+      - embodichain/lab/sim/motion/trajectory_augmentation/coverage.py
+      - embodichain/lab/sim/motion/trajectory_augmentation/session.py
       - embodichain/lab/task_program/semantics/scene.py
       - embodichain/toolkits/graspkit/pose_generator.py
       - embodichain/lab/task_program/integrations/configured.py

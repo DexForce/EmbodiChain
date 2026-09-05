@@ -4,16 +4,25 @@
 
 | What | Path |
 |---|---|
-| Planner registry | `embodichain/lab/sim/planners/__init__.py` |
-| Base planner class & config | `embodichain/lab/sim/planners/base_planner.py` → `BasePlanner`, `BasePlannerCfg`, `CollisionWorldInfo`, `PlanOptions`, `validate_plan_options` |
-| TOPPRA planner | `embodichain/lab/sim/planners/toppra_planner.py` → `ToppraPlanner`, `ToppraPlannerCfg`, `ToppraPlanOptions` |
-| Neural planner | `embodichain/lab/sim/planners/neural_planner.py` → `NeuralPlanner`, `NeuralPlannerCfg`, `NeuralPlanOptions` |
-| cuRobo planner | `embodichain/lab/sim/planners/curobo/curobo_planner.py` → `CuroboPlanner`, `CuroboPlannerCfg`, `CuroboWorldCfg`, `CuroboPlanOptions` |
+| Planner registry | `embodichain/lab/sim/motion/planners/__init__.py` |
+| Base planner class & config | `embodichain/lab/sim/motion/planners/base_planner.py` → `BasePlanner`, `BasePlannerCfg`, `CollisionWorldInfo`, `PlanOptions`, `validate_plan_options` |
+| TOPPRA planner | `embodichain/lab/sim/motion/planners/toppra_planner.py` → `ToppraPlanner`, `ToppraPlannerCfg`, `ToppraPlanOptions` |
+| Neural planner | `embodichain/lab/sim/motion/planners/neural_planner.py` → `NeuralPlanner`, `NeuralPlannerCfg`, `NeuralPlanOptions` |
+| cuRobo planner | `embodichain/lab/sim/motion/planners/curobo/curobo_planner.py` → `CuroboPlanner`, `CuroboPlannerCfg`, `CuroboWorldCfg`, `CuroboPlanOptions` |
 | Planner assets | `embodichain/data/assets/planner_assets.py` → `download_neural_planner_checkpoint()` |
-| Motion generator | `embodichain/lab/sim/planners/motion_generator.py` → `MotionGenerator`, `MotionGenCfg`, `MotionGenOptions` |
-| Planner utilities & data types | `embodichain/lab/sim/planners/utils.py` → `PlanState`, `PlanResult`, `MoveType`, `MovePart`, `TrajectorySampleMethod`, `interpolate_xpos_batched` |
+| Motion generator | `embodichain/lab/sim/motion/planners/motion_generator.py` → `MotionGenerator`, `MotionGenCfg`, `MotionGenOptions` |
+| Planner utilities & data types | `embodichain/lab/sim/motion/planners/utils.py` → `PlanState`, `PlanResult`, `MoveType`, `MovePart`, `TrajectorySampleMethod`, `interpolate_xpos_batched` |
+| Trajectory augmentation | `embodichain/lab/sim/motion/trajectory_augmentation/` → contracts, configs, operators, coverage, `GenerationSession` |
 
 ## Overview
+
+Planners, solvers, workspace analysis, and trajectory augmentation are sibling
+packages under `embodichain.lab.sim.motion`. Import planner APIs from
+`embodichain.lab.sim.motion.planners`; the parent namespace resolves subpackages
+lazily and must not eagerly load planners during Robot initialization. Atomic
+Actions consume these motion capabilities from `sim/atomic_actions/`.
+Focused tests and examples live under `tests/sim/motion/` and
+`examples/sim/motion/`.
 
 The planning stack has two layers:
 1. **BasePlanner** — low-level trajectory planner that takes a list of `PlanState` waypoints and produces a `PlanResult` with joint trajectories.
@@ -24,6 +33,30 @@ The planning stack has two layers:
 All planners resolve their robot at init via `SimulationManager.get_instance().get_robot(cfg.robot_uid)`.
 
 The entire stack is **env-batched** (`B = num_envs`). `PlanState` / `PlanResult` tensors carry a leading `B` dimension; `BasePlanner.plan()` and `MotionGenerator.generate()` operate on `B` environments in one call.
+
+## Trajectory Augmentation Boundary
+
+`motion/trajectory_augmentation/` owns immutable trajectory/candidate contracts,
+strict configuration decoding, phase-authorized joint residuals and retiming,
+sampled motion-limit checks, geometric/timing coverage, and bounded generation
+session bookkeeping. Candidates are logical rows; their identities and local
+random seeds do not derive from physical environment slots.
+
+`GenerationSession` accounts for ready candidates, rollout and pending-write
+budgets, accepted-episode coverage reservations, and idempotent commit receipts.
+It never steps or resets an environment or writes a dataset. Execution,
+initial-state restoration, physical/task validation, and durable sinks belong
+to host integrations. Keep algorithm modules free of direct Gym imports while
+recognizing that the public package follows normal `lab/sim` initialization.
+Motion-limit validation alone does not establish collision freedom or task
+success.
+
+`rotate_grasp_about_object_axis` rotates a reference TCP pose about a fixed
+object-local axis through the object origin. The caller chooses geometry-valid
+angles and replans the resulting pose candidates; the operator neither moves
+the object nor certifies the grasp.
+
+Focused augmentation tests live under `tests/sim/motion/trajectory_augmentation/`.
 
 ## Planner Hierarchy
 
@@ -295,7 +328,7 @@ total duration and emits new explicit arrival intervals.
        "neural": (NeuralPlanner, NeuralPlannerCfg),
    }
    ```
-6. Export from `embodichain/lab/sim/planners/__init__.py`.
+6. Export from `embodichain/lab/sim/motion/planners/__init__.py`.
 
 ### validate_plan_options decorator
 

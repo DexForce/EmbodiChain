@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import torch
 
-from embodichain.lab.sim.planners import (
+from embodichain.lab.sim.motion.planners import (
     CuroboPlanOptions,
     CuroboPlanner,
     CuroboPlannerCfg,

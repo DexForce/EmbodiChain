@@ -64,7 +64,7 @@ from .tracking import (
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
-    from embodichain.lab.sim.planners import MotionGenerator
+    from embodichain.lab.sim.motion.planners import MotionGenerator
 
     from .runtime import ActionPlanningServices
     from .state import PlanningContext

@@ -31,7 +31,7 @@ from embodichain.lab.sim.atomic_actions import (
     ObservedArticulationJointState,
     SceneSnapshot,
 )
-from embodichain.lab.sim.planners.base_planner import CollisionWorldInfo
+from embodichain.lab.sim.motion.planners.base_planner import CollisionWorldInfo
 from embodichain.lab.task_program.semantics import (
     AmbiguousSceneAffordanceError,
     GRASP_AFFORDANCE_CAPABILITY,

@@ -275,7 +275,7 @@ cuRobo world, derive both the explicit `registry_id -> RigidObject` mapping and
 the dynamic-obstacle ID list from the registry:
 
 ```python
-from embodichain.lab.sim.planners import (
+from embodichain.lab.sim.motion.planners import (
     CuroboPlannerCfg,
     CuroboWorldCfg,
     MotionGenCfg,
@@ -383,5 +383,5 @@ provide alias normalization or registry/provider/planner construction checks.
 
 See {doc}`index` for manifest and semantic-call integration,
 {doc}`../sim/atomic_actions/index` for snapshot grounding and recovery
-semantics, and {doc}`../sim/planners/curobo_planner` for cuRobo world
+semantics, and {doc}`../sim/motion/planners/curobo_planner` for cuRobo world
 representation and frame details.

@@ -71,7 +71,7 @@ from embodichain.utils.logger import log_info, log_warning, log_error
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.cfg import RobotCfg
-    from embodichain.lab.sim.workspace.analyzer import (
+    from embodichain.lab.sim.motion.workspace.analyzer import (
         WorkspaceAnalyzerConfig,
     )
 
@@ -298,7 +298,7 @@ def _build_asset_robot_cfg(
             given without ``--urdf``.
     """
     from embodichain.lab.sim.cfg import RobotCfg
-    from embodichain.lab.sim.solvers import (
+    from embodichain.lab.sim.motion.solvers import (
         PinkSolverCfg,
         PinocchioSolverCfg,
         PytorchSolverCfg,
@@ -365,7 +365,7 @@ def build_analyzer_config(
     """
     import torch
 
-    from embodichain.lab.sim.workspace.configs import (
+    from embodichain.lab.sim.motion.workspace.configs import (
         CacheConfig,
         DimensionConstraint,
         SamplingConfig,
@@ -373,7 +373,7 @@ def build_analyzer_config(
         VisualizationConfig,
         VisualizationType,
     )
-    from embodichain.lab.sim.workspace.analyzer import (
+    from embodichain.lab.sim.motion.workspace.analyzer import (
         AnalysisMode,
         WorkspaceAnalyzerConfig,
     )
@@ -592,7 +592,7 @@ def preview_cache(args: argparse.Namespace, analyzer: WorkspaceAnalyzer) -> None
             ``args.hide_unreachable``.
         analyzer: Analyzer attached to the loaded robot and simulation.
     """
-    from embodichain.lab.sim.workspace.caches.results_cache import (
+    from embodichain.lab.sim.motion.workspace.caches.results_cache import (
         DEFAULT_RESULTS_CACHE_DIR,
         deserialize_results,
     )
@@ -638,7 +638,7 @@ def main(args: argparse.Namespace) -> None:
     import torch
 
     from embodichain.lab.sim.sim_manager import SimulationManager
-    from embodichain.lab.sim.workspace.analyzer import (
+    from embodichain.lab.sim.motion.workspace.analyzer import (
         WorkspaceAnalyzer,
     )
 
@@ -1069,7 +1069,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
     # Resolve cache dir default here (after parse) to keep --help output clean.
     if args.cache_dir is None and not args.no_cache:
-        from embodichain.lab.sim.workspace.caches import (
+        from embodichain.lab.sim.motion.workspace.caches import (
             DEFAULT_RESULTS_CACHE_DIR,
         )
 

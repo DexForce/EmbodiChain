@@ -33,7 +33,7 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
 )
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim.solvers import PinkSolverCfg
+from embodichain.lab.sim.motion.solvers import PinkSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.lab.sim.robots.dexforce_w1.cfg import DexforceW1Cfg

@@ -31,7 +31,7 @@ from embodichain.lab.sim.atomic_actions import (
     JointPositionTarget,
     RuntimeCommandFrame,
 )
-from embodichain.lab.sim.planners import CuroboPlanner, MotionGenerator
+from embodichain.lab.sim.motion.planners import CuroboPlanner, MotionGenerator
 from embodichain.lab.task_program.semantics import (
     RegistrySceneProvider,
     SceneRegistry,

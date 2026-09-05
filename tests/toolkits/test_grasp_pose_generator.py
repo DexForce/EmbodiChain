@@ -32,7 +32,7 @@ from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 from embodichain.lab.sim.shapes import MeshCfg
-from embodichain.lab.sim.solvers import PytorchSolverCfg
+from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
 from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.utils import logger

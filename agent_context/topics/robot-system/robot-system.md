@@ -11,6 +11,9 @@
 | Robot registry (all robots) | `embodichain/lab/sim/robots/__init__.py` |
 | DexforceW1 config package | `embodichain/lab/sim/robots/dexforce_w1/` |
 | CobotMagic config | `embodichain/lab/sim/robots/cobotmagic.py` |
+| Solver APIs | `embodichain/lab/sim/motion/solvers/__init__.py` |
+| Workspace runtime and config | `embodichain/lab/sim/motion/workspace/runtime.py`, `cfg.py` |
+| Workspace offline analysis | `embodichain/lab/sim/motion/workspace/analyzer.py` |
 | Add-robot tutorial | `docs/source/tutorial/add_robot.rst` |
 | Add-robot quick-reference | `docs/source/guides/add_robot.rst` |
 
@@ -22,6 +25,23 @@
 - **Planners** — motion planner attachment point.
 
 A `Robot` is instantiated with a `RobotCfg` and a list of DexSim `Articulation` entities.
+
+## Motion and Workspace Integration
+
+- `Robot` imports solver APIs and runtime workspace types from
+  `embodichain.lab.sim.motion`. `RobotCfg.from_dict()` resolves solver
+  `class_type` names against `embodichain.lab.sim.motion.solvers`.
+- `RobotCfg.workspace_cfg` maps control-part names to `RobotWorkspaceCfg`.
+  `Robot.get_workspace(name)` lazily loads the configured cache on first use;
+  robot construction does not read workspace cache files.
+- `Robot.attach_workspace()` accepts a prebuilt `RobotWorkspace` and moves it
+  to the robot device. `Robot.sample_reachable_pose()` uses the runtime cache
+  to return bounded batched workspace samples.
+- `motion` subpackages load lazily, and workspace analyzer/visualization APIs
+  retain a separate lazy export boundary. Do not introduce offline analysis
+  imports into the Robot initialization path.
+- Focused workspace coverage lives under `tests/sim/motion/workspace/`; solver
+  tests live under `tests/sim/motion/solvers/`.
 
 ## RobotCfg Pattern
 

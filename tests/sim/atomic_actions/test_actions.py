@@ -108,7 +108,7 @@ from embodichain.toolkits.graspkit import (
     ParallelJawGraspPoseGenerator,
     ParallelJawGripperModelCfg,
 )
-from embodichain.lab.sim.planners import (
+from embodichain.lab.sim.motion.planners import (
     MotionGenerator,
     MoveType,
     PlanOptions,
@@ -263,7 +263,7 @@ def _torch_interpolation(monkeypatch: pytest.MonkeyPatch) -> None:
         interpolate,
     )
     monkeypatch.setattr(
-        "embodichain.lab.sim.planners.motion_generator.interpolate_with_distance",
+        "embodichain.lab.sim.motion.planners.motion_generator.interpolate_with_distance",
         interpolate,
     )
     monkeypatch.setattr(

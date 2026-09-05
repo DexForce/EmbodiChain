@@ -26,7 +26,7 @@ import argparse
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.sim.solvers import PytorchSolverCfg
+from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     RobotCfg,
@@ -34,7 +34,7 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
 )
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim.solvers import PinkSolverCfg
+from embodichain.lab.sim.motion.solvers import PinkSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 

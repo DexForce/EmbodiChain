@@ -1,7 +1,7 @@
 Robot Workspace
 ===============
 
-The ``embodichain.lab.sim.workspace`` package provides offline workspace
+The ``embodichain.lab.sim.motion.workspace`` package provides offline workspace
 analysis, persistent cache management, visualization, and runtime sampling for
 task-environment randomization.
 

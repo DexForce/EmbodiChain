@@ -94,7 +94,7 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
             ControlPartCommandProfile,
             ObjectSemantics,
         )
-        from embodichain.lab.sim.planners import (
+        from embodichain.lab.sim.motion.planners import (
             MotionGenCfg,
             MotionGenerator,
             ToppraPlannerCfg,

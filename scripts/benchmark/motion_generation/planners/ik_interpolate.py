@@ -22,7 +22,7 @@ import math
 
 import torch
 
-from embodichain.lab.sim.planners import PlanResult
+from embodichain.lab.sim.motion.planners import PlanResult
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 
 from ..models import BenchmarkCase

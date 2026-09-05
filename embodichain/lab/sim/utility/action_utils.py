@@ -22,7 +22,7 @@ import numpy as np
 import torch
 import warp as wp
 
-from embodichain.lab.sim.solvers.base_solver import BaseSolver
+from embodichain.lab.sim.motion.solvers.base_solver import BaseSolver
 from embodichain.utils.device_utils import standardize_device_string
 from embodichain.utils.utility import inv_transform
 from embodichain.utils.warp import (

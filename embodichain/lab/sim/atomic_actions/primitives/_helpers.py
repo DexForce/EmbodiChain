@@ -31,7 +31,7 @@ from ..trajectory_ops import build_pose_plan_states
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
-    from embodichain.lab.sim.planners import MotionGenerator
+    from embodichain.lab.sim.motion.planners import MotionGenerator
 
     from ..policies import MotionPolicy
 

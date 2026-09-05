@@ -55,7 +55,7 @@ from embodichain.lab.sim.atomic_actions import (
     TrackingPolicy,
 )
 from embodichain.lab.sim.atomic_actions.invocation import ResolvedActionRequest
-from embodichain.lab.sim.planners import PlanResult
+from embodichain.lab.sim.motion.planners import PlanResult
 from embodichain.lab.task_program.semantics import (
     EndpointResolution,
     ResourceBinding,

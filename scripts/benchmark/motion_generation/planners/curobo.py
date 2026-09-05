@@ -22,7 +22,7 @@ import importlib.util
 
 import torch
 
-from embodichain.lab.sim.planners import (
+from embodichain.lab.sim.motion.planners import (
     CuroboAutoGenCfg,
     CuroboPlanOptions,
     CuroboPlannerCfg,

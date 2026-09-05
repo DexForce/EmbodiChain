@@ -85,7 +85,7 @@ from embodichain.lab.sim.atomic_actions.runtime_commands import (
     RuntimeCommandFrame,
     RuntimeCommandPayload,
 )
-from embodichain.lab.sim.planners import MotionGenerator
+from embodichain.lab.sim.motion.planners import MotionGenerator
 from embodichain.lab.task_program.semantics import (
     BoundSemanticCall,
     COMPOSITE_EFFECT_MONITOR_ID,

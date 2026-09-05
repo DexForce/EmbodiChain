@@ -9,11 +9,11 @@
 
 | File | Role |
 |---|---|
-| `embodichain/lab/sim/solvers/__init__.py` | Public re-exports for all solver classes and configs |
-| `embodichain/lab/sim/solvers/base_solver.py` | `BaseSolver` ABC + `SolverCfg` base config |
+| `embodichain/lab/sim/motion/solvers/__init__.py` | Public re-exports for all solver classes and configs |
+| `embodichain/lab/sim/motion/solvers/base_solver.py` | `BaseSolver` ABC + `SolverCfg` base config |
 | `embodichain/lab/sim/cfg.py` | `RobotCfg.solver_cfg` — where solver config is wired into a robot |
-| `embodichain/lab/sim/solvers/qpos_seed_sampler.py` | `QposSeedSampler` — random joint-seed generation |
-| `embodichain/lab/sim/solvers/null_space_posture_task.py` | `NullSpacePostureTask` — Pink null-space posture objective |
+| `embodichain/lab/sim/motion/solvers/qpos_seed_sampler.py` | `QposSeedSampler` — random joint-seed generation |
+| `embodichain/lab/sim/motion/solvers/null_space_posture_task.py` | `NullSpacePostureTask` — Pink null-space posture objective |
 | `embodichain/lab/sim/utility/solver_utils.py` | Helpers: `create_pk_serial_chain`, `build_reduced_pinocchio_robot`, `validate_iteration_params`, `compute_pinocchio_fk` |
 
 ---
@@ -25,6 +25,13 @@ Solvers share a common `BaseSolver` interface for FK, IK, Jacobian, TCP,
 and joint-limit management.  A `SolverCfg` subclass is instantiated
 inside `RobotCfg` and its `init_solver()` factory method produces the
 concrete `BaseSolver` instance at runtime.
+
+Import solver classes and configs from `embodichain.lab.sim.motion.solvers`.
+`RobotCfg.from_dict()` resolves configured `class_type` names against
+that public module. The `motion` parent loads subpackages lazily; adding solver
+exports must not eagerly import planners or workspace analyzers into the Robot
+initialization path. Warp kernels remain under `embodichain/utils/warp/kinematics/`.
+Focused solver tests live under `tests/sim/motion/solvers/`.
 
 All solvers use a `pytorch_kinematics` serial chain (`pk_serial_chain`)
 for FK and Jacobian computation. `torch.compile` is applied to the FK

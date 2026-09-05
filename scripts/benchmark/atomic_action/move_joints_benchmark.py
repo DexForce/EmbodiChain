@@ -244,8 +244,8 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         AtomicActionEngine,
         ControlPartCommandProfile,
     )
-    from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg
-    from embodichain.lab.sim.planners import ToppraPlannerCfg
+    from embodichain.lab.sim.motion.planners import MotionGenerator, MotionGenCfg
+    from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
     from scripts.tutorials.atomic_action.move_joints import (
         create_robot,
         initialize_simulation,

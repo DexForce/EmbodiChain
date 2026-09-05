@@ -5,6 +5,7 @@
 | What | Path |
 |------|------|
 | Public simulation package | `embodichain/lab/sim/__init__.py` |
+| Motion capability namespace | `embodichain/lab/sim/motion/__init__.py` |
 | World and scene owner | `embodichain/lab/sim/sim_manager.py` → `SimulationManager` |
 | Global simulation config | `embodichain/lab/sim/sim_manager.py` → `SimulationManagerCfg` |
 | Object and physics configs | `embodichain/lab/sim/cfg.py` |
@@ -13,7 +14,8 @@
 
 `embodichain.lab.sim` exports the manager, its config, shared material
 types, `BatchEntity`, and the simulation profiler. Import a specialized
-object, sensor, solver, planner, or atomic-action API from its own subpackage.
+object, sensor, or atomic-action API from its own subpackage. Solver, planner,
+workspace, and trajectory-augmentation APIs live under `embodichain.lab.sim.motion`.
 
 ## Ownership
 
@@ -86,16 +88,31 @@ flag later for all or selected environment indices.
 | Rigid, deformable, articulation, robot, light, constraint, gizmo | `objects/` | `robot-system` for robots |
 | Camera, stereo camera, contact sensor | `sensors/` | `sensor-system` |
 | Robot-specific configuration | `robots/` | `robot-system` |
-| Inverse kinematics | `solvers/` | `ik-solvers` |
-| Trajectory and motion generation | `planners/` | `motion-planning` |
+| Inverse kinematics | `motion/solvers/` | `ik-solvers` |
+| Trajectory and motion generation | `motion/planners/` | `motion-planning` |
+| Trajectory candidates, augmentation, coverage, generation bookkeeping | `motion/trajectory_augmentation/` | `motion-planning` |
 | Typed action planning and execution | `atomic_actions/` | `atomic-actions` |
 | Task Program Semantic Calls and robot profiles | `embodichain/lab/task_program/semantics/` | `task-programs` |
-| Reachability analysis and runtime workspace queries | `workspace/` | `robot-system` |
+| Reachability analysis and runtime workspace queries | `motion/workspace/` | `robot-system` |
 | Browser scene export and Viser runtime | `embodichain/lab/visualization/` | `sim-visualization` |
 
 Use the narrow topic when a request names one of these subsystems. Use
 `simulation-system` for the overall `lab/sim` architecture, manager
 lifecycle, scene ownership, or cross-module flow.
+
+`motion/__init__.py` resolves its four public subpackages lazily. Keep it free
+of eager planner imports: `Robot` needs solver and runtime workspace types
+during initialization, while planners resolve robots through
+`SimulationManager`. Workspace analyzer/visualization exports retain their own
+lazy boundary. Import concrete APIs from the corresponding `motion` subpackage;
+the former `sim.solvers`, `sim.planners`, and `sim.workspace` paths have no
+compatibility packages.
+
+Trajectory augmentation owns value contracts, operators, coverage, and session
+bookkeeping. Its algorithms do not import Gym or perform environment execution,
+reset, or dataset I/O; those operations belong to host integrations. Its public
+import follows the normal `lab/sim` lifecycle and does not promise an isolated
+toolkit import. Atomic Actions remain above the motion capabilities.
 
 `Articulation.get_parent_joint_chain(link_name)` is the public topology query
 for integrations that need link ancestry. It returns immediate-parent-first

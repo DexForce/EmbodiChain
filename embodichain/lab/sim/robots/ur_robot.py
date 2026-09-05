@@ -25,7 +25,7 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     RigidBodyAttributesCfg,
 )
-from embodichain.lab.sim.solvers import URSolverCfg
+from embodichain.lab.sim.motion.solvers import URSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.data import get_data_path
 from embodichain.utils import configclass
@@ -64,7 +64,7 @@ class URRobotCfg(RobotCfg):
 
     One config class covers UR3 / UR3e / UR5 / UR5e / UR10 / UR10e, selected via
     ``robot_type``. The kinematic (DH) parameters are owned by
-    :class:`~embodichain.lab.sim.solvers.URSolverCfg`; this config owns the URDF,
+    :class:`~embodichain.lab.sim.motion.solvers.URSolverCfg`; this config owns the URDF,
     control parts, drive properties and rigid-body attributes.
 
     Example:
