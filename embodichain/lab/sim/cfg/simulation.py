@@ -443,6 +443,11 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             collision_values["broad_phase"] = self.broad_phase
         collision_values["requires_grad"] = self.requires_grad
 
+        collision_pipeline_cfg = (
+            NewtonCollisionPipelineCfg(**collision_values)
+            if self.enable_collision_pipeline
+            else None
+        )
         cfg = NewtonCfg(
             dt=self.physics_dt,
             num_substeps=self.num_substeps,
@@ -452,8 +457,7 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             requires_grad=self.requires_grad,
             suppress_warp_kernel_logs=self.suppress_warp_kernel_logs,
             solver_cfg=solver_cfg,
-            collision_pipeline_cfg=NewtonCollisionPipelineCfg(**collision_values),
-            enable_collision_pipeline=self.enable_collision_pipeline,
+            collision_pipeline_cfg=collision_pipeline_cfg,
             sync_to_dexsim=True,
         )
         cfg.use_cuda_graph = self.use_cuda_graph and not self.requires_grad

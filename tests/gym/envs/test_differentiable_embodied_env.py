@@ -59,6 +59,16 @@ def _bridge_terminal_loss_kernel(
     loss[0] = wp.dot(delta, delta)
 
 
+@wp.kernel
+def _functional_state_step_kernel(
+    action: wp.array(dtype=wp.float32),
+    state: wp.array(dtype=wp.float32),
+    next_state: wp.array(dtype=wp.float32),
+) -> None:
+    """Advance a scalar functional state for bridge-chain regression tests."""
+    next_state[0] = state[0] + action[0]
+
+
 class _FakeModel:
     """Keep the pre-contract bridge path runnable for clean RED failures."""
 
@@ -1035,6 +1045,63 @@ def test_environment_kinematics_hook_keeps_its_strict_legacy_signature(
     assert torch.equal(calls[0][0], action)
     assert isinstance(calls[0][1], _RecordingTape)
     assert manager.physics.newton_manager.trajectory_requests == []
+
+
+def test_kinematics_bridge_keeps_functional_state_gradient_across_steps() -> None:
+    """Optional tensor inputs preserve a complete closed-loop state graph."""
+    wp.init()
+    manager = SimpleNamespace(differentiable_runtime=object())
+
+    def functional_step(action: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
+        outputs: dict[str, wp.array] = {}
+
+        def apply_action(action_wp, _tape, state_wp) -> None:
+            next_state_wp = wp.zeros(
+                1,
+                dtype=wp.float32,
+                device=action_wp.device,
+                requires_grad=True,
+            )
+            wp.launch(
+                _functional_state_step_kernel,
+                dim=1,
+                inputs=[action_wp, state_wp],
+                outputs=[next_state_wp],
+                device=action_wp.device,
+            )
+            outputs["next_state"] = next_state_wp
+
+        def read_outputs(_final_state) -> dict[str, Any]:
+            next_state_wp = outputs["next_state"]
+            return {
+                "_order": ("next_state",),
+                "_grad_track": {"next_state": next_state_wp},
+                "next_state": wp.to_torch(next_state_wp),
+            }
+
+        sim_state = {
+            "manager": manager,
+            "step_mode": "kinematics",
+            "substeps": 1,
+            "action_to_control_kernel": apply_action,
+            "kernel_args": (),
+            "obs_reward_fn": read_outputs,
+            "step_fn": lambda: object(),
+        }
+        return NewtonStepFunc.apply(action, sim_state, state)[0]
+
+    initial_state = torch.tensor([0.5], requires_grad=True)
+    first_action = torch.tensor([0.2], requires_grad=True)
+    second_action = torch.tensor([0.3], requires_grad=True)
+    first_state = functional_step(first_action, initial_state)
+    final_state = functional_step(second_action, first_state)
+
+    final_state.sum().backward()
+
+    assert torch.allclose(final_state, torch.tensor([1.0]))
+    assert torch.allclose(initial_state.grad, torch.ones(1))
+    assert torch.allclose(first_action.grad, torch.ones(1))
+    assert torch.allclose(second_action.grad, torch.ones(1))
 
 
 def test_grad_terminal_step_defers_reset_until_after_backward(monkeypatch) -> None:

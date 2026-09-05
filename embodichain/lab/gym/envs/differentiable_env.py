@@ -244,7 +244,7 @@ class DifferentiableEmbodiedEnv(EmbodiedEnv):
         """Expose the strict legacy action hook only for kinematics mode."""
         env = self
 
-        def _inner(action_wp: Any, tape: Any, *_: Any) -> None:
-            env._apply_action_kernel(action_wp, tape=tape)
+        def _inner(action_wp: Any, tape: Any, *kernel_args: Any) -> None:
+            env._apply_action_kernel(action_wp, *kernel_args, tape=tape)
 
         return _inner

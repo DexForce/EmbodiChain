@@ -42,7 +42,7 @@ class NewtonDifferentiableTrajectory:
 
         model = self._backend.model
         self.states = [model.state() for _ in range(self.total_solver_steps + 1)]
-        self.states[0].assign(self._backend.runtime.current_state)
+        self.states[0].assign(runtime._runtime_context(self._backend).current_state)
         self.control = model.control()
         self.contacts = [
             self._backend.collision_pipeline.contacts()
@@ -70,14 +70,15 @@ class NewtonDifferentiableTrajectory:
             )
 
         backend = self._backend
-        apply_external_wrenches = backend.runtime.has_external_wrenches
+        runtime = self._runtime._runtime_context(backend)
+        apply_external_wrenches = runtime.has_external_wrenches
         for index, (state_in, state_out, contacts) in enumerate(
             zip(self.states, self.states[1:], self.contacts)
         ):
             state_in.clear_forces()
             if apply_external_wrenches and index < self._runtime.num_substeps:
-                backend.runtime.apply_external_wrenches(state_in)
-            if backend.cfg.enable_collision_pipeline:
+                runtime.apply_external_wrenches(state_in)
+            if backend.cfg.collision_pipeline_cfg is not None:
                 backend.collision_pipeline.collide(state_in, contacts)
             backend.solver.step(
                 state_in,
@@ -143,6 +144,22 @@ class NewtonDifferentiableRuntime:
             )
         return backend
 
+    @staticmethod
+    def _runtime_context(backend: Any) -> Any:
+        """Return DexSim's runtime facade across 0.4 and 0.5 backends.
+
+        DexSim 0.5 keeps the Newton runtime on the private ``_runtime``
+        attribute, whereas older releases exposed it as ``runtime``.  The
+        EmbodiChain adapter owns this compatibility boundary so callers do not
+        need to depend on either backend layout.
+        """
+        runtime = getattr(backend, "runtime", None)
+        if runtime is None:
+            runtime = getattr(backend, "_runtime", None)
+        if runtime is None:
+            raise RuntimeError("The Newton backend has no runtime context.")
+        return runtime
+
     @property
     def model(self) -> Any:
         """Return the finalized Newton model for expert Warp operations."""
@@ -151,7 +168,8 @@ class NewtonDifferentiableRuntime:
     @property
     def current_state(self) -> Any:
         """Return the live state currently selected by the Spawn runtime."""
-        return self._validated_backend().runtime.current_state
+        backend = self._validated_backend()
+        return self._runtime_context(backend).current_state
 
     @property
     def live_states(self) -> tuple[Any, Any]:
@@ -207,14 +225,16 @@ class NewtonDifferentiableRuntime:
 
     @property
     def _external_forces(self) -> Any:
-        return self._validated_backend().runtime.external_wrenches
+        backend = self._validated_backend()
+        return self._runtime_context(backend).external_wrenches
 
     def _ensure_external_force_buffers(self) -> None:
         self._validated_backend()
 
     def clear_external_forces(self) -> None:
         """Clear pending Spawn runtime wrenches."""
-        self._validated_backend().runtime.clear_external_wrenches()
+        backend = self._validated_backend()
+        self._runtime_context(backend).clear_external_wrenches()
 
     def create_differentiable_trajectory(
         self,
@@ -275,8 +295,9 @@ class NewtonDifferentiableRuntime:
             )
         backend.state_0.assign(trajectory.final_state)
         backend.state_1.assign(trajectory.final_state)
-        backend.runtime.set_current_state(backend.state_0)
-        backend.runtime.clear_external_wrenches()
+        runtime = self._runtime_context(backend)
+        runtime.set_current_state(backend.state_0)
+        runtime.clear_external_wrenches()
         backend.set_sim_time(
             backend.sim_time + trajectory.physics_steps * trajectory.physics_dt,
             backend.step_index + trajectory.physics_steps,
@@ -328,7 +349,7 @@ class NewtonDifferentiableRuntime:
 
         total_substeps = record_steps * substeps
         states = [backend.model.state() for _ in range(total_substeps + 1)]
-        states[0].assign(backend.runtime.current_state)
+        states[0].assign(self._runtime_context(backend).current_state)
         contacts = [
             backend.collision_pipeline.contacts() for _ in range(total_substeps)
         ]

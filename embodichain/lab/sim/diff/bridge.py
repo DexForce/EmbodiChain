@@ -224,7 +224,12 @@ class NewtonStepFunc(torch.autograd.Function):
     """
 
     @classmethod
-    def apply(cls, action_torch: torch.Tensor, sim_state: dict[str, Any]) -> Any:
+    def apply(
+        cls,
+        action_torch: torch.Tensor,
+        sim_state: dict[str, Any],
+        *state_tensors: torch.Tensor,
+    ) -> Any:
         """Capture the caller's grad mode before PyTorch enters ``forward``.
 
         ``torch.autograd.Function.forward`` always executes with grad mode
@@ -233,8 +238,18 @@ class NewtonStepFunc(torch.autograd.Function):
         block. Passing the ambient mode as a non-differentiable argument lets
         the bridge synchronously reset/release no-grad trajectories instead of
         retaining an unreachable manager lease.
+
+        ``state_tensors`` are optional functional state inputs.  They are
+        converted to Warp arrays and appended to the action-kernel arguments,
+        allowing a sequence of bridge calls to retain gradients through state
+        without placing task-specific tensors inside ``sim_state``.
         """
-        return super().apply(action_torch, sim_state, torch.is_grad_enabled())
+        return super().apply(
+            action_torch,
+            sim_state,
+            torch.is_grad_enabled(),
+            *state_tensors,
+        )
 
     @staticmethod
     def forward(
@@ -242,6 +257,7 @@ class NewtonStepFunc(torch.autograd.Function):
         action_torch: torch.Tensor,
         sim_state: dict[str, Any],
         outer_grad_enabled: bool,
+        *state_tensors: torch.Tensor,
     ) -> tuple[torch.Tensor, ...]:
         manager = sim_state["manager"]
         substeps = int(sim_state["substeps"])
@@ -253,8 +269,9 @@ class NewtonStepFunc(torch.autograd.Function):
             sim_state.get("_bind_dynamics_tape") if step_mode == "dynamics" else None
         )
 
-        # Save the original action shape so backward can reshape the gradient.
+        # Save input layouts so backward can restore the original tensor shapes.
         ctx.saved_action_shape = action_torch.shape
+        ctx.saved_state_shapes = tuple(tensor.shape for tensor in state_tensors)
 
         nm = _differentiable_runtime(manager)
 
@@ -265,6 +282,25 @@ class NewtonStepFunc(torch.autograd.Function):
             dtype=wp.float32,
             requires_grad=needs_action_grad,
         )
+        state_wps = []
+        state_needs_grad = []
+        for index, tensor in enumerate(state_tensors):
+            if not isinstance(tensor, torch.Tensor):
+                raise TypeError(
+                    "NewtonStepFunc functional state inputs must be torch.Tensor, "
+                    f"got {type(tensor).__name__} at index {index}."
+                )
+            needs_grad = bool(outer_grad_enabled and ctx.needs_input_grad[index + 3])
+            state_flat = tensor.detach().clone().reshape(-1).contiguous()
+            state_wps.append(
+                wp.from_torch(
+                    state_flat,
+                    dtype=wp.float32,
+                    requires_grad=needs_grad,
+                )
+            )
+            state_needs_grad.append(needs_grad)
+        retains_tape_for_backward = needs_action_grad or any(state_needs_grad)
 
         trajectory = None
         tape = None
@@ -283,13 +319,18 @@ class NewtonStepFunc(torch.autograd.Function):
                     if tape_binder is not None:
                         tape_binder(tape)
                     if step_mode == "dynamics":
-                        kernel(action_wp, trajectory.control, *kernel_args)
+                        kernel(
+                            action_wp,
+                            trajectory.control,
+                            *kernel_args,
+                            *state_wps,
+                        )
                         final_state = trajectory.step()
                     else:
                         # The explicit FK route keeps the historical callback
                         # shape and receives the open tape, but never detached
                         # solver control.
-                        kernel(action_wp, tape, *kernel_args)
+                        kernel(action_wp, tape, *kernel_args, *state_wps)
                         final_state = step_fn()
 
                     # Validate and materialize outputs inside the tape. A malformed
@@ -309,13 +350,15 @@ class NewtonStepFunc(torch.autograd.Function):
             _abort_forward(tape, trajectory)
             raise
 
-        if not needs_action_grad:
+        if not retains_tape_for_backward:
             _reset_tape_then_release(tape, trajectory)
             return output_values
 
         ctx.tape = tape
         ctx.trajectory = trajectory
         ctx.action_wp = action_wp
+        ctx.state_wps = tuple(state_wps)
+        ctx.state_needs_grad = tuple(state_needs_grad)
         ctx.outputs_order = outputs_order
         ctx.outputs_grad_track = outputs_grad_track
         ctx._bridge_released = False
@@ -325,7 +368,7 @@ class NewtonStepFunc(torch.autograd.Function):
     def backward(
         ctx: Any,
         *grad_outputs: torch.Tensor | None,
-    ) -> tuple[torch.Tensor | None, None, None]:
+    ) -> tuple[torch.Tensor | None, ...]:
         if getattr(ctx, "_bridge_released", False):
             raise RuntimeError(
                 "NewtonStepFunc backward was already consumed; create a new "
@@ -333,6 +376,7 @@ class NewtonStepFunc(torch.autograd.Function):
             )
 
         action_grad = None
+        state_grads: list[torch.Tensor | None] = []
         try:
             # Copy each upstream grad back into the corresponding Warp .grad.
             for name, grad_t in zip(ctx.outputs_order, grad_outputs):
@@ -348,7 +392,7 @@ class NewtonStepFunc(torch.autograd.Function):
                     wp_arr.grad,
                     wp.from_torch(
                         grad_t.detach().clone().contiguous(),
-                        dtype=wp.float32,
+                        dtype=wp_arr.dtype,
                     ),
                 )
             ctx.tape.backward()
@@ -358,14 +402,27 @@ class NewtonStepFunc(torch.autograd.Function):
                 # storage, then terminate tape ownership before releasing the
                 # trajectory's active manager token.
                 action_grad = wp.to_torch(action_wp_grad).clone()
+            for state_wp, needs_grad in zip(
+                ctx.state_wps,
+                ctx.state_needs_grad,
+            ):
+                state_wp_grad = getattr(state_wp, "grad", None)
+                if needs_grad and state_wp_grad is not None:
+                    state_grads.append(wp.to_torch(state_wp_grad).clone())
+                else:
+                    state_grads.append(None)
         finally:
             try:
                 _reset_tape_then_release(ctx.tape, ctx.trajectory)
             finally:
                 ctx._bridge_released = True
 
-        if action_grad is None:
-            return None, None, None
-        # Reshape to the original action layout; metadata inputs have no
-        # gradient.
-        return action_grad.reshape(ctx.saved_action_shape), None, None
+        shaped_action_grad = (
+            None if action_grad is None else action_grad.reshape(ctx.saved_action_shape)
+        )
+        shaped_state_grads = tuple(
+            None if grad is None else grad.reshape(shape)
+            for grad, shape in zip(state_grads, ctx.saved_state_shapes)
+        )
+        # ``sim_state`` and the captured ambient-grad flag are metadata inputs.
+        return shaped_action_grad, None, None, *shaped_state_grads
