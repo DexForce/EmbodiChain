@@ -28,10 +28,18 @@ import torch
 import wandb
 
 from embodichain.learning.rl.algo import APG
-from embodichain.learning.rl.collector import DifferentiableCollector
-from embodichain.learning.rl.env import DifferentiableVecEnv
+from embodichain.learning.rl.collector import (
+    DifferentiableCollector,
+    DifferentiableRollout,
+)
+from embodichain.learning.rl.env import (
+    DifferentiableRolloutSpec,
+    DifferentiableVecEnv,
+    ScheduledDifferentiableVecEnv,
+)
 from embodichain.learning.rl.evaluation import evaluate_episodes
 from embodichain.learning.rl.models import Policy
+from embodichain.learning.rl.normalization import RunningObservationNormalizer
 from embodichain.learning.rl.utils import LRSchedulerCfg, build_lr_scheduler
 from embodichain.utils import configclass
 
@@ -45,11 +53,17 @@ _CHECKPOINT_SCHEMA_VERSION = 1
 
 @configclass
 class DifferentiableTrainerCfg:
-    """Configuration for graph-preserving segmented training."""
+    """Configuration for segmented or complete graph-preserving training."""
 
     segment_length: int = 16
     update_horizon: int | None = None
+    rollout_mode: str = "segmented"
+    gradient_accumulation_steps: int = 1
     deterministic_actions: bool = False
+    clip_actions_to_space: bool = False
+    action_adjoint_max_norm: float = 0.0
+    normalize_observations: bool = False
+    rollout_seed: int | None = None
     checkpoint_dir: str = "outputs/checkpoints"
     experiment_name: str = "apg"
     save_frequency_updates: int = 0
@@ -62,7 +76,7 @@ class DifferentiableTrainerCfg:
 
 
 class DifferentiableTrainer:
-    """Coordinate APG updates and truncated-backpropagation boundaries."""
+    """Coordinate APG updates, full rollouts, and optional TBPTT boundaries."""
 
     def __init__(
         self,
@@ -72,16 +86,25 @@ class DifferentiableTrainer:
         algorithm: APG,
         writer: SummaryWriter | None = None,
         eval_env: DifferentiableVecEnv | None = None,
+        observation_normalizer: RunningObservationNormalizer | None = None,
     ) -> None:
         if cfg.segment_length <= 0:
             raise ValueError("segment_length must be positive.")
         update_horizon = (
             cfg.segment_length if cfg.update_horizon is None else cfg.update_horizon
         )
-        if update_horizon < cfg.segment_length:
+        if cfg.rollout_mode not in {"segmented", "complete"}:
+            raise ValueError("rollout_mode must be 'segmented' or 'complete'.")
+        if cfg.rollout_mode == "segmented" and update_horizon < cfg.segment_length:
             raise ValueError("update_horizon must be at least segment_length.")
-        if update_horizon % cfg.segment_length != 0:
+        if cfg.rollout_mode == "segmented" and update_horizon % cfg.segment_length != 0:
             raise ValueError("update_horizon must be divisible by segment_length.")
+        if update_horizon <= 0:
+            raise ValueError("update_horizon must be positive.")
+        if cfg.gradient_accumulation_steps <= 0:
+            raise ValueError("gradient_accumulation_steps must be positive.")
+        if cfg.action_adjoint_max_norm < 0.0:
+            raise ValueError("action_adjoint_max_norm cannot be negative.")
         if cfg.save_frequency_updates < 0:
             raise ValueError("save_frequency_updates cannot be negative.")
         if cfg.eval_frequency_steps < 0:
@@ -100,10 +123,22 @@ class DifferentiableTrainer:
         self.algorithm = algorithm
         self.writer = writer
         self.eval_env = eval_env
+        if observation_normalizer is None and cfg.normalize_observations:
+            observation_dim = int(env.single_observation_space.shape[-1])
+            normalize_mask = getattr(env, "observation_normalize_mask", None)
+            observation_normalizer = RunningObservationNormalizer(
+                observation_dim,
+                algorithm.device,
+                normalize_mask=normalize_mask,
+            )
+        self.observation_normalizer = observation_normalizer
         self.collector = DifferentiableCollector(
             env=env,
             policy=policy,
             device=algorithm.device,
+            observation_normalizer=observation_normalizer,
+            clip_actions_to_space=cfg.clip_actions_to_space,
+            action_adjoint_max_norm=cfg.action_adjoint_max_norm,
         )
         self.global_step = 0
         self.num_updates = 0
@@ -125,43 +160,72 @@ class DifferentiableTrainer:
         self._next_eval_step = (
             cfg.eval_frequency_steps if cfg.eval_frequency_steps > 0 else None
         )
+        self._rollout_index = 0
 
-    def train(self, total_timesteps: int) -> dict[str, Any]:
-        """Train until at least ``total_timesteps`` vector transitions exist."""
-        if total_timesteps < 0:
+    def train(
+        self,
+        total_timesteps: int | None = None,
+        *,
+        total_updates: int | None = None,
+    ) -> dict[str, Any]:
+        """Train to a vector-transition or optimizer-update budget.
+
+        ``total_updates`` is the stable budget for scheduled variable-horizon
+        training. Exactly one budget may be supplied.
+
+        Args:
+            total_timesteps: Optional absolute vector-transition budget.
+            total_updates: Optional absolute optimizer-update budget.
+
+        Returns:
+            Current training counters, metrics, histories, and checkpoint paths.
+
+        Raises:
+            ValueError: If neither/both budgets are supplied or one is negative.
+        """
+        if total_timesteps is None and total_updates is None:
+            raise ValueError("Provide total_timesteps or total_updates.")
+        if total_timesteps is not None and total_updates is not None:
+            raise ValueError("Provide only one training budget.")
+        if total_timesteps is not None and total_timesteps < 0:
             raise ValueError("total_timesteps cannot be negative.")
+        if total_updates is not None and total_updates < 0:
+            raise ValueError("total_updates cannot be negative.")
 
-        steps_per_update = self.update_horizon * self.env.num_envs
-        if total_timesteps > 0 and steps_per_update > 0:
-            total_updates = math.ceil(total_timesteps / steps_per_update)
-            self.algorithm.bind_schedule(total_updates=total_updates)
+        if total_updates is not None:
+            if total_updates > 0:
+                self.algorithm.bind_schedule(total_updates=total_updates)
+        else:
+            assert total_timesteps is not None
+            steps_per_update = (
+                self.update_horizon
+                * self.env.num_envs
+                * (
+                    self.cfg.gradient_accumulation_steps
+                    if self.cfg.rollout_mode == "complete"
+                    else 1
+                )
+            )
+            if total_timesteps > 0 and steps_per_update > 0:
+                estimated_updates = math.ceil(total_timesteps / steps_per_update)
+                self.algorithm.bind_schedule(total_updates=estimated_updates)
 
         self.policy.train()
-        while self.global_step < total_timesteps:
-            remaining_vector_steps = math.ceil(
-                (total_timesteps - self.global_step) / self.env.num_envs
-            )
-            update_steps = min(self.update_horizon, remaining_vector_steps)
-            collected_steps = 0
-            self.algorithm.begin_update()
-            try:
-                while collected_steps < update_steps:
-                    segment_steps = min(
-                        self.cfg.segment_length,
-                        update_steps - collected_steps,
+        while (
+            self.num_updates < total_updates
+            if total_updates is not None
+            else self.global_step < total_timesteps
+        ):
+            if self.cfg.rollout_mode == "complete":
+                collected_steps, metrics = self._complete_rollout_update()
+            else:
+                update_steps = self.update_horizon
+                if total_timesteps is not None:
+                    remaining_vector_steps = math.ceil(
+                        (total_timesteps - self.global_step) / self.env.num_envs
                     )
-                    rollout = self.collector.collect(
-                        segment_steps,
-                        deterministic=self.cfg.deterministic_actions,
-                        on_step_callback=self._on_step,
-                    )
-                    self.algorithm.accumulate_segment(rollout)
-                    self.collector.detach_state()
-                    collected_steps += rollout.num_steps
-                metrics = self.algorithm.finish_update()
-            except Exception:
-                self.algorithm.cancel_update()
-                raise
+                    update_steps = min(self.update_horizon, remaining_vector_steps)
+                collected_steps, metrics = self._segmented_update(update_steps)
 
             self.global_step += collected_steps * self.env.num_envs
             self.num_updates += 1
@@ -202,6 +266,80 @@ class DifferentiableTrainer:
 
         return self.get_summary()
 
+    def _segmented_update(self, update_steps: int) -> tuple[int, dict[str, float]]:
+        """Run one backward-compatible TBPTT optimizer update."""
+        collected_steps = 0
+        self.algorithm.begin_update()
+        try:
+            while collected_steps < update_steps:
+                segment_steps = min(
+                    self.cfg.segment_length,
+                    update_steps - collected_steps,
+                )
+                rollout = self.collector.collect(
+                    segment_steps,
+                    deterministic=self.cfg.deterministic_actions,
+                    on_step_callback=self._on_step,
+                )
+                self.algorithm.accumulate_segment(rollout)
+                self._update_observation_normalizer(rollout)
+                self.collector.detach_state()
+                collected_steps += rollout.num_steps
+            return collected_steps, self.algorithm.finish_update()
+        except Exception:
+            self.algorithm.cancel_update()
+            raise
+
+    def _complete_rollout_update(self) -> tuple[int, dict[str, float]]:
+        """Accumulate independent full trajectories and apply one APG step."""
+        accumulation_steps = self.cfg.gradient_accumulation_steps
+        collected_steps = 0
+        metadata: dict[str, list[float]] = {}
+        self.algorithm.begin_update()
+        try:
+            for _ in range(accumulation_steps):
+                spec = self._prepare_complete_rollout()
+                seed = self.cfg.rollout_seed if self._rollout_index == 0 else None
+                self.collector.reset(seed=seed)
+                rollout = self.collector.collect(
+                    spec.num_steps,
+                    deterministic=self.cfg.deterministic_actions,
+                    on_step_callback=self._on_step,
+                )
+                self.algorithm.accumulate_complete_rollout(
+                    rollout,
+                    objective_scale=spec.objective_scale,
+                    accumulation_scale=1.0 / accumulation_steps,
+                )
+                self._update_observation_normalizer(rollout)
+                self.collector.detach_state()
+                collected_steps += rollout.num_steps
+                for key, value in spec.metadata.items():
+                    metadata.setdefault(str(key), []).append(float(value))
+                self._rollout_index += 1
+            metrics = self.algorithm.finish_update()
+        except Exception:
+            self.algorithm.cancel_update()
+            raise
+        for key, values in metadata.items():
+            metrics[f"rollout_{key}_mean"] = sum(values) / len(values)
+        return collected_steps, metrics
+
+    def _prepare_complete_rollout(self) -> DifferentiableRolloutSpec:
+        if isinstance(self.env, ScheduledDifferentiableVecEnv):
+            return self.env.prepare_differentiable_rollout(self._rollout_index)
+        return DifferentiableRolloutSpec(num_steps=self.update_horizon)
+
+    def _update_observation_normalizer(
+        self,
+        rollout: DifferentiableRollout,
+    ) -> None:
+        if self.observation_normalizer is None:
+            return
+        observations = rollout.observations
+        alive_observations = observations[rollout.alive_mask]
+        self.observation_normalizer.update(alive_observations.detach())
+
     def save_checkpoint(self, path: str | Path | None = None) -> str:
         """Save policy, optimizer, and trainer counters."""
         if path is None:
@@ -218,7 +356,10 @@ class DifferentiableTrainer:
             "policy": self.policy.state_dict(),
             "optimizer": self.algorithm.optimizer.state_dict(),
             "best_eval_value": self.best_eval_value,
+            "rollout_index": self._rollout_index,
         }
+        if self.observation_normalizer is not None:
+            payload["observation_normalizer"] = self.observation_normalizer.state_dict()
         if self.algorithm.lr_scheduler is not None:
             payload["lr_scheduler"] = self.algorithm.lr_scheduler.state_dict()
             payload["lr_scheduler_cfg"] = {
@@ -259,6 +400,15 @@ class DifferentiableTrainer:
         self.global_step = int(checkpoint["global_step"])
         self.num_updates = int(checkpoint["num_updates"])
         self.best_eval_value = checkpoint.get("best_eval_value")
+        self._rollout_index = int(checkpoint.get("rollout_index", self.num_updates))
+        normalizer_state = checkpoint.get("observation_normalizer")
+        if normalizer_state is not None:
+            if self.observation_normalizer is None:
+                raise ValueError(
+                    "Checkpoint contains observation normalization state, but the "
+                    "trainer has normalization disabled."
+                )
+            self.observation_normalizer.load_state_dict(normalizer_state)
         self.latest_checkpoint_path = str(path)
 
     def get_summary(self) -> dict[str, Any]:
@@ -305,6 +455,11 @@ class DifferentiableTrainer:
             num_episodes=self.cfg.num_eval_episodes,
             device=self.algorithm.device,
             seed=self.cfg.eval_seed,
+            observation_transform=(
+                self.observation_normalizer.normalize
+                if self.observation_normalizer is not None
+                else None
+            ),
         )
         entry = {"global_step": float(self.global_step), **metrics}
         self.eval_history.append(entry)

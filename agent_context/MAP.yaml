@@ -543,6 +543,13 @@ topics:
       - reward
       - RolloutKind
       - DifferentiableTrainer
+      - ScheduledDifferentiableVecEnv
+      - DifferentiableRolloutSpec
+      - complete rollout
+      - full horizon
+      - gradient accumulation
+      - action adjoint
+      - observation normalization
       - SyncCollector
       - learning_env
       - gym_config
@@ -556,6 +563,8 @@ topics:
       - embodichain/learning/rl/train.py
       - embodichain/learning/rl/env.py
       - embodichain/learning/rl/evaluation.py
+      - embodichain/learning/rl/gradients.py
+      - embodichain/learning/rl/normalization.py
       - embodichain/learning/rl/routing.py
       - embodichain/learning/rl/differentiable_trainer.py
       - embodichain/learning/rl/utils/config.py

@@ -30,8 +30,13 @@ from embodichain.learning.rl.algo import (
     APG,
     APGCfg,
     build_algo,
+    complete_discounted_return,
     get_registered_algo_names,
     segmented_discounted_return,
+)
+from embodichain.learning.rl.gradients import (
+    BatchedGradientNormStats,
+    clip_batched_gradient_norm,
 )
 from embodichain.learning.rl.collector import (
     DifferentiableCollector,
@@ -147,6 +152,110 @@ def test_segmented_discounted_return_restarts_discount_after_done() -> None:
     returns = segmented_discounted_return(rollout, gamma=0.5)
 
     assert torch.equal(returns, torch.tensor([5.0]))
+
+
+def test_complete_discounted_return_stops_after_first_done() -> None:
+    observation = torch.zeros((1, 1))
+    transitions = []
+    for reward, done in ((1.0, False), (2.0, True), (100.0, False)):
+        transitions.append(
+            DifferentiableTransition(
+                observation=observation,
+                policy_output=TensorDict(
+                    {"action": torch.zeros((1, 1))},
+                    batch_size=[1],
+                ),
+                reward=torch.tensor([reward]),
+                terminated=torch.tensor([done]),
+                truncated=torch.tensor([False]),
+                next_observation=observation,
+                info={},
+            )
+        )
+
+    returns = complete_discounted_return(
+        DifferentiableRollout(observation, tuple(transitions)),
+        gamma=0.5,
+    )
+
+    assert torch.equal(returns, torch.tensor([2.0]))
+
+
+def test_action_adjoint_clip_is_per_environment_and_overflow_safe() -> None:
+    gradient = torch.tensor(
+        [[3.0, 4.0], [0.3, 0.4], [2.0e30, 2.0e30], [float("inf"), 0.0]]
+    )
+    stats = BatchedGradientNormStats("cpu")
+
+    clipped = clip_batched_gradient_norm(gradient, 1.0, stats)
+
+    torch.testing.assert_close(clipped[0], torch.tensor([0.6, 0.8]))
+    torch.testing.assert_close(clipped[1], gradient[1])
+    torch.testing.assert_close(
+        clipped[2],
+        torch.full((2,), 2.0**-0.5),
+        rtol=1.0e-5,
+        atol=1.0e-6,
+    )
+    torch.testing.assert_close(clipped[3], torch.zeros(2))
+    assert torch.isfinite(clipped).all()
+    assert stats.rows == 4
+    assert stats.finite_rows == 3
+    assert stats.clipped_rows == 2
+    assert stats.nonfinite_rows == 1
+
+
+def test_complete_rollout_objective_scale_equalizes_sequence_lengths() -> None:
+    policy = _make_policy()
+    algorithm = APG(APGCfg(device="cpu", max_grad_norm=100.0), policy)
+    observation = torch.zeros((4, 1))
+    waypoint_counts = torch.tensor([1.0, 2.0, 4.0, 8.0])
+    transition = DifferentiableTransition(
+        observation=observation,
+        policy_output=TensorDict(
+            {"action": policy.actor.weight.sum() * torch.ones((4, 1))},
+            batch_size=[4],
+        ),
+        reward=30.0 * waypoint_counts + policy.actor.weight.sum() * 0.0,
+        terminated=torch.zeros(4, dtype=torch.bool),
+        truncated=torch.zeros(4, dtype=torch.bool),
+        next_observation=observation,
+        info={},
+    )
+    rollout = DifferentiableRollout(observation, (transition,))
+
+    algorithm.begin_update()
+    algorithm.accumulate_complete_rollout(
+        rollout,
+        objective_scale=waypoint_counts.reciprocal(),
+    )
+    metrics = algorithm.finish_update()
+
+    assert metrics["objective"] == pytest.approx(30.0)
+
+
+def test_apg_skips_gradient_above_preclip_safety_limit() -> None:
+    policy = _make_policy()
+    algorithm = APG(
+        APGCfg(
+            device="cpu",
+            max_grad_norm=1.0,
+            max_grad_norm_before_clip=0.01,
+        ),
+        policy,
+    )
+    initial_weight = policy.actor.weight.detach().clone()
+    rollout = DifferentiableCollector(
+        _LinearDifferentiableEnv(),
+        policy,
+        torch.device("cpu"),
+    ).collect(num_steps=2, deterministic=True)
+
+    metrics = algorithm.update(rollout)
+
+    assert metrics["skipped_update"] == 1.0
+    assert metrics["skipped_excessive_gradient"] == 1.0
+    assert torch.equal(policy.actor.weight, initial_weight)
 
 
 def test_apg_entropy_uses_reward_discount_and_done_reset_semantics() -> None:

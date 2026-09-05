@@ -27,8 +27,10 @@ import torch.nn as nn
 from gymnasium.spaces import Box
 
 from embodichain.learning.rl import (
+    DifferentiableRolloutSpec,
     DifferentiableTrainer,
     DifferentiableTrainerCfg,
+    stratified_rollout_value,
 )
 from embodichain.learning.rl.algo import APG, APGCfg
 from embodichain.learning.rl.models import ActorOnly
@@ -74,6 +76,35 @@ class _QuadraticActionEnv:
         return None
 
 
+class _ScheduledCompleteRolloutEnv(_QuadraticActionEnv):
+    def __init__(self, num_envs: int = 2) -> None:
+        super().__init__(num_envs)
+        self.prepared_indices: list[int] = []
+        self.reset_calls = 0
+        self.current_waypoint_count = 1
+
+    def prepare_differentiable_rollout(
+        self,
+        rollout_index: int,
+    ) -> DifferentiableRolloutSpec:
+        self.prepared_indices.append(rollout_index)
+        self.current_waypoint_count = stratified_rollout_value(rollout_index, 1, 3)
+        return DifferentiableRolloutSpec(
+            num_steps=2 * self.current_waypoint_count,
+            objective_scale=1.0 / self.current_waypoint_count,
+            metadata={"waypoint_count": float(self.current_waypoint_count)},
+        )
+
+    def reset(
+        self,
+        *,
+        seed: int | None = None,
+        options: Mapping[str, Any] | None = None,
+    ) -> tuple[torch.Tensor, dict[str, Any]]:
+        self.reset_calls += 1
+        return super().reset(seed=seed, options=options)
+
+
 def _make_components(
     ent_coef: float = 0.0,
 ) -> tuple[_QuadraticActionEnv, ActorOnly, APG]:
@@ -114,6 +145,76 @@ def test_trainer_updates_policy_and_detaches_each_segment() -> None:
     assert summary["global_step"] == 8
     assert summary["num_updates"] == 2
     assert env.detach_calls == 2
+
+
+def test_complete_rollout_mode_resets_each_scheduled_microbatch() -> None:
+    env = _ScheduledCompleteRolloutEnv()
+    actor = nn.Linear(1, 1, bias=False)
+    nn.init.constant_(actor.weight, 0.5)
+    policy = ActorOnly(1, 1, env.device, actor=actor)
+    algorithm = APG(
+        APGCfg(
+            device="cpu",
+            optimizer=OptimizerCfg(learning_rate=0.05),
+            max_grad_norm=10.0,
+        ),
+        policy,
+    )
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(
+            rollout_mode="complete",
+            update_horizon=6,
+            gradient_accumulation_steps=3,
+            deterministic_actions=True,
+            clip_actions_to_space=True,
+            rollout_seed=17,
+        ),
+        env,
+        policy,
+        algorithm,
+    )
+
+    summary = trainer.train(total_timesteps=24)
+
+    assert summary["num_updates"] == 1
+    assert summary["global_step"] == 24
+    assert env.prepared_indices == [0, 1, 2]
+    assert env.reset_calls == 3
+    assert env.detach_calls == 3
+    assert summary["last_train_metrics"][
+        "train/rollout_waypoint_count_mean"
+    ] == pytest.approx(2.0)
+
+
+def test_complete_rollout_mode_honors_exact_optimizer_update_budget() -> None:
+    env = _ScheduledCompleteRolloutEnv()
+    actor = nn.Linear(1, 1, bias=False)
+    policy = ActorOnly(1, 1, env.device, actor=actor)
+    algorithm = APG(APGCfg(device="cpu", max_grad_norm=10.0), policy)
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(
+            rollout_mode="complete",
+            update_horizon=6,
+            deterministic_actions=True,
+        ),
+        env,
+        policy,
+        algorithm,
+    )
+
+    summary = trainer.train(total_updates=2)
+
+    assert summary["num_updates"] == 2
+    assert env.prepared_indices == [0, 1]
+    assert summary["global_step"] == 12
+
+
+def test_stratified_rollout_value_balances_and_rotates_cycles() -> None:
+    first = [stratified_rollout_value(index, 1, 3) for index in range(3)]
+    second = [stratified_rollout_value(index, 1, 3) for index in range(3, 6)]
+
+    assert first == [1, 2, 3]
+    assert second == [2, 3, 1]
 
 
 def test_update_horizon_keeps_optimizer_budget_fixed_across_segment_lengths() -> None:

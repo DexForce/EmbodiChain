@@ -28,7 +28,12 @@ from embodichain.learning.rl.utils import (
     coerce_optimizer_cfg,
 )
 
-from .apg import APG, APGCfg, segmented_discounted_return
+from .apg import (
+    APG,
+    APGCfg,
+    complete_discounted_return,
+    segmented_discounted_return,
+)
 from .base import BaseAlgorithm, RolloutKind
 from .common import compute_gae
 from .grpo import GRPO, GRPOCfg
@@ -95,6 +100,7 @@ __all__ = [
     "RolloutKind",
     "APGCfg",
     "APG",
+    "complete_discounted_return",
     "segmented_discounted_return",
     "PPOCfg",
     "PPO",
