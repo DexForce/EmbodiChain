@@ -71,9 +71,11 @@ from embodichain.lab.sim.sensors import (
     SensorCfg,
     BaseSensor,
     Camera,
+    CameraCfg,
     StereoCamera,
     ContactSensor,
 )
+from embodichain.lab.sim.sensors.attachment import resolve_parent_nodes
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     PhysicsCfg,
@@ -2462,13 +2464,24 @@ class SimulationManager:
             logger.log_warning(f"Sensor {sensor_uid} already exists.")
             return None
 
+        parent_nodes = None
+        if (
+            isinstance(sensor_cfg, CameraCfg)
+            and sensor_cfg.extrinsics.parent is not None
+        ):
+            parent_nodes = resolve_parent_nodes(
+                parent=sensor_cfg.extrinsics.parent,
+                assets={**self._articulations, **self._robots},
+                num_envs=self.num_envs,
+            )
+
         sensor = self.SUPPORTED_SENSOR_TYPES[sensor_type](sensor_cfg, self.device)
+        if isinstance(sensor, Camera) and parent_nodes is not None:
+            sensor.attach_to_parent_nodes(parent_nodes)
 
         self._sensors[sensor_uid] = sensor
         if isinstance(sensor, Camera):
             self.notify_visualization_topology_changed()
-
-        # Check if the sensor needs to change the parent frame.
 
         return sensor
 
