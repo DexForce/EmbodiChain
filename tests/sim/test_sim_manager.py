@@ -33,6 +33,7 @@ from embodichain.lab.sim.sim_manager import (
     SimulationManagerCfg,
     _WindowRecordState,
 )
+from embodichain.lab.sim.sensors import Camera, CameraCfg, StereoCamera, StereoCameraCfg
 from embodichain.lab.visualization import (
     GizmoCommand,
     PointCloudOverlay,
@@ -574,6 +575,73 @@ def test_add_stereo_camera_marks_visualization_topology_dirty() -> None:
 
     assert sim.add_sensor(cfg) is sensor
     assert sim._visualization_topology_revision == 3
+
+
+def _make_camera_parent_asset(
+    num_envs: int = 2, link_name: str = "wrist"
+) -> tuple[SimpleNamespace, list[object]]:
+    """Expose only the public articulation API used by attachment resolution."""
+    nodes = [object() for _ in range(num_envs)]
+    return (
+        SimpleNamespace(
+            link_names=[link_name],
+            num_instances=num_envs,
+            get_link_render_nodes=MagicMock(return_value=nodes),
+        ),
+        nodes,
+    )
+
+
+def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
+    sim = object.__new__(SimulationManager)
+    sim.num_envs = num_envs
+    sim.device = torch.device("cpu")
+    sim._robots = {}
+    sim._articulations = {}
+    sim._sensors = {}
+    sim._visualization_topology_revision = 0
+    return sim
+
+
+@pytest.mark.parametrize("registry", ["_robots", "_articulations"])
+@pytest.mark.parametrize("stereo", [False, True])
+@pytest.mark.parametrize("parent", [None, "wrist", "arm/wrist"])
+def test_add_camera_attaches_resolved_nodes_only_when_parent_is_configured(
+    registry: str, stereo: bool, parent: str | None
+) -> None:
+    sim = _make_camera_attachment_manager()
+    asset, nodes = _make_camera_parent_asset()
+    getattr(sim, registry)["arm"] = asset
+    cfg_type = StereoCameraCfg if stereo else CameraCfg
+    camera_type = StereoCamera if stereo else Camera
+    cfg = cfg_type(uid="camera", extrinsics=CameraCfg.ExtrinsicsCfg(parent=parent))
+    camera = object.__new__(camera_type)
+    camera.attach_to_parent_nodes = MagicMock()
+    sim.SUPPORTED_SENSOR_TYPES = {cfg.sensor_type: lambda cfg, device: camera}
+
+    assert sim.add_sensor(cfg) is camera
+    assert sim._sensors["camera"] is camera
+    assert sim._visualization_topology_revision == 1
+    if parent is None:
+        camera.attach_to_parent_nodes.assert_not_called()
+        asset.get_link_render_nodes.assert_not_called()
+    else:
+        camera.attach_to_parent_nodes.assert_called_once_with(nodes)
+        asset.get_link_render_nodes.assert_called_once_with("wrist")
+
+
+def test_add_camera_validates_parent_before_allocating_views() -> None:
+    sim = _make_camera_attachment_manager()
+    factory = MagicMock()
+    sim.SUPPORTED_SENSOR_TYPES = {"Camera": factory}
+    cfg = CameraCfg(uid="camera", extrinsics=CameraCfg.ExtrinsicsCfg(parent="missing"))
+
+    with pytest.raises(ValueError, match="was not found"):
+        sim.add_sensor(cfg)
+
+    factory.assert_not_called()
+    assert sim._sensors == {}
+    assert sim._visualization_topology_revision == 0
 
 
 def test_window_camera_pose_to_look_at_uses_dexsim_world_up() -> None:
