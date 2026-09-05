@@ -402,6 +402,42 @@ class BezierPath:
         speed_derivative = (first * second).sum(dim=-1, keepdim=True) / speed
         return second / speed.square() - first * speed_derivative / speed.pow(3)
 
+    def parameter_at_arc_length(
+        self, distance: torch.Tensor, *, table_count: int = 4097
+    ) -> torch.Tensor:
+        """Convert geometric arc lengths to normalized polynomial parameters.
+
+        Reuse the returned parameters for positions, tangents, and curvature
+        so they refer to the same points on the curve. A polyline lookup table
+        approximates cumulative length; its resolution is independent of the
+        number of requested distances. The table is rebuilt on each call to
+        reflect changes to the underlying control points.
+
+        Args:
+            distance: Finite scalar, shared sample vector (N,), or per-path
+                samples (..., N) whose batch dimensions broadcast with the
+                control points. Values outside the path are clamped.
+            table_count: Number of uniformly spaced polynomial parameters in
+                the lookup table, at least two. Higher values improve accuracy.
+
+        Returns:
+            Parameters in [0, 1] with broadcast batch and sample dimensions.
+            A scalar distance omits the sample dimension. Stationary paths
+            return zero parameters.
+
+        Raises:
+            ValueError: If distances are non-finite or table_count is invalid.
+        """
+        distance = torch.as_tensor(
+            distance,
+            dtype=self._control_points.dtype,
+            device=self._control_points.device,
+        )
+        if not bool(torch.isfinite(distance).all().item()):
+            raise ValueError("distance must contain only finite values.")
+        table_t, cumulative = _arc_length_table(self._control_points, table_count)
+        return _parameter_at_arc_length(table_t, cumulative, distance)
+
     def sample(
         self, sample_count: int, *, arc_length: bool = True
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -570,6 +606,59 @@ def _evaluate_control_points(
     return result
 
 
+def _arc_length_table(
+    control_points: torch.Tensor, table_count: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build a cumulative polyline-length table over polynomial parameters."""
+    if (
+        isinstance(table_count, bool)
+        or not isinstance(table_count, int)
+        or table_count < 2
+    ):
+        raise ValueError("table_count must be an integer of at least 2.")
+    table_t = torch.linspace(
+        0.0, 1.0, table_count, dtype=control_points.dtype, device=control_points.device
+    )
+    # Length is translation invariant. Removing the origin also prevents
+    # roundoff in constant curves from producing a nonzero lookup length.
+    relative_controls = control_points - control_points[..., :1, :]
+    table_points = bezier_evaluate(relative_controls.unsqueeze(-3), table_t)
+    distances = torch.linalg.vector_norm(
+        table_points[..., 1:, :] - table_points[..., :-1, :], dim=-1
+    )
+    cumulative = torch.cat(
+        (torch.zeros_like(distances[..., :1]), distances.cumsum(dim=-1)), dim=-1
+    )
+    return table_t, cumulative
+
+
+def _parameter_at_arc_length(
+    table_t: torch.Tensor, cumulative: torch.Tensor, distance: torch.Tensor
+) -> torch.Tensor:
+    """Invert a cumulative-length table with linear interpolation."""
+    scalar = distance.ndim == 0
+    if scalar:
+        distance = distance[None]
+    batch_shape = torch.broadcast_shapes(cumulative.shape[:-1], distance.shape[:-1])
+    cumulative = cumulative.expand(*batch_shape, cumulative.shape[-1]).contiguous()
+    targets = distance.expand(*batch_shape, distance.shape[-1]).clamp_min(0.0)
+    targets = torch.minimum(targets, cumulative[..., -1:]).contiguous()
+    indices = torch.searchsorted(cumulative, targets, right=True).clamp(
+        1, table_t.numel() - 1
+    )
+    lower = cumulative.gather(-1, indices - 1)
+    upper = cumulative.gather(-1, indices)
+    span = upper - lower
+    alpha = (targets - lower) / torch.where(span > 0.0, span, torch.ones_like(span))
+    parameters = table_t[indices - 1] + alpha * (
+        table_t[indices] - table_t[indices - 1]
+    )
+    total_length = cumulative[..., -1:]
+    parameters = torch.where(targets >= total_length, 1.0, parameters)
+    parameters = torch.where(targets <= 0.0, 0.0, parameters)
+    return parameters.squeeze(-1) if scalar else parameters
+
+
 def sample_bezier_path(
     control_points: torch.Tensor, sample_count: int, *, arc_length: bool = True
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -587,17 +676,6 @@ def sample_bezier_path(
         or sample_count < 2
     ):
         raise ValueError("sample_count must be an integer of at least 2.")
-    table_count = max(1025, sample_count * 32)
-    table_t = torch.linspace(
-        0.0, 1.0, table_count, dtype=control_points.dtype, device=control_points.device
-    )
-    table_points = bezier_evaluate(control_points.unsqueeze(-3), table_t)
-    distances = torch.linalg.vector_norm(
-        table_points[..., 1:, :] - table_points[..., :-1, :], dim=-1
-    )
-    cumulative = torch.cat(
-        (torch.zeros_like(distances[..., :1]), distances.cumsum(dim=-1)), dim=-1
-    )
     if not arc_length:
         parameters = torch.linspace(
             0.0,
@@ -618,21 +696,13 @@ def sample_bezier_path(
             dim=-1,
         )
         return points, sampled_cumulative
+    table_t, cumulative = _arc_length_table(
+        control_points, max(1025, sample_count * 32)
+    )
     targets = torch.linspace(
         0.0, 1.0, sample_count, dtype=control_points.dtype, device=control_points.device
     )
     targets = targets * cumulative[..., -1:]
-    indices = torch.searchsorted(cumulative, targets, right=True).clamp(
-        1, table_count - 1
-    )
-    lower = cumulative.gather(-1, indices - 1)
-    upper = cumulative.gather(-1, indices)
-    alpha = (
-        (targets - lower)
-        / (upper - lower).clamp_min(torch.finfo(control_points.dtype).eps)
-    ).clamp(0.0, 1.0)
-    parameters = table_t[indices - 1] + alpha * (
-        table_t[indices] - table_t[indices - 1]
-    )
+    parameters = _parameter_at_arc_length(table_t, cumulative, targets)
     points = bezier_evaluate(control_points.unsqueeze(-3), parameters)
     return points, targets

@@ -17,9 +17,12 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import torch
 
 from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.solvers import DifferentialSolverCfg, OPWSolverCfg, URSolverCfg
+from embodichain.lab.sim.solvers.opw_solver import OPWSolver
+from embodichain.lab.sim.solvers.pytorch_solver import PytorchSolver
 
 UR5_DH_PARAMETERS = {
     "d1": 0.089159,
@@ -29,6 +32,20 @@ UR5_DH_PARAMETERS = {
     "d5": 0.09465,
     "d6": 0.0823,
 }
+
+
+def test_continuous_batch_ik_is_an_optional_solver_capability() -> None:
+    # Capability discovery must not initialize kinematics or simulator resources.
+    ordinary = object.__new__(PytorchSolver)
+    opw = object.__new__(OPWSolver)
+    assert not ordinary.supports_continuous_batch_ik
+    assert opw.supports_continuous_batch_ik
+    with pytest.raises(NotImplementedError, match="continuous batch IK"):
+        ordinary._select_continuous_ik_path(
+            torch.empty(1, 2, 1, 6),
+            torch.empty(1, 2, 1, dtype=torch.bool),
+            torch.zeros(1, 6),
+        )
 
 
 def assert_ur5_dh_parameters(cfg: URSolverCfg) -> None:

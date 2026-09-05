@@ -10,6 +10,8 @@
 | Trapezoidal planner | `embodichain/lab/sim/planners/trapezoidal_planner.py` → `TrapezoidalPlanner`, `TrapezoidalPlannerCfg`, `TrapezoidalPlanOptions` |
 | Bézier path geometry | `embodichain/lab/sim/planners/bezier.py` → `BezierPath` and internal quintic waypoint blending helpers |
 | Cartesian SE(3) line | `embodichain/lab/sim/planners/se3.py` → `plan_se3_line`, `SE3LineResult` |
+| Shared scalar timing | `embodichain/lab/sim/planners/_scalar_time_law.py` → `ScalarTimeLaw`, `ScalarState` |
+| Continuous blend constraints | `embodichain/lab/sim/planners/_blend_constraints.py` → Bernstein derivative bounds and phase interval bounds |
 | Trapezoidal Warp kernels | `embodichain/utils/warp/kinematics/trapezoidal_warp.py` → batched profile construction and sampling kernels |
 | Neural planner | `embodichain/lab/sim/planners/neural_planner.py` → `NeuralPlanner`, `NeuralPlannerCfg`, `NeuralPlanOptions` |
 | cuRobo planner | `embodichain/lab/sim/planners/curobo/curobo_planner.py` → `CuroboPlanner`, `CuroboPlannerCfg`, `CuroboWorldCfg`, `CuroboPlanOptions` |
@@ -143,9 +145,10 @@ equivalent nearest to the previous seed, removing representation wrap jumps
 without changing the physical configuration or Cartesian path.
 For OPW robots the Cartesian tutorial submits the complete pose path through
 ``Robot.compute_batch_ik(..., continuous=True)``. This reuses the existing batch
-IK boundary and asks OPW for all candidates in one solver call before its
-internal temporally ordered branch selector runs; other solver types fail
-explicitly rather than being silently treated as continuous path solvers.
+IK boundary and checks the typed `BaseSolver.supports_continuous_batch_ik`
+capability before requesting all candidates. OPW opts in and overrides the
+base `_select_continuous_ik_path` hook; unsupported solvers are rejected before
+candidate generation or pose-frame conversion.
 Interactive replay consumes ``PlanResult.dt`` rather than submitting all
 samples as fast as Python can loop: every command advances enough physics steps
 for its scaled interval and windowed runs are wall-clock paced. The
@@ -170,6 +173,29 @@ fifth-order Bézier blends. The planner projects per-joint limits onto the
 curved path and composes derivatives analytically through jerk; zero preserves
 piecewise-linear behavior. All-stationary inputs take the hold fast path before
 blend construction.
+Blended constraints are enforced before caller-requested sampling. Derivative
+control-point convex hulls bound each linear/quintic path segment, while exact
+scalar extrema bound each constant-jerk phase interval. Subdivision tightens
+these bounds without relying on samples hitting a peak. Third-order chain-rule
+bounds determine one uniform time stretch per environment; changing output
+quantity or time step cannot change the continuous trajectory duration.
+`constraint_report` retains sampled peaks and additionally exposes continuous
+`velocity_upper_bound_per_joint`, `acceleration_upper_bound_per_joint`, and
+`jerk_upper_bound_per_joint`. Blended `within_limits` uses these bounds;
+trapezoidal acceleration jumps are not jerk constrained and their jerk bound
+is infinite. Geometry bounds are reused for initial projection and enforcement.
+Both joint and Cartesian planners use `ScalarTimeLaw` for construction,
+minimum-duration scaling, and evaluation. `plan_se3_line` accepts only
+`trapezoidal` and `double_s` and validates `minimum_duration` as `None` or a
+finite non-negative number; zero leaves natural timing unchanged. Joint
+`TrapezoidalPlanOptions` retains its positive-only minimum-duration contract.
+SE(3) logarithm and exponential translation coefficients use stable half-angle
+expressions and dtype-aware small-angle series, including float32 motions.
+For Cartesian Bézier timing, `BezierPath.parameter_at_arc_length` maps metric
+distance to polynomial parameters using an independent lookup resolution.
+Positions, arc tangents, and arc curvature must all use these same parameters;
+normalized arc length is not the polynomial parameter. The Cartesian tutorial
+uses this mapping directly instead of interpolating a second dense point table.
 Torch uses batched ``searchsorted`` for segment lookup without materializing a
 ``(B, N, segments)`` comparison tensor. Warp uses binary segment search once
 per ``(B, N)`` sample, then a separate ``(B, N, DOF)`` composition kernel so
@@ -359,6 +385,10 @@ Helper: `PlanResult.is_all_success() -> bool` returns `True` only when every env
 A failed result may omit the trajectory entirely by leaving `positions=None`.
 When `MotionGenerator` resamples a fully timed result, it preserves each row's
 total duration and emits new explicit arrival intervals.
+`MotionGenerator.generate()` preserves the backend `constraint_report` for
+unchanged trajectories, including backends that preserve samples. Resampling
+or replacing failed rows with a start-pose hold invalidates the entire report
+to `None`; planner-specific diagnostics cannot be generically recomputed.
 
 ### MoveType enum
 

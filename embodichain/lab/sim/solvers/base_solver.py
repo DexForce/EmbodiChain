@@ -29,6 +29,8 @@ if TYPE_CHECKING:
 
 from embodichain.lab.sim.utility.solver_utils import create_pk_serial_chain
 
+__all__ = ["BaseSolver", "SolverCfg"]
+
 
 @configclass
 class SolverCfg:
@@ -428,6 +430,39 @@ class BaseSolver(metaclass=ABCMeta):
             ValueError: If the TCP position has not been set.
         """
         return self.tcp_xpos
+
+    @property
+    def supports_continuous_batch_ik(self) -> bool:
+        """Whether all-candidate IK and temporally continuous selection are supported.
+
+        Supporting solvers return candidate validity shaped (M, K) and joint
+        positions shaped (M, K, DOF) from ``get_ik(return_all_solutions=True)``.
+        They must also implement :meth:`_select_continuous_ik_path`.
+        """
+        return False
+
+    def _select_continuous_ik_path(
+        self,
+        candidate_qpos: torch.Tensor,
+        candidate_valid: torch.Tensor,
+        qpos_seed: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Select a joint path from solver-specific candidate branches.
+
+        Args:
+            candidate_qpos: Candidates shaped (B, N, K, DOF).
+            candidate_valid: Boolean candidate validity shaped (B, N, K).
+            qpos_seed: Initial path seeds shaped (B, DOF).
+
+        Returns:
+            Per-sample validity (B, N) and selected positions (B, N, DOF).
+
+        Raises:
+            NotImplementedError: If continuous selection is unsupported.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support continuous batch IK."
+        )
 
     @abstractmethod
     def get_ik(

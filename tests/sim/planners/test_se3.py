@@ -53,6 +53,40 @@ def test_se3_line_uses_geodesic_rotation_and_linear_translation() -> None:
     assert torch.allclose(result[2], end, atol=1e-12)
 
 
+@pytest.mark.parametrize("angle", [0.0, 1e-7, 1e-4, 0.01, 0.02])
+def test_plan_se3_line_float32_small_rotations_reach_target(angle: float) -> None:
+    start = torch.eye(4)
+    end = start.clone()
+    theta = torch.tensor(angle)
+    cosine, sine = theta.cos(), theta.sin()
+    end[:2, :2] = torch.stack(
+        (torch.stack((cosine, -sine)), torch.stack((sine, cosine)))
+    )
+    end[0, 3] = 1.0
+    limit = torch.ones(6)
+
+    result = plan_se3_line(start, end, limit, limit, limit, sample_count=101)
+
+    # An SE(3) exponential/logarithm round trip should retain float32 precision
+    # even when rotation is tiny compared with the translation.
+    tolerance = 4.0 * torch.finfo(start.dtype).eps
+    torch.testing.assert_close(result.poses[0], start, atol=tolerance, rtol=0.0)
+    torch.testing.assert_close(result.poses[-1], end, atol=tolerance, rtol=0.0)
+
+
+@pytest.mark.parametrize("angle", [0.0, 1e-4, 0.01])
+def test_se3_small_rotation_path_matches_matrix_exponential(angle: float) -> None:
+    generator = torch.zeros((4, 4), dtype=torch.float64)
+    generator[0, 1], generator[1, 0] = -angle, angle
+    generator[:3, 3] = torch.tensor([1.0, 0.2, -0.3], dtype=torch.float64)
+    parameter = torch.linspace(0.0, 1.0, 33)
+    expected = torch.matrix_exp(parameter.double()[:, None, None] * generator)
+
+    poses = se3_line_evaluate(torch.eye(4), expected[-1].float(), parameter)
+
+    torch.testing.assert_close(poses, expected.float(), atol=2e-7, rtol=0.0)
+
+
 def test_se3_line_handles_exact_half_turn() -> None:
     start = torch.eye(4, dtype=torch.float64)
     end = torch.diag(torch.tensor([1.0, -1.0, -1.0, 1.0], dtype=torch.float64))
@@ -292,3 +326,35 @@ def test_plan_se3_line_validates_transforms_before_planning() -> None:
             torch.ones(6, dtype=torch.float64),
             torch.ones(6, dtype=torch.float64),
         )
+
+
+@pytest.mark.parametrize(
+    "timing",
+    [
+        {"profile": "invalid"},
+        {"profile": None},
+        {"minimum_duration": -1.0},
+        {"minimum_duration": float("nan")},
+        {"minimum_duration": float("inf")},
+        {"minimum_duration": True},
+        {"minimum_duration": "1.0"},
+    ],
+)
+def test_plan_se3_line_rejects_invalid_timing_options(timing: dict) -> None:
+    start = torch.eye(4, dtype=torch.float64)
+    end = start.clone()
+    end[0, 3] = 1.0
+    limits = torch.ones(6, dtype=torch.float64)
+    with pytest.raises(ValueError, match=next(iter(timing))):
+        plan_se3_line(start, end, limits, limits, limits, **timing)
+
+
+def test_plan_se3_line_accepts_zero_minimum_duration() -> None:
+    start = torch.eye(4, dtype=torch.float64)
+    end = start.clone()
+    end[0, 3] = 1.0
+    limits = torch.ones(6, dtype=torch.float64)
+    unconstrained = plan_se3_line(start, end, limits, limits, limits)
+    zero = plan_se3_line(start, end, limits, limits, limits, minimum_duration=0.0)
+    assert torch.equal(zero.times, unconstrained.times)
+    assert torch.equal(zero.poses, unconstrained.poses)

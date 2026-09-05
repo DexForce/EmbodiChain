@@ -210,7 +210,13 @@ class PlanResult:
     """Per-env time deltas, shape ``(B, N)``."""
 
     constraint_report: dict[str, torch.Tensor] | None = None
-    """Optional diagnostics containing sampled derivative peaks and limits."""
+    """Optional derivative diagnostics, invalidated when the trajectory changes.
+
+    Peak fields describe sampled derivatives (or analytic phase jerk). Blended
+    joint plans also provide conservative ``*_upper_bound_per_joint`` fields;
+    their ``within_limits`` is based on these continuous bounds. Trapezoidal
+    acceleration jumps are not jerk constrained and have an infinite jerk bound.
+    """
 
     def __post_init__(self) -> None:
         """Validate the explicit trajectory-timing contract."""

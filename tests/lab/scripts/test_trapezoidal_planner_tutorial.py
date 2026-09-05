@@ -37,6 +37,7 @@ from scripts.tutorials.sim.planner.trapezoidal_planner import (
     joint_derivatives_from_path_time_law,
     maximum_line_deviation,
     nearest_equivalent_joint_solution,
+    plan_cartesian_bezier,
     plan_cartesian_line,
     plot_trajectory_diagnostics,
     positive_float,
@@ -58,8 +59,10 @@ class _Solver:
 class _Robot:
     """Minimal robot interface used by the tutorial waypoint builders."""
 
-    def __init__(self, batch_size: int = 2, dof: int = 6) -> None:
-        self.qpos = torch.zeros(batch_size, dof)
+    def __init__(
+        self, batch_size: int = 2, dof: int = 6, *, dtype: torch.dtype = torch.float32
+    ) -> None:
+        self.qpos = torch.zeros(batch_size, dof, dtype=dtype)
         self.commands: list[torch.Tensor] = []
         self.solver = _Solver()
         self.fk_call_count = 0
@@ -90,10 +93,10 @@ class _Robot:
         if env_ids is not None:
             assert len(env_ids) == qpos.shape[0]
         if to_matrix:
-            pose = torch.eye(4).repeat(qpos.shape[0], 1, 1)
+            pose = torch.eye(4, dtype=qpos.dtype).repeat(qpos.shape[0], 1, 1)
             pose[:, :3, 3] = qpos[:, :3]
             return pose
-        quaternion = torch.zeros(qpos.shape[0], 4)
+        quaternion = qpos.new_zeros((qpos.shape[0], 4))
         quaternion[:, 0] = 1.0
         return torch.cat((qpos[:, :3], quaternion), dim=-1)
 
@@ -132,7 +135,7 @@ class _Robot:
     def get_control_part_base_pose(self, name: str, to_matrix: bool) -> torch.Tensor:
         assert name == "left_arm"
         assert to_matrix
-        return torch.eye(4).repeat(self.qpos.shape[0], 1, 1)
+        return torch.eye(4, dtype=self.qpos.dtype).repeat(self.qpos.shape[0], 1, 1)
 
     def set_qpos(self, qpos: torch.Tensor, name: str) -> None:
         assert name == "left_arm"
@@ -251,6 +254,41 @@ def test_cartesian_time_law_is_applied_before_ik() -> None:
     )
     assert torch.count_nonzero(result.velocities[:, 0]) == 0
     assert robot.path_ik_call_count == 1
+
+
+@pytest.mark.parametrize("count", [501, 2001])
+def test_cartesian_bezier_derivatives_match_timed_positions(count: int) -> None:
+    robot = _Robot(dtype=torch.float64)
+    robot.qpos[1, :3] = torch.tensor([0.1, -0.2, 0.3])
+    result, _, _ = plan_cartesian_bezier(
+        robot,
+        "left_arm",
+        robot.qpos,
+        distance=0.2,
+        profile="double_s",
+        sample_count=count,
+        velocity_limit=0.15,
+        acceleration_limit=0.3,
+        jerk_limit=1.0,
+        backend="torch",
+    )
+
+    for row in range(robot.qpos.shape[0]):
+        time = result.dt[row].cumsum(0)
+        velocity = torch.gradient(
+            result.positions[row], spacing=(time,), dim=(0,), edge_order=2
+        )[0]
+        acceleration = torch.gradient(
+            velocity, spacing=(time,), dim=(0,), edge_order=2
+        )[0]
+        # Interior central differences allow for finite spacing across jerk
+        # switches and the approximate arc-length inverse lookup.
+        torch.testing.assert_close(
+            result.velocities[row, 2:-2], velocity[2:-2], atol=2e-5, rtol=1e-3
+        )
+        torch.testing.assert_close(
+            result.accelerations[row, 2:-2], acceleration[2:-2], atol=2e-3, rtol=1e-3
+        )
 
 
 def test_eef_trajectory_uses_one_batched_fk_call() -> None:

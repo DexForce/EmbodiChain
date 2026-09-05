@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from typing import Literal
 
 import torch
@@ -28,7 +27,6 @@ from embodichain.utils import configclass
 from .bezier import (
     compose_quintic_blend_jerk,
     compose_quintic_blend_state,
-    project_quintic_blend_limits,
     quintic_blend_segments,
 )
 
@@ -38,6 +36,8 @@ from .base_planner import (
     PlanOptions,
     validate_plan_options,
 )
+from ._blend_constraints import bound_blended_derivatives, bound_path_derivatives
+from ._scalar_time_law import ScalarTimeLaw
 from .utils import MoveType, PlanResult, PlanState, TrajectorySampleMethod
 
 __all__ = [
@@ -149,17 +149,6 @@ class TrapezoidalPlanOptions(PlanOptions):
             raise ValueError("backend must be 'auto', 'torch', or 'warp'.")
 
 
-@dataclass(slots=True)
-class _ProfileBatch:
-    """Internal fixed-shape phase representation."""
-
-    durations: torch.Tensor
-    positions: torch.Tensor
-    velocities: torch.Tensor
-    accelerations: torch.Tensor
-    jerks: torch.Tensor
-
-
 def _compress_collinear_waypoints(
     waypoints: torch.Tensor,
     tolerance: float,
@@ -262,400 +251,6 @@ def _scalar_path_limits(
     )
 
 
-def _integrate_phases(durations: torch.Tensor, jerks: torch.Tensor) -> _ProfileBatch:
-    """Integrate piecewise-constant jerk phases from rest."""
-    positions = torch.zeros_like(durations)
-    velocities = torch.zeros_like(durations)
-    accelerations = torch.zeros_like(durations)
-    position = torch.zeros_like(durations[..., 0])
-    velocity = torch.zeros_like(position)
-    acceleration = torch.zeros_like(position)
-    for phase in range(durations.shape[-1]):
-        positions[..., phase] = position
-        velocities[..., phase] = velocity
-        accelerations[..., phase] = acceleration
-        duration = durations[..., phase]
-        jerk = jerks[..., phase]
-        position = (
-            position
-            + velocity * duration
-            + 0.5 * acceleration * duration.square()
-            + jerk * duration.pow(3) / 6.0
-        )
-        velocity = velocity + acceleration * duration + 0.5 * jerk * duration.square()
-        acceleration = acceleration + jerk * duration
-    return _ProfileBatch(durations, positions, velocities, accelerations, jerks)
-
-
-def _apply_minimum_duration(
-    profile: _ProfileBatch,
-    minimum_duration: float | None,
-) -> _ProfileBatch:
-    """Uniformly slow complete batch rows to a requested minimum duration."""
-    if minimum_duration is None:
-        return profile
-    total_duration = profile.durations.sum(dim=(-2, -1))
-    epsilon = torch.finfo(total_duration.dtype).eps
-    stationary = total_duration <= epsilon
-    requested_scale = minimum_duration / total_duration.clamp_min(epsilon)
-    scale = torch.maximum(torch.ones_like(total_duration), requested_scale)
-    scale = torch.where(stationary, torch.ones_like(scale), scale)
-    phase_scale = scale[:, None, None]
-    slowed = _ProfileBatch(
-        durations=profile.durations * phase_scale,
-        positions=profile.positions,
-        velocities=profile.velocities / phase_scale,
-        accelerations=profile.accelerations / phase_scale.square(),
-        jerks=profile.jerks / phase_scale.pow(3),
-    )
-    if bool(stationary.any().item()):
-        slowed.durations[stationary] = 0.0
-        slowed.durations[stationary, 0, slowed.durations.shape[-1] // 2] = (
-            minimum_duration
-        )
-        slowed.positions[stationary] = 0.0
-        slowed.velocities[stationary] = 0.0
-        slowed.accelerations[stationary] = 0.0
-        slowed.jerks[stationary] = 0.0
-    return slowed
-
-
-def _scale_profile_time(profile: _ProfileBatch, scale: torch.Tensor) -> _ProfileBatch:
-    """Apply per-segment uniform time scaling without changing path position."""
-    phase_scale = scale[..., None]
-    return _ProfileBatch(
-        durations=profile.durations * phase_scale,
-        positions=profile.positions,
-        velocities=profile.velocities / phase_scale,
-        accelerations=profile.accelerations / phase_scale.square(),
-        jerks=profile.jerks / phase_scale.pow(3),
-    )
-
-
-def _build_trapezoidal_profile(
-    velocity_limit: torch.Tensor,
-    acceleration_limit: torch.Tensor,
-) -> _ProfileBatch:
-    """Build rest-to-rest unit-distance triangular or trapezoidal profiles."""
-    stationary = velocity_limit <= 0.0
-    acceleration_time = velocity_limit / acceleration_limit.clamp_min(1e-12)
-    acceleration_distance_twice = (
-        velocity_limit.square() / acceleration_limit.clamp_min(1e-12)
-    )
-    reaches_velocity = acceleration_distance_twice < 1.0
-    peak_velocity = torch.where(
-        reaches_velocity,
-        velocity_limit,
-        torch.sqrt(acceleration_limit),
-    )
-    acceleration_time = peak_velocity / acceleration_limit.clamp_min(1e-12)
-    cruise_time = torch.where(
-        reaches_velocity,
-        (1.0 - peak_velocity.square() / acceleration_limit) / peak_velocity,
-        torch.zeros_like(peak_velocity),
-    )
-    acceleration_time = torch.where(
-        stationary, torch.zeros_like(acceleration_time), acceleration_time
-    )
-    cruise_time = torch.where(stationary, torch.zeros_like(cruise_time), cruise_time)
-    durations = torch.stack([acceleration_time, cruise_time, acceleration_time], dim=-1)
-    # A trapezoidal profile has piecewise-constant acceleration. Represent it as
-    # zero-jerk phases and seed their accelerations explicitly below.
-    profile = _integrate_phases(durations, torch.zeros_like(durations))
-    profile.accelerations[..., 0] = acceleration_limit
-    profile.accelerations[..., 1] = 0.0
-    profile.accelerations[..., 2] = -acceleration_limit
-    profile.velocities[..., 0] = 0.0
-    profile.velocities[..., 1] = peak_velocity
-    profile.velocities[..., 2] = peak_velocity
-    profile.positions[..., 0] = 0.0
-    profile.positions[..., 1] = 0.5 * peak_velocity * acceleration_time
-    profile.positions[..., 2] = profile.positions[..., 1] + peak_velocity * cruise_time
-    return profile
-
-
-def _build_double_s_profile(
-    velocity_limit: torch.Tensor,
-    acceleration_limit: torch.Tensor,
-    jerk_limit: torch.Tensor,
-) -> _ProfileBatch:
-    """Build the rest-to-rest seven-phase Double-S profile.
-
-    This follows ``TrajectoryDoubleS::_ComputeDoubleSProfile`` for zero path
-    boundary velocities. In particular, a move without a constant-velocity
-    phase repeatedly lowers the candidate acceleration by ``0.9`` until both
-    acceleration halves can contain their two jerk ramps. That deliberately
-    differs from the closed-form triangular-jerk fallback commonly used by
-    simplified Double-S implementations.
-    """
-    stationary = velocity_limit <= 0.0
-    epsilon = 1e-12
-    safe_velocity = velocity_limit.clamp_min(epsilon)
-    safe_acceleration = acceleration_limit.clamp_min(epsilon)
-    safe_jerk = jerk_limit.clamp_min(epsilon)
-
-    reaches_acceleration = safe_velocity * safe_jerk >= safe_acceleration.square()
-    tj = torch.where(
-        reaches_acceleration,
-        safe_acceleration / safe_jerk,
-        torch.sqrt(safe_velocity / safe_jerk),
-    )
-    ta = torch.where(
-        reaches_acceleration,
-        tj + safe_velocity / safe_acceleration,
-        2.0 * tj,
-    )
-    cruise_time = 1.0 / safe_velocity - ta
-    no_cruise = (~stationary) & (cruise_time <= 0.0)
-
-    # Use the intentionally discrete feasibility search required by the
-    # than substituting an analytic triangular-jerk solution.
-    candidate_acceleration = safe_acceleration.clone()
-    for _ in range(1001):
-        if not bool(no_cruise.any().item()):
-            break
-        candidate_tj = candidate_acceleration / safe_jerk
-        delta = torch.sqrt(
-            candidate_acceleration.pow(4) / safe_jerk.square()
-            + 4.0 * candidate_acceleration
-        )
-        candidate_ta = (candidate_acceleration.square() / safe_jerk + delta) / (
-            2.0 * candidate_acceleration
-        )
-        accepted = no_cruise & (candidate_ta >= 2.0 * candidate_tj)
-        tj = torch.where(accepted, candidate_tj, tj)
-        ta = torch.where(accepted, candidate_ta, ta)
-        no_cruise = no_cruise & ~accepted
-        candidate_acceleration = torch.where(
-            no_cruise, candidate_acceleration * 0.9, candidate_acceleration
-        )
-    if bool(no_cruise.any().item()):
-        raise RuntimeError("Double-S acceleration search did not converge.")
-    cruise_time = torch.clamp_min(cruise_time, 0.0)
-    tj = torch.where(stationary, torch.zeros_like(tj), tj)
-    ta = torch.where(stationary, torch.zeros_like(ta), ta)
-    cruise_time = torch.where(stationary, torch.zeros_like(cruise_time), cruise_time)
-    constant_acceleration_time = torch.clamp_min(ta - 2.0 * tj, 0.0)
-    durations = torch.stack(
-        [
-            tj,
-            constant_acceleration_time,
-            tj,
-            cruise_time,
-            tj,
-            constant_acceleration_time,
-            tj,
-        ],
-        dim=-1,
-    )
-    signs = torch.tensor(
-        [1.0, 0.0, -1.0, 0.0, -1.0, 0.0, 1.0],
-        dtype=jerk_limit.dtype,
-        device=jerk_limit.device,
-    )
-    jerks = jerk_limit[..., None] * signs
-    jerks = torch.where(stationary[..., None], torch.zeros_like(jerks), jerks)
-    return _integrate_phases(durations, jerks)
-
-
-def _use_warp_backend(
-    reference: torch.Tensor,
-    backend: Literal["auto", "torch", "warp"],
-) -> bool:
-    """Return whether a profile stage should execute through Warp."""
-    return backend == "warp" or (
-        backend == "auto" and reference.is_cuda and reference.dtype == torch.float32
-    )
-
-
-def _build_scalar_profile(
-    *,
-    profile_name: Literal["trapezoidal", "double_s"],
-    velocity_limit: torch.Tensor,
-    acceleration_limit: torch.Tensor,
-    jerk_limit: torch.Tensor,
-    backend: Literal["auto", "torch", "warp"],
-) -> _ProfileBatch:
-    """Build scalar phases with the selected backend and shared post-processing."""
-    use_warp = _use_warp_backend(velocity_limit, backend)
-    if use_warp and velocity_limit.dtype != torch.float32:
-        if backend == "warp":
-            raise ValueError("The Warp trajectory backend requires float32 input.")
-        use_warp = False
-    if use_warp:
-        try:
-            from embodichain.utils.warp.kinematics.trapezoidal_warp import (
-                build_profile_warp,
-            )
-        except ImportError:
-            if backend == "warp":
-                raise ImportError(
-                    "The Warp trajectory backend requires the 'warp' package."
-                ) from None
-            use_warp = False
-        else:
-            tensors = build_profile_warp(
-                profile=profile_name,
-                velocity_limits=velocity_limit,
-                acceleration_limits=acceleration_limit,
-                jerk_limits=jerk_limit,
-            )
-            result = _ProfileBatch(*tensors)
-    if not use_warp:
-        result = (
-            _build_double_s_profile(velocity_limit, acceleration_limit, jerk_limit)
-            if profile_name == "double_s"
-            else _build_trapezoidal_profile(velocity_limit, acceleration_limit)
-        )
-
-    if profile_name in {"double_s", "trapezoidal"}:
-        # HolisticMotion applies a 1% duration margin after limit projection
-        # so sampled derivatives remain strictly inside their constraints.
-        margin = torch.where(
-            velocity_limit > 0.0,
-            torch.full_like(velocity_limit, 1.01),
-            torch.ones_like(velocity_limit),
-        )
-        result = _scale_profile_time(result, margin)
-    return result
-
-
-def _compose_profile_samples_torch(
-    *,
-    times: torch.Tensor,
-    cumulative_duration: torch.Tensor,
-    profile: _ProfileBatch,
-    segment_starts: torch.Tensor,
-    segment_deltas: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Evaluate scalar profiles and compose joint states with Torch."""
-    segment = torch.searchsorted(
-        cumulative_duration.contiguous(), times.contiguous(), right=True
-    )
-    segment = segment.clamp_max(segment_deltas.shape[1] - 1)
-    previous_duration = torch.cat(
-        [torch.zeros_like(cumulative_duration[:, :1]), cumulative_duration[:, :-1]],
-        dim=-1,
-    )
-    local_time = times - torch.gather(previous_duration, 1, segment)
-    batch_ids = torch.arange(times.shape[0], device=times.device)[:, None].expand_as(
-        segment
-    )
-    selected_durations = profile.durations[batch_ids, segment]
-    # HolisticMotion clamps evaluation outside the trajectory domain to the
-    # segment endpoint.  Clamp before phase lookup so extrapolation cannot
-    # produce overshoot for callers supplying out-of-range sample times.
-    local_time = local_time.clamp_min(0.0).clamp_max(selected_durations.sum(dim=-1))
-    cumulative_phase_time = selected_durations.cumsum(dim=-1)
-    phase = torch.searchsorted(
-        cumulative_phase_time.contiguous(),
-        local_time.unsqueeze(-1).contiguous(),
-        right=True,
-    ).squeeze(-1)
-    phase = phase.clamp_max(profile.durations.shape[-1] - 1)
-    phase_start_time = torch.cat(
-        [
-            torch.zeros_like(cumulative_phase_time[..., :1]),
-            cumulative_phase_time[..., :-1],
-        ],
-        dim=-1,
-    )
-    gather = phase[..., None]
-    tau = (
-        local_time - torch.gather(phase_start_time, -1, gather).squeeze(-1)
-    ).clamp_min(0.0)
-    p0 = profile.positions[batch_ids, segment, phase]
-    v0 = profile.velocities[batch_ids, segment, phase]
-    a0 = profile.accelerations[batch_ids, segment, phase]
-    jerk = profile.jerks[batch_ids, segment, phase]
-    path_position = p0 + v0 * tau + 0.5 * a0 * tau.square() + jerk * tau.pow(3) / 6.0
-    path_velocity = v0 + a0 * tau + 0.5 * jerk * tau.square()
-    path_acceleration = a0 + jerk * tau
-    selected_delta = segment_deltas[batch_ids, segment]
-    selected_start = segment_starts[batch_ids, segment]
-    return (
-        selected_start + selected_delta * path_position[..., None],
-        selected_delta * path_velocity[..., None],
-        selected_delta * path_acceleration[..., None],
-    )
-
-
-def _sample_profile_jerk_torch(
-    times: torch.Tensor,
-    cumulative_duration: torch.Tensor,
-    profile: _ProfileBatch,
-) -> torch.Tensor:
-    """Return analytic scalar phase jerk at each sample time."""
-    segment = torch.searchsorted(
-        cumulative_duration.contiguous(), times.contiguous(), right=True
-    ).clamp_max(cumulative_duration.shape[1] - 1)
-    previous_duration = torch.cat(
-        (torch.zeros_like(cumulative_duration[:, :1]), cumulative_duration[:, :-1]),
-        dim=1,
-    )
-    local = times - previous_duration.gather(1, segment)
-    batch = torch.arange(times.shape[0], device=times.device)[:, None].expand_as(
-        segment
-    )
-    durations = profile.durations[batch, segment]
-    phase = (
-        torch.searchsorted(
-            durations.cumsum(dim=-1).contiguous(),
-            local[..., None].contiguous(),
-            right=True,
-        )
-        .squeeze(-1)
-        .clamp_max(durations.shape[-1] - 1)
-    )
-    return profile.jerks[batch, segment, phase]
-
-
-def _compose_profile_samples(
-    *,
-    times: torch.Tensor,
-    cumulative_duration: torch.Tensor,
-    profile: _ProfileBatch,
-    segment_starts: torch.Tensor,
-    segment_deltas: torch.Tensor,
-    backend: Literal["auto", "torch", "warp"],
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Dispatch sample composition to Torch or the optional Warp kernel."""
-    use_warp = _use_warp_backend(times, backend)
-    if use_warp:
-        if times.dtype != torch.float32:
-            if backend == "warp":
-                raise ValueError("The Warp trajectory backend requires float32 input.")
-        else:
-            try:
-                from embodichain.utils.warp.kinematics.trapezoidal_warp import (
-                    compose_profile_samples_warp,
-                )
-            except ImportError:
-                if backend == "warp":
-                    raise ImportError(
-                        "The Warp trajectory backend requires the 'warp' package."
-                    ) from None
-            else:
-                return compose_profile_samples_warp(
-                    times=times,
-                    cumulative_segment_time=cumulative_duration,
-                    phase_durations=profile.durations,
-                    phase_positions=profile.positions,
-                    phase_velocities=profile.velocities,
-                    phase_accelerations=profile.accelerations,
-                    phase_jerks=profile.jerks,
-                    segment_starts=segment_starts,
-                    segment_deltas=segment_deltas,
-                )
-    return _compose_profile_samples_torch(
-        times=times,
-        cumulative_duration=cumulative_duration,
-        profile=profile,
-        segment_starts=segment_starts,
-        segment_deltas=segment_deltas,
-    )
-
-
 def _sample_times_from_intervals(
     segment_duration: torch.Tensor,
     intervals: torch.Tensor,
@@ -684,7 +279,7 @@ def _sample_times_from_intervals(
     local_interval = clamped_ids - previous_intervals.gather(1, segment)
     times = previous_duration.gather(1, segment) + segment_duration.gather(
         1, segment
-    ) * (local_interval / segment_intervals)
+    ) * (local_interval.to(segment_duration.dtype) / segment_intervals)
     times[:, 0] = 0.0
     return torch.where(last_sample > 0, times, torch.zeros_like(times))
 
@@ -751,76 +346,70 @@ def _plan_blended_profiles(
     acceleration_joint = _limit_tensor(options.constraints["acceleration"], waypoints)
     jerk_joint = _limit_tensor(options.constraints.get("jerk", 1.0), waypoints)
     lengths = []
+    path_bounds = []
     projected = []
     for row in waypoints:
-        _, segment_lengths = quintic_blend_segments(row, options.blend_tolerance)
-        length = segment_lengths.sum()
-        path_velocity, path_acceleration = project_quintic_blend_limits(
-            row, options.blend_tolerance, velocity_joint, acceleration_joint
+        segments, segment_lengths = quintic_blend_segments(row, options.blend_tolerance)
+        bounds = bound_path_derivatives(segments, segment_lengths)
+        tangent, curvature, _ = bounds.amax(dim=(0, 2)).to(row.dtype)
+        epsilon = torch.finfo(row.dtype).eps
+        tangent = tangent.clamp_min(epsilon)
+        path_velocity = (velocity_joint / tangent).amin()
+        curvature_velocity = (
+            (acceleration_joint / curvature.clamp_min(epsilon)).sqrt().amin()
         )
-        # Tangential jerk projection; curvature is already accounted for by
-        # the conservative acceleration projection.
-        sample_distance = torch.linspace(
-            0.0, length.item(), 2049, dtype=row.dtype, device=row.device
-        )
-        unit_speed = torch.ones_like(sample_distance)
-        zero = torch.zeros_like(sample_distance)
-        _, unit_velocity, _ = compose_quintic_blend_state(
-            row, options.blend_tolerance, sample_distance, unit_speed, zero
-        )
-        tangent_peak = (
-            unit_velocity.abs().amax(dim=0).clamp_min(torch.finfo(row.dtype).eps)
-        )
-        path_jerk = (jerk_joint / tangent_peak).amin()
-        lengths.append(length)
+        path_velocity = torch.minimum(path_velocity, curvature_velocity)
+        path_acceleration = (acceleration_joint / tangent).amin()
+        path_jerk = (jerk_joint / tangent).amin()
+        lengths.append(segment_lengths)
+        path_bounds.append(bounds)
         projected.append(
-            torch.stack((path_velocity, path_acceleration, path_jerk)) / length
+            torch.stack((path_velocity, path_acceleration, path_jerk))
+            / segment_lengths.sum()
         )
-    path_length = torch.stack(lengths)
+    path_length = torch.stack([value.sum() for value in lengths])
     limits = torch.stack(projected)
-    profile = _build_scalar_profile(
+    profile = ScalarTimeLaw.build(
         profile_name=options.profile,
         velocity_limit=limits[:, 0:1],
         acceleration_limit=limits[:, 1:2],
         jerk_limit=limits[:, 2:3],
         backend=options.backend,
     )
-    profile = _apply_minimum_duration(profile, options.minimum_duration)
-    segment_duration = profile.durations.sum(dim=-1)
-    times = _make_sample_times(segment_duration, options)
-    scalar_position, scalar_velocity, scalar_acceleration = (
-        _compose_profile_samples_torch(
-            times=times,
-            cumulative_duration=segment_duration,
-            profile=profile,
-            segment_starts=waypoints.new_zeros((waypoints.shape[0], 1, 1)),
-            segment_deltas=waypoints.new_ones((waypoints.shape[0], 1, 1)),
-        )
-    )
-    states = [
-        compose_quintic_blend_state(
-            waypoints[index],
-            options.blend_tolerance,
-            path_length[index] * scalar_position[index, :, 0],
-            path_length[index] * scalar_velocity[index, :, 0],
-            path_length[index] * scalar_acceleration[index, :, 0],
-        )
-        for index in range(waypoints.shape[0])
-    ]
-    scalar_jerk = _sample_profile_jerk_torch(times, segment_duration, profile)
-    joint_jerks = torch.stack(
+    profile = profile.with_minimum_duration(options.minimum_duration)
+    upper_bounds = torch.stack(
         [
-            compose_quintic_blend_jerk(
-                waypoints[index],
-                options.blend_tolerance,
-                path_length[index] * scalar_position[index, :, 0],
-                path_length[index] * scalar_velocity[index, :, 0],
-                path_length[index] * scalar_acceleration[index, :, 0],
-                path_length[index] * scalar_jerk[index],
+            bound_blended_derivatives(
+                lengths[index], path_bounds[index], profile, index
             )
             for index in range(waypoints.shape[0])
         ]
     )
+    scale = torch.maximum(
+        (upper_bounds[:, 0] / velocity_joint).amax(dim=1),
+        (upper_bounds[:, 1] / acceleration_joint).amax(dim=1).sqrt(),
+    )
+    if options.profile == "double_s":
+        scale = torch.maximum(
+            scale, (upper_bounds[:, 2] / jerk_joint).amax(dim=1).pow(1.0 / 3.0)
+        )
+    scale = scale.clamp_min(1.0)
+    profile = profile.scaled(scale[:, None])
+    orders = waypoints.new_tensor([1.0, 2.0, 3.0])
+    upper_bounds = upper_bounds / scale[:, None, None].pow(orders[None, :, None])
+    segment_duration = profile.durations.sum(dim=-1)
+    times = _make_sample_times(segment_duration, options)
+    scalar = profile.evaluate(times)
+    states = [
+        compose_quintic_blend_state(
+            waypoints[index],
+            options.blend_tolerance,
+            path_length[index] * scalar.position[index],
+            path_length[index] * scalar.velocity[index],
+            path_length[index] * scalar.acceleration[index],
+        )
+        for index in range(waypoints.shape[0])
+    ]
     positions = torch.stack([state[0] for state in states])
     velocities = torch.stack([state[1] for state in states])
     accelerations = torch.stack([state[2] for state in states])
@@ -828,31 +417,20 @@ def _plan_blended_profiles(
     velocities[:, 0] = velocities[:, -1] = 0.0
     accelerations[:, 0] = accelerations[:, -1] = 0.0
     dt = torch.diff(times, dim=1, prepend=torch.zeros_like(times[:, :1]))
-    velocity_ratio = (velocities.abs().amax(dim=1) / velocity_joint).amax(dim=1)
-    acceleration_ratio = (accelerations.abs().amax(dim=1) / acceleration_joint).amax(
-        dim=1
-    )
-    derivative_scale = torch.maximum(
-        velocity_ratio,
-        acceleration_ratio.clamp_min(0.0).sqrt(),
-    ).clamp_min(1.0)
-    dt = dt * derivative_scale[:, None]
-    velocities = velocities / derivative_scale[:, None, None]
-    accelerations = accelerations / derivative_scale[:, None, None].square()
-    joint_jerks = joint_jerks / derivative_scale[:, None, None].pow(3)
     if options.profile == "double_s":
-        peak_jerk_joint = joint_jerks.abs().amax(dim=1)
-        peak_jerk = peak_jerk_joint.amax(dim=1)
-        # A uniform time stretch scales velocity, acceleration, and jerk by
-        # 1/k, 1/k², and 1/k³. Correct the curvature-variation contribution
-        # that is not represented by the tangential jerk projection.
-        jerk_scale = (
-            (peak_jerk_joint / jerk_joint).amax(dim=1).clamp_min(1.0).pow(1.0 / 3.0)
+        joint_jerks = torch.stack(
+            [
+                compose_quintic_blend_jerk(
+                    waypoints[index],
+                    options.blend_tolerance,
+                    path_length[index] * scalar.position[index],
+                    path_length[index] * scalar.velocity[index],
+                    path_length[index] * scalar.acceleration[index],
+                    path_length[index] * scalar.jerk[index],
+                )
+                for index in range(waypoints.shape[0])
+            ]
         )
-        dt = dt * jerk_scale[:, None]
-        velocities = velocities / jerk_scale[:, None, None]
-        accelerations = accelerations / jerk_scale[:, None, None].square()
-        joint_jerks = joint_jerks / jerk_scale[:, None, None].pow(3)
         peak_jerk_joint = joint_jerks.abs().amax(dim=1)
         peak_jerk = peak_jerk_joint.amax(dim=1)
     else:
@@ -878,13 +456,23 @@ def _plan_blended_profiles(
             "velocity_utilization": peak_velocity_joint / velocity_joint,
             "acceleration_utilization": peak_acceleration_joint / acceleration_joint,
             "jerk_utilization": peak_jerk_joint / jerk_joint,
-            "within_limits": torch.stack(
-                (
-                    (peak_velocity_joint <= velocity_joint).all(dim=1),
-                    (peak_acceleration_joint <= acceleration_joint).all(dim=1),
-                    (peak_jerk_joint <= jerk_joint * (1.0 + 1e-9)).all(dim=1),
+            "velocity_upper_bound_per_joint": upper_bounds[:, 0],
+            "acceleration_upper_bound_per_joint": upper_bounds[:, 1],
+            # Trapezoidal acceleration jumps are not jerk constrained.
+            "jerk_upper_bound_per_joint": (
+                upper_bounds[:, 2]
+                if options.profile == "double_s"
+                else torch.full_like(upper_bounds[:, 2], float("inf"))
+            ),
+            "within_limits": (
+                (upper_bounds[:, 0] <= velocity_joint * (1.0 + 1e-6)).all(dim=1)
+                & (upper_bounds[:, 1] <= acceleration_joint * (1.0 + 1e-6)).all(dim=1)
+                & (
+                    (upper_bounds[:, 2] <= jerk_joint * (1.0 + 1e-6)).all(dim=1)
+                    if options.profile == "double_s"
+                    else torch.ones_like(scale, dtype=torch.bool)
                 )
-            ).all(dim=0),
+            ),
         }
     )
     return PlanResult(
@@ -944,6 +532,9 @@ def _plan_linear_profiles(
             "velocity_utilization": zero_joint.clone(),
             "acceleration_utilization": zero_joint.clone(),
             "jerk_utilization": zero_joint.clone(),
+            "velocity_upper_bound_per_joint": zero_joint.clone(),
+            "acceleration_upper_bound_per_joint": zero_joint.clone(),
+            "jerk_upper_bound_per_joint": zero_joint.clone(),
             "within_limits": torch.ones(
                 batch_size, dtype=torch.bool, device=waypoints.device
             ),
@@ -1003,22 +594,18 @@ def _plan_linear_profiles(
     velocity_limit, acceleration_limit, jerk_limit = _scalar_path_limits(
         delta, options.constraints
     )
-    profile = _build_scalar_profile(
+    profile = ScalarTimeLaw.build(
         profile_name=options.profile,
         velocity_limit=velocity_limit,
         acceleration_limit=acceleration_limit,
         jerk_limit=jerk_limit,
         backend=options.backend,
     )
-    profile = _apply_minimum_duration(profile, options.minimum_duration)
+    profile = profile.with_minimum_duration(options.minimum_duration)
     segment_duration = profile.durations.sum(dim=-1)
-    cumulative_duration = segment_duration.cumsum(dim=-1)
-    duration = cumulative_duration[:, -1]
     times = _make_sample_times(segment_duration, options)
-    positions, velocities, accelerations = _compose_profile_samples(
+    positions, velocities, accelerations = profile.compose(
         times=times,
-        cumulative_duration=cumulative_duration,
-        profile=profile,
         segment_starts=waypoints[:, :-1],
         segment_deltas=delta,
         backend=options.backend,

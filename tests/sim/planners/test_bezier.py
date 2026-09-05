@@ -285,6 +285,63 @@ def test_batched_arc_length_sampling_keeps_paths_independent() -> None:
     assert lengths[1, -1].item() == pytest.approx(4.0, abs=1e-3)
 
 
+def test_arc_length_inverse_matches_nonuniform_quadratic_closed_form() -> None:
+    controls = torch.tensor([[0.0], [0.1], [1.0]], dtype=torch.float64)
+    path = BezierPath(controls)
+    distance = torch.tensor([-1.0, 0.0, 0.1, 0.5, 1.0, 2.0], dtype=torch.float64)
+    # This straight curve has x(u) = 0.2*u + 0.8*u**2, so distance and
+    # polynomial parameter differ even though geometric curvature is zero.
+    expected = (-0.2 + torch.sqrt(0.04 + 3.2 * distance.clamp(0.0, 1.0))) / 1.6
+
+    parameter = path.parameter_at_arc_length(distance)
+
+    torch.testing.assert_close(parameter, expected, atol=1e-7, rtol=0.0)
+    torch.testing.assert_close(
+        path.evaluate(parameter)[..., 0], distance.clamp(0.0, 1.0), atol=2e-8, rtol=0.0
+    )
+    scalar = path.parameter_at_arc_length(distance[3])
+    assert scalar.ndim == 0
+    torch.testing.assert_close(scalar, parameter[3])
+
+
+def test_arc_length_inverse_handles_batched_and_stationary_paths() -> None:
+    controls = torch.tensor(
+        [[[0.0], [0.1], [1.0]], [[0.0], [0.2], [2.0]], [[3.0], [3.0], [3.0]]],
+        dtype=torch.float64,
+    )
+    path = BezierPath(controls)
+    distance = torch.tensor([0.0, 0.5, 1.0, 2.0], dtype=torch.float64)
+    parameter = path.parameter_at_arc_length(distance)
+    expected = torch.minimum(distance[None], torch.tensor([[1.0], [2.0], [0.0]]))
+
+    torch.testing.assert_close(
+        path.evaluate(parameter)[..., 0],
+        expected + controls[:, :1, 0],
+        atol=4e-8,
+        rtol=0.0,
+    )
+    assert torch.count_nonzero(parameter[2]) == 0
+    torch.testing.assert_close(
+        path.parameter_at_arc_length(expected), parameter, atol=1e-12, rtol=0.0
+    )
+
+
+@pytest.mark.parametrize("distance", [float("nan"), float("inf"), -float("inf")])
+def test_arc_length_inverse_rejects_nonfinite_distance(distance: float) -> None:
+    path = BezierPath(torch.tensor([[0.0], [0.5], [1.0]]))
+    with pytest.raises(ValueError, match="distance must contain only finite"):
+        path.parameter_at_arc_length(torch.tensor(distance))
+
+
+@pytest.mark.parametrize("table_count", [True, 1, 1.5])
+def test_arc_length_inverse_rejects_invalid_table_count(table_count: object) -> None:
+    path = BezierPath(torch.tensor([[0.0], [0.5], [1.0]]))
+    with pytest.raises(
+        ValueError, match="table_count must be an integer of at least 2"
+    ):
+        path.parameter_at_arc_length(torch.tensor(0.5), table_count=table_count)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("sample_count", [True, 1, 1.5])
 def test_sample_count_must_be_an_integer_of_at_least_two(sample_count: object) -> None:
     control_points = torch.zeros((3, 2), dtype=torch.float32)

@@ -411,6 +411,8 @@ topics:
       - embodichain/lab/sim/planners/base_planner.py
       - embodichain/lab/sim/planners/toppra_planner.py
       - embodichain/lab/sim/planners/trapezoidal_planner.py
+      - embodichain/lab/sim/planners/_scalar_time_law.py
+      - embodichain/lab/sim/planners/_blend_constraints.py
       - embodichain/lab/sim/planners/bezier.py
       - embodichain/lab/sim/planners/se3.py
       - embodichain/lab/sim/planners/trapezoidal_warp.py

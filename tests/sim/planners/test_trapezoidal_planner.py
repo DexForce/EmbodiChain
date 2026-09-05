@@ -21,15 +21,23 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-import embodichain.lab.sim.planners.trapezoidal_planner as trapezoidal_module
+from embodichain.lab.sim.planners.bezier import (
+    compose_quintic_blend_jerk,
+    compose_quintic_blend_state,
+    quintic_blend_segments,
+)
 from embodichain.lab.sim.planners.trapezoidal_planner import (
     TrapezoidalPlanner,
     TrapezoidalPlanOptions,
+    _compress_collinear_waypoints,
+    _plan_linear_profiles,
+)
+from embodichain.lab.sim.planners import _scalar_time_law as scalar_module
+from embodichain.lab.sim.planners._scalar_time_law import (
+    ScalarTimeLaw,
     _build_double_s_profile,
     _build_scalar_profile,
-    _compress_collinear_waypoints,
     _compose_profile_samples_torch,
-    _plan_linear_profiles,
 )
 from embodichain.lab.sim.planners.utils import PlanState, TrajectorySampleMethod
 
@@ -532,6 +540,138 @@ def test_blended_path_constraint_report_tracks_realized_peaks() -> None:
     assert report["peak_acceleration"].item() <= 1.0
 
 
+@pytest.mark.parametrize(
+    ("dtype", "blend_tolerance"),
+    [(torch.float64, 0.1), (torch.float64, 1e-4), (torch.float32, 0.1)],
+)
+@pytest.mark.parametrize("profile", ["double_s", "trapezoidal"])
+def test_blended_limits_are_independent_of_output_sampling(
+    monkeypatch: pytest.MonkeyPatch,
+    dtype: torch.dtype,
+    blend_tolerance: float,
+    profile: str,
+) -> None:
+    waypoints = torch.tensor([[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]], dtype=dtype)
+    constraints = {
+        "velocity": [0.8, 0.6],
+        "acceleration": [1.0, 0.7],
+        "jerk": [2.0, 1.5],
+    }
+    laws = []
+    original_evaluate = ScalarTimeLaw.evaluate
+
+    def capture_law(self: ScalarTimeLaw, times: torch.Tensor):
+        laws.append(self)
+        return original_evaluate(self, times)
+
+    monkeypatch.setattr(ScalarTimeLaw, "evaluate", capture_law)
+    results = [
+        _plan_linear_profiles(
+            waypoints,
+            TrapezoidalPlanOptions(
+                profile=profile,
+                constraints=constraints,
+                blend_tolerance=blend_tolerance,
+                sample_method=method,
+                sample_interval=interval,
+                backend="torch",
+            ),
+        )
+        for method, interval in (
+            (TrajectorySampleMethod.QUANTITY, 2),
+            (TrajectorySampleMethod.QUANTITY, 4001),
+            (TrajectorySampleMethod.TIME, 0.1),
+        )
+    ]
+    coarse = results[0]
+    for result in results:
+        assert result.duration.item() == pytest.approx(coarse.duration.item(), rel=1e-6)
+        assert result.constraint_report["within_limits"].all()
+        for name in constraints:
+            key = f"{name}_upper_bound_per_joint"
+            assert torch.equal(
+                result.constraint_report[key], coarse.constraint_report[key]
+            )
+    assert results[-1].dt.max().item() <= 0.1 + 1e-6
+
+    # Re-evaluate the actual coarse plan, without planning again. Add a local
+    # grid on every geometric segment so even a tiny blend cannot fall between
+    # the uniform time samples. Invert the monotone scalar position by bisection.
+    _, lengths = quintic_blend_segments(waypoints[0], blend_tolerance)
+    starts = lengths.cumsum(dim=0) - lengths
+    distances = (
+        starts[:, None]
+        + lengths[:, None] * torch.linspace(0.0, 1.0, 257, dtype=dtype)[None]
+    ).reshape(1, -1)
+    lower = torch.zeros_like(distances)
+    upper = torch.full_like(distances, coarse.duration.item())
+    for _ in range(48):
+        middle = (lower + upper) / 2.0
+        before = original_evaluate(laws[0], middle).position * lengths.sum() < distances
+        lower = torch.where(before, middle, lower)
+        upper = torch.where(before, upper, middle)
+    times = (
+        torch.cat(
+            (
+                (lower + upper) / 2.0,
+                torch.linspace(0.0, coarse.duration.item(), 10001, dtype=dtype)[None],
+            ),
+            dim=1,
+        )
+        .sort(dim=1)
+        .values
+    )
+    scalar = original_evaluate(laws[0], times)
+    distance, velocity, acceleration, jerk = (
+        value[0] * lengths.sum() for value in scalar
+    )
+    _, joint_velocity, joint_acceleration = compose_quintic_blend_state(
+        waypoints[0], blend_tolerance, distance, velocity, acceleration
+    )
+    joint_jerk = compose_quintic_blend_jerk(
+        waypoints[0], blend_tolerance, distance, velocity, acceleration, jerk
+    )
+    for name, derivative in zip(
+        constraints, (joint_velocity, joint_acceleration, joint_jerk)
+    ):
+        if name == "jerk" and profile == "trapezoidal":
+            continue  # Acceleration jumps are not jerk constrained.
+        peak = derivative.abs().amax(dim=0)
+        limit = torch.tensor(constraints[name], dtype=dtype)
+        assert torch.all(peak <= limit * (1.0 + 1e-6))
+        assert torch.all(
+            peak
+            <= coarse.constraint_report[f"{name}_upper_bound_per_joint"][0]
+            * (1.0 + 1e-6)
+        )
+
+
+def test_blended_minimum_duration_and_stationary_rows_keep_valid_bounds() -> None:
+    waypoints = torch.tensor(
+        [
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
+            [[0.2, 0.1], [0.2, 0.1], [0.2, 0.1]],
+        ],
+        dtype=torch.float64,
+    )
+    result = _plan_linear_profiles(
+        waypoints,
+        TrapezoidalPlanOptions(
+            profile="double_s",
+            constraints={"velocity": 0.8, "acceleration": 1.0, "jerk": 2.0},
+            blend_tolerance=0.1,
+            minimum_duration=12.0,
+            sample_interval=2,
+        ),
+    )
+    assert torch.allclose(result.duration, torch.full_like(result.duration, 12.0))
+    assert result.constraint_report["within_limits"].all()
+    for name in ("velocity", "acceleration", "jerk"):
+        bound = result.constraint_report[f"{name}_upper_bound_per_joint"]
+        assert torch.all(bound[0] > 0.0)
+        assert torch.count_nonzero(bound[1]) == 0
+
+
 def test_collinear_compression_removes_only_same_direction_points() -> None:
     waypoints = torch.tensor(
         [
@@ -630,9 +770,7 @@ def test_stationary_fast_path_skips_profile_construction(monkeypatch) -> None:
     def fail_if_called(*args, **kwargs) -> None:
         raise AssertionError("stationary paths must not construct a profile")
 
-    monkeypatch.setattr(
-        trapezoidal_module, "_build_trapezoidal_profile", fail_if_called
-    )
+    monkeypatch.setattr(scalar_module, "_build_trapezoidal_profile", fail_if_called)
     waypoints = torch.full((2, 3, 4), 0.25)
 
     result = _plan_linear_profiles(

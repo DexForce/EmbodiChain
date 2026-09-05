@@ -498,10 +498,8 @@ def plan_cartesian_bezier(
         ),
         dim=1,
     )
-    dense_count = max(1025, sample_count * 8)
     path = BezierPath(control_points)
-    dense_points, dense_lengths = path.sample(dense_count)
-    total_length = dense_lengths[:, -1]
+    total_length = path.length
     scalar_waypoints = start_qpos.new_zeros((start_qpos.shape[0], 2, 1))
     scalar_waypoints[:, 1, 0] = total_length
     scalar_plan = _plan_linear_profiles(
@@ -518,14 +516,8 @@ def plan_cartesian_bezier(
             backend=str(kwargs["backend"]),
         ),
     )
-    progress = scalar_plan.positions[..., 0] / total_length[:, None]
-    dense_index = progress.clamp(0.0, 1.0) * (dense_count - 1)
-    lower = dense_index.floor().long().clamp_max(dense_count - 2)
-    alpha = (dense_index - lower)[..., None]
-    gather_index = lower[..., None].expand(-1, -1, 3)
-    lower_points = dense_points.gather(1, gather_index)
-    upper_points = dense_points.gather(1, gather_index + 1)
-    translations = torch.lerp(lower_points, upper_points, alpha)
+    parameter = path.parameter_at_arc_length(scalar_plan.positions[..., 0])
+    translations = path.evaluate(parameter)
     desired_poses = start_pose[:, None].expand(-1, sample_count, -1, -1).clone()
     desired_poses[:, :, :3, 3] = translations
     ik_result = robot.compute_batch_ik(
@@ -540,7 +532,6 @@ def plan_cartesian_bezier(
     jacobians = solver.get_jacobian(
         positions.reshape(start_qpos.shape[0] * sample_count, -1), jac_type="full"
     ).reshape(start_qpos.shape[0], sample_count, 6, -1)
-    parameter = dense_index / (dense_count - 1)
     world_tangent = path.arc_tangent(parameter)
     world_curvature = path.arc_curvature(parameter)
     base_pose = robot.get_control_part_base_pose(control_part, to_matrix=True)

@@ -884,7 +884,11 @@ class MotionGenerator:
 
         velocities = normalize_derivative(result.velocities, "velocities")
         accelerations = normalize_derivative(result.accelerations, "accelerations")
+        constraint_report = None if resampled else result.constraint_report
         if start_qpos is not None and not success.all():
+            # The backend report describes the original failed rows. A generic
+            # facade cannot recompute arbitrary planner-specific diagnostics.
+            constraint_report = None
             held = (
                 start_qpos.to(dtype=positions.dtype).unsqueeze(1).expand_as(positions)
             )
@@ -909,6 +913,7 @@ class MotionGenerator:
             velocities=velocities,
             accelerations=accelerations,
             dt=dt,
+            constraint_report=constraint_report,
         )
 
     def _runtime_device(self) -> torch.device:

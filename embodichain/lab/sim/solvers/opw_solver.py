@@ -372,6 +372,11 @@ class OPWSolver(BaseSolver):
         best_ik_valid = wp.to_torch(best_ik_valid_wp).to(self.device)
         return best_ik_valid, best_ik_result
 
+    @property
+    def supports_continuous_batch_ik(self) -> bool:
+        """Return whether OPW supports batched candidates and continuous selection."""
+        return True
+
     def _select_continuous_ik_path(
         self,
         candidate_qpos: torch.Tensor,

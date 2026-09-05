@@ -28,6 +28,12 @@ from embodichain.utils.math import (
     quat_from_matrix,
 )
 
+from ._scalar_time_law import (
+    ScalarTimeLaw,
+    validate_minimum_duration,
+    validate_profile_name,
+)
+
 __all__ = ["SE3LineResult", "plan_se3_line"]
 
 
@@ -72,11 +78,10 @@ def _se3_log(transform: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     omega = axis_angle_from_quat(quat_from_matrix(transform[:3, :3]))
     theta = torch.linalg.vector_norm(omega)
     omega_hat = _skew(omega)
-    if bool((theta < 1e-8).item()):
-        inverse_v = (
-            torch.eye(3, dtype=transform.dtype, device=transform.device)
-            - 0.5 * omega_hat
-            + omega_hat @ omega_hat / 12.0
+    theta_squared = theta.square()
+    if bool((theta_squared < torch.finfo(theta.dtype).eps ** 0.5).item()):
+        coefficient = (
+            1.0 / 12.0 + theta_squared / 720.0 + theta_squared.square() / 30240.0
         )
     else:
         # Half-angle form remains finite at theta=pi, unlike the equivalent
@@ -84,11 +89,11 @@ def _se3_log(transform: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         coefficient = (
             1.0 - 0.5 * theta * torch.cos(0.5 * theta) / torch.sin(0.5 * theta)
         ) / theta.square()
-        inverse_v = (
-            torch.eye(3, dtype=transform.dtype, device=transform.device)
-            - 0.5 * omega_hat
-            + coefficient * (omega_hat @ omega_hat)
-        )
+    inverse_v = (
+        torch.eye(3, dtype=transform.dtype, device=transform.device)
+        - 0.5 * omega_hat
+        + coefficient * (omega_hat @ omega_hat)
+    )
     return inverse_v @ transform[:3, 3], omega
 
 
@@ -100,15 +105,17 @@ def _se3_exp(
     theta = torch.linalg.vector_norm(scaled_omega, dim=-1)
     omega_hat = _skew(omega)
     eye = torch.eye(3, dtype=rho.dtype, device=rho.device)
-    a = torch.where(
-        theta.abs() > 1e-8,
-        (1.0 - torch.cos(theta)) / theta.square(),
-        0.5 - theta.square() / 24.0,
-    )
+    # The half-angle identity avoids subtracting nearly equal cosines. The
+    # remaining coefficients use dtype-aware series near zero, where their
+    # direct trigonometric formulas lose precision, especially in float32.
+    a = 0.5 * torch.sinc(theta / (2.0 * torch.pi)).square()
+    theta_squared = theta.square()
+    small = theta_squared < torch.finfo(theta.dtype).eps ** 0.5
+    safe_theta = torch.where(small, torch.ones_like(theta), theta)
     b = torch.where(
-        theta.abs() > 1e-8,
-        (theta - torch.sin(theta)) / theta.pow(3),
-        1.0 / 6.0 - theta.square() / 120.0,
+        small,
+        1.0 / 6.0 - theta_squared / 120.0 + theta_squared.square() / 5040.0,
+        (safe_theta - torch.sin(safe_theta)) / safe_theta.pow(3),
     )
     scaled_hat = parameter[..., None, None] * omega_hat
     v = (
@@ -206,7 +213,27 @@ def plan_se3_line(
     sample_count: int = 100,
     minimum_duration: float | None = None,
 ) -> SE3LineResult:
-    """Plan a constrained time-parameterized Cartesian line trajectory."""
+    """Plan a constrained time-parameterized Cartesian line trajectory.
+
+    Args:
+        start: Initial rigid transform shaped (4, 4).
+        end: Distinct final rigid transform with matching dtype and device.
+        velocity_limit: Positive finite body-twist limits shaped (6,).
+        acceleration_limit: Positive finite body-acceleration limits shaped (6,).
+        jerk_limit: Positive finite body-jerk limits shaped (6,).
+        profile: ``trapezoidal`` or jerk-limited ``double_s`` timing.
+        sample_count: Number of output samples, at least two.
+        minimum_duration: Optional finite non-negative lower duration bound in
+            seconds. Zero preserves natural timing.
+
+    Returns:
+        Timed poses, body derivatives, and sampled constraint diagnostics.
+
+    Raises:
+        ValueError: If transforms, limits, or timing options are invalid.
+    """
+    validate_profile_name(profile)
+    validate_minimum_duration(minimum_duration)
     _validate_transform(start, "start")
     _validate_transform(end, "end")
     if start.dtype != end.dtype or start.device != end.device:
@@ -228,15 +255,6 @@ def plan_se3_line(
         for value in limits
     ):
         raise ValueError("Cartesian limits must contain finite positive values.")
-    # Lazy import avoids a module cycle: the joint planner imports Bézier
-    # geometry, while this public Cartesian helper reuses its scalar profile.
-    from .trapezoidal_planner import (
-        _apply_minimum_duration,
-        _build_scalar_profile,
-        _compose_profile_samples_torch,
-        _sample_profile_jerk_torch,
-    )
-
     rho, rotation = _se3_log(torch.linalg.inv(start) @ end)
     tangent = torch.cat((rho, rotation))
     active = tangent.abs() > torch.finfo(start.dtype).eps
@@ -245,33 +263,26 @@ def plan_se3_line(
     scalar_limits = torch.stack(
         [(limit[active] / tangent[active].abs()).amin() for limit in limits]
     )
-    scalar_profile = _build_scalar_profile(
+    scalar_profile = ScalarTimeLaw.build(
         profile_name=profile,
         velocity_limit=scalar_limits[0].reshape(1, 1),
         acceleration_limit=scalar_limits[1].reshape(1, 1),
         jerk_limit=scalar_limits[2].reshape(1, 1),
         backend="torch",
     )
-    scalar_profile = _apply_minimum_duration(scalar_profile, minimum_duration)
+    scalar_profile = scalar_profile.with_minimum_duration(minimum_duration)
     duration = scalar_profile.durations.sum(dim=-1)
     times = torch.linspace(
         0.0, duration.item(), sample_count, dtype=start.dtype, device=start.device
     )[None]
-    position, velocity, acceleration = _compose_profile_samples_torch(
-        times=times,
-        cumulative_duration=duration,
-        profile=scalar_profile,
-        segment_starts=start.new_zeros((1, 1, 1)),
-        segment_deltas=start.new_ones((1, 1, 1)),
-    )
-    scalar_jerk = _sample_profile_jerk_torch(times, duration, scalar_profile)
+    scalar = scalar_profile.evaluate(times)
     poses, velocities, accelerations, jerks = se3_line_state(
         start,
         end,
-        position[0, :, 0],
-        velocity[0, :, 0],
-        acceleration[0, :, 0],
-        scalar_jerk[0],
+        scalar.position[0],
+        scalar.velocity[0],
+        scalar.acceleration[0],
+        scalar.jerk[0],
     )
     peak_velocity = velocities.abs().amax(dim=0)
     peak_acceleration = accelerations.abs().amax(dim=0)

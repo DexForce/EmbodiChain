@@ -1035,6 +1035,10 @@ class Robot(Articulation):
                 f"The control part '{name}' does not have an associated solver. Please ensure that a valid control part with an available solver is provided."
             )
             return None
+        if continuous and not solver.supports_continuous_batch_ik:
+            raise ValueError(
+                f"Solver for {name!r} does not support continuous batch IK."
+            )
         pose = to_tensor(pose, device=self.device)
 
         batch_size = len(local_env_ids)
@@ -1113,12 +1117,7 @@ class Robot(Articulation):
                 qpos_seed=None,
                 return_all_solutions=True,
             )
-            select_path = getattr(solver, "_select_continuous_ik_path", None)
-            if not callable(select_path):
-                raise ValueError(
-                    f"Solver for {name!r} does not support continuous batch IK."
-                )
-            return select_path(
+            return solver._select_continuous_ik_path(
                 candidate_qpos.reshape(batch_size, n_batch, -1, n_dof),
                 candidate_valid.reshape(batch_size, n_batch, -1),
                 joint_seed_tensor,

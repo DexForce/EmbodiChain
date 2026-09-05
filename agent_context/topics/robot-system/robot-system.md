@@ -23,6 +23,13 @@
 
 A `Robot` is instantiated with a `RobotCfg` and a list of DexSim `Articulation` entities.
 
+`Robot.compute_batch_ik(..., continuous=True)` checks the configured solver's
+typed `supports_continuous_batch_ik` capability before frame conversion or
+candidate generation. Supporting solvers implement the base
+`_select_continuous_ik_path` hook; OPW is the current implementation. Unsupported
+solvers raise `ValueError` without an IK call. The default `continuous=False`
+path retains independent per-target seeds and does not require this capability.
+
 ## RobotCfg Pattern
 
 Inheritance chain:

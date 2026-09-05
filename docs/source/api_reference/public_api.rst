@@ -967,6 +967,11 @@ embodichain.lab.sim.planners.bezier
 
 Differentiable quadratic and quintic Bézier geometry, including
 HolisticMotion-compatible waypoint blending and path-constraint projection.
+Use ``BezierPath.parameter_at_arc_length(distance)`` to convert a scalar
+time law's geometric distances to polynomial parameters. Reuse those parameters
+for ``evaluate``, ``arc_tangent``, and ``arc_curvature``; normalized arc length
+is generally different from the Bézier parameter. Lookup accuracy is controlled
+by ``table_count`` independently of the output sample count.
 
 .. autosummary::
 
@@ -975,6 +980,8 @@ HolisticMotion-compatible waypoint blending and path-constraint projection.
    bezier_derivative
    bezier_evaluate
    sample_bezier_path
+
+.. automethod:: BezierPath.parameter_at_arc_length
 
 embodichain.lab.sim.planners.neural_planner
 -------------------------------------------
@@ -1278,6 +1285,21 @@ embodichain.lab.task_program.semantics.scene
 .. automodule:: embodichain.lab.task_program.semantics.scene
    :members:
    :no-index:
+
+embodichain.lab.sim.solvers.base_solver
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.solvers.base_solver
+
+Shared solver configuration and runtime contracts for IK, FK, joint limits,
+and optional continuous batch IK. Continuous selection defaults to unsupported;
+implementations opt in through ``supports_continuous_batch_ik`` and implement
+the protected ``_select_continuous_ik_path`` hook for batched candidates.
+
+.. autosummary::
+
+   BaseSolver
+   SolverCfg
 
 embodichain.lab.sim.solvers.neural_ik_solver
 --------------------------------------------
