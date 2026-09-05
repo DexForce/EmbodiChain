@@ -136,9 +136,11 @@ Viser and DexSim use the same deferred target-control path:
 - robot drags invoke FK/IK for the selected `control_part`.
 
 Viser callbacks only enqueue immutable pose commands. `update_gizmos()` drains
-and applies them on the simulation thread; manual `SimulationManager.update()`
-does this automatically. Automatic-update loops must continue calling
-`update_gizmos()` and `capture_visualization_safely()`.
+and applies them on the simulation thread. `SimulationManager.update()`
+performs this work before each explicit physics step and then publishes the
+resulting state. Interactive applications must keep calling `update(step=1)`.
+For editing while physics is paused, call `update_gizmos()` and
+`capture_visualization_safely()` directly.
 
 Only one client owns a Gizmo from drag start through drag end or disconnect.
 Other clients are returned to the latest authoritative simulation pose. Gizmo

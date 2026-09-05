@@ -61,7 +61,6 @@ def main():
     )
 
     sim = SimulationManager(sim_cfg)
-    sim.set_manual_update(False)
 
     cfg = DexforceW1Cfg.from_dict(
         {
@@ -152,7 +151,7 @@ def main():
     robot.set_qpos(qpos=left_arm_qpos, joint_ids=left_joint_ids)
     robot.set_qpos(qpos=right_arm_qpos, joint_ids=right_joint_ids)
 
-    time.sleep(0.2)  # Wait for a moment to ensure everything is set up
+    sim.update(step=round(0.2 / sim.sim_config.physics_dt))
 
     native_window_opened = False
     if not args.headless:
@@ -196,10 +195,8 @@ def run_simulation(sim: SimulationManager):
         last_time = time.time()
         last_step = 0
         while True:
-            time.sleep(0.033)  # 30Hz
-            # Update all gizmos managed by sim
-            sim.update_gizmos()
-            sim.capture_visualization_safely()
+            step_start = time.perf_counter()
+            sim.update(step=1)
             step_count += 1
 
             if step_count % 100 == 0:
@@ -213,6 +210,10 @@ def run_simulation(sim: SimulationManager):
                 logger.log_info(f"Simulation step: {step_count}, FPS: {fps:.2f}")
                 last_time = current_time
                 last_step = step_count
+
+            time.sleep(
+                max(0.0, sim.sim_config.physics_dt - (time.perf_counter() - step_start))
+            )
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")
     finally:

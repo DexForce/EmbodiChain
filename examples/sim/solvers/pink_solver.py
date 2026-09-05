@@ -47,7 +47,6 @@ def main(visualization: VisualizationCfg | None = None) -> None:
         visualization=visualization or VisualizationCfg(),
     )
     sim = SimulationManager(config)
-    sim.set_manual_update(False)
 
     # Load robot URDF file
     urdf = get_data_path("Rokae/SR5/SR5.urdf")
@@ -91,7 +90,7 @@ def main(visualization: VisualizationCfg | None = None) -> None:
     robot.set_qpos(qpos=qpos, joint_ids=robot.get_joint_ids("main_arm"))
     import time
 
-    time.sleep(3.0)
+    sim.update(step=round(3.0 / sim.sim_config.physics_dt))
     fk_xpos = robot.compute_fk(qpos=qpos, name=arm_name, to_matrix=True)
     print(f"fk_xpos: {fk_xpos}")
     start_pose = fk_xpos.clone()[0]  # Start pose
@@ -177,11 +176,15 @@ def main(visualization: VisualizationCfg | None = None) -> None:
             )
         )
 
-        # Add delay to simulate motion
-        time.sleep(0.005)
+        # Advance the target by one configured physics step.
+        sim.update(step=1)
+        time.sleep(sim.sim_config.physics_dt)
 
+    sim.update(step=round(1.0 / sim.sim_config.physics_dt))
     sim.capture_visualization(force=True)
-    embed(header="Test PinkSolver example. Press Ctrl+D to exit.")
+    embed(
+        header="Test PinkSolver example. Physics is paused; call sim.update(step=N) to advance. Press Ctrl+D to exit."
+    )
 
 
 if __name__ == "__main__":

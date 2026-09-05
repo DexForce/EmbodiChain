@@ -141,7 +141,8 @@ The Simulation Loop
 
 
 
-In the main loop, simply call `sim.update_gizmos()`. There is no need to manually update any Gizmo instance.
+In the main loop, call ``sim.update(step=1)`` to apply pending Gizmo controls,
+advance physics, and publish the resulting state to Viser.
 
 
 
@@ -153,11 +154,11 @@ In the main loop, simply call `sim.update_gizmos()`. There is no need to manuall
            last_time = time.time()
            last_step = 0
            while True:
-               time.sleep(0.033)  # 30Hz
-               sim.update_gizmos()  # Update all gizmos
-               sim.capture_visualization_safely()  # Publish Viser state, if enabled
+               step_start = time.perf_counter()
+               sim.update(step=1)
                step_count += 1
                # ...performance statistics, etc...
+               time.sleep(max(0.0, sim.sim_config.physics_dt - (time.perf_counter() - step_start)))
        except KeyboardInterrupt:
            logger.log_info("\nStopping simulation...")
        finally:
@@ -168,8 +169,8 @@ In the main loop, simply call `sim.update_gizmos()`. There is no need to manuall
 
 Main loop highlights:
 
-- **Gizmo update**: Only `sim.update_gizmos()` is needed, no `gizmo.update()`
-- **Viser update**: Automatic-physics loops also call `sim.capture_visualization_safely()`
+- **Gizmo update**: ``sim.update(step=1)`` processes controls before stepping physics
+- **Viser update**: Each explicit physics step publishes the resulting state when Viser is enabled
 - **Performance monitoring**: Optional FPS statistics
 - **Resource cleanup**: Only `sim.destroy()` is needed, no manual Gizmo destruction
 - **Graceful shutdown**: Supports Ctrl+C interruption
@@ -183,7 +184,7 @@ Gizmo Lifecycle Management
 Gizmo lifecycle is managed by SimulationManager:
 
 - Enable: `sim.enable_gizmo(...)`
-- Update: Main loop automatically calls `sim.update_gizmos()`
+- Update: ``sim.update(step=1)`` processes Gizmos in the main loop
 - Destroy/disable: `sim.disable_gizmo(...)` or `sim.destroy()` (recommended)
 
 There is no need to manually create or destroy Gizmo instances. All resources are managed by SimulationManager.
@@ -248,9 +249,9 @@ Tips and Best Practices
 
 **Performance optimization:**
 
-- Only call ``sim.update_gizmos()`` in the main loop, no need for ``gizmo.update()``
+- Call ``sim.update(step=1)`` in the main loop; do not update Gizmos a second time
 - Reduce IK solver iterations for better real-time performance if needed
-- Use ``set_manual_update(False)`` for smoother interaction
+- Pace the loop with the configured physics timestep for interactive playback
 
 
 

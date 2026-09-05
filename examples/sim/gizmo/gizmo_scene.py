@@ -69,7 +69,6 @@ def main():
     )
 
     sim = SimulationManager(sim_cfg)
-    sim.set_manual_update(False)
 
     # Get DexForce W1 URDF path
     urdf_path = get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")
@@ -230,9 +229,8 @@ def run_simulation(
         last_time = time.time()
         last_step = 0
         while True:
-            time.sleep(0.033)  # 30Hz
-            sim.update_gizmos()
-            sim.capture_visualization_safely()
+            step_start = time.perf_counter()
+            sim.update(step=1)
             step_count += 1
 
             # Display camera view in a window every 5 steps
@@ -268,6 +266,10 @@ def run_simulation(
                 logger.log_info(f"Simulation step: {step_count}, FPS: {fps:.2f}")
                 last_time = current_time
                 last_step = step_count
+
+            time.sleep(
+                max(0.0, sim.sim_config.physics_dt - (time.perf_counter() - step_start))
+            )
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")
     finally:

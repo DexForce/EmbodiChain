@@ -310,7 +310,7 @@ Standalone updates are reported below ``sim_update``. When an environment owns
 the manager, it reuses the same instance and simulation sections stay below the
 existing ``step.sim_update`` path. The legacy ``EnvProfiler`` and
 ``EnvProfilerCfg`` imports remain aliases of ``Profiler`` and ``ProfilerCfg``.
-Within ``manual_update``, ``gizmo_update`` and ``world_update`` are sampled once
+Within ``physics_steps``, ``gizmo_update`` and ``world_update`` are sampled once
 per physics substep. Optional window recording and Viser publication are
 reported separately as ``window_record_capture`` and
 ``visualization_capture``, so they are not attributed to physics time.

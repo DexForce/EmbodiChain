@@ -50,8 +50,6 @@ def main(visualization: VisualizationCfg | None = None) -> None:
         )
     )
 
-    sim.set_manual_update(False)
-
     robot: Robot = sim.add_robot(cfg=DexforceW1Cfg.from_dict({"uid": "dexforce_w1"}))
     arm_name = "left_arm"
     # Set initial joint positions for left arm
@@ -60,7 +58,7 @@ def main(visualization: VisualizationCfg | None = None) -> None:
     ]
     robot.set_qpos(qpos_fk_list[0], joint_ids=robot.get_joint_ids(arm_name))
 
-    time.sleep(0.5)
+    sim.update(step=round(0.5 / sim.sim_config.physics_dt))
 
     fk_xpos_batch = torch.cat(qpos_fk_list, dim=0)
 
@@ -89,8 +87,11 @@ def main(visualization: VisualizationCfg | None = None) -> None:
     print("fk_xpos_list: ", fk_xpos_list)
     print("ik_xpos_list: ", ik_xpos_list)
 
+    sim.update(step=round(1.0 / sim.sim_config.physics_dt))
     sim.capture_visualization(force=True)
-    embed(header="Test SRSSolver example. Press Ctrl+D to exit.")
+    embed(
+        header="Test SRSSolver example. Physics is paused; call sim.update(step=N) to advance. Press Ctrl+D to exit."
+    )
 
 
 if __name__ == "__main__":

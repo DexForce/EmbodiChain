@@ -82,7 +82,6 @@ class BaseSolverTest:
     def setup_simulation(self, sim_device):
         config = SimulationManagerCfg(headless=True, sim_device=sim_device)
         self.sim = SimulationManager(config)
-        self.sim.set_manual_update(False)
 
         ur10_urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
         gripper_urdf_path = get_data_path("DH_PGC_140_50_M/DH_PGC_140_50_M.urdf")
