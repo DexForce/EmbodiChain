@@ -99,9 +99,14 @@ sim.disable_entity_gizmo()
 ```
 
 Robot TCP IK controls are registered automatically for parts with configured
-IK chain/TCP metadata. The first **I** press activates them; later presses show
-or hide their targets. **G** continues to control entity roots. Normal
+IK chain/TCP metadata. By default, the first **I** press activates them; later
+presses show or hide their targets. **G** continues to control entity roots. Normal
 `sim.update()` calls handle IK updates; no controller-specific call is needed.
+
+For immediate activation, set
+`SimulationManagerCfg(robot_ik_gizmo=GizmoCfg(ik_start_enabled=True))`. The
+controller starts on the first update with an open window. The robot Gizmo
+tutorial enables this option after preparing its initial joint pose.
 
 The entity gizmo is native-window only. The Viser backend offers an analogous
 **click-to-pick** flow (an *Enable click-to-pick Gizmo* checkbox instead of the

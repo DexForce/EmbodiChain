@@ -257,8 +257,9 @@ native window open; `SimulationManagerCfg.enable_entity_gizmo=False` or
 `sim.disable_entity_gizmo()` opts out and reopening preserves the choice.
 Pure headless and Viser runs do not automatically create native controls.
 `SimulationManagerCfg.robot_ik_gizmo` automatically registers robot parts with
-solver chain/TCP metadata: native IK activates on I and Viser builds IK on the
-first drag. The manager updates both and preserves native controls across window
+solver chain/TCP metadata: native IK activates on I by default, or on the first
+update with an open window when `GizmoCfg(ik_start_enabled=True)`. The robot
+tutorial uses this startup option. Viser builds IK on the first drag. The manager updates both and preserves native controls across window
 reopen. Explicit configuration and disable calls take precedence; caller-owned
 native factory controllers are not duplicated. Automatic Viser registration
 requires `allow_commands`, independently of native interaction preferences.

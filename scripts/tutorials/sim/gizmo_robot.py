@@ -23,6 +23,7 @@ import numpy as np
 import argparse
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.objects import GizmoCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
@@ -56,6 +57,7 @@ def main():
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
         visualization=visualization_cfg_from_args(args),
+        robot_ik_gizmo=GizmoCfg(ik_start_enabled=True),
     )
 
     sim = SimulationManager(sim_cfg)
@@ -116,7 +118,9 @@ def main():
     if native_window_opened or args.viser:
         logger.log_info("Use the gizmo to drag the robot end-effector (EE)")
     if native_window_opened:
-        logger.log_info("Press I to activate or toggle the native robot IK Gizmo")
+        logger.log_info(
+            "Native robot IK Gizmo starts enabled; press I to show or hide it"
+        )
     logger.log_info("Press Ctrl+C to stop the simulation")
 
     run_simulation(sim)

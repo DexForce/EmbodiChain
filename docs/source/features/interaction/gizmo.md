@@ -43,8 +43,10 @@ Use the same target through Viser:
 python scripts/tutorials/sim/gizmo_robot.py --viser
 ```
 
-The tutorial does not create or update a controller explicitly. After adding
-the robot, its ordinary manual-physics loop is sufficient:
+The tutorial opts into immediate native activation with
+`robot_ik_gizmo=GizmoCfg(ik_start_enabled=True)`. It sets the initial robot pose
+before opening the window, then its ordinary manual-physics loop creates and
+updates the controller:
 
 ```python
 sim.open_window()  # Safely skipped when Viser is configured.
@@ -52,8 +54,9 @@ while True:
     sim.update(step=1)
 ```
 
-In the native window, the first **I** press creates the eligible robot IK
-controllers; later presses toggle their visibility. Opening a window alone
+By default, the first **I** press creates eligible native robot IK controllers.
+With `ik_start_enabled=True`, the first update with an open window activates
+them from the current robot pose; **I** then toggles their visibility. Opening a window alone
 does not construct an IK solver or change existing drive targets. Viser displays
 the TCP handles and constructs the solver on the first drag. Both paths update
 through `SimulationManager.update()`.

@@ -21,12 +21,13 @@ and Viser runs do not automatically create native gizmos.
 
 ``SimulationManagerCfg.robot_ik_gizmo`` defaults to ``GizmoCfg()`` and registers
 robot control parts with configured IK-chain/TCP metadata during normal updates.
-Native IK activates on the first **I** press; Viser constructs its solver on
+Native IK activates on the first **I** press by default; Viser constructs its solver on
 the first drag and requires ``visualization.allow_commands``. Registration does
 not write drive targets. Set this field to ``None`` to opt out or select
 ``GizmoCfg(ik_solver="embodichain")`` to reuse configured solvers. Explicit
 ``enable_gizmo()`` settings override automatic defaults, and ``disable_gizmo()``
-prevents automatic recreation.
+prevents automatic recreation. ``GizmoCfg(ik_start_enabled=True)`` activates
+native IK on the first update with an open window, as used by the robot tutorial.
 
 .. rubric:: Classes
 

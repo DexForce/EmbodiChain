@@ -195,10 +195,12 @@ Gizmo
 .. autofunction:: create_robot_ik_gizmo_controller
 
 SimulationManager automatically discovers robot control parts with configured
-IK chain metadata. Native controllers activate on the first I press, while
+IK chain metadata. Native controllers activate on the first I press by default, while
 Viser constructs its solver on the first drag. ``sim.update()`` owns updates
 and cleanup; ordinary applications do not need the explicit factory.
 Use ``SimulationManagerCfg(robot_ik_gizmo=None)`` to disable automatic setup.
+Set ``GizmoCfg(ik_start_enabled=True)`` to activate native IK on the first update
+with an open window; subsequent visibility toggles and reopening are preserved.
 
 The native controller defaults to DexSim Newton IK. With a ``PinkSolverCfg``
 (or another EmbodiChain solver) configured for the robot's control part, pass

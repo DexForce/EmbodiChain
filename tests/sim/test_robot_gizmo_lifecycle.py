@@ -231,6 +231,47 @@ def test_explicit_disable_and_solver_override_take_precedence(managed_robot) -> 
     assert set(sim.list_gizmos()) == {"robot:left", "robot:right"}
 
 
+def test_start_enabled_waits_for_window_and_preserves_later_visibility(
+    managed_robot,
+) -> None:
+    sim, _, factory = managed_robot
+    sim.sim_config.robot_ik_gizmo.ik_start_enabled = True
+    sim.close_window()
+    sim.update_gizmos()
+    factory.assert_not_called()
+    sim.open_window()
+    sim.update_gizmos()  # No I press is needed.
+    controls = [g._native_controller for _, g in sim.get_gizmo_items()]
+    assert factory.call_count == 2
+    assert all(control.enabled for control in controls)
+    sim._world.key_down = True
+    sim.update_gizmos()
+    sim.update_gizmos()
+    assert not any(control.enabled for control in controls)
+    sim.close_window()
+    sim.open_window()
+    sim.update_gizmos()
+    assert [g._native_controller for _, g in sim.get_gizmo_items()] == controls
+    assert not any(control.enabled for control in controls)
+    assert factory.call_count == 2
+
+
+def test_start_enabled_failure_waits_for_a_key_before_retry(managed_robot) -> None:
+    sim, _, factory = managed_robot
+    sim.sim_config.robot_ik_gizmo.ik_start_enabled = True
+    create = factory.side_effect
+    factory.side_effect = ValueError("invalid chain")
+    sim.update_gizmos()
+    sim.update_gizmos()
+    assert factory.call_count == 2
+    assert not sim._window.controls
+    factory.side_effect = create
+    sim._world.key_down = True
+    sim.update_gizmos()
+    assert factory.call_count == 4
+    assert all(g._native_controller.enabled for _, g in sim.get_gizmo_items())
+
+
 def test_whole_robot_disable_cleans_activated_controls(managed_robot) -> None:
     sim, _, factory = managed_robot
     sim._world.key_down = True
@@ -289,10 +330,12 @@ def test_robot_removal_cleans_native_controls_and_allows_same_uid_again(
     assert set(sim.list_gizmos()) == {"robot:left", "robot:right"}
 
 
+@pytest.mark.parametrize("start_enabled", [False, True])
 def test_explicit_native_factory_controller_is_not_duplicated(
-    managed_robot, monkeypatch: pytest.MonkeyPatch
+    managed_robot, monkeypatch: pytest.MonkeyPatch, start_enabled: bool
 ) -> None:
     sim, robot, factory = managed_robot
+    sim.sim_config.robot_ik_gizmo.ik_start_enabled = start_enabled
     explicit = Mock()
     monkeypatch.setitem(
         gizmo_module._NATIVE_IK_CONTROLLERS, (id(robot), "left"), explicit

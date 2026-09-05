@@ -116,20 +116,32 @@ DexSim Newton IK. Applications may instead set this metadata directly in
 Automatic Robot Controls
 ------------------------
 
-With the robot configuration above, no Gizmo-specific configuration or API
-call is needed. SimulationManager discovers each control part with existing
-root-link and end-link metadata and uses its configured TCP transform.
+SimulationManager discovers each control part with existing root-link and
+end-link metadata and uses its configured TCP transform. This tutorial
+explicitly activates native IK at startup with one setting:
 
-- In a native window, press **I** to create and show the IK targets. Further
-  presses toggle their visibility using DexSim's native controller.
+.. code-block:: python
+
+   sim_cfg = SimulationManagerCfg(
+       robot_ik_gizmo=GizmoCfg(ik_start_enabled=True),
+   )
+
+The first update after opening the window creates and displays the controller.
+The tutorial sets current joint positions and drive targets before opening the
+window; activation initializes the controller from that pose.
+
+- In this tutorial's native window, IK targets start visible. Press **I** to
+  hide or show them. Ordinary simulations retain ``ik_start_enabled=False``
+  and wait for the first **I** press to activate.
 - In Viser, the TCP controls are available automatically when commands are
   allowed. The solver is constructed on the first drag.
 - Pure headless, read-only Viser, and multi-environment simulations skip
   automatic registration.
 
-Opening a window or registering a control does not initialize another IK
-solver or overwrite existing joint drive targets. DexSim Newton IK is the
-default. To use the robot's configured solver instead:
+Registration alone does not initialize another IK solver or overwrite drive
+targets. Explicit startup activation initializes the controller once; closing
+and reopening the window preserves its later visibility state. DexSim Newton IK
+is the default. To use the robot's configured solver instead:
 
 .. code-block:: python
 
@@ -210,7 +222,7 @@ Command-line options:
 
 Once running:
 
-1. **Activate**: Press **I** in the native window, or open the Viser page
+1. **Open**: The native IK target starts visible, or open the Viser page
 2. **Mouse Interaction**: Click and drag the gizmo to move the robot
 3. **Real-time IK**: Watch the robot joints automatically adjust to follow the gizmo
 4. **Workspace Limits**: Observe how the robot behaves at workspace boundaries

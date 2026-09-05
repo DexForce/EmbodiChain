@@ -151,6 +151,8 @@ class SimulationManagerCfg:
     headless and multi-environment simulations do not register controls.
     Defaults to DexSim IK. Use ``GizmoCfg(ik_solver="embodichain")`` to reuse
     configured solvers such as Pink, or ``None`` to disable automatic setup.
+    ``GizmoCfg(ik_start_enabled=True)`` explicitly activates native controls on
+    their first update with an open window, without waiting for I.
     """
 
     render_cfg: RenderCfg = field(default_factory=RenderCfg)

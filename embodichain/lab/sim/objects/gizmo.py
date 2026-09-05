@@ -103,6 +103,15 @@ class GizmoCfg:
     ik_toggle_key: InputKey = InputKey.SCANCODE_I
     """Native-window key used to toggle a DexSim robot IK target."""
 
+    ik_start_enabled: bool = False
+    """Activate managed native IK on the first update with an open window.
+
+    Defaults to waiting for the toggle key. Explicit startup activation creates
+    the controller and initializes its drive targets from the current pose.
+    This is a one-time request: later toggles and window reopening retain their
+    normal behavior. Viser still builds its solver on the first drag.
+    """
+
 
 class _RobotGizmoAdapter:
     """Expose one EmbodiChain robot control part to DexSim's IK controller."""
@@ -490,6 +499,7 @@ class Gizmo:
         self._native_controller: IKGizmoController | None = None
         self._native_input_controller: GizmoController | None = None
         self._native_window = None
+        self._native_start_pending = self.cfg.ik_start_enabled
 
         from dexsim.kit.ik.interactive import KeyPressTracker
 
@@ -559,9 +569,10 @@ class Gizmo:
         )
 
     def update_native(self, world: dexsim.World) -> None:
-        """Activate robot IK on the first toggle, then update DexSim's controller.
+        """Activate robot IK on startup or a toggle, then update its controller.
 
-        Registration and window reopening never write robot drive targets.
+        Startup activation is opt-in; otherwise only the toggle key activates
+        IK. Registration and window reopening never write robot drive targets.
         Explicit factory-created controllers remain owned by their caller.
 
         Args:
@@ -574,7 +585,11 @@ class Gizmo:
             return
         if self._native_controller is None:
             existing = _NATIVE_IK_CONTROLLERS.get((id(self.target), self._control_part))
-            if existing is not None or not self._native_toggle.pressed(world):
+            if existing is not None:
+                return
+            start_enabled = self._native_start_pending
+            self._native_start_pending = False
+            if not self._native_toggle.pressed(world) and not start_enabled:
                 return
             self._native_controller, self._native_input_controller = (
                 create_robot_ik_gizmo_controller(
@@ -582,8 +597,8 @@ class Gizmo:
                 )
             )
             self._native_window = window
-            # The activation press created a visible target. Consume it so the
-            # controller's own toggle does not immediately hide that target.
+            # Creation starts with a visible target. Consume any held toggle
+            # so the controller does not immediately hide the new target.
             self._native_controller.toggle.pressed(world)
             return
         if self._native_window is not window:

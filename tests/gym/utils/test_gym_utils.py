@@ -1408,7 +1408,9 @@ class TestConfigToCfgFromFile:
         assert cfg.sim_cfg.enable_entity_gizmo is (enabled is not False)
 
     @pytest.mark.parametrize("suffix", ["yaml", "json"])
-    @pytest.mark.parametrize("settings", [None, {}, {"ik_solver": "embodichain"}])
+    @pytest.mark.parametrize(
+        "settings", [None, {}, {"ik_solver": "embodichain"}, {"ik_start_enabled": True}]
+    )
     def test_gym_config_parses_automatic_robot_gizmo_settings(
         self, tmp_path: Path, suffix: str, settings: dict | None
     ) -> None:
@@ -1429,6 +1431,9 @@ class TestConfigToCfgFromFile:
         else:
             assert cfg.sim_cfg.robot_ik_gizmo.ik_solver == settings.get(
                 "ik_solver", "dexsim"
+            )
+            assert cfg.sim_cfg.robot_ik_gizmo.ik_start_enabled is settings.get(
+                "ik_start_enabled", False
             )
 
     def test_yaml_gym_config_parses_to_cfg(self, tmp_path):
