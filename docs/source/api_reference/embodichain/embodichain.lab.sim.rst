@@ -163,3 +163,16 @@ Utility
    :maxdepth: 1
 
    embodichain.lab.sim.utility
+
+DLSS Configuration
+------------------
+
+.. currentmodule:: embodichain.lab.sim
+
+Configure window and offscreen Ray Reconstruction and Super Resolution through
+``SimulationManagerCfg.render_cfg.dlss``. Output resolution remains owned by the
+window or camera configuration.
+
+.. autoclass:: DLSSCfg
+   :members:
+   :undoc-members:

@@ -113,6 +113,97 @@ sim_config = SimulationManagerCfg(
 )
 ```
 
+### NVIDIA DLSS
+
+`RenderCfg.dlss` exposes DexSim's DLSS settings for the `hybrid`, `fast-rt`,
+and `rt` renderers, including `auto` after renderer selection.
+Ray Reconstruction (RR) denoises the image; Super Resolution (SR) upscales it. The two features have independent switches.
+
+| Parameter | Default | Description |
+| :--- | :--- | :--- |
+| `dlss_enabled` | `True` | Master switch; disabling it explicitly selects the standard renderer path. |
+| `offscreen_dlss_enabled` | `True` | Enable DLSS for offscreen cameras, including headless simulations. Also requires the master switch. |
+| `rayreconstruction_enabled` | `True` | Enable RR denoising. |
+| `upscale_enabled` | `True` | Enable SR upscaling; disable for RR at the target resolution. |
+| `dlss_quality` | `2` | Quality mode and default internal render scale; see below. |
+| `render_width`, `render_height` | `0` | Internal FastRT/OfflineRT window dimensions; zero lets DexSim derive them from quality. |
+| `target_width`, `target_height` | `0` | DexSim compatibility fields. The actual window or camera configuration owns output size. These fields do not resize the window. |
+| `upsample_ratio` | `None` | Optional window output/internal ratio, finite and at least 1.0. Computes each zero render dimension from the actual window size; explicit render dimensions take precedence. |
+| `exposure_compensation` | `1.0` | Positive, finite exposure multiplier for the RR bridge. |
+
+DLSS is enabled by default for windows and offscreen cameras. Set
+`offscreen_dlss_enabled=False` to keep offscreen cameras on the standard OptiX
+denoiser. Each enabled offscreen camera needs its own temporal history and
+Vulkan exchange images, so account for additional GPU memory when configuring
+camera batches.
+
+#### Quality and resolution
+
+| Value | Mode | Derived internal size relative to output |
+| :--- | :--- | :--- |
+| `-1` | Auto | 58% balanced-safe scale, then ratio-based NGX mode selection |
+| `0` | Ultra Performance | About 33% |
+| `1` | Performance | 50% |
+| `2` | Balanced | 58% |
+| `3` | Quality | About 67% |
+| `4` | Ultra Quality | 77% |
+| `5` | DLAA | 100% |
+
+Set the window output size with `SimulationManagerCfg.width/height`, or set the
+sensor's output resolution in its camera configuration. With SR enabled,
+FastRT/OfflineRT windows accept explicit internal dimensions or
+`upsample_ratio`. Hybrid and offscreen targets always derive internal size from
+their own output size and quality; window dimension overrides do not control
+those targets. With SR disabled, RR runs at the target resolution.
+
+Leave `upsample_ratio=None` and render dimensions at zero to use the quality
+preset. Setting `upsample_ratio=1.0` explicitly requests native internal
+resolution for FastRT/OfflineRT windows. Very small dimensions computed from a
+ratio are clamped to one pixel.
+
+#### Examples
+
+Enable DLSS for offscreen camera observations in a headless simulation:
+
+```python
+from embodichain.lab.sim import DLSSCfg, SimulationManagerCfg
+from embodichain.lab.sim.cfg import RenderCfg
+
+sim_config = SimulationManagerCfg(
+    headless=True,
+    render_cfg=RenderCfg(
+        renderer="hybrid",
+        dlss=DLSSCfg(
+            dlss_enabled=True,
+            offscreen_dlss_enabled=True,
+            dlss_quality=3,
+        ),
+    ),
+)
+```
+
+Configure an OfflineRT window with an explicit internal resolution:
+
+```python
+sim_config = SimulationManagerCfg(
+    width=1920,
+    height=1080,
+    render_cfg=RenderCfg(
+        renderer="rt",
+        dlss=DLSSCfg(render_width=1280, render_height=720),
+    ),
+)
+```
+
+The same settings are available in task JSON/YAML under
+`render_cfg.dlss` (decoded into `env_cfg.sim_cfg.render_cfg.dlss`). To disable DLSS, set `dlss_enabled: false` explicitly.
+
+DLSS requires Vulkan, a compatible NVIDIA GPU/driver, and a DexSim build with
+the NGX runtime libraries. Initialization is lazy: render an eligible frame and
+check the engine log for `DLSS initialized`. Successful configuration conversion
+or world construction alone does not verify DLSS availability. DexSim owns
+feature initialization and its fallback rendering behavior.
+
 
 ## Initialization
 

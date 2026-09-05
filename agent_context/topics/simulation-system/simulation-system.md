@@ -127,6 +127,27 @@ step ratio. CLI and task config loaders may override runtime fields before
 constructing the environment. Trace those overrides through the caller rather
 than changing a default in the manager blindly.
 
+`RenderCfg.apply_to_dexsim_config()` owns renderer, sampling, tone mapping,
+and `DLSSCfg` conversion into `WorldConfig`. DLSS settings apply to `hybrid`,
+`fast-rt`, and `rt`, after automatic renderer resolution. Defaults enable
+window and offscreen DLSS, with independent RR/SR switches,
+Balanced quality, and zero render dimensions for engine-derived scaling.
+Always forward the master switch, including `False`. Headless initialization
+must retain DLSS settings because offscreen cameras or a later window can use
+them. The actual window/camera owns output size; compatibility target fields
+must not resize it. Explicit internal dimensions and `upsample_ratio` only
+affect FastRT/OfflineRT windows; hybrid and offscreen cameras derive internal
+size from their own output and quality. DexSim initializes DLSS lazily on a
+rendered frame, so config tests do not qualify GPU/NGX support.
+
+`gym/utils/gym_utils.py:config_to_cfg()` decodes task `render_cfg.dlss`
+mappings into `DLSSCfg` before constructing `RenderCfg`. DLSS switches require
+booleans; ratio/exposure settings require real numbers, excluding booleans.
+Malformed scalar types raise a field-specific `ValueError` during construction
+and are rechecked before native conversion after mutable config edits. Focused
+coverage lives in `tests/sim/test_cfg.py`, `tests/sim/test_sim_manager.py`, and
+`tests/gym/utils/test_gym_utils.py`.
+
 Object-specific configuration belongs in `lab/sim/cfg.py` or the
 corresponding robot/sensor module. Scene composition belongs in
 `EmbodiedEnv` or a task config, not in `SimulationManagerCfg`.

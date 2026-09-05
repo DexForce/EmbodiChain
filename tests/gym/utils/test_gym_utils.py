@@ -1385,6 +1385,44 @@ class TestConfigToCfgFromFile:
                 source_path=tmp_path / "env.yaml",
             )
 
+    @pytest.mark.parametrize("extension", ["json", "yaml"])
+    @pytest.mark.parametrize(
+        ("field_name", "invalid_value"),
+        [
+            ("dlss_enabled", "false"),
+            ("offscreen_dlss_enabled", 0),
+            ("rayreconstruction_enabled", 1),
+            ("upscale_enabled", None),
+            ("upsample_ratio", "2.0"),
+            ("exposure_compensation", "1.0"),
+        ],
+    )
+    def test_gym_config_rejects_wrongly_typed_dlss_scalars(
+        self,
+        tmp_path: Path,
+        extension: str,
+        field_name: str,
+        invalid_value: object,
+    ) -> None:
+        """Malformed file values fail at DLSS decoding with the offending field name."""
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "env": {},
+            "robot": {
+                "class_type": "URRobot",
+                "robot_type": "ur5",
+                "uid": "TestUR5",
+            },
+            "render_cfg": {"dlss": {field_name: invalid_value}},
+        }
+        config_path = tmp_path / f"gym_config.{extension}"
+        save_config(config_path, config)
+
+        with pytest.raises(ValueError, match=field_name):
+            config_to_cfg(
+                load_config(config_path), manager_modules=DEFAULT_MANAGER_MODULES
+            )
+
     def test_yaml_gym_config_parses_to_cfg(self, tmp_path):
         config = {
             "id": "EmbodiedEnv-v1",
@@ -1402,6 +1440,13 @@ class TestConfigToCfgFromFile:
                 "spp": 4,
                 "tone_mapping_enabled": True,
                 "tone_mapping_exposure": 1.25,
+                "dlss": {
+                    "dlss_enabled": True,
+                    "offscreen_dlss_enabled": True,
+                    "rayreconstruction_enabled": False,
+                    "upscale_enabled": True,
+                    "dlss_quality": 1,
+                },
             },
             "visualization": {
                 "backend": "viser",
@@ -1466,6 +1511,17 @@ class TestConfigToCfgFromFile:
         assert cfg.sim_cfg.render_cfg.spp == 4
         assert cfg.sim_cfg.render_cfg.tone_mapping_enabled is True
         assert cfg.sim_cfg.render_cfg.tone_mapping_exposure == 1.25
+        from embodichain.lab.sim import DLSSCfg
+        import dexsim
+
+        assert isinstance(cfg.sim_cfg.render_cfg.dlss, DLSSCfg)
+        world_config = dexsim.WorldConfig()
+        cfg.sim_cfg.render_cfg.apply_to_dexsim_config(world_config)
+        assert world_config.dlss_config.dlss_enabled is True
+        assert world_config.dlss_config.offscreen_dlss_enabled is True
+        assert world_config.dlss_config.rayreconstruction_enabled is False
+        assert world_config.dlss_config.upscale_enabled is True
+        assert world_config.dlss_config.dlss_quality == 1
         assert cfg.sim_cfg.visualization.backend == "viser"
         assert cfg.sim_cfg.visualization.scene_fps == 12.5
         assert cfg.sim_cfg.visualization.viser_server.host == "0.0.0.0"

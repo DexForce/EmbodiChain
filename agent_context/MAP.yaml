@@ -21,6 +21,10 @@ topics:
       - simulation
       - SimulationManager
       - SimulationManagerCfg
+      - RenderCfg
+      - DLSSCfg
+      - DLSS
+      - offscreen_dlss_enabled
       - DexSim
       - world
       - arena

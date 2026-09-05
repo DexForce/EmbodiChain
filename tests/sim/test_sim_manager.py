@@ -19,6 +19,8 @@ from __future__ import annotations
 import gc
 import queue
 
+from pathlib import Path
+
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -29,6 +31,7 @@ import torch
 import embodichain.lab.sim.sim_manager as sim_manager_module
 from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.profiler import Profiler
+from embodichain.lab.sim.cfg import DLSSCfg, RenderCfg
 from embodichain.lab.sim.sim_manager import (
     SimulationManager,
     SimulationManagerCfg,
@@ -49,6 +52,52 @@ DEFAULT_LOOK_AT = (
 )
 
 pytestmark = pytest.mark.no_sim
+
+
+@pytest.mark.parametrize("renderer", ["hybrid", "fast-rt", "rt", "auto"])
+@pytest.mark.parametrize("headless", [False, True])
+@pytest.mark.parametrize(
+    "dlss_enabled,offscreen_enabled", [(False, True), (True, False), (True, True)]
+)
+def test_convert_sim_config_applies_dlss_for_all_renderers_and_camera_modes(
+    renderer: str,
+    headless: bool,
+    dlss_enabled: bool,
+    offscreen_enabled: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Headless and auto-selected renderers retain explicit DLSS configuration."""
+    monkeypatch.setattr(
+        "embodichain.lab.sim.utility.render_utils.select_default_renderer",
+        lambda _gpu_id: "hybrid",
+    )
+    config = SimulationManagerCfg(
+        headless=headless,
+        sim_device="cpu",
+        width=640,
+        height=480,
+        render_cfg=RenderCfg(
+            renderer=renderer,
+            dlss=DLSSCfg(
+                dlss_enabled=dlss_enabled,
+                offscreen_dlss_enabled=offscreen_enabled,
+                dlss_quality=3,
+                target_width=1920,
+                target_height=1080,
+            ),
+        ),
+    )
+    manager = SimpleNamespace(_material_cache_dir=tmp_path)
+
+    world = SimulationManager._convert_sim_config(manager, config)
+
+    assert world.dlss_config.dlss_enabled is dlss_enabled
+    assert world.dlss_config.offscreen_dlss_enabled is offscreen_enabled
+    assert world.dlss_config.dlss_quality == 3
+    assert world.dlss_config.render_width == world.dlss_config.render_height == 0
+    assert (world.win_config.width, world.win_config.height) == (640, 480)
+    assert world.open_windows is not headless
 
 
 class FakeCamera:

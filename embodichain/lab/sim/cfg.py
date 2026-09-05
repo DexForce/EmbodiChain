@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import enum
 import json
+import math
 import os
 
 import dexsim
@@ -26,6 +27,7 @@ import torch
 
 from typing import Sequence, Dict, Literal, List, Any, Optional
 from dataclasses import field, MISSING
+from numbers import Real
 
 from dexsim.types import (
     DenoiserType,
@@ -49,6 +51,35 @@ from embodichain.utils.utility import key_in_nested_dict
 from .shapes import ShapeCfg, MeshCfg
 from .workspace.cfg import RobotWorkspaceCfg
 
+__all__ = [
+    "DEFAULT_RENDERER",
+    "DLSSCfg",
+    "RenderCfg",
+    "PhysicsCfg",
+    "MarkerCfg",
+    "WindowRecordCfg",
+    "WindowCameraPoseCfg",
+    "GPUMemoryCfg",
+    "RigidBodyAttributesCfg",
+    "RigidBodyAttributesOverrideCfg",
+    "LinkPhysicsOverrideCfg",
+    "link_attrs_from_dict",
+    "SoftbodyVoxelAttributesCfg",
+    "SoftbodyPhysicalAttributesCfg",
+    "ClothPhysicalAttributesCfg",
+    "JointDrivePropertiesCfg",
+    "ObjectBaseCfg",
+    "LightCfg",
+    "RigidObjectCfg",
+    "SoftObjectCfg",
+    "ClothObjectCfg",
+    "RigidObjectGroupCfg",
+    "RigidConstraintCfg",
+    "URDFCfg",
+    "ArticulationCfg",
+    "RobotCfg",
+]
+
 # Global default renderer settings for simulation.
 #
 # The sentinel value ``"auto"`` defers the choice to GPU-based auto-selection
@@ -57,6 +88,131 @@ from .workspace.cfg import RobotWorkspaceCfg
 # concrete renderer here (e.g. in test fixtures) forces that renderer and takes
 # precedence over auto-selection.
 DEFAULT_RENDERER: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
+
+
+@configclass
+class DLSSCfg:
+    """DexSim DLSS configuration for window and offscreen rendering.
+
+    Ray Reconstruction (RR) and Super Resolution (SR) are independently
+    configurable on the ``"hybrid"``, ``"fast-rt"``, and ``"rt"`` renderers.
+    DLSS is enabled by default for both windows and offscreen cameras.
+    Offscreen DLSS also requires the master switch to remain enabled.
+
+    .. attention::
+        DLSS requires a Vulkan render device, a compatible NVIDIA GPU/driver,
+        and a DexSim build with the NGX runtime. Initialization is deferred
+        until rendering; configuration conversion alone cannot verify support.
+        Each enabled offscreen camera needs its own temporal history and
+        Vulkan exchange images, increasing GPU memory use.
+    """
+
+    dlss_enabled: bool = True
+    """Master switch for DLSS. False retains the standard rendering path."""
+
+    offscreen_dlss_enabled: bool = True
+    """Enable DLSS for offscreen cameras, including in headless simulations."""
+
+    rayreconstruction_enabled: bool = True
+    """Enable RR denoising. Can be used without SR at the target resolution."""
+
+    upscale_enabled: bool = True
+    """Enable SR upscaling. Can be used independently of RR."""
+
+    dlss_quality: int = 2
+    """Quality mode and derived internal scale: ``-1`` auto (58%), ``0`` Ultra
+    Performance (~33%), ``1`` Performance (50%), ``2`` Balanced (58%),
+    ``3`` Quality (~67%), ``4`` Ultra Quality (77%), ``5`` DLAA (100%)."""
+
+    upsample_ratio: float | None = None
+    """Optional window target/render ratio, at least 1.0. None leaves zero
+    render dimensions for DexSim to derive from quality. When specified,
+    computes each unset render dimension from the actual window size. Only
+    FastRT/OfflineRT windows honor these overrides; hybrid and offscreen
+    targets derive their internal resolution from quality."""
+
+    render_width: int = 0
+    """Internal FastRT/OfflineRT window width; zero derives it from quality."""
+
+    render_height: int = 0
+    """Internal FastRT/OfflineRT window height; zero derives it from quality."""
+
+    target_width: int = 0
+    """DexSim compatibility field. Set the actual window or camera width instead."""
+
+    target_height: int = 0
+    """DexSim compatibility field. Set the actual window or camera height instead."""
+
+    exposure_compensation: float = 1.0
+    """Positive, finite exposure multiplier used by the RR bridge."""
+
+    def __post_init__(self) -> None:
+        """Validate scalar types and the ranges of numeric settings."""
+        for name in (
+            "dlss_enabled",
+            "offscreen_dlss_enabled",
+            "rayreconstruction_enabled",
+            "upscale_enabled",
+        ):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"DLSSCfg.{name} must be a boolean.")
+        if type(self.dlss_quality) is not int or not -1 <= self.dlss_quality <= 5:
+            raise ValueError("DLSSCfg.dlss_quality must be an integer from -1 to 5.")
+        for name in ("render_width", "render_height", "target_width", "target_height"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"DLSSCfg.{name} must be a non-negative integer.")
+        if self.upsample_ratio is not None and (
+            isinstance(self.upsample_ratio, bool)
+            or not isinstance(self.upsample_ratio, Real)
+            or not math.isfinite(self.upsample_ratio)
+            or self.upsample_ratio < 1.0
+        ):
+            raise ValueError(
+                "DLSSCfg.upsample_ratio must be a finite number of at least 1.0."
+            )
+        if (
+            isinstance(self.exposure_compensation, bool)
+            or not isinstance(self.exposure_compensation, Real)
+            or not math.isfinite(self.exposure_compensation)
+            or self.exposure_compensation <= 0.0
+        ):
+            raise ValueError(
+                "DLSSCfg.exposure_compensation must be a positive, finite number."
+            )
+
+    def to_dexsim_cfg(self, window_width: int, window_height: int) -> dexsim.DLSSConfig:
+        """Convert settings without changing the window or camera output size.
+
+        Args:
+            window_width: Window width in pixels.
+            window_height: Window height in pixels.
+
+        Returns:
+            Populated :class:`dexsim.DLSSConfig` instance ready to assign to
+            ``world_config.dlss_config``.
+
+        Raises:
+            ValueError: If the configuration contains invalid values.
+        """
+        self.__post_init__()
+        dlss = dexsim.DLSSConfig()
+        dlss.dlss_enabled = self.dlss_enabled
+        dlss.offscreen_dlss_enabled = self.offscreen_dlss_enabled
+        dlss.rayreconstruction_enabled = self.rayreconstruction_enabled
+        dlss.upscale_enabled = self.upscale_enabled
+        dlss.dlss_quality = self.dlss_quality
+        dlss.render_width = self.render_width
+        dlss.render_height = self.render_height
+        if self.upsample_ratio is not None:
+            if self.render_width == 0:
+                dlss.render_width = max(1, int(window_width / self.upsample_ratio))
+            if self.render_height == 0:
+                dlss.render_height = max(1, int(window_height / self.upsample_ratio))
+        dlss.target_width = self.target_width
+        dlss.target_height = self.target_height
+        dlss.exposure_compensation = self.exposure_compensation
+        return dlss
 
 
 @configclass
@@ -76,6 +232,9 @@ class RenderCfg:
 
     spp: int = 1
     """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid', 'fast-rt' or 'rt'."""
+
+    dlss: DLSSCfg = field(default_factory=DLSSCfg)
+    """DLSS settings for hybrid, fast-rt, and rt windows and offscreen cameras."""
 
     tone_mapping_enabled: bool = False
     """Whether to map HDR RGB output with the modified Reinhard curve."""
@@ -120,6 +279,10 @@ class RenderCfg:
             world_config: DexSim world configuration to update in place.
         """
         world_config.renderer = self.to_dexsim_flags()
+        world_config.dlss_config = self.dlss.to_dexsim_cfg(
+            window_width=world_config.win_config.width,
+            window_height=world_config.win_config.height,
+        )
         world_config.raytrace_config.render_iterations_per_frame = self.spp
         world_config.raytrace_config.open_denoise = True
         world_config.raytrace_config.denoiser_type = DenoiserType.OPTIX
