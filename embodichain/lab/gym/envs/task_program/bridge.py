@@ -66,6 +66,8 @@ from embodichain.lab.task_program.runtime.results import (
     SemanticExecutionResult,
     SemanticExecutionStatus,
 )
+from embodichain.lab.task_program.semantics.calls import Pick, Place
+from embodichain.lab.task_program.semantics.integration import SemanticValidationError
 from embodichain.lab.task_program.semantics.profiles import EffectAssurance
 from embodichain.lab.sim.types import EnvAction
 
@@ -1042,97 +1044,61 @@ class TaskProgramDemoBridge:
             )
 
     def _segment_progress_total_steps(self, segment: Any) -> int | None:
-        """Return an exact static action count when one is safe to expose.
-
-        A Task Program normally grounds and plans calls just in time, so a
-        generic segment cannot promise its final number of Gym actions.  The
-        open-loop Pick/Place path is different: no retry, no runner hold, no
-        feedback settlement, and each primitive constructs exactly its policy
-        sample count plus its explicit settle frames.  Expose a total only for
-        that deterministic subset; all other segments retain tqdm's unknown
-        total rather than showing a misleading percentage.
-        """
-        if getattr(segment, "parallel_block", None) is not None or getattr(
-            segment, "post_policies", ()
+        """Count fixed Pick/Place samples without analyzing downstream calls."""
+        if (
+            getattr(segment, "parallel_block", None) is not None
+            or segment.post_policies
+            or self._runner_cfg.minimum_cycle_time != 0.0
+            or self._runner_cfg.hold_on_completion
+            or self._runner_cfg.hold_during_effect_verification
         ):
             return None
 
         compiler = getattr(self._runtime, "compiler", None)
-        analyze = getattr(compiler, "analyze", None)
-        if not callable(analyze):
+        integration = getattr(compiler, "integration", None)
+        if integration is None:
             return None
 
+        total = 0
         try:
-            analysis = self._program.sequential_execution_analysis(
-                segment.segment_index
-            )
-            workflow = analyze(
-                analysis.calls,
-                workflow_id=(
-                    f"{self._program.program_id}/{segment.segment_id}:progress"
-                ),
-            )
-            prefix_length = analysis.execution_prefix_length
-            analyzed_calls = tuple(getattr(workflow, "calls", ()))[:prefix_length]
-            if len(analyzed_calls) != prefix_length:
-                return None
-            totals = [
-                self._deterministic_call_progress_steps(call) for call in analyzed_calls
-            ]
-        except Exception:  # Optional terminal display must not alter execution.
+            for compiled_call in segment.calls:
+                call = compiled_call.call
+                if type(call) not in (Pick, Place):
+                    return None
+                preset = integration.link_call(call).preset
+                motion = preset.motion_policy
+                recovery = preset.recovery_policy
+                tracking = preset.tracking_policy
+                if (
+                    preset.effect_assurance is not EffectAssurance.PROJECTED
+                    or motion.strategy != "ik_interp"
+                    or type(motion.sample_count) is not int
+                    or recovery.max_replans != 0
+                    or recovery.max_action_retries != 0
+                    or preset.workflow_recovery_policy.max_recovery_attempts != 0
+                    or tracking.in_flight is not None
+                    or getattr(tracking.terminal, "settle_duration", None) != 0.0
+                ):
+                    return None
+                options = preset.action_option_template(call.semantic_id)
+                if type(options) is PickUpOptions:
+                    total += motion.sample_count + options.grasp_settle_steps
+                elif type(options) is PlaceOptions:
+                    total += motion.sample_count + options.release_settle_steps
+                else:
+                    return None
+        except SemanticValidationError:
+            # Let ordinary execution report linking failures through its lifecycle.
             return None
-
-        if any(total is None for total in totals):
-            return None
-        return sum(total for total in totals if total is not None)
-
-    def _deterministic_call_progress_steps(
-        self,
-        analyzed_call: Any,
-    ) -> int | None:
-        """Return an exact command count for one deterministic Pick/Place call."""
-        bound = getattr(analyzed_call, "bound", None)
-        preset = getattr(bound, "preset", None)
-        call = getattr(analyzed_call, "call", None)
-        semantic_id = getattr(call, "semantic_id", None)
-        if preset is None or type(semantic_id) is not str:
-            return None
-        if preset.effect_assurance is not EffectAssurance.PROJECTED:
-            return None
-
-        motion_policy = preset.motion_policy
-        recovery_policy = preset.recovery_policy
-        workflow_recovery_policy = preset.workflow_recovery_policy
-        tracking_policy = preset.tracking_policy
-        sample_count = getattr(motion_policy, "sample_count", None)
-        if (
-            getattr(motion_policy, "strategy", None) != "ik_interp"
-            or type(sample_count) is not int
-            or sample_count < 1
-            or recovery_policy.max_replans != 0
-            or recovery_policy.max_action_retries != 0
-            or workflow_recovery_policy.max_recovery_attempts != 0
-            or self._runner_cfg.minimum_cycle_time != 0.0
-            or self._runner_cfg.hold_on_completion
-            or self._runner_cfg.hold_during_effect_verification
-            or tracking_policy.in_flight is not None
-            or getattr(tracking_policy.terminal, "settle_duration", None) != 0.0
-        ):
-            return None
-
-        options = preset.action_option_template(semantic_id)
-        if type(options) is PickUpOptions:
-            return sample_count + options.grasp_settle_steps
-        if type(options) is PlaceOptions:
-            return sample_count + options.release_settle_steps
-        return None
+        return total or None
 
     def _segment_metadata(self, segment: Any) -> dict[str, Any]:
         """Build mutable JSON-safe metadata completed at lifecycle boundaries."""
-        metadata: dict[str, Any] = {
+        return {
             "task_program_id": self._program.program_id,
             "program_segment_id": segment.segment_id,
             "program_segment_index": segment.segment_index,
+            "segment_count": getattr(self._program, "segment_count", None),
             "program_segment_source_path": list(segment.source_path),
             "program_segment_implicit": bool(segment.implicit),
             "semantic_call_indices": [call.call_index for call in segment.calls],
@@ -1143,10 +1109,6 @@ class TaskProgramDemoBridge:
             "post_policies": [],
             "validation": None,
         }
-        program_segment_count = getattr(self._program, "segment_count", None)
-        if type(program_segment_count) is int and program_segment_count > 0:
-            metadata["program_segment_count"] = program_segment_count
-        return metadata
 
     @staticmethod
     def _record_runtime_result(

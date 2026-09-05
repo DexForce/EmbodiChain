@@ -129,8 +129,8 @@ executor exposes that total through `__len__` only to the progress wrapper.
 Task Program bridges and handwritten trajectory tasks must set it only when
 the emitted action count is fixed. Dynamic recovery, feedback settling, or
 data-dependent waits retain an unknown total rather than reporting a false
-percentage. Segment metadata `program_segment_count` or `segment_count`
-selects the `segment N/M` label; legacy action-list tasks receive
+percentage. Segment metadata `segment_count` selects the `segment N/M` label
+for both execution styles; legacy action-list tasks receive
 `segment_count=1` automatically.
 
 ---

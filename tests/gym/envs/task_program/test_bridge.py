@@ -18,8 +18,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -45,6 +45,7 @@ from embodichain.lab.sim.atomic_actions.execution import (
     ExecutionEvent,
     ExecutionEventKind,
 )
+from embodichain.lab.sim.atomic_actions.policies import MotionPolicy, RecoveryPolicy
 from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
 from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
 from embodichain.lab.sim.atomic_actions.runner import ExecutionRunnerCfg
@@ -60,7 +61,13 @@ from embodichain.lab.sim.atomic_actions.state import (
     SceneSnapshot,
     TaskState,
 )
-from embodichain.lab.task_program.semantics.calls import RegisteredSemanticCall
+from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
+from embodichain.lab.task_program.semantics.calls import (
+    Pick,
+    Place,
+    RegisteredSemanticCall,
+)
+from embodichain.lab.task_program.semantics.scene import SceneObjectRef
 from embodichain.lab.task_program.runtime.parallel import ParallelTimingPolicy
 from embodichain.lab.task_program.runtime.results import (
     SemanticExecutionResult,
@@ -75,11 +82,13 @@ from embodichain.lab.task_program.runtime.parallel_executor import (
 from embodichain.lab.task_program.semantics.profiles import (
     EffectAssurance,
     ResourceClaim,
+    SkillPolicyPreset,
 )
 
 STEP_DT = 0.02
 BATCH_SIZE = 2
 ROBOT_DOF = 5
+PROGRESS_SAMPLE_COUNT = 40
 
 
 class _QposProvider:
@@ -293,60 +302,6 @@ class _FakeProgram:
                 break
             calls.extend(compiled.call for compiled in segment.calls)
         return _FakeProgramAnalysis(tuple(calls), len(current.calls))
-
-
-class _DeterministicProgressCompiler:
-    """Return static policy bindings for the terminal-progress contract."""
-
-    def __init__(self) -> None:
-        runner_cfg = ExecutionRunnerCfg(
-            minimum_cycle_time=0.0,
-            hold_on_completion=False,
-            hold_during_effect_verification=False,
-        )
-        common = {
-            "effect_assurance": EffectAssurance.PROJECTED,
-            "motion_policy": SimpleNamespace(
-                strategy="ik_interp",
-                sample_count=40,
-            ),
-            "recovery_policy": SimpleNamespace(
-                max_replans=0,
-                max_action_retries=0,
-            ),
-            "workflow_recovery_policy": SimpleNamespace(max_recovery_attempts=0),
-            "runner_cfg": runner_cfg,
-            "tracking_policy": SimpleNamespace(
-                in_flight=None,
-                terminal=SimpleNamespace(settle_duration=0.0),
-            ),
-        }
-        self._calls = (
-            SimpleNamespace(
-                bound=SimpleNamespace(
-                    preset=SimpleNamespace(
-                        **common,
-                        action_option_template=lambda _: PickUpOptions(),
-                    )
-                ),
-                call=SimpleNamespace(semantic_id="pick"),
-            ),
-            SimpleNamespace(
-                bound=SimpleNamespace(
-                    preset=SimpleNamespace(
-                        **common,
-                        action_option_template=lambda _: PlaceOptions(),
-                    )
-                ),
-                call=SimpleNamespace(semantic_id="place"),
-            ),
-        )
-        self.seen_calls: tuple[object, ...] = ()
-
-    def analyze(self, calls: object, *, workflow_id: str) -> SimpleNamespace:
-        del workflow_id
-        self.seen_calls = tuple(calls)
-        return SimpleNamespace(calls=self._calls)
 
 
 def _skill_result(
@@ -956,23 +911,52 @@ def _bridge(
     return bridge, runtime, clock
 
 
-def test_bridge_declares_repeat_pick_place_progress_total_before_execution() -> None:
-    """Deterministic open-loop Pick/Place exposes the 80-step tqdm total."""
+@pytest.mark.parametrize(
+    "overrides, expected_total",
+    [
+        ({}, 2 * PROGRESS_SAMPLE_COUNT),
+        ({"motion_policy": MotionPolicy(strategy="motion_gen")}, None),
+        ({"recovery_policy": RecoveryPolicy()}, None),
+        ({"tracking_policy": TrackingPolicy.joint_position()}, None),
+        ({"tracking_policy": TrackingPolicy.timed(settle_duration=STEP_DT)}, None),
+    ],
+)
+def test_bridge_progress_counts_only_fixed_pick_place_calls(
+    overrides, expected_total
+) -> None:
+    """Only fixed paths expose a total, without starting or analyzing a workflow."""
+    cube = SceneObjectRef("cube")
+    calls = (Pick(cube), Place(cube, on=SceneObjectRef("table")))
     bridge, runtime, _ = _bridge(
         duration=STEP_DT,
+        segment=_FakeSegment(
+            calls=tuple(_FakeCompiledCall(i, call) for i, call in enumerate(calls))
+        ),
         runner_cfg=ExecutionRunnerCfg(
             minimum_cycle_time=0.0,
             hold_on_completion=False,
             hold_during_effect_verification=False,
         ),
     )
-    compiler = _DeterministicProgressCompiler()
+    policies = {
+        "motion_policy": MotionPolicy(sample_count=PROGRESS_SAMPLE_COUNT),
+        "recovery_policy": RecoveryPolicy(max_replans=0, max_action_retries=0),
+        "tracking_policy": TrackingPolicy.timed(),
+        **overrides,
+    }
+    compiler = Mock()
+    compiler.integration.link_call.return_value.preset = SkillPolicyPreset(
+        "progress",
+        effect_assurance=EffectAssurance.PROJECTED,
+        action_option_templates={"pick": PickUpOptions(), "place": PlaceOptions()},
+        **policies,
+    )
     runtime.compiler = compiler
 
     demo_segment = next(bridge.iter_segments())
 
-    assert demo_segment.progress_total_steps == 80
-    assert compiler.seen_calls == ("pick", "place")
+    assert demo_segment.progress_total_steps == expected_total
+    compiler.analyze.assert_not_called()
     assert runtime.start_count == 0
 
 

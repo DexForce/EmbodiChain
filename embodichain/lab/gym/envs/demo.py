@@ -523,20 +523,20 @@ ProgressWrapper = Callable[[Iterable[Any], str], Iterable[Any]]
 StopPredicate = Callable[[], bool]
 
 
+@dataclass(frozen=True)
 class _SizedActionIterable:
     """Expose a declared action count without materializing a lazy iterable."""
 
-    def __init__(self, actions: Iterable[Any], total_steps: int) -> None:
-        self._actions = actions
-        self._total_steps = total_steps
+    actions: Iterable[Any]
+    total_steps: int
 
     def __iter__(self) -> Iterator[Any]:
         """Return the original lazy action iterator."""
-        return iter(self._actions)
+        return iter(self.actions)
 
     def __len__(self) -> int:
         """Return the exact declared number of action steps."""
-        return self._total_steps
+        return self.total_steps
 
 
 def _env_target(env: Any) -> Any:
@@ -595,27 +595,6 @@ def _has_terminal_runtime_failure_trace(segment: DemoSegment) -> bool:
     )
 
 
-def _segment_progress_description(
-    episode_index: int,
-    segment_id: int,
-    segment: DemoSegment,
-) -> str:
-    """Build the terminal label for one executing demonstration segment."""
-    segment_total = segment.metadata.get("program_segment_count")
-    if type(segment_total) is not int:
-        segment_total = segment.metadata.get("segment_count")
-
-    segment_number = segment_id + 1
-    if type(segment_total) is int and segment_total >= segment_number:
-        segment_label = f"{segment_number}/{segment_total}"
-    else:
-        segment_label = f"#{segment_number}"
-    return (
-        f"Executing episode #{episode_index}, segment {segment_label}: "
-        f"{segment.name}"
-    )
-
-
 def _dataset_instruction(env: Any) -> str:
     """Return the dataset-level instruction used for legacy demo segments."""
     metadata = getattr(_env_target(env), "metadata", {})
@@ -665,15 +644,9 @@ def resolve_demo_segments(env: Any, **kwargs: Any) -> Iterable[DemoSegment]:
             )
         actions = legacy_creator(**kwargs)
         segments = (
-            None
+            ()
             if actions is None
-            else (
-                DemoSegment(
-                    actions,
-                    name="legacy",
-                    metadata={"segment_count": 1},
-                ),
-            )
+            else (DemoSegment(actions, name="legacy", metadata={"segment_count": 1}),)
         )
 
     if segments is None:
@@ -817,12 +790,16 @@ def execute_demo_episode(
             if progress is not None:
                 if segment.progress_total_steps is not None:
                     actions = _SizedActionIterable(
-                        actions,
-                        segment.progress_total_steps,
+                        actions, segment.progress_total_steps
                     )
+                segment_total = segment.metadata.get("segment_count")
+                segment_label = f"#{segment_id + 1}"
+                if type(segment_total) is int and segment_total > segment_id:
+                    segment_label = f"{segment_id + 1}/{segment_total}"
                 actions = progress(
                     actions,
-                    _segment_progress_description(episode_index, segment_id, segment),
+                    f"Executing episode #{episode_index}, segment {segment_label}: "
+                    f"{segment.name}",
                 )
 
             action_iterator = iter(actions)

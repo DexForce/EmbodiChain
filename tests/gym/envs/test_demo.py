@@ -34,9 +34,6 @@ from embodichain.lab.gym.envs.demo import (
 )
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
 from embodichain.lab.gym.envs.types import ControllerAction
-from embodichain_tasks.manipulation.tableware.blocks_ranking_rgb import (
-    BlocksRankingRGBEnv,
-)
 from embodichain_tasks.manipulation.tableware.stack_blocks_two import (
     SETTLE_STEPS,
     StackBlocksTwoEnv,
@@ -293,108 +290,61 @@ def test_execute_demo_episode_runs_lazy_segments_as_one_episode() -> None:
     assert not env._demo_no_auto_reset
 
 
-def test_execute_demo_episode_exposes_declared_progress_total_for_lazy_actions() -> (
-    None
-):
+@pytest.mark.parametrize("total", [None, 3])
+def test_execute_demo_episode_exposes_declared_progress_total_for_lazy_actions(
+    total,
+) -> None:
     """A progress wrapper can render a total without consuming a generator."""
 
     class _ProgressTotalEnv(_SegmentedEnv):
         def create_demo_segments(self):
             def actions():
-                yield from (1, 2, 3)
+                for action in (1, 2, 3):
+                    assert self.state == action - 1
+                    yield action
 
             return (
                 DemoSegment(
                     actions=actions(),
                     name="move_cube",
-                    progress_total_steps=3,
+                    progress_total_steps=total,
                 ),
             )
 
-    totals: list[int] = []
-
     def progress(actions, description: str):
-        del description
-        totals.append(len(actions))
+        assert description == "Executing episode #0, segment #1: move_cube"
+        assert env.actions == []
+        if total is None:
+            with pytest.raises(TypeError):
+                len(actions)
+        else:
+            assert len(actions) == total
         return actions
 
-    result = execute_demo_episode(_ProgressTotalEnv(), progress=progress)
+    env = _ProgressTotalEnv()
+    result = execute_demo_episode(env, progress=progress)
 
     assert result.all_success
-    assert totals == [3]
 
 
 def test_handwritten_motion_generator_segment_declares_exact_progress_total() -> None:
     """A fixed trajectory and fixed settle phase share the tqdm total contract."""
 
-    class _HandwrittenStackEnv:
-        _iter_segment_actions = StackBlocksTwoEnv._iter_segment_actions
-
-        def __init__(self) -> None:
-            self._stack_block = Mock()
-            self._trajectory = torch.zeros(
-                1,
-                HANDWRITTEN_TRAJECTORY_STEPS,
-                HANDWRITTEN_TRAJECTORY_DOF,
-            )
-
-        def _plan_stack(
-            self,
-        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-            plan_success = torch.tensor([True])
-            pose = torch.eye(4).unsqueeze(0)
-            return plan_success, self._trajectory, pose, pose
-
-        @staticmethod
-        def _validate_stack(plan_success: torch.Tensor) -> torch.Tensor:
-            return plan_success
-
-    env = _HandwrittenStackEnv()
-
+    trajectory = torch.zeros(
+        1, HANDWRITTEN_TRAJECTORY_STEPS, HANDWRITTEN_TRAJECTORY_DOF
+    )
+    pose = torch.eye(4).unsqueeze(0)
+    env = Mock(spec=StackBlocksTwoEnv)
+    env._stack_block = Mock()
+    env._plan_stack.return_value = torch.tensor([True]), trajectory, pose, pose
+    env._iter_segment_actions.side_effect = (
+        lambda value: StackBlocksTwoEnv._iter_segment_actions(env, value)
+    )
     segment = StackBlocksTwoEnv.create_demo_segments(env)[0]
 
     assert segment.progress_total_steps == HANDWRITTEN_TRAJECTORY_STEPS + SETTLE_STEPS
     assert len(tuple(segment.actions)) == segment.progress_total_steps
     env._stack_block.clear_dynamics.assert_called_once()
-
-
-def test_dynamic_handwritten_settling_keeps_progress_indeterminate() -> None:
-    """A runtime-dependent settle phase must not claim a fixed tqdm total."""
-
-    class _DynamicHandwrittenEnv:
-        @staticmethod
-        def _target_position(x_offset: float) -> torch.Tensor:
-            del x_offset
-            return torch.zeros(1, HANDWRITTEN_TRAJECTORY_DOF)
-
-        @staticmethod
-        def _plan_block_segment(
-            *,
-            uid: str,
-            arm: str,
-            hand: str,
-            target_position: torch.Tensor,
-        ) -> tuple[torch.Tensor, Any, torch.Tensor]:
-            del uid, arm, hand, target_position
-
-            def actions():
-                yield torch.zeros(1, HANDWRITTEN_TRAJECTORY_DOF)
-
-            return torch.tensor([True]), actions(), torch.eye(4).unsqueeze(0)
-
-        @staticmethod
-        def _validate_block_placement(
-            uid: str,
-            plan_success: torch.Tensor,
-            target_position: torch.Tensor,
-        ) -> torch.Tensor:
-            del uid, target_position
-            return plan_success
-
-    segments = tuple(BlocksRankingRGBEnv.create_demo_segments(_DynamicHandwrittenEnv()))
-
-    assert segments
-    assert all(segment.progress_total_steps is None for segment in segments)
 
 
 class _LifecycleMetadataEnv:

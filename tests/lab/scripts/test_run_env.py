@@ -91,19 +91,16 @@ class _LegacyProgressEnv:
 class _TaskProgramProgressEnv(_LegacyProgressEnv):
     """Three-segment Task Program stand-in matching repeated pick/place."""
 
-    def get_wrapper_attr(self, name: str):
-        if name == "create_demo_segments":
-            return self.create_demo_segments
-        return super().get_wrapper_attr(name)
-
     def create_demo_segments(self, **kwargs):
         del kwargs
         return tuple(
             DemoSegment(
-                actions=(object(),),
+                actions=(
+                    object() for _ in range(REPEATED_PICK_PLACE_SEGMENT_STEP_COUNT)
+                ),
                 name="move_cube",
                 metadata={
-                    "program_segment_count": REPEATED_PICK_PLACE_SEGMENT_COUNT,
+                    "segment_count": REPEATED_PICK_PLACE_SEGMENT_COUNT,
                 },
                 progress_total_steps=REPEATED_PICK_PLACE_SEGMENT_STEP_COUNT,
             )
@@ -134,14 +131,11 @@ def test_legacy_action_list_displays_episode_and_segment_indices(
     assert len(progress.call_args.args[0]) == 1
     assert progress.call_args.kwargs["file"] is sys.stdout
     assert progress.call_args.kwargs["dynamic_ncols"] is True
-    assert progress.call_args.kwargs["disable"] is False
 
 
-def test_task_program_progress_displays_repeated_segment_position(monkeypatch) -> None:
-    """Repeated pick/place progress labels identify each segment out of three."""
+def test_task_program_progress_displays_repeated_segment_position(capsys) -> None:
+    """Each lazy segment renders its position, percentage, and exact step count."""
     env = _TaskProgramProgressEnv()
-    progress = MagicMock(side_effect=lambda actions, **kwargs: actions)
-    monkeypatch.setattr(run_env.tqdm, "tqdm", progress)
 
     generated = run_env.generate_and_execute_action_list(
         env,
@@ -151,14 +145,14 @@ def test_task_program_progress_displays_repeated_segment_position(monkeypatch) -
     )
 
     assert generated
-    assert [call.kwargs["desc"] for call in progress.call_args_list] == [
-        f"Executing episode #{EPISODE_INDEX}, segment {index}/"
-        f"{REPEATED_PICK_PLACE_SEGMENT_COUNT}: move_cube"
-        for index in range(1, REPEATED_PICK_PLACE_SEGMENT_COUNT + 1)
-    ]
-    assert [len(call.args[0]) for call in progress.call_args_list] == [
-        REPEATED_PICK_PLACE_SEGMENT_STEP_COUNT
-    ] * REPEATED_PICK_PLACE_SEGMENT_COUNT
+    output = capsys.readouterr().out
+    for index in range(1, REPEATED_PICK_PLACE_SEGMENT_COUNT + 1):
+        assert (
+            f"Executing episode #{EPISODE_INDEX}, segment {index}/"
+            f"{REPEATED_PICK_PLACE_SEGMENT_COUNT}: move_cube: 100%|"
+        ) in output
+    total = REPEATED_PICK_PLACE_SEGMENT_STEP_COUNT
+    assert output.count(f"{total}/{total}") == REPEATED_PICK_PLACE_SEGMENT_COUNT
 
 
 def test_run_env_syncs_viser_images_each_step_by_default() -> None:

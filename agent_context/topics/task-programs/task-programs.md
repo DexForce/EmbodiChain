@@ -208,7 +208,9 @@ segment lifecycle completes normally.
 
 The bridge declares `progress_total_steps` only for deterministic open-loop
 Pick/Place segments with fixed interpolation samples and no recovery, runner
-holds, feedback settling, post-policies, or parallel execution. Handwritten
+holds, feedback settling, post-policies, or parallel execution. It links only
+the current segment's calls to their policy presets; progress display never
+performs full workflow analysis or downstream look-ahead. Handwritten
 trajectory tasks use the same `DemoSegment` field for a known fixed trajectory
 and settle suffix; paths whose emitted action count depends on runtime state
 remain indeterminate in both execution styles.

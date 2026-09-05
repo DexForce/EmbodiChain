@@ -476,7 +476,7 @@ def test_packaged_repeated_cube_runs_three_lazy_bridge_lifecycles() -> None:
     for segment_index, metadata in enumerate(segment_metadata):
         assert metadata["task_program_id"] == compiled.program_id
         assert metadata["program_segment_index"] == segment_index
-        assert metadata["program_segment_count"] == 3
+        assert metadata["segment_count"] == 3
         assert metadata["semantic_call_indices"] == [
             2 * segment_index,
             2 * segment_index + 1,

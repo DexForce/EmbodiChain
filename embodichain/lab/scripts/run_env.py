@@ -62,8 +62,6 @@ def _progress_wrapper(actions: Iterable[Any], description: str) -> Iterable[Any]
         unit="step",
         file=sys.stdout,
         dynamic_ncols=True,
-        leave=True,
-        disable=False,
     )
 
 
