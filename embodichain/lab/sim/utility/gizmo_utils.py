@@ -20,12 +20,16 @@ Gizmo utility functions for EmbodiSim.
 This module provides utility functions for creating gizmo transform callbacks.
 """
 
+from __future__ import annotations
+
 from typing import Callable
 from typing import TYPE_CHECKING
 from dexsim.types import TransformMask
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
+
+__all__ = ["create_gizmo_callback", "run_gizmo_robot_control_loop"]
 
 
 def create_gizmo_callback() -> Callable:
@@ -47,11 +51,12 @@ def create_gizmo_callback() -> Callable:
 
 def run_gizmo_robot_control_loop(
     robot: object | str, control_part: str = "arm", end_link_name: str | None = None
-):
+) -> None:
     """Run a control loop for testing gizmo controls on a robot.
 
     This function implements a control loop that allows users to manipulate a robot
-    using gizmo controls with keyboard input for additional commands.
+    using gizmo controls with keyboard input for additional commands. The loop
+    explicitly steps physics and paces execution with the configured timestep.
 
     Args:
         robot (Robot | str): The robot to control with the gizmo.
@@ -84,9 +89,6 @@ def run_gizmo_robot_control_loop(
 
     if isinstance(robot, str):
         robot = sim.get_robot(uid=robot)
-
-    # Enter auto-update mode.
-    sim.set_manual_update(False)
 
     # Replace robot's default solver with PinkSolver for gizmo control.
     robot_solver = robot.get_solver(name=control_part)
@@ -135,8 +137,8 @@ def run_gizmo_robot_control_loop(
 
     try:
         while True:
-            time.sleep(0.033)  # ~30Hz
-            sim.update_gizmos()
+            step_start = time.perf_counter()
+            sim.update(step=1)
 
             # Check for keyboard input
             key = get_key()
@@ -203,6 +205,10 @@ def run_gizmo_robot_control_loop(
                     log_info("  G: Toggle gizmo visibility")
                     log_info("  R: Reset robot to initial pose")
                     log_info("  I: Print this information again")
+
+            time.sleep(
+                max(0.0, sim.sim_config.physics_dt - (time.perf_counter() - step_start))
+            )
 
     except KeyboardInterrupt:
         sim.disable_gizmo(uid=robot.uid, control_part=control_part)

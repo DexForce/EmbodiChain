@@ -46,14 +46,18 @@ if not sim.has_gizmo("robot", control_part="arm"):
     raise RuntimeError("Gizmo setup failed")
 ```
 
-`SimulationManager.update()` drains pending Gizmo commands during a normal
-manual-physics loop. An automatic-physics loop that does not call `update()`
-must continue calling:
+`SimulationManager.update()` drains pending Gizmo commands, steps physics,
+and publishes the resulting pose to Viser. Interactive applications call it
+explicitly in their main loop:
 
 ```python
-sim.update_gizmos()
-sim.capture_visualization_safely()  # Publish the authoritative pose to Viser.
+while True:
+    sim.update(step=1)
 ```
+
+The caller can pace this loop against wall time using the configured physics
+timestep. For editing while physics is paused, call `update_gizmos()` followed
+by `capture_visualization_safely()` without stepping the world.
 
 Use `disable_gizmo()`, `set_gizmo_visibility()`, and
 `toggle_gizmo_visibility()` for lifecycle and visibility changes.
