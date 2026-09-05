@@ -153,17 +153,17 @@ def test_render_cfg_rejects_invalid_image_processing_settings(
         RenderCfg(**{field_name: invalid_value})
 
 
-def test_dlss_defaults_preserve_native_quality_resolution_selection() -> None:
-    """Default conversion leaves render dimensions at zero for engine derivation."""
+def test_dlss_defaults_enable_offscreen_and_preserve_quality_resolution() -> None:
+    """Offscreen DLSS defaults on while quality and resolution retain native defaults."""
     native = dexsim.DLSSConfig()
     converted = DLSSCfg().to_dexsim_cfg(1920, 1080)
 
     for name in DLSSCfg().to_dict():
-        if name != "upsample_ratio":
+        if name not in ("upsample_ratio", "offscreen_dlss_enabled"):
             assert getattr(converted, name) == getattr(native, name), name
     assert converted.render_width == converted.render_height == 0
     assert converted.dlss_quality == 2
-    assert converted.offscreen_dlss_enabled is False
+    assert converted.offscreen_dlss_enabled is True
 
 
 @pytest.mark.parametrize("rr_enabled", [False, True])

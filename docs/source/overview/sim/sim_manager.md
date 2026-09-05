@@ -116,14 +116,13 @@ sim_config = SimulationManagerCfg(
 ### NVIDIA DLSS
 
 `RenderCfg.dlss` exposes DexSim's DLSS settings for the `hybrid`, `fast-rt`,
-and `rt` renderers, including `auto` after renderer selection. The configuration
-follows the DexSim v0.5.0 API. Ray Reconstruction (RR) denoises the image; Super
-Resolution (SR) upscales it. The two features have independent switches.
+and `rt` renderers, including `auto` after renderer selection.
+Ray Reconstruction (RR) denoises the image; Super Resolution (SR) upscales it. The two features have independent switches.
 
 | Parameter | Default | Description |
 | :--- | :--- | :--- |
 | `dlss_enabled` | `True` | Master switch; disabling it explicitly selects the standard renderer path. |
-| `offscreen_dlss_enabled` | `False` | Opt offscreen cameras into DLSS, including headless simulations. Also requires the master switch. |
+| `offscreen_dlss_enabled` | `True` | Enable DLSS for offscreen cameras, including headless simulations. Also requires the master switch. |
 | `rayreconstruction_enabled` | `True` | Enable RR denoising. |
 | `upscale_enabled` | `True` | Enable SR upscaling; disable for RR at the target resolution. |
 | `dlss_quality` | `2` | Quality mode and default internal render scale; see below. |
@@ -132,10 +131,11 @@ Resolution (SR) upscales it. The two features have independent switches.
 | `upsample_ratio` | `None` | Optional window output/internal ratio, finite and at least 1.0. Computes each zero render dimension from the actual window size; explicit render dimensions take precedence. |
 | `exposure_compensation` | `1.0` | Positive, finite exposure multiplier for the RR bridge. |
 
-The defaults match DexSim: window DLSS is enabled and offscreen cameras keep
-the standard OptiX denoiser until explicitly enabled. Each enabled offscreen
-camera needs its own temporal history and Vulkan exchange images, so account
-for additional GPU memory when configuring camera batches.
+DLSS is enabled by default for windows and offscreen cameras. Set
+`offscreen_dlss_enabled=False` to keep offscreen cameras on the standard OptiX
+denoiser. Each enabled offscreen camera needs its own temporal history and
+Vulkan exchange images, so account for additional GPU memory when configuring
+camera batches.
 
 #### Quality and resolution
 

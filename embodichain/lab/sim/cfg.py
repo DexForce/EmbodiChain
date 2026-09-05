@@ -95,8 +95,8 @@ class DLSSCfg:
 
     Ray Reconstruction (RR) and Super Resolution (SR) are independently
     configurable on the ``"hybrid"``, ``"fast-rt"``, and ``"rt"`` renderers.
-    Defaults match DexSim v0.5.0: window DLSS is enabled, while offscreen
-    cameras require an explicit opt-in in addition to the master switch.
+    DLSS is enabled by default for both windows and offscreen cameras.
+    Offscreen DLSS also requires the master switch to remain enabled.
 
     .. attention::
         DLSS requires a Vulkan render device, a compatible NVIDIA GPU/driver,
@@ -109,8 +109,8 @@ class DLSSCfg:
     dlss_enabled: bool = True
     """Master switch for DLSS. False retains the standard rendering path."""
 
-    offscreen_dlss_enabled: bool = False
-    """Opt offscreen cameras into DLSS, including in headless simulations."""
+    offscreen_dlss_enabled: bool = True
+    """Enable DLSS for offscreen cameras, including in headless simulations."""
 
     rayreconstruction_enabled: bool = True
     """Enable RR denoising. Can be used without SR at the target resolution."""
@@ -218,7 +218,7 @@ class RenderCfg:
     """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid', 'fast-rt' or 'rt'."""
 
     dlss: DLSSCfg = field(default_factory=DLSSCfg)
-    """DLSS settings for hybrid, fast-rt, and rt windows and opt-in offscreen cameras."""
+    """DLSS settings for hybrid, fast-rt, and rt windows and offscreen cameras."""
 
     tone_mapping_enabled: bool = False
     """Whether to map HDR RGB output with the modified Reinhard curve."""
