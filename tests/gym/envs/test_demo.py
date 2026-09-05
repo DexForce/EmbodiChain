@@ -283,6 +283,37 @@ def test_execute_demo_episode_runs_lazy_segments_as_one_episode() -> None:
     assert not env._demo_no_auto_reset
 
 
+def test_execute_demo_episode_exposes_declared_progress_total_for_lazy_actions() -> (
+    None
+):
+    """A progress wrapper can render a total without consuming a generator."""
+
+    class _ProgressTotalEnv(_SegmentedEnv):
+        def create_demo_segments(self):
+            def actions():
+                yield from (1, 2, 3)
+
+            return (
+                DemoSegment(
+                    actions=actions(),
+                    name="move_cube",
+                    progress_total_steps=3,
+                ),
+            )
+
+    totals: list[int] = []
+
+    def progress(actions, description: str):
+        del description
+        totals.append(len(actions))
+        return actions
+
+    result = execute_demo_episode(_ProgressTotalEnv(), progress=progress)
+
+    assert result.all_success
+    assert totals == [3]
+
+
 class _LifecycleMetadataEnv:
     """Populate one shared metadata mapping at lazy lifecycle boundaries."""
 

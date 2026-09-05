@@ -55,8 +55,16 @@ _REPLAY_CONTROL_POLL_INTERVAL = 0.05
 
 
 def _progress_wrapper(actions: Iterable[Any], description: str) -> Iterable[Any]:
-    """Wrap a segment action iterable in the run-env progress bar."""
-    return tqdm.tqdm(actions, desc=description, unit="step")
+    """Wrap a segment action iterable in a visible terminal progress bar."""
+    return tqdm.tqdm(
+        actions,
+        desc=description,
+        unit="step",
+        file=sys.stdout,
+        dynamic_ncols=True,
+        leave=True,
+        disable=False,
+    )
 
 
 def _env_target(env: Any) -> Any:
