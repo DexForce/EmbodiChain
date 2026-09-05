@@ -60,7 +60,6 @@ def main():
 
     # Create simulation context
     sim = SimulationManager(sim_cfg)
-    sim.set_manual_update(False)
 
     # Add some objects to the scene for camera to observe
     for i in range(5):
@@ -99,7 +98,7 @@ def main():
     camera = sim.add_sensor(sensor_cfg=camera_cfg)
 
     # Wait for initialization
-    time.sleep(0.2)
+    sim.update(step=round(0.2 / sim.sim_config.physics_dt))
 
     native_window_opened = False
     if not args.headless:
@@ -153,9 +152,8 @@ def run_simulation(
 
     try:
         while True:
-            # Update all gizmos managed by sim (including camera gizmo)
-            sim.update_gizmos()
-            sim.capture_visualization_safely()
+            step_start = time.perf_counter()
+            sim.update(step=1)
 
             # Update camera to get latest sensor data
             camera.update()
@@ -224,6 +222,10 @@ def run_simulation(
 
                 last_time = current_time
                 last_step = step_count
+
+            time.sleep(
+                max(0.0, sim.sim_config.physics_dt - (time.perf_counter() - step_start))
+            )
 
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")

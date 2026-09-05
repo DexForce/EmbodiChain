@@ -1127,7 +1127,6 @@ class RigidObjectCfg(ObjectBaseCfg):
 
     If set to larger than 1, the rigid body will be decomposed into multiple convex hulls
     using the approximate convex decomposition method specified by :attr:`acd_method`.
-    Reference: https://github.com/SarahWeiii/CoACD
     """
 
     acd_method: str = MISSING
@@ -1137,8 +1136,9 @@ class RigidObjectCfg(ObjectBaseCfg):
         Use :attr:`MeshCfg.acd_method` instead. This field is kept for
         backward compatibility and overrides the shape-level value when explicitly set.
 
-    Currently, ``"coacd"`` and ``"vhacd"`` are supported. Only used when
-    :attr:`max_convex_hull_num` is set to larger than 1.
+    ``"visacd"``, ``"coacd"``, and ``"vhacd"`` are supported. Only used when
+    :attr:`max_convex_hull_num` is set to larger than 1. ``"visacd"`` requires
+    CUDA support.
     """
 
     sdf_resolution: int = MISSING

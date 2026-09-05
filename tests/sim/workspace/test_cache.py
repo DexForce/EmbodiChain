@@ -689,7 +689,6 @@ def _make_cobotmagic_sim(tmp_path):
 
     config = SimulationManagerCfg(headless=True, sim_device="cpu")
     sim = SimulationManager(config)
-    sim.set_manual_update(False)
 
     cfg_dict = {
         "uid": "CobotMagic",

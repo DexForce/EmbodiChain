@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import time
 import torch
 import pytest
 import numpy as np
@@ -55,7 +54,6 @@ class BaseTestMotionGenerator(object):
             return
         cls.config = SimulationManagerCfg(headless=True, sim_device="cpu")
         cls.robot_sim = SimulationManager(cls.config)
-        cls.robot_sim.set_manual_update(False)
 
         cfg_dict = {
             "uid": "CobotMagic",
@@ -158,8 +156,12 @@ class BaseTestMotionGenerator(object):
         )
         for i in indices:
             self.robot.set_qpos(qpos=qpos_list[i], joint_ids=self.get_joint_ids())
-            time.sleep(delay)
-        time.sleep(delay * 2)
+            self.robot_sim.update(
+                step=round(delay / self.robot_sim.sim_config.physics_dt)
+            )
+        self.robot_sim.update(
+            step=round(delay * 2 / self.robot_sim.sim_config.physics_dt)
+        )
 
     @classmethod
     def teardown_class(cls):
@@ -178,16 +180,24 @@ class BaseTestMotionGenerator(object):
         # Forward
         for q in qpos_list:
             robot.set_qpos(qpos=q, joint_ids=self.robot.get_joint_ids(self.arm_name))
-            time.sleep(delay)
-        time.sleep(delay * 5)
+            self.robot_sim.update(
+                step=round(delay / self.robot_sim.sim_config.physics_dt)
+            )
+        self.robot_sim.update(
+            step=round(delay * 5 / self.robot_sim.sim_config.physics_dt)
+        )
 
     def _execute_backward_trajectory(self, robot, qpos_list, delay=0.1):
         """Helper method to execute trajectory"""
         # Backward
         for q in qpos_list[::-1]:
             robot.set_qpos(qpos=q, joint_ids=self.robot.get_joint_ids(self.arm_name))
-            time.sleep(delay)
-        time.sleep(delay * 5)
+            self.robot_sim.update(
+                step=round(delay / self.robot_sim.sim_config.physics_dt)
+            )
+        self.robot_sim.update(
+            step=round(delay * 5 / self.robot_sim.sim_config.physics_dt)
+        )
 
 
 class TestMotionGenerator(BaseTestMotionGenerator):
@@ -203,7 +213,7 @@ class TestMotionGenerator(BaseTestMotionGenerator):
     def test_create_trajectory_with_xpos(self, is_linear):
         """Test trajectory generation with cartesian positions"""
         self.robot.set_qpos(qpos=self.qpos_list[0], joint_ids=self.get_joint_ids())
-        time.sleep(0.2)
+        self.robot_sim.update(step=round(0.2 / self.robot_sim.sim_config.physics_dt))
 
         options = MotionGenOptions(
             start_qpos=self.qpos_list[0],
@@ -256,7 +266,7 @@ class TestMotionGenerator(BaseTestMotionGenerator):
     def test_create_trajectory_with_qpos(self, is_linear):
         """Test trajectory generation with joint positions"""
         self.robot.set_qpos(qpos=self.qpos_list[0], joint_ids=self.get_joint_ids())
-        time.sleep(0.05)
+        self.robot_sim.update(step=round(0.05 / self.robot_sim.sim_config.physics_dt))
 
         options = MotionGenOptions(
             start_qpos=self.qpos_list[0],

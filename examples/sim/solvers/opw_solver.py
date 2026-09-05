@@ -47,7 +47,6 @@ def main(visualization: VisualizationCfg | None = None) -> None:
         visualization=visualization or VisualizationCfg(),
     )
     sim = SimulationManager(config)
-    sim.set_manual_update(False)
 
     # Robot configuration dictionary
     cfg_dict = {
@@ -200,8 +199,11 @@ def main(visualization: VisualizationCfg | None = None) -> None:
     else:
         robot.set_qpos(qpos=ik_qpos_r, joint_ids=robot.get_joint_ids(arm_name_r))
 
+    sim.update(step=round(1.0 / sim.sim_config.physics_dt))
     sim.capture_visualization(force=True)
-    embed(header="Test OPWSolver example. Press Ctrl+D to exit.")
+    embed(
+        header="Test OPWSolver example. Physics is paused; call sim.update(step=N) to advance. Press Ctrl+D to exit."
+    )
 
 
 if __name__ == "__main__":

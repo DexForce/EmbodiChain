@@ -59,9 +59,10 @@ EnvCfg.sim_cfg
 the scene can be assembled before a native window is opened. It sets
 `SimulationManagerCfg.num_envs` from `EnvCfg.num_envs`.
 
-`SimulationManager` enables physics, selects manual physics updates, creates
-the configured arenas, installs default plane/background/lighting resources,
-and starts configured visualization during initialization. A Viser backend
+`SimulationManager` fixes the native world to explicit physics updates before
+enabling physics or assembling scene resources. It creates the configured arenas,
+installs default plane/background/lighting resources, and starts configured
+visualization during initialization. A Viser backend
 forces `headless=True`; Viser and the native DexSim window are mutually
 exclusive.
 
@@ -102,6 +103,13 @@ for integrations that need link ancestry. It returns immediate-parent-first
 origin, axis, and optional limits. Consumers must not reach into
 `BatchEntity._entities` or retain backend-native joint-info objects.
 
+`Articulation.get_link_render_nodes(link_name)` is the explicit render-attachment
+query, inherited by Robot. It validates every instance and returns live render
+nodes in environment order; those nodes must not be used after asset destruction.
+`sensors.attachment.resolve_parent_nodes()` owns camera parent-name resolution
+using public asset queries. `SimulationManager.add_sensor()` only supplies the
+asset registry and environment count, then coordinates creation and attachment.
+
 `Articulation` also exposes deterministic link meshes through
 `get_link_vert_face()` and named-state FK through `compute_fk()` with
 `qpos_joint_names`. Stochastic surface sampling and Atomic Action geometry keys
@@ -141,6 +149,10 @@ Object-specific configuration belongs in `lab/sim/cfg.py` or the
 corresponding robot/sensor module. Scene composition belongs in
 `EmbodiedEnv` or a task config, not in `SimulationManagerCfg`.
 
+For mesh collision decomposition, `MeshCfg.acd_method` defaults to `"visacd"`
+with DexSim 0.5.0; it requires CUDA support. `"coacd"` and `"vhacd"` remain
+supported explicit options.
+
 ## Where to Make Changes
 
 | Change | Primary location |
@@ -162,8 +174,11 @@ corresponding robot/sensor module. Scene composition belongs in
 - Keep batched object and sensor state aligned with the manager's arena count.
 - Build scene assets before explicitly initializing GPU physics. The manager
   will warn and initialize lazily on the first update if this was missed.
-- Manual update is the default; normal environment stepping must advance
-  physics through `SimulationManager.update()`.
+- Physics advances through explicit `SimulationManager.update()` calls.
+  Interactive loops own their fixed physics timestep and optional wall-clock
+  pacing.
+- Drawing markers and publishing visualization do not advance physics.
+  Use `capture_visualization(force=True)` to publish marker edits while paused.
 - Reset only the requested environment rows and honor
   `excluded_uids` for resources detached from automatic reset.
 - `destroy()` queues deferred cleanup. Tests and non-exiting standalone
