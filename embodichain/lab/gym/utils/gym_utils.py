@@ -620,6 +620,8 @@ def config_to_cfg(
 
     env_cfg.sim_cfg = SimulationManagerCfg(
         headless=config.get("headless", False),
+        enable_entity_gizmo=config.get("enable_entity_gizmo", True),
+        robot_ik_gizmo=config.get("robot_ik_gizmo", {}),
         sim_device=config.get("device", "cpu"),
         render_cfg=RenderCfg(**render_config),
         gpu_id=config.get("gpu_id", 0),

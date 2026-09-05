@@ -1385,6 +1385,57 @@ class TestConfigToCfgFromFile:
                 source_path=tmp_path / "env.yaml",
             )
 
+    @pytest.mark.parametrize("suffix", ["yaml", "json"])
+    @pytest.mark.parametrize("enabled", [None, False, True])
+    def test_gym_config_preserves_entity_gizmo_startup_preference(
+        self, tmp_path: Path, suffix: str, enabled: bool | None
+    ) -> None:
+        """Task deployments default to native interaction and can opt out."""
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "env": {},
+            "robot": {"uid": "TestRobot"},
+        }
+        if enabled is not None:
+            config["enable_entity_gizmo"] = enabled
+        config_path = tmp_path / f"gym_config.{suffix}"
+        save_config(config_path, config)
+
+        cfg = config_to_cfg(
+            load_config(config_path), manager_modules=DEFAULT_MANAGER_MODULES
+        )
+
+        assert cfg.sim_cfg.enable_entity_gizmo is (enabled is not False)
+
+    @pytest.mark.parametrize("suffix", ["yaml", "json"])
+    @pytest.mark.parametrize(
+        "settings", [None, {}, {"ik_solver": "embodichain"}, {"ik_start_enabled": True}]
+    )
+    def test_gym_config_parses_automatic_robot_gizmo_settings(
+        self, tmp_path: Path, suffix: str, settings: dict | None
+    ) -> None:
+        """Deployments may disable automatic IK controls or select their solver."""
+        path = tmp_path / f"gym_config.{suffix}"
+        save_config(
+            path,
+            {
+                "id": "EmbodiedEnv-v1",
+                "env": {},
+                "robot": {"uid": "robot"},
+                "robot_ik_gizmo": settings,
+            },
+        )
+        cfg = config_to_cfg(load_config(path), manager_modules=DEFAULT_MANAGER_MODULES)
+        if settings is None:
+            assert cfg.sim_cfg.robot_ik_gizmo is None
+        else:
+            assert cfg.sim_cfg.robot_ik_gizmo.ik_solver == settings.get(
+                "ik_solver", "dexsim"
+            )
+            assert cfg.sim_cfg.robot_ik_gizmo.ik_start_enabled is settings.get(
+                "ik_start_enabled", False
+            )
+
     def test_yaml_gym_config_parses_to_cfg(self, tmp_path):
         config = {
             "id": "EmbodiedEnv-v1",

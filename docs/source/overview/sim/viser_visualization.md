@@ -126,7 +126,7 @@ each Gizmo through `SimulationManager.enable_gizmo`; a pure browser process can
 omit the DexSim handle:
 
 ```python
-sim.enable_gizmo("cube", enable_native=False)
+sim.enable_gizmo("cube")
 ```
 
 Viser and DexSim use the same deferred target-control path:
