@@ -103,6 +103,13 @@ for integrations that need link ancestry. It returns immediate-parent-first
 origin, axis, and optional limits. Consumers must not reach into
 `BatchEntity._entities` or retain backend-native joint-info objects.
 
+`Articulation.get_link_render_nodes(link_name)` is the explicit render-attachment
+query, inherited by Robot. It validates every instance and returns live render
+nodes in environment order; those nodes must not be used after asset destruction.
+`sensors.attachment.resolve_parent_nodes()` owns camera parent-name resolution
+using public asset queries. `SimulationManager.add_sensor()` only supplies the
+asset registry and environment count, then coordinates creation and attachment.
+
 `Articulation` also exposes deterministic link meshes through
 `get_link_vert_face()` and named-state FK through `compute_fk()` with
 `qpos_joint_names`. Stochastic surface sampling and Atomic Action geometry keys
@@ -123,6 +130,10 @@ than changing a default in the manager blindly.
 Object-specific configuration belongs in `lab/sim/cfg.py` or the
 corresponding robot/sensor module. Scene composition belongs in
 `EmbodiedEnv` or a task config, not in `SimulationManagerCfg`.
+
+For mesh collision decomposition, `MeshCfg.acd_method` defaults to `"visacd"`
+with DexSim 0.5.0; it requires CUDA support. `"coacd"` and `"vhacd"` remain
+supported explicit options.
 
 ## Where to Make Changes
 

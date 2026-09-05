@@ -95,7 +95,7 @@ def _resolve_mesh_collision_params(
     )
     acd_method = next(
         value
-        for value in (cfg.acd_method, cfg.shape.acd_method, "coacd")
+        for value in (cfg.acd_method, cfg.shape.acd_method, "visacd")
         if not is_missing(value)
     )
     sdf_resolution = next(
