@@ -1498,6 +1498,178 @@ def test_move_held_object_moves_only_exclusively_held_rows() -> None:
     assert not torch.allclose(trajectory.positions[1], context.robot.qpos[1])
 
 
+def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
+    generator = _motion_generator()
+    solved_poses: list[torch.Tensor] = []
+
+    def compute_ik(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+        **_: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        solved_poses.append(pose.clone())
+        return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed + 0.1
+
+    generator.robot.compute_ik.side_effect = compute_ik
+    current_eef_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    current_eef_pose[:, 0, 3] = torch.tensor([0.4, 0.7])
+    generator.robot.compute_fk.return_value = current_eef_pose
+    generator.robot.compute_fk.side_effect = None
+    action = _bind_action(generator, Pour())
+    semantics = ObjectSemantics(
+        affordance=AxisAlignAffordance(internal_axis=torch.tensor([1.0, 0.0, 0.0])),
+        geometry={},
+        label="pourable-object",
+    )
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={"arm": _held(semantics)},
+    )
+    context = _context(task)
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="pour",
+            goal=PourGoal(),
+            binding=_binding(),
+            motion_policy=MotionPolicy(sample_count=10),
+            skill_options=PourOptions(rotate_angle=math.pi / 2.0),
+        ),
+        context,
+    )
+
+    expected_rotation = axis_angle_to_rotation_matrix(
+        torch.tensor([math.pi / 2.0, 0.0, 0.0])
+    )
+    assert plan.plan_success.tolist() == [True, True]
+    assert plan.trajectory.positions.shape == (NUM_ENVS, 10, ROBOT_DOF)
+    assert plan.trajectory.duration.tolist() == pytest.approx([9.0 / 60.0] * NUM_ENVS)
+    assert [segment.name for segment in plan.segments] == ["pour"]
+    assert torch.allclose(
+        solved_poses[0][:, :3, :3],
+        expected_rotation.expand(NUM_ENVS, -1, -1),
+        atol=1.0e-6,
+    )
+    assert torch.allclose(
+        solved_poses[0][:, :3, 3],
+        current_eef_pose[:, :3, 3],
+    )
+    assert len(solved_poses) == 2
+    assert torch.allclose(solved_poses[1], current_eef_pose, atol=1.0e-6)
+    assert torch.all(plan.trajectory.positions[:, :, ARM_DOF:] == 1.0)
+    assert plan.expected_effects.is_empty
+    assert context.task is task
+
+
+def test_engine_compiles_pickup_followed_by_pour() -> None:
+    generator = _motion_generator()
+    engine = AtomicActionEngine(
+        generator,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=torch.zeros(HAND_DOF),
+                grasp=torch.ones(HAND_DOF),
+            )
+        },
+    )
+    semantics = ObjectSemantics(
+        affordance=AxisAlignAffordance(internal_axis=torch.tensor([1.0, 0.0, 0.0])),
+        geometry={},
+        label="pourable-object",
+        entity_id="target",
+    )
+    context = _context(
+        scene=_target_scene(
+            torch.eye(4).repeat(NUM_ENVS, 1, 1),
+            timestamp=0.0,
+            version=0,
+        )
+    )
+
+    compiled = engine.compile(
+        (
+            ActionInvocation(
+                skill_id="pick_up",
+                goal=GraspGoal(semantics, grasp_xpos=torch.eye(4)),
+                binding=_binding(),
+                motion_policy=MotionPolicy(sample_count=20),
+            ),
+            ActionInvocation(
+                skill_id="pour",
+                goal=PourGoal(),
+                binding=_binding(),
+                motion_policy=MotionPolicy(sample_count=10),
+                skill_options=PourOptions(rotate_angle=math.pi / 2.0),
+            ),
+        ),
+        context,
+    )
+
+    assert compiled.plan_success.tolist() == [True, True]
+    assert [plan.skill_id for plan in compiled.action_plans] == ["pick_up", "pour"]
+    assert compiled.projected_context.get_held_object("arm") is not None
+
+
+def test_pour_requires_exclusively_held_axis_align_affordance() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, Pour())
+    invocation = ActionInvocation(
+        skill_id="pour",
+        goal=PourGoal(),
+        binding=_binding(),
+        motion_policy=MotionPolicy(sample_count=10),
+    )
+
+    with pytest.raises(ValueError, match="run PickUp first"):
+        _plan_action(action, invocation, _context())
+
+    invalid_task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={"arm": _held(_semantics())},
+    )
+    with pytest.raises(ValueError, match="AxisAlignAffordance"):
+        _plan_action(action, invocation, _context(invalid_task))
+
+    semantics = ObjectSemantics(
+        affordance=AxisAlignAffordance(),
+        geometry={},
+        label="shared-pourable-object",
+    )
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={
+            "arm": _held(semantics),
+            "alternate_arm": _held(
+                semantics,
+                env_mask=torch.tensor([True, False]),
+            ),
+        },
+    )
+
+    plan = _plan_action(action, invocation, _context(task))
+
+    assert plan.plan_success.tolist() == [False, True]
+    assert torch.allclose(
+        plan.trajectory.positions[0],
+        _context(task)
+        .robot.qpos[0]
+        .unsqueeze(0)
+        .expand(plan.trajectory.waypoint_count, -1),
+    )
+
+
+def test_pour_options_only_contain_rotate_angle_and_require_finite_value() -> None:
+    assert set(PourOptions.__dataclass_fields__) == {"rotate_angle"}
+    assert PourOptions().rotate_angle == pytest.approx(math.pi / 4.0)
+    with pytest.raises(ValueError, match="rotate_angle must be finite"):
+        PourOptions(rotate_angle=float("nan"))
+
+
 def test_strategy_and_sample_count_are_not_action_config_fields() -> None:
     with pytest.raises(TypeError):
         MoveEndEffectorOptions(strategy="motion_gen")  # type: ignore[call-arg]
@@ -1964,6 +2136,165 @@ def test_axis_align_validates_goal_and_binding_contract() -> None:
                 binding=ActionBinding(
                     owner_id=_ACTION_ENGINES[id(action)].binding_owner_id,
                 ),
+            )
+        )
+
+
+def test_axis_align_handles_opposite_axes_without_nan() -> None:
+    action = _bind_action(_motion_generator(), AxisAlign())
+    identity = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+
+    eef_keyframes = action._axis_alignment_eef_keyframes(
+        identity,
+        identity,
+        torch.tensor([1.0, 0.0, 0.0]),
+        torch.tensor([-1.0, 0.0, 0.0]),
+        waypoint_count=3,
+    )
+
+    final_axis = torch.matmul(
+        eef_keyframes[:, -1, :3, :3], torch.tensor([1.0, 0.0, 0.0])
+    )
+    assert torch.isfinite(eef_keyframes).all()
+    assert torch.allclose(
+        final_axis,
+        torch.tensor([-1.0, 0.0, 0.0]).expand(NUM_ENVS, -1),
+        atol=1.0e-6,
+    )
+
+
+def test_axis_align_plans_seven_segments_and_aligns_the_object_axis() -> None:
+    generator = _motion_generator()
+    solved_poses: list[torch.Tensor] = []
+
+    def compute_ik(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+        **_: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        solved_poses.append(pose.clone())
+        return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed + 0.1
+
+    generator.robot.compute_ik.side_effect = compute_ik
+    action = _bind_action(generator, AxisAlign())
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    semantics = ObjectSemantics(
+        affordance=AxisAlignAffordance(internal_axis=torch.tensor([1.0, 0.0, 0.0])),
+        geometry={},
+        label="axis-object",
+        entity_id="target",
+    )
+    context = _context(scene=_target_scene(object_pose, timestamp=0.0, version=0))
+    original_task = context.task
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="axis_align",
+            goal=AxisAlignGoal(semantics=semantics, grasp_xpos=torch.eye(4)),
+            binding=_binding(),
+            motion_policy=MotionPolicy(sample_count=20),
+            skill_options=AxisAlignOptions(
+                target_axis=torch.tensor([0.0, 0.0, 1.0]),
+                lift_height=0.1,
+                lower_distance=0.03,
+            ),
+        ),
+        context,
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    assert plan.trajectory.positions.shape == (NUM_ENVS, 20, ROBOT_DOF)
+    assert torch.equal(plan.trajectory.env_ids, context.env_ids)
+    assert plan.trajectory.duration.tolist() == pytest.approx([19.0 / 60.0] * NUM_ENVS)
+    assert [segment.name for segment in plan.segments] == [
+        "approach",
+        "reach",
+        "close",
+        "lift",
+        "align",
+        "lower",
+        "open",
+    ]
+    assert plan.expected_effects.is_empty
+    assert context.task is original_task
+    assert plan.scene_dependencies == ("target",)
+    final_object_rotation = solved_poses[-1][:, :3, :3]
+    final_world_axis = torch.matmul(
+        final_object_rotation,
+        torch.tensor([1.0, 0.0, 0.0]),
+    )
+    assert torch.allclose(
+        final_world_axis,
+        torch.tensor([0.0, 0.0, 1.0]).expand(NUM_ENVS, -1),
+        atol=1.0e-6,
+    )
+    assert solved_poses[-1][:, 2, 3].tolist() == pytest.approx([0.07, 0.07])
+
+
+def test_axis_align_holds_only_failed_environment_rows() -> None:
+    generator = _motion_generator()
+
+    def compute_ik(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+        **_: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        return torch.tensor([True, False]), joint_seed + 0.1
+
+    generator.robot.compute_ik.side_effect = compute_ik
+    action = _bind_action(generator, AxisAlign())
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    semantics = ObjectSemantics(
+        affordance=AxisAlignAffordance(),
+        geometry={},
+        label="partially-alignable-object",
+        entity_id="target",
+    )
+    context = _context(scene=_target_scene(object_pose, timestamp=0.0, version=0))
+
+    plan = _plan_action(
+        action,
+        _invocation(
+            "axis_align",
+            AxisAlignGoal(semantics=semantics, grasp_xpos=torch.eye(4)),
+            sample_count=20,
+        ),
+        context,
+    )
+
+    assert plan.plan_success.tolist() == [True, False]
+    assert not torch.allclose(plan.trajectory.positions[0], context.robot.qpos[0])
+    assert torch.allclose(
+        plan.trajectory.positions[1],
+        context.robot.qpos[1].unsqueeze(0).expand(plan.trajectory.waypoint_count, -1),
+    )
+
+
+def test_axis_align_validates_goal_and_binding_contract() -> None:
+    action = _bind_action(_motion_generator(), AxisAlign())
+    semantics = ObjectSemantics(
+        affordance=AxisAlignAffordance(),
+        geometry={},
+        label="axis-object",
+    )
+
+    with pytest.raises(TypeError, match="expects goal AxisAlignGoal"):
+        action.resolve_request(
+            ActionInvocation(
+                skill_id="axis_align",
+                goal=object(),
+                binding=_binding(),
+            )
+        )
+    with pytest.raises(KeyError, match="end effector"):
+        action.resolve_request(
+            ActionInvocation(
+                skill_id="axis_align",
+                goal=AxisAlignGoal(semantics),
+                binding=ActionBinding(manipulators={"primary": "arm"}),
             )
         )
 

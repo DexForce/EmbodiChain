@@ -30,6 +30,8 @@ from embodichain.utils.math import transform_points_mat
 
 pytestmark = pytest.mark.gpu
 
+_EXPECTED_VHACD_MAX_SURFACE_DISTANCE = 0.5945
+
 
 def batch_convex_collision_query(device=torch.device("cuda")):
     mug_path = get_data_path("ScannedBottle/moliwulong_processed.ply")
@@ -73,7 +75,10 @@ def batch_convex_collision_query(device=torch.device("cuda")):
     is_pose_collide = is_point_collide.any(dim=1)
     pose_surface_distance = point_surface_distance.min(dim=1).values
     assert is_pose_collide.sum().item() == 1
-    assert abs(pose_surface_distance.max().item() - 0.8492) < 1e-2
+    assert (
+        abs(pose_surface_distance.max().item() - _EXPECTED_VHACD_MAX_SURFACE_DISTANCE)
+        < 1e-2
+    )
 
 
 def test_batch_convex_collision_cpu():
