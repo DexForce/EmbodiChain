@@ -12,7 +12,7 @@
 | Planner assets | `embodichain/data/assets/planner_assets.py` → `download_neural_planner_checkpoint()` |
 | Motion generator | `embodichain/lab/sim/motion/motion_generator.py` → `MotionGenerator`, `MotionGenCfg`, `MotionGenOptions` |
 | Planner utilities & data types | `embodichain/lab/sim/motion/planners/utils.py` → `PlanState`, `PlanResult`, `MoveType`, `MovePart`, `TrajectorySampleMethod`, `interpolate_xpos_batched` |
-| Trajectory augmentation | `embodichain/lab/sim/motion/trajectory_augmentation/` → contracts, configs, operators, coverage, `GenerationSession` |
+| Trajectory augmentation | `embodichain/lab/sim/motion/expansion/` → contracts, configs, operators, coverage, `GenerationSession` |
 
 ## Overview
 
@@ -38,7 +38,7 @@ The entire stack is **env-batched** (`B = num_envs`). `PlanState` / `PlanResult`
 
 ## Trajectory Augmentation Boundary
 
-`motion/trajectory_augmentation/` owns immutable trajectory/candidate contracts,
+`motion/expansion/` owns immutable trajectory/candidate contracts,
 strict configuration decoding, phase-authorized joint residuals and retiming,
 sampled motion-limit checks, geometric/timing coverage, and bounded generation
 session bookkeeping. Candidates are logical rows; their identities and local
@@ -58,7 +58,7 @@ object-local axis through the object origin. The caller chooses geometry-valid
 angles and replans the resulting pose candidates; the operator neither moves
 the object nor certifies the grasp.
 
-Focused augmentation tests live under `tests/sim/motion/trajectory_augmentation/`.
+Focused augmentation tests live under `tests/sim/motion/expansion/`.
 
 ## Choose the owning layer
 

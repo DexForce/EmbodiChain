@@ -22,11 +22,11 @@ import math
 import pytest
 import torch
 
-from embodichain.lab.sim.motion.trajectory_augmentation.contracts import (
+from embodichain.lab.sim.motion.expansion.contracts import (
     TrajectoryPhase,
     TrajectoryTemplate,
 )
-from embodichain.lab.sim.motion.trajectory_augmentation.operators import (
+from embodichain.lab.sim.motion.expansion.operators import (
     joint_residual,
     retime,
     rotate_grasp_about_object_axis,

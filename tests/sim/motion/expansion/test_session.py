@@ -23,10 +23,10 @@ from dataclasses import replace
 import pytest
 import torch
 
-from embodichain.lab.sim.motion.trajectory_augmentation.cfg import (
+from embodichain.lab.sim.motion.expansion.cfg import (
     TrajectoryGenerationJobCfg,
 )
-from embodichain.lab.sim.motion.trajectory_augmentation.contracts import (
+from embodichain.lab.sim.motion.expansion.contracts import (
     CandidateIdentity,
     CandidateTrajectoryBatch,
     CommitReceipt,
@@ -36,7 +36,7 @@ from embodichain.lab.sim.motion.trajectory_augmentation.contracts import (
     ValidationCheck,
     ValidationResult,
 )
-from embodichain.lab.sim.motion.trajectory_augmentation.session import GenerationSession
+from embodichain.lab.sim.motion.expansion.session import GenerationSession
 
 CASE = SceneCase("case", "initial", "scene_v1", "lift", "robot")
 JOINT_NAMES = ("joint_a", "joint_b")

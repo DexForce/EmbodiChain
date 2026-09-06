@@ -42,7 +42,7 @@ The simulation stack can be read from the bottom up:
     |   |-- solvers: forward, inverse, and differential kinematics
     |   |-- planners: paths, time parameterization, and sampling
     |   |-- workspace: reachability analysis and runtime queries
-    |   `-- trajectory_augmentation: candidates, coverage, and generation accounting
+    |   `-- expansion: candidates, coverage, and generation accounting
     `-- atomic actions
         `-- reusable manipulation primitives built from assets, solvers, and planners
 

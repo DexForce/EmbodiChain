@@ -136,9 +136,9 @@ topics:
   status: active
 - id: motion-planning
   title: Motion Planning
-  aliases: [motion planning, trajectory planning, trajectory augmentation, fixed scene trajectory augmentation, 轨迹扩增, 运动规划, 轨迹规划]
+  aliases: [motion planning, trajectory planning, motion expansion, trajectory expansion, trajectory augmentation, fixed scene trajectory augmentation, 轨迹扩增, 运动规划, 轨迹规划]
   keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, CuroboPlanner, NeuralPlanner,
-    trajectory_augmentation, GenerationSession, TrajectoryAugmentationCfg, CandidateTrajectoryBatch,
+    expansion, GenerationSession, TrajectoryAugmentationCfg, CandidateTrajectoryBatch,
     collision world, compute trajectory, trajectory resampling, trajectory warping]
   paths: [topics/motion-planning/motion-planning.md]
   source_of_truth:
@@ -149,12 +149,12 @@ topics:
   - embodichain/lab/sim/motion/planners/curobo/curobo_planner.py
   - embodichain/lab/sim/motion/planners/curobo/curobo_yaml.py
   - embodichain/lab/task_program/semantics/scene.py
-  - embodichain/lab/sim/motion/trajectory_augmentation/
+  - embodichain/lab/sim/motion/expansion/
   - embodichain/compute/trajectory/
   - embodichain/lab/sim/utility/action_utils.py
   watch_paths: [embodichain/lab/sim/motion/motion_generator.py, tests/sim/motion/test_motion_generator.py,
-    tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/, embodichain/lab/sim/motion/trajectory_augmentation/,
-    tests/sim/motion/trajectory_augmentation/, embodichain/lab/sim/utility/action_utils.py, embodichain/compute/trajectory/,
+    tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/, embodichain/lab/sim/motion/expansion/,
+    tests/sim/motion/expansion/, embodichain/lab/sim/utility/action_utils.py, embodichain/compute/trajectory/,
     tests/sim/motion/planners/, tests/compute/]
   related_topics: [simulation-system, robot-system, ik-solvers, atomic-actions]
   status: active

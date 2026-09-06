@@ -30,7 +30,7 @@ __all__ = [
     "solvers",
     "planners",
     "workspace",
-    "trajectory_augmentation",
+    "expansion",
     "motion_generator",
 ]
 

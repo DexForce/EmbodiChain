@@ -99,7 +99,7 @@ flag later for all or selected environment indices.
 | Robot-specific configuration | `robots/` | `robot-system` |
 | Inverse kinematics | `motion/solvers/` | `ik-solvers` |
 | Trajectory and motion generation | `motion/planners/` | `motion-planning` |
-| Trajectory candidates, augmentation, coverage, generation bookkeeping | `motion/trajectory_augmentation/` | `motion-planning` |
+| Trajectory candidates, augmentation, coverage, generation bookkeeping | `motion/expansion/` | `motion-planning` |
 | Typed action planning and execution | `atomic_actions/` | `atomic-actions` |
 | Task Program Semantic Calls and robot profiles | `embodichain/lab/task_program/semantics/` | `task-programs` |
 | Reachability analysis and runtime workspace queries | `motion/workspace/` | `robot-workspace` |

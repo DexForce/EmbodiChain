@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from embodichain.lab.sim.motion.trajectory_augmentation import (
+from embodichain.lab.sim.motion.expansion import (
     TrajectoryAugmentationCfg,
     TrajectoryGenerationJobCfg,
 )

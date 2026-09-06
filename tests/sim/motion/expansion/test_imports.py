@@ -23,7 +23,7 @@ import sys
 def test_public_core_import_uses_motion_namespace_without_creating_a_world() -> None:
     script = """
 import dexsim
-from embodichain.lab.sim.motion.trajectory_augmentation import TrajectoryGenerationJobCfg
+from embodichain.lab.sim.motion.expansion import TrajectoryGenerationJobCfg
 TrajectoryGenerationJobCfg.from_mapping({})
 assert dexsim.get_world_num() == 0
 """

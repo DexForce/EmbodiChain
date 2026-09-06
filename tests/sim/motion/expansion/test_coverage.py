@@ -19,8 +19,8 @@ from __future__ import annotations
 import pytest
 import torch
 
-from embodichain.lab.sim.motion.trajectory_augmentation.contracts import TrajectoryPhase
-from embodichain.lab.sim.motion.trajectory_augmentation.coverage import (
+from embodichain.lab.sim.motion.expansion.contracts import TrajectoryPhase
+from embodichain.lab.sim.motion.expansion.coverage import (
     CoverageIndex,
     TrajectoryDescriptor,
     describe_trajectory,

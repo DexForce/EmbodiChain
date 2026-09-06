@@ -23,7 +23,7 @@ public imports still use the normal ``lab`` and ``sim`` initialization path.
        parameterization.
    * - ``motion.workspace``
      - Offline reachability analysis, workspace caches, and runtime sampling.
-   * - ``motion.trajectory_augmentation``
+   * - ``motion.expansion``
      - Explicit qpos templates and candidates, constrained geometric and timing
        variation, measured coverage, and bounded generation accounting.
 
@@ -31,7 +31,7 @@ Trajectory augmentation provides the core contracts and operators. Physical
 initial-state restoration, planning, rollout execution, task validation, and
 dataset persistence must be supplied by host integrations. The core accepts
 their evidence and persistence receipts without creating those services. See the
-:doc:`augmentation API </api_reference/embodichain/embodichain.lab.sim.motion.trajectory_augmentation>`
+:doc:`augmentation API </api_reference/embodichain/embodichain.lab.sim.motion.expansion>`
 for the implemented boundaries.
 
 Migrating Existing Imports

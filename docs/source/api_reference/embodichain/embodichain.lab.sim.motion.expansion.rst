@@ -1,7 +1,7 @@
-embodichain.lab.sim.motion.trajectory_augmentation
+embodichain.lab.sim.motion.expansion
 ==================================================
 
-The :mod:`embodichain.lab.sim.motion.trajectory_augmentation` package provides
+The :mod:`embodichain.lab.sim.motion.expansion` package provides
 qpos contracts, constrained trajectory operators, measured coverage, and a
 generation session for simulation expert trajectories. The core algorithms do
 not directly import Gym or own simulation stepping. Public imports pass through
@@ -14,7 +14,7 @@ episode persistence must be supplied by separate host integrations. Those
 integrations provide actual observations and commands, validation evidence,
 and persistence confirmations; this package does not instantiate them.
 
-.. currentmodule:: embodichain.lab.sim.motion.trajectory_augmentation
+.. currentmodule:: embodichain.lab.sim.motion.expansion
 
 .. autosummary::
    :nosignatures:
@@ -193,7 +193,7 @@ Implementation Modules
 The following module paths expose the same contracts and implementations.
 The package import path above is convenient for callers combining them.
 
-.. currentmodule:: embodichain.lab.sim.motion.trajectory_augmentation.contracts
+.. currentmodule:: embodichain.lab.sim.motion.expansion.contracts
 
 .. autosummary::
    :nosignatures:
@@ -209,7 +209,7 @@ The package import path above is convenient for callers combining them.
    ExpertEpisode
    CommitReceipt
 
-.. currentmodule:: embodichain.lab.sim.motion.trajectory_augmentation.cfg
+.. currentmodule:: embodichain.lab.sim.motion.expansion.cfg
 
 .. autosummary::
    :nosignatures:
@@ -217,7 +217,7 @@ The package import path above is convenient for callers combining them.
    TrajectoryAugmentationCfg
    TrajectoryGenerationJobCfg
 
-.. currentmodule:: embodichain.lab.sim.motion.trajectory_augmentation.coverage
+.. currentmodule:: embodichain.lab.sim.motion.expansion.coverage
 
 .. autosummary::
    :nosignatures:
@@ -226,7 +226,7 @@ The package import path above is convenient for callers combining them.
    describe_trajectory
    CoverageIndex
 
-.. currentmodule:: embodichain.lab.sim.motion.trajectory_augmentation.operators
+.. currentmodule:: embodichain.lab.sim.motion.expansion.operators
 
 .. autosummary::
    :nosignatures:
@@ -236,7 +236,7 @@ The package import path above is convenient for callers combining them.
    retime
    validate_motion_limits
 
-.. currentmodule:: embodichain.lab.sim.motion.trajectory_augmentation.session
+.. currentmodule:: embodichain.lab.sim.motion.expansion.session
 
 .. autosummary::
    :nosignatures:

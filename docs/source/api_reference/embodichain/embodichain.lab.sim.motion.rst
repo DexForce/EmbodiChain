@@ -12,7 +12,7 @@ capability from its owning subpackage:
    from embodichain.lab.sim.motion.solvers import SolverCfg
    from embodichain.lab.sim.motion.motion_generator import MotionGenerator, MotionGenCfg
    from embodichain.lab.sim.motion.workspace import RobotWorkspaceCfg
-   from embodichain.lab.sim.motion.trajectory_augmentation import TrajectoryTemplate
+   from embodichain.lab.sim.motion.expansion import TrajectoryTemplate
 
 The parent package exposes its subpackages and ``motion_generator`` module
 through lazy attributes;
@@ -36,7 +36,7 @@ and dataset persistence belong to explicit host integrations.
    solvers
    planners
    workspace
-   trajectory_augmentation
+   expansion
 
 .. toctree::
    :maxdepth: 1
@@ -45,4 +45,4 @@ and dataset persistence belong to explicit host integrations.
    embodichain.lab.sim.motion.solvers
    embodichain.lab.sim.motion.planners
    embodichain.lab.sim.motion.workspace
-   embodichain.lab.sim.motion.trajectory_augmentation
+   embodichain.lab.sim.motion.expansion
