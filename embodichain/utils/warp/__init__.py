@@ -14,7 +14,12 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""High-performance Warp kernels and helpers for image processing, 3D spatial computation, robotics kinematics/trajectories, and convex collision queries."""
+"""Compatibility exports; new code should use ``embodichain.compute``.
+
+Warp kernels live in private domain implementations under that package.
+"""
+
+from __future__ import annotations
 
 from .kernels import reshape_tiled_image
 from . import kinematics
@@ -34,3 +39,21 @@ from .kinematics.interpolate import (
 )
 
 from .collision.convex_query import convex_signed_distance_kernel
+
+__all__ = [
+    "reshape_tiled_image",
+    "kinematics",
+    "kernels",
+    "collision",
+    "opw_fk_kernel",
+    "opw_ik_kernel",
+    "trajectory_get_diff_kernel",
+    "trajectory_interpolate_kernel",
+    "trajectory_add_origin_kernel",
+    "get_offset_qpos_kernel",
+    "pairwise_distances",
+    "cumsum_distances",
+    "repeat_first_point",
+    "interpolate_along_distance",
+    "convex_signed_distance_kernel",
+]

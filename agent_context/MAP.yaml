@@ -206,6 +206,8 @@ topics:
       - 逆运动学
       - IK求解器
     keywords:
+      - compute kinematics
+      - Warp kinematics
       - ik
       - solver
       - inverse kinematics
@@ -222,6 +224,7 @@ topics:
     paths:
       - topics/ik-solvers/ik-solvers.md
     source_of_truth:
+      - embodichain/compute/kinematics/
       - embodichain/lab/sim/solvers/base_solver.py
       - embodichain/lab/sim/solvers/srs_solver.py
       - embodichain/lab/sim/solvers/opw_solver.py
@@ -286,6 +289,8 @@ topics:
       - 传感器
       - 相机
     keywords:
+      - scatter_contact_data
+      - tiled image
       - sensor
       - embodiment sensor
       - embodiment.component
@@ -303,6 +308,8 @@ topics:
     paths:
       - topics/sensor-system/sensor-system.md
     source_of_truth:
+      - embodichain/lab/sim/sensors/_warp/
+      - embodichain/compute/image/
       - embodichain/lab/sim/sensors/base_sensor.py
       - embodichain/lab/sim/sensors/camera.py
       - embodichain/lab/sim/sensors/stereo.py
@@ -394,6 +401,9 @@ topics:
       - 运动规划
       - 轨迹规划
     keywords:
+      - compute trajectory
+      - trajectory resampling
+      - trajectory warping
       - planner
       - planning
       - trajectory
@@ -424,6 +434,8 @@ topics:
     paths:
       - topics/motion-planning/motion-planning.md
     source_of_truth:
+      - embodichain/compute/trajectory/
+      - embodichain/lab/sim/utility/action_utils.py
       - embodichain/lab/sim/planners/base_planner.py
       - embodichain/lab/sim/planners/toppra_planner.py
       - embodichain/lab/sim/planners/curobo/curobo_planner.py

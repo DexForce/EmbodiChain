@@ -337,3 +337,13 @@ The decorator checks that every `PlanState` in `target_states` shares the same l
   exact full registry/planner collision-world agreement, dynamic
   registry/provider/planner agreement, and batch-mode agreement through
   `SceneRegistry` before starting execution.
+
+## Shared trajectory computations
+
+`embodichain.compute.trajectory` owns pure interpolation, path resampling,
+and keyframe-based warping. `interpolate_with_distance` retains keyframes;
+`resample_with_distance` treats interior points as optional path samples.
+MotionGenerator and atomic trajectory helpers import the compute API directly.
+`lab.sim.utility.action_utils` retains solver-dependent pose/IK adaptation and
+re-exports pure functions for compatibility. Warp implementations live in
+`compute/trajectory/_warp/`; tests belong to `tests/compute/test_trajectory.py`.

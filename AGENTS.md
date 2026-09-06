@@ -57,6 +57,7 @@ EmbodiChain/
 ├── .claude/                      # Claude adapters for canonical skills
 │   └── skills/
 ├── embodichain/                  # Main Python package
+│   ├── compute/                  # Shared kinematics, trajectory, geometry, and image computations
 │   ├── data/                     # Assets, datasets, constants, enums
 │   ├── data_pipeline/            # Datasets and online data streaming
 │   ├── gen_sim/                  # Scene Engine and SimReady generation pipelines
@@ -95,7 +96,7 @@ EmbodiChain/
 │       ├── configclass.py        # @configclass decorator
 │       ├── logger.py             # Project logger
 │       ├── math/                 # Tensor math helpers
-│       └── warp/kinematics/      # GPU kinematics via Warp
+│       └── warp/                 # Compatibility aliases for relocated computations
 ├── embodichain_tasks/            # Official tasks/configs bundled in the main wheel as an import package
 ├── docs/                         # Sphinx documentation source + build
 │   └── source/                   # .md doc pages (overview, quick_start, features, resources)
@@ -105,6 +106,13 @@ EmbodiChain/
 ├── setup.py                      # Package setup
 └── VERSION                       # Package version file
 ```
+
+Shared numerical algorithms belong to `embodichain/compute/<domain>/`, with
+Warp kernels under private `_warp/` packages. Compute modules must not import
+`lab`, simulation objects, or environment managers. Stateful solver interfaces
+remain in `lab/sim/solvers`; contact-data adaptation belongs to the sensor.
+New trajectory consumers import `embodichain.compute.trajectory` directly.
+`utils/warp` and pure `lab/sim/utility/action_utils` exports remain compatible.
 
 Official tasks use a task-first layout:
 
