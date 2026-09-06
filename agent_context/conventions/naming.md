@@ -1,20 +1,15 @@
-# Agent Context Naming
+# Context names and paths
 
-Directory and index naming rules:
+`agent_context/MAP.yaml` is the sole topic registry. Use stable kebab-case topic
+ids and `topics/<id>/<id>.md` for the overview; use descriptive detail names
+such as `configuration.md` or `execution.md` in the same directory.
 
-- Topic directories use kebab-case ids, for example:
-  - `env-framework`
-  - `manager-functor`
-  - `ik-solvers`
-- `agent_context/MAP.yaml` is the only topic registry for agents.
-- Each topic entry must have:
-  - `id`
-  - `title`
-  - `aliases`
-  - `keywords`
-  - `paths`
-  - `source_of_truth`
-  - `related_topics`
-  - `status`
-- Sphinx documentation lives under `docs/source/` and is the human-facing reference.
-  Agent context files under `agent_context/topics/` summarize operational knowledge for agents.
+Choose aliases for natural-language subsystem names and keywords for distinctive
+symbols, flags and configuration fields, including useful Chinese phrases.
+Avoid broad words such as `save`, `task` or `step` that drown out better matches.
+Shared symbol names may remain ambiguous when their owners really differ.
+
+Keep source paths repository-relative, context paths relative to `agent_context/`,
+and Markdown links relative to their containing document. Use watch directories
+for change scope without treating those directories as an all-files read list.
+The maintenance reference in the project context skill defines the schema.
