@@ -512,14 +512,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             name="Pick-up trajectory success",
         )
 
-        object_to_eef = torch.bmm(pose_inv(object_pose), grasp_xpos)
-        held = HeldObjectState(
-            semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
-        )
-        coordinated_updates = {
-            key: None for key in state.coordinated_held_objects if task_state_key in key
-        }
-        return self.build_plan(
+        return self.materialize_trajectory(
             request,
             context,
             success=success_mask,
@@ -528,6 +521,65 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                 env_ids=context.env_ids,
                 step_dt=context.require_control_dt(),
             ),
+            grasp_xpos=grasp_xpos,
+            segment_lengths=segment_lengths,
+        )
+
+    def materialize_trajectory(
+        self,
+        request: ResolvedActionRequest[GraspGoal, PickUpOptions],
+        context: PlanningContext,
+        *,
+        success: torch.Tensor,
+        trajectory: TimedTrajectory,
+        grasp_xpos: torch.Tensor,
+        segment_lengths: dict[str, int],
+    ) -> ActionPlan:
+        """Bind a qualified PickUp trajectory to fresh task and scene state.
+
+        Planning and candidate integrations share this effect materialization.
+        The caller owns geometric qualification; symbolic effects remain pending
+        until the ordinary execution-session verification boundary accepts them.
+
+        Args:
+            request: Newly resolved PickUp invocation and endpoint bindings.
+            context: Current measured scene and verified symbolic state.
+            success: Per-row qualified planning mask.
+            trajectory: Full-joint command trajectory with explicit timing.
+            grasp_xpos: Qualified TCP grasp poses in the current scene frame.
+            segment_lengths: Ordered semantic command ranges, including approach.
+
+        Returns:
+            A new plan with authorized commands, tracking and pending effects.
+        """
+        if request.skill_id != self.skill_id or type(request.goal) is not GraspGoal:
+            raise ValueError("PickUp materialization requires a resolved GraspGoal")
+        if "approach" not in segment_lengths:
+            raise ValueError("PickUp materialization requires an approach segment")
+        task_state_key = require_shared_task_state_key(
+            request.binding.endpoint("primary", "motion"),
+            request.binding.endpoint("primary", "grasp"),
+            participant="PickUp primary participant",
+        )
+        sem = request.goal.semantics
+        object_pose = _resolve_object_pose(sem, context, name="pickup_object_pose")
+        grasp_xpos = resolve_pose_target(
+            grasp_xpos, num_envs=context.batch_size, device=self.device
+        )
+        object_to_eef = torch.bmm(pose_inv(object_pose), grasp_xpos)
+        held = HeldObjectState(
+            semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
+        )
+        coordinated_updates = {
+            key: None
+            for key in context.coordinated_held_objects
+            if task_state_key in key
+        }
+        return self.build_plan(
+            request,
+            context,
+            success=success,
+            trajectory=trajectory,
             expected_effects=StateDelta(
                 held_object_updates={task_state_key: held},
                 coordinated_held_object_updates=coordinated_updates,
@@ -539,7 +591,13 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             scene_dependency_monitor_until=(
                 {}
                 if sem.entity_id is None
-                else {sem.entity_id: segment_lengths["approach"]}
+                else {
+                    sem.entity_id: sum(
+                        length
+                        for index, length in enumerate(segment_lengths.values())
+                        if index <= tuple(segment_lengths).index("approach")
+                    )
+                }
             ),
         )
 

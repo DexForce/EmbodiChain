@@ -689,6 +689,11 @@ class ExecutionSession:
         return self._plan.snapshot()
 
     @property
+    def attempt_generation(self) -> int:
+        """Current plan generation; replans and retries advance it monotonically."""
+        return self._attempt_generation
+
+    @property
     def plan_attempts(self) -> tuple[ExecutionPlanAttempt, ...]:
         """Return every installed plan in deterministic recovery order.
 

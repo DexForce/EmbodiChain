@@ -36,6 +36,7 @@ from embodichain.lab.sim.motion.trajectory_augmentation import (
 )
 from .initial_state import FixedSceneHost, PreparedBatch
 from .integrations.contact import PickUpMotionValidator
+from .integrations.atomic_runtime import PickUpRuntimeSource
 
 __all__ = ["QposRolloutExecutor"]
 
@@ -135,6 +136,9 @@ class QposRolloutExecutor:
             robot. Adds physical-substep contact gates and measured object/TCP
             observations; permits its target and observed mimic joints to move.
             Supported only with pure simulation and the matching Runner planner.
+        runtime_source: Optional fresh PickUp plan source. Commands are dispatched
+            by ExecutionRunner; tracking, recovery or effect failures reject the
+            active batch. Requires the same pure-sim contact validator.
     """
 
     def __init__(
@@ -157,6 +161,7 @@ class QposRolloutExecutor:
         validation_profile_id: str = "verified_motion",
         max_episode_bytes: int = 256 * 1024 * 1024,
         contact_validator: PickUpMotionValidator | None = None,
+        runtime_source: PickUpRuntimeSource | None = None,
     ) -> None:
         if (
             isinstance(control_dt, bool)
@@ -179,7 +184,11 @@ class QposRolloutExecutor:
         ):
             if not isinstance(value, str) or not value or len(value.encode()) > 1024:
                 raise ValueError(f"{name} must be nonempty text of at most 1024 bytes.")
-        if validator_id in {"execution_complete", "fixed_collision_world"}:
+        if validator_id in {
+            "execution_complete",
+            "fixed_collision_world",
+            "atomic_runtime",
+        }:
             raise ValueError("validator_id cannot replace an execution check.")
         ratio = control_dt / host.profile.physics_dt
         if round(ratio) < 1 or not math.isclose(
@@ -210,6 +219,17 @@ class QposRolloutExecutor:
                 "Contact validation requires the same pure-sim host robot."
             )
         self.contact_validator = contact_validator
+        if runtime_source is not None and (
+            not isinstance(runtime_source, PickUpRuntimeSource)
+            or contact_validator is None
+            or host.env is not None
+            or runtime_source.engine.robot is not host.adapter.robot
+        ):
+            raise ValueError(
+                "Runtime source requires its own robot and pure-sim contact validation"
+            )
+        self.runtime_source = runtime_source
+        self._runtime = None
         self._substeps = round(ratio)
         self._running = False
         self._last_failures: Mapping[str, str] = MappingProxyType({})
@@ -484,6 +504,7 @@ class QposRolloutExecutor:
         if self._running:
             raise RuntimeError("QposRolloutExecutor requires serialized execution.")
         self._last_failures = MappingProxyType({})
+        self._runtime = None
         if not callable(on_started) or (
             should_stop is not None and not callable(should_stop)
         ):
@@ -658,6 +679,14 @@ class QposRolloutExecutor:
                 yield expected_command.clone()
 
         try:
+            if self.runtime_source is not None:
+                self._runtime = self.runtime_source.start(
+                    self.host,
+                    binding,
+                    candidates,
+                    contact_validator=self.contact_validator,
+                    control_dt=self.control_dt,
+                )
             if env is not None:
                 from embodichain.lab.gym.envs.demo import (
                     DemoSegment,
@@ -700,7 +729,12 @@ class QposRolloutExecutor:
                 for command in actions():
                     if stop():
                         break
-                    robot.set_qpos(command[:, joints], joint_ids=joints, target=True)
+                    if self._runtime is None:
+                        robot.set_qpos(
+                            command[:, joints], joint_ids=joints, target=True
+                        )
+                    else:
+                        self._runtime.dispatch(command, current_mask)
                     command_submitted()
                     if self.contact_validator is None:
                         sim.update(self.host.profile.physics_dt, self._substeps)
@@ -716,12 +750,16 @@ class QposRolloutExecutor:
                                 physics_dt=self.host.profile.physics_dt,
                             )
                     transition()
+                if self._runtime is not None:
+                    self._runtime.finish()
         except Exception as error:
             for row in rows:
                 if row is not None:
                     row.failure = _failure_text(error)
         finally:
             try:
+                if self._runtime is not None:
+                    self._runtime.stop()
                 self._hold(joints)
             except Exception as error:
                 self._last_failures = MappingProxyType(
@@ -808,6 +846,16 @@ class QposRolloutExecutor:
                 checks.extend(
                     self.contact_validator.rollout_validation(row_index).checks
                 )
+            if self.runtime_source is not None:
+                checks.extend(
+                    self._runtime.validation(row_index).checks
+                    if self._runtime is not None
+                    else (
+                        ValidationCheck(
+                            "atomic_runtime", "failed", "Runtime did not start"
+                        ),
+                    )
+                )
             try:
                 validation = self.validator(
                     row.candidate,
@@ -824,7 +872,8 @@ class QposRolloutExecutor:
                         f"Task validator omitted required check {self.validator_id!r}."
                     )
                 if any(
-                    check.check_id in {"execution_complete", "fixed_collision_world"}
+                    check.check_id
+                    in {"execution_complete", "fixed_collision_world", "atomic_runtime"}
                     for check in validation.checks
                 ):
                     raise ValueError("Task validator cannot replace execution checks.")
@@ -853,6 +902,8 @@ class QposRolloutExecutor:
                 metadata["collision_geometry"] = (
                     "URDF collision convex hulls; cuboid world; implicit ground"
                 )
+            if self._runtime is not None:
+                metadata["atomic_runtime"] = self._runtime.metadata(row_index)
             if (
                 _metadata_bytes(
                     (

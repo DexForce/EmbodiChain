@@ -435,6 +435,7 @@ topics:
       - GenerationRunner
       - FixedSceneHost
       - QposRolloutExecutor
+      - PickUpRuntimeSource
       - trajectory_generation
       - TrajectoryAugmentationCfg
       - CandidateTrajectoryBatch
@@ -489,6 +490,7 @@ topics:
       - examples/sim/motion/trajectory_generation/cube_grasp_parallel.py
       - examples/sim/motion/trajectory_generation/cube_pickup_collection.py
       - embodichain/lab/trajectory_generation/integrations/atomic.py
+      - embodichain/lab/trajectory_generation/integrations/atomic_runtime.py
       - embodichain/lab/trajectory_generation/integrations/contact.py
       - embodichain/lab/task_program/semantics/scene.py
       - embodichain/toolkits/graspkit/pose_generator.py

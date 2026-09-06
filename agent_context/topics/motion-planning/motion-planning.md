@@ -66,7 +66,8 @@ LeRobot expert qualification; the separate `cube_pickup_collection.py` performs
 that bounded collection workflow.
 
 `lab/trajectory_generation/runner.py` owns the synchronous qpos job for
-handwritten free motion and offline atomic PickUp exports. It resolves supplied host/planner/executor/sink policy identities,
+handwritten free motion and atomic PickUp references with offline or observed
+runtime execution. It resolves supplied host/planner/executor/sink policy identities,
 reserves bounded rollout capacity through `GenerationSession`, and restores the
 full batch only when ready candidates need another round. The concrete
 `QposRolloutExecutor` uses normal Gym demo/controller ports or one pure-sim
@@ -141,9 +142,18 @@ controller labels from full-joint passive target columns.
 This is CPU-physics / unscaled fixed-base URDF / cuboid-rigid support. The
 optional `trajectory-generation` dependencies supply FCL/trimesh/yourdfpy.
 It is sampled validation, not continuous collision detection. Contact-aware
-Gym, atomic runtime replay, general via points and a registry/CLI remain work.
+Gym, general via points and a registry/CLI remain work.
+`integrations/atomic_runtime.py::PickUpRuntimeSource` enables the optional
+`QposRolloutExecutor(runtime_source=...)` path. A fresh invocation/current context
+materializes the selected five-phase candidate through the existing PickUp skill;
+ExecutionRunner checks arm feedback while native contact and measured transforms
+verify the held-object effect before commit. The initial sample is an observation,
+not a command. Clock, command or recovery-generation mismatches cancel/hold and
+reject the complete active batch; recovery demonstrations are not collected.
+Use `cube_pickup_collection.py --runtime --record-video` for this pure-sim path.
 Focused tests: `test_contact.py`, `test_atomic_source.py`, `test_episode_sinks.py`,
-`test_pickup_collection.py` under `tests/lab/trajectory_generation/`.
+`test_atomic_runtime.py`, `test_pickup_collection.py` under
+`tests/lab/trajectory_generation/`.
 
 ## Planner Hierarchy
 

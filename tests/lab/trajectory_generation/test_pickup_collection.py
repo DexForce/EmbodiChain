@@ -31,7 +31,8 @@ import pytest
 @pytest.mark.slow
 @pytest.mark.requires_sim
 @pytest.mark.subprocess_sim
-def test_pickup_collection(tmp_path: Path) -> None:
+@pytest.mark.parametrize("runtime", [False, True], ids=["offline", "runtime"])
+def test_pickup_collection(tmp_path: Path, runtime: bool) -> None:
     av = pytest.importorskip("av")
     import pyarrow.parquet as pq
 
@@ -46,6 +47,7 @@ def test_pickup_collection(tmp_path: Path) -> None:
             "--episodes",
             "8",
             "--record-video",
+            *(["--runtime"] if runtime else []),
         ],
         cwd=root,
         capture_output=True,
@@ -93,6 +95,19 @@ def test_pickup_collection(tmp_path: Path) -> None:
         assert evidence["observation_shapes"]["object_pose"] == [4, 4]
         assert len(evidence["metadata"]["commanded_joint_indices"]) == 7
         assert len(evidence["metadata"]["joint_names"]) == 8
+        if runtime:
+            assert checks["atomic_runtime"]["status"] == "passed"
+            audit = evidence["metadata"]["atomic_runtime"]
+            assert audit["status"] == "completed"
+            assert audit["command_count"] == 271
+            assert audit["plan_attempts"] == 1
+            assert audit["effect_verified"]
+            assert audit["events"]["effect_verification_required"] == 1
+            assert audit["events"]["action_completed"] == 1
+            assert audit["effect_translation_error_m"] <= 0.01
+            assert audit["effect_rotation_error_rad"] <= 0.15
+            assert audit["effect_tcp_frame"]["source"] == "robot.compute_fk"
+            assert audit["contact_tcp_frame"]["source"] == "robot.get_link_pose"
         files = sorted((shard / "dataset" / "data").rglob("*.parquet"))
         table = pq.read_table(files)
         assert table.num_rows == 271
@@ -142,6 +157,74 @@ def test_pickup_collection(tmp_path: Path) -> None:
         assert float(stream.average_rate) == 20.0
         frames = sum(1 for _ in video.decode(stream))
         assert frames == pickup["video_frames"] == pickup["prepared_batches"] * 272
+
+
+@pytest.mark.gpu
+@pytest.mark.slow
+@pytest.mark.requires_sim
+@pytest.mark.subprocess_sim
+def test_runtime_recovery_rejects_physical_tail_batch_without_committing(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).resolve().parents[3]
+    output = tmp_path / "recovery"
+    script = """
+import json
+import sys
+from dataclasses import replace
+from pathlib import Path
+import torch
+from examples.sim.motion.trajectory_generation.cube_pickup_collection import main
+from embodichain.lab.sim.atomic_actions import TrackingPolicy
+from embodichain.lab.sim.motion.trajectory_augmentation import TrajectoryGenerationJobCfg
+from embodichain.lab.trajectory_generation.execution import QposRolloutExecutor
+from embodichain.lab.trajectory_generation.integrations.atomic_runtime import PickUpRuntimeSource
+
+original_cfg = TrajectoryGenerationJobCfg.from_mapping
+def bounded(raw):
+    raw['collection'].update(max_proposals=1, max_rollout_attempts=1)
+    return original_cfg(raw)
+TrajectoryGenerationJobCfg.from_mapping = staticmethod(bounded)
+
+original_init = PickUpRuntimeSource.__init__
+def strict(self, engine, *, invocation_factory, templates):
+    def factory(binding):
+        return replace(invocation_factory(binding), tracking_policy=TrackingPolicy.joint_position(
+            in_flight_max_abs_error=1e-8, terminal_max_abs_error=0.05))
+    original_init(self, engine, invocation_factory=factory, templates=templates)
+PickUpRuntimeSource.__init__ = strict
+
+original_execute = QposRolloutExecutor.execute
+def audited(self, *args, **kwargs):
+    result = original_execute(self, *args, **kwargs)
+    robot = self.host.adapter.robot
+    ids = robot.active_joint_ids
+    torch.testing.assert_close(robot.get_qpos(target=True)[:, ids], robot.get_qpos()[:, ids])
+    torch.testing.assert_close(robot.get_qvel(target=True)[:, ids], torch.zeros_like(robot.get_qvel()[:, ids]))
+    (Path(sys.argv[2]) / 'runtime_audit.json').write_text(json.dumps(self._runtime.metadata(0)))
+    return result
+QposRolloutExecutor.execute = audited
+sys.argv = ['cube_pickup_collection.py', '--output', sys.argv[1], '--episodes', '1', '--runtime']
+main()
+"""
+    process = subprocess.run(
+        [sys.executable, "-c", script, str(output)],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert process.returncode == 1, process.stdout[-2000:] + process.stderr[-2000:]
+    report = json.loads((output / "generation_report.json").read_text())
+    assert report["error"] is None and not report["target_reached"]
+    assert report["counts"]["rollout_attempted"] == 1
+    assert report["counts"]["committed"] == 0
+    assert not (output / "manifest.json").exists()
+    audit = json.loads((output / "runtime_audit.json").read_text())
+    assert audit["command_count"] == 1
+    assert audit["plan_attempts"] == 2
+    assert audit["events"]["tracking_diverged"] == 1
+    assert not audit["effect_verified"]
 
 
 @pytest.mark.gpu

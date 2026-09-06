@@ -13,9 +13,10 @@ The :mod:`embodichain.lab.sim.motion.trajectory_augmentation` package provides
 qpos candidates, constrained variation, coverage, and generation accounting.
 Two collection paths are available: free motion through the existing locked-joint
 planner, and a bounded CPU-physics PickUp integration with full-joint geometry
-and physical contact validation. PickUp consumes offline atomic compilations;
-AtomicActionRuntime recovery/feedback execution, contact-aware Gym collection,
-and the unified generation CLI remain unimplemented. Initial-state preparation
+and physical contact validation. PickUp can replay an offline compilation or
+consume its augmented candidates through the observed atomic runtime described
+below. Contact-aware Gym collection and the unified generation CLI remain
+unimplemented. Initial-state preparation
 alone does not certify a candidate trajectory or confirm that an episode was saved.
 
 Supported Initial States
@@ -290,7 +291,7 @@ planned feasibility alone cannot qualify the saved episode.
 counts, coverage, audit, resolved configuration, and ``target_reached`` and writes
 ``generation_report.json`` under the sink root. Reaching a proposal, rollout, or
 wall-time budget can finish without reaching the collection target. The PickUp
-adapter below adds contact-aware offline atomic replay; a unified configuration
+adapter below adds contact-aware offline and observed atomic execution; a unified configuration
 registry and generation CLI remain subsequent work.
 
 Running the Real Free-Motion Example
@@ -559,8 +560,56 @@ retain their 4x4 shape. ``preview.mp4`` includes accepted and rejected attempts;
 it is a four-panel record of actual observations, and each round restarts its
 trail and time display. Video is separate from the numeric training dataset.
 
-``source.kind=atomic`` here identifies an offline compilation source. Exporting
-its trajectory does not commit projected symbolic effects or execute the atomic
-recovery/tracking state machine. A full runtime source adapter, the four-way
-handwritten/atomic × sim/Gym qualification matrix, general via-point planning,
-and YAML-based deployment remain subsequent implementation milestones.
+``source.kind=atomic`` identifies the template's compilation source. The default
+mode replays those templates with the physical checks above. To execute them
+through the observed atomic runtime, select ``--runtime``.
+
+Observed Atomic PickUp Execution
+--------------------------------
+
+.. code-block:: bash
+
+   python examples/sim/motion/trajectory_generation/cube_pickup_collection.py \
+     --output /tmp/cube-runtime-experts --episodes 8 --runtime --record-video
+
+``PickUpRuntimeSource`` supplies the selected candidate through
+``initial_plan_provider``. Every prepared batch receives a fresh invocation,
+measured planning context, pending effect and ``ExecutionSession``. A single
+PickUp plan preserves transit/approach/close/lift/hold, including the qualified
+joint branch and protected contact coordinates. The runtime goal uses the
+reference's URDF TCP FK at grasp closure, which can differ from the nominal
+analytic IK target when the asset contains a wrist offset. The initial
+observation is omitted from the command sequence, retaining 271 commands and
+272 observations for this example.
+
+``ExecutionRunner`` sends typed commands through ``SimulationExecutionAdapter``
+and monitors arm position feedback at the existing 0.08 rad in-flight and
+0.05 rad terminal thresholds. The grasp endpoint has no position-tracking
+channels: the fingers press against the cube before full commanded closure.
+Native bilateral contact and hold stability remain mandatory. At completion,
+the verifier's measured joint context supplies FK in the same motion endpoint
+TCP frame as the plan. Together with the current object pose, it must agree with
+the pending held-object transform within the contact profile's tolerances. The
+native contact TCP has its own declared frame; both frame sources and effect
+errors are recorded in episode metadata. Only then does the session commit its
+held-object state. The usual task, geometry and persistence gates still apply.
+
+The collection executor owns every physics step and records the actual submitted
+targets. Runtime commands must match the selected candidate and fixed control
+clock. Intervals retain float64 precision; zero velocity targets are explicit
+for both full and tail batches. Phase or terminal feedback requiring extra waiting fails collection;
+replans and retries use the registered skill but their commands are blocked at
+the transport boundary. Any runtime failure cancels and holds the entire active
+batch, which is retained only as rejected audit evidence. Idle tail-batch rows
+are supported. Recovery demonstrations and independent continuation of other
+rows after a runtime failure are outside this adapter's contract.
+Interrupted phase prefixes produce unavailable path evidence so rejection does
+not prevent the runner from preparing its next batch.
+
+The ``atomic_runtime`` episode metadata contains bounded per-row event counts,
+command count, plan-attempt count, status and physical-effect result. Its
+mandatory validation check must pass before persistence. ``pickup_report.json``
+distinguishes observed runtime execution from offline replay; both modes use the
+same video and LeRobot formats. Contact-aware Gym, the complete handwritten/atomic
+× sim/Gym qualification matrix, general via-point planning, and YAML-based
+deployment remain subsequent milestones.

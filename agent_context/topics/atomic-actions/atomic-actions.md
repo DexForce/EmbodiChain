@@ -296,8 +296,29 @@ mimic geometry and appends real hold commands. Only transit permits residuals.
 `cube_pickup_collection.py` uses this source with full-state/contact validation
 and confirmed LeRobot persistence across repeated full-batch restoration.
 
-This is an offline atomic source: the qpos executor owns physical validation;
-no projected `HeldObjectState` is committed as observed evidence. It does not
-consume `initial_plan_provider` or run AtomicActionRuntime tracking/recovery.
-The runtime adapter and contact-aware Gym source/host matrix remain separate
-acceptance work. Keep the existing runtime and task-state contracts intact.
+The exporter itself does not execute commands or commit projected effects.
+`integrations/atomic_runtime.py::PickUpRuntimeSource` optionally consumes those
+references through `initial_plan_provider`, using a new invocation/context/session
+after every prepared epoch. `PickUp.materialize_trajectory` shares the ordinary
+skill's command, tracking, scene-dependency and pending-held-effect construction.
+The selected transit branch and protected contact phases are retained; the
+reference's initial observation is omitted from the command sequence.
+
+`ExecutionRunner` and `SimulationExecutionAdapter` own command dispatch and arm
+feedback; the collection executor owns the only physics clock and recorder.
+The gripper endpoint has no position-tracking channels because preload prevents
+full closure. Native bilateral contact, hold stability and fresh object/TCP
+transform evidence must pass before symbolic effects are committed. Effect TCP
+uses the verifier context's measured joints through the motion endpoint FK;
+the contact profile's native TCP is a separate frame recorded in metadata. The runtime
+goal must match the qualified reference's URDF FK, not an approximate IK target.
+`ExecutionSession.attempt_generation` exposes recovery generation without copying
+plans. Generation changes, altered commands, extra settling or runtime failures
+cancel/hold and reject the full active cohort; recovery commands are not sent as
+expert data. Commands preserve float64 periods and explicit zero velocity targets
+for full/tail cohorts. Interrupted phase prefixes return unavailable path evidence
+and are audited without terminating the collection job.
+`cube_pickup_collection.py --runtime` selects this pure-sim path.
+Contact-aware Gym and the complete source/host matrix remain separate acceptance
+work. Tests: `test_atomic_runtime.py` and `test_pickup_collection.py` under
+`tests/lab/trajectory_generation/`.

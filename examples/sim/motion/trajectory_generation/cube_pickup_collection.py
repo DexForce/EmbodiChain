@@ -30,6 +30,7 @@ count towards the requested target. The video also shows rejected attempts.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 from pathlib import Path
 import sys
@@ -43,6 +44,11 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    RecoveryPolicy,
+    TrackingPolicy,
+)
 from embodichain.lab.sim.motion.trajectory_augmentation import (
     SceneCase,
     TrajectoryGenerationJobCfg,
@@ -60,6 +66,9 @@ from embodichain.lab.trajectory_generation.integrations.sim import (
 from embodichain.lab.trajectory_generation.integrations.atomic import (
     export_pickup_templates,
 )
+from embodichain.lab.trajectory_generation.integrations.atomic_runtime import (
+    PickUpRuntimeSource,
+)
 from embodichain.lab.trajectory_generation.integrations.contact import (
     PickUpContactProfile,
     PickUpMotionValidator,
@@ -72,7 +81,7 @@ from embodichain.lab.trajectory_generation.sinks import LeRobotEpisodeSink
 from embodichain.utils.math import look_at_to_pose
 from examples.sim.motion.trajectory_generation.cube_grasp_parallel import (
     _prepare_cube_scene,
-    _compile_cube_pickup,
+    _cube_pickup_program,
     _preview_frame,
     _YAW,
     _EYE,
@@ -92,6 +101,7 @@ def run_cube_pickup_collection(
     seed: int = 13,
     cuda_device: int = 0,
     record_video: bool = False,
+    runtime: bool = False,
 ) -> dict[str, object]:
     """Run a bounded four-row PickUp collection with real contact acceptance.
 
@@ -101,6 +111,8 @@ def run_cube_pickup_collection(
         seed: Local augmentation random seed.
         cuda_device: GPU used by the simulator renderer.
         record_video: Stream synchronized four-panel observations to preview.mp4.
+        runtime: Execute candidates through observed Atomic ExecutionRunner
+            tracking and effect verification before accepting expert data.
 
     Returns:
         The persisted generation audit with committed count and target outcome.
@@ -147,8 +159,11 @@ def run_cube_pickup_collection(
         robot, cube, camera, initial, grasps, hand_open, hand_close = (
             _prepare_cube_scene(sim, arm_stiffness=2e5, hand_open_margin=0.001)
         )
-        generator, compiled = _compile_cube_pickup(
+        generator, engine, invocations = _cube_pickup_program(
             robot, cube, grasps, hand_open, hand_close
+        )
+        compiled = engine.compile(
+            invocations, engine.initial_context(control_dt=_CONTROL_DT)
         )
         templates = export_pickup_templates(compiled, robot, control_dt=_CONTROL_DT)
         initial_objects = {
@@ -224,6 +239,7 @@ def run_cube_pickup_collection(
             sim, robot, profile=PickUpContactProfile(approach_contact_distance=0.06)
         )
         frames = 0
+        preview_round, round_frame = 0, 0
         trails = [[] for _ in range(4)]
         view = torch.linalg.inv(look_at_to_pose(_EYE, _TARGET)).squeeze(0).numpy()
         if record_video:
@@ -235,11 +251,12 @@ def run_cube_pickup_collection(
                 font = ImageFont.load_default()
 
         def observe() -> dict[str, torch.Tensor]:
-            nonlocal frames, trails
+            nonlocal frames, trails, preview_round, round_frame
             if record_video:
-                index = frames % len(templates[0].positions)
-                if index == 0:
+                if preview_round != prepares:
+                    preview_round, round_frame = prepares, 0
                     trails = [[] for _ in range(4)]
+                index = round_frame
                 observations = planner.observations()
                 tcp = observations["tcp_pose"].cpu().numpy()
                 for row in range(4):
@@ -275,6 +292,7 @@ def run_cube_pickup_collection(
                 )
                 writer.append_data(frame)
                 frames += 1
+                round_frame += 1
             return {
                 "joint_positions": robot.get_qpos(),
                 "joint_velocities": robot.get_qvel(),
@@ -308,6 +326,51 @@ def run_cube_pickup_collection(
             )
 
         budget = 1024 * 1024
+        # Ground the runtime request in the selected reference's full-URDF TCP.
+        # The analytic IK target can differ from that geometry (the UR5 asset
+        # includes a wrist offset); pending effects must describe the qualified
+        # joint branch that will actually execute.
+        qualified_grasps = robot.compute_fk(
+            qpos=torch.stack(
+                [t.positions[t.phases[2].start_index - 1, arm_ids] for t in templates]
+            ),
+            name="arm",
+            to_matrix=True,
+        )
+
+        def runtime_invocation(binding):
+            reference = invocations[1]
+            invocation = engine.make_invocation(
+                "pick_up",
+                replace(reference.goal, grasp_xpos=qualified_grasps),
+                control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
+                motion_policy=reference.motion_policy,
+                skill_options=reference.skill_options,
+                tracking_policy=TrackingPolicy.joint_position(
+                    in_flight_max_abs_error=0.08,
+                    terminal_max_abs_error=0.05,
+                ),
+                recovery_policy=RecoveryPolicy(max_replans=1, max_action_retries=0),
+                invocation_id=f"pickup_batch_{prepares}",
+            )
+            # The closing hand presses into the cube. Its physical contract is
+            # bilateral contact and held-object stability, while arm positions
+            # retain the ordinary runtime feedback thresholds.
+            return replace(
+                invocation,
+                binding=ActionBinding(
+                    invocation.binding.owner_id,
+                    tuple(
+                        (
+                            replace(endpoint, tracking_channels={})
+                            if endpoint.endpoint_id == "grasp"
+                            else endpoint
+                        )
+                        for endpoint in invocation.binding.endpoints
+                    ),
+                ),
+            )
+
         executor = QposRolloutExecutor(
             host,
             control_dt=_CONTROL_DT,
@@ -315,6 +378,15 @@ def run_cube_pickup_collection(
             validator=task_validator,
             max_episode_bytes=budget,
             contact_validator=planner,
+            runtime_source=(
+                PickUpRuntimeSource(
+                    engine,
+                    invocation_factory=runtime_invocation,
+                    templates=templates,
+                )
+                if runtime
+                else None
+            ),
         )
         sink = LeRobotEpisodeSink(output_dir, fps=20, max_episode_bytes=budget)
         if record_video:
@@ -354,7 +426,11 @@ def run_cube_pickup_collection(
                     "target_reached": report["target_reached"],
                     "prepared_batches": prepares,
                     "video_frames": frames,
-                    "source": "offline AtomicActionEngine MoveEndEffector + PickUp export",
+                    "source": (
+                        "Atomic ExecutionRunner with fresh PickUp candidate plans"
+                        if runtime
+                        else "offline AtomicActionEngine MoveEndEffector + PickUp export"
+                    ),
                     "contact_profile": planner.profile.to_dict(),
                 },
                 indent=2,
@@ -382,6 +458,11 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--cuda-device", type=int, default=0)
     parser.add_argument("--record-video", action="store_true")
+    parser.add_argument(
+        "--runtime",
+        action="store_true",
+        help="Use observed atomic candidate execution and effect verification",
+    )
     args = parser.parse_args()
     report = None
     try:
@@ -391,6 +472,7 @@ def main() -> None:
             seed=args.seed,
             cuda_device=args.cuda_device,
             record_video=args.record_video,
+            runtime=args.runtime,
         )
     except Exception as error:
         diagnostic = traceback.TracebackException.from_exception(error)

@@ -16,8 +16,9 @@ The synchronous runner supports free-motion references and an explicitly
 bounded CPU-physics PickUp integration. The latter exports an offline atomic
 compilation, checks full gripper and held-object geometry, records native
 contacts at each physics substep, and persists accepted measured episodes.
-AtomicActionRuntime recovery/feedback execution, contact-aware Gym collection,
-a configuration registry, and the unified generation CLI remain separate work.
+An optional observed atomic runner consumes those candidates with arm feedback
+and physical effect verification. Contact-aware Gym collection, a configuration
+registry, and the unified generation CLI remain separate work.
 See :doc:`/overview/trajectory_generation` for the host lifecycle and integration
 requirements.
 
@@ -358,6 +359,42 @@ commit the compilation's hypothetical symbolic effects.
 
 .. autofunction:: export_pickup_templates
 
+.. currentmodule:: embodichain.lab.trajectory_generation.integrations.atomic_runtime
+
+.. autosummary::
+   :nosignatures:
+
+   PickUpRuntimeSource
+
+Pass ``PickUpRuntimeSource`` as ``QposRolloutExecutor(runtime_source=...)`` to
+execute selected references through a fresh ``ExecutionSession`` and
+``ExecutionRunner``. The invocation factory receives the current ``PreparedBatch``;
+its explicit grasp pose must match the qualified reference's TCP FK. The source
+retains all five phase boundaries and contact coordinates, removes the initial
+observation from the command sequence, and constructs pending effects against
+the current measured scene using ``PickUp.materialize_trajectory``.
+
+Arm endpoints require in-flight and terminal feedback. Grasp endpoints use no
+position-tracking channels because contact preload prevents full closure;
+native bilateral contact and held-object stability are mandatory instead.
+The supplied contact validator, engine and pure-sim host must share the robot
+and simulator. Effect poses come from the verifier context's measured joints
+through the same motion endpoint FK as the plan; the contact profile's native
+TCP remains an independent physical check. Symbolic held state is committed only
+after both checks pass.
+
+All active rows must share reference phase boundaries and a uniform control
+clock with float64 intervals and explicit zero velocity targets, including idle
+tail batches. The executor remains the only physics owner. Replans, retries, altered
+commands, or feedback that requires additional settling cancel the active batch
+and reject its expert data. ``ExecutionSession.attempt_generation`` identifies
+recovery plans without copying plan history. Episode metadata includes bounded
+``atomic_runtime`` event counts and validation evidence. This integration does
+not collect recovery demonstrations or support contact-aware Gym execution.
+
+.. autoclass:: PickUpRuntimeSource
+   :members:
+
 .. currentmodule:: embodichain.lab.trajectory_generation.integrations.contact
 
 .. autosummary::
@@ -380,6 +417,8 @@ hold thresholds. Unknown bodies, cross-row contact, buffer overflow, forbidden
 contacts, missing finger contact, slipping and falling fail acceptance. The
 profile does not enable contact or timing augmentation. Gym and arbitrary
 mesh-shaped rigid objects are not supported by this integration.
+``validate_episode`` returns unavailable path evidence for an interrupted phase
+prefix, allowing the runner to audit rejection and continue with a fresh batch.
 
 .. autoclass:: PickUpContactProfile
    :members:

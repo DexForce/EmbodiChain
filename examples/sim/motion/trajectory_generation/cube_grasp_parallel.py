@@ -247,8 +247,8 @@ def _prepare_cube_scene(
     return robot, cube, camera, initial_qpos, grasps, hand_open, hand_close
 
 
-def _compile_cube_pickup(robot, cube, grasps, hand_open, hand_close):
-    """Compile the same atomic transit and PickUp for preview and collection."""
+def _cube_pickup_program(robot, cube, grasps, hand_open, hand_close):
+    """Build reusable atomic transit and PickUp requests for the fixed scene."""
     generator = create_toppra_motion_generator(robot)
     engine = create_simulation_atomic_action_engine(
         motion_generator=generator,
@@ -261,31 +261,39 @@ def _compile_cube_pickup(robot, cube, grasps, hand_open, hand_close):
     )
     pregrasp = grasps.clone()
     pregrasp[:, 2, 3] += 0.16
-    compiled = engine.compile(
-        (
-            engine.make_invocation(
-                "move_end_effector",
-                EndEffectorPoseGoal(pregrasp),
-                control_parts={"primary": {"motion": "arm"}},
-                motion_policy=MotionPolicy(strategy="ik_interp", sample_count=81),
+    invocations = (
+        engine.make_invocation(
+            "move_end_effector",
+            EndEffectorPoseGoal(pregrasp),
+            control_parts={"primary": {"motion": "arm"}},
+            motion_policy=MotionPolicy(strategy="ik_interp", sample_count=81),
+        ),
+        engine.make_invocation(
+            "pick_up",
+            GraspGoal(
+                create_antipodal_semantics(cube, label="cube"),
+                grasp_xpos=grasps,
             ),
-            engine.make_invocation(
-                "pick_up",
-                GraspGoal(
-                    create_antipodal_semantics(cube, label="cube"),
-                    grasp_xpos=grasps,
-                ),
-                control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
-                motion_policy=MotionPolicy(strategy="ik_interp", sample_count=141),
-                skill_options=PickUpOptions(
-                    pre_grasp_distance=0.16,
-                    lift_height=0.18,
-                    hand_interp_steps=30,
-                    grasp_settle_steps=20,
-                ),
+            control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
+            motion_policy=MotionPolicy(strategy="ik_interp", sample_count=141),
+            skill_options=PickUpOptions(
+                pre_grasp_distance=0.16,
+                lift_height=0.18,
+                hand_interp_steps=30,
+                grasp_settle_steps=20,
             ),
         ),
-        engine.initial_context(control_dt=_CONTROL_DT),
+    )
+    return generator, engine, invocations
+
+
+def _compile_cube_pickup(robot, cube, grasps, hand_open, hand_close):
+    """Compile the same atomic transit and PickUp for preview and collection."""
+    generator, engine, invocations = _cube_pickup_program(
+        robot, cube, grasps, hand_open, hand_close
+    )
+    compiled = engine.compile(
+        invocations, engine.initial_context(control_dt=_CONTROL_DT)
     )
     return generator, compiled
 

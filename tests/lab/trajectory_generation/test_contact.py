@@ -196,6 +196,22 @@ def test_unobserved_hold_cannot_pass():
     assert not validator.rollout_validation(0).accepted
 
 
+def test_interrupted_pickup_returns_rejected_path_evidence():
+    validator, _, _ = _monitor()
+    episode = SimpleNamespace(
+        observations={
+            "joint_positions": torch.zeros(2, 1),
+            "object_pose": torch.eye(4).repeat(2, 1, 1),
+        },
+        phases=(TrajectoryPhase("transit", 0, 2),),
+    )
+    result = validator.validate_episode(episode, None, row=0)
+    assert not result.accepted
+    assert result.checks[0].check_id == "path_collision"
+    assert result.checks[0].status == "unavailable"
+    assert "incomplete" in result.checks[0].detail.lower()
+
+
 def test_full_state_collision_uses_collision_shapes_and_moving_fingers(tmp_path):
     pytest.importorskip("fcl")
     pytest.importorskip("yourdfpy")

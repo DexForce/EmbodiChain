@@ -447,7 +447,21 @@ class PickUpMotionValidator:
 
         Returns:
             The measured path's joint-limit and collision validation result.
+            An interrupted or malformed phase sequence returns unavailable
+            evidence so the runner can audit rejection and continue collection.
         """
+        try:
+            self._phases(episode.phases, len(episode.observations["joint_positions"]))
+        except ValueError as error:
+            return ValidationResult(
+                (
+                    ValidationCheck(
+                        "path_collision",
+                        "unavailable",
+                        f"Incomplete or invalid PickUp phases: {error}",
+                    ),
+                )
+            )
         return self._validate_path(
             episode.observations["joint_positions"],
             episode.phases,

@@ -530,16 +530,16 @@ H(job_seed, source_id, source_revision, scene_case_id,
 
 ### 11.1 现有基础与待补模块
 
-以下记录当前实现与剩余设计范围。真实验证已包括初态恢复、Panda 动态障碍采样检查，以及普通重力下 UR5 自由运动的执行、实测验收、LeRobot 写入/读回。Panda 手指漂移负例被锁定关节模型检查拒绝。真实 Runner 验证为 B=1、direct-sim、20 个命令，不代表 PickUp、真实 Gym 采集或四组合 M1 已完成；详细命令和验证记录见[实施计划](fixed_scene_expert_trajectory_augmentation_implementation_plan.md)。
+以下记录当前实现与剩余设计范围。真实验证包括初态恢复、动态障碍采样检查、普通重力下 UR5 自由运动，以及四行两轮固定 cube 的 PickUp 采集。PickUp 支持离线回放与新的 Atomic Runtime 候选执行，均需物理接触验收和 LeRobot 写入/回读确认；运行时效果验证与恢复拒收已接入。当前结果覆盖 direct-sim 子集，不代表真实 Gym 采集或四组合 M1 已完成；详细命令和验证记录见[实施计划](fixed_scene_expert_trajectory_augmentation_implementation_plan.md)。
 
 | 模块 | 已有基础 | 仍需补齐 |
 |---|---|---|
-| 公共核心与来源 | qpos 模板/候选/配置、严格能力校验、demo 候选输入、原子初始计划供应入口 | EEF via-point 因子、完整原子来源导出与候选消费 |
+| 公共核心与来源 | qpos 模板/候选/配置、严格能力校验、demo 候选输入、PickUp 阶段导出及 pure-sim 运行时候选消费 | EEF via-point 因子、Gym 原子候选接线 |
 | IK 与规划 | MotionGenerator、cuRobo、真实 env_rows 分轮、EEF 显式样本 IK 与已解分支/FK 保留 | 多解枚举/去重、主动绕障路线生成与有界修复、独立候选容量桶与更广 backend 能力 |
-| 路径验证 | free/no-held qpos 加密采样、实测路径重验、运动限值与质量独立 gate | 接触/持物/夹爪变化语义、连续碰撞与任务级 PickUp 验收 |
-| SceneCase 与副本池 | 全批物理初态捕获/恢复/校验、可信 profile、独占 host/epoch、Gym 观测重播种 | 同 case 副本重绑定、接触任务 profile 与长期 settling 验收 |
+| 路径验证 | free/no-held 路径与实测重验；PickUp 完整 URDF 碰撞凸包、受限接触/持物验证、原生接触子步证据 | 更广几何与接触语义、连续碰撞、Gym 子步证据 |
+| SceneCase 与副本池 | 全批物理初态捕获/恢复/校验、可信 profile、独占 host/epoch、Gym 观测重播种 | 同 case 副本重绑定、更广接触任务 profile 与长期 settling 验收 |
 | 会话与调度 | 按 case 分区、局部 RNG、几何去重/覆盖、提议/执行/写入配额及条数/字节上限 | 依赖缓存、时长调度、有界异步 pipeline 与成本调度 |
-| sim/Gym 数据闭环 | 手写 qpos Runner、实际命令/观测冻结、同步 LeRobot 封存/读回/确认，真实 UR5 direct-sim 正例 | 真实 Gym/PickUp、原子来源、统一注册/CLI 及四组合 M1 验收 |
+| sim/Gym 数据闭环 | 手写 qpos Runner、PickUp 离线与 Atomic Runtime direct-sim 采集、T/T+1 冻结、LeRobot 封存/读回/确认 | 真实 Gym/PickUp、手写 EEF/PickUp、统一注册/CLI 及四组合 M1 验收 |
 | 逐行异步／分叉 | 部分行级接口、自然片段保存 | 全链路行隔离、独立任务上下文、完整 checkpoint 及连续性协议 |
 
 ### 11.2 交付顺序

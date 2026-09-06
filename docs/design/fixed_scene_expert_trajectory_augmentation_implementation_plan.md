@@ -1,6 +1,6 @@
 # 固定场景专家轨迹扩增：实施计划
 
-- 状态：实施中；手写自由运动与离线原子 PickUp 的 direct-sim 采集闭环已落地，完整 Atomic Runtime/Gym/M1 仍待实现与验收。
+- 状态：实施中；手写自由运动、离线原子 PickUp 与受限 Atomic Runtime PickUp 的 direct-sim 采集闭环已落地；Gym、统一启动器及完整 M1 仍待实现与验收。
 - 依据：[设计文档](fixed_scene_expert_trajectory_augmentation_design.md)，2026-09-05。
 - 代码核对基线：`fb7228e2`。首批实现基于该版本，已运行 CPU 行为测试；尚未完成四组合真实仿真和性能验收。
 - 交付原则：先完成可验收、可持久化的四条执行路径，再优化吞吐，最后扩大运动覆盖。
@@ -13,13 +13,13 @@
 | PR 2 的初态基础 | 全批初态复制、恢复、验证与独占 host；Gym 准备/重播种；UR5 自由运动 profile；新增四行 PickUp profile 和抓取结束后的整批循环恢复 | 任意接触 checkpoint、逐行恢复和复杂 settling 仍不支持；Gym PickUp 待验收 |
 | PR 4 的基础算子与自由段适配 | 显式自由段 `joint_residual`、retime 与阶段索引重映射、采样速度/加速度检查；`EEFPath / EnvRowMotionPlanner` 的真实 env_rows 分轮、显式 EEF 样本 IK、已解分支保留/FK 验证、自由 qpos 分段加密碰撞检查 | EEF via-point 因子生成、接触/持物/夹爪变化的完整碰撞语义与真实 backend 任务验收；离散路径检查不代表连续碰撞证明或物理成功 |
 | PR 5 的手写 qpos/free-motion 闭环 | `GenerationRunner / MotionLimitsProfile / QposRolloutExecutor` 连接 profile 身份、全批初态、sim/Gym 实际命令/观测冻结、规划与实测验收、Session 配额和 sink 确认；真实 UR5 direct-sim 正例 committed 1，Panda 锁定关节漂移负例 committed 0 | 手写 EEF/PickUp、真实 Gym 任务采集及多行/多 episode 任务验收；当前结果不代表 PR 5 全部原定验收或 M1 完成 |
-| PR 6 的候选输入与离线模板 | 既有 `initial_plan_provider` 入口；新增 `export_pickup_templates`，从 MoveEndEffector → PickUp 离线编译导出受保护阶段、mimic 几何和实测保持段；接入 Runner 的离线 qpos 采集 | 候选到新的运行时 ActionPlan 的适配、Atomic Runtime tracking/recovery 和 Task Program/Gym 四组合接线；离线导出不代表这些完成 |
+| PR 6 的候选输入与原子运行时 | `export_pickup_templates` 导出五阶段模板；`PickUpRuntimeSource` 在当前初态物化新的 PickUp 计划，由 ExecutionRunner 执行选中分支、检查反馈、验证效果；真实四行两轮确认提交 8 条 | Task Program/Gym 接触桥、恢复数据隔离之外的恢复专家、统一启动器和完整四组合验收仍待实现 |
 | 新增 PickUp 接触闭环 | `PickUpMotionValidator`：完整 URDF 碰撞凸包、mimic 与持物几何、分阶段接触规则、CPU 物理子步接触证据、抬升到保持的相对漂移和双指接触验收；`cube_pickup_collection.py` 四行多轮采集，保存视频和确认后的 LeRobot 数据 | 仅固定基座未缩放 URDF + 盒状刚体 + CPU 物理；通用 mesh 场景、连续碰撞、Gym 子步接口另行扩展 |
 | PR 3 的同步保存基础 | `ExpertEpisode` 与 `CommitReceipt`；Session 预留/确认/失败重试；LeRobot 分片封存/真实回读；新增数值矩阵展开及原始 shape/终态保留；确认提交只读幂等核验 | 重启恢复、异步 pipeline 等后续范围；完整四组合真实采集仍需 PR 6 验收 |
 
-当前 `restore_initial` 使用显式全批物理状态适配与可信 profile，不调用普通 reset；同步 sink 只有封存并读回真实文件才确认提交。手写 qpos 的宿主证据冻结、实际控制标签、Runner/Session/sink 已接通，并通过普通重力下 UR5 自由运动真实采集。新增 direct-sim PickUp 的受限接触/持物检查和任务 profile；统一配置注册/CLI、完整原子运行时来源和 M1 四组合发布门槛仍未完成。当前示例显式构造可信服务；配置 ID 本身不代表服务已经注册。
+当前 `restore_initial` 使用显式全批物理状态适配与可信 profile，不调用普通 reset；同步 sink 只有封存并读回真实文件才确认提交。手写 qpos 的宿主证据冻结、实际控制标签、Runner/Session/sink 已接通，并通过普通重力下 UR5 自由运动真实采集。新增 direct-sim PickUp 的受限接触/持物检查和任务 profile；统一配置注册/CLI、Gym 原子运行时来源和 M1 四组合发布门槛仍未完成。当前示例显式构造可信服务；配置 ID 本身不代表服务已经注册。
 
-新增 API、测试和现有行为变更已同步对应文档及 agent context。下一步接入 Atomic Runtime 的候选消费与等价物理子步证据，再推进 Gym PickUp、via-point 因子和统一配置启动器；当前离线回放不扩大为完整原子运行时或 M1 四组合能力声明。
+新增 API、测试和现有行为变更已同步对应文档及 agent context。Atomic Runtime 的 pure-sim 候选消费已接通同一物理子步证据；下一步推进 Gym PickUp、via-point 因子和统一配置启动器。本次只完成原子 × sim 子集，不扩大为完整 M1 四组合能力声明。
 
 模块归属 review 后，`solvers`、`planners`、`workspace` 与 `trajectory_augmentation` 统一归入 `embodichain.lab.sim.motion`。公共 API、测试、示例和文档使用新路径，不提供旧路径兼容包。`motion` 父包仅按需加载子包；扩增算法保持无直接 Gym/仿真 backend 依赖，但其公共导入不再承诺绕过 `lab/sim` 初始化。该调整不改变下述 M0/M1 验收要求或未完成状态。
 
@@ -33,7 +33,7 @@ PR 5 组合回归 `1379 passed, 1 skipped, 118 deselected`；补充有界 `last_
 
 上一轮文档校验：公共导出覆盖 `1751/1751`，checker 测试 `8 passed`，Sphinx dummy 构建成功。本次新增 API/指南没有相关告警；构建仍报告其他既有文档的 46 条告警。`git diff --check -- docs` 通过。
 
-### 本轮 PickUp 实施范围
+### PR #591 的离线 PickUp 实施范围
 
 - 来源通过 `AtomicActionEngine.compile` 复用现有 MoveEndEffector/PickUp 规划；`export_pickup_templates` 保留接近/闭合/抬升边界，展开 mimic 坐标，并加入 30 个真实保持命令。只增强 transit，不改变接触时序。
 - 碰撞适配使用 URDF **碰撞**形状的保守凸包和完整关节 FK，包含指尖、mimic、随 TCP 移动的目标盒体和隐式地面；实测重验使用真实目标位姿。两条关节边以内的结构自碰撞排除沿用 cuRobo 规则。验证有界采样，不声明连续碰撞保证。
@@ -44,7 +44,26 @@ PR 5 组合回归 `1379 passed, 1 skipped, 118 deselected`；补充有界 `last_
 
 本轮同步 main 的显式物理步进 API 后，motion、原子动作、采集、Gym 初态与 demo、仿真管理器及 gizmo 组合回归为 `1542 passed, 1 skipped, 168 deselected`；真实并行采集、异常退出清理和原有视频示例为 `3 passed, 1 deselected`。四行两轮共 proposed/attempted/committed `8/8/8`，每条保持 1.5 秒、双指接触覆盖 100%，最小抬升 17.90–17.92 cm，相对位置最大漂移 0.35–0.73 mm；LeRobot 和 544 帧 H.264 视频均已真实回读。全仓 Black、`git diff --check` 通过；API 覆盖 `1761/1761`、checker 测试 `8 passed`，Sphinx dummy 构建完成，仍有文档告警。这些测试集与前述记录有重叠，不相加。
 
-当前已实现部分合并为一个 draft PR 提交 review。下文的 PR 编号保留为实施计划的工作划分，不表示这些 PR 已独立创建或全部验收。
+上述基础在 [draft PR #591](https://github.com/DexForce/EmbodiChain/pull/591) 中 review。Atomic Runtime 增量使用独立 PR，base 为 #591 的 `feat/fixed-scene-trajectory-generation` 分支。下文的 PR 编号保留为实施计划的工作划分，不表示已独立创建或全部验收。
+
+### 本轮 Atomic Runtime × sim 实施范围
+
+- `PickUpRuntimeSource` 通过 `initial_plan_provider` 使用指定候选，在每个新 `PreparedBatch` 上创建 invocation、实测 context、session 和 pending effect。`PickUp.materialize_trajectory` 复用原技能的命令/反馈/场景依赖/效果构建，不重新求解候选 IK。
+- 一个 PickUp 计划保留 transit/approach/close/lift/hold；初始样本只做观测，271 个命令对应 272 个观测。运行时与采集器使用同一物理时钟，dt 保留 float64，整批和尾批均明确下发零速度目标。
+- 机械臂保留 0.08/0.05 rad 运行中/末端反馈。手指因抓物不能达到完全闭合目标，使用独立原生双指接触和抬升/持物稳定性验收。效果验证使用当前 context 的实测关节 FK，与请求的 motion endpoint TCP 同坐标定义；原生接触 profile 的 TCP 单独记录，不把两套定义混用。
+- 全部命令执行后才请求实测效果验证，通过后提交 held-object 状态。运行时失败、额外等待、时钟/命令失配或重试/重规划均安全取消并保持整批活跃行，只保留拒绝审计。`attempt_generation` 暴露计划代数，恢复命令在 transport 边界被拒绝。
+- 示例增加 `--runtime`；`atomic_runtime` 强制 gate 和有界 episode 元数据记录命令数、计划尝试数、事件、效果误差及 TCP 定义。原离线执行仍可运行，视频在实际批次边界重置轨迹和计时。
+
+复现正例：
+
+```bash
+python examples/sim/motion/trajectory_generation/cube_pickup_collection.py \
+  --output /tmp/cube-runtime-experts --episodes 8 --runtime --record-video
+```
+
+真实四行两轮 proposed/attempted/committed 为 `8/8/8`；每条 271 个命令、272 个观测，双指保持接触覆盖 100%，最小抬升 17.90 cm；效果平移误差 3.56–5.69 mm、最大转角误差 0.0073 rad。8 个 LeRobot 分片和 544 帧 H.264 视频均已回读。完整 M1 仍需 Gym 与手写 EEF/PickUp 对应组合、统一配置启动器及其失败矩阵。
+
+本轮验证：采集与原子动作 CPU 回归 `993 passed, 1 skipped, 15 deselected`；runtime 正例、真实尾批恢复拒收、原离线采集及可视化示例共 `4 passed`。恢复负例只下发 1 个候选命令，记录 2 次计划尝试和 tracking divergence，恢复命令被拦截，安全保持且 committed 为 0；中断阶段作为不可用路径证据正常拒收，不使整个 job 异常退出。公共 API 覆盖 `1762/1762`、checker 测试 `8 passed`，全仓 Black 和差异检查通过。Sphinx dummy 构建成功并报告 744 条告警；未报告本次新增采集 API 的告警。独立只读审查发现的尾批速度目标和 float32 控制周期问题均已修复并通过复查。
 
 ## 1. 实施范围与里程碑
 
@@ -103,7 +122,8 @@ embodichain/lab/trajectory_generation/
   integrations/
     planning.py     # 已实现 free/no-held EEF/qpos 的 env_rows 适配与采样检查
     handwritten.py  # 显式模板与 DemoSegment 适配
-    atomic.py         # 已实现：离线 PickUp 阶段模板；运行时 ActionPlan 适配另行落地
+    atomic.py         # 离线 PickUp 阶段模板
+    atomic_runtime.py # 新请求/计划物化、运行时命令与效果验证、恢复拒收
     contact.py        # 已实现：PickUp 完整几何和 CPU 物理子步接触验收
     sim.py           # 已实现物理初态适配；rollout 控制/计时/观测归 execution.py
     gym.py           # Gym 初态、正常 env.step、demo/Task Program 桥
@@ -210,7 +230,7 @@ Gym 接口增加全批 generation lease，租约内拒绝普通 reset 并抑制�
 
 **当前状态：handwritten qpos/free-motion 同步闭环已落地。** `GenerationRunner` 与 `MotionLimitsProfile` 要求显式传入现有 host、planner、executor、sink 和可信限速配置，对齐 source/template/profile/validator/tolerance ID 与 control_dt/fps。运行入口接收每个物理行的固定 case 和 qpos reference，提议允许的残差/retime，规划检查后先预留配额与容量，再执行。`QposRolloutExecutor` 采集实际命令与实测观测/时间，冻结证据后由 Runner 重验实际碰撞、速度/加速度、路径/时长质量和任务成功，再提交。`generation_report.json` 记录配置、包版本、计数、audit 与目标达成状态；`last_failures` 将无完整 transition 等失败原因有界保留到 audit。Runner 为 single-use，并在退出时关闭传入的 host/sink。
 
-自由运动路径使用原 `EnvRowMotionPlanner` 的锁定关节约束。新增 PickUp 路径必须将同一个 `PickUpMotionValidator` 传入 Runner 和 executor，才能允许目标物体与 mimic 运动并采集物理子步证据。它接收离线原子模板；完整 Atomic Runtime、Gym PickUp、M1 和统一 CLI 仍未完成。
+自由运动路径使用原 `EnvRowMotionPlanner` 的锁定关节约束。新增 PickUp 路径必须将同一个 `PickUpMotionValidator` 传入 Runner 和 executor，才能允许目标物体与 mimic 运动并采集物理子步证据。它接收离线原子模板，可选通过 `PickUpRuntimeSource` 消费选中候选；Gym PickUp、M1 和统一 CLI 仍未完成。
 
 真实正例使用纯 arm UR5、普通重力、CPU physics + CUDA cuRobo、B=1：1 秒内 21 个观测/20 个命令，实际位移约 `0.078021 rad`、终点误差 `0.003212 rad`、最大跟踪误差 `0.010872 rad`，全部 gate 通过且 LeRobot 读回 confirmed，`committed=1`。Panda 默认重力负例中 task/quality/dynamics 通过，但最大手指漂移约 `3.7853e-5` 超过 locked model 的 `1e-6` 比较阈值，实测路径验收 unavailable，`committed=0`。候选不发出夹爪变化命令不能代替实测锁定关节一致性。两项真实测试均通过；未据此验收真实 Gym 采集、多行或连续多 episode。
 

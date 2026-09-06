@@ -56,7 +56,22 @@ python examples/sim/motion/trajectory_generation/cube_pickup_collection.py \
 
 输出 `preview.mp4`（开启视频时）、`generation_report.json`、`pickup_report.json`、`manifest.json` 和逐 episode 的 LeRobot 分片。每条数据含 T 个真实控制目标及 T+1 个实测观测/时间戳。cube/TCP 位姿在 LeRobot 中按行优先展开为 16 维，`episode.json` 的 `observation_shapes` 保留 `[4, 4]`；终态 `terminal.npz` 保持矩阵形状。`commanded_joint_indices` 标识完整关节向量中真正下发的关节列。
 
-范围：单个固定基座 URDF 机器人、盒状刚体、CPU 物理。碰撞验证是有界采样，未提供连续碰撞保证。`source.kind=atomic` 表示来源是 `AtomicActionEngine.compile` 的离线计划；执行采用单独验收的 qpos 回放，不提交编译时预测的符号效果。Atomic Runtime 的 tracking/recovery 接入、Gym 接触采集与通用 YAML 启动器仍是后续工作。
+范围：单个固定基座 URDF 机器人、盒状刚体、CPU 物理。碰撞验证是有界采样，未提供连续碰撞保证。默认执行离线编译模板的 qpos 回放，不提交编译时预测的符号效果。加上 `--runtime` 可切换到下方的原子运行时执行；Gym 接触采集与通用 YAML 启动器仍是后续工作。
+
+## 通过 Atomic Runtime 采集
+
+```bash
+python examples/sim/motion/trajectory_generation/cube_pickup_collection.py \
+  --output /tmp/cube-runtime-experts --episodes 8 --runtime --record-video
+```
+
+场景、增强因子和物理验收与上面的采集示例相同。`PickUpRuntimeSource` 在每次全批恢复后创建新的 invocation 和 `ExecutionSession`，通过 `initial_plan_provider` 将选中的五阶段候选物化为一个 PickUp 计划。执行直接使用候选关节分支；运行时抓取目标取模板闭合前的 URDF FK 姿态，避免将分析 IK 目标与资产几何之间的腕部偏移带入持物效果。
+
+`ExecutionRunner` 通过 `SimulationExecutionAdapter` 下发命令并检查机械臂反馈，阈值为运行中 0.08 rad、末端 0.05 rad。手指依靠真实双侧接触及持物稳定性验收。全部命令执行后，使用当前观测关节的 FK 和实测物体位姿，在计划使用的 motion endpoint TCP 坐标系中验证持物效果；原生接触 TCP 仍单独检查，成功后才提交新的 held-object 状态。
+
+运行时与采集器共用 20 Hz 控制时钟；每条数据仍是 271 个实际命令和 272 个观测。计划重试/重规划、命令或时钟不匹配、额外等待及效果验证失败都会停止整批活跃行、保持当前关节状态并拒收数据。恢复命令不进入专家轨迹。尾批可保留空闲行，单行运行时失败会保守拒收同批其他活跃行。
+
+每条 episode 的 `atomic_runtime` 元数据记录命令数、计划尝试数、事件计数、完成状态、效果误差及计划/接触 TCP 定义；同名强制验收项必须通过。`pickup_report.json` 标识本次执行来源。视频与 LeRobot 文件的保存格式保持一致，完整的手写/原子 × sim/Gym 四组合验收仍待后续完成。
 
 ## 自由运动采集
 
