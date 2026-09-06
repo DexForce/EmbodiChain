@@ -126,7 +126,8 @@ behavior:
 | Change scope | Default validation |
 |---|---|
 | `.github/workflows/**` only | `actionlint` on changed workflows; run related script tests only when workflow scripts changed |
-| Docs content only | Relevant Sphinx build or docs-specific tests |
+| Human-facing docs content only | Relevant Sphinx build or docs-specific tests |
+| `agent_context/**` or its routing helper | Run `context.py check` and `tests/test_agent_context_{map,tools}.py`; exercise representative routes when routing changes |
 | `.agents/skills/**` and thin adapters | Run `quick_validate.py` for each changed canonical skill; compile/run any bundled scripts |
 | Task Program components/deployments | Run the `$add-task-program` static deployment inspector plus the closest configured-integration/package-data tests |
 | Other packaged JSON/YAML | Parse through the production loader and run the closest config/layout tests |
@@ -151,9 +152,12 @@ instructions to skip or narrow tests.
 For canonical skill directories, use:
 
 ```bash
-python /root/.codex/skills/.system/skill-creator/scripts/quick_validate.py \
+python "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py" \
   .agents/skills/<skill>
 ```
+
+If the personal skill installation differs, locate the available `skill-creator`
+validator through the session skill catalog instead of assuming a username.
 
 Thin `.claude/skills/` and `.github/copilot/` adapters should point back to
 the canonical `.agents/skills/<skill>/SKILL.md`; do not duplicate the full

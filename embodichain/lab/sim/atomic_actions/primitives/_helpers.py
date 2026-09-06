@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.utility.action_utils import resample_with_distance
+from embodichain.compute.trajectory import resample_with_distance
 
 from ..bindings import EndpointBinding
 from ..state import PlanningContext

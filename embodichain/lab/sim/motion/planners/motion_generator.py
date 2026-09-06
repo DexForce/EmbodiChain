@@ -39,7 +39,7 @@ from embodichain.lab.sim.motion.planners import (
     CuroboPlanner,
     CuroboPlannerCfg,
 )
-from embodichain.lab.sim.utility.action_utils import (
+from embodichain.compute.trajectory import (
     interpolate_with_distance,
     interpolate_with_nums,
     resample_with_distance,

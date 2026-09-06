@@ -29,8 +29,7 @@ pytestmark = pytest.mark.no_sim
     "module_name",
     [
         "examples.sim.gizmo.gizmo_robot",
-        "examples.sim.gizmo.gizmo_w1",
-        "examples.sim.gizmo.gizmo_scene",
+        "examples.sim.gizmo.gizmo_object",
         "examples.sim.gizmo.gizmo_camera",
         "scripts.tutorials.sim.gizmo_robot",
     ],
@@ -63,8 +62,8 @@ def test_gizmo_loops_step_before_pacing_and_close(
     sim = SimpleNamespace(
         sim_config=SimpleNamespace(physics_dt=physics_dt),
         num_envs=1,
+        is_use_gpu_physics=False,
         update=update,
-        get_sensor=lambda _uid: None,
         has_gizmo=lambda _uid: False,
         destroy=Mock(),
     )
@@ -79,8 +78,6 @@ def test_gizmo_loops_step_before_pacing_and_close(
 
     if module_name.endswith("gizmo_camera"):
         module.run_simulation(sim, Mock(), show_camera_window=False)
-    elif module_name.endswith("gizmo_scene"):
-        module.run_simulation(sim, show_camera_window=False)
     else:
         module.run_simulation(sim)
 

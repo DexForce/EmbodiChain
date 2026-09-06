@@ -14,12 +14,13 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Warp kinematics kernels.
+"""Compatibility package for relocated kinematics kernels."""
 
-``opw_solver`` provides OPW-based forward/inverse kinematics and ``warp_trajectory`` computes, interpolates, and applies trajectory offsets.
-"""
+from __future__ import annotations
 
 from . import interpolate
 from . import opw_solver
 from . import ur_solver
 from . import warp_trajectory
+
+__all__ = ["interpolate", "opw_solver", "ur_solver", "warp_trajectory"]

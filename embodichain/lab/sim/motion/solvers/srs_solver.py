@@ -26,7 +26,7 @@ import warp as wp
 from embodichain.lab.sim.motion.solvers import BaseSolver, SolverCfg
 from embodichain.utils import configclass, logger
 from embodichain.utils.device_utils import standardize_device_string
-from embodichain.utils.warp.kinematics.srs_solver import (
+from embodichain.compute.kinematics._warp.srs import (
     check_success_kernel,
     compute_arm_angle_kernel,
     compute_ik_kernel,

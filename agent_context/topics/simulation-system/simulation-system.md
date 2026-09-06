@@ -73,6 +73,15 @@ then advances the world for the requested number of physics steps. Each
 environment control step normally calls it with
 `sim_steps_per_control`.
 
+`scripts/tutorials/sim/gizmo_robot.py` supports only manual physics. It initializes
+GPU physics after robot creation when needed, sets both current and target
+joint positions, and advances once before opening the window. It explicitly
+sets `GizmoCfg(ik_start_enabled=True)` so the native controller activates on the
+first update after opening the window. Its loop only
+calls `sim.update(step=1)`; the manager owns native IK updates and Viser
+commands/capture. The loop is paced by `physics_dt` and has no automatic
+physics polling path.
+
 `ArticulationCfg.enable_gravity` defaults to `True`. During articulation
 construction, `Articulation` applies this explicit runtime flag to every native
 entity before the first physics update, including when
@@ -93,7 +102,7 @@ flag later for all or selected environment indices.
 | Trajectory candidates, augmentation, coverage, generation bookkeeping | `motion/trajectory_augmentation/` | `motion-planning` |
 | Typed action planning and execution | `atomic_actions/` | `atomic-actions` |
 | Task Program Semantic Calls and robot profiles | `embodichain/lab/task_program/semantics/` | `task-programs` |
-| Reachability analysis and runtime workspace queries | `motion/workspace/` | `robot-system` |
+| Reachability analysis and runtime workspace queries | `motion/workspace/` | `robot-workspace` |
 | Browser scene export and Viser runtime | `embodichain/lab/visualization/` | `sim-visualization` |
 
 Use the narrow topic when a request names one of these subsystems. Use
@@ -132,25 +141,7 @@ asset registry and environment count, then coordinates creation and attachment.
 `qpos_joint_names`. Stochastic surface sampling and Atomic Action geometry keys
 do not belong to the simulation object; use
 `atomic_actions.sample_initial_articulation_geometry()` for that adaptation.
-
-## Configuration Flow
-
-`SimulationManagerCfg` owns window size, headless mode, rendering, GPU/CPU
-selection, arena count and spacing, physics timestep, physics and GPU-memory
-settings, recording, profiling, and browser visualization.
-
-`EnvCfg` embeds `SimulationManagerCfg` and supplies the control-to-physics
-step ratio. CLI and task config loaders may override runtime fields before
-constructing the environment. Trace those overrides through the caller rather
-than changing a default in the manager blindly.
-
-Object-specific configuration belongs in `lab/sim/cfg.py` or the
-corresponding robot/sensor module. Scene composition belongs in
-`EmbodiedEnv` or a task config, not in `SimulationManagerCfg`.
-
-For mesh collision decomposition, `MeshCfg.acd_method` defaults to `"visacd"`
-with DexSim 0.5.0; it requires CUDA support. `"coacd"` and `"vhacd"` remain
-supported explicit options.
+Entity/IK gizmo configuration is owned by [native gizmos](../sim-visualization/native-gizmos.md).
 
 ## Where to Make Changes
 

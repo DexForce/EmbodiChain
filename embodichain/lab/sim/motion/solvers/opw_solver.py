@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import numpy as np
 import warp as wp
@@ -25,7 +27,7 @@ from scipy.spatial.transform import Rotation
 
 from embodichain.utils import configclass, logger
 from embodichain.lab.sim.motion.solvers import SolverCfg, BaseSolver
-from embodichain.utils.warp.kinematics.opw_solver import (
+from embodichain.compute.kinematics._warp.opw import (
     OPWparam,
     opw_fk_kernel,
     opw_ik_kernel,
