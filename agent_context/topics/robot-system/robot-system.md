@@ -5,9 +5,9 @@
 | What | Path |
 |---|---|
 | Robot runtime class | `embodichain/lab/sim/objects/robot.py` → `Robot` |
-| RobotCfg base config | `embodichain/lab/sim/cfg.py` → `RobotCfg` (line ~1455) |
-| ArticulationCfg parent | `embodichain/lab/sim/cfg.py` → `ArticulationCfg` (line ~1345) |
-| JointDrivePropertiesCfg | `embodichain/lab/sim/cfg.py` → `JointDrivePropertiesCfg` (line ~654) |
+| RobotCfg base config | `embodichain/lab/sim/cfg.py` → `RobotCfg` |
+| ArticulationCfg parent | `embodichain/lab/sim/cfg.py` → `ArticulationCfg` |
+| JointDrivePropertiesCfg | `embodichain/lab/sim/cfg.py` → `JointDrivePropertiesCfg` |
 | Robot registry (all robots) | `embodichain/lab/sim/robots/__init__.py` |
 | DexforceW1 config package | `embodichain/lab/sim/robots/dexforce_w1/` |
 | CobotMagic config | `embodichain/lab/sim/robots/cobotmagic.py` |
@@ -131,32 +131,24 @@ control_parts = {
 
 When using a dict, keys are joint names or regex patterns matching joint names. Control-part names can also be used as keys (resolved via `ArticulationCfg` logic).
 
-## Adding a New Robot
+## Extension route
 
-Full guide: `docs/source/tutorial/add_robot.rst` · Quick reference: `docs/source/guides/add_robot.rst`
+Use `/add-robot` for configuration hooks, registry exports, docs and focused
+tests. Use `/add-embodiment-component` to reuse a robot with sensors in Gym
+deployments. For reachability caches and sampling, read
+[robot workspace](../robot-workspace/robot-workspace.md).
 
-Minimal checklist:
-1. Create a `@configclass` inheriting `RobotCfg`.
-2. Override `_build_defaults(self, init_dict=None)` — read variant fields from `init_dict`, then populate `urdf_cfg`, `control_parts`, `solver_cfg`, `drive_pros` and `attrs`.
-3. Keep `from_dict` as the 3-line template (`cls()` → `_build_defaults` → `merge_robot_cfg`) unless version-derived state requires an explicitly documented post-merge step.
-4. Define `control_parts` mapping part names to joint name lists.
-5. Configure `solver_cfg` (one `SolverCfg` per control part).
-6. Implement `build_pk_serial_chain` reading from `_pk_urdf_path` (property for constant paths, method for variant-dependent).
-7. For robots with variants, use a sub-package with `types.py` (enums + `__all__`), `cfg.py` (variant-aware `_build_defaults`), optional `params.py` / `utils.py` helpers (see `dexforce_w1/` as example).
-8. Export from `embodichain/lab/sim/robots/__init__.py` and set `__all__`.
-9. Add robot docs in `docs/source/resources/robot/` and update `docs/source/resources/robot/index.rst`.
-10. Test — a `__main__` smoke test + the DOF drift guard + `preview-asset` CLI.
+## Available robots
 
-Serialization (`to_dict` / `save_to_file`) is normally inherited. A robot-specific
-override requires documented raw/final semantics and regression tests for default,
-custom-transform, component-version, and public-builder round-trips.
-
-## Available Robots
+The authoritative inventory is `robots/__init__.py`; exported configs include:
 
 | Robot | Config Class | Module | Structure | Notes |
 |---|---|---|---|---|
 | DexForce W1 | `DexforceW1Cfg` | `embodichain/lab/sim/robots/dexforce_w1/` | Package (`cfg.py`, `types.py`, `specs.py`, `hand_specs.py`, `params.py`, `utils.py`) | Humanoid; robot and hand versions are independently registered |
 | CobotMagic | `CobotMagicCfg` | `embodichain/lab/sim/robots/cobotmagic.py` | Single file | Dual-arm; 6-DOF arms + 2-DOF grippers; uses OPW solver |
+| Franka Panda | `FrankaPandaCfg` | `embodichain/lab/sim/robots/franka_panda.py` | Single file | Panda preset |
+| Universal Robots | `URRobotCfg` | `embodichain/lab/sim/robots/ur_robot.py` | Single file | UR family presets |
+| Composed dual arm | `DualArmRobotCfg`, `build_dual_arm_cfg` | `embodichain/lab/sim/robots/dual_arm.py` | Single file | Reusable dual-arm assembly |
 
 ## Common Failure Modes
 
