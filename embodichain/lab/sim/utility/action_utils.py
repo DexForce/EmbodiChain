@@ -32,7 +32,7 @@ from embodichain.compute.trajectory import (
     warp_trajectory_qpos,
 )
 from embodichain.compute.trajectory._warp.warping import compute_offset_key_poses_kernel
-from embodichain.lab.sim.solvers.base_solver import BaseSolver
+from embodichain.lab.sim.motion.solvers.base_solver import BaseSolver
 from embodichain.utils.device_utils import standardize_device_string
 from embodichain.utils.utility import inv_transform
 

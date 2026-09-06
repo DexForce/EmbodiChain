@@ -9,10 +9,10 @@ Overview
 The ``sim`` package is EmbodiChain's simulation core. It is organized around
 the :class:`SimulationManager` (the DexSim scene handle), the scene-object
 hierarchy (lights, rigid/soft/cloth bodies, articulations, robots, gizmos,
-constraints), the sensor suite (cameras, stereo cameras, contact sensors), IK
-solvers and motion planners, the atomic-action motion-primitive layer, a
-reusable workspace-analysis and sampling toolkit, and the shared configuration
-types and utilities that wire all of these together.
+constraints), the sensor suite (cameras, stereo cameras, contact sensors), the
+``motion`` package for solvers, planners, workspace, and trajectory augmentation,
+the atomic-action motion-primitive layer, and the shared configuration types and
+utilities that wire all of these together.
 
 .. rubric:: Submodules
 
@@ -28,10 +28,8 @@ types and utilities that wire all of these together.
    objects
    robots
    sensors
-   solvers
-   planners
+   motion
    atomic_actions
-   workspace
    types
    utility
 
@@ -116,21 +114,13 @@ Robot Configurations
 
    embodichain.lab.sim.robots
 
-Solvers
--------
+Robot Motion
+------------
 
 .. toctree::
    :maxdepth: 1
 
-   embodichain.lab.sim.solvers
-
-Planners
---------
-
-.. toctree::
-   :maxdepth: 1
-
-   embodichain.lab.sim.planners
+   embodichain.lab.sim.motion
 
 Atomic Actions
 --------------
@@ -139,14 +129,6 @@ Atomic Actions
    :maxdepth: 1
 
    embodichain.lab.sim.atomic_actions
-
-Robot Workspace
----------------
-
-.. toctree::
-   :maxdepth: 1
-
-   embodichain.lab.sim.workspace
 
 Shared Types
 ------------

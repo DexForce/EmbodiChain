@@ -24,8 +24,8 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.planners.curobo.curobo_planner import CuroboPlanner
-from embodichain.lab.sim.planners.utils import MoveType, PlanResult
+from embodichain.lab.sim.motion.planners.curobo.curobo_planner import CuroboPlanner
+from embodichain.lab.sim.motion.planners.utils import MoveType, PlanResult
 from scripts.benchmark.motion_generation.aggregation import aggregate_results
 from scripts.benchmark.motion_generation.config import load_suite
 from scripts.benchmark.motion_generation.metrics.trajectory import (

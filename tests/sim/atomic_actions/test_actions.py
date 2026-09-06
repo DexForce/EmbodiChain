@@ -108,12 +108,8 @@ from embodichain.toolkits.graspkit import (
     ParallelJawGraspPoseGenerator,
     ParallelJawGripperModelCfg,
 )
-from embodichain.lab.sim.planners import (
-    MotionGenerator,
-    MoveType,
-    PlanOptions,
-    PlanResult,
-)
+from embodichain.lab.sim.motion.motion_generator import MotionGenerator
+from embodichain.lab.sim.motion.planners import MoveType, PlanOptions, PlanResult
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
 NUM_ENVS = 2
@@ -263,7 +259,7 @@ def _torch_interpolation(monkeypatch: pytest.MonkeyPatch) -> None:
         interpolate,
     )
     monkeypatch.setattr(
-        "embodichain.lab.sim.planners.motion_generator.interpolate_with_distance",
+        "embodichain.lab.sim.motion.motion_generator.interpolate_with_distance",
         interpolate,
     )
     monkeypatch.setattr(

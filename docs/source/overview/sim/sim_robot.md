@@ -22,7 +22,7 @@ A `Robot` must be spawned within a `SimulationManager`.
 import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RobotCfg
-from embodichain.lab.sim.solvers import SolverCfg
+from embodichain.lab.sim.motion.solvers import SolverCfg
 
 # 1. Initialize Simulation Environment
 # Note: Use 'sim_device' to specify device (e.g., "cuda:0" or "cpu")

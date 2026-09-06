@@ -80,7 +80,7 @@ def test_new_topics_cover_their_owning_packages() -> None:
         "gen-sim": "embodichain/gen_sim/",
         "data-assets": "embodichain/data/",
         "data-pipeline": "embodichain/data_pipeline/",
-        "robot-workspace": "embodichain/lab/sim/workspace/",
+        "robot-workspace": "embodichain/lab/sim/motion/workspace/",
     }
 
     for topic_id, prefix in expected_source_prefixes.items():

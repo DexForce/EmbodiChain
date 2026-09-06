@@ -1,0 +1,53 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Inverse-kinematics solvers sharing the ``BaseSolver`` interface.
+
+Provides analytic (SRS, OPW, UR), numerical (Pinocchio, Pink, Differential), and learning-based (PyTorch, NeuralIK) solvers, one per robot control part.
+"""
+
+from __future__ import annotations
+
+from .base_solver import SolverCfg, BaseSolver
+from .pytorch_solver import PytorchSolverCfg, PytorchSolver
+from .pinocchio_solver import PinocchioSolverCfg, PinocchioSolver
+from .differential_solver import DifferentialSolverCfg, DifferentialSolver
+from .pink_solver import PinkSolverCfg, PinkSolver
+from .opw_solver import OPWSolverCfg, OPWSolver
+from .srs_solver import SRSSolverCfg, SRSSolver
+from .neural_ik_solver import NeuralIKSolverCfg, NeuralIKSolver
+from .ur_solver import URSolverCfg, URSolver
+
+__all__ = [
+    "SolverCfg",
+    "BaseSolver",
+    "PytorchSolverCfg",
+    "PytorchSolver",
+    "PinocchioSolverCfg",
+    "PinocchioSolver",
+    "DifferentialSolverCfg",
+    "DifferentialSolver",
+    "PinkSolverCfg",
+    "PinkSolver",
+    "OPWSolverCfg",
+    "OPWSolver",
+    "SRSSolverCfg",
+    "SRSSolver",
+    "NeuralIKSolverCfg",
+    "NeuralIKSolver",
+    "URSolverCfg",
+    "URSolver",
+]

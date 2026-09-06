@@ -61,9 +61,9 @@ cache-key inputs, runtime selection and cache failure diagnosis.
 
 | Change | Tests |
 |---|---|
-| Sampling/FK/IK analysis | `tests/sim/workspace/test_analyzer.py` |
-| Cache identity and CLI cache behavior | `tests/sim/workspace/test_cache.py` |
-| Runtime alignment, base pose, bounds and invalid padding | `tests/sim/workspace/test_runtime.py` |
+| Sampling/FK/IK analysis | `tests/sim/motion/workspace/test_analyzer.py` |
+| Cache identity and CLI cache behavior | `tests/sim/motion/workspace/test_cache.py` |
+| Runtime alignment, base pose, bounds and invalid padding | `tests/sim/motion/workspace/test_runtime.py` |
 | Workspace-aware event sampling | `tests/gym/envs/managers/test_workspace_randomization.py` |
 
 Use [robot-system](../robot-system/robot-system.md) for robot config/kinematic

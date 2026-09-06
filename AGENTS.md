@@ -37,10 +37,17 @@ bundles official tasks as the **`embodichain_tasks`** import package.
 
 Shared numerical algorithms belong to `compute/<domain>/`, with Warp kernels
 under private `_warp/` packages. Compute must not import `lab`, simulation
-objects or environment managers. Stateful solvers remain in `lab/sim/solvers`;
+objects or environment managers. Stateful solvers remain in `lab/sim/motion/solvers`;
 contact-data adaptation belongs to sensors. New trajectory consumers import
 `embodichain.compute.trajectory`; existing `utils/warp` and pure
 `lab/sim/utility/action_utils` exports remain compatibility surfaces.
+
+Motion APIs live under `embodichain.lab.sim.motion.{solvers,planners,workspace,expansion}`.
+`motion/motion_generator.py` owns `MotionGenerator`, `MotionGenCfg`, and
+`MotionGenOptions`, composing the planner backends. Planners do not re-export it.
+The motion parent and workspace analyzer exports remain lazy to preserve Robot
+initialization. Trajectory augmentation owns candidates, operators, coverage and
+generation bookkeeping; execution, reset and persistence belong to host integrations.
 
 ## Task ownership
 

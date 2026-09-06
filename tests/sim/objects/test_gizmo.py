@@ -418,7 +418,7 @@ class _PlanarRobot(_ConfiguredRobot):
         self.root_pose[1:3, 3] = [-0.2, 0.6]
         if backend == "embodichain":
             pytest.importorskip("pink")
-            from embodichain.lab.sim.solvers import PinkSolverCfg
+            from embodichain.lab.sim.motion.solvers import PinkSolverCfg
 
             self.solver = PinkSolverCfg(
                 urdf_path=str(urdf_path),

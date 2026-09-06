@@ -102,7 +102,7 @@ There are no task-specific environment subclasses or direct-planning paths.
        "neural": (NeuralPlanner, NeuralPlannerCfg),
    }
    ```
-6. Export from `embodichain/lab/sim/planners/__init__.py`.
+6. Export from `embodichain/lab/sim/motion/planners/__init__.py`.
 
 ### validate_plan_options decorator
 

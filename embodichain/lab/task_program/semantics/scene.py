@@ -41,7 +41,7 @@ from embodichain.lab.sim.atomic_actions import (
 from .effects import EffectEvidenceAddress
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.planners import MotionGenerator
+    from embodichain.lab.sim.motion.motion_generator import MotionGenerator
     from embodichain.lab.sim.sim_manager import SimulationManager
 
 

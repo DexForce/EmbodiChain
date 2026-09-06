@@ -17,7 +17,7 @@
 """Analytical kinematics computations.
 
 Private Warp kernels implement OPW, SRS, and UR algorithms. Stateful solver
-interfaces and robot configuration remain in ``embodichain.lab.sim.solvers``."""
+interfaces and robot configuration remain in ``embodichain.lab.sim.motion.solvers``."""
 
 from __future__ import annotations
 

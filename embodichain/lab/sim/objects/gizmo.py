@@ -41,7 +41,7 @@ from embodichain.utils import configclass, logger
 if TYPE_CHECKING:
     from dexsim.engine import GizmoController
     from dexsim.kit.ik import IKGizmoController, NewtonChainIK
-    from embodichain.lab.sim.solvers import BaseSolver
+    from embodichain.lab.sim.motion.solvers import BaseSolver
 
 __all__ = ["Gizmo", "GizmoCfg", "create_robot_ik_gizmo_controller"]
 

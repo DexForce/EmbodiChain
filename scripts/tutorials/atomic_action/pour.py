@@ -38,7 +38,10 @@ from embodichain.lab.sim.atomic_actions import (
     PourGoal,
     PourOptions,
 )
-from embodichain.lab.sim.planners import ToppraPlanOptions, TrajectorySampleMethod
+from embodichain.lab.sim.motion.planners import (
+    ToppraPlanOptions,
+    TrajectorySampleMethod,
+)
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.axis_align import (
     create_align_object,

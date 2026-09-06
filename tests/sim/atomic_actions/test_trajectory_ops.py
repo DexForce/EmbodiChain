@@ -39,7 +39,7 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     split_three_segments,
     translate_pose_world,
 )
-from embodichain.lab.sim.planners import MoveType
+from embodichain.lab.sim.motion.planners import MoveType
 
 CPU = torch.device("cpu")
 

@@ -23,7 +23,8 @@ import pytest
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import CobotMagicCfg
-from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
+from embodichain.lab.sim.motion.motion_generator import MotionGenerator, MotionGenCfg
+from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
 from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     AtomicActionEngine,

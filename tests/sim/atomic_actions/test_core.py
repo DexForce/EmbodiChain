@@ -74,7 +74,7 @@ from embodichain.lab.sim.atomic_actions.goals import (
     collect_scene_dependencies,
     resolve_pose_goal,
 )
-from embodichain.lab.sim.planners import ToppraPlanOptions
+from embodichain.lab.sim.motion.planners import ToppraPlanOptions
 
 
 def _semantics(

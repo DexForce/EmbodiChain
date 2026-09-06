@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import torch
 
-from embodichain.lab.sim.planners import MoveType, PlanResult, PlanState
+from embodichain.lab.sim.motion.planners import MoveType, PlanResult, PlanState
 from embodichain.compute.trajectory import interpolate_with_distance
 
 from .plans import TimedTrajectory, normalize_success_mask

@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from embodichain.lab.sim.planners import PlanResult
+from embodichain.lab.sim.motion.planners import PlanResult
 
 from ..models import BenchmarkCase
 from ..registry import register_planner_adapter

@@ -38,7 +38,7 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.robots import build_dual_arm_cfg
-from embodichain.lab.sim.solvers import PytorchSolverCfg
+from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     ROBOTIQ_2F_140_TCP,
