@@ -45,14 +45,14 @@ from embodichain.compute.trajectory import (
     resample_with_distance,
 )
 from embodichain.utils import logger, configclass
-from .utils import (
+from .planners.utils import (
     MoveType,
     PlanResult,
     PlanState,
     TrajectorySampleMethod,
     normalize_success_mask,
 )
-from .utils import (
+from .planners.utils import (
     calculate_point_allocations,
     interpolate_xpos,
     interpolate_xpos_batched,

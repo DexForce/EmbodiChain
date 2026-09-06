@@ -979,7 +979,10 @@ def _make_curobo_engine(
     from embodichain.lab.sim.atomic_actions import (
         AtomicActionEngine,
     )
-    from embodichain.lab.sim.motion.planners import MotionGenCfg, MotionGenerator
+    from embodichain.lab.sim.motion.motion_generator import (
+        MotionGenCfg,
+        MotionGenerator,
+    )
 
     motion_generator = MotionGenerator(
         MotionGenCfg(

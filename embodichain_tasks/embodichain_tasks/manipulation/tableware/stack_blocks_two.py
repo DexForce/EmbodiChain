@@ -74,11 +74,11 @@ class StackBlocksTwoEnv(EmbodiedEnv):
             ControlPartCommandProfile,
             ObjectSemantics,
         )
-        from embodichain.lab.sim.motion.planners import (
+        from embodichain.lab.sim.motion.motion_generator import (
             MotionGenCfg,
             MotionGenerator,
-            ToppraPlannerCfg,
         )
+        from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
 
         hand_dof = len(self.robot.get_joint_ids(name=HAND_CONTROL_PART))
         hand_open_qpos = torch.full(

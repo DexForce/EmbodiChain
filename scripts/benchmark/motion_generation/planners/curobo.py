@@ -22,14 +22,16 @@ import importlib.util
 
 import torch
 
+from embodichain.lab.sim.motion.motion_generator import (
+    MotionGenCfg,
+    MotionGenOptions,
+    MotionGenerator,
+)
 from embodichain.lab.sim.motion.planners import (
     CuroboAutoGenCfg,
     CuroboPlanOptions,
     CuroboPlannerCfg,
     CuroboWorldCfg,
-    MotionGenCfg,
-    MotionGenOptions,
-    MotionGenerator,
     MoveType,
     PlanResult,
     PlanState,

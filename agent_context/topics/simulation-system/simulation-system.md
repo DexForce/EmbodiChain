@@ -109,7 +109,7 @@ Use the narrow topic when a request names one of these subsystems. Use
 `simulation-system` for the overall `lab/sim` architecture, manager
 lifecycle, scene ownership, or cross-module flow.
 
-`motion/__init__.py` resolves its four public subpackages lazily. Keep it free
+`motion/__init__.py` resolves its public subpackages and `motion_generator` module lazily. Keep it free
 of eager planner imports: `Robot` needs solver and runtime workspace types
 during initialization, while planners resolve robots through
 `SimulationManager`. Workspace analyzer/visualization exports retain their own

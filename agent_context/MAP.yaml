@@ -143,7 +143,7 @@ topics:
   paths: [topics/motion-planning/motion-planning.md]
   source_of_truth:
   - embodichain/lab/sim/motion/planners/base_planner.py
-  - embodichain/lab/sim/motion/planners/motion_generator.py
+  - embodichain/lab/sim/motion/motion_generator.py
   - embodichain/lab/sim/motion/planners/utils.py
   - embodichain/lab/sim/motion/planners/toppra_planner.py
   - embodichain/lab/sim/motion/planners/curobo/curobo_planner.py
@@ -152,7 +152,8 @@ topics:
   - embodichain/lab/sim/motion/trajectory_augmentation/
   - embodichain/compute/trajectory/
   - embodichain/lab/sim/utility/action_utils.py
-  watch_paths: [embodichain/lab/sim/motion/planners/, embodichain/lab/sim/motion/trajectory_augmentation/,
+  watch_paths: [embodichain/lab/sim/motion/motion_generator.py, tests/sim/motion/test_motion_generator.py,
+    tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/, embodichain/lab/sim/motion/trajectory_augmentation/,
     tests/sim/motion/trajectory_augmentation/, embodichain/lab/sim/utility/action_utils.py, embodichain/compute/trajectory/,
     tests/sim/motion/planners/, tests/compute/]
   related_topics: [simulation-system, robot-system, ik-solvers, atomic-actions]

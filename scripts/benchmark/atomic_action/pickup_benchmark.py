@@ -470,7 +470,10 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
 
     ensure_repo_root()
     ensure_torch()
-    from embodichain.lab.sim.motion.planners import MotionGenerator, MotionGenCfg
+    from embodichain.lab.sim.motion.motion_generator import (
+        MotionGenerator,
+        MotionGenCfg,
+    )
     from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
     from scripts.tutorials.atomic_action.pickup import (
         create_robot,

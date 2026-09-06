@@ -10,8 +10,6 @@ embodichain.lab.sim.motion.planners
     BasePlanner
     ToppraPlannerCfg
     ToppraPlanner
-    MotionGenCfg
-    MotionGenerator
     TrajectorySampleMethod
     MovePart
     MoveType
@@ -40,18 +38,6 @@ Toppra Planner
     :exclude-members: __init__, copy, replace, to_dict, validate
 
 .. autoclass:: ToppraPlanner
-    :members:
-    :inherited-members:
-    :show-inheritance:
-
-Motion Generator
-----------------
-
-.. autoclass:: MotionGenCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict, validate
-
-.. autoclass:: MotionGenerator
     :members:
     :inherited-members:
     :show-inheritance:

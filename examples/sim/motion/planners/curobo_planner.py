@@ -67,7 +67,7 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.data import get_data_path
 from embodichain.lab.sim.cfg import RenderCfg, RigidBodyAttributesCfg
 from embodichain.lab.sim.objects import RigidObjectCfg, Robot, RigidObject
-from embodichain.lab.sim.motion.planners import MotionGenCfg, MotionGenerator
+from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     CuroboPlanOptions,
     CuroboPlannerCfg,

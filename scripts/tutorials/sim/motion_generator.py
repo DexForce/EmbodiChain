@@ -28,10 +28,12 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.motion.planners import (
+from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
     MotionGenOptions,
     MotionGenerator,
+)
+from embodichain.lab.sim.motion.planners import (
     PlanState,
     ToppraPlanOptions,
     ToppraPlannerCfg,

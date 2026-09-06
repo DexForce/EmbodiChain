@@ -20,10 +20,12 @@ from __future__ import annotations
 
 import importlib.util
 
-from embodichain.lab.sim.motion.planners import (
+from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
     MotionGenOptions,
     MotionGenerator,
+)
+from embodichain.lab.sim.motion.planners import (
     PlanResult,
     PlanState,
     ToppraPlannerCfg,

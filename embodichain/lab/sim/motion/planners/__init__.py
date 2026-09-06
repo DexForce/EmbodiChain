@@ -16,7 +16,9 @@
 
 """Motion planning stack.
 
-``BasePlanner`` trajectory planners (TOPPRA, neural, cuRobo) produce joint trajectories from waypoints, and ``MotionGenerator`` wraps a planner with interpolation, IK resolution, and multi-part coordination.
+``BasePlanner`` trajectory planners (TOPPRA, neural, cuRobo) produce joint
+trajectories from waypoints. Motion generation composes these backends in
+``embodichain.lab.sim.motion.motion_generator``.
 """
 
 from __future__ import annotations
@@ -27,4 +29,3 @@ from .toppra_planner import *
 from .neural_planner import *
 from .curobo.curobo_yaml import *
 from .curobo.curobo_planner import *
-from .motion_generator import *

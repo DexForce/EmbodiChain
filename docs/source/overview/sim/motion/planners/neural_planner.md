@@ -18,14 +18,8 @@ Pre-trained checkpoints are hosted on HuggingFace and can be downloaded with
 
 ```python
 from embodichain.data.assets.planner_assets import download_neural_planner_checkpoint
-from embodichain.lab.sim.motion.planners import (
-    MotionGenCfg,
-    MotionGenOptions,
-    MotionGenerator,
-    MoveType,
-    NeuralPlannerCfg,
-    PlanState,
-)
+from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenOptions, MotionGenerator
+from embodichain.lab.sim.motion.planners import MoveType, NeuralPlannerCfg, PlanState
 from embodichain.lab.sim.motion.planners.neural_planner import NeuralPlanOptions
 
 checkpoint_path = download_neural_planner_checkpoint()

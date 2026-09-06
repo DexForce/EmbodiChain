@@ -94,11 +94,11 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
             ControlPartCommandProfile,
             ObjectSemantics,
         )
-        from embodichain.lab.sim.motion.planners import (
+        from embodichain.lab.sim.motion.motion_generator import (
             MotionGenCfg,
             MotionGenerator,
-            ToppraPlannerCfg,
         )
+        from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
 
         motion_generator = MotionGenerator(
             cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=self.robot.uid))

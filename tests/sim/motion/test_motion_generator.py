@@ -25,10 +25,12 @@ from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.robots import CobotMagicCfg
 
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
-from embodichain.lab.sim.motion.planners import (
+from embodichain.lab.sim.motion.motion_generator import (
     MotionGenerator,
     MotionGenCfg,
     MotionGenOptions,
+)
+from embodichain.lab.sim.motion.planners import (
     ToppraPlannerCfg,
     ToppraPlanOptions,
     PlanState,

@@ -38,12 +38,12 @@ from embodichain.lab.sim.objects import RigidObjectCfg  # noqa: E402
 from embodichain.lab.sim.robots import FrankaPandaCfg  # noqa: E402
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg  # noqa: E402
 from embodichain.lab.sim.shapes import CubeCfg  # noqa: E402
-from embodichain.lab.sim.motion.planners import (  # noqa: E402
+from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
     MotionGenOptions,
     MotionGenerator,
-    PlanState,
 )
+from embodichain.lab.sim.motion.planners import PlanState
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (  # noqa: E402
     CuroboPlanOptions,
     CuroboPlanner,

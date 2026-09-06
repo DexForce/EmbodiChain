@@ -24,7 +24,11 @@ import pytest
 
 @pytest.mark.parametrize(
     "first_module",
-    ["embodichain.lab.sim.objects", "embodichain.lab.sim.motion.planners"],
+    [
+        "embodichain.lab.sim.objects",
+        "embodichain.lab.sim.motion.planners",
+        "embodichain.lab.sim.motion.motion_generator",
+    ],
 )
 def test_motion_import_order_and_config_resolution(first_module: str) -> None:
     script = """
@@ -33,6 +37,17 @@ import sys
 import dexsim
 
 importlib.import_module(sys.argv[1])
+generator_path = "embodichain.lab.sim.motion.motion_generator"
+if sys.argv[1] != generator_path:
+    assert generator_path not in sys.modules
+from embodichain.lab.sim.motion.motion_generator import (
+    MotionGenerator, MotionGenCfg, MotionGenOptions,
+)
+from embodichain.lab.sim.motion import planners
+assert not hasattr(planners, "MotionGenerator")
+assert MotionGenerator.__module__ == generator_path
+assert MotionGenCfg.__module__ == generator_path
+assert MotionGenOptions().strategy == "motion_gen"
 from embodichain.lab.sim import motion
 from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.motion.solvers import SolverCfg, URSolverCfg

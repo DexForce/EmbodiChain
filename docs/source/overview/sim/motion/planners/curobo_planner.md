@@ -72,12 +72,8 @@ Assuming the scene has been registered as shown in
 that catalog:
 
 ~~~python
-from embodichain.lab.sim.motion.planners import (
-    CuroboPlannerCfg,
-    CuroboWorldCfg,
-    MotionGenCfg,
-    MotionGenerator,
-)
+from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
+from embodichain.lab.sim.motion.planners import CuroboPlannerCfg, CuroboWorldCfg
 from embodichain.lab.task_program.semantics import SceneCollisionWorldMode
 
 collision_mode = registry.resolve_collision_world_mode(
@@ -317,11 +313,8 @@ trajectory duration).
 ~~~python
 import torch
 
-from embodichain.lab.sim.motion.planners import (
-    CuroboPlanOptions,
-    MotionGenOptions,
-    PlanState,
-)
+from embodichain.lab.sim.motion.motion_generator import MotionGenOptions
+from embodichain.lab.sim.motion.planners import CuroboPlanOptions, PlanState
 
 goal_pose = torch.eye(4, device=robot.device).unsqueeze(0)
 goal_pose[:, :3, 3] = torch.tensor(

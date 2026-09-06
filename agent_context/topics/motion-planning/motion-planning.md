@@ -10,7 +10,7 @@
 | Neural planner | `embodichain/lab/sim/motion/planners/neural_planner.py` → `NeuralPlanner`, `NeuralPlannerCfg`, `NeuralPlanOptions` |
 | cuRobo planner | `embodichain/lab/sim/motion/planners/curobo/curobo_planner.py` → `CuroboPlanner`, `CuroboPlannerCfg`, `CuroboWorldCfg`, `CuroboPlanOptions` |
 | Planner assets | `embodichain/data/assets/planner_assets.py` → `download_neural_planner_checkpoint()` |
-| Motion generator | `embodichain/lab/sim/motion/planners/motion_generator.py` → `MotionGenerator`, `MotionGenCfg`, `MotionGenOptions` |
+| Motion generator | `embodichain/lab/sim/motion/motion_generator.py` → `MotionGenerator`, `MotionGenCfg`, `MotionGenOptions` |
 | Planner utilities & data types | `embodichain/lab/sim/motion/planners/utils.py` → `PlanState`, `PlanResult`, `MoveType`, `MovePart`, `TrajectorySampleMethod`, `interpolate_xpos_batched` |
 | Trajectory augmentation | `embodichain/lab/sim/motion/trajectory_augmentation/` → contracts, configs, operators, coverage, `GenerationSession` |
 
@@ -19,7 +19,9 @@
 Planners, solvers, workspace analysis, and trajectory augmentation are sibling
 packages under `embodichain.lab.sim.motion`. Import planner APIs from
 `embodichain.lab.sim.motion.planners`; the parent namespace resolves subpackages
-lazily and must not eagerly load planners during Robot initialization. Atomic
+lazily and must not eagerly load planners during Robot initialization. Import the coordinating `MotionGenerator`, `MotionGenCfg` and `MotionGenOptions`
+from `embodichain.lab.sim.motion.motion_generator`. Planners do not re-export
+this facade; solver and planner imports must not load it eagerly. Atomic
 Actions consume these motion capabilities from `sim/atomic_actions/`.
 Focused tests and examples live under `tests/sim/motion/` and
 `examples/sim/motion/`.

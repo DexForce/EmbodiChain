@@ -20,12 +20,12 @@ from __future__ import annotations
 
 import torch
 
+from embodichain.lab.sim.motion.motion_generator import MotionGenerator
 from embodichain.lab.sim.motion.planners import (
     CuroboPlanOptions,
     CuroboPlanner,
     CuroboPlannerCfg,
     CuroboWorldCfg,
-    MotionGenerator,
 )
 from embodichain.lab.task_program.semantics import (
     SceneCollisionRole,

@@ -54,12 +54,13 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
 )
 
-from embodichain.lab.sim.motion.planners.motion_generator import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
+from embodichain.lab.sim.motion.motion_generator import MotionGenerator, MotionGenCfg
+from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
 from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanOptions
 from embodichain.lab.sim.objects.robot import Robot
 from embodichain.lab.sim.motion.solvers.pink_solver import PinkSolverCfg
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod, PlanState, MoveType
-from embodichain.lab.sim.motion.planners.motion_generator import MotionGenOptions
+from embodichain.lab.sim.motion.motion_generator import MotionGenOptions
 
 # Configure the simulation
 sim_cfg = SimulationManagerCfg(

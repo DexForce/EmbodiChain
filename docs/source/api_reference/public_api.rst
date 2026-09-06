@@ -954,17 +954,6 @@ embodichain.lab.sim.motion.planners.curobo.curobo_yaml
    generate_curobo_robot_yaml
    generate_curobo_world_yaml
 
-embodichain.lab.sim.motion.planners.motion_generator
-----------------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.motion.planners.motion_generator
-
-.. autosummary::
-
-   MotionGenerator
-   MotionGenCfg
-   MotionGenOptions
-
 embodichain.lab.sim.motion.planners.neural_planner
 --------------------------------------------------
 

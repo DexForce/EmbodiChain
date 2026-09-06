@@ -444,7 +444,7 @@ class CuroboPlannerCfg(BasePlannerCfg):
     """Whether callers must retain cuRobo's raw collision-checked samples exactly.
 
     When ``False`` (default),
-    :class:`~embodichain.lab.sim.motion.planners.motion_generator.MotionGenerator`
+    :class:`~embodichain.lab.sim.motion.motion_generator.MotionGenerator`
     resamples the returned trajectory to ``MotionGenOptions.sample_count`` -
     matching the documented contract of
     :attr:`~embodichain.lab.sim.atomic_actions.MotionPolicy.sample_count`
@@ -473,7 +473,7 @@ class CuroboPlanOptions(PlanOptions):
     """Per-plan options for :class:`CuroboPlanner`.
 
     ``start_qpos`` and ``control_part`` are populated from the
-    :class:`~embodichain.lab.sim.motion.planners.motion_generator.MotionGenOptions`
+    :class:`~embodichain.lab.sim.motion.motion_generator.MotionGenOptions`
     runtime context via :meth:`CuroboPlanner.with_motion_context`.
     """
 

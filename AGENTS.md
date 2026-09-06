@@ -43,6 +43,8 @@ contact-data adaptation belongs to sensors. New trajectory consumers import
 `lab/sim/utility/action_utils` exports remain compatibility surfaces.
 
 Motion APIs live under `embodichain.lab.sim.motion.{solvers,planners,workspace,trajectory_augmentation}`.
+`motion/motion_generator.py` owns `MotionGenerator`, `MotionGenCfg`, and
+`MotionGenOptions`, composing the planner backends. Planners do not re-export it.
 The motion parent and workspace analyzer exports remain lazy to preserve Robot
 initialization. Trajectory augmentation owns candidates, operators, coverage and
 generation bookkeeping; execution, reset and persistence belong to host integrations.

@@ -10,11 +10,12 @@ capability from its owning subpackage:
 .. code-block:: python
 
    from embodichain.lab.sim.motion.solvers import SolverCfg
-   from embodichain.lab.sim.motion.planners import MotionGenerator, MotionGenCfg
+   from embodichain.lab.sim.motion.motion_generator import MotionGenerator, MotionGenCfg
    from embodichain.lab.sim.motion.workspace import RobotWorkspaceCfg
    from embodichain.lab.sim.motion.trajectory_augmentation import TrajectoryTemplate
 
-The parent package exposes these four subpackages through lazy attributes;
+The parent package exposes its subpackages and ``motion_generator`` module
+through lazy attributes;
 it does not eagerly import them or re-export their classes and functions.
 This keeps their initialization boundaries separate: robot configuration can
 use solver and workspace contracts without ``motion`` also initializing the
@@ -31,6 +32,7 @@ and dataset persistence belong to explicit host integrations.
 .. autosummary::
    :nosignatures:
 
+   motion_generator
    solvers
    planners
    workspace
@@ -39,6 +41,7 @@ and dataset persistence belong to explicit host integrations.
 .. toctree::
    :maxdepth: 1
 
+   embodichain.lab.sim.motion.motion_generator
    embodichain.lab.sim.motion.solvers
    embodichain.lab.sim.motion.planners
    embodichain.lab.sim.motion.workspace

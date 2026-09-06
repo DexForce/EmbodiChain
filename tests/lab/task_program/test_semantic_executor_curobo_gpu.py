@@ -50,10 +50,7 @@ from embodichain.lab.sim.atomic_actions import (  # noqa: E402
 from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy  # noqa: E402
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg  # noqa: E402
 from embodichain.lab.sim.objects import RigidObjectCfg  # noqa: E402
-from embodichain.lab.sim.motion.planners import (
-    MotionGenCfg,
-    MotionGenerator,
-)  # noqa: E402
+from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (  # noqa: E402
     CuroboAutoGenCfg,
     CuroboPlannerCfg,

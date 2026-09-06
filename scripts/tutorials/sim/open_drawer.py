@@ -33,10 +33,12 @@ from embodichain.lab.sim.cfg import (
     RigidBodyAttributesCfg,
 )
 from embodichain.lab.sim.objects import Articulation, Robot
-from embodichain.lab.sim.motion.planners import (
+from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
     MotionGenerator,
     MotionGenOptions,
+)
+from embodichain.lab.sim.motion.planners import (
     PlanState,
     ToppraPlannerCfg,
     ToppraPlanOptions,

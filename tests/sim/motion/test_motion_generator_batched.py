@@ -26,7 +26,7 @@ from embodichain.lab.sim.motion.planners.base_planner import (
     CollisionWorldInfo,
     PlanOptions,
 )
-from embodichain.lab.sim.motion.planners.motion_generator import (
+from embodichain.lab.sim.motion.motion_generator import (
     MotionGenerator,
     MotionGenOptions,
 )
@@ -92,7 +92,7 @@ def _torch_resampling(monkeypatch: pytest.MonkeyPatch) -> None:
         return torch.lerp(trajectory[:, lower], trajectory[:, upper], weights)
 
     monkeypatch.setattr(
-        "embodichain.lab.sim.motion.planners.motion_generator.resample_with_distance",
+        "embodichain.lab.sim.motion.motion_generator.resample_with_distance",
         resample,
     )
 
