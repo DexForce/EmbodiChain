@@ -162,3 +162,11 @@ Properties `left_to_right` and `right_to_left` return `4×4` transform tensors. 
 - **Stereo baseline sign** — `left_to_right_pos` defines translation from left to right camera. Flipping the sign inverts the disparity.
 - **Contact sensor buffer overflow** — `max_contacts_per_env` caps the contact count. Exceeding it silently drops contacts; increase if the scene has dense collisions.
 - **View attribute flags** — `Camera.get_view_attrib()` computes `dr.ViewFlags` from enabled booleans. Adding a new data type requires both the `enable_*` flag and the corresponding `ViewFlags` bit.
+
+## Contact computation ownership
+
+`lab/sim/sensors/_warp/contact.py` owns `scatter_contact_data`, whose fixed
+contact columns, environment IDs, and per-environment capacity belong to
+the sensor integration. The generic tiled-image kernel lives separately in
+`compute/image/_warp/tiling.py`. The old `utils.warp.kernels` image export is
+an alias; its contact export resolves the sensor implementation on demand.

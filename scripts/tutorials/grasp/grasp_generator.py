@@ -29,7 +29,7 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot, RigidObject
-from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
+from embodichain.compute.trajectory import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.data import get_data_path

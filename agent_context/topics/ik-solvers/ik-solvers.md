@@ -259,3 +259,13 @@ higher-priority tasks.
 | `solver_cfg` keys don't match `control_parts` | Multi-part robot misconfiguration | Dict keys in `solver_cfg` must exactly match `control_parts` names |
 | DifferentialSolver oscillates near target | `damp` too low or `dt` too large | Increase `damp` or decrease `dt` |
 | Pink solver ignores orientation | `is_only_position_constraint = True` | Set to `False` for full-pose IK |
+
+## Computation ownership
+
+OPW, SRS, and UR Warp implementations live in
+`embodichain/compute/kinematics/_warp/{opw,srs,ur}.py`. The existing
+`lab.sim.solvers` classes own configuration, state, device buffers, and
+solver interfaces. The compute kernels do not import simulation modules.
+`utils/warp/kinematics/*_solver.py` are compatibility aliases.
+Validate kernel import/compilation with `tests/compute/test_imports.py` and
+solver behavior with the corresponding `tests/sim/solvers/` tests.

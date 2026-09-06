@@ -14,13 +14,15 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import numpy as np
 import warp as wp
 from embodichain.utils import configclass
 from embodichain.lab.sim.solvers import SolverCfg, BaseSolver
 from embodichain.data import get_data_path
-from embodichain.utils.warp.kinematics.ur_solver import (
+from embodichain.compute.kinematics._warp.ur import (
     URParam,
     ur_ik_kernel,
 )
