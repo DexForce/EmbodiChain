@@ -196,6 +196,8 @@ def _profile() -> RobotSkillProfile:
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=SAMPLE_COUNT,
+                    # Isolate dynamic-world recovery from velocity feed-forward tracking.
+                    velocity_targets="zero",
                 ),
                 tracking_policy=TrackingPolicy.joint_position(
                     in_flight_max_abs_error=0.1,
