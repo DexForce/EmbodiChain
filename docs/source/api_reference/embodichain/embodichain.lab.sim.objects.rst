@@ -42,6 +42,7 @@ bodies.
     RobotWorkspaceCfg
     Gizmo
     GizmoCfg
+    create_robot_ik_gizmo_controller
     RigidConstraint
 
 .. currentmodule:: embodichain.lab.sim.objects
@@ -190,6 +191,27 @@ Gizmo
     :inherited-members:
     :show-inheritance:
     :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autofunction:: create_robot_ik_gizmo_controller
+
+SimulationManager automatically discovers robot control parts with configured
+IK chain metadata. Native controllers activate on the first I press by default, while
+Viser constructs its solver on the first drag. ``sim.update()`` owns updates
+and cleanup; ordinary applications do not need the explicit factory.
+Use ``SimulationManagerCfg(robot_ik_gizmo=None)`` to disable automatic setup.
+Set ``GizmoCfg(ik_start_enabled=True)`` to activate native IK on the first update
+with an open window; subsequent visibility toggles and reopening are preserved.
+
+The native controller defaults to DexSim Newton IK. With a ``PinkSolverCfg``
+(or another EmbodiChain solver) configured for the robot's control part, pass
+``GizmoCfg(ik_solver="embodichain")`` to select that solver for either a native
+controller or a Viser gizmo. Its iteration limits and convergence settings
+remain owned by the configured solver; ``ik_iterations`` applies to Newton IK.
+Only the selected control part's drive targets are written, and failed
+EmbodiChain IK solutions preserve the current joint positions.
+
+The runnable example ``examples/sim/gizmo/gizmo_robot.py`` exposes
+``--ik-solver dexsim|pytorch|pink`` for both the native window and ``--viser``.
 
 Rigid Constraint
 ----------------

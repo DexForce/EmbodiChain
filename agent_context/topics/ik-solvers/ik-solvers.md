@@ -34,6 +34,16 @@ path for performance.
 
 ## Solver Hierarchy
 
+Gizmo solver selection belongs to `embodichain/lab/sim/objects/gizmo.py`, not
+to a new solver subclass. Native DexSim `IKGizmoController` remains the
+controller in both modes: `GizmoCfg.ik_solver="dexsim"` selects Newton IK;
+`"embodichain"` adapts `robot.get_solver(control_part)` for the native window
+and Viser. It preserves configured solver convergence/limits, maps joint names
+between solver and robot order, and holds current qpos on failure/non-finite
+results. Gizmo root/end links must match the configured solver; TCP overrides
+are converted without mutating that solver. See the robot gizmo example's
+`--ik-solver pink` option for an executable Pink configuration.
+
 ```
 SolverCfg  (@configclass, abstract)
   ├── SRSSolverCfg

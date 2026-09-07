@@ -39,6 +39,7 @@ __all__ = [
     "JointControlSpec",
     "JointControlState",
     "MeshGeometry",
+    "PickCommand",
     "PointCloudOverlay",
     "SceneFrame",
     "SceneManifest",
@@ -353,6 +354,31 @@ class GizmoCommand:
         )
         object.__setattr__(self, "position", position)
         object.__setattr__(self, "wxyz", wxyz)
+
+
+@dataclass(frozen=True)
+class PickCommand:
+    """Immutable browser click-pick command consumed on the simulation thread.
+
+    A non-empty ``node_id`` requests a Gizmo on the clicked scene node; a
+    ``None`` ``node_id`` (clicking empty space) clears the picker-owned Gizmo.
+    """
+
+    run_id: str
+    scene_revision: int
+    client_id: str
+    node_id: str | None
+    schema_version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if not self.run_id:
+            raise ValueError("Pick command run_id must not be empty.")
+        if self.scene_revision < 0:
+            raise ValueError("Pick command scene_revision must be non-negative.")
+        if not self.client_id:
+            raise ValueError("Pick command client_id must not be empty.")
+        if self.node_id is not None and not self.node_id:
+            raise ValueError("Pick command node_id must be None or non-empty.")
 
 
 @dataclass(frozen=True)

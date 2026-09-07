@@ -25,6 +25,10 @@ topics:
       - DLSSCfg
       - DLSS
       - offscreen_dlss_enabled
+      - EntityGizmoManipulator
+      - enable_entity_gizmo
+      - disable_entity_gizmo
+      - robot_ik_gizmo
       - DexSim
       - world
       - arena
@@ -353,11 +357,18 @@ topics:
       - deformable
       - soft body
       - cloth
+      - gizmo
+      - IKGizmoController
+      - create_robot_ik_gizmo_controller
+      - GizmoCfg
+      - ScenePicker
+      - PickCommand
     paths:
       - topics/sim-visualization/sim-visualization.md
     source_of_truth:
       - embodichain/lab/sim/sim_manager.py
       - embodichain/lab/visualization/
+      - embodichain/lab/sim/objects/gizmo.py
       - embodichain/lab/gym/utils/gym_utils.py
       - embodichain/lab/gym/envs/base_env.py
       - embodichain/lab/scripts/preview_asset.py
