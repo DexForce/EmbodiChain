@@ -109,9 +109,10 @@ A typical robot-learning or data-generation workflow follows this sequence:
 1. Create a :class:`SimulationManager` from :class:`SimulationManagerCfg`.
 2. Add assets such as objects, articulations, robots, lights, and materials.
 3. Add sensors for camera, stereo, or contact observations.
-4. Use solvers and planners to convert task goals into robot trajectories.
-5. Step the simulation with :meth:`SimulationManager.update` and collect state or sensor tensors.
-6. Wrap the same simulation logic in a Gym environment when training or evaluating agents.
+4. Call :meth:`SimulationManager.prepare` before reading asset state or joint/link metadata.
+5. Use solvers and planners to convert task goals into robot trajectories.
+6. Step the simulation with :meth:`SimulationManager.update` and collect state or sensor tensors.
+7. Wrap the same simulation logic in a Gym environment when training or evaluating agents.
 
 For manipulation tasks, atomic actions can replace the lower-level solver and
 planner calls. An action engine receives semantic targets or poses, resolves the
@@ -166,6 +167,9 @@ See Also
    :maxdepth: 1
 
    sim_manager.md
+   default_physics.md
+   newton_physics.md
+   physics_migration.md
    sim_assets.md
    sim_sensor.md
    viser_visualization.md

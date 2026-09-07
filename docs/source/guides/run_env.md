@@ -69,7 +69,9 @@ At startup, `run-env`:
 5. enters rollout, preview, or replay mode.
 
 The runnable config, or its selected `environment.component`, must declare
-`physics: default` or `physics: newton`. That backend is file-owned:
+`physics: default` or `physics: newton`. See
+{doc}`configuration` for paired backend configuration fragments and
+{doc}`/overview/sim/physics_migration` for migration checks. That backend is file-owned:
 `--physics` can confirm it but cannot switch it. Omitting `--device` preserves
 an authored `device` or the selected backend's default; supplying `--device`
 overrides both environment tensors and backend execution, including an explicit

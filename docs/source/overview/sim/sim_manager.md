@@ -37,7 +37,7 @@ sim_config = SimulationManagerCfg(
 | `height` | `int` | `1080` | The height of the simulation window. |
 | `headless` | `bool` | `False` | Whether to run the simulation in headless mode (no Window). |
 | `render_cfg` | `RenderCfg` | `RenderCfg()` | The rendering configuration parameters. |
-| `gpu_id` | `int` | `0` | The gpu index that the simulation engine will be used. Affects gpu physics device. |
+| `gpu_id` | `int` | `0` | Rendering GPU index; also resolves an unindexed CUDA compute device. |
 | `thread_mode` | `ThreadMode` | `RENDER_SHARE_ENGINE` | The threading mode for the simulation engine. |
 | `cpu_num` | `int` | `1` | The number of CPU threads to use for the simulation engine. |
 | `num_envs` | `int` | `1` | The number of parallel environments (arenas) to simulate. |
@@ -49,150 +49,87 @@ sim_config = SimulationManagerCfg(
 
 ### Physics Configuration
 
-Use {class}`~cfg.DefaultPhysicsCfg` for the Default backend or {class}`~cfg.NewtonPhysicsCfg` for the Newton backend. Both are integrated through the DexSim runtime. GPU memory settings are on {class}`~cfg.DefaultPhysicsCfg` as ``gpu_memory``.
+EmbodiChain exposes two physics backends, selected by the configuration type:
 
-`default` and `newton` are the only public physics-backend identifiers.
-Backend-neutral nested property groups may additionally use `common`. DexSim
-is the runtime and Spawn SDK integration layer, not another selectable physics
-backend; SDK-native `Dexsim*Desc` names remain confined to that adapter boundary.
+| Backend | Python configuration | Execution and solver model | Start here |
+| :--- | :--- | :--- | :--- |
+| `default` | `DefaultPhysicsCfg` | CPU or Direct GPU execution; TGS is the established constraint-solver default. | {doc}`default_physics` |
+| `newton` | `NewtonPhysicsCfg` | Newton through DexSim; scene-aware automatic selection or an explicit solver. | {doc}`newton_physics` |
 
-The physics-config type is the only backend selector. Runtime code delegates
-backend-specific work through `PhysicsBackend` hooks and capability flags;
-backend names are retained for diagnostics and compatibility predicates, not as
-a second operational switch.
+Both are integrated through DexSim's runtime and Spawn SDK. `default` and
+`newton` are the only public backend identifiers. The renderer is selected
+separately by `render_cfg`; native-window and browser visualization settings
+control how the scene is displayed. Selecting Newton does not select a different
+camera renderer. `headless=True` closes the native window while permitting
+configured offscreen camera rendering.
+
+### Supported capabilities
+
+This table describes the current EmbodiChain integration. A feature in an
+upstream solver does not imply that every asset or operation exposes it here.
 
 | Capability | Default | Newton |
-| :--- | :---: | :---: |
-| Rigid objects, rigid-object groups, articulations, and robots | Yes | Yes |
-| Volume and surface deformables | CUDA only | No |
-| Native rigid constraints | Yes | No |
-| Camera and stereo camera | Yes | Yes |
-| `ContactSensor` | Yes | No |
+| :--- | :--- | :--- |
+| Rigid objects, rigid-object groups, articulations, robots | Supported | Supported; joint features depend on the solver. |
+| Volume and surface deformables | Unsupported | Supported on CUDA with a particle-capable solver; see {doc}`newton_physics`. |
+| Native rigid constraints through the manager | Supported | Unsupported; this is distinct from solver-internal articulation constraints. |
+| Camera and stereo camera | Supported | Supported through the shared rendering integration. |
+| `ContactSensor` | Supported on CPU and Direct GPU | Supported; geometry and impulse availability depend on solver/device. See {doc}`sim_sensor`. |
+| Differentiable simulation | Unsupported | Explicit `semi_implicit` solver only; see {doc}`newton_physics`. |
 
-Unsupported operations fail at the manager capability boundary with an
-actionable `NotImplementedError`, before backend-native handles are accessed.
+Use Default for workflows needing its native rigid constraints or established
+TGS behavior. Use Newton for particle-based cloth/soft bodies, solver-specific
+experiments, or the supported differentiable path. For rigid robot tasks that
+can run on either backend, validate the target task with each configuration;
+shared APIs do not guarantee identical trajectories or contact responses.
 
-All physics backends inherit these base parameters from {class}`~cfg.PhysicsBackendCfg`:
+### Common configuration and devices
 
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `physics_dt` | `float` | `0.01` | The time step for the physics simulation. |
-| `device` | `str` \| `torch.device` | `"cpu"` (Default), `"cuda:0"` (Newton) | The selected backend's compute device. `SimulationManagerCfg(device=...)` is an explicit override; omitting it preserves the concrete physics config default. |
+All backends inherit these parameters from {class}`~cfg.PhysicsBackendCfg`:
 
-`physics_cfg.device` owns the backend default. Passing
-`SimulationManagerCfg(device=...)` overrides it uniformly for either backend;
-the legacy `sim_device` argument is an alias with the same behavior. In Gym
-launches, omitting `--device` preserves the config value or backend default,
-while an explicit value such as `--device cpu` is honored for Newton as well.
-Environment tensors use `sim.device`, so there is no separate environment and
-physics-device selection to keep in sync.
+| Parameter | Default | Meaning |
+| :--- | :--- | :--- |
+| `physics_dt` | `0.01` | Duration of one EmbodiChain physics step, in seconds. |
+| `device` | `"cpu"` for Default; `"cuda:0"` for Newton | Compute device for physics and environment tensors. Solver/device restrictions still apply. |
+| `gravity` | `[0.0, 0.0, -9.81]` | World-frame acceleration in m/s². |
 
-#### Default Backend
+`physics_cfg.device` owns the backend default. An explicit
+`SimulationManagerCfg(device=...)` overrides it; the legacy `sim_device`
+argument is an alias. `gpu_id` selects the rendering GPU and supplies the index
+for an unindexed `"cuda"` device. Keep explicit compute and render GPU indices
+consistent with the intended deployment. Omitting Gym's `--device` preserves
+the configured value or backend default; an explicit `--device cpu` also applies
+to Newton, subject to the selected solver and asset restrictions.
 
-The {class}`~cfg.DefaultPhysicsCfg` class controls the global default-backend physics simulation parameters.
+Python chooses a backend through `physics_cfg`. Gym files declare `physics`
+and a matching `physics_config`; an environment component owns both fields and
+its deployment cannot override either. `--physics` can confirm the file's
+backend but cannot switch it. See {doc}`/guides/configuration` for paired
+configuration examples and {doc}`physics_migration` for migration checks.
 
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `gravity` | `np.ndarray` | `[0, 0, -9.81]` | Gravity vector for the simulation environment. |
-| `bounce_threshold` | `float` | `2.0` | The speed threshold below which collisions will not produce bounce effects. |
-| `enable_ccd` | `bool` | `False` | Enable continuous collision detection (CCD) for fast-moving objects. |
-| `length_tolerance` | `float` | `0.05` | The length tolerance for the simulation. Larger values increase speed. |
-| `speed_tolerance` | `float` | `0.25` | The speed tolerance for the simulation. Larger values increase speed. |
+### Physics, control, and solver time
 
-PCM and TGS remain enabled, enhanced determinism remains disabled, and friction
-is evaluated on every solver iteration. These solver implementation details use
-fixed defaults and are not exposed by `DefaultPhysicsCfg`.
+| Interval | Definition | Example |
+| :--- | :--- | :--- |
+| Physics step | `physics_dt` | `0.01 s` (100 Hz) |
+| Gym control step | `physics_dt * sim_steps_per_control` | `0.01 * 4 = 0.04 s` (25 Hz) |
+| Newton solver substep | `physics_dt / num_substeps` | `0.01 / 10 = 0.001 s` (1 kHz) |
 
-#### Newton Backend and Automatic Solver Selection
+In this example, one control action spans four physics steps and forty Newton
+solver substeps. Increasing Newton's `num_substeps` refines integration without
+changing the control period. Reducing `physics_dt` also changes the control
+period unless `sim_steps_per_control` is adjusted. Rendering and visualization
+publication have their own cadence and do not define the control frequency.
 
-Use {class}`~cfg.NewtonPhysicsCfg` to enable the Newton backend. Its
-`solver_cfg` defaults to `None` intentionally: EmbodiChain leaves the
-`solver_cfg` argument unset when it creates DexSim's `NewtonCfg`, preserving
-DexSim's `AutoSolverCfg` default.
+### Default Backend
 
-```python
-from embodichain.lab.sim import SimulationManagerCfg
-from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+See {doc}`default_physics` for scale parameters, CCD, CPU/GPU behavior, and GPU
+buffer capacities.
 
-sim_config = SimulationManagerCfg(
-    physics_cfg=NewtonPhysicsCfg(
-        device="cuda:0",
-        physics_dt=0.01,
-        num_substeps=10,
-    )
-)
-```
+### Newton Backend and Automatic Solver Selection
 
-AutoSolver is resolved when DexSim finalizes the complete Spawn scene during
-{meth}`SimulationManager.prepare`. Add all initial robots and objects before
-calling `prepare()` so the selection sees the complete scene. An explicit
-`{"solver_type": "auto"}` or `{"class_type": "AutoSolverCfg"}` mapping has
-the same effect as leaving `solver_cfg` unset.
-
-:::{important}
-This integration requires a DexSim build that exports `AutoSolverCfg`.
-EmbodiChain does not fall back to a hard-coded concrete solver when that API is
-unavailable.
-:::
-
-DexSim applies the following scene-content rules. Independent rigid objects and
-articulation links are classified separately.
-
-| Finalized scene contents | Selected configuration | Solver type | Active collision path |
-| :--- | :--- | :--- | :--- |
-| Empty scene or independent rigid bodies only | `XPBDSolverCfg` | `xpbd` | Newton collision pipeline |
-| Articulations, with or without independent rigid bodies | `MJWarpSolverCfg` | `mujoco_warp` | MuJoCo Warp collision pipeline |
-| Cloth or soft bodies, optionally with rigid bodies | `VBDSolverCfg` | `vbd` | Newton collision pipeline; VBD may handle deformable self-contact |
-| Cloth or soft bodies with articulations, optionally with rigid bodies | `MJVBDSolverCfg` | `mjvbd` | Newton particle-shape soft contacts; MuJoCo rigid collision is disabled |
-| Fluid particles, optionally with rigid SDF boundaries | `SPHSolverCfg` | `sph` | SPH one-way SDF boundary handling; rigid contacts are not consumed |
-| MPM particles, optionally with rigid colliders | `ImplicitMPMSolverCfg` | `implicit_mpm` | Implicit-MPM collider projection; the rigid collision pipeline is not stepped |
-
-The current MJVBD path does not generate rigid-rigid or rigid-ground contacts.
-MuJoCo Warp still advances rigid bodies and articulations, while Newton's soft
-contact kernels handle deformable particle-shape contacts.
-
-:::{note}
-The table documents DexSim's resolver. EmbodiChain currently exposes Newton
-runtime adapters for rigid bodies and articulations. Newton soft-body and cloth
-adapters remain disabled, and fluid/MPM assets do not yet have public
-EmbodiChain APIs; those rows describe upstream selection behavior rather than
-an EmbodiChain support guarantee.
-:::
-
-AutoSolver rejects scene combinations for which one solver cannot represent
-all coupled systems:
-
-- more than one particle family among deformable, fluid, and MPM;
-- fluid particles combined with articulations;
-- MPM particles combined with articulations.
-
-Selection is based on scene contents, not the configured device. DexSim reports
-device incompatibility after resolution; cloth, soft-body, fluid, and MPM
-solvers currently require CUDA. The selected type is also written to the
-DexSim log, for example `Newton AutoSolver selected 'mujoco_warp'.`
-
-Pass a concrete solver configuration when an algorithm or solver-specific
-parameter must be fixed:
-
-```python
-sim_config = SimulationManagerCfg(
-    physics_cfg=NewtonPhysicsCfg(
-        device="cpu",
-        solver_cfg={
-            "solver_type": "xpbd",
-            "iterations": 8,
-        },
-    )
-)
-```
-
-EmbodiChain mapping configs recognize `auto`, `mujoco_warp` (or `mjwarp`),
-`xpbd`, `semi_implicit`, `featherstone`, and `vbd`. A DexSim
-`NewtonSolverCfg` object may also be assigned directly when another explicit
-solver class is required. AutoSolver never selects `DFSPHSolverCfg`,
-`FeatherstoneSolverCfg`, or `SemiImplicitSolverCfg`. In particular,
-`requires_grad=True` requires an explicit `semi_implicit` configuration;
-automatic selection is rejected for differentiable simulation.
+See {doc}`newton_physics` for solver selection, collision scheduling, supported
+deformables, contact data, and gradient/CUDA Graph restrictions.
 
 ### Render Configuration
 
@@ -257,6 +194,29 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 sim_config = SimulationManagerCfg()
 sim = SimulationManager(sim_config)
 ```
+
+### Declare, prepare, then step
+
+Use the same readiness boundary with both physics backends:
+
+1. Construct the manager and declare the initial assets and sensors.
+2. Register any Newton trajectory or contact-material schedules.
+3. Call `sim.prepare()` before reading asset state, joint/link metadata, or
+   native handles.
+4. Apply controls and advance time with `sim.update(step=1)`.
+5. Release resources when the simulation finishes.
+
+Newton defers physical model construction until preparation; Default may
+materialize assets earlier, but its CUDA buffers also require preparation.
+`prepare()` is idempotent for an unchanged scene and binds declared facades in
+place. It publishes initial render state without advancing simulation time.
+Declare all deformables before the first preparation. After supported topology
+changes, prepare again before consuming state and reacquire native views.
+
+The compatibility methods `init_gpu_physics()` and
+`finalize_newton_physics()` delegate to `prepare()`; new examples should use
+the shared method. See {doc}`default_physics` for a complete minimal loop and
+{doc}`newton_physics` for the matching backend configuration.
 
 ## Profiling simulation updates
 

@@ -7,6 +7,9 @@
 particle sets. Volume deformables
 require the Newton backend on CUDA and a particle-capable solver.
 
+See {doc}`newton_physics` for solver selection, mixed rigid/deformable scene
+limitations, and the requirement to declare deformables before preparation.
+
 ## Configuration
 
 {class}`~cfg.VolumeDeformableObjectCfg` separates physical parameters under

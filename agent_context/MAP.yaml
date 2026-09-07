@@ -79,6 +79,8 @@ topics:
       - AssetPhysicsMode
       - asset_physics_mode
       - RigidBodyPhysicsCfg
+      - has_gravity
+      - set_gravity
       - recompute_inertia
       - MeshCollisionCfg
       - mesh collision approximation

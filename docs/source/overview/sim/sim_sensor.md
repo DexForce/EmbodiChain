@@ -227,7 +227,7 @@ Retrieve contact data using `contact_sensor.get_data()`. The data is returned as
 | `position` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Contact positions in arena frame (world coordinates minus arena offset). |
 | `normal` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Unit normal vectors pointing from actor 0 toward actor 1. |
 | `friction` | `torch.float32` | `(num_envs, max_contacts_per_env, 3)` | Tangential contact impulse applied to actor 0. Availability is reported by `contact_capabilities.friction`. |
-| `impulse` | `torch.float32` | `(num_envs, max_contacts_per_env)` | Backend contact impulse magnitudes. PhysX CPU reports the total impulse norm; Direct GPU and force-reporting Newton solvers report normal impulse magnitude. |
+| `impulse` | `torch.float32` | `(num_envs, max_contacts_per_env)` | Backend contact impulse magnitudes. Default CPU reports the total impulse norm; Direct GPU and force-reporting Newton solvers report normal impulse magnitude. |
 | `distance` | `torch.float32` | `(num_envs, max_contacts_per_env)` | Signed contact separation (negative means penetration). |
 | `user_ids` | `torch.int32` | `(num_envs, max_contacts_per_env, 2)` | Pair of query-local, backend-neutral contact actor IDs. The legacy field name is retained; resolve IDs with `get_actor_info()`. |
 | `is_valid` | `torch.bool` | `(num_envs, max_contacts_per_env)` | Boolean mask indicating which contact slots contain valid data. Use this mask to filter out unused slots. |
@@ -264,4 +264,4 @@ may be left over from an earlier update.
 
 Newton MuJoCo-Warp exposes contact forces, so both impulse fields are available. Other supported Newton rigid solvers currently expose contact geometry with zero-valued impulse fields. MuJoCo CPU mode does not expose device contact buffers, and MJVBD does not currently publish rigid contacts through `ContactQuery`; those modes are therefore unsupported by this sensor.
 
-PhysX Direct GPU reports static counterparts with actor ID `-1` because its raw contact buffer does not expose their object identity. To monitor a dynamic body or articulation link against arbitrary static geometry, select the dynamic/link object and set `filter_need_both_actor=False`. Default CPU and Newton can identify registered static shapes.
+Default Direct GPU reports static counterparts with actor ID `-1` because its raw contact buffer does not expose their object identity. To monitor a dynamic body or articulation link against arbitrary static geometry, select the dynamic/link object and set `filter_need_both_actor=False`. Default CPU and Newton can identify registered static shapes.

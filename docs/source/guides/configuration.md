@@ -262,6 +262,54 @@ or an explicit `run-env --device ...` override, is applied to both the
 environment tensors and the selected physics backend. In particular,
 `--device cpu` is not ignored for Newton.
 
+#### Paired physics configurations
+
+The following are **physics fragments**, not complete runnable task files.
+Apply each fragment to a separate copy of the same inline deployment, retaining
+its required `id`, `env`, robot/embodiment, and scene declarations. Retune any
+backend-specific asset fields as described in
+{doc}`/overview/sim/physics_migration`.
+
+Default fragment:
+
+```yaml
+physics: default
+device: cuda:0
+physics_config:
+  physics_dt: 0.01
+  gravity: [0.0, 0.0, -9.81]
+  bounce_threshold: 2.0
+  enable_ccd: false
+```
+
+Newton fragment for a rigid articulated scene:
+
+```yaml
+physics: newton
+device: cuda:0
+physics_config:
+  physics_dt: 0.01
+  gravity: [0.0, 0.0, -9.81]
+  num_substeps: 10
+  solver_cfg:
+    solver_type: mujoco_warp
+  use_cuda_graph: true
+```
+
+Omit `solver_cfg` to let Newton's AutoSolver select from the complete scene at
+`prepare()`. For componentized tasks, place these backend declarations in
+separate physical environment files, such as `env.default.yaml` and
+`env.newton.yaml`, and point each deployment's `environment.component` at the
+appropriate file. Do not repeat `physics` or `physics_config` in those
+deployments. Keep the control period equal when comparing the two tasks.
+
+| Entry point | Backend selection | Backend parameters |
+| :--- | :--- | :--- |
+| Python `SimulationManagerCfg` | Concrete `physics_cfg` type | Fields of `DefaultPhysicsCfg` or `NewtonPhysicsCfg`. |
+| Inline runnable Gym file | Required `physics` | Flat `physics_config`, decoded against that backend. |
+| Componentized deployment | Selected environment component's `physics` | The same environment component owns `physics_config`. |
+| Launcher `--physics` | Confirms the file-owned value | Cannot convert a task to a different backend. |
+
 The `visualization` section is optional and defaults to
 `{"backend": "none"}`. Setting `"backend": "viser"` starts browser
 visualization when the environment constructs its `SimulationManager`. The

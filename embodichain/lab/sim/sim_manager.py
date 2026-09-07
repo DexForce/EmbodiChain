@@ -855,7 +855,7 @@ class SimulationManager:
     @property
     def _active_newton_solver_type(self) -> str | None:
         """Return the active backend's resolved solver type, when available."""
-        return self.physics.solver_type
+        return self.physics.solver_type if self.is_newton_backend else None
 
     @property
     def newton_manager(self):

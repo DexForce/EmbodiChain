@@ -14,7 +14,7 @@ Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
 | `fpath` | `str` | `None` | Path to the asset file (URDF/USD). |
 | `init_pos` | `tuple` | `(0,0,0)` | Initial root position `(x, y, z)`. |
 | `init_rot` | `tuple` | `(0,0,0)` | Initial root rotation `(r, p, y)` in degrees. |
-| `root_props` | `ArticulationRootPropertiesCfg` | all fields `None` | Fixed-base/self-collision are portable; root sleep and paired solver iterations are Default-only and ignored by Newton. `None` preserves source/backend values. |
+| `root_props` | `ArticulationRootPropertiesCfg` | `fixed_base=True`, `self_collision_enabled=False`; other fields `None` | Fixed-base/self-collision are portable; root sleep and paired solver iterations are Default-only and ignored by Newton. Explicit `None` preserves source/backend values. |
 | `asset_physics_mode` | `"preserve" \| "overlay"` | `"preserve"` | Preserve source link/joint physics, or apply explicitly configured overlays after source resolution. |
 | `init_qpos` | `List[float]` | `None` | Initial joint positions. |
 | `qpos_limits` | `Tensor` / `Dict[str, List[float]]` | `None` | Override limits by flattened source-resolved DOF order or joint-name/regex rules before backend build. |
@@ -42,6 +42,7 @@ from embodichain.lab.sim.cfg import (
 
 art_cfg = ArticulationCfg(
     fpath="path/to/robot.urdf",
+    asset_physics_mode="overlay",
     attrs=RigidBodyPhysicsCfg(
         material_props=RigidBodyMaterialCfg(static_friction=0.5),
     ),
@@ -76,17 +77,39 @@ derive a fallback tensor from that geometry.
 
 ### Drive Configuration
 
-The `joint_drive_props` parameter controls the joint physics behavior. It is defined using the `JointDrivePropertiesCfg` class. Generic articulations default to `drive_type="none"`, so passive assets such as cabinets and drawers do not receive internal drive forces unless explicitly configured.
+The `joint_drive_props` parameter uses `JointDrivePropertiesCfg` for sparse
+joint-property overlays. Each field defaults to `None`, preserving its source
+or backend value. Generic articulations default to
+`asset_physics_mode="preserve"`; explicit drive changes require `"overlay"`.
+Robot configurations default to `"overlay"`. An unspecified drive is not an
+instruction to remove an existing source-authored actuator.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `stiffness` | `float` / `Dict` | `1.0e4` | Stiffness (P-gain) of the joint drive. Unit: $N/m$ or $Nm/rad$. |
-| `damping` | `float` / `Dict` | `1.0e3` | Damping (D-gain) of the joint drive. Unit: $Ns/m$ or $Nms/rad$. |
-| `max_effort` | `float` / `Dict` | `1.0e10` | Maximum effort (force/torque) the joint can exert. |
-| `max_velocity` | `float` / `Dict` | `1.0e10` | Maximum velocity allowed for the joint ($m/s$ or $rad/s$). |
-| `friction` | `float` / `Dict` | `0.0` | Joint friction coefficient. |
-| `armature` | `float` / `Dict` | `0.0` | Joint armature added to joint-space inertia ($kg$ for prismatic, $kg \cdot m^2$ for revolute). |
-| `drive_type` | `str` | `"none"` | Drive mode: `"force"`(driven by a force), `"acceleration"`(driven by an acceleration) or `none`(no force). |
+| `stiffness` | `float` / `Dict` | `None` | Position gain; force-drive units are N/m or N·m/rad. |
+| `damping` | `float` / `Dict` | `None` | Velocity gain; force-drive units are N·s/m or N·m·s/rad. |
+| `max_effort` | `float` / `Dict` | `None` | Authored effort limit in N or N·m; solver enforcement varies. |
+| `max_velocity` | `float` / `Dict` | `None` | Authored speed limit in m/s or rad/s; solver enforcement varies. |
+| `friction` | `float` / `Dict` | `None` | Passive joint friction; interpretation depends on backend/solver. |
+| `armature` | `float` / `Dict` | `None` | Added joint-space inertia in kg for prismatic joints or kg·m² for revolute joints. |
+| `drive_type` | `str` | `None` | `"force"`, `"acceleration"` (Default only), or `"none"`; omission preserves the source value. |
+| `target_mode` | `str` / `int` / `Dict` | `None` | Target components: `none`/0, `position`/1, `velocity`/2, `position_velocity`/3, or `effort`/4. |
+
+`None` is accepted for every field in this table. Gain units shown apply to
+force/torque drives; Default acceleration drives use a mass-independent
+response. Newton rejects active acceleration drives. Unless `target_mode` is
+explicit, `drive_type="force"` or `"acceleration"` selects
+`position_velocity`, while `drive_type="none"` selects `none`.
+
+Default implements target components through effective gains. Newton authors
+its target mode and uses gain-based fallbacks for solvers without native mode
+support: `none` and `effort` clear both gains, and `velocity` clears position
+gain. Non-MuJoCo Newton position mode assumes a zero velocity target.
+
+Newton support for effort/velocity limits, passive friction, and armature is
+solver-dependent; storing a value is not proof that the solver enforces it.
+Inspect the resolved properties and test the response after changing solvers.
+See {doc}`physics_migration` for portability and drive-calibration guidance.
 
 ### Joint Position Limits
 

@@ -318,9 +318,9 @@ class NewtonCollisionPipelineCfg:
     update_interval: int | None = 1
     """External-pipeline updates within one EmbodiChain physics step.
 
-    ``None`` (the default) updates once at the first solver substep. An integer
-    ``k >= 1`` updates at substeps ``0, k, 2k, ...``; ``1`` updates before
-    every solver substep.
+    The default ``1`` updates before every solver substep. An integer
+    ``k >= 1`` updates at substeps ``0, k, 2k, ...``; ``None`` updates once
+    at the first solver substep of each physics step.
     """
 
     def __post_init__(self) -> None:

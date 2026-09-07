@@ -107,7 +107,13 @@ class DefaultRigidBodyPropertiesCfg:
     """Non-negative damping coefficient applied to angular velocity."""
 
     has_gravity: bool | None = None
-    """Whether world gravity accelerates this body."""
+    """Whether world gravity accelerates this body (Default backend only).
+
+    ``None`` preserves source/backend intent. Articulation ``attrs`` applies
+    to all links; ``link_attrs`` can override individual links. File-backed
+    assets require ``asset_physics_mode="overlay"`` to apply this property.
+    Explicit gravity overrides are rejected by the Newton integration.
+    """
 
     max_linear_velocity: float | None = None
     """Maximum rigid-body linear speed [m/s]."""
@@ -621,6 +627,7 @@ class RigidBodyPhysicsCfg:
                 com_quaternion=com_quaternion,
             ),
             rigid_props=DefaultRigidBodyPropertiesCfg(
+                has_gravity=getattr(attr, "has_gravity", None),
                 angular_damping=getattr(attr, "angular_damping", None),
                 linear_damping=getattr(attr, "linear_damping", None),
                 max_depenetration_velocity=getattr(

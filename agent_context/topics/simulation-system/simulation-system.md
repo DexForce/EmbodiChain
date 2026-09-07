@@ -267,11 +267,28 @@ calls `sim.update(step=1)`; the manager owns native IK updates and Viser
 commands/capture. The loop is paced by `physics_dt` and has no automatic
 physics polling path.
 
-`ArticulationCfg.enable_gravity` defaults to `True`. During articulation
-construction, `Articulation` applies this explicit runtime flag to every native
-entity before the first physics update, including when
-`use_usd_properties=True`. Use `Articulation.set_gravity(...)` to change the
-flag later for all or selected environment indices.
+Default object-level gravity uses
+`attrs.rigid_props=DefaultRigidBodyPropertiesCfg(has_gravity=False)`.
+`None` inherits source/backend intent; `True` enables world gravity. The same
+field applies to every articulation/robot link through `attrs`, with
+`link_attrs` providing more specific overrides. Source-backed assets require
+`asset_physics_mode="overlay"`; preserve mode retains source physics.
+
+After `prepare()`, `RigidObject.set_gravity(enable, env_ids=None)` and
+`Articulation.set_gravity(enable, env_ids=None, link_ids=None)` change selected
+bodies without clearing velocity or replacing mass/inertia. Link indices use
+`link_names` order, not joint-DOF order. Omitted selections mean all; invalid
+indices are rejected before any write. Dynamic/kinematic rigid bodies and
+articulations capture resolved gravity flags during binding and restore them
+on reset for selected environments. Gravity control uses the DexSim Scene
+handles, whose Default backend identifier is `"dexsim"`.
+
+Newton's current Scene integration does not implement object-level gravity:
+explicit gravity overlays and runtime calls raise `NotImplementedError`.
+Upstream MuJoCo's per-body `mujoco:gravcomp` is a solver-specific capability,
+not an implemented cross-solver EmbodiChain contract. The manager passes a
+Newton solver type to descriptor compilation only when Newton is active;
+Default's TGS/PGS names are not Newton solver selections.
 
 Newton deformable demos use the current polymorphic rigid-property slots:
 `attrs.collision_props=NewtonCollisionPropertiesCfg(...)` and
