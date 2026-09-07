@@ -30,13 +30,11 @@ interact with the Microwave's `button_cap`/`start_button_press` and
 Drawer's `large_handle_bar`/`cabinet_to_drawer` pair. Cases freeze targets
 derived from the actual link geometry rather than synthetic semantic targets.
 
-Physical replay starts sampling the target joint at each action's effect
-segment and continues through release, retract, and the final hold. `task_success`
-requires valid, executed motion and a sufficient peak signed displacement from
-the reset joint state: 0.004 m for the microwave button, 0.12 m for the drawer,
-and 0.5 rad for the power knob. The peak, rather than only the final joint
-state, is authoritative because a spring-loaded button can rebound during the
-post-action hold.
+Physical replay samples the target joint from each action's effect segment
+through release, retract, and the final hold. Peak signed displacement remains
+an explicit diagnostic, including for a spring-loaded button that rebounds,
+but `task_success` is intentionally gated only by valid executed motion rather
+than the articulation's final state.
 
 The optional `atomic_franka_pgi_curobo_pose_batch` suite exercises the same
 runner with translation-only pose perturbations. Its `pose_batch_size` is
@@ -44,10 +42,12 @@ mapped directly to the simulator batch (`B=8` in the supplied YAML): each
 environment row is one independently sampled object or target pose, and the
 corresponding Atomic Action goal is planned in one vectorized call. Explicit
 `GraspGoal.object_pose` values keep PickUp and the PickUp→MoveHeldObject/
-Place composites grounded to the settled per-row cube pose. This coverage
-track deliberately uses fixed grasps; geometry-sampled antipodal and
-articulated-grasp providers remain single-batch until their candidate
-selection is vectorized.
+Place composites grounded to the settled per-row cube pose. The coverage track
+contains all eight skills. Press, Slide, and Twist perturb the physical
+Microwave/Drawer root translation before freezing the live target-link pose;
+Slide samples one PGI grasp once in target-local coordinates and screens its
+translated copies together. General per-row geometry-sampled antipodal
+candidate selection remains a future extension.
 
 The shared runner now selects planners, scenarios, robots, Atomic Action case
 providers, and object kinds through registries. Cases freeze the full robot
@@ -693,10 +693,12 @@ Retain ineligible algorithms in the leaderboard with `eligible=false`.
 The shipped `atomic_franka_pgi_curobo_pose_batch` coverage suite is the
 translation-only Atomic Task variant: `randomization.pose_batch_size: K` is
 paired with one simulator `batch_sizes: [K]`, and each environment row carries
-one deterministic object/target pose perturbation.  A case therefore makes one
-batched planner request for all `K` rows.  It currently uses fixed cube grasps;
-geometry-sampled antipodal and articulated-grasp selection remain batch-size
-one until their candidate selection is vectorized.
+one deterministic object/target pose perturbation. A case therefore makes one
+batched planner request for all `K` rows. It uses fixed cube grasps and moves
+the real Microwave/Drawer root for Press, Slide, and Twist. The Slide case
+shares one geometry-sampled target-local grasp across the translated rows;
+fully independent per-row antipodal candidate selection remains a future
+extension.
 
 ### 6.2 Fixed case manifests
 

@@ -477,18 +477,23 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
     joint_type,
     expected_waypoints,
 ):
+    batch_size = 8
     robot = Mock(device=torch.device("cpu"))
-    robot.get_qpos.return_value = torch.zeros(1, 7)
-    robot.compute_fk.return_value = torch.eye(4).unsqueeze(0)
+    robot.get_qpos.return_value = torch.zeros(batch_size, 7)
+    robot.compute_fk.return_value = torch.eye(4).repeat(batch_size, 1, 1)
     scenario = Mock(robot=robot, control_part="arm")
     entity = Mock(uid=f"benchmark_{config['articulation']}")
+    articulation_dof = 4 if config["articulation"] == "microwave" else 1
+    articulation_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    articulation_qpos = torch.zeros(batch_size, articulation_dof)
+    entity.get_qpos.return_value = articulation_qpos
     handle = Mock(
         object_id=config["articulation"],
         entity=entity,
-        initial_pose=torch.eye(4).unsqueeze(0),
-        initial_qpos=torch.zeros(1, 4 if config["articulation"] == "microwave" else 1),
+        initial_pose=articulation_pose,
+        initial_qpos=articulation_qpos,
     )
-    handle.link_pose.return_value = torch.eye(4).unsqueeze(0)
+    handle.link_pose.return_value = articulation_pose
     handle.link_mesh.return_value = (
         torch.tensor(
             [
@@ -501,10 +506,11 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
         torch.tensor([[0, 1, 2]], dtype=torch.long),
     )
     scenario.activate_articulation.return_value = handle
+    scenario.randomize_articulation_pose.return_value = articulation_pose
     scenario.sample_articulation_geometry.return_value = _fake_articulation_geometry(
         joint_type=joint_type
     )
-    scenario.resolve_articulation_grasp.return_value = torch.eye(4).unsqueeze(0)
+    scenario.resolve_articulation_grasp.return_value = articulation_pose
     scenario.solve_reference_qpos.side_effect = lambda start, targets: torch.zeros(
         start.shape[0], targets.shape[1], start.shape[1]
     )
@@ -517,13 +523,13 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
         track,
         config,
         seed=11,
-        batch_size=1,
+        batch_size=batch_size,
     )
 
     assert case.skill_id == skill_id
     assert case.num_waypoints == expected_waypoints
-    assert case.target_waypoints.shape == (1, expected_waypoints, 4, 4)
-    assert case.reference_qpos.shape == (1, expected_waypoints, 7)
+    assert case.target_waypoints.shape == (batch_size, expected_waypoints, 4, 4)
+    assert case.reference_qpos.shape == (batch_size, expected_waypoints, 7)
     assert torch.isfinite(case.target_waypoints).all()
     assert case.case_parameters["sample_count"] == 140
     assert case.object_id == config["articulation"]
@@ -537,6 +543,15 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
         target_link=config["target_link"],
         target_joint=config["target_joint"],
         joint_type=joint_type,
+    )
+    scenario.randomize_articulation_pose.assert_called_once_with(
+        handle,
+        config,
+        seed=11,
+        stream={"press": 32, "slide": 42, "twist": 52}[skill_id],
+    )
+    assert len(case.case_parameters["articulation_translation_offsets_m"]) == (
+        batch_size
     )
 
 

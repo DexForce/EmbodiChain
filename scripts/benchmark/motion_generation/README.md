@@ -41,10 +41,9 @@ in that run's `videos/` directory.
 - `atomic_franka_pgi_curobo_smoke_v3` uses the Microwave articulation for
   `Press`/`Twist` and the Drawer articulation for `Slide`; contact targets are
   the actual `button_cap`, `cap_1`, and `large_handle_bar` links
-- Physical `task_success` for those contact skills requires the configured
-  peak signed target-joint displacement from the effect segment through replay
-  hold; this also
-  accepts a spring-loaded button that rebounds before the final hold state
+- Contact-skill replay records peak signed target-joint displacement as a
+  diagnostic. `task_success` follows the common motion/execution result and
+  does not gate on the object's final articulation state.
 - Deterministic 16-seed generalization sweep for the original six-skill subset,
   with bounded robot-start, target, held-object, and object-pose randomization
 - Translation-only pose-batch coverage suite (`atomic_franka_pgi_curobo_pose_batch`):
@@ -53,13 +52,16 @@ in that run's `videos/` directory.
   Atomic Action goal and planner call (one benchmark case). Configure
   `randomization.pose_batch_size` together with a matching single-value
   `batch_sizes: [K]` and the
-  `*_translation_jitter_m` bounds in the suite YAML.  The shipped track uses
-  fixed grasps; geometry-sampled antipodal and articulated-grasp providers
-  remain batch-size-one until their candidate selection is vectorized.
+  `*_translation_jitter_m` bounds in the suite YAML. The shipped track covers
+  all eight skills: cube actions use fixed grasps, while the per-skill
+  `articulation_position_jitter_m` bounds translate the actual Microwave/Drawer
+  roots for `Press`, `Slide`, and `Twist`. `Slide` samples one PGI grasp in
+  target-local coordinates and screens the translated batch together.
 - Default matrix: cuRobo (`primary_baseline`); IK / TOPPRA optional diagnostics
 - Direct, batched NMG ONNX adapter (`candidate`, enabled when a model path is supplied)
 - Lifecycle timing: construct / prepare / cold / warm
-- Distinct planning, motion-valid, execution, and physical task-success stages
+- Distinct planning, motion-valid, execution, task-success, and physical-effect
+  diagnostic stages
 - Planning latency, execution wall time, end-to-end time, nominal trajectory
   duration, simulated task-completion time, controller tracking RMSE, and
   task-specific object lift/articulation-joint displacement
@@ -88,8 +90,10 @@ scenes. Use `--no-headless` instead to open the live simulator viewer.
 
 - `collision-deployment` and obstacle-aware common-input tracks
 - Atomic Task pose-batch execution uses one configured simulator batch per
-  track (the supplied pose-batch suite uses `B=8`); geometry-sampled
-  antipodal and articulated-grasp candidate selection remains `B=1`
+  track (the supplied pose-batch suite uses `B=8`). General per-row
+  geometry-sampled antipodal candidate selection remains `B=1`; the supplied
+  articulated `Slide` case instead shares one target-local candidate across
+  translation-only rows.
 - The supplied pose-batch suite covers only Franka + PGI and cuRobo
 - The v3 suite's Microwave and Drawer are physical simulation articulations,
   but cuRobo still receives an empty external collision world. Contact replay

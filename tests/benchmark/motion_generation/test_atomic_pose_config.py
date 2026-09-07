@@ -43,6 +43,7 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     track = suite.enabled_tracks()[0]
 
     settings = resolve_atomic_pose_randomization(track)
+    assert suite.suite_version == "atomic_franka_pgi_curobo_pose_batch_v3"
     assert settings.enabled is True
     assert settings.mode == "translation"
     assert settings.pose_batch_size == 8
@@ -51,13 +52,50 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     assert resolve_atomic_batch_sizes(track) == [8]
 
     skills = {entry["id"]: entry for entry in track.config["skills"]}
+    assert set(skills) == {
+        "move_end_effector",
+        "move_joints",
+        "pick_up",
+        "move_held_object",
+        "place",
+        "press",
+        "slide",
+        "twist",
+    }
     assert skills["pick_up"]["grasp_source"] == "fixed"
+    assert skills["press"]["press_distance_m"] == pytest.approx(0.008)
     assert skills["pick_up"]["object_position_jitter_m"] == [0.03, 0.03, 0.0]
     assert skills["move_end_effector"]["target_offset_jitter_m"] == [
         0.03,
         0.03,
         0.02,
     ]
+    assert {
+        entry["id"]: entry["asset_path"] for entry in track.config["articulations"]
+    } == {
+        "microwave": "MicrowaveOven/microwave_oven_with_inertials.urdf",
+        "drawer": "Drawer/model_split_links_with_inertials.urdf",
+    }
+    assert {
+        skill_id: skills[skill_id]["articulation_position_jitter_m"]
+        for skill_id in ("press", "slide", "twist")
+    } == {
+        "press": [0.03, 0.03, 0.02],
+        "slide": [0.03, 0.03, 0.02],
+        "twist": [0.03, 0.03, 0.02],
+    }
+    assert {
+        skill_id: (
+            skills[skill_id]["articulation"],
+            skills[skill_id]["target_link"],
+            skills[skill_id]["target_joint"],
+        )
+        for skill_id in ("press", "slide", "twist")
+    } == {
+        "press": ("microwave", "button_cap", "start_button_press"),
+        "slide": ("drawer", "large_handle_bar", "cabinet_to_drawer"),
+        "twist": ("microwave", "cap_1", "power_knob_rotation"),
+    }
 
 
 def test_pose_batch_aliases_are_normalized() -> None:
@@ -259,6 +297,122 @@ def test_randomize_object_pose_returns_live_pose_after_optional_settle() -> None
     torch.testing.assert_close(entity.set_local_pose.call_args.args[0], pose)
 
 
+def test_randomize_articulation_root_translation_is_deterministic() -> None:
+    """Articulation pose batches vary only in translation and remain replayable."""
+    batch_size = 4
+    initial_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    initial_pose[:, :3, 3] = torch.tensor([-1.0, -0.3, 0.4])
+    initial_qpos = torch.zeros(batch_size, 4)
+    state = {"pose": initial_pose.clone()}
+    entity = Mock()
+    entity.get_local_pose.side_effect = lambda **_: state["pose"].clone()
+    handle = Mock(
+        initial_pose=initial_pose,
+        initial_qpos=initial_qpos,
+        entity=entity,
+        config={"reset_settle_steps": 1},
+    )
+
+    def reset(*, pose: torch.Tensor, qpos: torch.Tensor) -> None:
+        state["pose"] = pose.clone()
+        torch.testing.assert_close(qpos, initial_qpos)
+
+    handle.reset.side_effect = reset
+    scenario = AtomicTaskScenario()
+    scenario.simulation = Mock()
+    config = {
+        "articulation_position_jitter_m": [0.03, 0.02, 0.0],
+        "_pose_batch_seed_stride": 1,
+    }
+
+    first = scenario.randomize_articulation_pose(
+        handle,
+        config,
+        seed=11,
+        stream=32,
+    )
+    second = scenario.randomize_articulation_pose(
+        handle,
+        config,
+        seed=11,
+        stream=32,
+    )
+
+    offsets = first[:, :3, 3] - initial_pose[:, :3, 3]
+    torch.testing.assert_close(first, second)
+    torch.testing.assert_close(first[:, :3, :3], initial_pose[:, :3, :3])
+    assert torch.all(offsets[:, 0].abs() <= 0.03)
+    assert torch.all(offsets[:, 1].abs() <= 0.02)
+    assert torch.equal(offsets[:, 2], torch.zeros(batch_size))
+    assert torch.unique(offsets[:, :2], dim=0).shape[0] == batch_size
+    assert scenario.simulation.update.call_count == 2
+    scenario.simulation.update.assert_called_with(step=1)
+
+
+def test_resolve_articulation_grasp_broadcasts_one_local_candidate_over_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Slide samples PGI once and screens the translated batch together."""
+    from scripts.tutorials.atomic_action import tutorial_utils
+
+    batch_size = 4
+    target_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    target_pose[:, :3, 3] = torch.tensor(
+        [
+            [-0.82, -0.02, 0.46],
+            [-0.80, 0.01, 0.46],
+            [-0.84, 0.02, 0.46],
+            [-0.81, -0.01, 0.46],
+        ]
+    )
+    candidate = target_pose[0].clone()
+    candidate[:3, 3] += torch.tensor([0.01, 0.0, 0.0])
+    generator = Mock()
+    generator.get_valid_grasp_poses.return_value = [
+        (candidate.unsqueeze(0), torch.zeros(1))
+    ]
+    monkeypatch.setattr(
+        tutorial_utils,
+        "create_parallel_jaw_grasp_pose_generator",
+        lambda **_: generator,
+    )
+    robot = Mock(device=torch.device("cpu"))
+    robot.compute_ik.side_effect = lambda pose, joint_seed, name: (
+        torch.ones(batch_size, dtype=torch.bool),
+        joint_seed.clone(),
+    )
+    scenario = AtomicTaskScenario()
+    scenario.robot = robot
+    scenario.control_part = "arm"
+
+    grasp = scenario.resolve_articulation_grasp(
+        mesh_vertices=torch.zeros(3, 3),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        target_pose=target_pose,
+        approach_direction=torch.tensor([0.0, 0.0, 1.0]).repeat(batch_size, 1),
+        start_qpos=torch.zeros(batch_size, 7),
+        direction="pull",
+        approach_distance=0.10,
+        translation_distance=0.18,
+        seed=11,
+        n_sample=32,
+        max_candidates=8,
+        alignment_max_angle_deg=10.0,
+    )
+
+    expected = target_pose.clone()
+    expected[:, 0, 3] += 0.01
+    torch.testing.assert_close(grasp, expected)
+    sampled = generator.get_valid_grasp_poses.call_args.kwargs
+    assert sampled["obj_poses"].shape == (1, 4, 4)
+    assert sampled["approach_direction"].shape == (1, 3)
+    assert robot.compute_ik.call_count == 3
+    assert all(
+        call.kwargs["pose"].shape == (batch_size, 4, 4)
+        for call in robot.compute_ik.call_args_list
+    )
+
+
 def test_pickup_case_pins_settle_steps_in_pose_manifest() -> None:
     """PickUp forwards its settle window so reset/replay can reproduce it."""
     pose = torch.eye(4).unsqueeze(0)
@@ -341,6 +495,39 @@ def test_reset_case_reapplies_frozen_object_pose_after_settle() -> None:
     assert entity.set_local_pose.call_count == 2
     torch.testing.assert_close(entity.set_local_pose.call_args.args[0], pose)
     assert entity.clear_dynamics.call_count == 2
+
+
+def test_reset_case_restores_batched_articulation_root_and_joint_state() -> None:
+    """Each translated articulation row is restored from the frozen manifest."""
+    batch_size = 4
+    pose = torch.eye(4).repeat(batch_size, 1, 1)
+    pose[:, 0, 3] = torch.tensor([-1.02, -0.98, -1.01, -0.99])
+    qpos = torch.zeros(batch_size, 4)
+    qpos[:, 0] = torch.tensor([0.0, 0.001, 0.002, 0.003])
+    handle = Mock(
+        object_id="microwave",
+        config={"reset_settle_steps": 10},
+    )
+    simulation = Mock()
+    robot = Mock(device=torch.device("cpu"))
+    scenario = AtomicTaskScenario()
+    scenario._articulations = {"microwave": handle}
+    case = Mock(
+        full_start_qpos=torch.zeros(batch_size, 8),
+        object_id="microwave",
+        case_parameters={
+            "articulation_initial_pose": pose.tolist(),
+            "articulation_initial_qpos": qpos.tolist(),
+        },
+    )
+
+    scenario.reset_case(simulation, robot, case, "arm")
+
+    assert handle.reset.call_count == 2
+    restored = handle.reset.call_args.kwargs
+    torch.testing.assert_close(restored["pose"], pose)
+    torch.testing.assert_close(restored["qpos"], qpos)
+    simulation.update.assert_called_once_with(step=10)
 
 
 def test_pose_fallback_does_not_leak_into_local_grasp_offsets() -> None:

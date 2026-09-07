@@ -223,6 +223,63 @@ def test_curobo_v2_plans_a_joint_space_move():
 
 
 @pytest.mark.slow
+def test_curobo_v2_plans_batched_joint_space_moves_direct_first():
+    """Keep easy shared-world joint plans from receiving partial PRM seeds."""
+    sim, robot, _ = _make_sim_robot(num_envs=8)
+    try:
+        cfg = CuroboPlannerCfg(
+            robot_uid=ROBOT_UID,
+            world=CuroboWorldCfg(rigid_objects=None, multi_env=False),
+            max_attempts=5,
+            use_cuda_graph=True,
+            warmup_iterations=1,
+        )
+        mg = MotionGenerator(MotionGenCfg(planner_cfg=cfg))
+        start_qpos = robot.get_qpos(name=CONTROL_PART)
+        # Regression targets from atomic_franka_pgi_curobo_pose_batch seed 11.
+        # All eight straight joint-space paths are comfortably inside the arm
+        # limits and free of self-collision; the old graph-first batch call
+        # nevertheless reported rows 2, 4, 5, and 7 as failed.
+        offsets = torch.tensor(
+            [
+                [0.15976, -0.05098, 0.12690, 0.15966, -0.08830, 0.06692, -0.08060],
+                [0.12048, -0.10187, 0.08644, 0.10465, -0.10477, 0.06865, -0.12116],
+                [0.09504, -0.07512, 0.07663, 0.11244, -0.11973, 0.11481, -0.12281],
+                [0.13500, -0.04382, 0.11807, 0.09559, -0.04747, 0.09605, -0.06925],
+                [0.08764, -0.06679, 0.12766, 0.08694, -0.06389, 0.06160, -0.12890],
+                [0.13917, -0.05947, 0.07191, 0.14824, -0.07624, 0.11442, -0.12609],
+                [0.12398, -0.06021, 0.12909, 0.09491, -0.05128, 0.09065, -0.11569],
+                [0.13496, -0.05047, 0.08403, 0.11617, -0.06094, 0.13774, -0.12086],
+            ],
+            dtype=start_qpos.dtype,
+            device=start_qpos.device,
+        )
+        target_qpos = start_qpos + offsets
+
+        result = mg.generate(
+            [PlanState.from_qpos(target_qpos)],
+            MotionGenOptions(
+                sample_count=80,
+                start_qpos=start_qpos,
+                control_part=CONTROL_PART,
+                plan_opts=CuroboPlanOptions(control_part=CONTROL_PART),
+            ),
+        )
+
+        assert result.success.tolist() == [True] * 8
+        assert result.positions is not None
+        assert result.positions.shape == (8, 80, start_qpos.shape[-1])
+        assert result.dt is not None
+        assert result.dt.shape == (8, 80)
+        assert torch.isfinite(result.positions).all()
+        assert torch.allclose(result.positions[:, 0], start_qpos, atol=1e-3)
+        assert torch.allclose(result.positions[:, -1], target_qpos, atol=1e-3)
+    finally:
+        sim.destroy()
+        SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.slow
 def test_curobo_v2_multi_env_worlds_are_independent():
     """Apply the first dynamic update to both in-process collision worlds."""
     sim, robot, block = _make_sim_robot(num_envs=2)

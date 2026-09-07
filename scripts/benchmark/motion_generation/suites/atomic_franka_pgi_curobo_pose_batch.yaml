@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_skill_franka_pgi_curobo_pose_batch
-suite_version: atomic_franka_pgi_curobo_pose_batch_v1
+suite_version: atomic_franka_pgi_curobo_pose_batch_v3
 profile: coverage
 
 robot:
@@ -91,6 +91,31 @@ tracks:
         # below the joint limit keeps the 50 mm cube between the fingers
         # instead of driving the jaws fully into one another.
         grasp_qpos: [0.036]
+      articulations:
+        - id: microwave
+          asset_path: MicrowaveOven/microwave_oven_with_inertials.urdf
+          position: [-1.0, -0.30, 0.4]
+          rotation_deg: [0.0, 0.0, 90.0]
+          init_qpos: [0.0, 0.0, 0.0, 0.0]
+          drive:
+            stiffness: 0.001
+            damping: 100.0
+            max_effort: 0.01
+          fix_base: true
+          settle_steps: 10
+        - id: drawer
+          asset_path: Drawer/model_split_links_with_inertials.urdf
+          position: [-1.1, 0.0, 0.0]
+          rotation_deg: [0.0, 0.0, 90.0]
+          init_qpos: [0.0]
+          drive:
+            drive_type: none
+          attrs:
+            static_friction: 1.0
+            dynamic_friction: 1.0
+          fix_base: true
+          settle_steps: 10
+          reset_settle_steps: 0
       objects:
         - id: cube_50mm
           kind: cube
@@ -190,3 +215,73 @@ tracks:
               difficulty_factors:
                 pre_pick_required: true
                 randomized_object_pose: true
+        - id: press
+          sample_count: 140
+          hand_interp_steps: 12
+          approach_distance_m: 0.12
+          # The physical button has 6 mm of travel. Keep a small 2 mm
+          # over-travel for reliable actuation without driving the arm 24 mm
+          # into the hard joint stop in every randomized environment.
+          press_distance_m: 0.008
+          articulation: microwave
+          target_link: button_cap
+          target_joint: start_button_press
+          articulation_position_jitter_m: [0.03, 0.03, 0.02]
+          effect_joint_sign: 1.0
+          minimum_joint_delta_m: 0.004
+          geometry_seed: 11
+          cases:
+            - name: microwave_start_button
+              task_difficulty: medium
+              difficulty_factors:
+                articulated_target: microwave_start_button
+                randomized_articulation_pose: true
+                approach_distance_m: 0.12
+                press_depth_m: 0.008
+        - id: slide
+          sample_count: 140
+          grasp_source: antipodal
+          grasp_sample_count: 10000
+          grasp_max_candidates: 128
+          grasp_alignment_max_angle_deg: 10.0
+          hand_interp_steps: 12
+          approach_distance_m: 0.10
+          translation_distance_m: 0.18
+          direction: pull
+          articulation: drawer
+          target_link: large_handle_bar
+          target_joint: cabinet_to_drawer
+          articulation_position_jitter_m: [0.03, 0.03, 0.02]
+          effect_joint_sign: 1.0
+          minimum_joint_delta_m: 0.12
+          geometry_seed: 11
+          cases:
+            - name: drawer_pull
+              task_difficulty: medium
+              difficulty_factors:
+                articulated_target: drawer_large_handle
+                randomized_articulation_pose: true
+                approach_distance_m: 0.10
+                translation_distance_m: 0.18
+                direction: pull
+        - id: twist
+          sample_count: 140
+          hand_interp_steps: 12
+          twist_waypoint_count: 8
+          pre_grasp_distance_m: 0.12
+          twist_angle_rad: -0.7853981634
+          articulation: microwave
+          target_link: cap_1
+          target_joint: power_knob_rotation
+          articulation_position_jitter_m: [0.03, 0.03, 0.02]
+          effect_joint_sign: 1.0
+          minimum_joint_delta_rad: 0.5
+          geometry_seed: 11
+          cases:
+            - name: microwave_power_knob
+              task_difficulty: medium
+              difficulty_factors:
+                articulated_target: microwave_power_knob
+                randomized_articulation_pose: true
+                pre_grasp_distance_m: 0.12
+                twist_angle_rad: -0.7853981634

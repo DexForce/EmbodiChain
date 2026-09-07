@@ -711,6 +711,43 @@ def test_frozen_articulation_grasp_generator_preserves_batch_shapes():
     assert all(cost.shape == (1,) for _, cost in candidates)
 
 
+def test_frozen_articulation_grasp_generator_replays_batched_manifest_rows():
+    batch_size = 3
+    target_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    target_pose[:, 0, 3] = torch.tensor([-0.82, -0.79, -0.85])
+    grasp_pose = target_pose.clone()
+    grasp_pose[:, 1, 3] += torch.tensor([0.01, 0.02, 0.03])
+    generator = _FrozenArticulationGraspPoseGenerator([(target_pose, grasp_pose)])
+    replay_target = target_pose.clone()
+    replay_target[:, 2, 3] += torch.tensor([0.04, -0.01, 0.02])
+
+    valid, resolved, costs = generator.get_best_grasp_poses(
+        mesh_vertices=torch.zeros(3, 3),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        obj_poses=replay_target,
+        approach_direction=torch.tensor([0.0, 0.0, 1.0]).repeat(batch_size, 1),
+    )
+
+    expected = replay_target.clone()
+    expected[:, 1, 3] += torch.tensor([0.01, 0.02, 0.03])
+    assert valid.tolist() == [True, True, True]
+    torch.testing.assert_close(resolved, expected)
+    torch.testing.assert_close(costs, torch.zeros(batch_size))
+
+
+def test_frozen_articulation_grasp_generator_rejects_ambiguous_cases():
+    target_pose = torch.eye(4).repeat(2, 1, 1)
+    first_grasp = target_pose.clone()
+    first_grasp[:, 0, 3] += 0.01
+    second_grasp = target_pose.clone()
+    second_grasp[:, 1, 3] += 0.02
+
+    with pytest.raises(ValueError, match="identical target batches"):
+        _FrozenArticulationGraspPoseGenerator(
+            [(target_pose, first_grasp), (target_pose, second_grasp)]
+        )
+
+
 def test_atomic_task_press_invocation_uses_articulated_target_manifest():
     robot = Mock()
     robot.device = torch.device("cpu")

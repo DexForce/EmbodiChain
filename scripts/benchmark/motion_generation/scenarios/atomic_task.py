@@ -704,37 +704,73 @@ class _FrozenArticulationGraspPoseGenerator(GraspPoseGenerator):
     ) -> None:
         if not target_grasps:
             raise ValueError("At least one frozen Slide grasp is required.")
-        self._target_grasps = tuple(
-            (
-                target.detach().to(device="cpu", dtype=torch.float32).clone(),
-                grasp.detach().to(device="cpu", dtype=torch.float32).clone(),
-            )
-            for target, grasp in target_grasps
-        )
+        normalized: list[tuple[torch.Tensor, torch.Tensor]] = []
+        for target, grasp in target_grasps:
+            target = target.detach().to(device="cpu", dtype=torch.float32).clone()
+            grasp = grasp.detach().to(device="cpu", dtype=torch.float32).clone()
+            if target.shape == (4, 4):
+                target = target.unsqueeze(0)
+            if grasp.shape == (4, 4):
+                grasp = grasp.unsqueeze(0)
+            if target.dim() != 3 or target.shape[1:] != (4, 4):
+                raise ValueError(
+                    "Frozen Slide targets must have shape (4, 4) or (B, 4, 4)."
+                )
+            if grasp.shape != target.shape:
+                raise ValueError(
+                    "Frozen Slide target and grasp batches must have equal shapes."
+                )
+            target_to_grasp = torch.bmm(pose_inv(target), grasp)
+            for previous_target, previous_grasp in normalized:
+                if previous_target.shape != target.shape or not torch.allclose(
+                    previous_target, target
+                ):
+                    continue
+                previous_target_to_grasp = torch.bmm(
+                    pose_inv(previous_target), previous_grasp
+                )
+                if not torch.allclose(previous_target_to_grasp, target_to_grasp):
+                    raise ValueError(
+                        "Frozen Slide cases with identical target batches must "
+                        "use the same target-local grasp."
+                    )
+            normalized.append((target, grasp))
+        self._target_grasps = tuple(normalized)
 
     def _resolve(self, obj_poses: torch.Tensor) -> torch.Tensor:
-        """Select the closest frozen target and preserve its local grasp."""
-        results: list[torch.Tensor] = []
-        for obj_pose in obj_poses:
-            candidates = [
-                target.squeeze(0).to(device=obj_poses.device, dtype=torch.float32)
-                for target, _ in self._target_grasps
-            ]
-            costs = torch.stack(
-                [
-                    torch.linalg.vector_norm(obj_pose[:3, 3] - candidate[:3, 3])
-                    + 0.1
-                    * torch.linalg.matrix_norm(obj_pose[:3, :3] - candidate[:3, :3])
-                    for candidate in candidates
-                ]
+        """Select the closest frozen batch and preserve each row's local grasp."""
+        if obj_poses.dim() != 3 or obj_poses.shape[1:] != (4, 4):
+            raise ValueError("Slide object poses must have shape (B, 4, 4).")
+        candidates: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
+        batch_size = obj_poses.shape[0]
+        for target, grasp in self._target_grasps:
+            if target.shape[0] == 1:
+                target = target.expand(batch_size, -1, -1)
+                grasp = grasp.expand(batch_size, -1, -1)
+            elif target.shape[0] != batch_size:
+                continue
+            target = target.to(device=obj_poses.device, dtype=torch.float32)
+            grasp = grasp.to(device=obj_poses.device, dtype=torch.float32)
+            translation_cost = torch.linalg.vector_norm(
+                obj_poses[:, :3, 3] - target[:, :3, 3], dim=-1
             )
-            index = int(torch.argmin(costs).item())
-            target, grasp = self._target_grasps[index]
-            target = target.squeeze(0).to(device=obj_poses.device, dtype=torch.float32)
-            grasp = grasp.squeeze(0).to(device=obj_poses.device, dtype=torch.float32)
-            target_to_grasp = torch.linalg.inv(target) @ grasp
-            results.append(obj_pose @ target_to_grasp)
-        return torch.stack(results)
+            rotation_cost = torch.linalg.matrix_norm(
+                obj_poses[:, :3, :3] - target[:, :3, :3], dim=(-2, -1)
+            )
+            candidates.append(
+                (
+                    (translation_cost + 0.1 * rotation_cost).mean(),
+                    target,
+                    grasp,
+                )
+            )
+        if not candidates:
+            raise ValueError(
+                "No frozen Slide grasp batch matches the requested batch size."
+            )
+        _, target, grasp = min(candidates, key=lambda item: float(item[0].item()))
+        target_to_grasp = torch.bmm(pose_inv(target), grasp)
+        return torch.bmm(obj_poses.to(dtype=torch.float32), target_to_grasp)
 
     def get_valid_grasp_poses(
         self,
@@ -1867,12 +1903,17 @@ class _PressCases(AtomicSkillCaseProvider):
             joint_type="prismatic",
         )
         scenario.restore_base_robot()
+        articulation_initial_pose = scenario.randomize_articulation_pose(
+            handle,
+            config,
+            seed=seed,
+            stream=32,
+        )
         scenario.randomize_robot_start(config, seed=seed, stream=31)
         start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
         start_pose = scenario.robot.compute_fk(
             start_qpos, name=scenario.control_part, to_matrix=True
         )
-        articulation_initial_pose = handle.entity.get_local_pose(to_matrix=True).clone()
         articulation_initial_qpos = handle.entity.get_qpos().clone()
         target_pose = handle.link_pose(target_link).to(device=start_pose.device)
         geometry = scenario.sample_articulation_geometry(
@@ -1945,6 +1986,16 @@ class _PressCases(AtomicSkillCaseProvider):
                 "articulation_initial_pose": articulation_initial_pose.detach()
                 .cpu()
                 .tolist(),
+                "articulation_translation_offsets_m": (
+                    articulation_initial_pose[:, :3, 3]
+                    - handle.initial_pose[:, :3, 3].to(
+                        device=articulation_initial_pose.device,
+                        dtype=articulation_initial_pose.dtype,
+                    )
+                )
+                .detach()
+                .cpu()
+                .tolist(),
                 "articulation_initial_qpos": articulation_initial_qpos.detach()
                 .cpu()
                 .tolist(),
@@ -1956,7 +2007,7 @@ class _PressCases(AtomicSkillCaseProvider):
                     config.get("minimum_joint_delta_m", 0.004)
                 ),
                 "waypoint_rotation_symmetry": "half_turn_about_z",
-                "task_success_scope": "physical_articulation_joint_displacement",
+                "task_success_scope": "motion_execution_surrogate",
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -2068,9 +2119,14 @@ class _SlideCases(AtomicSkillCaseProvider):
             joint_type="prismatic",
         )
         scenario.restore_base_robot()
+        articulation_initial_pose = scenario.randomize_articulation_pose(
+            handle,
+            config,
+            seed=seed,
+            stream=42,
+        )
         scenario.randomize_robot_start(config, seed=seed, stream=41)
         start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
-        articulation_initial_pose = handle.entity.get_local_pose(to_matrix=True).clone()
         articulation_initial_qpos = handle.entity.get_qpos().clone()
         target_pose = handle.link_pose(target_link).to(device=start_qpos.device)
         mesh_vertices, mesh_triangles = handle.link_mesh(target_link)
@@ -2172,6 +2228,16 @@ class _SlideCases(AtomicSkillCaseProvider):
                 "articulation_initial_pose": articulation_initial_pose.detach()
                 .cpu()
                 .tolist(),
+                "articulation_translation_offsets_m": (
+                    articulation_initial_pose[:, :3, 3]
+                    - handle.initial_pose[:, :3, 3].to(
+                        device=articulation_initial_pose.device,
+                        dtype=articulation_initial_pose.dtype,
+                    )
+                )
+                .detach()
+                .cpu()
+                .tolist(),
                 "articulation_initial_qpos": articulation_initial_qpos.detach()
                 .cpu()
                 .tolist(),
@@ -2182,7 +2248,7 @@ class _SlideCases(AtomicSkillCaseProvider):
                 "minimum_articulation_joint_delta": float(
                     config.get("minimum_joint_delta_m", 0.12)
                 ),
-                "task_success_scope": "physical_articulation_joint_displacement",
+                "task_success_scope": "motion_execution_surrogate",
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -2307,12 +2373,17 @@ class _TwistCases(AtomicSkillCaseProvider):
             joint_type="revolute",
         )
         scenario.restore_base_robot()
+        articulation_initial_pose = scenario.randomize_articulation_pose(
+            handle,
+            config,
+            seed=seed,
+            stream=52,
+        )
         scenario.randomize_robot_start(config, seed=seed, stream=51)
         start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
         start_pose = scenario.robot.compute_fk(
             start_qpos, name=scenario.control_part, to_matrix=True
         )
-        articulation_initial_pose = handle.entity.get_local_pose(to_matrix=True).clone()
         articulation_initial_qpos = handle.entity.get_qpos().clone()
         target_pose = handle.link_pose(target_link).to(device=start_pose.device)
         mesh_vertices, _ = handle.link_mesh(target_link)
@@ -2401,6 +2472,16 @@ class _TwistCases(AtomicSkillCaseProvider):
                 "articulation_initial_pose": articulation_initial_pose.detach()
                 .cpu()
                 .tolist(),
+                "articulation_translation_offsets_m": (
+                    articulation_initial_pose[:, :3, 3]
+                    - handle.initial_pose[:, :3, 3].to(
+                        device=articulation_initial_pose.device,
+                        dtype=articulation_initial_pose.dtype,
+                    )
+                )
+                .detach()
+                .cpu()
+                .tolist(),
                 "articulation_initial_qpos": articulation_initial_qpos.detach()
                 .cpu()
                 .tolist(),
@@ -2412,7 +2493,7 @@ class _TwistCases(AtomicSkillCaseProvider):
                     config.get("minimum_joint_delta_rad", 0.5)
                 ),
                 "waypoint_rotation_symmetry": "half_turn_about_z",
-                "task_success_scope": "physical_articulation_joint_displacement",
+                "task_success_scope": "motion_execution_surrogate",
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -2846,6 +2927,14 @@ class AtomicTaskScenario(ScenarioProvider):
         active_id = case.object_id
         reset_steps = 2
         active_object_pose: torch.Tensor | None = None
+        active_articulation_state: (
+            tuple[
+                AtomicArticulationHandle,
+                torch.Tensor | None,
+                torch.Tensor | None,
+            ]
+            | None
+        ) = None
         for index, handle in enumerate(self._objects.values()):
             if handle.object_id == active_id:
                 reset_steps = int(
@@ -2888,6 +2977,7 @@ class AtomicTaskScenario(ScenarioProvider):
                     )
                 )
                 handle.reset(pose=pose, qpos=qpos)
+                active_articulation_state = (handle, pose, qpos)
             else:
                 handle.park(len(self._objects) + index)
         simulation.update(step=reset_steps)
@@ -2900,6 +2990,13 @@ class AtomicTaskScenario(ScenarioProvider):
             if active_handle is not None:
                 active_handle.entity.set_local_pose(active_object_pose)
                 active_handle.entity.clear_dynamics()
+        if active_articulation_state is not None:
+            # Settling may advance a weakly driven button/knob from the exact
+            # state used to derive the frozen link target.  Restore the
+            # manifest state once more so planning and replay begin at Q1,
+            # rather than integrating it into a different Q2 state.
+            handle, pose, qpos = active_articulation_state
+            handle.reset(pose=pose, qpos=qpos)
 
     def plan_case(self, adapter: PlannerAdapter, case: BenchmarkCase) -> object:
         """Compile one Atomic Action with an explicitly pinned motion backend."""
@@ -3571,8 +3668,16 @@ class AtomicTaskScenario(ScenarioProvider):
         """Freeze a geometry-aware PGI grasp that can complete a Slide path."""
         if self.robot is None:
             raise RuntimeError("Atomic Task runtime is not configured.")
-        if target_pose.shape != (1, 4, 4):
-            raise ValueError("Physical Slide grasp selection requires batch size one.")
+        if target_pose.dim() != 3 or target_pose.shape[1:] != (4, 4):
+            raise ValueError("Physical Slide target poses must have shape (B, 4, 4).")
+        if approach_direction.shape != (target_pose.shape[0], 3):
+            raise ValueError(
+                "Physical Slide approach directions must have shape (B, 3)."
+            )
+        if start_qpos.shape[0] != target_pose.shape[0]:
+            raise ValueError(
+                "Physical Slide start states and target poses must share a batch."
+            )
         if n_sample < 1 or max_candidates < 1:
             raise ValueError("Slide grasp sample/candidate counts must be positive.")
         if not 0.0 < alignment_max_angle_deg <= 90.0:
@@ -3595,8 +3700,11 @@ class AtomicTaskScenario(ScenarioProvider):
             candidates, costs = generator.get_valid_grasp_poses(
                 mesh_vertices=mesh_vertices,
                 mesh_triangles=mesh_triangles,
-                obj_poses=target_pose,
-                approach_direction=approach_direction,
+                # All rows share one target-link mesh and differ only by the
+                # articulation root pose.  Sample PGI candidates once, then
+                # preserve the selected target-local grasp across the batch.
+                obj_poses=target_pose[:1],
+                approach_direction=approach_direction[:1],
             )[0]
         finite_indices = torch.nonzero(torch.isfinite(costs), as_tuple=False).flatten()
         if finite_indices.numel() == 0:
@@ -3609,23 +3717,27 @@ class AtomicTaskScenario(ScenarioProvider):
             candidate = candidates[candidate_index].to(
                 device=self.robot.device, dtype=torch.float32
             )
-            if (
-                float(torch.dot(candidate[:3, 2], approach_direction[0]).item())
-                < minimum_alignment
-            ):
-                continue
-            mirrored = candidate.clone()
-            mirrored[:3, 0] = -mirrored[:3, 0]
-            mirrored[:3, 1] = -mirrored[:3, 1]
-            for variant in (candidate, mirrored):
-                grasp = variant.unsqueeze(0)
-                approach = grasp.clone()
-                approach[:, :3, 3] -= approach_direction * approach_distance
-                translated = grasp.clone()
+            target_to_grasp = torch.bmm(
+                pose_inv(target_pose[:1]), candidate.unsqueeze(0)
+            )
+            grasp = torch.bmm(
+                target_pose,
+                target_to_grasp.expand(target_pose.shape[0], -1, -1),
+            )
+            mirrored = grasp.clone()
+            mirrored[:, :3, 0] = -mirrored[:, :3, 0]
+            mirrored[:, :3, 1] = -mirrored[:, :3, 1]
+            for variant in (grasp, mirrored):
+                alignment = torch.sum(variant[:, :3, 2] * approach_direction, dim=-1)
+                if not bool((alignment >= minimum_alignment).all().item()):
+                    continue
+                translated = variant.clone()
                 translated[:, :3, 3] += (
                     approach_direction * translation_sign * translation_distance
                 )
-                poses = [approach, grasp, translated]
+                approach = variant.clone()
+                approach[:, :3, 3] -= approach_direction * approach_distance
+                poses = [approach, variant, translated]
                 if direction == "push":
                     poses.append(approach)
                 qpos_seed = start_qpos
@@ -3641,7 +3753,7 @@ class AtomicTaskScenario(ScenarioProvider):
                         break
                     qpos_seed = _canonical_case_qpos(qpos_seed)
                 if feasible:
-                    return grasp
+                    return variant
         raise RuntimeError(
             "No independently reachable antipodal Slide grasp remained after "
             f"screening {len(ranked)} candidates."
@@ -3699,6 +3811,59 @@ class AtomicTaskScenario(ScenarioProvider):
             grasp_gripper=False,
         )
         return randomized
+
+    def randomize_articulation_pose(
+        self,
+        handle: AtomicArticulationHandle,
+        config: Mapping[str, object],
+        *,
+        seed: int,
+        stream: int,
+    ) -> torch.Tensor:
+        """Translate an articulation root independently in every environment.
+
+        The articulation orientation and joint state stay frozen.  A
+        skill-local ``articulation_position_jitter_m`` range overrides the
+        pose-batch track's object-translation range.
+        """
+        configured = config.get("articulation_position_jitter_m")
+        if configured is None:
+            configured = config.get("_pose_batch_object_translation_jitter_m")
+        amplitude = _float_vector(
+            configured,
+            name="articulation_position_jitter_m",
+            length=3,
+            default=(0.0, 0.0, 0.0),
+        )
+        if any(value < 0.0 for value in amplitude):
+            raise ValueError(
+                "articulation_position_jitter_m values must be non-negative."
+            )
+        pose = handle.initial_pose.clone()
+        if any(amplitude):
+            translation = _seeded_jitter(
+                amplitude,
+                seed=seed,
+                stream=stream,
+                dtype=pose.dtype,
+                device=pose.device,
+                batch_size=pose.shape[0],
+                seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
+            )
+            if translation.dim() == 1:
+                translation = translation.unsqueeze(0)
+            pose[:, :3, 3] += translation
+        handle.reset(pose=pose, qpos=handle.initial_qpos)
+
+        update_steps = handle.config.get("reset_settle_steps", 10)
+        if type(update_steps) is not int or update_steps < 0:
+            raise ValueError(
+                "articulation reset_settle_steps must be a non-negative integer."
+            )
+        if self.simulation is not None and update_steps:
+            self.simulation.update(step=update_steps)
+        handle.entity.clear_dynamics()
+        return handle.entity.get_local_pose(to_matrix=True).clone()
 
     def randomize_object_pose(
         self,
