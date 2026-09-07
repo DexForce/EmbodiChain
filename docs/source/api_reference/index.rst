@@ -17,6 +17,10 @@ Core Framework
 
 The core ``embodichain`` framework is split into six top-level packages:
 
+``compute``
+    Shared numerical computations: analytical kinematics, trajectory
+    interpolation/resampling/warping, geometry queries, and image layouts.
+
 ``data``
     Dataset resolution, asset-download helpers, shared constants, and enums used
     by simulation tasks and training pipelines.
@@ -43,14 +47,14 @@ The core ``embodichain`` framework is split into six top-level packages:
 
 ``utils``
     Shared utilities: the ``@configclass`` decorator, logging, math/tensor
-    helpers, file/string/device helpers, and high-performance ``warp`` kernels
-    for kinematics and image processing.
+    helpers, file/string/device helpers, and legacy computation import aliases.
 
 .. currentmodule:: embodichain
 
 .. autosummary::
    :toctree: embodichain
 
+   compute
    data
    data_pipeline
    lab

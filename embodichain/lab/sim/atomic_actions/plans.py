@@ -26,7 +26,7 @@ from typing import Any, Mapping, Sequence
 
 import torch
 
-from embodichain.lab.sim.planners.utils import normalize_success_mask
+from embodichain.lab.sim.motion.planners.utils import normalize_success_mask
 
 from .effects import StateDelta
 from .policies import RecoveryPolicy

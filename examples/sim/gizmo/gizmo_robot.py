@@ -24,7 +24,7 @@ import argparse
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.sim.solvers import PinkSolverCfg, PytorchSolverCfg
+from embodichain.lab.sim.motion.solvers import PinkSolverCfg, PytorchSolverCfg
 from embodichain.lab.sim.objects import (
     GizmoCfg,
     create_robot_ik_gizmo_controller,

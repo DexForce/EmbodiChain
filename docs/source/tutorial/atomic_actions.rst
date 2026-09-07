@@ -156,7 +156,7 @@ total trajectory duration four times longer. The script checks that relationship
 before replaying the fast and slow trajectories in sequence.
 
 The ``motion_generator`` variable in the snippets below is a configured
-:class:`~embodichain.lab.sim.planners.MotionGenerator`; its robot, planner,
+:class:`~embodichain.lab.sim.motion.motion_generator.MotionGenerator`; its robot, planner,
 device, cache, and collision world become the resources owned by the engine.
 
 Control-part commands

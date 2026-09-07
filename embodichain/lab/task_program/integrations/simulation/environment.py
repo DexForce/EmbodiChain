@@ -50,12 +50,8 @@ from embodichain.lab.sim.atomic_actions import (
     SceneSnapshot,
     TaskState,
 )
-from embodichain.lab.sim.planners import (
-    BasePlannerCfg,
-    MotionGenCfg,
-    MotionGenerator,
-    ToppraPlannerCfg,
-)
+from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
+from embodichain.lab.sim.motion.planners import BasePlannerCfg, ToppraPlannerCfg
 from embodichain.lab.task_program.compiler.lowering import (
     RegisteredSemanticLowerer,
 )

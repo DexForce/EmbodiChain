@@ -49,7 +49,7 @@ from embodichain.utils import logger
 from embodichain.utils.utility import key_in_nested_dict
 
 from .shapes import ShapeCfg, MeshCfg
-from .workspace.cfg import RobotWorkspaceCfg
+from .motion.workspace.cfg import RobotWorkspaceCfg
 
 __all__ = [
     "DEFAULT_RENDERER",
@@ -1909,7 +1909,7 @@ class ArticulationCfg(ObjectBaseCfg):
 
 @configclass
 class RobotCfg(ArticulationCfg):
-    from embodichain.lab.sim.solvers import SolverCfg
+    from embodichain.lab.sim.motion.solvers import SolverCfg
 
     """Configuration for a robot asset in the simulation.
     """
@@ -1953,7 +1953,7 @@ class RobotCfg(ArticulationCfg):
 
         import importlib
 
-        solver_module = importlib.import_module("embodichain.lab.sim.solvers")
+        solver_module = importlib.import_module("embodichain.lab.sim.motion.solvers")
 
         cfg = cls()  # Create a new instance of the class (cls)
         for key, value in init_dict.items():

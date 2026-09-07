@@ -29,7 +29,9 @@ import open3d as o3d
 from typing import List, Tuple, Union
 from dexsim.kit.meshproc import convex_decomposition_coacd
 
-from embodichain.utils.warp import convex_signed_distance_kernel
+from embodichain.compute.geometry._warp.convex_query import (
+    convex_signed_distance_kernel,
+)
 from embodichain.utils.device_utils import standardize_device_string
 from embodichain.utils.math import transform_points_mat
 from embodichain.utils import configclass

@@ -66,145 +66,10 @@ a physical effect.
 | Task Program lowering/execution | `embodichain/lab/task_program/compiler/`, `runtime/` |
 | Gym lifecycle bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |
 
-## Articulation geometry boundary
+## Read on demand
 
-`sample_initial_articulation_geometry()` adapts domain-neutral articulation
-facts into the geometry consumed by link affordances. Callers pass an
-`ArticulationGeometryProvider`, the explicitly named initial joint state, and
-body scale. The adapter owns Open3D surface sampling, target-link-frame mesh
-transforms, nearest prismatic/revolute ancestor geometry, and the private
-`ObjectSemantics.geometry` keys.
-
-Every non-empty provider link mesh must expose at least one non-degenerate
-triangle surface. The adapter rejects vertices-only or fully degenerate links
-before merging so the target-link and whole-articulation clouds cannot disagree
-about whether a link contributes geometry.
-
-The adapter preserves the complete articulation cloud and separately samples
-all non-target link surfaces. `SlideAffordance`, `PressAffordance`, and
-`TwistAffordance` use only that non-target cloud to sign a parent-joint axis.
-Missing provenance, no non-target samples within twice the target radius, or an
-axial offset within the sampling-error confidence bound is directionally
-ambiguous; never fall back to the complete cloud because its independently
-sampled target surface is noise, not direction evidence.
-
-The adapter returns `ArticulationAffordanceGeometry`; convert it with
-`to_object_geometry()` only when constructing `ObjectSemantics`. Keep random
-sampling and semantic geometry keys out of `objects/articulation.py`.
-
-## Direct resolution path
-
-### 1. Construct the engine
-
-`AtomicActionEngine` owns one `ActionPlanningServices` snapshot: robot, motion
-generator, device, planner backend, trajectory builder, and command profiles.
-Built-ins are installed through the engine catalog. An engine is not a global
-process registry.
-
-The standard simulation composition root is
-`create_simulation_atomic_action_engine()` in `sim_adapter.py`.
-
-### 2. Bind resources
-
-Each action publishes a `SkillBindingContract` with participant slots and
-endpoint requirements. Direct callers may use engine binding helpers. Task
-Program binds a declarative `RobotSkillProfile` to the same engine.
-
-Bindings are immutable endpoint snapshots keyed by `(slot_id, endpoint_id)`.
-They contain capabilities, semantic commands, resource claims, and runtime
-targets. They do not contain live planners or mutable controller state.
-
-### 3. Build an invocation
-
-`ActionInvocation` contains:
-
-- exact action `skill_id`;
-- an action-owned frozen goal;
-- resolved binding;
-- typed action options;
-- motion, tracking, and recovery policy; and
-- a monotonic revision when replacing a compatible in-flight request.
-
-The engine resolves the invocation into `ResolvedActionRequest`. The action's
-framework-owned `plan()` validates exact goal/options types and then calls the
-implementation `_plan(request, context)` hook.
-
-### 4. Choose planning or execution
-
-- `engine.plan(invocation, context)` returns one `ActionPlan`.
-- `engine.compile(invocations, context)` performs a fixed offline projection.
-- `engine.start(invocations, context)` creates an observed `ExecutionSession`.
-- `ExecutionRunner` drives that session against observation, command, and clock
-  ports without blocking `step()`.
-
-## PlanningContext invariants
-
-`PlanningContext` carries robot observation, scene snapshot, symbolic
-`TaskState`, and authoritative `control_dt`.
-
-When session code updates only symbolic state, use:
-
-```python
-replace(context, task=new_task_state)
-```
-
-Do not reconstruct `PlanningContext` from only robot/scene/task fields. Doing so
-loses a caller-selected `control_dt` and changes trajectory timing during held
-object guards, phase gates, retries, or later calls.
-
-Focused regression coverage:
-
-- `tests/sim/atomic_actions/test_engine_per_env.py`
-- `tests/sim/atomic_actions/test_endpoint_runtime_e2e.py`
-
-## Execution and verification
-
-`execution.py` owns session events, attempts, ticks, state transitions, and
-bounded recovery. `verification.py` owns immutable request/result values:
-
-- `EffectVerificationRequest` / `EffectVerificationResult`;
-- `HeldObjectGuardRequest` / `HeldObjectGuardResult`;
-- `PhaseEffectGateRequest` / `PhaseEffectGateResult`; and
-- `EffectExpectationResult`.
-
-The runner correlates every result with the current request ID. A retry or row
-mask change may replace a request, so delayed results for older IDs must not be
-applied.
-
-Held-object guards and phase-effect gates are observational:
-
-- guards can remove an action-authorized held relation before dependent motion;
-- gates can hold a named plan segment until evidence proves a transition; and
-- neither mechanism creates constraints, freezes objects, or overwrites poses.
-
-Pick gates attachment before lift. Place gates detachment before retract.
-HandOver owns independent source/destination transfer boundaries.
-
-## Row-local state
-
-Vector environments share a synchronized call and command cursor, but success,
-failure, retry budgets, held relations, and eligible masks are per row.
-Successful peer rows are not reactivated by a retry on another row.
-
-Use `runner.deactivate_rows()` instead of mutating session masks directly; it
-also refreshes cached verification requests.
-
-## Scene dependencies and recovery
-
-Scene-relative goals declare the exact entity poses they consume. The session
-compares dependency revisions against fresh snapshots and replans only within
-the selected `RecoveryPolicy`.
-
-`PlanningContext.control_dt` is the authoritative control grid. Every emitted
-trajectory or endpoint command must align to it; integrations must not silently
-resample fractional durations.
-
-Tracking recovery is separate from task-level semantic recovery:
-
-- Atomic Actions owns planning failure, target/collision revision, transport
-  acknowledgement, tracking error, timeout, retry, and safe stop.
-- Task Program may perform bounded workflow recovery after the action reaches
-  a semantic effect boundary.
+- [Planning and execution](execution.md): invocation resolution, control grid, row-local recovery and verification.
+- [Articulation geometry](articulation-geometry.md): topology/mesh ownership and directional affordance contracts.
 
 ## Semantic integration boundary
 
@@ -228,20 +93,8 @@ Every `SkillPolicyPreset` selects explicit effect authority:
 
 Projected assurance is not physical task success.
 
-## Adding or changing an Atomic Action
-
-Use `.agents/skills/add-atomic-action/SKILL.md`. The main change sites are:
-
-1. frozen goal/options/affordance contracts;
-2. one `AtomicAction` subclass with exact `skill_id` and binding contract;
-3. side-effect-free `_plan(request, context)` implementation;
-4. built-in registration and exports;
-5. semantic profile/catalog exposure only when the action should be
-   agent-visible; and
-6. focused planning, execution, recovery, registration, docs, and API tests.
-
-Do not add task sequencing, simulator stepping, or global mutable registries to
-an action implementation.
+Use `/add-atomic-action` to extend goals, planners, registration and focused tests.
+Keep planning side-effect-free; actions do not own task sequencing or simulator stepping.
 
 ## Recommended change sites
 
@@ -263,7 +116,7 @@ an action implementation.
 
 ```bash
 pytest -q tests/sim/atomic_actions
-pytest -q tests/lab/semantics
+pytest -q tests/lab/task_program/semantics
 pytest -q tests/lab/task_program
 python docs/scripts/check_api_docs.py
 ```

@@ -38,12 +38,8 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.lab.sim.cfg import LightCfg, MarkerCfg, RenderCfg, RobotCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
-from embodichain.lab.sim.planners import (
-    CuroboPlannerCfg,
-    MotionGenCfg,
-    MotionGenerator,
-    ToppraPlannerCfg,
-)
+from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
+from embodichain.lab.sim.motion.planners import CuroboPlannerCfg, ToppraPlannerCfg
 from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,

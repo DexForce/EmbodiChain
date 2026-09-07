@@ -38,8 +38,8 @@ own `--host`/`--port` options:
 
 ```bash
 python scripts/tutorials/sim/create_scene.py --viser
-python examples/sim/solvers/srs_solver.py --viser
-python examples/sim/workspace/analyze_joint_workspace.py --viser
+python examples/sim/motion/solvers/srs_solver.py --viser
+python examples/sim/motion/workspace/analyze_joint_workspace.py --viser
 embodichain run-env --gym_config path/to/task.ur5.yaml --viser
 ```
 
