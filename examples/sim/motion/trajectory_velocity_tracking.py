@@ -45,6 +45,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.robots import FrankaPandaCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 
 __all__ = [
     "compute_pose_errors",
@@ -373,6 +374,7 @@ def main() -> None:
             num_envs=1,
             arena_space=args.arena_space,
             render_cfg=RenderCfg(renderer=args.renderer),
+            visualization=visualization_cfg_from_args(args),
         )
     )
     try:

@@ -25,8 +25,10 @@ import torch
 import warp as wp
 
 from embodichain.compute.trajectory import (
+    differentiate_positions,
     interpolate_with_distance,
     interpolate_with_nums,
+    resample_in_time,
     resample_with_distance,
     sort_and_padding_key_frame,
     warp_trajectory_qpos,
@@ -38,9 +40,11 @@ from embodichain.utils.utility import inv_transform
 
 __all__ = [
     "compute_pose_offset_related_to_first",
+    "differentiate_positions",
     "get_trajectory_object_offset_qpos",
     "interpolate_with_distance",
     "interpolate_with_nums",
+    "resample_in_time",
     "resample_with_distance",
     "sort_and_padding_key_frame",
     "warp_trajectory_qpos",
