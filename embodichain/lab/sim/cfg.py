@@ -146,6 +146,15 @@ class DLSSCfg:
     exposure_compensation: float = 1.0
     """Positive, finite exposure multiplier used by the RR bridge."""
 
+    frame_time_delta_ms: float = 0.0
+    """Frame interval in milliseconds passed to DexSim's DLSS temporal path.
+
+    The default ``0.0`` intentionally matches ``dexsim.DLSSConfig``: DexSim
+    measures the actual render interval automatically. Set a positive value
+    only for a fixed render cadence; this is a render-frame interval, not a
+    physics or control timestep.
+    """
+
     def __post_init__(self) -> None:
         """Validate scalar types and the ranges of numeric settings."""
         for name in (
@@ -212,6 +221,7 @@ class DLSSCfg:
         dlss.target_width = self.target_width
         dlss.target_height = self.target_height
         dlss.exposure_compensation = self.exposure_compensation
+        dlss.frame_time_delta_ms = self.frame_time_delta_ms
         return dlss
 
 
