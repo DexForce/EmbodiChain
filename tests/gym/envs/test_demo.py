@@ -343,7 +343,7 @@ def test_execute_demo_episode_exposes_declared_progress_total_for_lazy_actions(
             )
 
     def progress(actions, description: str):
-        assert description == "Executing episode #0, segment #1: move_cube"
+        assert description == "Ep 0 · Seg #1 · move_cube"
         assert env.actions == []
         if total is None:
             with pytest.raises(TypeError):

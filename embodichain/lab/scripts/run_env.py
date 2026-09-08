@@ -23,7 +23,7 @@ import select
 import sys
 import time
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence, Sized
 from typing import TYPE_CHECKING, Any
 
 import gymnasium
@@ -46,22 +46,74 @@ from embodichain.lab.gym.utils.registration import (
     discover_task_packages,
     execute_init_hooks,
 )
-from embodichain.utils.logger import log_warning, log_info, log_error
+from embodichain.utils.logger import (
+    decorate_str_color,
+    log_warning,
+    log_info,
+    log_error,
+)
 
 if TYPE_CHECKING:
     from embodichain.lab.visualization import VisualizationRuntime
 
 _REPLAY_CONTROL_POLL_INTERVAL = 0.05
+_ACTIVITY_BAR_WIDTH = 10
+
+
+def _indeterminate_progress(actions: Iterable[Any], description: str) -> Iterator[Any]:
+    """Render an activity bar for an action stream with no exact length."""
+    mode = decorate_str_color("[dynamic]", "yellow")
+
+    def label(position: int, *, done: bool = False) -> str:
+        if done:
+            cells = "━" * _ACTIVITY_BAR_WIDTH
+        else:
+            cells_list = ["·"] * _ACTIVITY_BAR_WIDTH
+            cells_list[position] = "╺"
+            cells = "".join(cells_list)
+        bar = decorate_str_color(f"│{cells}│", "cyan")
+        completion = " ✓" if done else ""
+        return f"Steps  {mode}  {description} {bar}{completion}"
+
+    progress = tqdm.tqdm(
+        total=None,
+        desc=label(0),
+        unit=" step",
+        file=sys.stdout,
+        dynamic_ncols=True,
+        bar_format="{desc} {n_fmt} steps [{elapsed}, {rate_fmt}]",
+    )
+    try:
+        for action in actions:
+            yield action
+            progress.update()
+            cycle_position = progress.n % (2 * _ACTIVITY_BAR_WIDTH - 2)
+            position = min(cycle_position, 2 * _ACTIVITY_BAR_WIDTH - 2 - cycle_position)
+            progress.set_description_str(label(position), refresh=False)
+        progress.set_description_str(label(0, done=True), refresh=False)
+    finally:
+        progress.close()
 
 
 def _progress_wrapper(actions: Iterable[Any], description: str) -> Iterable[Any]:
     """Wrap a segment action iterable in a visible terminal progress bar."""
+    total = len(actions) if isinstance(actions, Sized) else None
+    if total is None:
+        return _indeterminate_progress(actions, description)
+    mode = decorate_str_color("[fixed]", "blue")
     return tqdm.tqdm(
         actions,
+        total=total,
         desc=description,
-        unit="step",
+        unit=" step",
         file=sys.stdout,
         dynamic_ncols=True,
+        colour="cyan",
+        bar_format=(
+            f"Steps  {mode}    {{desc}} {{percentage:3.0f}}%│{{bar}}│ "
+            "{n_fmt}/{total_fmt} "
+            "[{elapsed}<{remaining}, {rate_fmt}]"
+        ),
     )
 
 
@@ -718,7 +770,6 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
         preview(env)
         return
 
-    log_info("Start offline data generation.", color="green")
     # Prepare one clean scene. max_episodes counts persisted per-environment
     # episodes, not vector batches. Every successful generate_function call
     # commits exactly the selected rows and leaves the next batch ready to plan.
@@ -729,34 +780,66 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
     num_envs = int(getattr(_env_target(env), "num_envs", 1))
     if num_envs < 1:
         raise ValueError(f"env.num_envs must be at least 1, got {num_envs}.")
+    max_attempts = int(gym_config.get("demo_max_attempts", 3))
+
+    environment_label = "environment" if num_envs == 1 else "environments"
+    tqdm.tqdm.write(
+        "\n".join(
+            (
+                "╭─ EmbodiChain · Run Task",
+                f"│ Task        {gym_config.get('id', 'unknown')}",
+                f"│ Episodes    {max_episodes}",
+                f"│ Parallel    {num_envs} {environment_label}",
+                f"│ Attempts    {max_attempts} per batch",
+                "╰─",
+            )
+        ),
+        file=sys.stdout,
+    )
 
     saved_episodes = 0
     generated_batches = 0
-    while saved_episodes < max_episodes:
-        batch_episode_count = min(num_envs, max_episodes - saved_episodes)
-        save_env_ids = tuple(range(batch_episode_count))
-        generated = generate_function(
-            env,
-            time_id=saved_episodes,
-            save_path=getattr(args, "save_path", ""),
-            save_video=getattr(args, "save_video", False),
-            debug_mode=getattr(args, "debug_mode", False),
-            save_env_ids=save_env_ids,
-            regenerate=getattr(args, "regenerate", False),
-            max_attempts=gym_config.get("demo_max_attempts", 3),
-            reset_before=False,
-        )
-        if not generated:
-            raise RuntimeError(
-                f"Failed to generate episode batch starting at {saved_episodes} after "
-                f"{gym_config.get('demo_max_attempts', 3)} attempts."
+    with tqdm.tqdm(
+        total=max_episodes,
+        desc="Collecting episodes",
+        unit="episode",
+        file=sys.stdout,
+        dynamic_ncols=True,
+        colour="green",
+        bar_format=(
+            "{desc:<22} {percentage:3.0f}%│{bar}│ {n_fmt}/{total_fmt} "
+            "[{elapsed}<{remaining}, {rate_fmt}]"
+        ),
+    ) as episode_progress:
+        while saved_episodes < max_episodes:
+            batch_episode_count = min(num_envs, max_episodes - saved_episodes)
+            save_env_ids = tuple(range(batch_episode_count))
+            generated = generate_function(
+                env,
+                time_id=saved_episodes,
+                save_path=getattr(args, "save_path", ""),
+                save_video=getattr(args, "save_video", False),
+                debug_mode=getattr(args, "debug_mode", False),
+                save_env_ids=save_env_ids,
+                regenerate=getattr(args, "regenerate", False),
+                max_attempts=max_attempts,
+                reset_before=False,
             )
-        saved_episodes += batch_episode_count
-        generated_batches += 1
+            if not generated:
+                raise RuntimeError(
+                    f"Failed to generate episode batch starting at {saved_episodes} "
+                    f"after {max_attempts} attempts."
+                )
+            saved_episodes += batch_episode_count
+            generated_batches += 1
+            episode_progress.update(batch_episode_count)
 
-    log_info(
-        f"Committed {saved_episodes} episode(s) in {generated_batches} vector batch(es).",
-        color="green",
+    episode_label = "episode" if saved_episodes == 1 else "episodes"
+    batch_label = "batch" if generated_batches == 1 else "batches"
+    tqdm.tqdm.write(
+        f"✓ Collection complete · {saved_episodes} {episode_label} saved in "
+        f"{generated_batches} {batch_label}",
+        file=sys.stdout,
     )
 
     # Log the trajectory save location before cli() tears down the sim and, by
