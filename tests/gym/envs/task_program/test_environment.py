@@ -23,6 +23,7 @@ from unittest.mock import Mock
 
 import pytest
 import torch
+from tensordict import TensorDict
 
 from embodichain.lab.gym.envs.task_program.bridge import (
     TaskProgramDemoBridge,
@@ -529,6 +530,26 @@ def test_embodied_env_delegates_compilation_and_bridge_assembly() -> None:
     assert segment.name == "invoke:pick"
     assert segment.failure_policy == "row_independent"
     segment_iterator.close()
+
+
+def test_adapter_assembles_position_velocity_command_encoder() -> None:
+    adapter = TaskProgramEnvironmentAdapter(
+        _FakeEnvironmentFactory(),
+        step_dt=_STEP_DT,
+        joint_command_mode="position_velocity",
+    )
+
+    assembly = adapter.assemble_runtime(_program().integration)
+    assembly.observation_provider.observe(
+        TaskState(batch_size=_BATCH_SIZE, device="cpu")
+    )
+    action = assembly.command_encoder.encode_idle_hold(
+        torch.arange(_BATCH_SIZE, dtype=torch.long)
+    )
+
+    assert adapter.joint_command_mode == "position_velocity"
+    assert isinstance(action, TensorDict)
+    assert torch.equal(action["qvel"], torch.zeros(_BATCH_SIZE, _ROBOT_DOF))
 
 
 def test_later_sequential_resource_error_fails_before_observation_or_action() -> None:

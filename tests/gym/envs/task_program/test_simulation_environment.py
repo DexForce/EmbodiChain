@@ -53,6 +53,7 @@ from embodichain.lab.task_program.integrations import (
     create_simulation_task_program_adapter,
 )
 import embodichain.lab.task_program.integrations.simulation.environment as simulation_environment_module
+from embodichain.lab.gym.envs.expert_trajectory import ExpertTrajectoryCfg
 from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
 from embodichain.lab.task_program.integrations.simulation.environment import (
     SharedTickSceneProvider,
@@ -1466,6 +1467,33 @@ def test_simulation_factory_returns_exact_environment_adapter() -> None:
     assert type(adapter) is TaskProgramEnvironmentAdapter
     assert adapter.step_dt == pytest.approx(_STEP_DT)
     assert factory.segment_policy_port is not None
+
+
+def test_simulation_factory_uses_environment_expert_joint_command_mode() -> None:
+    robot = _Robot()
+    simulation = _Simulation(robot)
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
+    )
+    environment = SimpleNamespace(
+        sim=simulation,
+        robot=robot,
+        step_dt=_STEP_DT,
+        cfg=SimpleNamespace(
+            expert_trajectory=ExpertTrajectoryCfg(
+                joint_command_mode="position_velocity"
+            )
+        ),
+    )
+
+    factory = SimulationTaskProgramFactory.from_environment(
+        environment,
+        registration=registration,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+
+    assert factory.create_adapter().joint_command_mode == "position_velocity"
 
 
 def test_adapter_factory_binds_registration_to_initialized_environment(
