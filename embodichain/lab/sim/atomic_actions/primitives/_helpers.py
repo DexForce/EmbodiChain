@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.utility.action_utils import resample_with_distance
+from embodichain.compute.trajectory import resample_with_distance
 
 from ..bindings import EndpointBinding
 from ..state import PlanningContext
@@ -31,7 +31,7 @@ from ..trajectory_ops import build_pose_plan_states
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
-    from embodichain.lab.sim.planners import MotionGenerator
+    from embodichain.lab.sim.motion.motion_generator import MotionGenerator
 
     from ..policies import MotionPolicy
 

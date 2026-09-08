@@ -1267,12 +1267,14 @@ class GeneralActionBank(ActionBank):
         vis: bool = False,
         **kwargs,
     ) -> np.ndarray:
-        from embodichain.lab.sim.planners import (
-            MoveType,
-            PlanState,
+        from embodichain.lab.sim.motion.motion_generator import (
             MotionGenerator,
             MotionGenCfg,
             MotionGenOptions,
+        )
+        from embodichain.lab.sim.motion.planners import (
+            MoveType,
+            PlanState,
             ToppraPlanOptions,
             ToppraPlannerCfg,
         )

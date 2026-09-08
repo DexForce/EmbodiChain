@@ -284,7 +284,7 @@ class GravitySettler:
                 attrs=self._rigid_body_attrs(physics),
                 body_type=body_type,
                 max_convex_hull_num=self._max_convex_hull_num(physics),
-                acd_method="vhacd",
+                acd_method="visacd",
             )
         )
 

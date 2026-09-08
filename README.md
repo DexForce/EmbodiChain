@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/github/license/DexForce/EmbodiChain?style=for-the-badge)](LICENSE)
 [![Website](https://img.shields.io/badge/website-dexforce.com-yellow?style=for-the-badge&logo=google-chrome&logoColor=white)](https://dexforce.com/embodichain/index.html#/)
 [![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-docs-blue?style=for-the-badge&logo=github&logoColor=white)](https://dexforce.github.io/EmbodiChain/main/index.html)
-[![Python](https://img.shields.io/badge/python-3.10%20|%203.11-blue?style=for-the-badge&logo=python&logoColor=white)](https://docs.python.org/3/whatsnew/3.10.html)
+[![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-blue?style=for-the-badge&logo=python&logoColor=white)](https://docs.python.org/3/whatsnew/3.12.html)
 [![Version](https://img.shields.io/github/v/release/DexForce/EmbodiChain?style=for-the-badge&label=version)](https://github.com/DexForce/EmbodiChain/releases)
 ---
 

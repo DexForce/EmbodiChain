@@ -22,11 +22,11 @@ from dataclasses import replace
 
 import torch
 
-from embodichain.lab.sim.planners.motion_generator import (
+from embodichain.lab.sim.motion.motion_generator import (
     MotionGenOptions,
     MotionGenerator,
 )
-from embodichain.lab.sim.planners.utils import (
+from embodichain.lab.sim.motion.planners.utils import (
     MoveType,
     PlanResult,
     PlanState,

@@ -41,6 +41,9 @@ class CameraCfg(SensorCfg):
         The extrinsics define the position and orientation of the camera in the 3D world.
         If eye, target, and up are provided, they will be used to compute the extrinsics.
         Otherwise, the position and orientation will be set to the defaults.
+
+        SimulationManager resolves ``parent`` as a Robot or Articulation link
+        name. Use ``"<asset_uid>/<link_name>"`` when the link name is ambiguous.
         """
 
         eye: Tuple[float, float, float] | None = None
@@ -136,6 +139,7 @@ class Camera(BaseSensor):
     def __init__(
         self, config: CameraCfg, device: torch.device = torch.device("cpu")
     ) -> None:
+        self._is_attached = False
         super().__init__(config, device)
 
     def _build_sensor_from_config(
@@ -202,8 +206,6 @@ class Camera(BaseSensor):
                 )
 
         self.cfg: CameraCfg = config
-        if self.cfg.extrinsics.parent is not None:
-            self._attach_to_entity()
 
     @cached_property
     def group_id(self) -> int:
@@ -221,7 +223,7 @@ class Camera(BaseSensor):
         Returns:
             bool: True if the camera is attached to a parent entity, False otherwise.
         """
-        return self.cfg.extrinsics.parent is not None
+        return self._is_attached
 
     def update(self, **kwargs) -> None:
         """Update the sensor data.
@@ -268,22 +270,35 @@ class Camera(BaseSensor):
                 self._frame_buffer.get_position_gpu_buffer().to(self.device)[..., :3]
             )
 
-    def _attach_to_entity(self) -> None:
-        """Attach the sensor to the parent entity in each environment."""
-        env = self._world.get_env()
-        for i, entity in enumerate(self._entities):
+    def attach_to_parent_nodes(
+        self, parent_nodes: Sequence[dexsim.engine.Node]
+    ) -> None:
+        """Attach camera views to one resolved parent node per environment.
 
-            parent = None
-            if i == 0:
-                parent = env.find_node(f"{self.cfg.extrinsics.parent}")
-            else:
-                parent = env.find_node(f"{self.cfg.extrinsics.parent}.{i-1}")
-            if parent is None:
-                logger.log_error(
-                    f"Failed to find parent entity {self.cfg.extrinsics.parent} for sensor {self.cfg.uid}."
-                )
+        SimulationManager calls this after resolving ``extrinsics.parent``.
+        Cameras constructed directly can be attached by supplying their parent
+        render nodes explicitly.
 
+        Args:
+            parent_nodes: Parent render nodes ordered by environment index.
+
+        Raises:
+            RuntimeError: If the parent count differs from the camera count.
+            ValueError: If any parent node is missing.
+        """
+        nodes = list(parent_nodes)
+        if len(nodes) != self.num_instances:
+            raise RuntimeError(
+                f"Camera attachment received {len(nodes)} parent nodes for "
+                f"{self.num_instances} camera instances."
+            )
+        if any(node is None for node in nodes):
+            raise ValueError("Camera attachment requires a parent node in every arena.")
+        for entity, parent in zip(self._entities, nodes, strict=True):
             entity.attach_node(parent)
+        # Reapply parent-relative extrinsics after reparenting the camera views.
+        self.reset()
+        self._is_attached = True
 
     def set_local_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | None = None

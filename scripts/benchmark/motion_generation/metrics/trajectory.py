@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.planners.utils import PlanResult
+from embodichain.lab.sim.motion.planners.utils import PlanResult
 
 from ..models import BenchmarkCase, CaseOutcome
 from .stats import nearest_rank_percentile

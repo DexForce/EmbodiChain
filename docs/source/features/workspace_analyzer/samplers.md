@@ -10,7 +10,7 @@ grid may return a nearby grid-sized count).
 ```python
 import torch
 
-from embodichain.lab.sim.workspace.samplers import UniformSampler
+from embodichain.lab.sim.motion.workspace.samplers import UniformSampler
 
 bounds = torch.tensor(
     [
@@ -49,8 +49,8 @@ sampling; it does not apply a spherical geometric constraint.
 Use `create_sampler` when the strategy comes from configuration:
 
 ```python
-from embodichain.lab.sim.workspace.configs import SamplingStrategy
-from embodichain.lab.sim.workspace.samplers import create_sampler
+from embodichain.lab.sim.motion.workspace.configs import SamplingStrategy
+from embodichain.lab.sim.motion.workspace.samplers import create_sampler
 
 sampler = create_sampler(
     SamplingStrategy.SOBOL,
@@ -89,7 +89,7 @@ Select a strategy through `SamplingConfig`; `WorkspaceAnalyzer` creates the
 matching sampler and uses it for joint- and Cartesian-space sampling:
 
 ```python
-from embodichain.lab.sim.workspace.configs import (
+from embodichain.lab.sim.motion.workspace.configs import (
     SamplingConfig,
     SamplingStrategy,
 )

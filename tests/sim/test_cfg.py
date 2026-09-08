@@ -21,7 +21,13 @@ import pytest
 
 from dexsim.types import DenoiserType, Renderer, ToneMappingType
 
-from embodichain.lab.sim.cfg import ArticulationCfg, PhysicsCfg, RenderCfg, RobotCfg
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    DLSSCfg,
+    PhysicsCfg,
+    RenderCfg,
+    RobotCfg,
+)
 
 
 def test_articulation_cfg_defaults_to_no_joint_drive() -> None:
@@ -145,3 +151,167 @@ def test_render_cfg_rejects_invalid_image_processing_settings(
     """Invalid image-processing values fail at configuration construction."""
     with pytest.raises(ValueError):
         RenderCfg(**{field_name: invalid_value})
+
+
+def test_dlss_defaults_enable_offscreen_and_preserve_quality_resolution() -> None:
+    """Offscreen DLSS defaults on while quality and resolution retain native defaults."""
+    native = dexsim.DLSSConfig()
+    converted = DLSSCfg().to_dexsim_cfg(1920, 1080)
+
+    for name in DLSSCfg().to_dict():
+        if name not in ("upsample_ratio", "offscreen_dlss_enabled"):
+            assert getattr(converted, name) == getattr(native, name), name
+    assert converted.render_width == converted.render_height == 0
+    assert converted.dlss_quality == 2
+    assert converted.offscreen_dlss_enabled is True
+
+
+@pytest.mark.parametrize("rr_enabled", [False, True])
+@pytest.mark.parametrize("sr_enabled", [False, True])
+def test_dlss_features_are_independent(rr_enabled: bool, sr_enabled: bool) -> None:
+    """RR and SR selections survive conversion independently."""
+    converted = DLSSCfg(
+        rayreconstruction_enabled=rr_enabled,
+        upscale_enabled=sr_enabled,
+    ).to_dexsim_cfg(1920, 1080)
+
+    assert converted.rayreconstruction_enabled is rr_enabled
+    assert converted.upscale_enabled is sr_enabled
+
+
+@pytest.mark.parametrize("quality", range(-1, 6))
+def test_dlss_quality_presets_keep_automatic_render_dimensions(quality: int) -> None:
+    """EmbodiChain forwards quality instead of hard-coding an internal scale."""
+    converted = DLSSCfg(dlss_quality=quality).to_dexsim_cfg(1920, 1080)
+
+    assert converted.dlss_quality == quality
+    assert converted.render_width == converted.render_height == 0
+
+
+@pytest.mark.parametrize(
+    ("render_size", "expected_size"),
+    [
+        ((0, 0), (960, 540)),
+        ((1280, 0), (1280, 540)),
+        ((0, 720), (960, 720)),
+        ((1280, 720), (1280, 720)),
+    ],
+)
+def test_dlss_ratio_uses_window_size_and_preserves_explicit_dimensions(
+    render_size: tuple[int, int], expected_size: tuple[int, int]
+) -> None:
+    """The ratio fills only zero dimensions using the actual window target."""
+    converted = DLSSCfg(
+        upsample_ratio=2.0,
+        render_width=render_size[0],
+        render_height=render_size[1],
+        target_width=3840,
+        target_height=2160,
+        exposure_compensation=1.5,
+    ).to_dexsim_cfg(1920, 1080)
+
+    assert (converted.render_width, converted.render_height) == expected_size
+    assert (converted.target_width, converted.target_height) == (3840, 2160)
+    assert converted.exposure_compensation == pytest.approx(1.5)
+
+
+def test_dlss_ratio_clamps_small_internal_dimensions() -> None:
+    """An explicit ratio cannot produce an invalid zero-pixel render target."""
+    converted = DLSSCfg(upsample_ratio=8.0).to_dexsim_cfg(4, 2)
+
+    assert converted.render_width == converted.render_height == 1
+
+
+def test_render_cfg_instances_do_not_share_dlss_settings() -> None:
+    """Changing one rendering configuration does not alter another."""
+    first, second = RenderCfg(), RenderCfg()
+    first.dlss.dlss_enabled = False
+
+    assert second.dlss.dlss_enabled is True
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("dlss_quality", -2),
+        ("dlss_quality", 6),
+        ("dlss_quality", 2.5),
+        ("render_width", -1),
+        ("render_height", -1),
+        ("target_width", -1),
+        ("target_height", -1),
+        ("render_width", 1.5),
+        ("upsample_ratio", 0.5),
+        ("upsample_ratio", float("inf")),
+        ("upsample_ratio", float("nan")),
+        ("upsample_ratio", "2.0"),
+        ("upsample_ratio", True),
+        ("upsample_ratio", []),
+        ("upsample_ratio", {}),
+        ("exposure_compensation", 0.0),
+        ("exposure_compensation", -1.0),
+        ("exposure_compensation", float("inf")),
+        ("exposure_compensation", float("nan")),
+        ("exposure_compensation", "1.0"),
+        ("exposure_compensation", True),
+        ("exposure_compensation", None),
+        ("exposure_compensation", []),
+        ("exposure_compensation", {}),
+    ],
+)
+def test_dlss_rejects_invalid_settings(field_name: str, invalid_value: object) -> None:
+    """Invalid DLSS values fail before native configuration or rendering."""
+    with pytest.raises(ValueError, match=field_name):
+        DLSSCfg(**{field_name: invalid_value})
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "dlss_enabled",
+        "offscreen_dlss_enabled",
+        "rayreconstruction_enabled",
+        "upscale_enabled",
+    ],
+)
+@pytest.mark.parametrize("invalid_value", ["false", 0, 1, None])
+def test_dlss_rejects_non_boolean_switches(
+    field_name: str, invalid_value: object
+) -> None:
+    """Switches require booleans instead of silently coercing task config values."""
+    with pytest.raises(ValueError, match=field_name):
+        DLSSCfg(**{field_name: invalid_value})
+
+
+@pytest.mark.parametrize("value", [2, 2.0])
+def test_dlss_accepts_integer_and_float_numeric_settings(value: int | float) -> None:
+    """Both JSON/YAML numeric representations remain valid for real-valued settings."""
+    converted = DLSSCfg(
+        upsample_ratio=value, exposure_compensation=value
+    ).to_dexsim_cfg(1920, 1080)
+
+    assert (converted.render_width, converted.render_height) == (960, 540)
+    assert converted.exposure_compensation == pytest.approx(2.0)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("upsample_ratio", 0.0),
+        ("upsample_ratio", "2.0"),
+        ("exposure_compensation", "1.0"),
+        ("dlss_enabled", "false"),
+        ("offscreen_dlss_enabled", 0),
+        ("rayreconstruction_enabled", 1),
+        ("upscale_enabled", None),
+    ],
+)
+def test_dlss_conversion_revalidates_mutated_settings(
+    field_name: str, invalid_value: object
+) -> None:
+    """Mutable config edits are checked before entering the native binding."""
+    config = DLSSCfg()
+    setattr(config, field_name, invalid_value)
+
+    with pytest.raises(ValueError, match=field_name):
+        config.to_dexsim_cfg(1920, 1080)

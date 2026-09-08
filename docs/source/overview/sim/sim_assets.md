@@ -100,9 +100,13 @@ Configured via {class}`~cfg.RigidObjectCfg`.
 | `shape` | `ShapeCfg` | `ShapeCfg()` | Shape configuration (e.g., Mesh, Box). |
 | `attrs` | `RigidBodyAttributesCfg` | `RigidBodyAttributesCfg()` | Physical attributes. |
 | `body_type` | `Literal` | `"dynamic"` | "dynamic", "kinematic", or "static". |
-| `max_convex_hull_num` | `int` | `1` | Max convex hulls for decomposition (CoACD). |
+| `max_convex_hull_num` | `int` | `1` | Maximum hull count for approximate convex decomposition. |
+| `shape.acd_method` | `str` | `"visacd"` | Decomposition method. `visacd` is the default; `coacd` and `vhacd` remain available. |
 | `sdf_resolution` | `int` | `0` | Resolution for signed distance field. In most cases, a resolution of around 250 produces good results; resolutions exceeding 1000 are rarely necessary.|
 | `body_scale` | `tuple` | `(1.0, 1.0, 1.0)` | Scale of the rigid body. |
+
+`visacd` requires CUDA support. Select `coacd` or `vhacd` explicitly when that
+requirement is unavailable.
 
 ### Rigid Body Attributes
 

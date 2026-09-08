@@ -398,6 +398,28 @@ def test_launcher_preserves_gym_renderer_when_cli_omits_override():
     assert merged_config["render_cfg"]["renderer"] == "rt"
 
 
+def test_launcher_seed_overrides_gym_config() -> None:
+    """The common launcher exposes an explicit task-environment seed override."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+
+    args = parser.parse_args(["--gym_config", "gym_config.yaml", "--seed", "1234"])
+    merged_config = merge_args_with_gym_config(args, {"seed": 99})
+
+    assert merged_config["seed"] == 1234
+
+
+def test_launcher_preserves_config_seed_without_override() -> None:
+    """Omitting ``--seed`` keeps the value declared by the task config."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+
+    args = parser.parse_args(["--gym_config", "gym_config.yaml"])
+    merged_config = merge_args_with_gym_config(args, {"seed": 99})
+
+    assert merged_config["seed"] == 99
+
+
 def test_env_launcher_includes_viser_arguments():
     """The common environment launcher registers Viser options by default."""
     parser = argparse.ArgumentParser()
@@ -1363,9 +1385,99 @@ class TestConfigToCfgFromFile:
                 source_path=tmp_path / "env.yaml",
             )
 
+    @pytest.mark.parametrize("extension", ["json", "yaml"])
+    @pytest.mark.parametrize(
+        ("field_name", "invalid_value"),
+        [
+            ("dlss_enabled", "false"),
+            ("offscreen_dlss_enabled", 0),
+            ("rayreconstruction_enabled", 1),
+            ("upscale_enabled", None),
+            ("upsample_ratio", "2.0"),
+            ("exposure_compensation", "1.0"),
+        ],
+    )
+    def test_gym_config_rejects_wrongly_typed_dlss_scalars(
+        self,
+        tmp_path: Path,
+        extension: str,
+        field_name: str,
+        invalid_value: object,
+    ) -> None:
+        """Malformed file values fail at DLSS decoding with the offending field name."""
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "env": {},
+            "robot": {
+                "class_type": "URRobot",
+                "robot_type": "ur5",
+                "uid": "TestUR5",
+            },
+            "render_cfg": {"dlss": {field_name: invalid_value}},
+        }
+        config_path = tmp_path / f"gym_config.{extension}"
+        save_config(config_path, config)
+
+        with pytest.raises(ValueError, match=field_name):
+            config_to_cfg(
+                load_config(config_path), manager_modules=DEFAULT_MANAGER_MODULES
+            )
+
+    @pytest.mark.parametrize("suffix", ["yaml", "json"])
+    @pytest.mark.parametrize("enabled", [None, False, True])
+    def test_gym_config_preserves_entity_gizmo_startup_preference(
+        self, tmp_path: Path, suffix: str, enabled: bool | None
+    ) -> None:
+        """Task deployments default to native interaction and can opt out."""
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "env": {},
+            "robot": {"uid": "TestRobot"},
+        }
+        if enabled is not None:
+            config["enable_entity_gizmo"] = enabled
+        config_path = tmp_path / f"gym_config.{suffix}"
+        save_config(config_path, config)
+
+        cfg = config_to_cfg(
+            load_config(config_path), manager_modules=DEFAULT_MANAGER_MODULES
+        )
+
+        assert cfg.sim_cfg.enable_entity_gizmo is (enabled is not False)
+
+    @pytest.mark.parametrize("suffix", ["yaml", "json"])
+    @pytest.mark.parametrize(
+        "settings", [None, {}, {"ik_solver": "embodichain"}, {"ik_start_enabled": True}]
+    )
+    def test_gym_config_parses_automatic_robot_gizmo_settings(
+        self, tmp_path: Path, suffix: str, settings: dict | None
+    ) -> None:
+        """Deployments may disable automatic IK controls or select their solver."""
+        path = tmp_path / f"gym_config.{suffix}"
+        save_config(
+            path,
+            {
+                "id": "EmbodiedEnv-v1",
+                "env": {},
+                "robot": {"uid": "robot"},
+                "robot_ik_gizmo": settings,
+            },
+        )
+        cfg = config_to_cfg(load_config(path), manager_modules=DEFAULT_MANAGER_MODULES)
+        if settings is None:
+            assert cfg.sim_cfg.robot_ik_gizmo is None
+        else:
+            assert cfg.sim_cfg.robot_ik_gizmo.ik_solver == settings.get(
+                "ik_solver", "dexsim"
+            )
+            assert cfg.sim_cfg.robot_ik_gizmo.ik_start_enabled is settings.get(
+                "ik_start_enabled", False
+            )
+
     def test_yaml_gym_config_parses_to_cfg(self, tmp_path):
         config = {
             "id": "EmbodiedEnv-v1",
+            "seed": 2026,
             "max_episode_steps": 100,
             "physics_config": {
                 "gravity": [0.0, 0.0, -1.62],
@@ -1379,6 +1491,13 @@ class TestConfigToCfgFromFile:
                 "spp": 4,
                 "tone_mapping_enabled": True,
                 "tone_mapping_exposure": 1.25,
+                "dlss": {
+                    "dlss_enabled": True,
+                    "offscreen_dlss_enabled": True,
+                    "rayreconstruction_enabled": False,
+                    "upscale_enabled": True,
+                    "dlss_quality": 1,
+                },
             },
             "visualization": {
                 "backend": "viser",
@@ -1391,7 +1510,15 @@ class TestConfigToCfgFromFile:
             "env": {
                 "sim_steps_per_control": 2,
                 "target_control_frequency": 20.0,
-                "events": {},
+                "events": {
+                    "global_light": {
+                        "func": "randomize_emission_light",
+                        "mode": "interval",
+                        "interval_step": 7,
+                        "is_global": True,
+                        "params": {"intensity_range": [0.1, 0.9]},
+                    }
+                },
                 "observations": {},
                 "rewards": {},
             },
@@ -1418,6 +1545,9 @@ class TestConfigToCfgFromFile:
         cfg = config_to_cfg(loaded, manager_modules=DEFAULT_MANAGER_MODULES)
 
         assert cfg.max_episode_steps == 100
+        assert cfg.seed == 2026
+        assert cfg.events.global_light.interval_step == 7
+        assert cfg.events.global_light.is_global is True
         assert cfg.robot.uid == "TestRobot"
         assert cfg.sim_steps_per_control == 2
         assert cfg.target_control_frequency == 20.0
@@ -1432,6 +1562,17 @@ class TestConfigToCfgFromFile:
         assert cfg.sim_cfg.render_cfg.spp == 4
         assert cfg.sim_cfg.render_cfg.tone_mapping_enabled is True
         assert cfg.sim_cfg.render_cfg.tone_mapping_exposure == 1.25
+        from embodichain.lab.sim import DLSSCfg
+        import dexsim
+
+        assert isinstance(cfg.sim_cfg.render_cfg.dlss, DLSSCfg)
+        world_config = dexsim.WorldConfig()
+        cfg.sim_cfg.render_cfg.apply_to_dexsim_config(world_config)
+        assert world_config.dlss_config.dlss_enabled is True
+        assert world_config.dlss_config.offscreen_dlss_enabled is True
+        assert world_config.dlss_config.rayreconstruction_enabled is False
+        assert world_config.dlss_config.upscale_enabled is True
+        assert world_config.dlss_config.dlss_quality == 1
         assert cfg.sim_cfg.visualization.backend == "viser"
         assert cfg.sim_cfg.visualization.scene_fps == 12.5
         assert cfg.sim_cfg.visualization.viser_server.host == "0.0.0.0"

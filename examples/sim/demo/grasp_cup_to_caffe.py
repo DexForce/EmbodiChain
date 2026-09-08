@@ -39,7 +39,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyAttributesCfg,
     ArticulationCfg,
 )
-from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
+from embodichain.compute.trajectory import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger

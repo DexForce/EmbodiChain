@@ -79,9 +79,7 @@ def main(
             visualization=visualization or VisualizationCfg(),
         )
     )
-    # Keep pose conversion, IK, and FK error measurement deterministic. In automatic
-    # mode the engine thread may advance the robot base between these operations.
-    sim.set_manual_update(True)
+    # Keep physics paused during pose conversion, IK, and FK error measurement.
 
     try:
         arm_name = "left_arm"

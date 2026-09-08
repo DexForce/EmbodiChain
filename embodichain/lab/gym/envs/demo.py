@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any, Literal
@@ -197,6 +197,10 @@ class DemoSegment:
             behavior. ``"row_independent"`` permanently freezes only failed
             environment rows while peers continue through the shared segment
             and later lazy segments.
+        progress_total_steps: Optional exact action count used by terminal
+            progress wrappers. Leave this as ``None`` when the segment can
+            replan, retry, or otherwise emit a data-dependent number of
+            actions.
     """
 
     actions: Iterable[Any]
@@ -211,6 +215,7 @@ class DemoSegment:
         compare=False,
     )
     failure_policy: Literal["batch_abort", "row_independent"] = "batch_abort"
+    progress_total_steps: int | None = None
 
     def __post_init__(self) -> None:
         if self.abort_actions is not None and not callable(self.abort_actions):
@@ -219,6 +224,10 @@ class DemoSegment:
             raise ValueError(
                 "failure_policy must be 'batch_abort' or 'row_independent'."
             )
+        if self.progress_total_steps is not None and (
+            type(self.progress_total_steps) is not int or self.progress_total_steps < 1
+        ):
+            raise ValueError("progress_total_steps must be a positive integer or None.")
 
 
 @dataclass(frozen=True)
@@ -514,6 +523,22 @@ ProgressWrapper = Callable[[Iterable[Any], str], Iterable[Any]]
 StopPredicate = Callable[[], bool]
 
 
+@dataclass(frozen=True)
+class _SizedActionIterable:
+    """Expose a declared action count without materializing a lazy iterable."""
+
+    actions: Iterable[Any]
+    total_steps: int
+
+    def __iter__(self) -> Iterator[Any]:
+        """Return the original lazy action iterator."""
+        return iter(self.actions)
+
+    def __len__(self) -> int:
+        """Return the exact declared number of action steps."""
+        return self.total_steps
+
+
 def _env_target(env: Any) -> Any:
     """Return the unwrapped environment when available."""
     return getattr(env, "unwrapped", env)
@@ -618,7 +643,11 @@ def resolve_demo_segments(env: Any, **kwargs: Any) -> Iterable[DemoSegment]:
                 "create_demo_action_list()."
             )
         actions = legacy_creator(**kwargs)
-        segments = None if actions is None else (DemoSegment(actions, name="legacy"),)
+        segments = (
+            ()
+            if actions is None
+            else (DemoSegment(actions, name="legacy", metadata={"segment_count": 1}),)
+        )
 
     if segments is None:
         return ()
@@ -759,9 +788,17 @@ def execute_demo_episode(
             if actions is None:
                 actions = ()
             if progress is not None:
+                if segment.progress_total_steps is not None:
+                    actions = _SizedActionIterable(
+                        actions, segment.progress_total_steps
+                    )
+                segment_total = segment.metadata.get("segment_count")
+                segment_label = f"#{segment_id + 1}"
+                if type(segment_total) is int and segment_total > segment_id:
+                    segment_label = f"{segment_id + 1}/{segment_total}"
                 actions = progress(
                     actions,
-                    f"Executing episode #{episode_index}, segment #{segment_id}: "
+                    f"Executing episode #{episode_index}, segment {segment_label}: "
                     f"{segment.name}",
                 )
 

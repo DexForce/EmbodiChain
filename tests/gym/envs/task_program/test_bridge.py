@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -44,6 +45,9 @@ from embodichain.lab.sim.atomic_actions.execution import (
     ExecutionEvent,
     ExecutionEventKind,
 )
+from embodichain.lab.sim.atomic_actions.policies import MotionPolicy, RecoveryPolicy
+from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
+from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
 from embodichain.lab.sim.atomic_actions.runner import ExecutionRunnerCfg
 from embodichain.lab.sim.atomic_actions.runtime_commands import (
     EndpointCommand,
@@ -57,7 +61,13 @@ from embodichain.lab.sim.atomic_actions.state import (
     SceneSnapshot,
     TaskState,
 )
-from embodichain.lab.task_program.semantics.calls import RegisteredSemanticCall
+from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
+from embodichain.lab.task_program.semantics.calls import (
+    Pick,
+    Place,
+    RegisteredSemanticCall,
+)
+from embodichain.lab.task_program.semantics.scene import SceneObjectRef
 from embodichain.lab.task_program.runtime.parallel import ParallelTimingPolicy
 from embodichain.lab.task_program.runtime.results import (
     SemanticExecutionResult,
@@ -69,11 +79,16 @@ from embodichain.lab.task_program.runtime.parallel_executor import (
     ParallelSemanticExecutionResult,
     ParallelSemanticExecutor,
 )
-from embodichain.lab.task_program.semantics.profiles import ResourceClaim
+from embodichain.lab.task_program.semantics.profiles import (
+    EffectAssurance,
+    ResourceClaim,
+    SkillPolicyPreset,
+)
 
 STEP_DT = 0.02
 BATCH_SIZE = 2
 ROBOT_DOF = 5
+PROGRESS_SAMPLE_COUNT = 40
 
 
 class _QposProvider:
@@ -894,6 +909,55 @@ def _bridge(
         parallel_safety_validator=parallel_safety_validator,
     )
     return bridge, runtime, clock
+
+
+@pytest.mark.parametrize(
+    "overrides, expected_total",
+    [
+        ({}, 2 * PROGRESS_SAMPLE_COUNT),
+        ({"motion_policy": MotionPolicy(strategy="motion_gen")}, None),
+        ({"recovery_policy": RecoveryPolicy()}, None),
+        ({"tracking_policy": TrackingPolicy.joint_position()}, None),
+        ({"tracking_policy": TrackingPolicy.timed(settle_duration=STEP_DT)}, None),
+    ],
+)
+def test_bridge_progress_counts_only_fixed_pick_place_calls(
+    overrides, expected_total
+) -> None:
+    """Only fixed paths expose a total, without starting or analyzing a workflow."""
+    cube = SceneObjectRef("cube")
+    calls = (Pick(cube), Place(cube, on=SceneObjectRef("table")))
+    bridge, runtime, _ = _bridge(
+        duration=STEP_DT,
+        segment=_FakeSegment(
+            calls=tuple(_FakeCompiledCall(i, call) for i, call in enumerate(calls))
+        ),
+        runner_cfg=ExecutionRunnerCfg(
+            minimum_cycle_time=0.0,
+            hold_on_completion=False,
+            hold_during_effect_verification=False,
+        ),
+    )
+    policies = {
+        "motion_policy": MotionPolicy(sample_count=PROGRESS_SAMPLE_COUNT),
+        "recovery_policy": RecoveryPolicy(max_replans=0, max_action_retries=0),
+        "tracking_policy": TrackingPolicy.timed(),
+        **overrides,
+    }
+    compiler = Mock()
+    compiler.integration.link_call.return_value.preset = SkillPolicyPreset(
+        "progress",
+        effect_assurance=EffectAssurance.PROJECTED,
+        action_option_templates={"pick": PickUpOptions(), "place": PlaceOptions()},
+        **policies,
+    )
+    runtime.compiler = compiler
+
+    demo_segment = next(bridge.iter_segments())
+
+    assert demo_segment.progress_total_steps == expected_total
+    compiler.analyze.assert_not_called()
+    assert runtime.start_count == 0
 
 
 def test_bridge_snapshots_runner_cfg_before_lazy_parallel_creation() -> None:

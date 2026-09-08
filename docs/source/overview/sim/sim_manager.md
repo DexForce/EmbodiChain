@@ -62,57 +62,20 @@ PCM and TGS remain enabled, enhanced determinism remains disabled, and friction
 is evaluated on every solver iteration. These solver implementation details use
 fixed defaults and are not exposed by `PhysicsCfg`.
 
-### Render Configuration
+### Rendering
 
-The {class}`~cfg.RenderCfg` class controls the rendering backend and quality settings.
+Rendering configuration and advanced renderer features live in the dedicated
+{doc}`sim_manager/rendering/index` section. Start with
+{doc}`sim_manager/rendering/configuration` for renderer selection and common
+image-quality settings, then see {doc}`sim_manager/rendering/dlss` for DLSS
+behavior, quality modes, frame timing, and
+availability/fallback notes.
 
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `renderer` | `str` | `"auto"` | Renderer backend to use. Options are `'auto'` (pick a default based on the detected GPU), `'hybrid'` (ray tracing for shadows/reflections + rasterization), `'fast-rt'` (full ray tracing), and `'rt'` (offline ray-traced renderer for maximum visual fidelity). |
-| `spp` | `int` | `1` | Samples per pixel for ray-traced rendering. Must be at least 1. |
-| `tone_mapping_enabled` | `bool` | `False` | Whether to map HDR RGB output with the modified Reinhard curve. |
-| `tone_mapping_exposure` | `float` | `1.0` | Non-negative fixed linear exposure multiplier applied before tone mapping. |
+```{toctree}
+:maxdepth: 2
 
-Ray-traced output always uses DexSim's default OptiX denoiser. Tone mapping
-affects RGB output only; depth, segmentation masks, normals, and position
-buffers remain unchanged.
-
-#### Automatic Renderer Selection
-
-By default (`renderer="auto"`), EmbodiChain selects the renderer based on the GPU detected at the configured `gpu_id` when the {class}`SimulationManager` is constructed:
-
-| GPU class | Examples | Selected renderer |
-| :--- | :--- | :--- |
-| RTX-series (consumer/workstation) | RTX 4090, RTX 6000 Ada | `hybrid` |
-| Datacenter accelerators | A100, A800, H100, H800, H200, H20 | `fast-rt` |
-| No CUDA device / unknown GPU | — | `hybrid` (fallback) |
-
-You can override the global default at runtime — useful for forcing a renderer across all simulations regardless of hardware:
-
-```python
-from embodichain.lab.sim import SimulationManager
-
-# Resolve the default from the current GPU, or force a specific backend.
-SimulationManager.set_default_renderer("auto")       # auto-detect from GPU
-SimulationManager.set_default_renderer("fast-rt")    # force full ray tracing
+sim_manager/rendering/index
 ```
-
-Setting `render_cfg.renderer` explicitly always takes precedence over auto-selection:
-
-```python
-from embodichain.lab.sim import SimulationManagerCfg
-from embodichain.lab.sim.cfg import RenderCfg
-
-sim_config = SimulationManagerCfg(
-    render_cfg=RenderCfg(
-        renderer="fast-rt",         # Override automatic renderer selection
-        spp=4,                      # Render four samples per pixel
-        tone_mapping_enabled=True,  # Convert HDR RGB to display-referred RGB
-        tone_mapping_exposure=1.0,  # Fixed exposure for reproducible frames
-    )
-)
-```
-
 
 ## Initialization
 
@@ -144,7 +107,7 @@ sim.profiler.report()
 ```
 
 Each standalone {meth}`SimulationManager.update` call creates a `sim_update`
-root. The `manual_update` section contains one `gizmo_update` and one
+root. The `physics_steps` section contains one `gizmo_update` and one
 `world_update` sample per physics substep, plus optional
 `window_record_capture` and `visualization_capture` samples when those features
 are enabled. Consequently, `world_update.calls` is the total number of physics
@@ -269,36 +232,34 @@ See `scripts/tutorials/sim/export_usd.py` for a complete example.
 
 ## Simulation Loop
 
-### Manual Update mode
+Physics advances only through explicit {meth}`~SimulationManager.update` calls.
+Each call applies pending Gizmo controls before every physics step, then updates
+simulation time, recording, and browser visualization. Gym environments own this
+sequence through `env.step(action)`.
 
-In this mode, the physics simulation should be explicitly stepped by calling {meth}`~SimulationManager.update()` method, which provides precise control over the simulation timing. 
-
-The use case for manual update mode includes:
-- Data generation with openai gym environments, in which the observation and action must be synchronized with the physics simulation.
-- Applications that require precise dynamic control over the simulation timing.
+Interactive applications can pace the same fixed-step loop against wall time:
 
 ```python
-while True:
-    # Step physics simulation.
-    sim.update(step=1)
+import time
 
-    # Perform other tasks such as get data from the scene or apply sensor update.
+while True:
+    step_start = time.perf_counter()
+    sim.update(step=1)
+    # Read sensors or process application state here.
+    time.sleep(max(0.0, sim.sim_config.physics_dt - (time.perf_counter() - step_start)))
 ```
 
-> The default mode is manual update mode. To switch to automatic update mode, call `set_manual_update(False)`. 
+Wall-clock pacing limits playback speed without changing the configured physics
+timestep. Waiting at a REPL or breakpoint pauses physics. Drawing markers and
+calling `capture_visualization(force=True)` publish visual changes without
+advancing physics.
 
-### Automatic Update mode
-
-In this mode, the physics simulation stepping is automatically handling by the physics thread running in dexsim engine, which makes it easier to use for visualization and interactive applications.
-
-> When in automatic update mode, user are recommanded to use CPU `sim_device` for simulation.
-
+Pure IK/FK queries do not require a physics loop.
 
 ## Mainly used methods
 
-- **`SimulationManager.update(physics_dt=None, step=1)`**: Steps the physics simulation with optional custom time step and number of steps. If `physics_dt` is None, uses the configured physics time step.
+- **`SimulationManager.update(physics_dt=None, step=10)`**: Steps the physics simulation with optional custom time step and number of steps. If `physics_dt` is None, uses the configured physics time step.
 - **`SimulationManager.enable_physics(enable: bool)`**: Enable or disable physics simulation.
-- **`SimulationManager.set_manual_update(enable: bool)`**: Set manual update mode for physics.
 - **`SimulationManager.start_visualization()`**: Start or return the configured visualization runtime.
 - **`SimulationManager.refresh_visualization()`**: Immediately republish scene topology.
 - **`SimulationManager.capture_visualization(force=False)`**: Capture the current scene state.
