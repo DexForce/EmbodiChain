@@ -472,7 +472,7 @@ def _runner_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(add_help=True)
     add_env_launcher_args_to_parser(parser, require_gym_config=False)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.set_defaults(seed=0)
     parser.add_argument(
         "--failure-policy", choices=("stop", "continue"), default="stop"
     )
