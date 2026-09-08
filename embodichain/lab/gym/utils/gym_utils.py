@@ -458,6 +458,7 @@ def config_to_cfg(
         RigidObjectGroupCfg,
         ArticulationCfg,
         LightCfg,
+        DLSSCfg,
         RenderCfg,
         physics_cfg_for_backend,
     )
@@ -636,6 +637,8 @@ def config_to_cfg(
     env_cfg.seed = config.get("seed", None)
 
     render_config = deepcopy(config.get("render_cfg", {}))
+    if isinstance(render_config.get("dlss"), dict):
+        render_config["dlss"] = DLSSCfg(**render_config["dlss"])
     if "renderer" in config:
         # Keep the existing flat renderer option as the command-line override.
         render_config["renderer"] = config["renderer"]

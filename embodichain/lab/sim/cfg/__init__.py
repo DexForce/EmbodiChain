@@ -62,6 +62,7 @@ from .rigid_object import RigidObjectCfg, RigidObjectGroupCfg
 from .scene import LightCfg, RigidConstraintCfg
 from .simulation import (
     DefaultPhysicsCfg,
+    DLSSCfg,
     GPUMemoryCfg,
     NewtonCollisionPipelineCfg,
     NewtonPhysicsCfg,
@@ -84,6 +85,7 @@ from .robot import RobotCfg, RobotPresetCfg  # noqa: E402
 __all__ = [
     "DEFAULT_RENDERER",
     "AssetPhysicsMode",
+    "DLSSCfg",
     "RenderCfg",
     "GPUMemoryCfg",
     "PhysicsBackendCfg",
