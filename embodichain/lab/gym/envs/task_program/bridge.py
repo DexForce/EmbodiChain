@@ -518,6 +518,8 @@ class RuntimeCommandFrameEncoder:
         include_joint_position: Whether to install the built-in joint-position
             encoder. Standard assemblies disable it when their exact profile uses
             only custom endpoint transports.
+        joint_command_mode: Whether joint commands emit qpos alone or structured
+            qpos and qvel targets.
     """
 
     def __init__(

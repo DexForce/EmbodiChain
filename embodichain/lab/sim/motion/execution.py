@@ -19,12 +19,12 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Sequence
 
 import torch
 
 from embodichain.compute.trajectory import retime_to_control_grid
+from embodichain.utils import configclass
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -38,9 +38,14 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@configclass
 class JointTrajectoryPlaybackCfg:
-    """Fixed-cadence standalone simulation playback settings."""
+    """Fixed-cadence standalone simulation playback settings.
+
+    Args:
+        control_dt: Command period, or ``None`` for one physics period.
+        joint_command_mode: Whether to write qpos alone or qpos and qvel.
+    """
 
     control_dt: float | None = None
     """Command period, or ``None`` to use the simulation physics period."""

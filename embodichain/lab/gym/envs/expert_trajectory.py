@@ -53,7 +53,11 @@ def _validate_joint_command_mode(value: object) -> JointCommandMode:
 
 @configclass
 class ExpertTrajectoryCfg:
-    """Environment-owned expert trajectory execution and recording settings."""
+    """Environment-owned expert trajectory execution and recording settings.
+
+    Args:
+        joint_command_mode: Position-only or position-velocity expert targets.
+    """
 
     joint_command_mode: JointCommandMode = "position"
     """Joint targets emitted and stored by expert trajectory generation."""
@@ -64,7 +68,13 @@ class ExpertTrajectoryCfg:
 
 @dataclass(frozen=True, slots=True)
 class ExpertJointTrajectory:
-    """Environment-batched expert joint samples with optional source timing."""
+    """Environment-batched expert joint samples with optional source timing.
+
+    Args:
+        positions: Floating joint positions with shape ``(B, N, D)``.
+        velocities: Optional matching source velocity samples.
+        dt: Optional non-negative arrival intervals with shape ``(B, N)``.
+    """
 
     positions: torch.Tensor
     velocities: torch.Tensor | None = None
@@ -123,7 +133,12 @@ class ExpertJointTrajectory:
 
 @dataclass(frozen=True, slots=True)
 class ExpertActionSpec:
-    """Canonical flat action layout used by expert trajectory persistence."""
+    """Canonical flat action layout used by expert trajectory persistence.
+
+    Args:
+        joint_command_mode: Position-only or position-velocity storage mode.
+        joint_names: Active joint names in stored column order.
+    """
 
     joint_command_mode: JointCommandMode
     joint_names: tuple[str, ...]
@@ -156,7 +171,14 @@ class ExpertActionSpec:
         )
 
     def metadata(self, *, step_dt: float) -> dict[str, object]:
-        """Return serializable metadata describing this expert action schema."""
+        """Return serializable metadata describing this expert action schema.
+
+        Args:
+            step_dt: Environment command period associated with stored actions.
+
+        Returns:
+            JSON-compatible schema metadata.
+        """
         return {
             "expert_trajectory_schema_version": EXPERT_TRAJECTORY_SCHEMA_VERSION,
             "joint_command_mode": self.joint_command_mode,
@@ -172,7 +194,18 @@ def build_expert_action_spec(
     joint_names: Sequence[str],
     joint_command_mode: JointCommandMode,
 ) -> ExpertActionSpec:
-    """Build the immutable stored-action layout for one environment."""
+    """Build the immutable stored-action layout for one environment.
+
+    Args:
+        joint_names: Active robot joint names in stored column order.
+        joint_command_mode: Position-only or position-velocity storage mode.
+
+    Returns:
+        Validated expert action layout.
+
+    Raises:
+        ValueError: If the mode is unsupported or a joint name is empty.
+    """
     mode = _validate_joint_command_mode(joint_command_mode)
     names = tuple(joint_names)
     if not names or not all(isinstance(name, str) and name for name in names):
@@ -186,7 +219,24 @@ def prepare_expert_joint_trajectory(
     control_dt: float,
     joint_command_mode: JointCommandMode,
 ) -> ExpertJointTrajectory:
-    """Prepare source samples for a destination's fixed command clock."""
+    """Prepare source samples for a destination's fixed command clock.
+
+    Timed trajectories are retimed to ``control_dt`` and their velocities are
+    recomputed. Untimed position-velocity trajectories must provide velocity
+    samples explicitly.
+
+    Args:
+        trajectory: Source joint samples and optional arrival intervals.
+        control_dt: Positive destination command period in seconds.
+        joint_command_mode: Position-only or position-velocity output mode.
+
+    Returns:
+        A detached trajectory aligned with the destination command clock.
+
+    Raises:
+        TypeError: If ``trajectory`` has the wrong type.
+        ValueError: If timing, mode, or required velocity data is invalid.
+    """
     if not isinstance(trajectory, ExpertJointTrajectory):
         raise TypeError("trajectory must be an ExpertJointTrajectory.")
     mode = _validate_joint_command_mode(joint_command_mode)
@@ -241,7 +291,21 @@ def encode_expert_action(
     spec: ExpertActionSpec,
     active_joint_ids: Sequence[int],
 ) -> torch.Tensor:
-    """Flatten effective qpos/qvel targets into the expert dataset layout."""
+    """Flatten effective qpos/qvel targets into the expert dataset layout.
+
+    Args:
+        action: Effective controller action after validation and row masking.
+        spec: Destination expert action layout.
+        active_joint_ids: Full-robot columns represented by ``spec``.
+
+    Returns:
+        Active-joint qpos, or concatenated active-joint ``[qpos, qvel]``.
+
+    Raises:
+        TypeError: If the action or its joint targets have invalid types.
+        ValueError: If required targets are missing or cannot be mapped to the
+            configured active joints.
+    """
     if not isinstance(spec, ExpertActionSpec):
         raise TypeError("spec must be an ExpertActionSpec.")
     joint_ids = tuple(active_joint_ids)

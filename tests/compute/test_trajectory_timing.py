@@ -149,6 +149,20 @@ def test_retime_zero_duration_returns_one_hold_sample() -> None:
     assert torch.equal(valid_counts, torch.tensor([1]))
 
 
+def test_retime_positive_sub_tolerance_duration_still_uses_one_interval() -> None:
+    positions = torch.tensor([[[0.0], [1.0]]], dtype=torch.float64)
+    dt = torch.tensor([[0.0, 1.0e-12]], dtype=torch.float64)
+
+    retimed, velocities, intervals, valid_counts = trajectory.retime_to_control_grid(
+        positions, dt, control_dt=1.0
+    )
+
+    torch.testing.assert_close(retimed, positions)
+    assert torch.equal(velocities, torch.zeros_like(positions))
+    assert torch.equal(intervals, torch.tensor([[0.0, 1.0]], dtype=torch.float64))
+    assert torch.equal(valid_counts, torch.tensor([2]))
+
+
 @pytest.mark.parametrize("control_dt", [0.0, -0.1, float("inf"), float("nan")])
 def test_retime_rejects_invalid_control_period(control_dt: float) -> None:
     with pytest.raises(ValueError, match="control_dt"):

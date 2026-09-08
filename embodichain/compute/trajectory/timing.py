@@ -185,13 +185,12 @@ def retime_to_control_grid(
         ratio = duration / destination_dt
         nearest = round(ratio)
         tolerance = max(1.0e-9, abs(ratio) * 1.0e-7)
-        interval_counts.append(
-            int(
-                nearest
-                if math.isclose(ratio, nearest, abs_tol=tolerance)
-                else math.ceil(ratio)
-            )
+        interval_count = int(
+            nearest
+            if math.isclose(ratio, nearest, abs_tol=tolerance)
+            else math.ceil(ratio)
         )
+        interval_counts.append(0 if duration == 0 else max(1, interval_count))
 
     valid_counts = torch.tensor(
         [count + 1 for count in interval_counts],
