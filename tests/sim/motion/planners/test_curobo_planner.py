@@ -37,6 +37,7 @@ from dexsim.types import RigidBodyShape
 
 from embodichain.lab.sim.objects import CollisionShapeDesc
 from embodichain.lab.sim.motion.planners import CuroboPlannerCfg
+from embodichain.lab.sim.motion.planners.curobo import curobo_yaml
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     CuroboPlanOptions,
     CuroboPlanner,
@@ -51,7 +52,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     _validate_dynamic_obstacles,
 )
 from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
-    _convex_hulls_to_voxel_entry,
+    _convex_hull_to_voxel_entry,
     _parse_mimic_joint_names,
     _world_collision_sphere_data,
     generate_curobo_robot_yaml,
@@ -773,22 +774,26 @@ class _FakeRigidObject:
         return self._collision_shapes
 
 
-def _mock_visacd_as_identity(monkeypatch, calls=None):
-    import dexsim.kit.meshproc as meshproc
+def _track_convex_hull_preprocessing(monkeypatch, calls=None):
+    original_compute_convex_hull = curobo_yaml._compute_convex_hull
 
-    def fake_visacd(mesh, **kwargs):
+    def tracked_compute_convex_hull(mesh):
         if calls is not None:
-            calls.append((mesh, kwargs))
-        return True, (mesh,)
+            calls.append(mesh)
+        return original_compute_convex_hull(mesh)
 
-    monkeypatch.setattr(meshproc, "convex_decomposition_visacd", fake_visacd)
+    monkeypatch.setattr(
+        curobo_yaml,
+        "_compute_convex_hull",
+        tracked_compute_convex_hull,
+    )
 
 
-def test_voxel_entry_uses_visacd_with_sixteen_hulls(monkeypatch):
+def test_voxel_entry_computes_convex_hull_before_signed_distance(monkeypatch):
     calls = []
-    _mock_visacd_as_identity(monkeypatch, calls)
+    _track_convex_hull_preprocessing(monkeypatch, calls)
 
-    name, fields = _convex_hulls_to_voxel_entry(
+    name, fields = _convex_hull_to_voxel_entry(
         "block",
         _unit_cube_vertices(),
         _cube_faces(),
@@ -798,8 +803,6 @@ def test_voxel_entry_uses_visacd_with_sixteen_hulls(monkeypatch):
     )
 
     assert len(calls) == 1
-    _, kwargs = calls[0]
-    assert kwargs["max_convex_hull_num"] == 16
     assert name == "block"
     assert fields["pose"] == pytest.approx(_identity_pose().tolist())
     assert fields["dims"] == pytest.approx([1.5, 1.5, 1.5])
@@ -809,11 +812,11 @@ def test_voxel_entry_uses_visacd_with_sixteen_hulls(monkeypatch):
 
 
 def test_voxel_entry_preserves_homogeneous_object_pose(monkeypatch):
-    _mock_visacd_as_identity(monkeypatch)
+    _track_convex_hull_preprocessing(monkeypatch)
     pose = torch.eye(4, dtype=torch.float32)
     pose[:3, 3] = torch.tensor([0.45, 0.0, 0.18])
 
-    _, fields = _convex_hulls_to_voxel_entry(
+    _, fields = _convex_hull_to_voxel_entry(
         "block",
         _unit_cube_vertices(),
         _cube_faces(),
@@ -831,7 +834,7 @@ def test_voxel_entry_preserves_homogeneous_object_pose(monkeypatch):
 )
 def test_voxel_entry_rejects_invalid_settings(voxel_size, voxel_padding, match):
     with pytest.raises(ValueError, match=match):
-        _convex_hulls_to_voxel_entry(
+        _convex_hull_to_voxel_entry(
             "block",
             _unit_cube_vertices(),
             _cube_faces(),
@@ -845,9 +848,22 @@ class _FakeDexsimMaterial:
     def __init__(self, name, color):
         self.name = name
         self.color = color
+        self.pbr_type = None
+        self.pbr_params = {}
 
     def set_base_color(self, color):
         self.color = color
+
+    def get_inst(self):
+        return self
+
+    def update_pbr_material_type(self, material_type):
+        self.pbr_type = material_type
+
+    def set_pbr_param(self, name, *values):
+        self.pbr_params[name] = values
+        if name == "baseColor":
+            self.color = list(values)
 
 
 class _FakeDexsimActor:
@@ -871,6 +887,11 @@ class _FakeDexsimEnv:
 
     def create_color_material(self, color, name, has_alpha=False):  # noqa: ARG002
         material = _FakeDexsimMaterial(name, color)
+        self.materials[name] = material
+        return material
+
+    def create_pbr_material(self, name):
+        material = _FakeDexsimMaterial(name, None)
         self.materials[name] = material
         return material
 
@@ -915,7 +936,7 @@ def test_obstacle_collision_visualization_loads_one_combined_dexsim_actor():
     assert bounds.get_center() == pytest.approx([1.0, 2.0, 3.0])
     assert bounds.get_extent() == pytest.approx([0.1, 0.1, 0.1])
     assert actors[0].material.name == "curobo_world_collision_material"
-    assert actors[0].material.color == [1.0, 0.0, 0.0, 0.45]
+    assert actors[0].material.color == [1.0, 0.0, 0.0]
 
 
 def test_combined_collision_visualization_colors_and_cleans_two_actors(
@@ -978,12 +999,12 @@ def test_combined_collision_visualization_colors_and_cleans_two_actors(
     assert robot_bounds.get_center() == pytest.approx([1.1, 2.0, 3.0])
     assert robot_bounds.get_extent() == pytest.approx([0.22, 0.22, 0.22])
     assert robot_actor.material.name == "curobo_robot_collision_material"
-    assert robot_actor.material.color == [0.0, 0.0, 1.0, 0.45]
+    assert robot_actor.material.color == [0.75, 0.75, 1.0]
     obstacle_bounds = obstacle_actor.mesh.get_axis_aligned_bounding_box()
     assert obstacle_bounds.get_center() == pytest.approx([2.0, 2.0, 3.0])
     assert obstacle_bounds.get_extent() == pytest.approx([0.1, 0.1, 0.1])
     assert obstacle_actor.material.name == "curobo_world_collision_material"
-    assert obstacle_actor.material.color == [1.0, 0.0, 0.0, 0.45]
+    assert obstacle_actor.material.color == [1.0, 0.75, 0.75]
     assert env.removed_actors == list(reversed(env.actors))
     assert all(not Path(path).exists() for path in env.loaded_paths)
     assert "Showing 2 cuRobo collision spheres" in prompts[0]
@@ -1028,7 +1049,7 @@ def test_mixed_collision_visualization_supports_cuboid():
 
 
 def test_world_scene_object_override_can_force_voxel(monkeypatch):
-    _mock_visacd_as_identity(monkeypatch)
+    _track_convex_hull_preprocessing(monkeypatch)
     box = CollisionShapeDesc(
         name="physics_box",
         shape_type=RigidBodyShape.BOX,
@@ -1129,7 +1150,8 @@ def test_dynamic_compound_object_fans_out_to_shape_local_poses():
     assert obstacle_shapes[0][1][:3, 3].tolist() == pytest.approx([0.25, 0.0, 0.0])
 
 
-def test_generate_world_scene_uses_mapping_key_instead_of_object_uid():
+def test_generate_world_scene_uses_mapping_key_instead_of_object_uid(monkeypatch):
+    _track_convex_hull_preprocessing(monkeypatch)
     rigid_object = _FakeRigidObject(
         "legacy_uid",
         _unit_cube_vertices(),
@@ -1139,9 +1161,58 @@ def test_generate_world_scene_uses_mapping_key_instead_of_object_uid():
 
     scene_data = generate_curobo_world_scene(
         {"registry_cube": rigid_object},
+        voxel_size=0.5,
+        voxel_padding=0.0,
     )
 
-    assert set(scene_data["mesh"]) == {"registry_cube"}
+    assert set(scene_data["voxel"]) == {"registry_cube"}
+
+
+@pytest.mark.parametrize(
+    "shape_type",
+    [RigidBodyShape.MESH, RigidBodyShape.CONVEX, RigidBodyShape.SDF],
+)
+def test_auto_world_scene_voxelizes_every_mesh_backed_shape(monkeypatch, shape_type):
+    _track_convex_hull_preprocessing(monkeypatch)
+    mesh_shape = CollisionShapeDesc(
+        name="mesh_backed_shape",
+        shape_type=shape_type,
+        local_pose=torch.eye(4),
+        vertices=_unit_cube_vertices(),
+        triangles=_cube_faces(),
+    )
+    rigid_object = _FakeRigidObject(
+        "mesh_obstacle",
+        _unit_cube_vertices(),
+        _cube_faces(),
+        _identity_pose(),
+        [mesh_shape],
+    )
+
+    scene_data = generate_curobo_world_scene(
+        [rigid_object],
+        voxel_size=0.5,
+        voxel_padding=0.0,
+    )
+
+    assert list(scene_data) == ["voxel"]
+
+
+def test_mesh_backed_world_scene_rejects_oversized_voxel_grid():
+    rigid_object = _FakeRigidObject(
+        "mesh_obstacle",
+        _unit_cube_vertices(),
+        _cube_faces(),
+        _identity_pose(),
+    )
+
+    with pytest.raises(ValueError, match="max_voxel_count"):
+        generate_curobo_world_scene(
+            [rigid_object],
+            voxel_size=0.1,
+            voxel_padding=0.0,
+            max_voxel_count=8,
+        )
 
 
 def test_world_scene_cache_key_includes_registry_id():
@@ -1274,24 +1345,22 @@ def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order():
     assert joint_states[0][1] == ("curobo_right", "curobo_left")
 
 
-def test_generate_mesh_world_scene_assembles_schema():
+def test_generate_world_scene_rejects_direct_mesh_representation():
     rigid_object = _FakeRigidObject(
         "demo_block",
         _unit_cube_vertices(),
         _cube_faces(),
         _identity_pose(),
     )
-    scene_data = generate_curobo_world_scene(
-        [rigid_object],
-        representation="mesh",
-    )
-
-    assert list(scene_data) == ["mesh"]
-    assert len(scene_data["mesh"]["demo_block"]["vertices"]) == 8
+    with pytest.raises(ValueError, match="representation policies"):
+        generate_curobo_world_scene(
+            [rigid_object],
+            representation="mesh",
+        )
 
 
 def test_generate_world_scene_supports_multiple_objects(monkeypatch):
-    _mock_visacd_as_identity(monkeypatch)
+    _track_convex_hull_preprocessing(monkeypatch)
     rigid_objects = [
         _FakeRigidObject(
             "block_a",
@@ -1339,7 +1408,7 @@ def test_registry_world_scene_rejects_missing_physical_shapes():
 
 
 def test_generate_world_scene_rejects_duplicate_names(monkeypatch):
-    _mock_visacd_as_identity(monkeypatch)
+    _track_convex_hull_preprocessing(monkeypatch)
     pose = _identity_pose()
     first = _FakeRigidObject(
         "block",
@@ -1376,7 +1445,7 @@ def test_generated_voxel_data_loads_in_curobo_scene_cfg(monkeypatch):
     pytest.importorskip("curobo")
     from curobo._src.geom.types import SceneCfg
 
-    _mock_visacd_as_identity(monkeypatch)
+    _track_convex_hull_preprocessing(monkeypatch)
 
     rigid_object = _FakeRigidObject(
         "demo_block",
@@ -1399,10 +1468,11 @@ def test_generated_voxel_data_loads_in_curobo_scene_cfg(monkeypatch):
     assert tuple(scene.voxel[0].feature_tensor.shape) == (2, 2, 2)
 
 
-def test_generated_physical_mesh_loads_in_curobo_scene_cfg():
+def test_generated_physical_mesh_loads_as_voxel_in_curobo_scene_cfg(monkeypatch):
     pytest.importorskip("curobo")
     from curobo._src.geom.types import SceneCfg
 
+    _track_convex_hull_preprocessing(monkeypatch)
     rigid_object = _FakeRigidObject(
         "collision_mesh",
         _unit_cube_vertices(),
@@ -1410,11 +1480,17 @@ def test_generated_physical_mesh_loads_in_curobo_scene_cfg():
         _identity_pose(),
     )
 
-    scene = SceneCfg.create(generate_curobo_world_scene([rigid_object]))
+    scene = SceneCfg.create(
+        generate_curobo_world_scene(
+            [rigid_object],
+            voxel_size=0.5,
+            voxel_padding=0.0,
+        )
+    )
 
-    assert len(scene.mesh) == 1
-    assert scene.mesh[0].name == "collision_mesh"
-    assert len(scene.mesh[0].vertices) == _unit_cube_vertices().shape[0]
+    assert not scene.mesh
+    assert len(scene.voxel) == 1
+    assert scene.voxel[0].name == "collision_mesh"
 
 
 # Simulator smoke coverage

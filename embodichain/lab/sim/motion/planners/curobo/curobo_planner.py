@@ -166,16 +166,17 @@ class CuroboWorldCfg:
     overrides: dict[str, str] = {}
     """Per-object representation overrides keyed by canonical obstacle ID.
 
-    Supported values are ``"auto"``, ``"voxel"``, ``"mesh"``, ``"cuboid"``,
-    ``"sphere"``, and ``"capsule"``. A forced analytic representation must
-    match the source physical shape.
+    Supported values are ``"auto"``, ``"voxel"``, ``"cuboid"``, ``"sphere"``,
+    and ``"capsule"``. Mesh-backed collision shapes always become convex-hull
+    ESDF voxels; direct cuRobo ``Mesh`` obstacles are not supported. A forced
+    analytic representation must match the source physical shape.
     """
 
     mesh_triangle_threshold: int = 5_000
-    """Triangle count above which ``auto`` prefers voxel ESDF for mesh shapes."""
+    """Deprecated compatibility setting; mesh-backed shapes always use ESDF."""
 
     max_voxel_count: int = 2_000_000
-    """Maximum estimated voxel count allowed when ``auto`` selects ESDF."""
+    """Maximum estimated voxel count allowed for one ESDF obstacle."""
 
     plane_dims: tuple[float, float, float] = (10.0, 10.0, 0.01)
     """Workspace-bounded dimensions used to represent an infinite plane."""
@@ -553,9 +554,7 @@ def _validate_dynamic_obstacles(
             )
 
 
-_WORLD_REPRESENTATIONS = frozenset(
-    {"auto", "voxel", "mesh", "cuboid", "sphere", "capsule"}
-)
+_WORLD_REPRESENTATIONS = frozenset({"auto", "voxel", "cuboid", "sphere", "capsule"})
 
 
 def _validate_world_cfg(cfg: CuroboWorldCfg) -> None:
@@ -1838,7 +1837,9 @@ class CuroboPlanner(BasePlanner):
     def _world_scene_cache_key(self, world_cfg: CuroboWorldCfg) -> str:
         """Hash physical collision geometry, initial poses, and policy settings."""
         hasher = hashlib.md5()
-        hasher.update(b"physical-shapes-v1")
+        # V2 makes mesh-backed collision shapes convex-hull ESDF voxels and
+        # intentionally invalidates caches that may contain direct Mesh entries.
+        hasher.update(b"physical-shapes-v2")
         hasher.update(world_cfg.representation.encode("utf-8"))
         hasher.update(repr(sorted(world_cfg.overrides.items())).encode("utf-8"))
         hasher.update(repr(sorted(world_cfg.dynamic_obstacle_names)).encode("utf-8"))

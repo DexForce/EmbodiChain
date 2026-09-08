@@ -18,6 +18,17 @@ shapes fails fast instead of silently dropping the source. The sequence form is
 an advanced direct-core path that derives names from each object's `uid` or an
 `obstacle_<index>` fallback.
 
+Analytic box, plane, sphere, and capsule shapes retain their native cuRobo
+representations. Mesh-backed `MESH`, `CONVEX`, and `SDF` shapes never become
+direct cuRobo `Mesh` entries: scene generation computes one Open3D convex hull,
+then samples its signed distance into a dense ESDF `VoxelGrid`. The global or
+per-object `"voxel"` policy can apply the same conversion to an analytic shape;
+the direct `"mesh"` policy is unsupported. `max_voxel_count` guards every ESDF
+allocation and fails fast with an actionable error. `mesh_triangle_threshold`
+remains accepted only for configuration compatibility and no longer changes
+representation selection. The world cache format is versioned so caches that
+may contain direct mesh entries are not reused.
+
 `CuroboWorldCfg.multi_env` controls collision-world batching, not whether robot
 states or goals are batched:
 

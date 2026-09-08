@@ -84,7 +84,7 @@ def _make_sim_robot(num_envs: int = 1):
 
 
 @pytest.mark.slow
-def test_curobo_v2_plans_around_a_static_voxel_obstacle():
+def test_curobo_v2_plans_around_a_static_cuboid_obstacle():
     sim, robot, block = _make_sim_robot()
     try:
         cfg = CuroboPlannerCfg(
@@ -135,12 +135,12 @@ def test_curobo_v2_plans_around_a_static_voxel_obstacle():
 
 @pytest.mark.slow
 def test_curobo_v2_plans_around_rigid_object_voxel_world():
-    """Exercise mesh -> VisACD convex hulls -> voxel ESDF planning end to end."""
+    """Exercise convex-hull preprocessing and voxel ESDF planning end to end."""
     sim, robot, block = _make_sim_robot()
     try:
         cfg = CuroboPlannerCfg(
             robot_uid=ROBOT_UID,
-            world=CuroboWorldCfg(rigid_objects=[block]),
+            world=CuroboWorldCfg(rigid_objects=[block], representation="voxel"),
             warmup_iterations=0,
         )
         mg = MotionGenerator(MotionGenCfg(planner_cfg=cfg))

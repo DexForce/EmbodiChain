@@ -23,7 +23,9 @@ this automatically (with on-disk caching) on the first plan; see
 :class:`~embodichain.lab.sim.motion.planners.curobo.curobo_planner.CuroboAutoGenCfg`.
 
 :func:`generate_curobo_world_scene` builds mixed cuRobo collision data from live
-:class:`~embodichain.lab.sim.objects.RigidObject` physical shapes.
+:class:`~embodichain.lab.sim.objects.RigidObject` physical shapes. Analytic
+primitives stay analytic, while mesh-backed shapes are reduced to a convex hull
+before being voxelized into an ESDF grid.
 """
 
 from __future__ import annotations
@@ -51,7 +53,6 @@ __all__ = [
 
 
 _ROBOT_MAX_CONVEX_HULL_NUM = 2
-_OBSTACLE_MAX_CONVEX_HULL_NUM = 16
 
 
 def _named_rigid_objects(
@@ -354,7 +355,12 @@ def _voxel_grid_coordinates(
     return torch.stack(torch.meshgrid(*axes, indexing="ij"), dim=-1).reshape(-1, 3)
 
 
-def _convex_hulls_to_voxel_entry(
+def _compute_convex_hull(mesh: Any) -> Any:
+    """Return the Open3D convex hull used as the voxelization surface."""
+    return mesh.compute_convex_hull()
+
+
+def _convex_hull_to_voxel_entry(
     name: str,
     vertices: torch.Tensor,
     faces: torch.Tensor,
@@ -363,7 +369,7 @@ def _convex_hulls_to_voxel_entry(
     voxel_size: float = 0.01,
     voxel_padding: float = 0.005,
 ) -> tuple[str, dict[str, object]]:
-    """Decompose one mesh with VisACD and convert its union to an ESDF grid.
+    """Reduce one mesh to its convex hull and convert it to an ESDF grid.
 
     The grid is centered at the object's local origin, so the voxel obstacle's
     pose stays identical to the source object's pose during dynamic updates.
@@ -391,16 +397,22 @@ def _convex_hulls_to_voxel_entry(
 
     import open3d as o3d
 
-    from dexsim.kit.meshproc import convex_decomposition_visacd
-
     mesh = _to_open3d_tensor_mesh(vertices, faces, o3d)
-    is_success, convex_hulls = convex_decomposition_visacd(
-        mesh,
-        max_convex_hull_num=_OBSTACLE_MAX_CONVEX_HULL_NUM,
-        is_visual=False,
+    try:
+        convex_hull = _compute_convex_hull(mesh)
+    except Exception as exc:  # noqa: BLE001 - normalize Open3D/QHull failures
+        raise RuntimeError(
+            f"Convex-hull preprocessing failed for object {name!r}."
+        ) from exc
+    if convex_hull.is_empty():
+        raise RuntimeError(
+            f"Convex-hull preprocessing produced no geometry for object {name!r}."
+        )
+    # Open3D's QHull bridge returns Float64 vertices even for a Float32 input,
+    # while RaycastingScene requires Float32 triangle positions.
+    convex_hull.vertex.positions = convex_hull.vertex.positions.to(
+        o3d.core.Dtype.Float32
     )
-    if not is_success or not convex_hulls:
-        raise RuntimeError(f"VisACD decomposition failed for object {name!r}.")
 
     local_half_extent = torch.maximum(
         vertices.amin(dim=0).abs(), vertices.amax(dim=0).abs()
@@ -413,17 +425,14 @@ def _convex_hulls_to_voxel_entry(
     query_points = _voxel_grid_coordinates(grid_shape, float(voxel_size))
     query_o3d = o3d.core.Tensor(query_points.numpy(), dtype=o3d.core.Dtype.Float32)
 
-    union_sdf = torch.full((query_points.shape[0],), torch.inf, dtype=torch.float32)
-    for hull in convex_hulls:
-        hull_cpu = hull.cpu() if hasattr(hull, "cpu") else hull
-        scene = o3d.t.geometry.RaycastingScene()
-        scene.add_triangles(hull_cpu)
-        hull_sdf = torch.from_numpy(
-            scene.compute_signed_distance(query_o3d).numpy()
-        ).to(torch.float32)
-        union_sdf = torch.minimum(union_sdf, hull_sdf)
+    convex_hull = convex_hull.cpu() if hasattr(convex_hull, "cpu") else convex_hull
+    scene = o3d.t.geometry.RaycastingScene()
+    scene.add_triangles(convex_hull)
+    signed_distance = torch.from_numpy(
+        scene.compute_signed_distance(query_o3d).numpy()
+    ).to(torch.float32)
 
-    feature_tensor = union_sdf.reshape(grid_shape).to(torch.float16).contiguous()
+    feature_tensor = signed_distance.reshape(grid_shape).to(torch.float16).contiguous()
     return name, {
         "pose": pose.tolist(),
         "dims": dims.tolist(),
@@ -479,20 +488,16 @@ def _estimated_voxel_count(
     voxel_padding: float,
 ) -> int:
     """Estimate the dense ESDF allocation for a local collision mesh."""
-    extents = vertices.amax(dim=0) - vertices.amin(dim=0) + 2.0 * voxel_padding
-    shape = torch.clamp(torch.ceil(extents / voxel_size), min=2).to(torch.int64)
+    local_half_extent = torch.maximum(
+        vertices.amin(dim=0).abs(), vertices.amax(dim=0).abs()
+    )
+    requested_dims = 2.0 * (local_half_extent + float(voxel_padding))
+    shape = torch.clamp(torch.ceil(requested_dims / voxel_size), min=2).to(torch.int64)
     return int(torch.prod(shape).item())
 
 
 def _auto_collision_representation(
     shape: CollisionShapeDesc,
-    *,
-    is_dynamic: bool,
-    voxel_size: float,
-    voxel_padding: float,
-    mesh_triangle_threshold: int,
-    max_voxel_count: int,
-    plane_dims: tuple[float, float, float],
 ) -> str:
     """Select a cuRobo representation from one physical shape descriptor."""
     native = {
@@ -500,28 +505,16 @@ def _auto_collision_representation(
         RigidBodyShape.PLANE: "cuboid",
         RigidBodyShape.SPHERE: "sphere",
         RigidBodyShape.CAPSULE: "capsule",
-        RigidBodyShape.CONVEX: "mesh",
-        RigidBodyShape.SDF: "mesh",
+        RigidBodyShape.CONVEX: "voxel",
+        RigidBodyShape.SDF: "voxel",
+        RigidBodyShape.MESH: "voxel",
     }
     if shape.shape_type in native:
         return native[shape.shape_type]
-    if shape.shape_type != RigidBodyShape.MESH:
-        raise ValueError(
-            f"No automatic cuRobo representation for DexSim shape "
-            f"{shape.shape_type.name}."
-        )
-    vertices, triangles = _collision_shape_mesh(shape, plane_dims)
-    effective_triangle_threshold = mesh_triangle_threshold * (2 if is_dynamic else 1)
-    if triangles.shape[0] <= effective_triangle_threshold:
-        return "mesh"
-    voxel_count = _estimated_voxel_count(vertices, voxel_size, voxel_padding)
-    if voxel_count <= max_voxel_count:
-        return "voxel"
-    logger.log_warning(
-        f"Keeping collision mesh {shape.name!r}: its estimated ESDF allocation "
-        f"({voxel_count} voxels) exceeds max_voxel_count={max_voxel_count}."
+    raise ValueError(
+        f"No automatic cuRobo representation for DexSim shape "
+        f"{shape.shape_type.name}."
     )
-    return "mesh"
 
 
 def _validate_forced_representation(
@@ -559,10 +552,11 @@ def generate_curobo_world_scene(
 ) -> dict[str, dict[str, dict[str, object]]]:
     """Build a mixed cuRobo scene from DexSim physical collision shapes.
 
-    ``auto`` preserves primitives, exports collision meshes directly, and uses
-    ESDF for triangle meshes whose complexity exceeds ``mesh_triangle_threshold``
-    when the estimated dense grid fits ``max_voxel_count``. Forced ``voxel``
-    remains available globally or per object.
+    ``auto`` preserves analytic primitives and converts every mesh-backed
+    physical shape (triangle mesh, convex mesh, or SDF mesh) exclusively to an
+    ESDF voxel grid. Meshes are reduced to an Open3D convex hull before sampling
+    signed distances. Direct cuRobo ``Mesh`` obstacles are intentionally not
+    supported.
 
     Args:
         rigid_objects: Live obstacles whose physical shapes define the world.
@@ -575,22 +569,23 @@ def generate_curobo_world_scene(
             between plans.
         voxel_size: ESDF voxel edge length in meters.
         voxel_padding: Free-space padding around object-local voxel grids.
-        mesh_triangle_threshold: Auto-policy triangle threshold.
-        max_voxel_count: Auto-policy upper bound for a dense ESDF grid.
+        mesh_triangle_threshold: Deprecated compatibility parameter. Mesh-backed
+            shapes are always voxelized regardless of triangle count.
+        max_voxel_count: Upper bound for any generated dense ESDF grid.
         plane_dims: Workspace-bounded cuboid dimensions used for planes.
     Returns:
         A mixed tensor-backed scene mapping accepted by cuRobo ``Scene.create``.
 
     Raises:
         ValueError: If configuration or collision geometry is unsupported.
-        RuntimeError: If DexSim VisACD decomposition fails.
+        RuntimeError: If Open3D convex-hull preprocessing fails.
     """
     registry_backed = isinstance(rigid_objects, Mapping)
     named_rigid_objects = _named_rigid_objects(rigid_objects)
     if not named_rigid_objects:
         raise ValueError("rigid_objects must contain at least one RigidObject.")
     overrides = overrides or {}
-    supported = {"auto", "voxel", "mesh", "cuboid", "sphere", "capsule"}
+    supported = {"auto", "voxel", "cuboid", "sphere", "capsule"}
     if representation not in supported or any(
         value not in supported for value in overrides.values()
     ):
@@ -648,15 +643,7 @@ def generate_curobo_world_scene(
             shape_pose = object_pose @ shape.local_pose
             policy = overrides.get(object_name, representation)
             if policy == "auto":
-                policy = _auto_collision_representation(
-                    shape,
-                    is_dynamic=object_name in dynamic_obstacle_names,
-                    voxel_size=voxel_size,
-                    voxel_padding=voxel_padding,
-                    mesh_triangle_threshold=mesh_triangle_threshold,
-                    max_voxel_count=max_voxel_count,
-                    plane_dims=plane_dims,
-                )
+                policy = _auto_collision_representation(shape)
             _validate_forced_representation(policy, shape)
             if shape.shape_type == RigidBodyShape.PLANE:
                 offset = torch.eye(4, dtype=torch.float32)
@@ -685,16 +672,21 @@ def generate_curobo_world_scene(
                     "base": [0.0, 0.0, -shape.half_height],
                     "tip": [0.0, 0.0, shape.half_height],
                 }
-            elif policy == "mesh":
-                vertices, triangles = _collision_shape_mesh(shape, plane_dims)
-                fields = {
-                    "pose": _pose_matrix_to_list(shape_pose),
-                    "vertices": vertices.tolist(),
-                    "faces": triangles.reshape(-1).tolist(),
-                }
             elif policy == "voxel":
                 vertices, triangles = _collision_shape_mesh(shape, plane_dims)
-                _, fields = _convex_hulls_to_voxel_entry(
+                voxel_count = _estimated_voxel_count(
+                    vertices,
+                    voxel_size,
+                    voxel_padding,
+                )
+                if voxel_count > max_voxel_count:
+                    raise ValueError(
+                        f"Voxelizing collision shape {obstacle_name!r} requires "
+                        f"{voxel_count} voxels, exceeding "
+                        f"max_voxel_count={max_voxel_count}. Increase voxel_size "
+                        "or max_voxel_count."
+                    )
+                _, fields = _convex_hull_to_voxel_entry(
                     obstacle_name,
                     vertices,
                     triangles,
@@ -863,8 +855,15 @@ def _get_or_create_dexsim_material(
     """Return a named DexSim material without accumulating duplicates."""
     material = env.find_material(name)
     if material is None:
-        return env.create_color_material(color, name, has_alpha=len(color) == 4)
-    material.set_base_color(color)
+        material = env.create_pbr_material(name)
+        material_inst = material.get_inst()
+        material_inst.update_pbr_material_type("BSDF_GGX_SMITH")
+        material_inst.set_pbr_param("baseColor", color[0], color[1], color[2])
+        material_inst.set_pbr_param("roughness", 0.02)
+        material_inst.set_pbr_param("ior", 1.12)
+        material_inst.set_pbr_param("colorAbsorption", 0.005, 0.005, 0.005)
+        material_inst.set_pbr_param("scaleAbsorption", 0.01)
+        return material
     return material
 
 
@@ -1143,12 +1142,12 @@ def visualize_curobo_collision_models(
     robot_material = _get_or_create_dexsim_material(
         env,
         "curobo_robot_collision_material",
-        [0.0, 0.0, 1.0, 0.45],
+        [0.75, 0.75, 1.0],
     )
     obstacle_material = _get_or_create_dexsim_material(
         env,
         "curobo_world_collision_material",
-        [1.0, 0.0, 0.0, 0.45],
+        [1.0, 0.75, 0.75],
     )
 
     with open(robot_yaml_path, encoding="utf-8") as yaml_file:
