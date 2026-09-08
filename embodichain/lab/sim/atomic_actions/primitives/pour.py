@@ -199,6 +199,7 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
             base_qpos=base_qpos,
             joint_ids=arm_joint_ids,
             env_ids=context.env_ids,
+            control_dt=context.require_control_dt(),
         )
 
         return self.build_plan(
