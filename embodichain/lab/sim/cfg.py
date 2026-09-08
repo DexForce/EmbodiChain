@@ -285,14 +285,24 @@ class RenderCfg:
     def apply_to_dexsim_config(self, world_config: dexsim.WorldConfig) -> None:
         """Apply rendering settings to a DexSim world configuration.
 
+        Engines without ``DLSSConfig`` retain the standard rendering path and
+        emit a warning that DLSS settings cannot be applied.
+
         Args:
             world_config: DexSim world configuration to update in place.
         """
         world_config.renderer = self.to_dexsim_flags()
-        world_config.dlss_config = self.dlss.to_dexsim_cfg(
-            window_width=world_config.win_config.width,
-            window_height=world_config.win_config.height,
-        )
+        if hasattr(dexsim, "DLSSConfig"):
+            world_config.dlss_config = self.dlss.to_dexsim_cfg(
+                window_width=world_config.win_config.width,
+                window_height=world_config.win_config.height,
+            )
+        else:
+            self.dlss.__post_init__()
+            logger.log_warning(
+                "This DexSim build has no DLSSConfig API (for example, 0.4.3). "
+                "Ignoring DLSS settings and using standard rendering."
+            )
         world_config.raytrace_config.render_iterations_per_frame = self.spp
         world_config.raytrace_config.open_denoise = True
         world_config.raytrace_config.denoiser_type = DenoiserType.OPTIX
