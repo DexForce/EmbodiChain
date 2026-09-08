@@ -26,7 +26,7 @@ import json
 import shutil
 from typing import Any
 
-from embodichain.gen_sim.action_engine.generation.source_scene import (
+from embodichain.gen_sim.task_engine.orchestration.source_scene import (
     resolve_source_scene,
 )
 from embodichain.gen_sim.scene_engine.pipeline import (

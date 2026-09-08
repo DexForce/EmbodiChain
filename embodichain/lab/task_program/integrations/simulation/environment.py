@@ -365,6 +365,52 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         """Return whether this provider belongs to one factory instance."""
         return self._owner_token is owner_token
 
+    def hold_qpos(self, env_ids: torch.Tensor) -> torch.Tensor:
+        """Return controller targets that keep unaddressed robot joints fixed.
+
+        Using measured qpos as a new target on every frame follows controller
+        error and lets an idle manipulator drift.  The simulator's target qpos is
+        the authoritative position-control hold state across semantic calls.
+        """
+        if (
+            not isinstance(env_ids, torch.Tensor)
+            or env_ids.dtype != torch.long
+            or env_ids.dim() != 1
+            or env_ids.numel() == 0
+        ):
+            raise ValueError("env_ids must be a non-empty one-dimensional long tensor.")
+        if env_ids.device != self._env_ids.device:
+            raise ValueError("env_ids must share the simulation environment device.")
+        if torch.unique(env_ids).numel() != env_ids.numel():
+            raise ValueError("env_ids must be unique.")
+        row_by_id = {
+            int(env_id): row
+            for row, env_id in enumerate(self._env_ids.detach().cpu().tolist())
+        }
+        try:
+            rows = [
+                row_by_id[int(env_id)] for env_id in env_ids.detach().cpu().tolist()
+            ]
+        except KeyError as exc:
+            raise ValueError(
+                f"Environment ID {int(exc.args[0])} is absent from the simulation."
+            ) from exc
+        target_qpos = self._robot.get_qpos(target=True)
+        if (
+            not isinstance(target_qpos, torch.Tensor)
+            or not target_qpos.is_floating_point()
+            or target_qpos.shape
+            != (self._env_ids.numel(), int(getattr(self._robot, "dof", 0)))
+            or target_qpos.device != self._env_ids.device
+            or not bool(torch.isfinite(target_qpos).all().item())
+        ):
+            raise ValueError(
+                "robot.get_qpos(target=True) must return finite floating full-qpos "
+                "shape (num_envs, robot_dof) on the simulation device."
+            )
+        index = torch.tensor(rows, dtype=torch.long, device=target_qpos.device)
+        return target_qpos.index_select(0, index).clone()
+
     def _capture(self, task_state: TaskState) -> PlanningContext:
         """Capture one synchronized robot and scene observation."""
         qpos = _full_robot_tensor(self._robot, "get_qpos", required=True)
@@ -518,6 +564,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             simulation,
             robot,
             selected_scene_binding,
+            step_dt=self._step_dt,
             settle_presets=selected_settle_presets,
             env_ids=self._env_ids,
         )

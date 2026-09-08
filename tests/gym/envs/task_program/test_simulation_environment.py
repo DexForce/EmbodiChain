@@ -301,6 +301,7 @@ class _Robot:
 
     def __init__(self) -> None:
         self.qpos = torch.zeros(_BATCH_SIZE, _ROBOT_DOF)
+        self.target_qpos = self.qpos.clone()
 
     def get_qpos(
         self,
@@ -308,8 +309,8 @@ class _Robot:
         target: bool = False,
     ) -> torch.Tensor:
         """Return full or control-part positions."""
-        del target
-        return self.qpos if name is None else self.qpos[:, :1]
+        qpos = self.target_qpos if target else self.qpos
+        return qpos if name is None else qpos[:, :1]
 
     def get_qvel(
         self,
@@ -1417,6 +1418,11 @@ def test_simulation_factory_builds_shared_observation_and_evidence_ports() -> No
     assert context.robot.timestamp == pytest.approx(0.0)
     assert context.control_dt == pytest.approx(_STEP_DT)
     assert torch.equal(observation.current_qpos(context.env_ids), robot.qpos)
+    robot.target_qpos.fill_(0.25)
+    assert torch.equal(
+        observation.hold_qpos(context.env_ids),
+        robot.target_qpos,
+    )
     assert len(providers) == 2
     assert all(
         getattr(provider, "_scene_provider") is observation.scene_provider

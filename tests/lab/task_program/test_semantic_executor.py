@@ -313,6 +313,29 @@ class _EffectAction(AtomicAction[_EffectGoal, ActionOptions]):
         )
 
 
+class _EffectlessAction(_EffectAction):
+    """Zero-frame action whose successful completion has no task-state effect."""
+
+    skill_id: ClassVar[str] = "runtime_test_effectless"
+    open_loop: ClassVar[bool] = True
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract()
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[_EffectGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        goal = self.require_goal(request)
+        self.plan_count += 1
+        return self.build_command_plan(
+            request,
+            context,
+            success=goal.plan_success,
+            commands=TimedCommandSequence((), context.env_ids),
+            replannable=False,
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class _WorkflowEffectGoal:
     """Test-only held-object effect for workflow recovery."""
@@ -473,6 +496,8 @@ class _Compiler(SemanticCallCompiler):
         runner_cfg: ExecutionRunnerCfg,
         *,
         install_effect_monitor: bool,
+        effect_assurance: EffectAssurance | None = None,
+        skill_id: str = _EffectAction.skill_id,
     ) -> None:
         self._test_integration = _Integration(engine, SceneRegistry())
         self._decisions = tuple(
@@ -494,6 +519,8 @@ class _Compiler(SemanticCallCompiler):
         self._plan_success = plan_success
         self._runner_cfg = runner_cfg
         self._install_effect_monitor = install_effect_monitor
+        self._effect_assurance = effect_assurance
+        self._skill_id = skill_id
         self.analyze_count = 0
         self.ground_count = 0
         self.ground_timestamps: list[float] = []
@@ -534,13 +561,13 @@ class _Compiler(SemanticCallCompiler):
         self.ground_task_masks.append(None if state is None else state.env_mask.clone())
         call = workflow.calls[call_index]
         invocation = ActionInvocation(
-            skill_id=_EffectAction.skill_id,
+            skill_id=self._skill_id,
             goal=_EffectGoal(
                 self._plan_success[call_index].clone(),
                 float(call_index + 1),
             ),
             binding=self.integration.engine.bind_control_parts(
-                _EffectAction.skill_id,
+                self._skill_id,
                 {},
             ),
             motion_policy=MotionPolicy(
@@ -592,9 +619,13 @@ class _Compiler(SemanticCallCompiler):
         analyzed = SimpleNamespace(
             call=call,
             effect_assurance=(
-                EffectAssurance.VERIFIED
-                if self._install_effect_monitor
-                else EffectAssurance.PROJECTED
+                self._effect_assurance
+                if self._effect_assurance is not None
+                else (
+                    EffectAssurance.VERIFIED
+                    if self._install_effect_monitor
+                    else EffectAssurance.PROJECTED
+                )
             ),
             effect_monitor_ref=None,
             bound=SimpleNamespace(
@@ -870,6 +901,8 @@ def _system(
     preset_runner_cfg: ExecutionRunnerCfg | None = None,
     runtime_runner_cfg: ExecutionRunnerCfg | None = None,
     install_effect_monitor: bool = True,
+    effect_assurance: EffectAssurance | None = None,
+    effectless_action: bool = False,
 ) -> _System:
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -882,7 +915,7 @@ def _system(
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "runtime_test"
     engine = AtomicActionEngine(generator, load_builtins=False)
-    action = _EffectAction()
+    action = _EffectlessAction() if effectless_action else _EffectAction()
     engine.register(action)
     selected_plan_success = plan_success or tuple(_mask(True, True) for _ in decisions)
     selected_runner_cfg = (
@@ -894,6 +927,8 @@ def _system(
         selected_plan_success,
         selected_runner_cfg,
         install_effect_monitor=install_effect_monitor,
+        effect_assurance=effect_assurance,
+        skill_id=action.skill_id,
     )
     observation = _ObservationProvider()
     sink = _CommandSink()
@@ -1026,6 +1061,22 @@ def test_runtime_projects_planned_effect_when_grounded_call_has_no_monitor() -> 
     assert joint is not None
     assert torch.equal(joint.env_mask, _mask(True, True))
     assert torch.allclose(joint.position, torch.ones(BATCH_SIZE, 1))
+
+
+def test_verified_runtime_accepts_an_effectless_motion_without_a_monitor() -> None:
+    """Tracking completion is sufficient when no effect claim exists to verify."""
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+        effect_assurance=EffectAssurance.VERIFIED,
+        effectless_action=True,
+    )
+
+    result = system.runtime.run(_call("park"))
+
+    assert result.status is SemanticExecutionStatus.COMPLETED
+    assert result.effects == ()
+    assert result.task_state.get_articulation_joint_state("fixture", "joint") is None
 
 
 def test_runtime_uses_selected_preset_runner_cfg_without_override(

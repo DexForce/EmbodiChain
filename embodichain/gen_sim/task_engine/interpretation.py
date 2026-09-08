@@ -644,6 +644,10 @@ def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
             raise ValueError(
                 f"{context} E4 uses transfer_arm/receive_arm, not required_arm."
             )
+    if task_type in {"E1", "E2"} and step["required_arm"] == "none":
+        raise ValueError(
+            f"{context} {task_type} requires required_arm=auto/left_arm/right_arm."
+        )
     if task_type == "E5" and step["required_arm"] not in {"none", "auto"}:
         raise ValueError(f"{context} E5 always uses both arms, not required_arm.")
     if task_type == "E6" and step["target_state"] != "open":
@@ -698,8 +702,12 @@ def _instruction_prompt(instruction: str) -> str:
         "Selector kind rules (these are not extra output fields):\n"
         f"{_instruction_selector_rules()}\n\n"
         "For E5, use target+relation for moving an object relative to another "
-        "object, or direction for a small robot-relative move. A dual-arm pick, "
-        "lift, raise, or hold request without another target uses direction=up "
+        "object, or direction for a small robot-relative move. When a request "
+        "combines lifting with a horizontal direction, preserve that horizontal "
+        "direction: 'carry forward and keep raised' uses direction=front and "
+        "terminal_behavior=hold. The hold recipe includes a raised terminal pose. "
+        "Use direction=up only for a dual-arm pick, lift, raise, or hold request "
+        "without an explicit horizontal direction or another target, "
         "and terminal_behavior=hold. Use hold unless the instruction explicitly "
         "says to put/release the object. For pick "
         "and release at the original location, use direction=none and place. A dual-arm "
@@ -708,7 +716,9 @@ def _instruction_prompt(instruction: str) -> str:
         "has all 5 selector keys. For an inapplicable field use the canonical "
         "default shown in the example, never omit the field. E4 must explicitly "
         "state transfer_arm, receive_arm, and terminal_behavior. E1/E3 must explicitly state target "
-        "and relation (except E1 layout=line)."
+        "and relation (except E1 layout=line). For E1 and E2, copy an explicitly "
+        "named left/right arm into required_arm; use required_arm=auto only when "
+        "the instruction does not specify an arm, and never use none."
     )
 
 
@@ -924,7 +934,7 @@ def _structured_output_runnable(
 ) -> Any:
     if not hasattr(client, "with_structured_output"):
         return client
-    method = "json_mode" if _is_mimo_compatible(settings) else "json_schema"
+    method = "json_mode"
     try:
         return client.with_structured_output(schema, method=method)
     except (TypeError, ValueError):

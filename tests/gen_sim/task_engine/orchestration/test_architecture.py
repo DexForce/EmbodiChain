@@ -17,15 +17,20 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import fields
+from inspect import signature
 from pathlib import Path
 
 import embodichain.gen_sim as gen_sim_package
-from embodichain.gen_sim.action_engine.agent import ActionAgent
 from embodichain.gen_sim.task_engine import TaskAgent
 from embodichain.gen_sim.task_engine import __main__ as task_engine_main
 from embodichain.gen_sim.task_engine import cli as task_engine_cli
 from embodichain.gen_sim.task_engine.orchestration.coordinator import (
     TaskEngineCoordinator,
+)
+from embodichain.gen_sim.task_engine.orchestration.artifacts import (
+    TaskEngineArtifactPaths,
+    write_task_engine_artifacts,
 )
 from embodichain.gen_sim.task_engine.orchestration.scene_adapter import SceneAdapter
 
@@ -69,9 +74,108 @@ def test_task_semantic_core_does_not_import_scene_action_or_orchestration() -> N
     assert offenders == []
 
 
+def test_task_engine_does_not_import_atomic_execution_layer() -> None:
+    forbidden = "embodichain.lab.sim.atomic_actions"
+    execution_modules = {"engine", "execution", "runner", "simulation", "session"}
+    runtime_types = {"AtomicActionEngine", "ExecutionSession", "ExecutionRunner"}
+    offenders: list[str] = []
+    task_root = _GEN_SIM_ROOT / "task_engine"
+    for path in task_root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                modules = [node.module or ""]
+            else:
+                continue
+            atomic_imports = [
+                module
+                for module in modules
+                if module == forbidden or module.startswith(forbidden + ".")
+            ]
+            in_adapter = path.is_relative_to(task_root / "_task_program")
+            if atomic_imports and (
+                not in_adapter
+                or any(
+                    module.rsplit(".", 1)[-1] in execution_modules
+                    for module in atomic_imports
+                )
+            ):
+                offenders.append(path.relative_to(task_root).as_posix())
+                break
+        # Goal types and factory annotations are allowed, private runtimes are not.
+        assert not any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in runtime_types
+            for node in ast.walk(tree)
+        ), path
+    assert offenders == []
+
+
+def test_configured_pick_and_transport_lowerers_only_bind_targets() -> None:
+    services = _GEN_SIM_ROOT / "task_engine/_task_program/services.py"
+    source = services.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
+    for name in ("_PickLowerer", "_MoveHeldObjectLowerer"):
+        forbidden_calls = {
+            node.func.attr
+            for node in ast.walk(classes[name])
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr
+            in {"compute_ik", "compute_batch_ik", "plan", "generate", "step"}
+        }
+        assert forbidden_calls == set()
+    assert "simulation.pick_release_safe" not in source
+    assert "simulation.move_held_object_upright" not in source
+
+
+def test_gensim_task_recipes_do_not_solve_live_ik() -> None:
+    for path in (_GEN_SIM_ROOT / "task_engine").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        assert not any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"compute_ik", "compute_batch_ik"}
+            for node in ast.walk(tree)
+        ), path
+
+
+def test_default_task_runtime_has_no_legacy_physical_executor() -> None:
+    task_root = _GEN_SIM_ROOT / "task_engine"
+    default_runtime = (
+        task_root / "workflow.py",
+        task_root / "_bundle_runner.py",
+        task_root / "semantic_planner.py",
+        task_root / "task_program_bundle.py",
+        task_root / "orchestration/coordinator.py",
+    )
+    forbidden_names = {
+        "ActionAgent",
+        "ActionGrounder",
+        "AtomicActionAdapter",
+        "ProgramExecutor",
+    }
+    offenders = {
+        path.relative_to(task_root).as_posix(): sorted(
+            forbidden_names.intersection(
+                node.id
+                for node in ast.walk(
+                    ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+                )
+                if isinstance(node, ast.Name)
+            )
+        )
+        for path in default_runtime
+    }
+    assert {path: names for path, names in offenders.items() if names} == {}
+
+
 def test_cross_engine_owners_are_explicit() -> None:
     assert TaskAgent.__module__ == "embodichain.gen_sim.task_engine.agent"
-    assert ActionAgent.__module__ == "embodichain.gen_sim.action_engine.agent"
     assert SceneAdapter.__module__.startswith(
         "embodichain.gen_sim.task_engine.orchestration"
     )
@@ -84,7 +188,14 @@ def test_task_engine_owns_its_module_entry_point() -> None:
     assert task_engine_main.main is task_engine_cli.main
 
 
+def test_task_engine_artifacts_have_no_legacy_grounded_plan_boundary() -> None:
+    assert "grounded_task_plan" not in {
+        field.name for field in fields(TaskEngineArtifactPaths)
+    }
+    assert "grounded_task_plan" not in signature(write_task_engine_artifacts).parameters
+
+
 def test_legacy_cross_engine_packages_are_deleted() -> None:
+    assert not any((_GEN_SIM_ROOT / "action_engine").rglob("*.py"))
     assert not (_GEN_SIM_ROOT / "scene_bridge").exists()
     assert not (_GEN_SIM_ROOT / "collaboration").exists()
-    assert not (_GEN_SIM_ROOT / "action_engine" / "collaboration").exists()

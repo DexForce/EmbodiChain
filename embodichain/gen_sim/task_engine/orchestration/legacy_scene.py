@@ -30,10 +30,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 import trimesh
 
-from embodichain.gen_sim.action_engine.generation.source_scene import (
-    prepare_scene,
-    resolve_source_scene,
-)
+from .source_scene import prepare_scene, resolve_source_scene
 
 from .scene_source import (
     SceneSourceFingerprint,

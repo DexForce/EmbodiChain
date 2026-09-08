@@ -24,6 +24,7 @@ import numpy as np
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.cfg import RobotCfg, RenderCfg
+from embodichain.lab.sim.solvers import PytorchSolver
 from embodichain.data import get_data_path
 from embodichain.utils.utility import reset_all_seeds
 
@@ -65,6 +66,46 @@ def grid_sample_qpos_from_limits(
     if stacked.shape[0] > max_samples:
         return stacked[:max_samples]
     return stacked
+
+
+def test_get_ik_uses_true_inverse_for_rotated_tcp() -> None:
+    """Preserve the requested TCP pose when lowering it to the end link."""
+    solver = object.__new__(PytorchSolver)
+    solver.device = torch.device("cpu")
+    solver.dof = 2
+    solver._num_samples = 1
+    solver.lower_qpos_limits = torch.full((2,), -1.0)
+    solver.upper_qpos_limits = torch.full((2,), 1.0)
+    solver.ik_nearest_weight = torch.ones(2)
+    solver.tcp_xpos = np.array(
+        [
+            [0.0, -1.0, 0.0, 0.1],
+            [1.0, 0.0, 0.0, 0.2],
+            [0.0, 0.0, 1.0, 0.3],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    received: list[torch.Tensor] = []
+
+    def solve(
+        target_pose: torch.Tensor,
+        joint_seed: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        del joint_seed
+        received.append(target_pose)
+        return torch.ones(1, dtype=torch.bool), torch.zeros((1, solver.dof))
+
+    solver._compute_inverse_kinematics = solve
+    target = torch.eye(4).unsqueeze(0)
+
+    success, _ = solver.get_ik(target, qpos_seed=torch.zeros(solver.dof))
+
+    assert success.tolist() == [True]
+    assert torch.allclose(
+        received[0],
+        target @ torch.linalg.inv(torch.as_tensor(solver.tcp_xpos)),
+    )
 
 
 # Base test class for CPU and CUDA
