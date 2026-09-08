@@ -82,7 +82,6 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
     skill_id: ClassVar[str] = "move_joints"
     GoalType: ClassVar[type] = JointPositionGoal
     OptionsType: ClassVar[type] = MoveJointsOptions
-    agent_visible: ClassVar[bool] = False
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             make_motion_slot(

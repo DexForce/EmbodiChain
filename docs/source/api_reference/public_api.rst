@@ -228,6 +228,125 @@ embodichain.gen_sim.gradio_ui.gradio_app
 
    main
 
+embodichain.gen_sim.task_engine.orchestration.grounding
+--------------------------------------------------------
+
+Task-conditioned grounding selects canonical scene UIDs from a redacted
+semantic inventory. It does not construct physical goals or action
+invocations.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.grounding
+
+.. autosummary::
+
+   GroundingCaller
+   GroundingResult
+   ground_scene_references
+
+embodichain.gen_sim.task_engine.orchestration.scene_assets
+-----------------------------------------------------------
+
+Generated GLB assets are normalized into renderer-safe runtime geometry while
+the source files and their provenance remain unchanged.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.scene_assets
+
+.. autosummary::
+
+   normalize_scene_assets
+
+embodichain.gen_sim.task_engine.orchestration.scene_inventory
+--------------------------------------------------------------
+
+The structural inventory preserves source semantics and validates only
+explicit task/scene compatibility. It deliberately avoids language matching
+and physical goal grounding.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.scene_inventory
+
+.. autosummary::
+
+   SceneEntity
+   SceneInventory
+   validate_source_compatibility
+   validate_target_compatibility
+
+embodichain.gen_sim.task_engine.orchestration.source_scene
+-----------------------------------------------------------
+
+Source-scene utilities resolve supported exports and normalize their stable
+identities, paths, transforms, and conservative physics metadata for Task
+Engine planning and simulator loading.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.source_scene
+
+.. autosummary::
+
+   PreparedScene
+   ResolvedSceneSource
+   is_prompt2scene_export
+   prepare_scene
+   resolve_gym_config_path
+   resolve_source_scene
+
+embodichain.gen_sim.task_engine.reporting
+------------------------------------------
+
+Tensor-free Task Engine reports retain the canonical Task Program runtime
+result and its per-environment semantic outcomes without reconstructing
+physical execution state.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.reporting
+
+.. autosummary::
+
+   EXECUTION_REPORT_FILENAME
+   TASK_PROGRAM_EXECUTION_REPORT_SCHEMA
+   TaskProgramExecutionReport
+   validate_execution_report
+   write_execution_report
+
+embodichain.gen_sim.task_engine.semantic_graph
+-----------------------------------------------
+
+Semantic task graphs are immutable, JSON-safe planning artifacts whose nodes
+contain canonical Semantic Calls and exclude grounded action data.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.semantic_graph
+
+.. autosummary::
+
+   SEMANTIC_TASK_GRAPH_SCHEMA
+   SemanticTaskGraph
+   semantic_task_graph_hash
+   validate_semantic_task_graph
+
+embodichain.gen_sim.task_engine.semantic_planner
+-------------------------------------------------
+
+The semantic planner lowers validated Task Engine candidates and canonical
+scene bindings into provider-free semantic task graphs.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.semantic_planner
+
+.. autosummary::
+
+   SemanticTaskPlanner
+   UnsupportedSemanticCapabilityError
+
+embodichain.gen_sim.task_engine.task_program_bundle
+----------------------------------------------------
+
+Bundle generation materializes and preflights a fingerprint-bound configured
+Task Program deployment from a semantic task graph and prepared scene.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.task_program_bundle
+
+.. autosummary::
+
+   TaskProgramBundlePaths
+   generate_task_program_bundle
+
 embodichain.gen_sim.scene_engine.core.scene_edit_plan
 -----------------------------------------------------
 
@@ -619,6 +738,7 @@ embodichain.lab.sim.atomic_actions.control
    GRASP_COMMAND
    JointPositionCommand
    OPEN_COMMAND
+   PARK_COMMAND
 
 embodichain.lab.sim.atomic_actions.core
 ---------------------------------------
@@ -1295,6 +1415,16 @@ embodichain.lab.sim.solvers.null_space_posture_task
 .. autosummary::
 
    NullSpacePostureTask
+
+embodichain.lab.sim.solvers.pytorch_solver
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.solvers.pytorch_solver
+
+.. autosummary::
+
+   PytorchSolverCfg
+   PytorchSolver
 
 embodichain.lab.sim.solvers.pink_solver
 ---------------------------------------

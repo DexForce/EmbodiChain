@@ -29,8 +29,8 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 import trimesh
 
-from embodichain.gen_sim.action_engine.generation.models import PreparedScene
-from embodichain.gen_sim.action_engine.generation.source_scene import (
+from embodichain.gen_sim.task_engine.orchestration.source_scene import (
+    PreparedScene,
     prepare_scene,
     resolve_source_scene,
 )

@@ -24,14 +24,6 @@ import json
 import math
 from typing import Any, TypeAlias
 
-from embodichain.gen_sim.action_engine.domain import (
-    validate_scene_requirements,
-    validate_task_spec,
-)
-from embodichain.gen_sim.action_engine.runtime import (
-    EXECUTION_REPORT_SCHEMA,
-    validate_execution_report,
-)
 from embodichain.gen_sim.task_engine import (
     SCENE_REQUEST_SCHEMA,
     SUCCESS_SPEC_SCHEMA,
@@ -43,7 +35,6 @@ from embodichain.gen_sim.task_engine import (
     TaskCandidateSet,
     TaskDraft,
     canonical_hash,
-    task_success_type,
     validate_scene_request,
     validate_success_spec,
     validate_task_candidate,
@@ -53,8 +44,6 @@ from embodichain.gen_sim.task_engine import (
 
 __all__ = [
     "BINDING_REPORT_SCHEMA",
-    "EXECUTION_REPORT_SCHEMA",
-    "GROUNDED_TASK_PLAN_SCHEMA",
     "ROLE_BINDINGS_SCHEMA",
     "SCENE_MANIFEST_SCHEMA",
     "SCENE_REQUEST_SCHEMA",
@@ -62,8 +51,6 @@ __all__ = [
     "TASK_CANDIDATE_SET_SCHEMA",
     "TASK_DRAFT_SCHEMA",
     "BindingReport",
-    "ExecutionReport",
-    "GroundedTaskPlan",
     "RoleBindings",
     "SceneManifest",
     "SceneRequest",
@@ -73,8 +60,6 @@ __all__ = [
     "TaskDraft",
     "canonical_hash",
     "validate_binding_report",
-    "validate_execution_report",
-    "validate_grounded_task_plan",
     "validate_role_bindings",
     "validate_scene_manifest",
     "validate_scene_request",
@@ -87,12 +72,9 @@ __all__ = [
 SCENE_MANIFEST_SCHEMA = "action_engine_scene_manifest_v1"
 ROLE_BINDINGS_SCHEMA = "action_engine_role_bindings_v1"
 BINDING_REPORT_SCHEMA = "action_engine_binding_report_v1"
-GROUNDED_TASK_PLAN_SCHEMA = "action_engine_grounded_task_plan_v1"
 SceneManifest: TypeAlias = dict[str, Any]
 RoleBindings: TypeAlias = dict[str, Any]
 BindingReport: TypeAlias = dict[str, Any]
-GroundedTaskPlan: TypeAlias = dict[str, Any]
-ExecutionReport: TypeAlias = dict[str, Any]
 
 
 def validate_scene_manifest(value: Mapping[str, Any]) -> SceneManifest:
@@ -334,188 +316,6 @@ def validate_binding_report(value: Mapping[str, Any]) -> BindingReport:
             "An unsatisfied BindingReport cannot contain resolved or ambiguous candidates."
         )
     result["candidates"] = candidates
-    return result
-
-
-def validate_grounded_task_plan(value: Mapping[str, Any]) -> GroundedTaskPlan:
-    result = _mapping(value, "GroundedTaskPlan")
-    keys = {
-        "schema_version",
-        "task_id",
-        "instruction",
-        "selected_candidate_id",
-        "task_draft",
-        "task_spec",
-        "scene_requirements",
-        "success_spec",
-        "scene_manifest",
-        "role_bindings",
-        "binding_report",
-        "hashes",
-    }
-    _keys(result, keys, "GroundedTaskPlan")
-    _schema(result, GROUNDED_TASK_PLAN_SCHEMA, "GroundedTaskPlan")
-    task_id = _nonempty(result.get("task_id"), "GroundedTaskPlan.task_id")
-    result["instruction"] = _nonempty(
-        result.get("instruction"), "GroundedTaskPlan.instruction"
-    )
-    result["selected_candidate_id"] = _nonempty(
-        result.get("selected_candidate_id"), "GroundedTaskPlan.selected_candidate_id"
-    )
-    result["task_draft"] = validate_task_draft(result.get("task_draft"))
-    # Candidate SuccessSpec terms use draft step IDs.  Once count/all selectors
-    # are lowered, the grounded plan carries one term per concrete TaskSpec
-    # instance instead, and is checked against the v2 recipe below.
-    result["success_spec"] = validate_success_spec(result.get("success_spec"))
-    result["scene_manifest"] = validate_scene_manifest(result.get("scene_manifest"))
-    result["role_bindings"] = validate_role_bindings(result.get("role_bindings"))
-    result["binding_report"] = validate_binding_report(result.get("binding_report"))
-    result["task_spec"] = validate_task_spec(
-        _mapping(result.get("task_spec"), "GroundedTaskPlan.task_spec")
-    )
-    result["scene_requirements"] = validate_scene_requirements(
-        _mapping(
-            result.get("scene_requirements"),
-            "GroundedTaskPlan.scene_requirements",
-        )
-    )
-    hashes = _mapping(result.get("hashes"), "GroundedTaskPlan.hashes")
-    _keys(
-        hashes,
-        {"task_draft", "task_spec", "scene_manifest", "role_bindings", "plan"},
-        "GroundedTaskPlan.hashes",
-    )
-    for key in hashes:
-        hashes[key] = _digest(hashes[key], f"GroundedTaskPlan.hashes.{key}")
-    if any(
-        part["task_id"] != task_id
-        for part in (
-            result["task_draft"],
-            result["task_spec"],
-            result["scene_requirements"],
-            result["success_spec"],
-            result["role_bindings"],
-            result["binding_report"],
-        )
-    ):
-        raise ValueError("GroundedTaskPlan task IDs must agree.")
-    if result["task_draft"]["instruction"] != result["instruction"]:
-        raise ValueError("GroundedTaskPlan instruction must match TaskDraft.")
-    if result["task_spec"]["instruction"] != result["instruction"]:
-        raise ValueError("GroundedTaskPlan instruction must match TaskSpec.")
-    if (
-        result["role_bindings"]["candidate_id"] != result["selected_candidate_id"]
-        or result["binding_report"]["selected_candidate_id"]
-        != result["selected_candidate_id"]
-    ):
-        raise ValueError("GroundedTaskPlan selected candidate IDs must agree.")
-    if result["binding_report"]["status"] != "bound":
-        raise ValueError("GroundedTaskPlan requires a bound BindingReport.")
-    selected_audit = next(
-        candidate
-        for candidate in result["binding_report"]["candidates"]
-        if candidate["candidate_id"] == result["selected_candidate_id"]
-    )
-    if selected_audit["semantic_hash"] != canonical_hash(result["task_draft"]["steps"]):
-        raise ValueError(
-            "GroundedTaskPlan selected candidate hash must match TaskDraft."
-        )
-    task_metadata = result["task_spec"].get("metadata", {})
-    task_oracle = result["task_spec"].get("oracle", {})
-    serialized_bindings = (
-        task_metadata.get("role_bindings")
-        if isinstance(task_metadata, Mapping)
-        and task_metadata.get("role_bindings") is not None
-        else (
-            task_oracle.get("role_bindings")
-            if isinstance(task_oracle, Mapping)
-            else None
-        )
-    )
-    if serialized_bindings != result["role_bindings"]["role_bindings"]:
-        raise ValueError(
-            "GroundedTaskPlan RoleBindings must match the TaskSpec binding hand-off."
-        )
-    requirement_roles = {
-        str(item["role_id"]) for item in result["scene_requirements"]["objects"]
-    }
-    if requirement_roles != set(result["role_bindings"]["role_bindings"]):
-        raise ValueError(
-            "GroundedTaskPlan SceneRequirements roles must match RoleBindings."
-        )
-    manifest_uids = {item["uid"] for item in result["scene_manifest"]["objects"]}
-    missing_uids = sorted(
-        set(result["role_bindings"]["role_bindings"].values()) - manifest_uids
-    )
-    if missing_uids:
-        raise ValueError(
-            f"GroundedTaskPlan RoleBindings reference unknown scene UIDs {missing_uids}."
-        )
-    reference_ids = {
-        f"{step['id']}.{role}"
-        for step in result["task_draft"]["steps"]
-        for role in ("object", "target")
-        if step[role]["kind"] == "scene_ref"
-    }
-    reference_bindings = result["role_bindings"]["reference_bindings"]
-    if set(reference_bindings) != reference_ids:
-        raise ValueError(
-            "GroundedTaskPlan reference bindings must cover every draft scene_ref exactly."
-        )
-    bound_uids = {uid for uids in reference_bindings.values() for uid in uids} | set(
-        result["role_bindings"]["role_bindings"].values()
-    )
-    unknown_uids = sorted(bound_uids - manifest_uids)
-    if unknown_uids:
-        raise ValueError(
-            "GroundedTaskPlan bindings reference unknown SceneManifest UIDs: "
-            f"{unknown_uids}."
-        )
-    audited_bindings = {
-        reference["reference_id"]: reference["selected_uids"]
-        for reference in selected_audit["references"]
-    }
-    if audited_bindings != reference_bindings:
-        raise ValueError(
-            "GroundedTaskPlan RoleBindings must match the selected candidate audit."
-        )
-    ontology_success = [
-        {
-            "step_id": instance["id"],
-            "type": task_success_type(instance["task_type"], instance["params"]),
-        }
-        for instance in result["task_spec"]["task_instances"]
-    ]
-    recipe_success = [
-        {
-            "step_id": term["task_instance_id"],
-            "type": term["type"],
-        }
-        for term in result["task_spec"]["success"]["terms"]
-    ]
-    if recipe_success != ontology_success:
-        raise ValueError(
-            "GroundedTaskPlan TaskSpec success recipe must be derived from "
-            "task_success_type."
-        )
-    if result["success_spec"]["terms"] != ontology_success:
-        raise ValueError(
-            "GroundedTaskPlan SuccessSpec must exactly match the lowered "
-            "TaskSpec success recipe."
-        )
-    expected_hashes = {
-        "task_draft": canonical_hash(result["task_draft"]),
-        "task_spec": canonical_hash(result["task_spec"]),
-        "scene_manifest": canonical_hash(result["scene_manifest"]),
-        "role_bindings": canonical_hash(result["role_bindings"]),
-    }
-    base = {key: value for key, value in result.items() if key != "hashes"}
-    expected_hashes["plan"] = canonical_hash(base)
-    if hashes != expected_hashes:
-        raise ValueError("GroundedTaskPlan hashes do not match their contents.")
-    result["task_id"] = task_id
-    result["hashes"] = hashes
-    _json_safe(result, "GroundedTaskPlan")
     return result
 
 

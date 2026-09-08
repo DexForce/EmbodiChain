@@ -14,12 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Task-owned orchestration across task, scene, and action engines."""
+"""Task-owned orchestration across task, scene, and Semantic Skill engines."""
 
 from __future__ import annotations
 
-from embodichain.gen_sim.action_engine.agent import ActionAgent, ActionGraph
-from embodichain.gen_sim.action_engine.runtime import ExecutionReport
+from typing import Any
 
 from .artifacts import (
     ArtifactTransaction,
@@ -34,20 +33,11 @@ from .artifacts import (
 )
 from .contracts import (
     BINDING_REPORT_SCHEMA,
-    EXECUTION_REPORT_SCHEMA,
-    GROUNDED_TASK_PLAN_SCHEMA,
     ROLE_BINDINGS_SCHEMA,
     SCENE_MANIFEST_SCHEMA,
     BindingReport,
-    GroundedTaskPlan,
     RoleBindings,
     SceneManifest,
-)
-from .coordinator import (
-    TaskEngineCoordinator,
-    PreparationResult,
-    build_grounded_task_plan,
-    lower_task_candidate,
 )
 from .scene_adapter import (
     CandidateSelection,
@@ -69,19 +59,13 @@ from .legacy_scene import (
 )
 
 __all__ = [
-    "ActionAgent",
-    "ActionGraph",
     "ArtifactTransaction",
     "CONSERVATIVE_SCENE_GRAPH_FILENAME",
     "BINDING_REPORT_SCHEMA",
     "BindingReport",
     "TaskEngineArtifactPaths",
     "TaskEngineCoordinator",
-    "EXECUTION_REPORT_SCHEMA",
-    "ExecutionReport",
     "FEASIBILITY_REPORT_FILENAME",
-    "GROUNDED_TASK_PLAN_SCHEMA",
-    "GroundedTaskPlan",
     "PREPARATION_FAILURE_FILENAME",
     "PreparationResult",
     "ROLE_BINDINGS_SCHEMA",
@@ -95,7 +79,6 @@ __all__ = [
     "SceneManifest",
     "SceneSourceFingerprint",
     "SceneSourceRef",
-    "build_grounded_task_plan",
     "task_engine_artifact_paths",
     "fingerprint_scene_source",
     "LEGACY_SCENE_CONVERSION_SCHEMA",
@@ -103,7 +86,15 @@ __all__ = [
     "convert_legacy_gym_project",
     "restore_locked_scene_entities",
     "verify_scene_source_fingerprint",
-    "lower_task_candidate",
     "write_execution_report",
     "write_preparation_failure",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """Load coordinator entry points lazily to avoid graph-contract cycles."""
+    if name in {"PreparationResult", "TaskEngineCoordinator"}:
+        from . import coordinator
+
+        return getattr(coordinator, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

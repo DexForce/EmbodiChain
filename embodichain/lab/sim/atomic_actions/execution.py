@@ -1247,6 +1247,13 @@ class ExecutionSession:
 
     def _validate_phase_effect_gates(self, plan: ActionPlan) -> None:
         """Bind invocation-owned gates to non-initial named plan segments."""
+        if not plan.plan_success.any():
+            # A fully failed plan owns no executable phase boundary.  Preserve
+            # its typed PlannerDiagnostics so ordinary retry/exhaustion logic
+            # can handle the failure; validating gate segment names against an
+            # empty failed-plan trajectory would replace that cause with a
+            # misleading preparation error.
+            return
         request = self._requests[self._invocation_index]
         for requirement in request.phase_effect_gates:
             if type(requirement) is not PhaseEffectGateRequirement:

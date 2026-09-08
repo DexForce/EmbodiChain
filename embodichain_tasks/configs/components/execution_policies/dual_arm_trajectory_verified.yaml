@@ -1,0 +1,58 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+policy_id: dual_arm_trajectory_verified_v1
+preset_id: trajectory_verified
+
+requires:
+  embodiment_contract: dual_arm_parallel_gripper
+
+motion:
+  strategy: ik_interp
+  # HandOver reserves explicit close, hold, release, and retreat phases.  A
+  # 140-frame budget leaves the calibrated 44 frames each for held-object
+  # transfer and receiver approach instead of compressing either physical
+  # motion into an unsafe burst.
+  sample_count: 140
+  dynamic_collision_mode: "off"
+
+tracking:
+  kind: joint_position
+  # The generated dual-Franka scene is driven through a 25 Hz joint-position
+  # target interface.  These bounds retain a real feedback boundary while
+  # allowing the transient controller lag measured during close/lift.
+  in_flight_max_abs_error: 0.8
+  terminal_max_abs_error: 0.25
+  terminal_settle_timeout: 2.0
+  consecutive_violations: 3
+  consecutive_acceptances: 3
+  grace_period: 0.2
+
+recovery:
+  max_replans: 3
+  max_action_retries: 1
+  goal_translation_threshold: 0.05
+  goal_rotation_threshold: 3.2
+
+workflow_recovery:
+  max_recovery_attempts: 1
+
+runner:
+  minimum_cycle_time: 0.04
+  hold_on_completion: false
+  hold_during_effect_verification: false
+
+effect_assurance: verified
