@@ -17,6 +17,7 @@ Lightweight RL environments have a separate owner in
 | Import registration | `embodichain/lab/gym/utils/registration.py`; official task imports under `embodichain_tasks/embodichain_tasks/` |
 | Environment timing and loop | `embodichain/lab/gym/envs/base_env.py`: `EnvCfg`, `BaseEnv` |
 | Scene, manager and demonstration integration | `embodichain/lab/gym/envs/embodied_env.py` |
+| Expert trajectory control and stored-action schema | `embodichain/lab/gym/envs/expert_trajectory.py` |
 | Controller-ready commands | `embodichain/lab/gym/envs/types.py`: `ControllerAction` |
 | Demo segment execution / outcomes | `embodichain/lab/gym/envs/demo.py` |
 | Configured Task Program registration | `embodichain/lab/gym/envs/task_program/registration.py` |
@@ -45,6 +46,23 @@ wrappers, and replay. Read [profiling](profiling.md) only for instrumentation.
 and `control_frequency = 1 / step_dt`. `control_freq` / `sim_freq` are compatibility
 aliases; `render_fps` follows the control frequency. For example, `physics_dt=0.01`
 and `target_control_frequency=25` resolve to four physics steps per control step.
+Source trajectory timing does not alter this contract: expert paths are retimed
+to `step_dt` before their commands reach `env.step()`.
+
+## Expert trajectory contract
+
+`EmbodiedEnvCfg.expert_trajectory` owns source-neutral expert generation
+behavior. `joint_command_mode="position"` is the compatibility default;
+`"position_velocity"` requires both effective qpos and qvel controller targets.
+This setting applies equally to handwritten, MotionGenerator, and Task Program
+experts and does not change the policy `action_space`.
+
+Expert recording uses its own immutable action layout. Position mode stores
+active-joint qpos. Position-velocity mode stores a flat
+`[active qpos, active qvel]` vector and publishes joint names, slices, mode,
+schema version, and `step_dt` in trajectory/demo metadata. Missing qvel fails
+before stepping in position-velocity mode; inactive and hold targets use zero
+qvel.
 
 ## Lifecycle and boundaries
 
@@ -80,6 +98,7 @@ dataset persistence are separate contracts; see
 | Seeding and reset | `tests/gym/envs/test_env_seed.py`, `tests/gym/envs/managers/test_event_manager_seed.py` |
 | Config or registration | Relevant tests under `tests/gym/`; use `rg --files tests` to select the component/registration case |
 | Controller or demo bridge | Relevant action/demo/Task Program tests under `tests/gym/envs/` |
+| Expert trajectory mode, action layout, or retiming | `tests/gym/envs/test_expert_trajectory.py`, `tests/gym/envs/test_demo.py`, `tests/gym/envs/test_replay.py` |
 | CLI discovery | `tests/test_main.py` |
 
 Use `/add-task-env` to select the task implementation route; use `/add-task-program`

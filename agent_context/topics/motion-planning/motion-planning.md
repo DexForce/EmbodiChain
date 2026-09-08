@@ -11,6 +11,7 @@
 | cuRobo planner | `embodichain/lab/sim/motion/planners/curobo/curobo_planner.py` → `CuroboPlanner`, `CuroboPlannerCfg`, `CuroboWorldCfg`, `CuroboPlanOptions` |
 | Planner assets | `embodichain/data/assets/planner_assets.py` → `download_neural_planner_checkpoint()` |
 | Motion generator | `embodichain/lab/sim/motion/motion_generator.py` → `MotionGenerator`, `MotionGenCfg`, `MotionGenOptions` |
+| Standalone timed playback | `embodichain/lab/sim/motion/execution.py` → `JointTrajectoryPlaybackCfg`, `play_joint_trajectory` |
 | Planner utilities & data types | `embodichain/lab/sim/motion/planners/utils.py` → `PlanState`, `PlanResult`, `MoveType`, `MovePart`, `TrajectorySampleMethod`, `interpolate_xpos_batched` |
 | Trajectory augmentation | `embodichain/lab/sim/motion/expansion/` → contracts, configs, operators, coverage, `GenerationSession` |
 
@@ -176,6 +177,20 @@ samples at repeated times are valid padding or junctions. `resample_in_time`
 preserves first-arrival offset and total duration. Neither helper guarantees
 motion limits or smooth rest-to-rest motion. Execution-specific stationary and
 terminal targets belong to [Atomic Skills](../atomic-actions/execution.md).
+
+`retime_to_control_grid(positions, dt, control_dt)` maps each row to a fixed
+destination command clock without shortening it: the executed interval count is
+`ceil(duration / control_dt)`, samples follow uniform source-path phase, and
+qvel is recomputed on the executed grid. The first, last valid, and padded hold
+velocities are zero. Planner `PlanResult.dt` remains source timing and never
+changes simulator `physics_dt`.
+
+For standalone simulation, `play_joint_trajectory()` additionally requires
+`control_dt` to be an integer multiple of `physics_dt`, then advances unchanged
+physics substeps. Its default is position-only at one physics step; qpos+qvel is
+explicitly opt-in. Environment experts instead use the environment-owned
+`step_dt` and `ExpertTrajectoryCfg` contract in
+[Environment framework](../env-framework/env-framework.md).
 
 `scripts/tutorials/sim/motion_generator.py` and the neural planner example
 replay timed trajectories on an explicit physics/control grid and recompute

@@ -109,6 +109,11 @@ the selected `RecoveryPolicy`.
 trajectory or endpoint command must align to it; integrations must not silently
 resample fractional durations.
 
+Primitive planner results are explicitly retimed before their controlled-joint
+paths are embedded into a full-robot `TimedTrajectory`. Off-grid duration rounds
+up to a whole control interval, qvel is recomputed from the executed samples,
+and now-invalid native acceleration samples are discarded.
+
 Tracking recovery is separate from task-level semantic recovery:
 
 - Atomic Actions owns planning failure, target/collision revision, transport
