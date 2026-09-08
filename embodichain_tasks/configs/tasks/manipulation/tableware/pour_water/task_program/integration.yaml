@@ -1,0 +1,92 @@
+integration_id: pour_water_v1
+program_id: pour_water_with_right_arm
+
+requires:
+  scene_contract: pour_water_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+
+scene_binding:
+  contract_id: pour_water_scene_v1
+  registry_id: task_program_pour_water
+  rigid_objects:
+    - entity_id: cup
+      simulation_uid: cup
+      dynamics: dynamic
+      semantic_type: cup
+    - entity_id: bottle
+      simulation_uid: bottle
+      dynamics: dynamic
+      semantic_type: bottle
+      affordances:
+        - entity_id: bottle_grasp
+          kind: antipodal_grasp
+          internal_axis: [1.0, 0.0, 0.0]
+
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    move_held_object:
+      primary: primary_manipulator
+    pour:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  action_options:
+    pick:
+      kind: pick_up
+      hand_interp_steps: 11
+      grasp_settle_steps: 25
+      fixed_object_to_eef:
+        - -0.0530918874
+        - 0.4963395894
+        - 0.8665033579
+        - 0.035870254
+        - -0.0525476672
+        - -0.8679134846
+        - 0.493927747
+        - 0.0204655528
+        - 0.9972059727
+        - -0.0193091929
+        - 0.0721606836
+        - 0.0321167707
+        - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+    simulation.move_held_object:
+      kind: move_held_object
+    simulation.pour:
+      kind: pour
+      rotate_angle: -1.0471975511965976
+    place:
+      kind: place
+      hand_interp_steps: 11
+      release_settle_steps: 15
+      preserve_current_object_orientation: true
+  effect_monitors: {}
+
+runtime_services:
+  registered_semantic_lowerers:
+    - kind: move_held_object
+      target_id: cup_pour_pose
+      reference_entity_id: cup
+      relative_pose:
+        - 1.0
+        - 0.0
+        - 0.0
+        - 0.05
+        - 0.0
+        - 1.0
+        - 0.0
+        - -0.1
+        - 0.0
+        - 0.0
+        - 1.0
+        - 0.125
+        - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+    - kind: pour
+      object_id: bottle

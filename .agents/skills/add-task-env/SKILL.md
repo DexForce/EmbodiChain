@@ -1,116 +1,179 @@
 ---
 name: add-task-env
-description: Use when creating a new task environment for EmbodiChain, including expert demonstration tasks, RL tasks or any EmbodiedEnv subclass
+description: "Route and scaffold a new EmbodiChain task by solution type: handwritten expert trajectory, Task Program expert trajectory, simulator RL, lightweight RL, or an environment-only baseline. Use when creating a task, environment, expert demo, or RL task."
 ---
 
 # Add Task Environment
 
-Scaffold a new task environment following EmbodiChain's conventions and patterns.
+Own the task identity, task-first layout, physical environment, registration
+boundary, and solution routing. Do not assume every new task needs a Python
+environment subclass.
 
-## When to Use
+## Route from the user's prompt
 
-- User asks to create a new task or environment
-- User says "add a task", "new env", "create environment for X"
+Classify the requested solution before creating files. Read only the matching
+reference files.
 
-## Steps
+| Prompt signal | Route | Required reference |
+|---|---|---|
+| `handwritten`, `scripted`, `demo segments`, `create_demo_segments`, custom Python planning | Handwritten expert trajectory | `references/handwritten-expert.md` |
+| `Task Program`, `program.yaml`, `integration.yaml`, declarative task, Semantic Call, MLLM-generated program | Task Program expert trajectory | `references/task-program-expert.md` |
+| Generic `expert trajectory` or `expert demo` with no implementation signal | Resolve handwritten versus Task Program from required behavior; ask only if still ambiguous | One selected expert reference |
+| `RL`, `PPO`, `GRPO`, `APG`, policy, reward learning, training config | Reinforcement learning | `references/rl.md` |
+| Task/environment/scene only, with no requested solution | Environment-only baseline | This file only |
 
-### 1. Determine Task Category
+Routing rules:
 
-Ask the user:
+- If the prompt names multiple solutions, read every matching reference and
+  keep all artifacts under one task-first directory.
+- If the prompt merely says `expert trajectory` and provides no signal for
+  handwritten versus Task Program, determine whether the requested behavior
+  is declarative and supported by existing Semantic Calls. Ask only when that
+  choice materially changes the requested deliverables.
+- Treat environment-only as the shared baseline, not as a fourth solution
+  implementation.
+- Task Program authoring and integration composition are owned by
+  `$add-task-program`. New reusable robot/skill-profile declarations are owned
+  by `$add-embodiment-component`.
 
-- **Category**: `tableware`, `rl`, or `special` (maps to `embodichain_tasks/embodichain_tasks/<category>/`)
-- **Task name** (snake_case, e.g. `pick_place`)
-- **Gym ID** (e.g. `PickPlace-v1`)
-- **Task type**: RL task (needs reward functors) or expert demonstration task (needs `create_demo_action_list`)
+## Load current project context
 
-### 2. Create the Task File
+Read `agent_context/MAP.yaml`, then load `env-framework`. Also load:
 
-Place at `embodichain_tasks/embodichain_tasks/<category>/<name>.py`.
-Lightweight pure-PyTorch RL tasks (e.g. PointMass) also live under
-`embodichain_tasks/embodichain_tasks/rl/basic/` and register through
-`@register_learning_env` when they are not `EmbodiedEnv` subclasses.
+- `task-programs` for the Task Program route;
+- `rl-learning` for the RL route; and
+- any matched robot, sensor, manager, or randomization topic needed by the
+  requested environment.
 
-Template:
+Verify paths and configuration fields against the current source of truth.
+Do not infer schemas from older task examples alone.
 
-```python
-# ----------------------------------------------------------------------------
-# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ----------------------------------------------------------------------------
+## Establish task identity
 
-from __future__ import annotations
+Resolve from the prompt or nearby conventions:
 
-import torch
-from typing import Dict, Any, Tuple
+- `<category_path>`: a task family plus optional subdomain, such as
+  `manipulation/tableware`;
+- `<task_name>`: snake case;
+- one unique runnable environment ID per deployment;
+- intended embodiment variants; and
+- selected solution routes.
 
-from embodichain.lab.gym.utils.registration import register_env
-from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
-from embodichain.lab.sim.types import EnvObs
+Organize by task identity, never by solution method. Use:
 
-__all__ = ["<CamelCaseName>Env"]
-
-
-@register_env("<GymId>")
-class <CamelCaseName>Env(EmbodiedEnv):
-    """<One-line description of the task>.
-
-    <Longer description of what the task involves and its reward structure.>
-    """
-
-    def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
-        if cfg is None:
-            cfg = EmbodiedEnvCfg()
-        super().__init__(cfg, **kwargs)
-
-    # Expert demo tasks: implement `create_demo_action_list`.
-    # RL tasks: implement `check_truncated`, `get_reward`, `compute_task_state`.
+```text
+embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py
+embodichain_tasks/configs/tasks/<category_path>/<task_name>/
 ```
 
-### 3. Update Exports
+Keep a single task Python entry point flat at `<task_name>.py`. Do not create a
+same-named Python package, `scenario` package, `mdp` package, or a task-local
+`task_program` Python package when configuration and manager functors express
+the behavior.
 
-Task packages under `embodichain_tasks` are auto-imported via
-`import_packages()`. Prefer an explicit export in the category
-`__init__.py`:
+## Build the shared environment baseline
 
-```python
-from .<name> import <CamelCaseName>Env
+Choose the narrowest representation that supports the requested routes.
 
-__all__ = [..., "<CamelCaseName>Env"]
+### Reusable physical environment
+
+For new task-first compositions, prefer:
+
+```text
+<task config>/env.yaml
 ```
 
-Optional compatibility re-export may also be added in
-`embodichain/lab/gym/envs/tasks/__init__.py`.
+This is a component, not a runnable deployment. It owns:
 
-### 4. Create Test Stub
+- `environment_id`;
+- ordinary environment values such as episode limits and environment count;
+- physical simulation entities under `simulation`; and
+- manager configuration under `env`.
 
-Place at `tests/gym/envs/tasks/test_<name>.py` (or `tests/learning/` for
-lightweight learning environments).
+It must not contain a runnable `id`, Task Program fields, semantic scene
+bindings, a robot, or sensors. Task Program semantic roots and affordances
+belong to `integration.yaml.scene_binding`.
 
-### 5. Format
+### Runnable deployment
 
-```bash
-black embodichain_tasks/embodichain_tasks/<category>/<name>.py
-black tests/gym/envs/tasks/test_<name>.py
+Prefer one thin deployment per embodiment or execution variant:
+
+```text
+<task config>/task.<variant>.yaml
 ```
 
-## Checklist
+It owns the runnable `id` and selects reusable components. A typical physical
+deployment selects:
 
-- [ ] File has Apache 2.0 header
-- [ ] Uses `from __future__ import annotations`
-- [ ] `@register_env` or `@register_learning_env` with a unique ID
-- [ ] `__all__` defined in the task module
-- [ ] Default `cfg = EmbodiedEnvCfg()` in `__init__` for EmbodiedEnv tasks
-- [ ] Category `__init__.py` export updated
-- [ ] Test stub created
-- [ ] `black` run on both files
+```yaml
+id: MyTask-v1
+
+environment:
+  component: env.yaml
+
+embodiment:
+  component: ../../../components/embodiments/<embodiment>.yaml
+```
+
+The original inline Gym format remains supported. When extending an existing
+inline `env.json` or `env.yaml`, preserve that representation unless the user
+asked for component extraction. Never select a component and repeat its owned
+inline fields in the same deployment.
+
+### Optional Python entry point
+
+Create
+`embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py` when the
+route requires import-owned behavior or registration:
+
+- an environment-only registered Gym task;
+- handwritten expert behavior;
+- simulator RL registration, even when managers/config own its behavior; or
+- a lightweight learning environment.
+
+A supported configuration-defined Task Program is the exception: it normally
+omits the task module and dynamically registers the common `EmbodiedEnv` while
+loading its runnable deployment.
+
+Keep `@register_env` or `@register_learning_env` in the task-named module. Task
+discovery recursively imports these modules, so category `__init__.py` files do
+not need per-task re-exports.
+
+## Implement the selected route
+
+After the shared baseline exists, follow the selected specialized reference:
+
+- `references/handwritten-expert.md`
+- `references/task-program-expert.md`
+- `references/rl.md`
+
+Reuse existing manager functors and registered components. Invoke
+`$add-functor` only when a missing observation, reward, event, action, dataset,
+or randomization term is required. Use `$add-test` for test structure.
+
+## Validate proportionally
+
+At minimum:
+
+1. parse every new or changed runnable config;
+2. prove registration/discovery for Python-owned tasks;
+3. run the route-specific focused tests;
+4. run `embodichain list-task` when task-discovery metadata changed; and
+5. format changed Python files with the pinned project Black version.
+
+Do not claim an expert trajectory is qualified from schema validation alone.
+Physical expert behavior requires an environment run with its validators and
+persisted completion result. Do not claim an RL task works from config parsing
+alone; at least construct/reset the selected environment and run a minimal
+trainer-routing smoke test when dependencies permit.
+
+## Completion checklist
+
+- [ ] Prompt was routed to the correct specialized reference(s)
+- [ ] Task family, optional subdomain, task name, and runnable IDs are stable
+- [ ] Python and config paths share the same task-first hierarchy
+- [ ] Environment component and runnable deployment ownership are not mixed
+- [ ] A Python task module exists only when the selected route needs it
+- [ ] No solution-method directory or same-named task package was introduced
+- [ ] Existing components and manager functors were reused where possible
+- [ ] Route-specific tests and focused validation passed

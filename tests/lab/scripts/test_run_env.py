@@ -16,13 +16,23 @@
 
 from __future__ import annotations
 
+import json
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 import torch
 
-from embodichain.lab.gym.envs.demo import DemoEpisodeResult
+from embodichain.lab.gym.envs.demo import (
+    DemoEpisodeResult,
+    DemoExecutionCfg,
+    DemoSegment,
+    DemoSegmentResult,
+)
+from embodichain.lab.task_program.language.loader import (
+    load_task_program as _load_task_program,
+)
 from embodichain.lab.gym.utils.gym_utils import merge_args_with_gym_config
 from embodichain.lab.scripts import run_env
 from embodichain.lab.scripts.run_env import (
@@ -38,6 +48,25 @@ ACTION_LIST_INDEX = 0
 REPLAY_NUM_STEPS = 5
 REPLAY_TARGET_STEP = 3
 VISER_POLL_INTERVAL = 0.05
+REPEATED_PICK_PLACE_SEGMENT_COUNT = 3
+REPEATED_PICK_PLACE_SEGMENT_STEP_COUNT = 80
+
+
+def _task_program_payload() -> dict[str, object]:
+    """Return one minimal strict Task Program payload."""
+    return {
+        "program_id": "cli_pick",
+        "integration": {
+            "robot_profile": "default_robot",
+            "scene_registry": "default_scene",
+            "runtime_preset": "default_runtime",
+        },
+        "targets": {},
+        "program": {
+            "kind": "invoke",
+            "call": {"kind": "pick", "object": "cube"},
+        },
+    }
 
 
 class _LegacyProgressEnv:
@@ -59,6 +88,26 @@ class _LegacyProgressEnv:
         return True
 
 
+class _TaskProgramProgressEnv(_LegacyProgressEnv):
+    """Three-segment Task Program stand-in matching repeated pick/place."""
+
+    def create_demo_segments(self, **kwargs):
+        del kwargs
+        return tuple(
+            DemoSegment(
+                actions=(
+                    object() for _ in range(REPEATED_PICK_PLACE_SEGMENT_STEP_COUNT)
+                ),
+                name="move_cube",
+                metadata={
+                    "segment_count": REPEATED_PICK_PLACE_SEGMENT_COUNT,
+                },
+                progress_total_steps=REPEATED_PICK_PLACE_SEGMENT_STEP_COUNT,
+            )
+            for _ in range(REPEATED_PICK_PLACE_SEGMENT_COUNT)
+        )
+
+
 def test_legacy_action_list_displays_episode_and_segment_indices(
     monkeypatch,
 ) -> None:
@@ -76,8 +125,34 @@ def test_legacy_action_list_displays_episode_and_segment_indices(
 
     assert generated
     assert progress.call_args.kwargs["desc"] == (
-        f"Executing episode #{EPISODE_INDEX}, segment #{ACTION_LIST_INDEX}: legacy"
+        f"Executing episode #{EPISODE_INDEX}, segment {ACTION_LIST_INDEX + 1}/1: "
+        "legacy"
     )
+    assert len(progress.call_args.args[0]) == 1
+    assert progress.call_args.kwargs["file"] is sys.stdout
+    assert progress.call_args.kwargs["dynamic_ncols"] is True
+
+
+def test_task_program_progress_displays_repeated_segment_position(capsys) -> None:
+    """Each lazy segment renders its position, percentage, and exact step count."""
+    env = _TaskProgramProgressEnv()
+
+    generated = run_env.generate_and_execute_action_list(
+        env,
+        ACTION_LIST_INDEX,
+        debug_mode=False,
+        episode_idx=EPISODE_INDEX,
+    )
+
+    assert generated
+    output = capsys.readouterr().out
+    for index in range(1, REPEATED_PICK_PLACE_SEGMENT_COUNT + 1):
+        assert (
+            f"Executing episode #{EPISODE_INDEX}, segment {index}/"
+            f"{REPEATED_PICK_PLACE_SEGMENT_COUNT}: move_cube: 100%|"
+        ) in output
+    total = REPEATED_PICK_PLACE_SEGMENT_STEP_COUNT
+    assert output.count(f"{total}/{total}") == REPEATED_PICK_PLACE_SEGMENT_COUNT
 
 
 def test_run_env_syncs_viser_images_each_step_by_default() -> None:
@@ -121,6 +196,86 @@ def test_run_env_preserves_configured_viser_image_fps() -> None:
     )
 
     assert merged["visualization"]["sensor_image_fps"] == configured_fps
+
+
+def test_run_env_parser_accepts_task_program_path() -> None:
+    """The declarative program is an explicit, opt-in CLI input."""
+    program_path = "program.yaml"
+
+    args = _create_parser().parse_args(
+        ["--gym_config", GYM_CONFIG_PATH, "--task-program", program_path]
+    )
+
+    assert args.task_program == program_path
+
+
+def test_run_env_parser_accepts_debug_trace_mode() -> None:
+    """Failed Task Program attempts can expose their structured trace."""
+    args = _create_parser().parse_args(
+        ["--gym_config", GYM_CONFIG_PATH, "--debug-mode"]
+    )
+
+    assert args.debug_mode is True
+
+
+@pytest.mark.parametrize("suffix", [".json", ".yaml", ".yml"])
+def test_load_task_program_safely_decodes_supported_files(
+    tmp_path,
+    suffix: str,
+) -> None:
+    """JSON and safe YAML inputs share the same strict schema decoder."""
+    path = tmp_path / f"program{suffix}"
+    payload = _task_program_payload()
+    if suffix == ".json":
+        serialized = json.dumps(payload)
+    else:
+        import yaml
+
+        serialized = yaml.safe_dump(payload)
+    path.write_text(serialized, encoding="utf-8")
+
+    program = _load_task_program(path)
+
+    assert program.program_id == "cli_pick"
+    assert program.integration.scene_registry == "default_scene"
+
+
+@pytest.mark.parametrize(
+    ("filename", "serialized", "message"),
+    [
+        (
+            "program.json",
+            '{"program_id": "one", "program_id": "two"}',
+            "Duplicate JSON key",
+        ),
+        (
+            "program.yaml",
+            "program_id: one\nprogram_id: two\n",
+            "found duplicate key",
+        ),
+    ],
+)
+def test_load_task_program_rejects_duplicate_mapping_keys(
+    tmp_path,
+    filename: str,
+    serialized: str,
+    message: str,
+) -> None:
+    """Ambiguous duplicate keys are rejected before schema decoding."""
+    path = tmp_path / filename
+    path.write_text(serialized, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        _load_task_program(path)
+
+
+def test_load_task_program_rejects_unsupported_file_extension(tmp_path) -> None:
+    """Only explicit JSON and YAML file formats are accepted."""
+    path = tmp_path / "program.toml"
+    path.write_text('program_id = "cli_pick"', encoding="utf-8")
+
+    with pytest.raises(ValueError, match=".json, .yaml, or .yml"):
+        _load_task_program(path)
 
 
 def test_replay_restores_wrapper_state_without_closing_caller_env(monkeypatch) -> None:
@@ -230,6 +385,34 @@ def test_generate_function_discards_retry_then_commits_once(monkeypatch) -> None
     assert env.reset_options == [{"save_data": False}, None]
 
 
+def test_generate_function_logs_failed_trace_in_debug_mode(monkeypatch) -> None:
+    """Debug retries expose the owned structured episode trace."""
+    env = _ResetTrackingEnv()
+    result = _episode_result(success=False, reason="segment_validation_failed")
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        lambda *args, **kwargs: result,
+    )
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.log_warning",
+        warnings.append,
+    )
+
+    generated = generate_function(
+        env,
+        max_attempts=1,
+        reset_before=False,
+        debug_mode=True,
+    )
+
+    assert not generated
+    debug_trace = next(
+        message for message in warnings if "Failed demo trace" in message
+    )
+    assert '"terminal_reason":"segment_validation_failed"' in debug_trace
+
+
 def test_generate_function_commits_failed_episode_when_configured(monkeypatch) -> None:
     """A recorded task failure is a persisted result when explicitly enabled."""
     env = _ResetTrackingEnv(save_failed_episodes=True)
@@ -245,6 +428,64 @@ def test_generate_function_commits_failed_episode_when_configured(monkeypatch) -
         env,
         time_id=3,
         max_attempts=2,
+        reset_before=False,
+    )
+
+    assert generated
+    assert env.reset_options == [None]
+
+
+def test_generate_function_commits_accepted_prefix_as_segment_fragment(
+    monkeypatch,
+) -> None:
+    """Fragment mode keeps useful accepted data without claiming episode success."""
+    env = _ResetTrackingEnv()
+    result = DemoEpisodeResult(
+        episode_index=0,
+        length=4,
+        completed=False,
+        success=(False,),
+        terminated=(False,),
+        truncated=(False,),
+        terminal_reason="segment_validation_failed",
+        segments=(
+            DemoSegmentResult(
+                segment_id=0,
+                name="pick",
+                start_step=0,
+                end_step=2,
+                success=True,
+                active=(True,),
+                start_steps=(0,),
+                end_steps=(2,),
+                successes=(True,),
+                failure_reasons=(None,),
+            ),
+            DemoSegmentResult(
+                segment_id=1,
+                name="place",
+                start_step=2,
+                end_step=4,
+                success=False,
+                failure_reason="segment_validation_failed",
+                active=(True,),
+                start_steps=(2,),
+                end_steps=(4,),
+                successes=(False,),
+                failure_reasons=("segment_validation_failed",),
+            ),
+        ),
+        lengths=(4,),
+    )
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        lambda *args, **kwargs: result,
+    )
+
+    generated = generate_function(
+        env,
+        execution_cfg=DemoExecutionCfg(mode="segment_fragments"),
+        max_attempts=1,
         reset_before=False,
     )
 
@@ -279,7 +520,7 @@ def test_generate_function_retries_empty_failure_even_when_saving_failures(
 
 
 def test_generate_function_commits_only_selected_vector_rows(monkeypatch) -> None:
-    """The final partial batch commits selected rows and discards its remainder."""
+    """The final partial batch commits selected rows in one full-batch reset."""
     num_envs = 3
     env = _ResetTrackingEnv(num_envs=num_envs)
     monkeypatch.setattr(
@@ -298,10 +539,10 @@ def test_generate_function_commits_only_selected_vector_rows(monkeypatch) -> Non
     )
 
     assert generated
-    assert env.reset_options[0]["reset_ids"].tolist() == [0, 1]
-    assert "save_data" not in env.reset_options[0]
-    assert env.reset_options[1]["reset_ids"].tolist() == [2]
-    assert env.reset_options[1]["save_data"] is False
+    assert len(env.reset_options) == 1
+    assert env.reset_options[0]["commit_env_ids"].tolist() == [0, 1]
+    assert env.reset_options[0]["save_data"] is False
+    assert "reset_ids" not in env.reset_options[0]
 
 
 def test_main_counts_max_episodes_as_persisted_env_rows(monkeypatch) -> None:
@@ -419,6 +660,46 @@ def test_cli_aborts_before_closing_environment_once(monkeypatch) -> None:
 
     abort_event = ("reset", {"save_data": False})
     assert env.events == [abort_event, abort_event, ("close", None)]
+
+
+def test_cli_uses_program_already_loaded_by_config_builder(
+    monkeypatch,
+) -> None:
+    """The CLI attaches the strict program config to the environment config."""
+    env = _LifecycleTrackingEnv()
+    env_cfg = SimpleNamespace(task_program=None)
+    decoded_program = object()
+    args = SimpleNamespace(
+        replay=False,
+        replay_mode="kinematic",
+        preview=True,
+        task_program="program.yaml",
+    )
+    parser = MagicMock()
+    parser.parse_args.return_value = args
+    make = MagicMock(return_value=env)
+
+    monkeypatch.setattr(run_env, "_create_parser", lambda: parser)
+    monkeypatch.setattr(run_env, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(run_env, "execute_init_hooks", lambda: None)
+
+    def build(parsed_args):
+        assert parsed_args is args
+        env_cfg.task_program = decoded_program
+        return env_cfg, {"id": GYM_ID}, {}
+
+    monkeypatch.setattr(run_env, "build_env_cfg_from_args", build)
+    monkeypatch.setattr(run_env.gymnasium, "make", make)
+    monkeypatch.setattr(run_env, "main", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "embodichain.lab.sim.sim_manager.SimulationManager.flush_cleanup_queue",
+        lambda: None,
+    )
+
+    run_env.cli([])
+
+    assert env_cfg.task_program is decoded_program
+    make.assert_called_once_with(id=GYM_ID, cfg=env_cfg)
 
 
 def test_close_durability_failure_is_not_swallowed() -> None:

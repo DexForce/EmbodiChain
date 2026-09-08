@@ -32,7 +32,7 @@ from dexsim.utility.path import get_resources_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot, SoftObject
-from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
+from embodichain.compute.trajectory import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
@@ -193,7 +193,7 @@ def create_cloth(sim: SimulationManager):
 
 
 def get_grasp_traj(sim: SimulationManager, robot: Robot, grasp_xpos: torch.Tensor):
-    n_envs = sim.num_envs
+    num_envs = sim.num_envs
     rest_arm_qpos = robot.get_qpos("arm")
 
     approach_xpos = grasp_xpos.clone()
@@ -222,12 +222,12 @@ def get_grasp_traj(sim: SimulationManager, robot: Robot, grasp_xpos: torch.Tenso
     )
     hand_trajectory = torch.cat(
         [
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_close_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_close_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_close_qpos[None, None, :].repeat(num_envs, 1, 1),
         ],
         dim=1,
     )

@@ -53,7 +53,7 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
     URDFCfg,
 )
-from embodichain.lab.sim.solvers import SolverCfg
+from embodichain.lab.sim.motion.solvers import SolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
 from embodichain.lab.sim.robots.ur_robot import URRobotCfg
@@ -410,6 +410,7 @@ def _populate_dual_cfg(
     cfg.min_velocity_iters = base_cfg.min_velocity_iters
     cfg.fix_base = base_cfg.fix_base
     cfg.disable_self_collision = base_cfg.disable_self_collision
+    cfg.enable_gravity = base_cfg.enable_gravity
     cfg.sleep_threshold = base_cfg.sleep_threshold
 
 

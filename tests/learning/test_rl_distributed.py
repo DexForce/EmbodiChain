@@ -30,7 +30,7 @@ import torch
 def _create_minimal_distributed_config():
     """Create a minimal train config for distributed testing."""
     config_path = Path(
-        "embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config_grpo.json"
+        "embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/grpo.json"
     )
     if not config_path.exists():
         pytest.skip(f"Config not found: {config_path}")

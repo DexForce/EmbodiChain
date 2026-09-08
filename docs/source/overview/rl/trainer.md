@@ -64,5 +64,3 @@ trainer.save_checkpoint()
 - It is recommended to perform periodic evaluation and model saving to prevent loss of progress during training.
 - The event mechanism can be used for automated experiments, data collection, and environment reset.
 - Logging and monitoring help analyze training progress and tune hyperparameters.
-
----

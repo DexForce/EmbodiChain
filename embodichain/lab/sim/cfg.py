@@ -47,7 +47,7 @@ from embodichain.utils import logger
 from embodichain.utils.utility import key_in_nested_dict
 
 from .shapes import ShapeCfg, MeshCfg
-from .workspace.cfg import RobotWorkspaceCfg
+from .motion.workspace.cfg import RobotWorkspaceCfg
 
 # Global default renderer settings for simulation.
 #
@@ -980,7 +980,6 @@ class RigidObjectCfg(ObjectBaseCfg):
 
     If set to larger than 1, the rigid body will be decomposed into multiple convex hulls
     using the approximate convex decomposition method specified by :attr:`acd_method`.
-    Reference: https://github.com/SarahWeiii/CoACD
     """
 
     acd_method: str = MISSING
@@ -990,8 +989,9 @@ class RigidObjectCfg(ObjectBaseCfg):
         Use :attr:`MeshCfg.acd_method` instead. This field is kept for
         backward compatibility and overrides the shape-level value when explicitly set.
 
-    Currently, ``"coacd"`` and ``"vhacd"`` are supported. Only used when
-    :attr:`max_convex_hull_num` is set to larger than 1.
+    ``"visacd"``, ``"coacd"``, and ``"vhacd"`` are supported. Only used when
+    :attr:`max_convex_hull_num` is set to larger than 1. ``"visacd"`` requires
+    CUDA support.
     """
 
     sdf_resolution: int = MISSING
@@ -1634,6 +1634,12 @@ class ArticulationCfg(ObjectBaseCfg):
     disable_self_collision: bool = True
     """Whether to enable or disable self-collisions."""
 
+    enable_gravity: bool = True
+    """Whether gravity is enabled for the articulation.
+
+    This runtime flag is applied regardless of :attr:`use_usd_properties`.
+    """
+
     init_qpos: torch.Tensor | np.ndarray | Sequence[float] = None
     """Initial joint positions of the articulation.
 
@@ -1730,7 +1736,7 @@ class ArticulationCfg(ObjectBaseCfg):
 
 @configclass
 class RobotCfg(ArticulationCfg):
-    from embodichain.lab.sim.solvers import SolverCfg
+    from embodichain.lab.sim.motion.solvers import SolverCfg
 
     """Configuration for a robot asset in the simulation.
     """
@@ -1745,8 +1751,8 @@ class RobotCfg(ArticulationCfg):
     If no control part is specified, the robot will use all joints as a single control part.
 
     Note: 
-        - if `control_parts` is specified, `solver_cfg` must be a dict with part names as
-            keys corresponding to the control parts name.
+        - `control_parts` can be used without `solver_cfg`. If `solver_cfg` is a
+            dictionary, its keys must correspond to control-part names.
         - The joint names in the control parts support regular expressions, e.g., 'joint[1-6]'.
             After initialization of robot, the names will be expanded to a list of full joint names.
         - `Robot` is a derived class of `Articulation`, with control parts support. So the `drive_pros`
@@ -1774,7 +1780,7 @@ class RobotCfg(ArticulationCfg):
 
         import importlib
 
-        solver_module = importlib.import_module("embodichain.lab.sim.solvers")
+        solver_module = importlib.import_module("embodichain.lab.sim.motion.solvers")
 
         cfg = cls()  # Create a new instance of the class (cls)
         for key, value in init_dict.items():

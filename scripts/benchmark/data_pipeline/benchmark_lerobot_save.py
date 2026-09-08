@@ -67,7 +67,9 @@ VARIANTS: dict[str, dict[str, Any]] = {
     "opt_ab_async_both": {"func": "AsyncLeRobotRecorder", "image_writer_threads": 4},
 }
 
-DEFAULT_GYM_CONFIG = "embodichain_tasks/configs/gym/special/stay_still_save_ur10.json"
+DEFAULT_GYM_CONFIG = (
+    "embodichain_tasks/configs/tasks/special/stay_still_save/env_ur10.json"
+)
 
 
 # --------------------------------------------------------------------------- #

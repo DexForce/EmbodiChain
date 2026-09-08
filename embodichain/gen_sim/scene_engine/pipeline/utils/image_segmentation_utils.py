@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from pathlib import Path
 from typing import Any
 
@@ -94,6 +95,35 @@ def decode_rle_mask(mask_rle: dict[str, Any]) -> Image.Image:
     return Image.frombytes("L", (width, height), bytes(pixels))
 
 
+def invert_mask_if_foreground_is_off_center(candidate: MaskCandidate) -> MaskCandidate:
+    """Invert a mask when its foreground is less concentrated at image center.
+
+    This heuristic is intended for generated single-object images, where the
+    object is expected near the center and SAM3 may return its background.
+    """
+    mask = decode_rle_mask(candidate.mask_rle)
+    width, height = mask.size
+    left, top = width // 6, height // 6
+    right, bottom = width - left, height - top
+    center_mask = mask.crop((left, top, right, bottom))
+
+    center_foreground_ratio = _foreground_ratio(center_mask)
+    total_foreground_pixels = _foreground_pixel_count(mask)
+    outside_foreground_pixels = total_foreground_pixels - _foreground_pixel_count(
+        center_mask
+    )
+    outside_pixel_count = width * height - center_mask.width * center_mask.height
+    outside_foreground_ratio = outside_foreground_pixels / outside_pixel_count
+    if center_foreground_ratio >= outside_foreground_ratio:
+        return candidate
+
+    inverted_mask = mask.point(lambda value: 0 if value else 255)
+    return MaskCandidate(
+        index=candidate.index,
+        mask_rle=_encode_binary_mask_rle(inverted_mask),
+    )
+
+
 def union_overlapping_mask_candidates(
     candidates: list[MaskCandidate],
     *,
@@ -153,6 +183,66 @@ def save_binary_mask(
     resolved_output_path = Path(output_path).expanduser().resolve()
     resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
     mask.save(resolved_output_path)
+    return resolved_output_path
+
+
+def save_visible_rgba_crop(
+    *,
+    image_path: str | Path,
+    mask_path: str | Path,
+    output_path: str | Path,
+    output_size: tuple[int, int] = (512, 512),
+    padding_ratio: float = 0.1,
+) -> Path:
+    """Save a fixed-size RGBA crop of one object's visible source-image pixels."""
+    if len(output_size) != 2 or not all(
+        isinstance(value, int) and value > 0 for value in output_size
+    ):
+        raise ValueError("RGBA crop output_size must contain two positive integers.")
+    if padding_ratio < 0:
+        raise ValueError("RGBA crop padding_ratio must be non-negative.")
+
+    with Image.open(image_path) as loaded_image:
+        image = loaded_image.convert("RGB")
+    with Image.open(mask_path) as loaded_mask:
+        mask = loaded_mask.convert("L")
+    _require_image_size(mask, image.size)
+    bbox = mask.getbbox()
+    if bbox is None:
+        raise ValueError("Cannot save an RGBA crop for an empty binary mask.")
+
+    left, top, right, bottom = bbox
+    padding = math.ceil(max(right - left, bottom - top) * padding_ratio)
+    crop_bounds = (
+        max(0, left - padding),
+        max(0, top - padding),
+        min(image.width, right + padding),
+        min(image.height, bottom + padding),
+    )
+    image_crop = image.crop(crop_bounds)
+    mask_crop = mask.crop(crop_bounds)
+    scale = min(
+        output_size[0] / image_crop.width,
+        output_size[1] / image_crop.height,
+    )
+    resized_size = (
+        max(1, round(image_crop.width * scale)),
+        max(1, round(image_crop.height * scale)),
+    )
+    rgba_crop = image_crop.resize(resized_size, Image.Resampling.LANCZOS).convert(
+        "RGBA"
+    )
+    rgba_crop.putalpha(mask_crop.resize(resized_size, Image.Resampling.NEAREST))
+
+    rgba_canvas = Image.new("RGBA", output_size, (0, 0, 0, 0))
+    paste_xy = (
+        (output_size[0] - resized_size[0]) // 2,
+        (output_size[1] - resized_size[1]) // 2,
+    )
+    rgba_canvas.alpha_composite(rgba_crop, dest=paste_xy)
+    resolved_output_path = Path(output_path).expanduser().resolve()
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    rgba_canvas.save(resolved_output_path)
     return resolved_output_path
 
 
@@ -277,6 +367,72 @@ def render_numbered_mask_candidates(
     return resolved_output_path
 
 
+def render_asset_mask_id_overlay(
+    *,
+    image_path: str | Path,
+    asset_masks: list[tuple[str, str | Path]],
+    output_path: str | Path,
+) -> Path:
+    """Overlay outlined asset masks and stable asset IDs on a scene image.
+
+    The table mask is intentionally omitted so its large contour does not
+    obscure the asset labels or their visual context in the source image.
+    """
+    asset_ids = [asset_id for asset_id, _ in asset_masks]
+    if any(not asset_id for asset_id in asset_ids):
+        raise ValueError("Every asset mask must have a non-empty asset id.")
+    if len(asset_ids) != len(set(asset_ids)):
+        raise ValueError("Asset mask ids must be unique.")
+
+    image = Image.open(image_path).convert("RGBA")
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    colors = (
+        (239, 83, 80, 255),
+        (66, 165, 245, 255),
+        (102, 187, 106, 255),
+        (255, 202, 40, 255),
+        (171, 71, 188, 255),
+        (38, 198, 218, 255),
+    )
+    decoded_masks: list[tuple[str, Image.Image]] = []
+    for index, (asset_id, mask_path) in enumerate(asset_masks):
+        mask = Image.open(mask_path).convert("L")
+        _require_image_size(mask, image.size)
+        decoded_masks.append((asset_id, mask))
+        color_layer = Image.new("RGBA", image.size, colors[index % len(colors)])
+        transparent_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        overlay.alpha_composite(
+            Image.composite(
+                color_layer,
+                transparent_layer,
+                _mask_outer_outline(mask, image.size),
+            )
+        )
+
+    draw = ImageDraw.Draw(overlay)
+    for asset_id, mask in decoded_masks:
+        bbox = mask.getbbox()
+        if bbox is None:
+            raise ValueError(f"Asset mask {asset_id!r} is empty.")
+        font = _load_asset_id_label_font(
+            image_size=image.size,
+            mask_bbox=bbox,
+            label=asset_id,
+        )
+        _draw_number_label(
+            draw=draw,
+            label=asset_id,
+            center=((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2),
+            font=font,
+            minimum_padding=2,
+        )
+
+    resolved_output_path = Path(output_path).expanduser().resolve()
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.alpha_composite(image, overlay).convert("RGB").save(resolved_output_path)
+    return resolved_output_path
+
+
 def _require_image_size(mask: Image.Image, image_size: tuple[int, int]) -> None:
     if mask.size != image_size:
         raise ValueError(
@@ -361,6 +517,19 @@ def _mask_iou(first_mask: Image.Image, second_mask: Image.Image) -> float:
     return intersection.histogram()[255] / union_pixels
 
 
+def _foreground_pixel_count(mask: Image.Image) -> int:
+    """Return the number of white pixels in one binary mask."""
+    return mask.convert("L").histogram()[255]
+
+
+def _foreground_ratio(mask: Image.Image) -> float:
+    """Return the white-pixel ratio in one non-empty image region."""
+    pixel_count = mask.width * mask.height
+    if pixel_count == 0:
+        raise ValueError("Mask region must contain at least one pixel.")
+    return _foreground_pixel_count(mask) / pixel_count
+
+
 def _encode_binary_mask_rle(mask: Image.Image) -> dict[str, Any]:
     binary_mask = mask.convert("L").point(
         lambda value: 255 if value else 0
@@ -401,6 +570,47 @@ def _union_parent(parents: list[int], first_index: int, second_index: int) -> No
 
 def _load_label_font(image_size: tuple[int, int]) -> ImageFont.ImageFont:
     font_size = max(16, round(min(image_size) / 32))
+    return _load_label_font_at_size(font_size)
+
+
+def _load_asset_id_label_font(
+    *,
+    image_size: tuple[int, int],
+    mask_bbox: tuple[int, int, int, int],
+    label: str,
+) -> ImageFont.ImageFont:
+    """Choose an ID-label font constrained by both image and mask dimensions."""
+    # The image sets the readable upper bound; the individual mask then caps it.
+    image_font_size = min(32, max(8, round(min(image_size) / 48)))
+    mask_width = mask_bbox[2] - mask_bbox[0]
+    mask_height = mask_bbox[3] - mask_bbox[1]
+    maximum_label_width = max(24, round(mask_width * 0.9))
+    maximum_label_height = max(16, round(mask_height * 0.75))
+    # Measure the complete text-and-background rectangle, not glyphs alone.
+    probe_draw = ImageDraw.Draw(Image.new("RGBA", image_size))
+    smallest_font = _load_label_font_at_size(6)
+    for font_size in range(image_font_size, 5, -1):
+        font = _load_label_font_at_size(font_size)
+        label_bounds = _number_label_bounds(
+            draw=probe_draw,
+            label=label,
+            center=(0.0, 0.0),
+            font=font,
+            minimum_padding=2,
+        )
+        if (
+            label_bounds[2] - label_bounds[0] <= maximum_label_width
+            and label_bounds[3] - label_bounds[1] <= maximum_label_height
+        ):
+            return font
+        smallest_font = font
+    return smallest_font
+
+
+def _load_label_font_at_size(font_size: int) -> ImageFont.ImageFont:
+    """Load the shared bold label font at one validated pixel size."""
+    if font_size < 1:
+        raise ValueError("Label font size must be positive.")
     try:
         return ImageFont.truetype("DejaVuSans-Bold.ttf", font_size)
     except OSError:
@@ -413,10 +623,15 @@ def _draw_number_label(
     label: str,
     center: tuple[float, float],
     font: ImageFont.ImageFont,
+    minimum_padding: int = 4,
 ) -> None:
     """Draw a numbered label with red background and white text at the given center position."""
     label_bounds = _number_label_bounds(
-        draw=draw, label=label, center=center, font=font
+        draw=draw,
+        label=label,
+        center=center,
+        font=font,
+        minimum_padding=minimum_padding,
     )
     label_box = draw.textbbox((0, 0), label, font=font)
     label_width = label_box[2] - label_box[0]
@@ -438,12 +653,15 @@ def _number_label_bounds(
     label: str,
     center: tuple[float, float],
     font: ImageFont.ImageFont,
+    minimum_padding: int = 4,
 ) -> tuple[int, int, int, int]:
     """Return the red label rectangle bounds for a label centre."""
     label_box = draw.textbbox((0, 0), label, font=font)
     label_width = label_box[2] - label_box[0]
     label_height = label_box[3] - label_box[1]
-    padding = max(4, round(max(label_width, label_height) / 4))
+    if minimum_padding < 0:
+        raise ValueError("Label minimum padding must be non-negative.")
+    padding = max(minimum_padding, round(max(label_width, label_height) / 4))
     x = center[0] - label_width / 2
     y = center[1] - label_height / 2
     return (

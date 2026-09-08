@@ -1,0 +1,12 @@
+program_id: slide_open_drawer
+targets: {}
+program:
+  kind: segment
+  name: open_drawer
+  steps:
+    kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.articulation_link_slide
+      arguments:
+        handle: drawer_handle

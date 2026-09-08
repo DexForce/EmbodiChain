@@ -9,8 +9,18 @@ Overview
 Shared utilities used across EmbodiChain: the ``@configclass`` decorator and
 the ``CfgNode`` configuration system, logging, math/tensor helpers,
 file/string/device/image utilities, non-maximum suppression, a visualizer
-helper, and the high-performance ``warp`` kernels for kinematics, collision,
-and image processing.
+helper, and legacy ``warp`` computation aliases. Shared numerical algorithms
+are owned by :doc:`embodichain.compute`.
+
+.. currentmodule:: embodichain.utils
+
+.. autodata:: GLOBAL_SEED
+
+.. autofunction:: set_seed
+
+.. autofunction:: is_configclass
+
+.. autofunction:: resolve_config_path
 
    .. rubric:: Submodules
 
@@ -19,6 +29,7 @@ and image processing.
       warp
       cfg
       configclass
+      config_paths
       device_utils
       file
       img_utils
@@ -30,8 +41,8 @@ and image processing.
       utility
       visualizer
 
-High Performance Computing with Warp
-------------------------------------
+Legacy Warp Imports
+-------------------
 
 .. toctree::
    :maxdepth: 1
@@ -45,6 +56,12 @@ Configuration Classes
    :members:
    :undoc-members:
    :show-inheritance:
+
+Configuration Paths
+-------------------
+
+.. automodule:: embodichain.utils.config_paths
+   :members:
 
 Configuration Nodes
 -------------------

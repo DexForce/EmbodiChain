@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain.lab.sim.solvers import SolverCfg
+from embodichain.lab.sim.motion.solvers import SolverCfg
 from embodichain.utils import logger
 
 

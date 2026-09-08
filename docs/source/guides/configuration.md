@@ -139,8 +139,8 @@ Example paths in the repository:
 
 | Use case | JSON example | YAML example |
 |---|---|---|
-| Gym environment | `embodichain_tasks/configs/gym/cobotmagic.json` | `embodichain_tasks/configs/gym/cobotmagic.yaml` |
-| RL training | `embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.json` | `embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml` |
+| Runnable Gym deployment | `embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.json` | `embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml` |
+| RL training | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.json` | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml` |
 
 When a training config references a gym config (via `trainer.gym_config`), the nested path may also use any supported extension.
 
@@ -263,6 +263,71 @@ forwarding unless the service is behind an authenticated gateway. See
 [Browser visualization with Viser](../overview/sim/viser_visualization.md) for
 the full schema, supported scene content, and deformable-object behavior.
 
+### Reusable Physical Environments and Runnable Deployments
+
+Use componentized YAML when one physical task environment must support several
+embodiments, or one embodiment must run in several environments. The task-local
+layout separates a reusable environment from runnable deployment choices:
+
+```text
+<task>/
+├── env.yaml
+├── task.franka.yaml
+├── task.ur5.yaml
+└── task_program/
+    ├── integration.yaml
+    └── program.yaml
+```
+
+The pure `env.yaml` component owns physical scene entities and ordinary Gym
+values. It requires `environment_id`, `simulation`, and `env`, may include run
+controls such as `max_episode_steps`, and contains no runnable `id`, robot,
+sensor, or Task Program selection:
+
+```yaml
+environment_id: repeated_pick_place
+max_episode_steps: 1200
+simulation:
+  rigid_object:
+    - uid: cube
+      # Shape, dynamics, and initial pose.
+env:
+  events: {}
+  dataset: {}
+```
+
+A runnable deployment has `id` and selects one environment and embodiment. A
+configuration-defined Task Program additionally selects its program,
+integration, and execution policy:
+
+```yaml
+id: TaskProgramRepeatedPickPlace-v1
+environment:
+  component: env.yaml
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.yaml
+  execution_policy: ../../../components/execution_policies/trajectory_open_loop.yaml
+embodiment:
+  component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+```
+
+All references above resolve relative to the runnable deployment file. An
+embodiment component owns its simulation robot and sensor suite; it may also
+own a `skill_profile` when Task Program needs semantic resources. The
+task-local `integration.yaml` owns its nested `scene_binding`, including each
+canonical `entity_id` to physical `simulation_uid` mapping.
+
+Component ownership is exclusive. Do not combine `environment.component` with
+inline environment or scene fields, and do not combine `embodiment.component`
+with inline `robot` or `sensor` fields. The original inline format and a
+standalone physical `scene.component` remain supported when no environment
+component is selected. A registered handwritten-trajectory task may select the
+same environment and embodiment components while omitting `task_program`, so
+neither reusable component is coupled to an expert-authoring method. See the
+[Task Program tutorial](../tutorial/task_program.rst) for a complete runnable
+composition.
+
 ### Robot Preset Configs
 
 Use `class_type` to select a `RobotCfg` subclass from
@@ -341,7 +406,7 @@ trainer:
   device: cuda:0
   iterations: 500
   buffer_size: 1024
-  gym_config: embodichain_tasks/configs/agents/rl/basic/cart_pole/gym_config.yaml
+  gym_config: embodichain_tasks/configs/tasks/classic_control/cart_pole/env.yaml
 policy:
   name: actor_critic
   actor:
@@ -385,11 +450,14 @@ This is automatically converted to a `SceneEntityCfg` object at runtime.
 
 ## Tips
 
-1. **Start from an existing config.** Copy a config file from `embodichain_tasks/configs/gym/` or `embodichain_tasks/configs/agents/rl/` and modify it for your task.
+1. **Start from an existing config.** Copy a task config from `embodichain_tasks/configs/tasks/<domain>/<task>/`, then modify it for your task.
 2. **Use Python configs for development.** They provide IDE auto-completion and type checking.
 3. **Use JSON or YAML configs for experiments.** YAML is often easier to read for nested structures; JSON remains fully supported.
 4. **Validate configs early.** Run your environment with a short episode count to catch config errors before long training runs.
-5. **Keep config pairs together.** For action-bank tasks, version `gym_config` and `action_config` together (either format).
+5. **Keep ownership explicit.** Put the reusable physical environment in
+   `env.yaml`, runnable choices in `task.<embodiment>.yaml`, and Task Program
+   intent plus semantic integration in `task_program/{program,integration}.yaml`.
+   Keep shared embodiments and execution policies under `configs/components/`.
 
 ---
 

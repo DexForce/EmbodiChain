@@ -18,23 +18,31 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Literal
 
 import torch
+
+from embodichain.utils import configclass
+
+from ._json import json_safe_copy as _json_safe_copy
 
 __all__ = [
     "DEMO_ANNOTATION_KEYS",
     "DEMO_SCHEMA_VERSION",
+    "DemoExecutionCfg",
     "DemoEpisodeResult",
+    "DemoOutputMode",
     "DemoSegment",
+    "DemoSegmentOutcomeKind",
     "DemoSegmentResult",
     "execute_demo_episode",
     "resolve_demo_segments",
 ]
 
-DEMO_SCHEMA_VERSION = 2
+DEMO_SCHEMA_VERSION = 3
 """Current version of the segment-aware demonstration metadata schema."""
 
 DEMO_ANNOTATION_KEYS = (
@@ -44,10 +52,120 @@ DEMO_ANNOTATION_KEYS = (
     "segment_step",
     "segment_start",
     "segment_end",
+    "segment_accepted",
+    "segment_attempt_id",
+    "continuity_id",
     "terminated",
     "truncated",
 )
 """Per-frame annotation keys stored in expert rollout buffers."""
+
+DemoOutputMode = Literal["continuous", "segment_fragments"]
+"""Supported persistence layouts for one demonstration execution."""
+
+DemoSegmentOutcomeKind = Literal[
+    "succeeded",
+    "runtime_failed",
+    "post_policy_failed",
+    "validation_failed",
+    "cancelled",
+    "truncated",
+    "not_attempted",
+]
+"""Stable, first-failure-phase outcome for one program segment row."""
+
+
+@configclass
+class DemoExecutionCfg:
+    """Collector-owned settings for demonstration persistence.
+
+    ``segment_fragments`` persists each eligible program segment as an
+    independent LeRobot episode. It does not resume execution after a failed
+    segment; checkpoint capture and resume are intentionally outside this
+    configuration until an authoritative restore port exists.
+
+    Args:
+        mode: Continuous episode or independent segment-fragment persistence.
+        save_failed_fragments: Whether failed segments with recorded frames are
+            retained in fragment mode. Failed fragments remain explicitly
+            annotated and are excluded by successful-segment sampling.
+    """
+
+    mode: DemoOutputMode = "continuous"
+    save_failed_fragments: bool = False
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"continuous", "segment_fragments"}:
+            raise ValueError(
+                "mode must be 'continuous' or 'segment_fragments', "
+                f"got {self.mode!r}."
+            )
+        if not isinstance(self.save_failed_fragments, bool):
+            raise TypeError("save_failed_fragments must be a bool.")
+        if self.mode == "continuous" and self.save_failed_fragments:
+            raise ValueError(
+                "save_failed_fragments is only valid in segment_fragments mode."
+            )
+
+
+def _validation_mask_value(
+    validation: Mapping[str, Any], key: str, env_id: int
+) -> bool | None:
+    """Return one optional row value from bridge validation metadata."""
+    values = validation.get(key)
+    if not isinstance(values, (list, tuple)) or env_id >= len(values):
+        return None
+    value = values[env_id]
+    return bool(value) if isinstance(value, bool) else None
+
+
+def _segment_outcome_kind(
+    *,
+    participant: bool,
+    success: bool,
+    failure_reason: str | None,
+    metadata: Mapping[str, Any],
+    env_id: int,
+) -> DemoSegmentOutcomeKind:
+    """Derive the first authoritative failure phase without re-validating."""
+    if not participant:
+        return "not_attempted"
+    if success:
+        return "succeeded"
+    if failure_reason == "truncated":
+        return "truncated"
+    if failure_reason in {"interrupted", "batch_aborted", "empty_segment"}:
+        return "cancelled"
+
+    validation = metadata.get("validation")
+    if isinstance(validation, Mapping):
+        if _validation_mask_value(validation, "runtime_success_mask", env_id) is False:
+            return "runtime_failed"
+        if (
+            _validation_mask_value(validation, "post_policy_success_mask", env_id)
+            is False
+        ):
+            return "post_policy_failed"
+        validators = validation.get("validators")
+        if isinstance(validators, (list, tuple)):
+            for validator in validators:
+                if not isinstance(validator, Mapping):
+                    continue
+                result_mask = validator.get("result_mask")
+                if (
+                    isinstance(result_mask, (list, tuple))
+                    and env_id < len(result_mask)
+                    and result_mask[env_id] is False
+                ):
+                    return "validation_failed"
+        if _validation_mask_value(validation, "accepted_mask", env_id) is False:
+            return "validation_failed"
+
+    if failure_reason == "segment_validation_failed":
+        return "validation_failed"
+    if failure_reason is None:
+        return "not_attempted"
+    return "runtime_failed"
 
 
 @dataclass(frozen=True)
@@ -69,6 +187,20 @@ class DemoSegment:
             parallel environment (or one scalar broadcast to every environment).
             Gym ``terminated`` and ``truncated`` remain episode-level signals;
             use this callback for subtask-level validation.
+        abort_actions: Optional callback invoked when the executor stops after
+            retrieving an action but before exhausting the iterable. It receives
+            a reason and ``last_action_consumed`` flag, and must return any
+            emergency controller actions that still need ordinary ``env.step``
+            consumption. This is the explicit cancellation handshake for lazy
+            runtimes whose command acknowledgements only mean locally buffered.
+        failure_policy: ``"batch_abort"`` preserves legacy batch-atomic
+            behavior. ``"row_independent"`` permanently freezes only failed
+            environment rows while peers continue through the shared segment
+            and later lazy segments.
+        progress_total_steps: Optional exact action count used by terminal
+            progress wrappers. Leave this as ``None`` when the segment can
+            replan, retry, or otherwise emit a data-dependent number of
+            actions.
     """
 
     actions: Iterable[Any]
@@ -77,6 +209,25 @@ class DemoSegment:
     instruction: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
     validator: Callable[[], Any] | None = field(default=None, repr=False, compare=False)
+    abort_actions: Callable[..., Iterable[Any]] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    failure_policy: Literal["batch_abort", "row_independent"] = "batch_abort"
+    progress_total_steps: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.abort_actions is not None and not callable(self.abort_actions):
+            raise TypeError("abort_actions must be callable or None.")
+        if self.failure_policy not in {"batch_abort", "row_independent"}:
+            raise ValueError(
+                "failure_policy must be 'batch_abort' or 'row_independent'."
+            )
+        if self.progress_total_steps is not None and (
+            type(self.progress_total_steps) is not int or self.progress_total_steps < 1
+        ):
+            raise ValueError("progress_total_steps must be a positive integer or None.")
 
 
 @dataclass(frozen=True)
@@ -101,6 +252,10 @@ class DemoSegmentResult:
         end_steps: Per-environment exclusive ends.
         successes: Per-environment segment status.
         failure_reasons: Per-environment failure reasons.
+        attempt_id: Collection attempt that produced this segment.
+        continuity_id: Causal-continuity region containing this segment.
+        outcome_kind: Aggregate first-failure-phase outcome.
+        outcome_kinds: Per-environment first-failure-phase outcomes.
     """
 
     segment_id: int
@@ -117,6 +272,72 @@ class DemoSegmentResult:
     end_steps: tuple[int, ...] = ()
     successes: tuple[bool, ...] = ()
     failure_reasons: tuple[str | None, ...] = ()
+    attempt_id: int = 0
+    continuity_id: int = 0
+    outcome_kind: DemoSegmentOutcomeKind | None = None
+    outcome_kinds: tuple[DemoSegmentOutcomeKind, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.metadata, Mapping):
+            raise TypeError("metadata must be a mapping.")
+        if self.attempt_id < 0:
+            raise ValueError("attempt_id must be non-negative.")
+        if self.continuity_id < 0:
+            raise ValueError("continuity_id must be non-negative.")
+        owned_metadata = _json_safe_copy(
+            self.metadata,
+            field_name="segment result metadata",
+        )
+        object.__setattr__(self, "metadata", MappingProxyType(owned_metadata))
+
+        if self.outcome_kinds:
+            expected = len(self.successes) or len(self.active)
+            if expected and len(self.outcome_kinds) != expected:
+                raise ValueError(
+                    "outcome_kinds must contain one value per environment row."
+                )
+            row_outcomes = self.outcome_kinds
+        elif self.successes:
+            active = self.active or (True,) * len(self.successes)
+            row_outcomes = tuple(
+                _segment_outcome_kind(
+                    participant=(active[env_id] if env_id < len(active) else True),
+                    success=self.successes[env_id],
+                    failure_reason=(
+                        self.failure_reasons[env_id]
+                        if env_id < len(self.failure_reasons)
+                        else self.failure_reason
+                    ),
+                    metadata=owned_metadata,
+                    env_id=env_id,
+                )
+                for env_id in range(len(self.successes))
+            )
+            object.__setattr__(self, "outcome_kinds", row_outcomes)
+        else:
+            row_outcomes = ()
+
+        if self.outcome_kind is None:
+            if self.success:
+                aggregate_outcome: DemoSegmentOutcomeKind = "succeeded"
+            elif row_outcomes:
+                aggregate_outcome = next(
+                    (
+                        outcome
+                        for outcome in row_outcomes
+                        if outcome not in {"succeeded", "not_attempted"}
+                    ),
+                    "not_attempted",
+                )
+            else:
+                aggregate_outcome = _segment_outcome_kind(
+                    participant=True,
+                    success=False,
+                    failure_reason=self.failure_reason,
+                    metadata=owned_metadata,
+                    env_id=0,
+                )
+            object.__setattr__(self, "outcome_kind", aggregate_outcome)
 
     def to_metadata(self, env_id: int | None = None) -> dict[str, Any]:
         """Return a JSON-compatible aggregate or per-environment representation.
@@ -133,15 +354,37 @@ class DemoSegmentResult:
             "name": self.name,
             "target_uid": self.target_uid,
             "instruction": self.instruction,
-            "metadata": dict(self.metadata),
+            "attempt_id": self.attempt_id,
+            "continuity_id": self.continuity_id,
+            "metadata": _json_safe_copy(
+                self.metadata,
+                field_name="segment result metadata",
+            ),
         }
         if env_id is not None and self.start_steps:
             metadata.update(
                 {
                     "start_step": self.start_steps[env_id],
-                    "end_step": self.end_steps[env_id],
-                    "success": self.successes[env_id],
-                    "failure_reason": self.failure_reasons[env_id],
+                    "end_step": (
+                        self.end_steps[env_id]
+                        if env_id < len(self.end_steps)
+                        else self.end_step
+                    ),
+                    "success": (
+                        self.successes[env_id]
+                        if env_id < len(self.successes)
+                        else self.success
+                    ),
+                    "failure_reason": (
+                        self.failure_reasons[env_id]
+                        if env_id < len(self.failure_reasons)
+                        else self.failure_reason
+                    ),
+                    "outcome_kind": (
+                        self.outcome_kinds[env_id]
+                        if env_id < len(self.outcome_kinds)
+                        else self.outcome_kind
+                    ),
                 }
             )
             return metadata
@@ -152,6 +395,7 @@ class DemoSegmentResult:
                 "end_step": self.end_step,
                 "success": self.success,
                 "failure_reason": self.failure_reason,
+                "outcome_kind": self.outcome_kind,
             }
         )
         if self.active:
@@ -162,6 +406,7 @@ class DemoSegmentResult:
                     "end_steps": list(self.end_steps),
                     "successes": list(self.successes),
                     "failure_reasons": list(self.failure_reasons),
+                    "outcome_kinds": list(self.outcome_kinds),
                 }
             )
         return metadata
@@ -183,6 +428,8 @@ class DemoEpisodeResult:
         lengths: Independent per-environment recorded lengths.
         completed_by_env: Independent valid-completion flags.
         terminal_reasons: Independent terminal reasons.
+        execution_mode: Persistence layout selected for this execution.
+        attempt_id: Zero-based collection attempt identifier.
     """
 
     episode_index: int
@@ -196,6 +443,8 @@ class DemoEpisodeResult:
     lengths: tuple[int, ...] = ()
     completed_by_env: tuple[bool, ...] = ()
     terminal_reasons: tuple[str, ...] = ()
+    execution_mode: DemoOutputMode = "continuous"
+    attempt_id: int = 0
 
     @property
     def all_success(self) -> bool:
@@ -207,11 +456,47 @@ class DemoEpisodeResult:
         """Whether at least one parallel environment completed successfully."""
         return any(self.success)
 
+    @property
+    def successful_fragment_count_by_env(self) -> tuple[int, ...]:
+        """Count accepted, non-empty program segments for each environment."""
+        if not self.success:
+            return ()
+        counts = [0] * len(self.success)
+        for segment in self.segments:
+            if not segment.successes:
+                if segment.success and segment.end_step > segment.start_step:
+                    counts[0] += 1
+                continue
+            for env_id, accepted in enumerate(segment.successes):
+                start = (
+                    segment.start_steps[env_id]
+                    if env_id < len(segment.start_steps)
+                    else segment.start_step
+                )
+                end = (
+                    segment.end_steps[env_id]
+                    if env_id < len(segment.end_steps)
+                    else segment.end_step
+                )
+                if (
+                    accepted
+                    and (
+                        not segment.active
+                        or env_id >= len(segment.active)
+                        or segment.active[env_id]
+                    )
+                    and end > start
+                ):
+                    counts[env_id] += 1
+        return tuple(counts)
+
     def to_metadata(self) -> dict[str, Any]:
         """Return a JSON-compatible representation."""
         metadata = {
             "schema_version": DEMO_SCHEMA_VERSION,
             "episode_index": self.episode_index,
+            "execution_mode": self.execution_mode,
+            "attempt_id": self.attempt_id,
             "length": self.length,
             "completed": self.completed,
             "success": list(self.success),
@@ -219,6 +504,9 @@ class DemoEpisodeResult:
             "truncated": list(self.truncated),
             "terminal_reason": self.terminal_reason,
             "segments": [segment.to_metadata() for segment in self.segments],
+            "successful_fragment_count_by_env": list(
+                self.successful_fragment_count_by_env
+            ),
         }
         if self.lengths:
             metadata.update(
@@ -233,6 +521,22 @@ class DemoEpisodeResult:
 
 ProgressWrapper = Callable[[Iterable[Any], str], Iterable[Any]]
 StopPredicate = Callable[[], bool]
+
+
+@dataclass(frozen=True)
+class _SizedActionIterable:
+    """Expose a declared action count without materializing a lazy iterable."""
+
+    actions: Iterable[Any]
+    total_steps: int
+
+    def __iter__(self) -> Iterator[Any]:
+        """Return the original lazy action iterator."""
+        return iter(self.actions)
+
+    def __len__(self) -> int:
+        """Return the exact declared number of action steps."""
+        return self.total_steps
 
 
 def _env_target(env: Any) -> Any:
@@ -267,6 +571,28 @@ def _as_bool_tuple(value: Any, num_envs: int) -> tuple[bool, ...]:
             f"Expected {num_envs} environment flags, got {tensor.numel()}."
         )
     return tuple(bool(item) for item in tensor.tolist())
+
+
+def _has_terminal_runtime_failure_trace(segment: DemoSegment) -> bool:
+    """Return whether a lazy segment recorded a canonical failed runtime.
+
+    Task Program action iterables may terminate before yielding a controller
+    command when planning fails.  Their bridge finalizes the runtime trace while
+    exhausting the iterable and exposes a validator that commits row-local
+    failure.  This marker distinguishes that outcome from an ordinary empty
+    ``DemoSegment``, whose existing ``empty_segment`` guard remains unchanged.
+    """
+    runtime = segment.metadata.get("runtime")
+    if not isinstance(runtime, Mapping):
+        return False
+    return (
+        runtime.get("kind")
+        in {
+            "skill_result",
+            "parallel_skill_result",
+        }
+        and runtime.get("status") == "failed"
+    )
 
 
 def _dataset_instruction(env: Any) -> str:
@@ -317,7 +643,11 @@ def resolve_demo_segments(env: Any, **kwargs: Any) -> Iterable[DemoSegment]:
                 "create_demo_action_list()."
             )
         actions = legacy_creator(**kwargs)
-        segments = None if actions is None else (DemoSegment(actions, name="legacy"),)
+        segments = (
+            ()
+            if actions is None
+            else (DemoSegment(actions, name="legacy", metadata={"segment_count": 1}),)
+        )
 
     if segments is None:
         return ()
@@ -344,6 +674,8 @@ def execute_demo_episode(
     env: Any,
     *,
     episode_index: int = 0,
+    execution_cfg: DemoExecutionCfg | None = None,
+    attempt_id: int = 0,
     should_stop: StopPredicate | None = None,
     progress: ProgressWrapper | None = None,
     **plan_kwargs: Any,
@@ -358,6 +690,9 @@ def execute_demo_episode(
     Args:
         env: Gym environment or wrapper.
         episode_index: Logical episode identifier used in metadata and logs.
+        execution_cfg: Collector-owned output settings. Defaults to continuous
+            episode persistence.
+        attempt_id: Zero-based identifier for this collection attempt.
         should_stop: Optional callback checked before every action.
         progress: Optional wrapper such as ``tqdm`` for action iterables.
         **plan_kwargs: Arguments forwarded to the task's planning method.
@@ -366,6 +701,13 @@ def execute_demo_episode(
         A :class:`DemoEpisodeResult` describing segment spans and terminal
         state.
     """
+    if execution_cfg is None:
+        execution_cfg = DemoExecutionCfg()
+    elif not isinstance(execution_cfg, DemoExecutionCfg):
+        raise TypeError("execution_cfg must be a DemoExecutionCfg or None.")
+    if attempt_id < 0:
+        raise ValueError("attempt_id must be non-negative.")
+
     target = _env_target(env)
     num_envs = int(getattr(target, "num_envs", 1))
     begin_episode = _get_env_callable(env, "_begin_demo_episode_recording")
@@ -393,7 +735,11 @@ def execute_demo_episode(
         )
 
     if begin_episode is not None:
-        begin_episode(episode_index=episode_index)
+        begin_episode(
+            episode_index=episode_index,
+            execution_cfg=execution_cfg,
+            attempt_id=attempt_id,
+        )
     publish_active_mask()
 
     previous_no_auto_reset = bool(getattr(target, "_demo_no_auto_reset", False))
@@ -442,13 +788,34 @@ def execute_demo_episode(
             if actions is None:
                 actions = ()
             if progress is not None:
+                if segment.progress_total_steps is not None:
+                    actions = _SizedActionIterable(
+                        actions, segment.progress_total_steps
+                    )
+                segment_total = segment.metadata.get("segment_count")
+                segment_label = f"#{segment_id + 1}"
+                if type(segment_total) is int and segment_total > segment_id:
+                    segment_label = f"{segment_id + 1}/{segment_total}"
                 actions = progress(
                     actions,
-                    f"Executing episode #{episode_index}, segment #{segment_id}: "
+                    f"Executing episode #{episode_index}, segment {segment_label}: "
                     f"{segment.name}",
                 )
 
-            for action in actions:
+            action_iterator = iter(actions)
+            last_action_consumed: bool | None = None
+            action_error: Exception | None = None
+            while True:
+                try:
+                    action = next(action_iterator)
+                except StopIteration:
+                    break
+                except Exception as exc:
+                    action_error = exc
+                    actions_exhausted = False
+                    segment_reason = "action_generation_failed"
+                    break
+                last_action_consumed = False
                 if should_stop is not None and should_stop():
                     actions_exhausted = False
                     fatal_reason = "interrupted"
@@ -461,18 +828,32 @@ def execute_demo_episode(
                     publish_active_mask()
                     break
 
-                if normalize_action is not None:
-                    action = normalize_action(action)
-                if not all(active):
-                    if mask_action is None:
-                        raise RuntimeError(
-                            "A vector demo environment completed asynchronously but "
-                            "does not implement _mask_demo_action(action, active_mask)."
-                        )
-                    action = mask_action(action, tuple(active))
+                try:
+                    if normalize_action is not None:
+                        action = normalize_action(action)
+                    if not all(active):
+                        if mask_action is None:
+                            raise RuntimeError(
+                                "A vector demo environment completed asynchronously "
+                                "but does not implement "
+                                "_mask_demo_action(action, active_mask)."
+                            )
+                        action = mask_action(action, tuple(active))
+                except Exception as exc:
+                    action_error = exc
+                    actions_exhausted = False
+                    segment_reason = "action_processing_failed"
+                    break
 
                 active_before_step = tuple(active)
-                _, _, terminated_value, truncated_value, info = env.step(action)
+                try:
+                    _, _, terminated_value, truncated_value, info = env.step(action)
+                except Exception as exc:
+                    action_error = exc
+                    actions_exhausted = False
+                    segment_reason = "action_execution_failed"
+                    break
+                last_action_consumed = True
                 action_count += 1
                 last_info = info
                 for env_id, was_active in enumerate(active_before_step):
@@ -529,16 +910,21 @@ def execute_demo_episode(
                             step_failed = True
 
                 if step_failed:
-                    actions_exhausted = False
-                    fatal_reason = "truncated" if active_step_truncated else "failure"
-                    segment_reason = fatal_reason
-                    for env_id, is_active in enumerate(active):
-                        if is_active:
-                            terminal_reasons[env_id] = "batch_aborted"
-                            segment_failure_reasons[env_id] = "batch_aborted"
-                            active[env_id] = False
+                    if segment.failure_policy == "batch_abort":
+                        actions_exhausted = False
+                        fatal_reason = (
+                            "truncated" if active_step_truncated else "failure"
+                        )
+                        segment_reason = fatal_reason
+                        for env_id, is_active in enumerate(active):
+                            if is_active:
+                                terminal_reasons[env_id] = "batch_aborted"
+                                segment_failure_reasons[env_id] = "batch_aborted"
+                                active[env_id] = False
                     publish_active_mask()
-                    break
+                    if segment.failure_policy == "batch_abort" or not any(active):
+                        actions_exhausted = False
+                        break
 
                 publish_active_mask()
                 if not any(active):
@@ -558,7 +944,78 @@ def execute_demo_episode(
                     publish_active_mask()
                     break
 
-            if action_count == 0 and segment_reason is None:
+            if not actions_exhausted:
+                if segment.abort_actions is not None:
+                    reason = (
+                        segment_reason
+                        or fatal_reason
+                        or "demo segment execution stopped before exhaustion"
+                    )
+                    try:
+                        emergency_actions = segment.abort_actions(
+                            reason,
+                            last_action_consumed=bool(last_action_consumed),
+                        )
+                        if isinstance(emergency_actions, (str, bytes)):
+                            raise TypeError(
+                                "abort_actions must return an iterable of actions."
+                            )
+                        emergency_iterator = iter(emergency_actions)
+                        try:
+                            for emergency_action in emergency_iterator:
+                                if normalize_action is not None:
+                                    emergency_action = normalize_action(
+                                        emergency_action
+                                    )
+                                try:
+                                    _, _, _, _, emergency_info = env.step(
+                                        emergency_action
+                                    )
+                                except Exception as exc:
+                                    raise RuntimeError(
+                                        "Emergency demo safe-stop action failed "
+                                        "during env.step()."
+                                    ) from exc
+                                action_count += 1
+                                last_info = emergency_info
+                                for env_id, is_participant in enumerate(participants):
+                                    if is_participant:
+                                        lengths[env_id] += 1
+                        finally:
+                            close_emergency = getattr(
+                                emergency_iterator,
+                                "close",
+                                None,
+                            )
+                            if callable(close_emergency):
+                                close_emergency()
+                    finally:
+                        close_actions = getattr(action_iterator, "close", None)
+                        if callable(close_actions):
+                            close_actions()
+                else:
+                    close_actions = getattr(action_iterator, "close", None)
+                    if callable(close_actions):
+                        close_actions()
+
+            if action_error is not None:
+                raise RuntimeError(
+                    "Demo action generation, processing, or execution failed "
+                    "after an emergency safe-stop attempt."
+                ) from action_error
+
+            traced_terminal_runtime_failure = (
+                action_count == 0
+                and actions_exhausted
+                and segment_reason is None
+                and segment.validator is not None
+                and _has_terminal_runtime_failure_trace(segment)
+            )
+            if (
+                action_count == 0
+                and segment_reason is None
+                and not traced_terminal_runtime_failure
+            ):
                 fatal_reason = "empty_segment"
                 segment_reason = fatal_reason
                 for env_id, is_participant in enumerate(participants):
@@ -588,15 +1045,25 @@ def execute_demo_episode(
                         terminal_reasons[env_id] = "segment_validation_failed"
 
                 if validation_failed:
-                    fatal_reason = "segment_validation_failed"
-                    segment_reason = fatal_reason
-                    for env_id, is_active in enumerate(active):
-                        if is_active:
-                            if segment_failure_reasons[env_id] is None:
-                                segment_failure_reasons[env_id] = "batch_aborted"
-                                terminal_reasons[env_id] = "batch_aborted"
-                            segment_successes[env_id] = False
-                            active[env_id] = False
+                    if segment.failure_policy == "batch_abort":
+                        fatal_reason = "segment_validation_failed"
+                        segment_reason = fatal_reason
+                        for env_id, is_active in enumerate(active):
+                            if is_active:
+                                if segment_failure_reasons[env_id] is None:
+                                    segment_failure_reasons[env_id] = "batch_aborted"
+                                    terminal_reasons[env_id] = "batch_aborted"
+                                segment_successes[env_id] = False
+                                active[env_id] = False
+                    else:
+                        for env_id, is_active in enumerate(active):
+                            if (
+                                is_active
+                                and segment_failure_reasons[env_id]
+                                == "segment_validation_failed"
+                            ):
+                                segment_successes[env_id] = False
+                                active[env_id] = False
                     publish_active_mask()
 
             participant_ids = [
@@ -631,6 +1098,8 @@ def execute_demo_episode(
                 end_steps=end_steps,
                 successes=tuple(segment_successes),
                 failure_reasons=tuple(segment_failure_reasons),
+                attempt_id=attempt_id,
+                continuity_id=0,
             )
             segment_results.append(segment_result)
             if end_segment is not None:
@@ -690,6 +1159,8 @@ def execute_demo_episode(
             lengths=tuple(lengths),
             completed_by_env=tuple(completed_by_env),
             terminal_reasons=tuple(terminal_reasons),
+            execution_mode=execution_cfg.mode,
+            attempt_id=attempt_id,
         )
         if end_episode is not None:
             end_episode(result=result)

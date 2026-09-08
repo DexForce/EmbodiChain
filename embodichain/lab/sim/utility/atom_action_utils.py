@@ -21,12 +21,14 @@ from typing import List
 
 from embodichain.utils.logger import log_error, log_warning
 from embodichain.lab.gym.utils.misc import mul_linear_expand
-from embodichain.lab.sim.planners import (
-    MoveType,
-    PlanState,
+from embodichain.lab.sim.motion.motion_generator import (
     MotionGenerator,
     MotionGenCfg,
     MotionGenOptions,
+)
+from embodichain.lab.sim.motion.planners import (
+    MoveType,
+    PlanState,
     ToppraPlanOptions,
     ToppraPlannerCfg,
 )

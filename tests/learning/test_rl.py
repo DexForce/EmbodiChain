@@ -39,10 +39,10 @@ class TestRLTraining:
         """Set up test configuration before each test method."""
         # Load the existing push_cube config
         train_config_path = (
-            "embodichain_tasks/configs/agents/rl/push_cube/train_config.json"
+            "embodichain_tasks/configs/tasks/manipulation/push_cube/agents/ppo.json"
         )
         gym_config_path = (
-            "embodichain_tasks/configs/agents/rl/push_cube/gym_config.json"
+            "embodichain_tasks/configs/tasks/manipulation/push_cube/env.json"
         )
 
         with open(train_config_path, "r") as f:

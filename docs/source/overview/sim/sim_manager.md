@@ -144,7 +144,7 @@ sim.profiler.report()
 ```
 
 Each standalone {meth}`SimulationManager.update` call creates a `sim_update`
-root. The `manual_update` section contains one `gizmo_update` and one
+root. The `physics_steps` section contains one `gizmo_update` and one
 `world_update` sample per physics substep, plus optional
 `window_record_capture` and `visualization_capture` samples when those features
 are enabled. Consequently, `world_update.calls` is the total number of physics
@@ -187,6 +187,35 @@ cloth, soft bodies, camera frustums, low-frequency RGB preview, overlays, and a
 1 m ground grid. For configuration, performance behavior, deformable-object
 limitations, remote access, and troubleshooting, see
 {doc}`viser_visualization`.
+
+## Native point-cloud visualization
+
+Use {meth}`SimulationManager.visualize_point_cloud` to add static point-based
+debug or analysis data to the native DexSim viewer. It accepts NumPy arrays or
+Torch tensors with point positions shaped `(N, 3)`, plus optional per-point RGB
+or RGBA colors. Colors can be normalized floats or `uint8` values in `[0, 255]`;
+the manager converts them to renderer-ready RGB values. Omitting `colors`
+renders the point cloud in green.
+
+```python
+import numpy as np
+
+points = np.array([[0.0, 0.0, 0.2], [0.1, 0.0, 0.2]], dtype=np.float32)
+colors = np.array([[255, 0, 0], [0, 255, 0]], dtype=np.uint8)
+
+point_cloud = sim.visualize_point_cloud(
+    points,
+    colors=colors,
+    point_size=6.0,
+    name="debug_points",
+)
+```
+
+The returned native point-cloud handle can be queried or modified with the
+DexSim point-cloud API. This method targets the native window; use the
+browser-overlay APIs documented in {doc}`viser_visualization` for Viser.
+See {doc}`/tutorial/point_cloud_visualization` for a runnable color-and-position
+verification example.
 
 ## Assets Management
 
@@ -240,41 +269,40 @@ See `scripts/tutorials/sim/export_usd.py` for a complete example.
 
 ## Simulation Loop
 
-### Manual Update mode
+Physics advances only through explicit {meth}`~SimulationManager.update` calls.
+Each call applies pending Gizmo controls before every physics step, then updates
+simulation time, recording, and browser visualization. Gym environments own this
+sequence through `env.step(action)`.
 
-In this mode, the physics simulation should be explicitly stepped by calling {meth}`~SimulationManager.update()` method, which provides precise control over the simulation timing. 
-
-The use case for manual update mode includes:
-- Data generation with openai gym environments, in which the observation and action must be synchronized with the physics simulation.
-- Applications that require precise dynamic control over the simulation timing.
+Interactive applications can pace the same fixed-step loop against wall time:
 
 ```python
-while True:
-    # Step physics simulation.
-    sim.update(step=1)
+import time
 
-    # Perform other tasks such as get data from the scene or apply sensor update.
+while True:
+    step_start = time.perf_counter()
+    sim.update(step=1)
+    # Read sensors or process application state here.
+    time.sleep(max(0.0, sim.sim_config.physics_dt - (time.perf_counter() - step_start)))
 ```
 
-> The default mode is manual update mode. To switch to automatic update mode, call `set_manual_update(False)`. 
+Wall-clock pacing limits playback speed without changing the configured physics
+timestep. Waiting at a REPL or breakpoint pauses physics. Drawing markers and
+calling `capture_visualization(force=True)` publish visual changes without
+advancing physics.
 
-### Automatic Update mode
-
-In this mode, the physics simulation stepping is automatically handling by the physics thread running in dexsim engine, which makes it easier to use for visualization and interactive applications.
-
-> When in automatic update mode, user are recommanded to use CPU `sim_device` for simulation.
-
+Pure IK/FK queries do not require a physics loop.
 
 ## Mainly used methods
 
-- **`SimulationManager.update(physics_dt=None, step=1)`**: Steps the physics simulation with optional custom time step and number of steps. If `physics_dt` is None, uses the configured physics time step.
+- **`SimulationManager.update(physics_dt=None, step=10)`**: Steps the physics simulation with optional custom time step and number of steps. If `physics_dt` is None, uses the configured physics time step.
 - **`SimulationManager.enable_physics(enable: bool)`**: Enable or disable physics simulation.
-- **`SimulationManager.set_manual_update(enable: bool)`**: Set manual update mode for physics.
 - **`SimulationManager.start_visualization()`**: Start or return the configured visualization runtime.
 - **`SimulationManager.refresh_visualization()`**: Immediately republish scene topology.
 - **`SimulationManager.capture_visualization(force=False)`**: Capture the current scene state.
 - **`SimulationManager.capture_visualization_safely(force=False)`**: Capture without allowing a visualization failure to interrupt simulation progress.
 - **`SimulationManager.stop_visualization()`**: Stop Viser and release its server port.
+- **`SimulationManager.visualize_point_cloud(points, colors=None, point_size=2.0, name="point_cloud")`**: Add a static colored point cloud to the native DexSim viewer.
 - **`SimulationManager.visualization_health`**: Return endpoint, client count, revision, and worker status.
 - **`SimulationManager.visualization_stats`**: Return capture, queue, payload, and upload telemetry.
 
@@ -289,10 +317,10 @@ In this mode, the physics simulation stepping is automatically handling by the p
 > Currently, multiple instances are not supported for ray tracing rendering backend. Good news is that we are working on adding this feature in future releases.
 
 
-For more methods and details, refer to the [SimulationManager](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.SimulationManager) documentation.
+For more methods and details, see the {doc}`SimulationManager API </api_reference/embodichain/embodichain.lab.sim.sim_manager>`.
 
-### Related Tutorials
+### Related Documentation
 
-- [Basic scene creation](https://dexforce.github.io/EmbodiChain/tutorial/create_scene.html)
-- [Interactive simulation with Gizmo](https://dexforce.github.io/EmbodiChain/tutorial/gizmo.html)
+- {doc}`Basic scene creation </tutorial/create_scene>`
+- {doc}`Interactive Gizmos </features/interaction/gizmo>`
 - {doc}`Viser browser visualization <viser_visualization>`

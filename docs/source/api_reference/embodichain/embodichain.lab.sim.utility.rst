@@ -17,7 +17,6 @@ action/solver adaptation.
    action_utils
    atom_action_utils
    cfg_utils
-   gizmo_utils
    import_utils
    io_utils
    keyboard_utils
@@ -44,12 +43,6 @@ Configuration Utilities
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: embodichain.lab.sim.utility.cfg_utils
-   :members:
-
-Gizmo Utilities
-~~~~~~~~~~~~~~~
-
-.. automodule:: embodichain.lab.sim.utility.gizmo_utils
    :members:
 
 Import Utilities

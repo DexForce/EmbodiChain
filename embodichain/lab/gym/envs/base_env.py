@@ -17,7 +17,8 @@
 from __future__ import annotations
 
 import math
-from numbers import Integral
+from collections.abc import Mapping
+from numbers import Integral, Real
 
 import torch
 import numpy as np
@@ -50,11 +51,11 @@ class EnvCfg:
     """Simulation configuration for the environment."""
 
     seed: int | None = None
-    """The seed for the random number generator. Defaults to -1, in which case the seed is not set.
+    """The task-environment seed. Defaults to None, in which case the seed is not set.
 
     Note:
-      The seed is set at the beginning of the environment initialization. This ensures that the environment
-      creation is deterministic and behaves similarly across different runs.
+      The seed is set before scene initialization and controls process RNGs and
+      deterministic event-functor streams.
     """
 
     sim_steps_per_control: int = 4
@@ -124,6 +125,11 @@ class BaseEnv(gym.Env):
     single_action_space: gym.spaces.Space = None
     single_observation_space: gym.spaces.Space = None
 
+    # EmbodiedEnv defers the summary until all managers and recording buffers
+    # have been initialized.
+    _defer_initialization_summary: bool = False
+    _initialization_summary_label_width: int = 22
+
     def __init__(
         self,
         cfg: EnvCfg,
@@ -148,7 +154,8 @@ class BaseEnv(gym.Env):
             self.sim_cfg.profiler = self.cfg.profiler
 
         if self.cfg.seed is not None:
-            self.cfg.seed = set_seed(self.cfg.seed)
+            effective_seed = self._set_seed(self.cfg.seed)
+            super().reset(seed=effective_seed)
         else:
             logger.log_info(f"No seed is set for the environment.")
 
@@ -188,13 +195,110 @@ class BaseEnv(gym.Env):
 
         self._init_raw_obs: Dict = self.get_obs(**kwargs)
 
-        logger.log_info("[INFO]: Initialized environment:")
-        logger.log_info(f"\tEnvironment device    : {self.sim.device}")
-        logger.log_info(f"\tNumber of environments: {self._num_envs}")
-        logger.log_info(f"\tEnvironment seed      : {self.cfg.seed}")
-        logger.log_info(f"\tPhysics dt            : {self.physics_dt}")
-        logger.log_info(f"\tEnvironment dt        : {self.step_dt}")
-        logger.log_info(f"\tControl frequency     : {self.control_frequency} Hz")
+        if not self._defer_initialization_summary:
+            self._log_initialization_summary()
+
+    def _log_initialization_summary(self) -> None:
+        """Log the environment initialization summary without log prefixes."""
+        logger.log_info("\n".join(self._initialization_summary_lines()), prefix=False)
+
+    def _initialization_summary_lines(self) -> list[str]:
+        """Build a compact, structured summary of the initialized environment."""
+        robot_description = type(self.robot).__name__
+        robot_uid = getattr(self.robot, "uid", None)
+        if robot_uid:
+            robot_description = f"{robot_description} (uid={robot_uid})"
+
+        sensor_names = [str(name) for name in self.sensors]
+        sensor_description = (
+            f"{len(sensor_names)} ({', '.join(sensor_names)})"
+            if sensor_names
+            else "none"
+        )
+        episode_limit = (
+            f"{self.cfg.max_episode_steps} control steps"
+            if self.cfg.max_episode_steps > 0
+            else "unlimited"
+        )
+
+        lines = [
+            f"╭─ Environment initialized: {type(self).__name__}",
+            "├─ Runtime",
+            self._format_initialization_summary_row("Config", type(self.cfg).__name__),
+            self._format_initialization_summary_row("Device", self.device),
+            self._format_initialization_summary_row(
+                "Parallel environments", self.num_envs
+            ),
+            self._format_initialization_summary_row(
+                "Seed", self.cfg.seed if self.cfg.seed is not None else "not set"
+            ),
+            self._format_initialization_summary_row(
+                "Headless", str(bool(self.sim_cfg.headless)).lower()
+            ),
+            self._format_initialization_summary_row("Robot", robot_description),
+            self._format_initialization_summary_row("Sensors", sensor_description),
+            "├─ Timing",
+            self._format_initialization_summary_row(
+                "Physics",
+                f"{self.physics_dt:g} s ({self.physics_frequency:g} Hz)",
+            ),
+            self._format_initialization_summary_row(
+                "Control",
+                f"{self.step_dt:g} s ({self.control_frequency:g} Hz, "
+                f"{self.cfg.sim_steps_per_control} physics steps)",
+            ),
+            self._format_initialization_summary_row("Episode limit", episode_limit),
+        ]
+
+        summary_metadata = [
+            (name, value)
+            for name, value in self.metadata.items()
+            if name != "render_fps"
+        ]
+        if summary_metadata:
+            lines.append("├─ Metadata")
+            for name, value in sorted(summary_metadata, key=lambda item: str(item[0])):
+                lines.append(
+                    self._format_initialization_summary_row(
+                        str(name), self._format_initialization_metadata_value(value)
+                    )
+                )
+
+        lines.extend(self._extra_initialization_summary_lines())
+        lines.append("╰─ Ready")
+        return lines
+
+    def _extra_initialization_summary_lines(self) -> list[str]:
+        """Return subclass-specific initialization summary lines."""
+        return []
+
+    @classmethod
+    def _format_initialization_summary_row(
+        cls, label: str, value: object, indent: int = 0
+    ) -> str:
+        """Format an aligned key-value row inside the initialization tree."""
+        label_width = max(1, cls._initialization_summary_label_width - 2 * indent)
+        return f"│  {'  ' * indent}{label:<{label_width}} {value}"
+
+    @staticmethod
+    def _format_initialization_metadata_value(value: object) -> str:
+        """Format metadata without expanding large nested structures."""
+        if value is None:
+            return "none"
+        if isinstance(value, bool):
+            return str(value).lower()
+        if isinstance(value, Real):
+            return f"{value:g}"
+        if isinstance(value, str):
+            return value if len(value) <= 80 else f"{value[:77]}..."
+        if isinstance(value, Mapping):
+            keys = ", ".join(sorted(str(key) for key in value))
+            noun = "key" if len(value) == 1 else "keys"
+            return f"{len(value)} {noun}" + (f" ({keys})" if keys else "")
+        if isinstance(value, (list, tuple, set, frozenset)):
+            noun = "item" if len(value) == 1 else "items"
+            return f"{len(value)} {noun}"
+        return type(value).__name__
 
     def _configure_timing(self) -> None:
         """Validate and expose the environment's simulation-derived timing."""
@@ -729,7 +833,8 @@ class BaseEnv(gym.Env):
             A tuple containing the observations and infos.
         """
         if seed is not None:
-            torch.manual_seed(seed)
+            seed = self._set_seed(seed)
+        super().reset(seed=seed)
 
         if options is None:
             options = dict()
@@ -762,6 +867,23 @@ class BaseEnv(gym.Env):
                 info = self.get_info(**options)
 
         return obs, info
+
+    def _set_seed(self, seed: int) -> int:
+        """Set the effective environment seed and rewind seeded managers."""
+        cudnn_benchmark = torch.backends.cudnn.benchmark
+        cudnn_deterministic = torch.backends.cudnn.deterministic
+        try:
+            effective_seed = set_seed(seed)
+        finally:
+            # Seeding selects random streams; it must not silently change the
+            # caller's deterministic-kernel policy.
+            torch.backends.cudnn.benchmark = cudnn_benchmark
+            torch.backends.cudnn.deterministic = cudnn_deterministic
+        self.cfg.seed = effective_seed
+        event_manager = getattr(self, "event_manager", None)
+        if event_manager is not None:
+            event_manager.set_seed(effective_seed)
+        return effective_seed
 
     def step(
         self, action: EnvAction, **kwargs

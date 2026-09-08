@@ -1,26 +1,39 @@
-# EmbodiChain Agent Context System
+# Context registry schema and maintenance
 
-EmbodiChain keeps agent-facing context in `agent_context/`, indexed by
-`agent_context/MAP.yaml`. Agent skills are stored under `.agents/skills/`.
-Claude Code project adapters use `.claude/skills/<skill>/SKILL.md`, and
-GitHub Copilot adapters under `.github/copilot/` should stay thin.
+Read this for context maintenance. The routing procedure lives only in
+`../SKILL.md`; the executable checker/router is `../scripts/context.py`.
 
-## Routing Rules
+`agent_context/MAP.yaml` uses schema `version: 1`:
 
-1. Read `agent_context/MAP.yaml` first.
-2. Resolve the requested topic by exact `id`, then `aliases`, then `keywords`.
-3. Load only the matched Markdown files listed in the topic `paths`.
-4. Do not read `docs/source/` unless the user explicitly asks for Sphinx
-   documentation.
+| Field | Contract |
+|---|---|
+| `defaults.write_contexts` | Convention Markdown paths relative to `agent_context/`, read for writing only |
+| `topics[].id` | Unique stable kebab-case id |
+| `title` | Nonempty human-readable title |
+| `aliases`, `keywords` | Lists of matching phrases; intentional ambiguity is allowed |
+| `paths` | Default overview Markdown paths relative to `agent_context/` |
+| `source_of_truth` | Prioritized repository-relative implementation files or narrow search directories |
+| `watch_paths` (optional) | Repository-relative files/directories for change impact, without increasing read load |
+| `related_topics` | Registered topic ids; never auto-load them |
+| `status` | `active` or `deprecated` |
+| `replaced_by` | Required active topic id when deprecated |
 
-## Update Rules
+Paths must exist and stay inside their base, including resolved symlinks.
+`paths` and `write_contexts` point to Markdown files. Detail pages under
+`agent_context/topics/` must be reachable by local Markdown links from an
+overview. Keep code paths in backticks and document links as Markdown links.
 
-When behavior covered by a context topic changes, update the topic Markdown and
-`agent_context/MAP.yaml` metadata in the same change. If routing behavior itself
-changes, update:
+The checker validates schema, relations, paths, local Markdown links and orphan
+topic pages. It does not prove source facts, frames, tensor dimensions, examples
+or freshness. Review those against the owning implementation and focused tests.
 
-- `.agents/skills/project-dev-context/SKILL.md`
-- `.agents/skills/project-dev-context/references/context-system.md`
-- `AGENTS.md`
-- `.claude/skills/project-dev-context/SKILL.md`
-- `.github/copilot/project-dev-context.md`
+`affected --base REF` compares the merge base with the checkout, including
+staged, unstaged and untracked files. Deleted/renamed source paths can identify
+their former topics. Run this before changing metadata to avoid losing old
+watch coverage. Impact uses the union of `source_of_truth` and optional `watch_paths`;
+context edits identify their owning topic as well. MAP, conventions or routing
+skill/adapter changes conservatively select all active topics for review.
+
+Add/delete/move topics atomically with their MAP entries and incoming links.
+Deprecation keeps a redirect until callers migrate. No timestamp field is used
+as proof of freshness; maintain relevant source changes and context together.

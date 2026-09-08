@@ -1,0 +1,47 @@
+program_id: pour_water_with_right_arm
+targets:
+  bottle_return_pose:
+    kind: cyclic_pose
+    values:
+      - position: [0.75, -0.1, 0.962]
+        quaternion_wxyz: [1.0, 0.0, 0.0, 0.0]
+program:
+  kind: segment
+  name: pour_and_return_bottle
+  steps:
+    kind: sequence
+    items:
+      - kind: invoke
+        call:
+          kind: pick
+          object: bottle
+          grasp: bottle_grasp
+      - kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.move_held_object
+          arguments:
+            target: cup_pour_pose
+      - kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.pour
+          arguments:
+            object: bottle
+      - kind: invoke
+        call:
+          kind: place
+          object: bottle
+          at:
+            kind: target_ref
+            target: bottle_return_pose
+  post:
+    - kind: wait_stable
+      entity: bottle
+    - kind: wait_stable
+      entity: cup
+  validators:
+    - kind: object_near_target
+      object: bottle
+      target: bottle_return_pose
+      position_tolerance: 0.05

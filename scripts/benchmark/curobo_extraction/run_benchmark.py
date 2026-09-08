@@ -44,12 +44,12 @@ from typing import Callable
 import psutil
 import torch
 
-from embodichain.lab.sim.planners.curobo.curobo_planner import (
+from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     CuroboPlanner,
     _CuroboBackend,
     _CuroboProfile,
 )
-from embodichain.lab.sim.planners.utils import PlanResult
+from embodichain.lab.sim.motion.planners.utils import PlanResult
 
 # =============================================================================
 # OLD (HEAD) implementations - verbatim loop logic, parameterized by device.
@@ -175,8 +175,7 @@ def old_assemble_result(
         else:
             positions[b, :1] = start[b]
             positions[b, 1:] = start[b]
-    duration = dt.sum(dim=1)
-    return PlanResult(success=alive, positions=positions, dt=dt, duration=duration)
+    return PlanResult(success=alive, positions=positions, dt=dt)
 
 
 # =============================================================================

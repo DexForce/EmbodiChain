@@ -82,6 +82,17 @@ git add -A
 git commit -m "Format code with black"
 ```
 
+Then run the read-only public API documentation gate used by CI:
+
+```bash
+python docs/scripts/check_api_docs.py
+```
+
+If it reports missing public exports, invoke `$update-api-docs` to generate or
+update the relevant Sphinx entries and descriptions, then rerun the checker.
+Keep generation in that specialized skill; do not add placeholder API docs in
+the PR workflow merely to make the gate pass.
+
 ### 6. Create or Update Branch
 
 For a single PR, create a feature branch if needed:
@@ -325,6 +336,7 @@ Fixes #<issue-number>
 
 - [x] I have run the `black .` command to format the code base.
 - [ ] I have made corresponding changes to the documentation
+- [ ] Public API changes are reflected in the API docs (`python docs/scripts/check_api_docs.py`), if applicable
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] Dependencies have been updated, if applicable.
 ```
@@ -345,6 +357,7 @@ Fixes #<issue-number>
 | `git status` | Check current state |
 | `git diff HEAD` | Show changes |
 | `black .` | Format code |
+| `python docs/scripts/check_api_docs.py` | Check public API documentation coverage |
 | `git checkout -b branch-name` | Create branch |
 | `git push -u origin branch` | Push to remote |
 | `gh pr create` | Create PR |

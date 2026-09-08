@@ -3,7 +3,7 @@
 Motion Generator
 ================
 
-.. currentmodule:: embodichain.lab.sim.planners.motion_generator
+.. currentmodule:: embodichain.lab.sim.motion.motion_generator
 
 The ``MotionGenerator`` class in EmbodiChain provides a unified and extensible interface for robot trajectory planning. It supports time-optimal trajectory generation (currently via TOPPRA), joint/Cartesian interpolation, and is designed for easy integration with RL, imitation learning, and classical control scenarios.
 
@@ -34,9 +34,10 @@ Typical Usage
 
 .. code-block:: python
 
-   from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
-   from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
-   from embodichain.lab.sim.planners.utils import PlanState, TrajectorySampleMethod, MoveType
+   from embodichain.lab.sim.motion.motion_generator import MotionGenerator, MotionGenCfg
+   from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
+   from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanOptions
+   from embodichain.lab.sim.motion.planners.utils import PlanState, TrajectorySampleMethod, MoveType
 
    # Assume you have a robot instance and arm_name
    # Constraints are now specified in ToppraPlanOptions, not in ToppraPlannerCfg
@@ -87,7 +88,7 @@ API Reference
 
 .. code-block:: python
 
-   from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
+   from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanOptions
 
    motion_cfg = MotionGenCfg(
        planner_cfg=ToppraPlannerCfg(
@@ -107,6 +108,7 @@ API Reference
    motion_opts = MotionGenOptions(
        strategy="motion_gen",               # "motion_gen" or "ik_interp"
        sample_count=None,                    # Optional normalized output length
+       interpolation_dt=None,                # Required for deterministic interpolation
        plan_opts=ToppraPlanOptions(...),  # Options for the underlying planner
        control_part=arm_name,              # Robot part to control (e.g., 'left_arm')
        is_interpolate=False,               # Whether to pre-interpolate trajectory
@@ -126,8 +128,10 @@ API Reference
        options: MotionGenOptions | None = None,
    ) -> PlanResult
 
-- ``strategy="motion_gen"`` delegates to the configured backend; ``strategy="ik_interp"`` performs deterministic waypoint IK and joint interpolation.
-- Returns a normalized, environment-batched ``PlanResult``.
+- ``strategy="motion_gen"`` delegates to the configured backend; ``strategy="ik_interp"`` performs deterministic waypoint IK and joint interpolation and requires ``interpolation_dt``.
+- Returns a normalized, environment-batched ``PlanResult`` with explicit ``dt``
+  and derived ``duration`` whenever positions are present. Missing timing raises
+  immediately.
 - Uses ``target_states`` (list of PlanState) and ``options`` (MotionGenOptions) instead of individual parameters.
 
 **interpolate_trajectory**
@@ -166,7 +170,7 @@ API Reference
 - (Reserved) Plan trajectory with collision checking (not yet implemented).
 
 Notes & Best Practices
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 - Only collision-free planning is currently supported; collision checking is a placeholder.
 - Input/outputs are numpy arrays or torch tensors; ensure type consistency.

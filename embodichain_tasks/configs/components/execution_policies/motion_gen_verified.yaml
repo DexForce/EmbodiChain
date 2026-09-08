@@ -1,0 +1,30 @@
+policy_id: motion_gen_verified_v1
+preset_id: safe
+
+requires:
+  embodiment_contract: dual_arm_parallel_gripper
+
+motion:
+  strategy: motion_gen
+  sample_count: 140
+  dynamic_collision_mode: auto
+
+tracking:
+  kind: joint_position
+  in_flight_max_abs_error: 1.0
+  terminal_max_abs_error: 1.0
+
+recovery:
+  max_replans: 3
+  max_action_retries: 0
+  goal_rotation_threshold: 0.5
+
+workflow_recovery:
+  max_recovery_attempts: 2
+
+runner:
+  minimum_cycle_time: 0.04
+  hold_on_completion: false
+  hold_during_effect_verification: false
+
+effect_assurance: verified

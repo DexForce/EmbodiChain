@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import select
 import sys
@@ -30,7 +31,11 @@ import numpy as np
 import torch
 import tqdm
 
-from embodichain.lab.gym.envs.demo import DemoEpisodeResult, execute_demo_episode
+from embodichain.lab.gym.envs.demo import (
+    DemoEpisodeResult,
+    DemoExecutionCfg,
+    execute_demo_episode,
+)
 from embodichain.lab.gym.envs.wrapper import ReplayWrapper
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
@@ -50,8 +55,14 @@ _REPLAY_CONTROL_POLL_INTERVAL = 0.05
 
 
 def _progress_wrapper(actions: Iterable[Any], description: str) -> Iterable[Any]:
-    """Wrap a segment action iterable in the run-env progress bar."""
-    return tqdm.tqdm(actions, desc=description, unit="step")
+    """Wrap a segment action iterable in a visible terminal progress bar."""
+    return tqdm.tqdm(
+        actions,
+        desc=description,
+        unit="step",
+        file=sys.stdout,
+        dynamic_ncols=True,
+    )
 
 
 def _env_target(env: Any) -> Any:
@@ -131,17 +142,20 @@ def _commit_pending_episode(
     env: Any,
     save_env_ids: Sequence[int] | torch.Tensor | None,
 ) -> None:
-    """Commit selected rows and discard unused rows from the same vector batch."""
+    """Commit selected dataset rows through one reset of the full vector batch."""
     selected = _normalize_save_env_ids(env, save_env_ids)
-    num_envs = int(getattr(_env_target(env), "num_envs", 1))
-    _reset_episode_rows(env, selected, save_data=True)
+    target = _env_target(env)
+    all_env_ids = tuple(range(int(getattr(target, "num_envs", 1))))
+    if selected == all_env_ids:
+        _reset_episode_rows(env, selected, save_data=True)
+        return
 
-    selected_set = set(selected)
-    discarded = tuple(
-        env_id for env_id in range(num_envs) if env_id not in selected_set
+    commit_env_ids = torch.tensor(
+        selected,
+        dtype=torch.int32,
+        device=getattr(target, "device", None),
     )
-    if discarded:
-        _reset_episode_rows(env, discarded, save_data=False)
+    env.reset(options={"save_data": False, "commit_env_ids": commit_env_ids})
 
 
 def _save_failed_episodes_enabled(env: Any) -> bool:
@@ -161,6 +175,47 @@ def _selected_rows_have_frames(
     if result.lengths:
         return all(result.lengths[env_id] > 0 for env_id in save_env_ids)
     return result.length > 0
+
+
+def _persistable_fragment_env_ids(
+    env: Any,
+    result: DemoEpisodeResult,
+    save_env_ids: Sequence[int],
+    *,
+    include_failed: bool,
+) -> tuple[int, ...]:
+    """Select rows containing at least one eligible non-empty segment span."""
+    persistable: list[int] = []
+    metadata_getter = getattr(_env_target(env), "get_demo_episode_metadata", None)
+    for env_id in save_env_ids:
+        if callable(metadata_getter):
+            metadata = metadata_getter(env_id)
+            if isinstance(metadata, dict):
+                eligible = any(
+                    int(segment.get("end_step", 0)) > int(segment.get("start_step", 0))
+                    and (bool(segment.get("success", False)) or include_failed)
+                    for segment in metadata.get("segments", [])
+                    if isinstance(segment, dict)
+                )
+                if eligible:
+                    persistable.append(env_id)
+                continue
+        for segment in result.segments:
+            if segment.active and not segment.active[env_id]:
+                continue
+            start = (
+                segment.start_steps[env_id]
+                if segment.start_steps
+                else segment.start_step
+            )
+            end = segment.end_steps[env_id] if segment.end_steps else segment.end_step
+            accepted = (
+                segment.successes[env_id] if segment.successes else segment.success
+            )
+            if end > start and (accepted or include_failed):
+                persistable.append(env_id)
+                break
+    return tuple(persistable)
 
 
 def generate_and_execute_action_list(
@@ -211,15 +266,18 @@ def generate_function(
     save_video: bool = False,
     debug_mode: bool = False,
     save_env_ids: Sequence[int] | torch.Tensor | None = None,
+    execution_cfg: DemoExecutionCfg | None = None,
     **kwargs: Any,
 ) -> bool:
-    """Generate, execute, and transactionally save one task episode batch.
+    """Generate, execute, and commit one demonstration collection batch.
 
     A task owns its segment count through ``create_demo_segments``. The legacy
     ``num_traj`` parameter is accepted only as ``None`` or ``1`` so callers do
     not accidentally repeat a one-grasp planner inside the same episode. When
     a dataset functor enables ``save_failed_episodes``, a failed result with at
     least one frame in every selected row is committed instead of retried.
+    Continuous mode has one reset commit boundary; fragment mode delegates
+    independent idempotent fragment commits to the dataset recorder.
 
     Args:
         env: The environment instance.
@@ -230,11 +288,14 @@ def generate_function(
         debug_mode (bool, optional): Enable debug mode for visualization and logging.
         save_env_ids: Environment rows to persist from this vector batch. Other
             rows are explicitly discarded after the selected rows commit.
+        execution_cfg: Continuous or independent segment-fragment persistence
+            settings. Checkpoint resume is not performed in either mode.
         **kwargs: Additional keyword arguments for data generation.
 
     Returns:
-        True if one episode per selected environment row was committed. With
-        ``save_failed_episodes`` enabled, committed episodes may be unsuccessful.
+        True if continuous episodes, or at least one eligible fragment row,
+        were committed. With ``save_failed_episodes`` enabled, committed
+        continuous episodes may be unsuccessful.
     """
     if num_traj not in (None, 1):
         raise ValueError(
@@ -248,6 +309,10 @@ def generate_function(
         raise ValueError(f"max_attempts must be at least 1, got {max_attempts}.")
     normalized_save_env_ids = _normalize_save_env_ids(env, save_env_ids)
     save_failed_episodes = _save_failed_episodes_enabled(env)
+    if execution_cfg is None:
+        execution_cfg = DemoExecutionCfg()
+    elif not isinstance(execution_cfg, DemoExecutionCfg):
+        raise TypeError("execution_cfg must be a DemoExecutionCfg or None.")
 
     if reset_before:
         _abort_pending_episode(env)
@@ -258,16 +323,35 @@ def generate_function(
             result: DemoEpisodeResult = execute_demo_episode(
                 env,
                 episode_index=time_id,
+                execution_cfg=execution_cfg,
+                attempt_id=attempt - 1,
                 progress=_progress_wrapper,
                 **kwargs,
             )
             successful = result.completed and result.all_success
+            fragment_env_ids = _persistable_fragment_env_ids(
+                env,
+                result,
+                normalized_save_env_ids,
+                include_failed=execution_cfg.save_failed_fragments,
+            )
             persistable_failure = (
                 not successful
                 and save_failed_episodes
                 and _selected_rows_have_frames(result, normalized_save_env_ids)
             )
-            if successful or persistable_failure:
+            if execution_cfg.mode == "segment_fragments" and fragment_env_ids:
+                _commit_pending_episode(env, fragment_env_ids)
+                commit_succeeded = True
+                if not successful:
+                    log_warning(
+                        f"Program run {time_id} stopped ({result.terminal_reason}); "
+                        f"saved eligible segments from env rows {fragment_env_ids}."
+                    )
+                return True
+            if execution_cfg.mode == "continuous" and (
+                successful or persistable_failure
+            ):
                 # reset() is the commit boundary: dataset functors consume the
                 # whole episode once, then buffers and scene state are reset.
                 _commit_pending_episode(env, normalized_save_env_ids)
@@ -289,6 +373,16 @@ def generate_function(
             f"Episode {time_id} attempt {attempt}/{max_attempts} failed: "
             f"{result.terminal_reason}. Discarding {result.length} frames."
         )
+        if debug_mode:
+            log_warning(
+                "Failed demo trace: "
+                + json.dumps(
+                    result.to_metadata(),
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
 
     return False
 
@@ -740,6 +834,18 @@ def _create_parser() -> argparse.ArgumentParser:
 
     add_env_launcher_args_to_parser(parser, require_gym_config=True)
     parser.set_defaults(viser_image_fps=None)
+
+    parser.add_argument(
+        "--task-program",
+        type=str,
+        default=None,
+        help="Path to a declarative Task Program (.json, .yaml, or .yml).",
+    )
+    parser.add_argument(
+        "--debug-mode",
+        action="store_true",
+        help="Log the structured trace for each failed demo attempt.",
+    )
 
     parser.add_argument(
         "--replay",

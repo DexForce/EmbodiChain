@@ -18,11 +18,24 @@ After installation, continue with the [Quick Start Tutorial](../tutorial/index.r
 |-----------|-------------|
 | **OS** | Linux x86_64 (Ubuntu 20.04+ recommended) |
 | **GPU** | NVIDIA GPU with compute capability 7.0+ |
-| **NVIDIA driver** | ≥ 535 (tested on driver branches up to 580.x) |
+| **NVIDIA driver** | ≥ 535 (tested on driver branches up to 595.x) |
 | **CUDA** | 12.x (aligned with the Docker image and `dexsim_engine` wheels) |
 | **Vulkan** | Host ICD/layer files for GPU rendering (see Docker notes) |
-| **Python** | 3.10 or 3.11 |
+| **Python** | Core: 3.10, 3.11, or 3.12; `gensim` / `bpy`: 3.11 |
 | **Display** (optional) | X11 `DISPLAY` for interactive viewer windows |
+
+> [!IMPORTANT]
+> Python 3.12 is supported for the core EmbodiChain installation. The optional
+> `gensim` extra includes Blender's ABI-specific `bpy` package and must run in a
+> Python 3.11 environment. If your core installation uses Python 3.12, create a
+> separate Python 3.11 environment for `gensim` and start its commands from that
+> environment; there is no automatic cross-environment handoff.
+
+NVIDIA drivers are backward compatible with applications built against older
+CUDA toolkits. A 595-series host driver therefore works with the current CUDA
+12.8 Docker image and wheels; installing a CUDA 13 toolkit on the host is not
+required. See NVIDIA's [CUDA compatibility documentation](https://docs.nvidia.com/deploy/cuda-compatibility/latest/index.html)
+for details.
 
 > [!NOTE]
 > **PyTorch:** EmbodiChain depends on PyTorch transitively (for example via `dexsim_engine` and `pytorch_kinematics`). If you install or upgrade PyTorch separately, match the wheel to your CUDA version using the [official PyTorch install selector](https://pytorch.org/get-started/locally/).
@@ -100,6 +113,9 @@ Inside the container, install or update EmbodiChain with the [local installation
 ## Local installation
 
 Use a dedicated virtual environment to avoid conflicts with system Python packages.
+For the core package, choose Python 3.10, 3.11, or 3.12. The examples below use
+Python 3.12; choose Python 3.11 instead if you plan to install `gensim` in the
+same environment.
 
 ### 1. Create a virtual environment
 
@@ -107,14 +123,14 @@ Use a dedicated virtual environment to avoid conflicts with system Python packag
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-uv venv --python 3.11 .venv
+uv venv --python 3.12 .venv
 source .venv/bin/activate
 ```
 
 **With pip:**
 
 ```bash
-python3.11 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 ```
@@ -135,7 +151,7 @@ Set the index variables from [Package indexes](#package-indexes), then pick one 
 ```bash
 git clone https://github.com/DexForce/EmbodiChain.git
 cd EmbodiChain
-uv venv --python 3.11 .venv && source .venv/bin/activate
+uv venv --python 3.12 .venv && source .venv/bin/activate
 uv pip install -e . \
   --extra-index-url http://pyp.open3dv.site:2345/simple/ \
   --trusted-host pyp.open3dv.site
@@ -169,9 +185,9 @@ pip install -e .
 ```
 
 Commands can continue to use repository-style paths such as
-`embodichain_tasks/configs/gym/pour_water/gym_config.json`. EmbodiChain resolves
-these paths from the checkout when present and otherwise from the installed
-wheel.
+`embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml`.
+EmbodiChain resolves these paths from the checkout when present and otherwise
+from the installed wheel.
 
 ## Optional: cuRobo V2 motion planning
 
@@ -179,7 +195,15 @@ Install cuRobo separately to use EmbodiChain's CUDA-accelerated,
 collision-aware motion planner. cuRobo is intentionally not part of the core
 dependency set, and its Git source requirement cannot be included in metadata
 published to PyPI. Select exactly one command that matches the CUDA version
-reported by `nvidia-smi`.
+used by PyTorch in the active environment:
+
+```bash
+python -c "import torch; print(torch.version.cuda)"
+```
+
+`nvidia-smi` reports the newest CUDA version supported by the installed driver,
+which can be newer than the CUDA runtime used by PyTorch and is therefore not
+the value to use when choosing the cuRobo extra.
 
 The normal EmbodiChain environment already provides PyTorch, so prefer one of
 the non-`torch` variants:
@@ -187,13 +211,11 @@ the non-`torch` variants:
 ```bash
 # CUDA 12.x
 uv pip install \
-  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
-  ${PIP_EXTRA_ARGS}
+  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
 
 # CUDA 13.x
 uv pip install \
-  "nvidia-curobo[cu13] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
-  ${PIP_EXTRA_ARGS}
+  "nvidia-curobo[cu13] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
 ```
 
 For a fresh environment that also needs cuRobo to select and install PyTorch,
@@ -204,9 +226,7 @@ requirements work with `pip`; replace `uv pip install` with `pip install`.
 
 ```bash
 uv pip install \
-  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
-  --extra-index-url http://pyp.open3dv.site:2345/simple/ \
-  --trusted-host pyp.open3dv.site
+  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
 
 python -c "import curobo; print(curobo.__version__)"
 pytest --pyargs curobo.tests
@@ -218,13 +238,20 @@ EmbodiChain installation: Linux, Python 3.10--3.13, a supported NVIDIA GPU with
 at least 4 GB VRAM, and a driver that supports CUDA 12 or newer. See
 [NVIDIA's official installation guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html)
 for the current compatibility requirements, and see
-[cuRobo V2 Planner](../overview/sim/planners/curobo_planner.md) for EmbodiChain
+[cuRobo V2 Planner](../overview/sim/motion/planners/curobo_planner.md) for EmbodiChain
 configuration and usage. cuRobo planning always runs on CUDA, but the
 SimulationManager physics device may be either CPU or CUDA.
 
 ## Optional: generative simulation (`gensim`)
 
-Install the `gensim` extra for SimReady asset pipelines, Blender-based mesh processing, and `pyrender`. The `bpy` wheel is hosted on Blender's index and must be included in the install command.
+Install the `gensim` extra for SimReady asset pipelines, Blender-based mesh
+processing, and `pyrender`. It requires a Python 3.11 environment because its
+`bpy` wheel is ABI-specific. Use the Blender index in the install command.
+
+If your core installation uses Python 3.12, create and activate a separate
+Python 3.11 environment before running any of the commands below. The current
+GenSim launchers use the interpreter that starts them, so start Blender-based
+commands from this Python 3.11 environment.
 
 | Source | Tool | Command |
 |--------|------|---------|
@@ -233,9 +260,11 @@ Install the `gensim` extra for SimReady asset pipelines, Blender-based mesh proc
 | Git clone | uv | `uv pip install -e ".[gensim]" ${GENSIM_EXTRA_ARGS}` |
 | Git clone | pip | `pip install -e ".[gensim]" ${GENSIM_EXTRA_ARGS}` |
 
-**Example:**
+**Example — separate Python 3.11 environment:**
 
 ```bash
+uv venv --python 3.11 .venv-gensim
+source .venv-gensim/bin/activate
 pip install -e ".[gensim]" \
   --extra-index-url http://pyp.open3dv.site:2345/simple/ \
   --trusted-host pyp.open3dv.site \
@@ -309,7 +338,7 @@ Press `Ctrl+C` to stop; the script cleans up the simulation on exit.
 | Viewer does not open | Export `DISPLAY`, allow X11 access (`xhost +local:` on the host), and ensure `~/.Xauthority` is mounted (the run script does this by default). |
 | PyTorch / CUDA errors at runtime | Reinstall a PyTorch build that matches your driver/CUDA from [pytorch.org](https://pytorch.org/get-started/locally/). |
 | `No module named 'curobo'` | Install the CUDA-matched cuRobo source requirement separately, such as `uv pip install "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"`. |
-| `bpy` install fails | Include the Blender index (`https://download.blender.org/pypi/`) and use Python 3.10 or 3.11. |
+| `bpy` install fails | Include the Blender index (`https://download.blender.org/pypi/`) and use Python 3.11. `bpy` is not available for the core Python 3.12 environment. |
 
 ## Next steps
 

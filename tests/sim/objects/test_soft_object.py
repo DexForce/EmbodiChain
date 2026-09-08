@@ -65,7 +65,7 @@ class BaseSoftObjectTest:
         assert os.path.isfile(COW_PATH)
 
         # Enable manual physics update for precise control
-        self.n_envs = 4
+        self.num_envs = 4
 
         # add softbody to the scene
         self.cow: SoftObject = self.sim.add_soft_object(

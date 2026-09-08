@@ -354,6 +354,7 @@ def _run_sim_worker(
                     result = execute_demo_episode(
                         env,
                         episode_index=rollout_idx,
+                        attempt_id=attempt - 1,
                         should_stop=close_signal.is_set,
                         progress=lambda actions, description: tqdm(
                             actions,
@@ -916,9 +917,10 @@ class OnlineDataEngine:
 
         Only fully valid windows are candidates, so padding or stale tail
         frames are never returned. ``episode`` mode allows a window to cross
-        segment boundaries, ``segment`` keeps every window inside one segment,
-        and ``boundary`` deliberately samples windows crossing an internal
-        segment boundary.
+        segment boundaries within one causal-continuity region, ``segment``
+        keeps every window inside one accepted segment, and ``boundary``
+        deliberately samples windows crossing a boundary between accepted
+        segments. No mode crosses a discontinuous state-restore boundary.
 
         After sampling the internal :attr:`_sample_count` is incremented by
         *batch_size*; if the count exceeds
@@ -990,6 +992,17 @@ class OnlineDataEngine:
             if segment_ids is None:
                 segment_ids = torch.zeros_like(valid, dtype=torch.int64)
 
+            continuity_ids = self.shared_buffer.get("continuity_id", None)
+            if continuity_ids is None:
+                # Schema-v2 and earlier buffers contain no out-of-band state
+                # restore, so the complete row belongs to continuity region 0.
+                continuity_ids = torch.zeros_like(valid, dtype=torch.int64)
+            continuity_windows = continuity_ids.unfold(1, chunk_size, 1)
+            same_continuity = (continuity_windows == continuity_windows[..., :1]).all(
+                dim=-1
+            ) & (continuity_windows[..., 0] >= 0)
+            valid_windows &= same_continuity
+
             if sampling_mode == "segment":
                 segment_windows = segment_ids.unfold(1, chunk_size, 1)
                 same_segment = (segment_windows == segment_windows[..., :1]).all(
@@ -1002,6 +1015,15 @@ class OnlineDataEngine:
                     segment_windows[..., 1:] != segment_windows[..., :-1]
                 ).any(dim=-1)
                 valid_windows &= crosses_boundary
+
+            if sampling_mode in {"segment", "boundary"}:
+                segment_accepted = self.shared_buffer.get("segment_accepted", None)
+                if segment_accepted is None:
+                    # Older successful-only online buffers predate explicit
+                    # segment qualification and remain fully eligible.
+                    segment_accepted = torch.ones_like(valid, dtype=torch.bool)
+                accepted_windows = segment_accepted.bool().unfold(1, chunk_size, 1)
+                valid_windows &= accepted_windows.all(dim=-1)
 
             candidate_rows = (
                 valid_windows.any(dim=1).nonzero(as_tuple=False).squeeze(-1)

@@ -44,13 +44,17 @@ class ControlCommand(ABC):
     def snapshot(self) -> ControlCommand:
         """Return an independently owned copy of this command."""
 
+    @abstractmethod
+    def equivalent_to(self, other: ControlCommand) -> bool:
+        """Return whether ``other`` has exactly the same command semantics."""
+
 
 @dataclass(frozen=True, slots=True, eq=False, init=False)
 class JointPositionCommand(ControlCommand):
     """A semantic command represented by one or batched joint positions.
 
     ``positions`` has shape ``(control_dof,)`` or
-    ``(n_envs, control_dof)``. A one-dimensional command is broadcast to the
+    ``(num_envs, control_dof)``. A one-dimensional command is broadcast to the
     planning batch when resolved.
     """
 
@@ -62,7 +66,7 @@ class JointPositionCommand(ControlCommand):
         if positions.dim() not in (1, 2) or positions.shape[-1] == 0:
             raise ValueError(
                 "positions must have shape (control_dof,) or "
-                "(n_envs, control_dof), got "
+                "(num_envs, control_dof), got "
                 f"{tuple(positions.shape)}."
             )
         if not torch.isfinite(positions).all().item():
@@ -78,10 +82,16 @@ class JointPositionCommand(ControlCommand):
         """Return an independently owned command snapshot."""
         return JointPositionCommand(self._positions)
 
+    def equivalent_to(self, other: ControlCommand) -> bool:
+        """Return whether ``other`` owns identical joint positions."""
+        return isinstance(other, JointPositionCommand) and self._positions.equal(
+            other._positions
+        )
+
     def resolve(
         self,
         *,
-        n_envs: int,
+        num_envs: int,
         control_dof: int,
         device: torch.device | str,
         dtype: torch.dtype | None = None,
@@ -89,20 +99,20 @@ class JointPositionCommand(ControlCommand):
         """Validate, move, and broadcast this command for a planning batch.
 
         Args:
-            n_envs: Number of selected environments.
+            num_envs: Number of selected environments.
             control_dof: Joint count of the resolved control part.
             device: Target planning device.
             dtype: Optional target dtype.
 
         Returns:
-            Independently owned tensor with shape ``(n_envs, control_dof)``.
+            Independently owned tensor with shape ``(num_envs, control_dof)``.
 
         Raises:
             ValueError: If the command shape does not match the control part or
                 selected environment batch.
         """
-        if not isinstance(n_envs, int) or n_envs < 1:
-            raise ValueError("n_envs must be a positive integer.")
+        if not isinstance(num_envs, int) or num_envs < 1:
+            raise ValueError("num_envs must be a positive integer.")
         if not isinstance(control_dof, int) or control_dof < 1:
             raise ValueError("control_dof must be a positive integer.")
         if self._positions.shape[-1] != control_dof:
@@ -112,11 +122,11 @@ class JointPositionCommand(ControlCommand):
             )
         resolved = self._positions.to(device=device, dtype=dtype)
         if resolved.dim() == 1:
-            return resolved.unsqueeze(0).expand(n_envs, -1).clone()
-        if resolved.shape[0] != n_envs:
+            return resolved.unsqueeze(0).expand(num_envs, -1).clone()
+        if resolved.shape[0] != num_envs:
             raise ValueError(
                 f"Batched joint-position command has {resolved.shape[0]} "
-                f"environments, expected {n_envs}."
+                f"environments, expected {num_envs}."
             )
         return resolved.clone()
 
@@ -131,11 +141,20 @@ def _snapshot_commands(
         raise TypeError(f"{field_name} must be a mapping.")
     snapshots: dict[str, ControlCommand] = {}
     for name, command in commands.items():
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError(f"{field_name} keys must be non-empty strings.")
+        if not isinstance(name, str) or not name or name != name.strip():
+            raise ValueError(
+                f"{field_name} keys must be non-empty strings without outer "
+                "whitespace."
+            )
         if not isinstance(command, ControlCommand):
             raise TypeError(f"{field_name} values must be ControlCommand instances.")
-        snapshots[name] = command.snapshot()
+        snapshot = command.snapshot()
+        if type(snapshot) is not type(command) or snapshot is command:
+            raise TypeError(
+                f"{field_name}[{name!r}].snapshot() must return an independently "
+                "owned value of the same ControlCommand type."
+            )
+        snapshots[name] = snapshot
     return MappingProxyType(snapshots)
 
 
@@ -176,65 +195,84 @@ class ControlPartCommandProfile:
         return ControlPartCommandProfile(commands=self.commands)
 
 
-def _snapshot_role_commands(
-    values: Mapping[str, Mapping[str, ControlCommand]],
+def _snapshot_endpoint_commands(
+    values: Mapping[str, Mapping[str, Mapping[str, ControlCommand]]],
     *,
     field_name: str,
-) -> Mapping[str, Mapping[str, ControlCommand]]:
-    """Validate and freeze role-scoped invocation command overrides."""
+) -> Mapping[str, Mapping[str, Mapping[str, ControlCommand]]]:
+    """Validate and freeze slot/endpoint-scoped command overrides."""
     if not isinstance(values, Mapping):
         raise TypeError(f"{field_name} must be a mapping.")
-    snapshots: dict[str, Mapping[str, ControlCommand]] = {}
-    for role, commands in values.items():
-        if not isinstance(role, str) or not role.strip():
-            raise ValueError(f"{field_name} roles must be non-empty strings.")
-        snapshots[role] = _snapshot_commands(
-            commands,
-            field_name=f"{field_name}[{role!r}]",
-        )
-    return MappingProxyType(snapshots)
+    slots: dict[str, Mapping[str, Mapping[str, ControlCommand]]] = {}
+    for slot_id, endpoints in values.items():
+        if not isinstance(slot_id, str) or not slot_id or slot_id != slot_id.strip():
+            raise ValueError(
+                f"{field_name} slot IDs must be non-empty strings without outer "
+                "whitespace."
+            )
+        if not isinstance(endpoints, Mapping):
+            raise TypeError(f"{field_name}[{slot_id!r}] must be a mapping.")
+        endpoint_snapshots: dict[str, Mapping[str, ControlCommand]] = {}
+        for endpoint_id, commands in endpoints.items():
+            if (
+                not isinstance(endpoint_id, str)
+                or not endpoint_id
+                or endpoint_id != endpoint_id.strip()
+            ):
+                raise ValueError(
+                    f"{field_name} endpoint IDs must be non-empty strings without "
+                    "outer whitespace."
+                )
+            endpoint_snapshots[endpoint_id] = _snapshot_commands(
+                commands,
+                field_name=f"{field_name}[{slot_id!r}][{endpoint_id!r}]",
+            )
+        slots[slot_id] = MappingProxyType(endpoint_snapshots)
+    return MappingProxyType(slots)
 
 
 @dataclass(frozen=True, slots=True)
 class ActionControlOverrides:
-    """Per-invocation semantic command overrides keyed by binding role.
+    """Per-invocation semantic commands keyed by slot and endpoint.
 
-    The outer keys are action roles such as ``primary``, ``source`` or
-    ``destination``. The inner keys are semantic command names. The engine
-    applies these values after resolving the role to a concrete control part,
-    and the resulting commands are captured in the invocation revision's
-    immutable planning snapshot.
+    The first two keys match a skill's ``(slot_id, endpoint_id)`` contract.
+    The innermost mapping contains semantic command names. Overrides are
+    captured in the invocation revision's immutable planning snapshot.
     """
 
-    manipulators: Mapping[str, Mapping[str, ControlCommand]] = field(
-        default_factory=dict
-    )
-    end_effectors: Mapping[str, Mapping[str, ControlCommand]] = field(
-        default_factory=dict
+    endpoints: Mapping[
+        str,
+        Mapping[str, Mapping[str, ControlCommand]],
+    ] = field(
+        default_factory=dict,
     )
 
     def __post_init__(self) -> None:
         object.__setattr__(
             self,
-            "manipulators",
-            _snapshot_role_commands(
-                self.manipulators,
-                field_name="manipulators",
-            ),
-        )
-        object.__setattr__(
-            self,
-            "end_effectors",
-            _snapshot_role_commands(
-                self.end_effectors,
-                field_name="end_effectors",
+            "endpoints",
+            _snapshot_endpoint_commands(
+                self.endpoints,
+                field_name="endpoints",
             ),
         )
 
     @property
     def is_empty(self) -> bool:
         """Whether this invocation defines no command overrides."""
-        return not self.manipulators and not self.end_effectors
+        return not self.endpoints
+
+    def as_flat_mapping(
+        self,
+    ) -> Mapping[tuple[str, str], Mapping[str, ControlCommand]]:
+        """Return immutable overrides keyed by ``(slot_id, endpoint_id)``."""
+        return MappingProxyType(
+            {
+                (slot_id, endpoint_id): commands
+                for slot_id, endpoints in self.endpoints.items()
+                for endpoint_id, commands in endpoints.items()
+            }
+        )
 
 
 __all__ = [

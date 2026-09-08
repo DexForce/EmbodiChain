@@ -1,85 +1,84 @@
 ---
 name: project-dev-context
-description: Use when a request asks to reference, refresh, write, or register project development context so the agent resolves the topic through agent_context/MAP.yaml and reads or updates the mapped Markdown context files.
+description: >
+  Route EmbodiChain project-context and codebase-navigation requests through
+  agent_context/MAP.yaml. Use to locate files, configs, defaults, entry points,
+  registration paths or change sites; explain resolution chains; read, refresh
+  or add project context. Chinese triggers include 文件在哪里、配置或默认值在哪里、
+  入口或注册逻辑在哪里、应该修改哪个文件、参考项目上下文、刷新项目上下文。
 ---
 
-# Project Dev Context
+# Project context and navigation
 
-Use this skill when:
-- the request says `reference project development docs`
-- the request says `reference project context`
-- the request says `refresh project context`
-- the request says `update project context`
-- the request says `write project context`
-- the request says `参考项目开发文档`
-- the request says `参考项目上下文`
-- the request says `刷新项目上下文`
-- the request says `更新项目上下文`
-- the request says `写项目上下文`
-- the request names a known project topic such as `env-framework`, `manager-functor`, `ik-solvers`, or `atomic-actions`
+## Select and route
 
-## Start here
+Read `agent_context/MAP.yaml` first. Select **navigate** (current code facts),
+**read** (context), **refresh** (update a topic), or **add** (register a topic).
+Specialized skills such as `/add-robot` own implementation; use this skill for
+orientation and context maintenance.
 
-- Read `agent_context/MAP.yaml` first
-- Read `references/context-system.md` for routing rules
-- Read `agents/openai.yaml` for the canonical agent metadata
-- Read `agent_context/conventions/*.md` when creating or updating context files
+Use the deterministic helper when matching is unclear or needs verification:
 
-## Workflow
+```bash
+python .agents/skills/project-dev-context/scripts/context.py route 'QUERY'
+```
 
-1. Resolve the topic through `agent_context/MAP.yaml`
-2. Match in this order: exact `id`, then `aliases`, then `keywords`
-3. Choose the operation mode:
-   - **read**: load only the matched Markdown files under `agent_context/`
-   - **refresh existing topic**: re-read `source_of_truth` and rewrite the mapped topic Markdown so it matches current implementation
-   - **add new topic**: write a new topic Markdown file and register it in `agent_context/MAP.yaml`
-4. Load `agent_context/conventions/*.md` if you add or update context files
-5. Do not re-read `docs/source/` unless the user explicitly asks for Sphinx documentation
+Match a complete topic `id` first, including an explicitly named id within a
+request; otherwise match aliases, then keywords. ASCII tokens have boundaries,
+so `sim` does not match `simready`; Chinese phrases support substring matching.
+Within the first matching alias/keyword tier, prefer the longest matching
+phrase, then additional distinct matches. Equal best matches remain candidates;
+never silently choose the first topic in MAP.
 
-This skill routes context. It does not replace the underlying source-of-truth files listed in each topic entry.
+For ambiguity, use the request's subsystem/owning path to narrow candidates,
+or inspect the specific symbol in their source files. If that still leaves
+different answers, ask one concise clarifying question. For example,
+`SceneManifest` belongs to both visualization and Task Program semantics;
+`visualization SceneManifest` identifies the visualization topic.
 
-## Explicit refresh mode
+## Read progressively
 
-Use explicit refresh mode when the request is phrased like:
+1. Load only the selected topic's `paths` (the overview).
+2. Follow only the overview's detail links relevant to the question.
+   `related_topics` is navigation metadata, not an automatic load list.
+3. For navigation, inspect the relevant symbols in `source_of_truth`, expanding
+   to callees/tests as needed. A listed directory is a search scope, not a
+   request to read every file. Current code takes precedence over context prose.
+4. If nothing matches, use `rg --files` and `rg -n` for symbols, flags, config
+   keys, registries and imports. CLI ownership starts in `embodichain/cli/` and
+   `pyproject.toml`; `embodichain/__main__.py` is an entry wrapper.
+5. Do not read `docs/source/` unless the user asks for Sphinx documentation.
 
-- `refresh <topic> context`
-- `update <topic> context`
-- `根据当前实现刷新 <topic> 上下文`
-- `重写 <topic> 项目上下文`
+Do not load writing conventions, this skill's reference schema or agent UI
+metadata for ordinary reads/navigation. Answer with the owning entry point,
+resolution path, recommended change site and focused validation when relevant.
 
-In refresh mode:
+## Maintain context
 
-1. Resolve the topic in `agent_context/MAP.yaml`
-2. Re-read the files listed in `source_of_truth`
-3. Rewrite the mapped topic Markdown from current implementation, not stale notes
-4. Update `aliases`, `keywords`, `paths`, `related_topics` if needed
+For refresh/add, read `references/context-system.md` and the conventions in
+`defaults.write_contexts`. Use current implementation as evidence, not old notes.
+Keep one owner for each contract and link from other topics. Preserve stable
+topic ids and overview paths; linked detail pages carry optional depth.
 
-## Update contract
+Find topics potentially affected by a code change:
 
-If code behavior changes a routed topic, update all relevant pieces in the same change:
-- the matching file under `agent_context/topics/...`
-- `agent_context/MAP.yaml` if topic metadata changed
-- `AGENTS.md` if routing guidance changed
-- `.agents/skills/project-dev-context/references/context-system.md` if routing behavior changed
-- `.claude/skills/project-dev-context/SKILL.md` if Claude adapter wording changed
-- `.github/copilot/project-dev-context.md` if Copilot adapter wording changed
+```bash
+python .agents/skills/project-dev-context/scripts/context.py affected --base origin/main
+python .agents/skills/project-dev-context/scripts/context.py affected embodichain/lab/gym/envs/base_env.py
+```
 
-## Source-of-truth
+Review affected topics in the same change; this is an impact hint, not proof
+that prose is stale or that unchanged paths are fresh. Update relevant prose,
+source pointers, watch scopes and routing terms. Add a topic for a requested or
+recurring missing domain, not automatically for every unmatched lookup.
 
-This skill does not store the project knowledge itself. The canonical project context lives in:
-- `agent_context/MAP.yaml`
-- `agent_context/topics/**/*.md`
-- `agent_context/conventions/*.md`
+After editing:
 
-## Map schema
+```bash
+python .agents/skills/project-dev-context/scripts/context.py check
+python -m pytest -q -c /dev/null --noconftest tests/test_agent_context_map.py tests/test_agent_context_tools.py
+```
 
-`agent_context/MAP.yaml` topic entry fields:
-
-- `id` — stable kebab-case identifier
-- `title` — human-readable title
-- `aliases` — alternate names for matching
-- `keywords` — search terms for fuzzy matching
-- `paths` — Markdown files under `agent_context/` to load
-- `source_of_truth` — source code files that define the behavior
-- `related_topics` — other topic ids for cross-reference
-- `status` — `active` or `deprecated`
+Validate representative natural-language routes before and after routing changes,
+including ambiguous and unmatched requests. Thin adapters only point here;
+they need changes only when their local entry hints change.

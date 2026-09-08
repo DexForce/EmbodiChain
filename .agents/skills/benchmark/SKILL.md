@@ -192,6 +192,21 @@ def benchmark_batch_fk():
     print("    analyzer.compute_workspace_points(joint_configs, batch_size=512)")
 ```
 
+### Task Program benchmark boundary
+
+For Task Program work, keep these measurements separate:
+
+- strict decode and provider-independent compile;
+- configured component composition and catalog preflight;
+- live grounding/planning;
+- controller execution and physical acceptance.
+
+Validate a configured deployment with `$add-task-program` before benchmarking
+it. Do not report static compile/preflight success as an expert-demo success
+rate. Physical tables must derive success from completed environment episodes,
+effect assurance, and task validators, and must state the selected embodiment,
+execution policy, seeds/randomization, and number of completed episodes.
+
 ### 7. Write the Orchestrator
 
 ```python

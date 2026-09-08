@@ -16,10 +16,21 @@
 
 """Shared utilities used across EmbodiChain.
 
-The ``@configclass`` decorator, ``CfgNode`` configuration system, logging, math/tensor helpers, file/string/device/image utilities, non-maximum suppression, and high-performance ``warp`` kernels.
+The ``@configclass`` decorator, ``CfgNode`` configuration system, logging, math/tensor helpers, file/string/device/image utilities, non-maximum suppression, and legacy computation import aliases. Domain computations live in ``embodichain.compute``.
 """
 
+from __future__ import annotations
+
 from .configclass import configclass, is_configclass
+from .config_paths import resolve_config_path
+
+__all__ = [
+    "GLOBAL_SEED",
+    "configclass",
+    "is_configclass",
+    "resolve_config_path",
+    "set_seed",
+]
 
 GLOBAL_SEED = 1024
 

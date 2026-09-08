@@ -28,9 +28,26 @@ Registration System
 
 .. autofunction:: make
 
+.. autofunction:: get_env_spec
+
+.. autofunction:: build_env
+
+.. autofunction:: make_vec
+
+.. autofunction:: register_env_function
+
 .. autoclass:: TimeLimitWrapper
     :members:
     :show-inheritance:
+
+.. autodata:: REGISTERED_ENVS
+
+Task Package Discovery
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: discover_task_packages
+
+.. autofunction:: execute_init_hooks
 
 Utility Modules
 ---------------
@@ -52,5 +69,3 @@ Profiling
 ~~~~~~~~~
 
 .. automodule:: embodichain.lab.gym.utils.profiler
-
-   

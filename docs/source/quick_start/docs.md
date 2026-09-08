@@ -2,11 +2,27 @@
 
 ## 1. Install the documentation dependencies
 
+Build the docs from a source checkout in a Python 3.11 virtual environment.
+API generation imports optional GenSim modules, so this setup installs the
+`gensim` extra and its ABI-specific `bpy` dependency. A Python 3.12 environment
+can run the core package, but it cannot run this full documentation setup.
+
+Install the project runtime and documentation toolchain from the repository
+root:
+
 ```bash
+pip install -e ".[gensim]" \
+  --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+  --trusted-host pyp.open3dv.site \
+  --extra-index-url https://download.blender.org/pypi/
 pip install -r docs/requirements.txt
 ```
 
-> If you have issue like `locale.Error: unsupported locale setting`, please enter `export LC_ALL=C.UTF-8; export LANG=C.UTF-8` before build the API.
+The documentation requirements are pinned so local and CI builds use the same
+Sphinx toolchain.
+
+> If the build raises `locale.Error: unsupported locale setting`, run
+> `export LC_ALL=C.UTF-8; export LANG=C.UTF-8` before rebuilding.
 
 ## 2. Build the HTML site
 
@@ -17,7 +33,8 @@ cd docs
 make current-docs
 ```
 
-Then you can preview the documentation in your browser at `docs/build/html/index.html`.
+This target treats warnings as errors. Preview the result at
+`docs/build/html/index.html`.
 
 ### Multi-version docs (CI/production)
 

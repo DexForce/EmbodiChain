@@ -27,7 +27,7 @@ from embodichain.lab.sim.robots.dual_arm import (
     resolve_mounts,
 )
 from embodichain.lab.sim.robots.ur_robot import URRobotCfg
-from embodichain.lab.sim.solvers import URSolverCfg
+from embodichain.lab.sim.motion.solvers import URSolverCfg
 
 # --------------------------------------------------------------------------- #
 # resolve_mounts
@@ -160,6 +160,15 @@ def test_build_dual_arm_dual_part_toggle():
     mounts = resolve_mounts({"preset": "side_by_side", "separation": 0.6})
     cfg = build_dual_arm_cfg(base, mounts, dual_part=False)
     assert "dual_arm" not in cfg.control_parts
+
+
+def test_build_dual_arm_preserves_gravity_setting() -> None:
+    base = URRobotCfg.from_dict({"robot_type": "ur5", "enable_gravity": False})
+    mounts = resolve_mounts({"preset": "side_by_side", "separation": 0.6})
+
+    cfg = build_dual_arm_cfg(base, mounts)
+
+    assert cfg.enable_gravity is False
 
 
 # --------------------------------------------------------------------------- #

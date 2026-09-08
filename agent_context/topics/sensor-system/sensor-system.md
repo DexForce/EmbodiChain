@@ -9,6 +9,9 @@
 | Camera | `embodichain/lab/sim/sensors/camera.py` → `Camera`, `CameraCfg` |
 | Stereo camera | `embodichain/lab/sim/sensors/stereo.py` → `StereoCamera`, `StereoCameraCfg` |
 | Contact sensor | `embodichain/lab/sim/sensors/contact_sensor.py` → `ContactSensor`, `ContactSensorCfg` |
+| Sensor creation and attachment coordination | `embodichain/lab/sim/sim_manager.py` → `SimulationManager.add_sensor()` |
+| Camera parent resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_nodes()` |
+| Native link render nodes | `embodichain/lab/sim/objects/articulation.py` → `Articulation.get_link_render_nodes()` |
 
 ## Overview
 
@@ -60,6 +63,20 @@ The `transformation` property returns a `4×4 torch.Tensor` homogeneous matrix.
 
 `SensorCfg.from_dict(init_dict)` creates the correct config class by looking up `init_dict["sensor_type"] + "Cfg"` in the sensors module. Nested configclass fields are recursively initialized via their own `from_dict()`.
 
+### Embodiment ownership in Gym deployments
+
+For any componentized Gym environment, sensors are declared in
+`configs/components/embodiments/<embodiment>.yaml` beside the embodiment's
+`simulation` robot mapping. The deployment selects that file with
+`embodiment.component`; task-local `env.yaml` does not own a `sensor` field.
+`config_to_cfg()` resolves the embodiment and passes its `sensor` list through
+the same `SensorCfg.from_dict()` boundary used by ordinary environment configs.
+Changing embodiments therefore changes the robot and its mounted sensor suite
+as one unit. Handwritten and Task Program tasks use the same physical resolver;
+only Task Program deployments additionally require the component's semantic
+`skill_profile` metadata. Inline `robot` and `sensor` fields remain valid when
+`embodiment.component` is absent.
+
 ## Camera System
 
 ### CameraCfg
@@ -89,6 +106,30 @@ Extends `SensorCfg.OffsetCfg` with look-at support:
 
 When `eye` is provided, the transformation is computed via `look_at_to_pose()`. Otherwise falls back to `pos`/`quat`.
 
+### Camera attachment
+
+- `SimulationManager.add_sensor()` passes the registered Robots/Articulations and
+  expected environment count to `sensors.attachment.resolve_parent_nodes()` before
+  allocating camera views. The manager only coordinates creation and attachment.
+- The resolver owns `extrinsics.parent` parsing, link-name disambiguation, and
+  instance-count validation. It uses public asset queries, not a manager singleton
+  or native handles. A plain canonical link name remains valid; use
+  `"<asset_uid>/<link_name>"` to disambiguate shared names.
+- `Articulation.get_link_render_nodes()` encapsulates per-arena topology checks and
+  `get_render_body(link_name).render_node()`; Robot inherits this query. Do not
+  access `asset._entities` from the resolver, use global `Env.find_node()`, or
+  infer backend clone suffixes such as `.0` and `.1`.
+- `Camera.attach_to_parent_nodes()` attaches one resolved node per camera instance,
+  reapplies parent-relative extrinsics, and then sets `is_attached` to `True`.
+  Stereo cameras use the same method, forwarding attachment to both views.
+- Directly constructed cameras require an explicit `attach_to_parent_nodes()`
+  call. With `parent=None`, cameras added through the manager remain in arena space.
+- Focused validation: `tests/sim/sensors/test_attachment.py` for resolution,
+  `tests/sim/objects/test_articulation.py` for native queries,
+  `tests/sim/sensors/test_camera.py` for attachment, and
+  `tests/sim/test_sim_manager.py` for coordination. Pure logic tests do not
+  initialize a renderer.
+
 ### StereoCameraCfg
 
 Extends `CameraCfg` with stereo-specific fields:
@@ -117,7 +158,15 @@ Properties `left_to_right` and `right_to_left` return `4×4` transform tensors. 
 
 - **`sensor_type` string mismatch** — `SensorCfg.from_dict()` looks up `sensor_type + "Cfg"` in the sensors module. A typo (e.g. `"camera"` instead of `"Camera"`) causes `AttributeError`.
 - **Depth not enabled** — `enable_depth` defaults to `False`. Accessing depth data without enabling it returns empty tensors.
-- **Parent frame not found** — `OffsetCfg.parent` must exactly match a link name in the scene. A wrong name silently places the sensor at the arena origin.
+- **Invalid camera parent** — Missing or ambiguous registered links raise `ValueError`; missing per-arena links or render nodes raise `RuntimeError`. Parent nodes must resolve in every arena before attachment.
 - **Stereo baseline sign** — `left_to_right_pos` defines translation from left to right camera. Flipping the sign inverts the disparity.
 - **Contact sensor buffer overflow** — `max_contacts_per_env` caps the contact count. Exceeding it silently drops contacts; increase if the scene has dense collisions.
 - **View attribute flags** — `Camera.get_view_attrib()` computes `dr.ViewFlags` from enabled booleans. Adding a new data type requires both the `enable_*` flag and the corresponding `ViewFlags` bit.
+
+## Contact computation ownership
+
+`lab/sim/sensors/_warp/contact.py` owns `scatter_contact_data`, whose fixed
+contact columns, environment IDs, and per-environment capacity belong to
+the sensor integration. The generic tiled-image kernel lives separately in
+`compute/image/_warp/tiling.py`. The old `utils.warp.kernels` image export is
+an alias; its contact export resolves the sensor implementation on demand.

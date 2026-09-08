@@ -41,9 +41,11 @@ from embodichain.lab.sim.robots import CobotMagicCfg
 
 config = SimulationManagerCfg(headless=False, sim_device="cpu", num_envs=2)
 sim = SimulationManager(config)
-sim.set_manual_update(False)
 
 robot = sim.add_robot(cfg=CobotMagicCfg().from_dict({}))
+
+# Explicitly advance physics when the application is ready.
+sim.update(step=1)
 ```
 
 ---

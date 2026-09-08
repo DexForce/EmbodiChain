@@ -36,14 +36,14 @@ class ImageSegmentationClient:
         timeout_s: int,
         max_attempts: int,
         health_path: str,
-        segment_single_object_path: str,
+        segment_by_prompt_path: str,
         session: requests.Session | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout_s = timeout_s
         self._max_attempts = max_attempts
         self._health_path = health_path
-        self._segment_single_object_path = segment_single_object_path
+        self._segment_by_prompt_path = segment_by_prompt_path
         self._session = session or requests.Session()
 
     @classmethod
@@ -96,7 +96,7 @@ class ImageSegmentationClient:
             try:
                 with resolved_image_path.open("rb") as image_file:
                     response = self._session.post(
-                        self._url(self._segment_single_object_path),
+                        self._url(self._segment_by_prompt_path),
                         data={"prompt": prompt},
                         files={"image": (resolved_image_path.name, image_file)},
                         timeout=self._timeout_s,
@@ -138,7 +138,7 @@ def _load_dotenv_config() -> dict[str, Any]:
         "SCENE_ENGINE_IMAGE_SEGMENTATION_TIMEOUT_S",
         "SCENE_ENGINE_IMAGE_SEGMENTATION_MAX_ATTEMPTS",
         "SCENE_ENGINE_IMAGE_SEGMENTATION_HEALTH_PATH",
-        "SCENE_ENGINE_IMAGE_SEGMENTATION_SINGLE_OBJECT_PATH",
+        "SCENE_ENGINE_IMAGE_SEGMENTATION_BY_PROMPT_PATH",
     )
     try:
         timeout_s = int(values["SCENE_ENGINE_IMAGE_SEGMENTATION_TIMEOUT_S"])
@@ -165,7 +165,7 @@ def _load_dotenv_config() -> dict[str, Any]:
     string_keys = (
         "SCENE_ENGINE_IMAGE_SEGMENTATION_BASE_URL",
         "SCENE_ENGINE_IMAGE_SEGMENTATION_HEALTH_PATH",
-        "SCENE_ENGINE_IMAGE_SEGMENTATION_SINGLE_OBJECT_PATH",
+        "SCENE_ENGINE_IMAGE_SEGMENTATION_BY_PROMPT_PATH",
     )
     for key in string_keys:
         if not values[key].strip():
@@ -176,8 +176,8 @@ def _load_dotenv_config() -> dict[str, Any]:
         "timeout_s": timeout_s,
         "max_attempts": max_attempts,
         "health_path": values["SCENE_ENGINE_IMAGE_SEGMENTATION_HEALTH_PATH"].strip(),
-        "segment_single_object_path": values[
-            "SCENE_ENGINE_IMAGE_SEGMENTATION_SINGLE_OBJECT_PATH"
+        "segment_by_prompt_path": values[
+            "SCENE_ENGINE_IMAGE_SEGMENTATION_BY_PROMPT_PATH"
         ].strip(),
     }
 

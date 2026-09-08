@@ -40,6 +40,18 @@ def test_articulation_cfg_partial_drive_properties_preserve_no_drive() -> None:
     assert articulation_cfg.drive_pros.drive_type == "none"
 
 
+def test_articulation_cfg_enables_gravity_by_default() -> None:
+    """Articulations opt into gravity unless explicitly configured otherwise."""
+    assert ArticulationCfg().enable_gravity is True
+
+
+def test_articulation_cfg_parses_disabled_gravity() -> None:
+    """Dictionary configuration can disable articulation gravity."""
+    articulation_cfg = ArticulationCfg.from_dict({"enable_gravity": False})
+
+    assert articulation_cfg.enable_gravity is False
+
+
 def test_robot_cfg_defaults_to_force_joint_drive() -> None:
     """Robots retain force-based joint drives by default."""
     robot_cfg = RobotCfg()

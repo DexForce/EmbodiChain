@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import threading
@@ -72,6 +73,9 @@ DEMO_FRAME_FEATURES = {
     "segment_step": "annotation.segment_step",
     "segment_start": "annotation.segment_start",
     "segment_end": "annotation.segment_end",
+    "segment_accepted": "annotation.segment_accepted",
+    "segment_attempt_id": "annotation.segment_attempt_id",
+    "continuity_id": "annotation.continuity_id",
     "terminated": "annotation.terminated",
     "truncated": "annotation.truncated",
 }
@@ -172,6 +176,9 @@ class LeRobotRecorder(Functor):
         self.curr_episode: int = 0
         self._metadata_lock = threading.Lock()
         self._subtask_to_index: dict[str, int] = {}
+        self._fragment_commit_lock = threading.RLock()
+        self._committed_fragment_ids: dict[str, int] = {}
+        self._partial_fragment_commits: dict[str, tuple[int, str]] = {}
         self._finalize_lock = threading.Lock()
         self._finalized = False
         self._finalize_result: Optional[str] = None
@@ -258,7 +265,7 @@ class LeRobotRecorder(Functor):
         """Save completed episodes for specified environments.
 
         This reads each env's slice from the rollout buffer and delegates to
-        :meth:`_save_single_episode`. The slice read happens in the caller
+        :meth:`_persist_episode_payload`. The slice read happens in the caller
         thread so that subclasses (e.g. :class:`AsyncLeRobotRecorder`) can
         clone the slice and defer the actual conversion/disk-write to a
         background worker without racing the buffer reuse on reset.
@@ -281,6 +288,267 @@ class LeRobotRecorder(Functor):
             episode_metadata = (
                 metadata_getter(env_id) if metadata_getter is not None else None
             )
+            payloads = list(
+                self._episode_payloads(
+                    env_id,
+                    obs_list,
+                    action_list,
+                    annotations,
+                    episode_metadata,
+                )
+            )
+            if (
+                episode_metadata is not None
+                and episode_metadata.get("output_mode") == "segment_fragments"
+                and not payloads
+            ):
+                raise RuntimeError(
+                    f"Committed fragment collection for env {env_id} had no "
+                    "eligible segment spans."
+                )
+            resolved_fragment_ids: list[str] = []
+            for payload in payloads:
+                fragment_id = self._fragment_id_from_metadata(payload[-1])
+                try:
+                    saved = self._persist_episode_payload(*payload)
+                except Exception as error:
+                    if fragment_id is None:
+                        raise
+                    prior = (
+                        f" Earlier fragments {resolved_fragment_ids!r} remain "
+                        "committed and will be deduplicated on retry."
+                        if resolved_fragment_ids
+                        else ""
+                    )
+                    raise RuntimeError(
+                        f"Failed to persist fragment {fragment_id!r} for env "
+                        f"{env_id}.{prior}"
+                    ) from error
+                if not saved:
+                    label = (
+                        f"fragment {fragment_id!r}"
+                        if fragment_id is not None
+                        else f"episode for env {env_id}"
+                    )
+                    raise RuntimeError(f"Committed {label} was not persisted.")
+                if fragment_id is not None:
+                    resolved_fragment_ids.append(fragment_id)
+
+    def _episode_payloads(
+        self,
+        env_id: int,
+        obs_list: Any,
+        action_list: Any,
+        annotations: Mapping[str, Any],
+        episode_metadata: Mapping[str, Any] | None,
+    ) -> Iterable[tuple[int, Any, Any, Mapping[str, Any], Mapping[str, Any] | None]]:
+        """Yield one continuous payload or independent natural-segment slices."""
+        if (
+            episode_metadata is None
+            or episode_metadata.get("output_mode") != "segment_fragments"
+        ):
+            yield env_id, obs_list, action_list, annotations, episode_metadata
+            return
+
+        episode_length = min(len(obs_list), len(action_list))
+        include_failed = bool(episode_metadata.get("save_failed_fragments", False))
+        for segment in episode_metadata.get("segments", []):
+            if not isinstance(segment, Mapping):
+                raise TypeError("Segment sidecar metadata must be a mapping.")
+            accepted = bool(segment.get("success", False))
+            if not accepted and not include_failed:
+                continue
+            start = int(segment.get("start_step", 0))
+            end = int(segment.get("end_step", 0))
+            if start < 0 or end > episode_length or end <= start:
+                raise ValueError(
+                    "Fragment span must be a non-empty subset of the buffered "
+                    f"episode; got [{start}, {end}) for length {episode_length}."
+                )
+
+            length = end - start
+            fragment_annotations = {
+                key: values[start:end].clone() for key, values in annotations.items()
+            }
+            reference = next(iter(fragment_annotations.values()), None)
+            device = getattr(reference, "device", None)
+            fragment_annotations["episode_step"] = torch.arange(
+                length, dtype=torch.int64, device=device
+            )
+            fragment_annotations["segment_step"] = torch.arange(
+                length, dtype=torch.int64, device=device
+            )
+            fragment_annotations["segment_start"] = torch.zeros(
+                length, dtype=torch.bool, device=device
+            )
+            fragment_annotations["segment_start"][0] = True
+            fragment_annotations["segment_end"] = torch.zeros(
+                length, dtype=torch.bool, device=device
+            )
+            fragment_annotations["segment_end"][-1] = True
+            fragment_annotations["segment_accepted"] = torch.full(
+                (length,), accepted, dtype=torch.bool, device=device
+            )
+            fragment_annotations["segment_attempt_id"] = torch.full(
+                (length,),
+                int(segment.get("attempt_id", episode_metadata.get("attempt_id", 0))),
+                dtype=torch.int64,
+                device=device,
+            )
+            fragment_annotations["continuity_id"] = torch.full(
+                (length,),
+                int(
+                    segment.get(
+                        "continuity_id", episode_metadata.get("continuity_id", 0)
+                    )
+                ),
+                dtype=torch.int64,
+                device=device,
+            )
+
+            fragment_segment = copy.deepcopy(dict(segment))
+            fragment_segment.update({"start_step": 0, "end_step": length})
+            fragment_metadata = copy.deepcopy(dict(episode_metadata))
+            program_run_id = str(fragment_metadata.get("program_run_id", "unknown"))
+            segment_provenance = segment.get("metadata", {})
+            if not isinstance(segment_provenance, Mapping):
+                segment_provenance = {}
+            source_program_id = segment_provenance.get("task_program_id")
+            if source_program_id is None:
+                # Schema-v2 Expert Program sidecars remain readable.
+                source_program_id = segment_provenance.get("expert_program_id")
+            segment_attempt_id = int(
+                segment.get("attempt_id", episode_metadata.get("attempt_id", 0))
+            )
+            continuity_id = int(
+                segment.get("continuity_id", episode_metadata.get("continuity_id", 0))
+            )
+            fragment_terminated = bool(
+                torch.as_tensor(
+                    fragment_annotations.get(
+                        "terminated", torch.zeros(length, dtype=torch.bool)
+                    )[-1]
+                ).item()
+            )
+            fragment_truncated = bool(
+                torch.as_tensor(
+                    fragment_annotations.get(
+                        "truncated", torch.zeros(length, dtype=torch.bool)
+                    )[-1]
+                ).item()
+            )
+            fragment_metadata.update(
+                {
+                    "fragment": True,
+                    "fragment_origin": "natural_segment",
+                    "fragment_id": (
+                        f"{program_run_id}:{env_id}:"
+                        f"{int(segment.get('segment_id', 0))}:"
+                        f"{segment_attempt_id}:{continuity_id}"
+                    ),
+                    "source_program_id": source_program_id,
+                    "program_segment_id": segment_provenance.get("program_segment_id"),
+                    "source_episode_index": fragment_metadata.get("episode_index"),
+                    "source_env_id": env_id,
+                    "source_start_step": start,
+                    "source_end_step": end,
+                    "length": length,
+                    "completed": accepted,
+                    "success": accepted,
+                    "terminated": fragment_terminated,
+                    "truncated": fragment_truncated,
+                    "terminal_reason": (
+                        "segment_succeeded"
+                        if accepted
+                        else segment.get("failure_reason")
+                        or segment.get("outcome_kind")
+                        or "segment_failed"
+                    ),
+                    "segments": [fragment_segment],
+                }
+            )
+            yield (
+                env_id,
+                obs_list[start:end].clone(),
+                action_list[start:end].clone(),
+                fragment_annotations,
+                fragment_metadata,
+            )
+
+    @staticmethod
+    def _fragment_id_from_metadata(
+        episode_metadata: Mapping[str, Any] | None,
+    ) -> str | None:
+        """Return the stable idempotency key for one fragment payload."""
+        if episode_metadata is None or not episode_metadata.get("fragment", False):
+            return None
+        fragment_id = episode_metadata.get("fragment_id")
+        if (
+            not isinstance(fragment_id, str)
+            or not fragment_id
+            or fragment_id != fragment_id.strip()
+        ):
+            raise ValueError(
+                "Fragment metadata must contain a non-empty fragment_id without "
+                "outer whitespace."
+            )
+        return fragment_id
+
+    def _ensure_fragment_commit_tracking(self) -> None:
+        """Initialize fragment commit state for lightweight test instances."""
+        if not hasattr(self, "_fragment_commit_lock"):
+            self._fragment_commit_lock = threading.RLock()
+        if not hasattr(self, "_committed_fragment_ids"):
+            self._committed_fragment_ids = {}
+        if not hasattr(self, "_partial_fragment_commits"):
+            self._partial_fragment_commits = {}
+
+    def _persist_episode_payload(
+        self,
+        env_id: int,
+        obs_list: Any,
+        action_list: Any,
+        annotations: Mapping[str, Any] | None = None,
+        episode_metadata: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """Persist one payload, deduplicating completed fragment commits.
+
+        Fragment ids are scoped to the current recorder/dataset. A successful
+        fragment is an independent commit and is skipped if the same source
+        collection is retried. A post-commit failure is sticky: the LeRobot
+        episode already exists, so retrying raises instead of creating a
+        duplicate with incomplete sidecar durability.
+        """
+        fragment_id = self._fragment_id_from_metadata(episode_metadata)
+        if fragment_id is None:
+            return self._save_single_episode(
+                env_id,
+                obs_list,
+                action_list,
+                annotations=annotations,
+                episode_metadata=episode_metadata,
+            )
+
+        self._ensure_fragment_commit_tracking()
+        with self._fragment_commit_lock:
+            partial_commit = self._partial_fragment_commits.get(fragment_id)
+            if partial_commit is not None:
+                episode_index, message = partial_commit
+                raise RuntimeError(
+                    f"Fragment {fragment_id!r} already reached LeRobot episode "
+                    f"{episode_index}, but post-commit finalization failed: "
+                    f"{message}. Refusing to write a duplicate."
+                )
+            committed_episode = self._committed_fragment_ids.get(fragment_id)
+            if committed_episode is not None:
+                logger.log_info(
+                    f"[LeRobotRecorder] Skipping duplicate fragment "
+                    f"{fragment_id!r}; already saved as episode "
+                    f"{committed_episode}."
+                )
+                return True
+
+            episode_index = int(getattr(self, "curr_episode", 0))
             saved = self._save_single_episode(
                 env_id,
                 obs_list,
@@ -288,10 +556,9 @@ class LeRobotRecorder(Functor):
                 annotations=annotations,
                 episode_metadata=episode_metadata,
             )
-            if not saved:
-                raise RuntimeError(
-                    f"Committed episode for env {env_id} was not persisted."
-                )
+            if saved:
+                self._committed_fragment_ids[fragment_id] = episode_index
+            return saved
 
     def _episode_length(self, env_id: int) -> int:
         """Return the valid buffered length for one environment."""
@@ -332,6 +599,12 @@ class LeRobotRecorder(Functor):
             if self.instruction
             else "unknown_task"
         )
+        if episode_metadata is not None and episode_metadata.get("fragment"):
+            segments = episode_metadata.get("segments", [])
+            if segments and isinstance(segments[0], Mapping):
+                task = self._normalize_subtask_description(
+                    segments[0].get("instruction") or task
+                )
 
         if len(obs_list) == 0:
             logger.log_warning(f"No episode data to save for env {env_id}")
@@ -362,6 +635,9 @@ class LeRobotRecorder(Functor):
         depth_prefix = f"{LeRobotKey.OBS_PREFIX.value}depth."
         episode_index = self.curr_episode
         dataset_committed = False
+        fragment_id = self._fragment_id_from_metadata(episode_metadata)
+        episode_attempt_id = int((episode_metadata or {}).get("attempt_id", 0))
+        episode_continuity_id = int((episode_metadata or {}).get("continuity_id", 0))
         try:
             frame_subtasks = [
                 self._subtask_for_frame(task, episode_metadata, frame_index)
@@ -379,12 +655,28 @@ class LeRobotRecorder(Functor):
                     desc=f"Converting env {env_id} episode to LeRobot format",
                 )
             ):
+                frame_segment = self._segment_for_frame(episode_metadata, frame_index)
                 frame_annotations = {
                     "episode_step": frame_index,
                     "segment_id": 0,
                     "segment_step": frame_index,
                     "segment_start": frame_index == 0,
                     "segment_end": frame_index == len(obs_list) - 1,
+                    "segment_accepted": (
+                        bool(frame_segment.get("success", True))
+                        if frame_segment is not None
+                        else True
+                    ),
+                    "segment_attempt_id": (
+                        int(frame_segment.get("attempt_id", episode_attempt_id))
+                        if frame_segment is not None
+                        else episode_attempt_id
+                    ),
+                    "continuity_id": (
+                        int(frame_segment.get("continuity_id", episode_continuity_id))
+                        if frame_segment is not None
+                        else episode_continuity_id
+                    ),
                     "terminated": False,
                     "truncated": False,
                 }
@@ -464,6 +756,13 @@ class LeRobotRecorder(Functor):
 
             return True
         except Exception as error:
+            if dataset_committed and fragment_id is not None:
+                self._ensure_fragment_commit_tracking()
+                with self._fragment_commit_lock:
+                    self._partial_fragment_commits[fragment_id] = (
+                        episode_index,
+                        f"{type(error).__name__}: {error}",
+                    )
             if not dataset_committed:
                 self.total_time = previous_total_time
             if self._depth_manager is not None and not dataset_committed:
@@ -533,23 +832,36 @@ class LeRobotRecorder(Functor):
             episode_buffer[feature_key] = normalized_values
 
     @staticmethod
+    def _segment_for_frame(
+        episode_metadata: Mapping[str, Any] | None,
+        frame_index: int,
+    ) -> Mapping[str, Any] | None:
+        """Return the sidecar segment owning one frame, when available."""
+        if episode_metadata is None:
+            return None
+        for segment in episode_metadata.get("segments", []):
+            if not isinstance(segment, Mapping):
+                continue
+            if (
+                int(segment.get("start_step", 0))
+                <= frame_index
+                < int(segment.get("end_step", 0))
+            ):
+                return segment
+        return None
+
+    @staticmethod
     def _subtask_for_frame(
         default_subtask: str,
         episode_metadata: Mapping[str, Any] | None,
         frame_index: int,
     ) -> str:
         """Resolve a segment-specific instruction for one LeRobot frame."""
-        if episode_metadata is None:
-            return LeRobotRecorder._normalize_subtask_description(default_subtask)
-        for segment in episode_metadata.get("segments", []):
-            if (
-                int(segment.get("start_step", 0))
-                <= frame_index
-                < int(segment.get("end_step", 0))
-            ):
-                return LeRobotRecorder._normalize_subtask_description(
-                    segment.get("instruction") or default_subtask
-                )
+        segment = LeRobotRecorder._segment_for_frame(episode_metadata, frame_index)
+        if segment is not None:
+            return LeRobotRecorder._normalize_subtask_description(
+                segment.get("instruction") or default_subtask
+            )
         return LeRobotRecorder._normalize_subtask_description(default_subtask)
 
     @staticmethod

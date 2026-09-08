@@ -32,6 +32,7 @@ from .protocol import (
     CameraImageFrame,
     CameraSpec,
     DynamicMeshUpdate,
+    FrameOverlay,
     GizmoSpec,
     GizmoState,
     JointControlProvider,
@@ -483,6 +484,26 @@ class SceneExporter:
                 )
             )
 
+    def resolve_node_target(self, node_id: str) -> tuple[str, str] | None:
+        """Map a published scene node id to its ``(uid, kind)``.
+
+        Used by the simulation thread to turn a Viser click-pick result into the
+        asset uid that :meth:`SimulationManager.enable_gizmo` expects.
+
+        Args:
+            node_id: Scene node id from the current manifest.
+
+        Returns:
+            ``(uid, kind)`` where ``kind`` is the asset kind (for example
+            ``"rigid"``, ``"robot"``, or ``"articulation"``), or ``None`` if the
+            node id is not part of the current scene.
+        """
+        for source in self._sources:
+            if source.node.node_id == node_id:
+                kind, uid = source.asset_key
+                return str(uid), str(kind)
+        return None
+
     def _append_rigid_object_groups(
         self,
         sources: list[_NodeSource],
@@ -702,9 +723,54 @@ class SceneExporter:
                         )
                     )
 
+    def _capture_axis_marker_overlays(
+        self, reserved_frame_ids: set[str] | None = None
+    ) -> tuple[FrameOverlay, ...]:
+        """Capture native simulation axes as Viser coordinate-frame overlays.
+
+        Args:
+            reserved_frame_ids: Caller-owned frame IDs that generated markers
+                must not replace.
+        """
+        get_axis_marker_items = getattr(self._sim, "get_axis_marker_items", None)
+        if get_axis_marker_items is None:
+            return ()
+
+        frames: list[FrameOverlay] = []
+        used_frame_ids = set(reserved_frame_ids or ())
+        for marker_name, handles, axis_length, axis_radius in get_axis_marker_items():
+            for index, handle in enumerate(handles):
+                position, wxyz = pose_to_position_wxyz(handle.get_world_pose())
+                base_id = f"marker:{marker_name}:{index}"
+                overlay_id = base_id
+                suffix = 1
+                while overlay_id in used_frame_ids:
+                    overlay_id = f"{base_id}#{suffix}"
+                    suffix += 1
+                used_frame_ids.add(overlay_id)
+                frames.append(
+                    FrameOverlay(
+                        overlay_id=overlay_id,
+                        position=position,
+                        wxyz=wxyz,
+                        axes_length=axis_length,
+                        axes_radius=axis_radius,
+                        # Native handles report hidden in headless mode even
+                        # though draw_marker() requested a visible marker.
+                        visible=True,
+                    )
+                )
+        return tuple(frames)
+
     def _prepare_overlays(self, overlays: SceneOverlays | None) -> SceneOverlays:
+        reserved_frame_ids = (
+            {frame.overlay_id for frame in overlays.frames}
+            if overlays is not None
+            else None
+        )
+        marker_frames = self._capture_axis_marker_overlays(reserved_frame_ids)
         if overlays is None:
-            return SceneOverlays()
+            return SceneOverlays(frames=marker_frames)
         point_clouds: list[PointCloudOverlay] = []
         for point_cloud in overlays.point_clouds:
             point_count = point_cloud.points.shape[0]
@@ -732,7 +798,7 @@ class SceneExporter:
                 )
             )
         return SceneOverlays(
-            frames=overlays.frames,
+            frames=marker_frames + overlays.frames,
             trajectories=overlays.trajectories,
             targets=overlays.targets,
             point_clouds=tuple(point_clouds),

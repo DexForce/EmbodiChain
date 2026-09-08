@@ -1,0 +1,42 @@
+embodiment_id: franka_panda
+
+simulation:
+  class_type: FrankaPanda
+  robot_type: panda
+  uid: FrankaPanda
+
+sensor: []
+
+skill_profile:
+  contract_id: single_arm_parallel_gripper
+  profile_id: franka_panda
+  resources:
+    - resource_id: primary_manipulator
+      endpoints:
+        - endpoint_id: motion
+          control_part: arm
+          capabilities:
+            - kinematics.batch_inverse
+            - motion.cartesian_pose
+            - kinematics.forward
+        - endpoint_id: grasp
+          control_part: hand
+          capabilities:
+            - interaction.grasp
+          command_preset: parallel_jaw_commands
+  command_presets:
+    - preset_id: parallel_jaw_commands
+      control_part: hand
+      commands:
+        open: [0.04, 0.04]
+        grasp: [0.0, 0.0]
+  runtime_services:
+    grasp_pose_generators:
+      hand:
+        kind: antipodal_parallel_jaw
+        sample_count: 1000
+        opening_margin: 0.002
+        point_sample_density: 0.012
+        filter_ground_collision: false
+        model:
+          model_id: franka_panda_hand

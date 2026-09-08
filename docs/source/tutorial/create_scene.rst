@@ -33,10 +33,10 @@ Command-line arguments are parsed using ``argparse`` to allow for easy customiza
    :start-at: # Parse command line arguments
    :end-at: sim = SimulationManager(sim_cfg)
 
-There are two kinds of physics mode in :class:`SimulationManager`:
-
-- `manual`: The physics updates only when the user calls the :meth:`SimulationManager.update` function. This mode is used for robot learning tasks where precise control over simulation steps is required. Enabled by setting :meth:`SimulationManager.set_manual_update` to True.
-- `auto`: The physics updates in a standalone thread, which enable asynchronous rendering and physics stepping. This mode is suitable for visualizations and demos for digital twins applications. This is the default mode.
+Physics advances only when the caller invokes :meth:`SimulationManager.update`.
+Each call executes the requested number of physics steps; sleeping, waiting for
+input, and refreshing visualization do not advance simulation time. Interactive
+applications use an explicit update loop with optional wall-clock pacing.
 
 Adding objects to the scene
 ---------------------------
