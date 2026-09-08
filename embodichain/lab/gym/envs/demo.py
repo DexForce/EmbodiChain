@@ -798,8 +798,7 @@ def execute_demo_episode(
                     segment_label = f"{segment_id + 1}/{segment_total}"
                 actions = progress(
                     actions,
-                    f"Executing episode #{episode_index}, segment {segment_label}: "
-                    f"{segment.name}",
+                    f"Ep {episode_index} · Seg {segment_label} · {segment.name}",
                 )
 
             action_iterator = iter(actions)
