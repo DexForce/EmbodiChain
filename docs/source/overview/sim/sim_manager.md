@@ -62,57 +62,20 @@ PCM and TGS remain enabled, enhanced determinism remains disabled, and friction
 is evaluated on every solver iteration. These solver implementation details use
 fixed defaults and are not exposed by `PhysicsCfg`.
 
-### Render Configuration
+### Rendering
 
-The {class}`~cfg.RenderCfg` class controls the rendering backend and quality settings.
+Rendering configuration and advanced renderer features live in the dedicated
+{doc}`sim_manager/rendering/index` section. Start with
+{doc}`sim_manager/rendering/configuration` for renderer selection and common
+image-quality settings, then see {doc}`sim_manager/rendering/dlss` for DLSS
+behavior, quality modes, frame timing, and
+availability/fallback notes.
 
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `renderer` | `str` | `"auto"` | Renderer backend to use. Options are `'auto'` (pick a default based on the detected GPU), `'hybrid'` (ray tracing for shadows/reflections + rasterization), `'fast-rt'` (full ray tracing), and `'rt'` (offline ray-traced renderer for maximum visual fidelity). |
-| `spp` | `int` | `1` | Samples per pixel for ray-traced rendering. Must be at least 1. |
-| `tone_mapping_enabled` | `bool` | `False` | Whether to map HDR RGB output with the modified Reinhard curve. |
-| `tone_mapping_exposure` | `float` | `1.0` | Non-negative fixed linear exposure multiplier applied before tone mapping. |
+```{toctree}
+:maxdepth: 2
 
-Ray-traced output always uses DexSim's default OptiX denoiser. Tone mapping
-affects RGB output only; depth, segmentation masks, normals, and position
-buffers remain unchanged.
-
-#### Automatic Renderer Selection
-
-By default (`renderer="auto"`), EmbodiChain selects the renderer based on the GPU detected at the configured `gpu_id` when the {class}`SimulationManager` is constructed:
-
-| GPU class | Examples | Selected renderer |
-| :--- | :--- | :--- |
-| RTX-series (consumer/workstation) | RTX 4090, RTX 6000 Ada | `hybrid` |
-| Datacenter accelerators | A100, A800, H100, H800, H200, H20 | `fast-rt` |
-| No CUDA device / unknown GPU | — | `hybrid` (fallback) |
-
-You can override the global default at runtime — useful for forcing a renderer across all simulations regardless of hardware:
-
-```python
-from embodichain.lab.sim import SimulationManager
-
-# Resolve the default from the current GPU, or force a specific backend.
-SimulationManager.set_default_renderer("auto")       # auto-detect from GPU
-SimulationManager.set_default_renderer("fast-rt")    # force full ray tracing
+sim_manager/rendering/index
 ```
-
-Setting `render_cfg.renderer` explicitly always takes precedence over auto-selection:
-
-```python
-from embodichain.lab.sim import SimulationManagerCfg
-from embodichain.lab.sim.cfg import RenderCfg
-
-sim_config = SimulationManagerCfg(
-    render_cfg=RenderCfg(
-        renderer="fast-rt",         # Override automatic renderer selection
-        spp=4,                      # Render four samples per pixel
-        tone_mapping_enabled=True,  # Convert HDR RGB to display-referred RGB
-        tone_mapping_exposure=1.0,  # Fixed exposure for reproducible frames
-    )
-)
-```
-
 
 ## Initialization
 

@@ -9,7 +9,8 @@ topics:
 - id: simulation-system
   title: Simulation System
   aliases: [simulation system, simulation manager, motion module, sim motion, 运动能力模块, 仿真系统, 仿真管理器]
-  keywords: [SimulationManager, SimulationManagerCfg, explicit physics stepping, arena, DexSim, ArticulationJointKinematics,
+  keywords: [SimulationManager, SimulationManagerCfg, RenderCfg, DLSSCfg, DLSS, frame_time_delta_ms,
+    offscreen_dlss_enabled, explicit physics stepping, arena, DexSim, ArticulationJointKinematics,
     get_parent_joint_chain, enable_gravity]
   paths: [topics/simulation-system/simulation-system.md]
   source_of_truth:
