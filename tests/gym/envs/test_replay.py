@@ -23,9 +23,12 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 import torch
+from tensordict import TensorDict
 
 from embodichain.data import get_data_path
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.lab.gym.envs.expert_trajectory import ExpertTrajectoryCfg
+from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.envs.wrapper import ReplayWrapper
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -46,6 +49,7 @@ class ReplayTestEnv(EmbodiedEnv):
         record_trajectory: bool = True,
         num_envs: int = 2,
         device: str = "cpu",
+        joint_command_mode: str = "position",
         **kwargs,
     ):
         cfg = EmbodiedEnvCfg()
@@ -69,6 +73,9 @@ class ReplayTestEnv(EmbodiedEnv):
         cfg.record_trajectory = record_trajectory
         cfg.trajectory_auto_save = False
         cfg.init_rollout_buffer = True
+        cfg.expert_trajectory = ExpertTrajectoryCfg(
+            joint_command_mode=joint_command_mode
+        )
         super().__init__(cfg, **kwargs)
 
 
@@ -164,6 +171,51 @@ def test_save_trajectory_round_trip(tmp_path):
         assert data["actions"].shape == (2, n, 6)
         assert "initial_states" not in data
         assert "cube" in data["states"]["rigid_objects"].keys()
+    finally:
+        env.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+
+def test_position_velocity_targets_keep_fixed_env_step_and_are_saved(tmp_path):
+    env = ReplayTestEnv(
+        record_trajectory=True,
+        num_envs=2,
+        device="cpu",
+        joint_command_mode="position_velocity",
+    )
+    try:
+        env.reset()
+        qpos = env.robot.get_qpos().clone()
+        qvel = torch.full_like(qpos, 0.25)
+        action = ControllerAction(
+            value=TensorDict(
+                {"qpos": qpos, "qvel": qvel},
+                batch_size=[env.num_envs],
+            )
+        )
+
+        with patch.object(env.sim, "update", wraps=env.sim.update) as update:
+            env.step(action)
+
+        update.assert_called_once_with(
+            env.physics_dt,
+            env.cfg.sim_steps_per_control,
+        )
+        assert env.action_space.shape[-1] == env.robot.dof
+        assert env.rollout_buffer["actions"].shape[-1] == 2 * env.robot.dof
+        assert env._traj_buffer["actions"].shape[-1] == 2 * env.robot.dof
+        expected = torch.cat((qpos, qvel), dim=-1)
+        torch.testing.assert_close(env.rollout_buffer["actions"][:, 0], expected)
+        torch.testing.assert_close(env._traj_buffer["actions"][:, 0], expected)
+
+        path = tmp_path / "position_velocity.pt"
+        env.save_trajectory(str(path))
+        saved = torch.load(path, weights_only=False)
+        assert saved["meta"]["joint_command_mode"] == "position_velocity"
+        assert saved["meta"]["step_dt"] == pytest.approx(env.step_dt)
+        assert saved["meta"]["qpos_slice"] == [0, env.robot.dof]
+        assert saved["meta"]["qvel_slice"] == [env.robot.dof, 2 * env.robot.dof]
     finally:
         env.close()
         SimulationManager.flush_cleanup_queue()
