@@ -16,11 +16,14 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import dexsim
 import pytest
 
 from dexsim.types import DenoiserType, Renderer, ToneMappingType
 
+from embodichain.lab.sim import cfg as cfg_module
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     DLSSCfg,
@@ -136,6 +139,67 @@ def test_render_cfg_applies_renderer_and_sample_count() -> None:
 
     assert world_config.renderer == Renderer.FASTRT
     assert world_config.raytrace_config.render_iterations_per_frame == expected_spp
+
+
+@pytest.mark.parametrize("has_dlss_api", [False, True])
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("renderer", ["hybrid", "fast-rt", "rt"])
+def test_render_cfg_supports_legacy_and_dlss_engines(
+    monkeypatch: pytest.MonkeyPatch,
+    has_dlss_api: bool,
+    enabled: bool,
+    renderer: str,
+) -> None:
+    """Missing native DLSS support must not discard ordinary render settings."""
+    if has_dlss_api:
+        monkeypatch.setattr(dexsim, "DLSSConfig", SimpleNamespace, raising=False)
+    else:
+        monkeypatch.delattr(dexsim, "DLSSConfig", raising=False)
+    warnings: list[str] = []
+    monkeypatch.setattr(cfg_module.logger, "log_warning", warnings.append)
+    world = SimpleNamespace(
+        win_config=SimpleNamespace(width=640, height=360),
+        raytrace_config=SimpleNamespace(),
+        postprocess_config=SimpleNamespace(),
+    )
+    config = RenderCfg(
+        renderer=renderer,
+        spp=4,
+        tone_mapping_enabled=True,
+        tone_mapping_exposure=1.25,
+        dlss=DLSSCfg(dlss_enabled=enabled, offscreen_dlss_enabled=enabled),
+    )
+
+    config.apply_to_dexsim_config(world)
+
+    assert world.renderer == config.to_dexsim_flags()
+    assert world.raytrace_config.render_iterations_per_frame == config.spp
+    assert world.raytrace_config.denoiser_type == DenoiserType.OPTIX
+    assert world.raytrace_config.open_denoise is True
+    assert world.postprocess_config.tone_mapping_enabled is True
+    assert (
+        world.postprocess_config.tone_mapping_exposure == config.tone_mapping_exposure
+    )
+    if has_dlss_api:
+        assert world.dlss_config.dlss_enabled is enabled
+        assert world.dlss_config.offscreen_dlss_enabled is enabled
+        assert warnings == []
+    else:
+        assert not hasattr(world, "dlss_config")
+        assert len(warnings) == 1
+        assert "DLSSConfig" in warnings[0]
+
+
+def test_render_cfg_revalidates_dlss_on_legacy_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The legacy fallback must not silently accept malformed mutable settings."""
+    monkeypatch.delattr(dexsim, "DLSSConfig", raising=False)
+    config = RenderCfg(renderer="fast-rt")
+    config.dlss.dlss_enabled = "false"
+
+    with pytest.raises(ValueError, match="DLSSCfg.dlss_enabled"):
+        config.apply_to_dexsim_config(dexsim.WorldConfig())
 
 
 @pytest.mark.parametrize(
