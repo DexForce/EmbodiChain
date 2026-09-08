@@ -19,7 +19,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from embodichain.lab.sim.planners.se3 import (
+from embodichain.lab.sim.motion.planners.se3 import (
     plan_se3_line,
     se3_line_evaluate,
     se3_line_state,

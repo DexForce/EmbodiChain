@@ -31,16 +31,16 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/embodichain-matplotlib")
 
 import torch
 
-from embodichain.lab.sim.planners.bezier import (
+from embodichain.lab.sim.motion.planners.bezier import (
     BezierPath,
     quintic_blend_segments,
 )
-from embodichain.lab.sim.planners.se3 import plan_se3_line
-from embodichain.lab.sim.planners.trapezoidal_planner import (
+from embodichain.lab.sim.motion.planners.se3 import plan_se3_line
+from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
     TrapezoidalPlanOptions,
     _plan_linear_profiles,
 )
-from embodichain.lab.sim.planners.utils import PlanResult
+from embodichain.lab.sim.motion.planners.utils import PlanResult
 
 
 def _print_tensor(name: str, value: torch.Tensor) -> None:
@@ -67,6 +67,7 @@ def _plan(
                 "jerk": [4.0, 3.0],
             },
             sample_interval=samples,
+            stop_at_waypoints=blend_tolerance == 0.0,
             blend_tolerance=blend_tolerance,
             minimum_duration=minimum_duration,
             backend=backend,

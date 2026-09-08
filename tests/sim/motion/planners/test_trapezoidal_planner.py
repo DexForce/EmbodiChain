@@ -21,25 +21,25 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from embodichain.lab.sim.planners.bezier import (
+from embodichain.lab.sim.motion.planners.bezier import (
     compose_quintic_blend_jerk,
     compose_quintic_blend_state,
     quintic_blend_segments,
 )
-from embodichain.lab.sim.planners.trapezoidal_planner import (
+from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
     TrapezoidalPlanner,
     TrapezoidalPlanOptions,
     _compress_collinear_waypoints,
     _plan_linear_profiles,
 )
-from embodichain.lab.sim.planners import _scalar_time_law as scalar_module
-from embodichain.lab.sim.planners._scalar_time_law import (
+from embodichain.lab.sim.motion.planners import _scalar_time_law as scalar_module
+from embodichain.lab.sim.motion.planners._scalar_time_law import (
     ScalarTimeLaw,
     _build_double_s_profile,
     _build_scalar_profile,
     _compose_profile_samples_torch,
 )
-from embodichain.lab.sim.planners.utils import PlanState, TrajectorySampleMethod
+from embodichain.lab.sim.motion.planners.utils import PlanState, TrajectorySampleMethod
 
 
 @pytest.mark.parametrize("profile", ["trapezoidal", "double_s"])
@@ -466,6 +466,7 @@ def test_blend_tolerance_generates_continuous_corner_motion() -> None:
                 "acceleration": [1.0, 0.7],
                 "jerk": [2.0, 1.5],
             },
+            stop_at_waypoints=False,
             blend_tolerance=0.1,
             sample_interval=501,
         ),
@@ -502,6 +503,7 @@ def test_blended_paths_support_batched_time_sampling() -> None:
         waypoints,
         TrapezoidalPlanOptions(
             profile="double_s",
+            stop_at_waypoints=False,
             blend_tolerance=0.05,
             sample_method=TrajectorySampleMethod.TIME,
             sample_interval=0.02,
@@ -523,6 +525,7 @@ def test_blended_path_constraint_report_tracks_realized_peaks() -> None:
                 "acceleration": [1.0, 0.7],
                 "jerk": [2.0, 1.5],
             },
+            stop_at_waypoints=False,
             blend_tolerance=0.1,
             sample_interval=4001,
         ),
@@ -571,6 +574,7 @@ def test_blended_limits_are_independent_of_output_sampling(
             TrapezoidalPlanOptions(
                 profile=profile,
                 constraints=constraints,
+                stop_at_waypoints=False,
                 blend_tolerance=blend_tolerance,
                 sample_method=method,
                 sample_interval=interval,
@@ -659,6 +663,7 @@ def test_blended_minimum_duration_and_stationary_rows_keep_valid_bounds() -> Non
         TrapezoidalPlanOptions(
             profile="double_s",
             constraints={"velocity": 0.8, "acceleration": 1.0, "jerk": 2.0},
+            stop_at_waypoints=False,
             blend_tolerance=0.1,
             minimum_duration=12.0,
             sample_interval=2,
@@ -686,6 +691,63 @@ def test_collinear_compression_removes_only_same_direction_points() -> None:
     assert torch.equal(compressed[0, 0], waypoints[0, 0])
     assert torch.equal(compressed[0, 1], waypoints[0, -1])
     assert torch.equal(compressed[1], waypoints[1])
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("span", [0.001, 0.01, 1.0])
+def test_dense_straight_compression_is_independent_of_scale(
+    dtype: torch.dtype, span: float
+) -> None:
+    parameter = torch.linspace(0.0, span, 201, dtype=dtype)
+    waypoints = torch.stack((parameter, -2.0 * parameter), dim=-1)[None]
+    compressed = _compress_collinear_waypoints(waypoints, tolerance=1e-5)
+    torch.testing.assert_close(compressed, waypoints[:, [0, -1]])
+    result = _plan_linear_profiles(
+        waypoints, TrapezoidalPlanOptions(stop_at_waypoints=False, sample_interval=100)
+    )
+    assert result.is_all_success()
+    torch.testing.assert_close(result.positions[:, [0, -1]], waypoints[:, [0, -1]])
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("point_count", [51, 501])
+def test_compression_preserves_accumulated_turns(
+    dtype: torch.dtype, point_count: int
+) -> None:
+    angles = torch.linspace(0.0, torch.pi / 2.0, point_count, dtype=dtype)
+    arc = torch.stack((angles.cos(), angles.sin()), dim=-1)[None]
+    # Include a straight row to check independent run boundaries and padding.
+    straight = torch.stack((angles, torch.zeros_like(angles)), dim=-1)[None]
+    compressed = _compress_collinear_waypoints(torch.cat((arc, straight)), 1e-5)
+    midpoints = 0.5 * (compressed[0, 1:] + compressed[0, :-1])
+    # The coarsest input chords themselves deviate from the unit circle by
+    # 1 - cos(pi / 200), approximately 0.0001234.
+    assert torch.linalg.vector_norm(midpoints, dim=-1).amin() > 0.9998
+    torch.testing.assert_close(
+        compressed[1, 1:], straight[0, -1:].expand_as(compressed[1, 1:])
+    )
+    result = _plan_linear_profiles(
+        arc, TrapezoidalPlanOptions(stop_at_waypoints=False, sample_interval=501)
+    )
+    assert result.is_all_success()
+    assert torch.linalg.vector_norm(result.positions[0], dim=-1).amin() > 0.9998
+
+
+def test_stop_at_waypoints_rejects_corner_blending() -> None:
+    with pytest.raises(ValueError, match="stop_at_waypoints=False"):
+        TrapezoidalPlanOptions(stop_at_waypoints=True, blend_tolerance=0.1)
+
+
+@pytest.mark.parametrize("stationary", [False, True])
+def test_planning_rejects_mutated_conflicting_waypoint_policy(stationary: bool) -> None:
+    options = TrapezoidalPlanOptions()
+    options.blend_tolerance = 0.1
+    waypoints = torch.zeros(1, 3, 2)
+    if not stationary:
+        waypoints[0, 1] = torch.tensor([1.0, 0.0])
+        waypoints[0, 2] = torch.tensor([1.0, 1.0])
+    with pytest.raises(ValueError, match="stop_at_waypoints=False"):
+        _plan_linear_profiles(waypoints, options)
 
 
 def test_disabling_waypoint_stops_shortens_dense_straight_path() -> None:
@@ -904,7 +966,10 @@ def test_stationary_blended_path_uses_hold_fast_path() -> None:
     result = _plan_linear_profiles(
         waypoints,
         TrapezoidalPlanOptions(
-            blend_tolerance=0.1, minimum_duration=1.5, sample_interval=7
+            stop_at_waypoints=False,
+            blend_tolerance=0.1,
+            minimum_duration=1.5,
+            sample_interval=7,
         ),
     )
     assert torch.all(result.positions == 0.25)
@@ -923,7 +988,9 @@ def test_blended_batch_accepts_stationary_and_moving_rows() -> None:
     )
     result = _plan_linear_profiles(
         waypoints,
-        TrapezoidalPlanOptions(blend_tolerance=0.1, sample_interval=101),
+        TrapezoidalPlanOptions(
+            stop_at_waypoints=False, blend_tolerance=0.1, sample_interval=101
+        ),
     )
     assert torch.all(result.positions[0] == 0.25)
     assert torch.count_nonzero(result.velocities[0]) == 0
@@ -951,11 +1018,18 @@ def test_stationary_time_sampling_preserves_requested_hold_duration() -> None:
     assert torch.allclose(result.dt[:, 1:], torch.full((2, 3), 0.5 / 3.0))
 
 
-def test_time_sampling_tail_pads_shorter_rows() -> None:
+@pytest.mark.parametrize("backend", ["torch", "warp"])
+@pytest.mark.parametrize("blend_tolerance", [0.0, 0.05])
+def test_time_sampling_tail_pads_shorter_rows(
+    backend: str, blend_tolerance: float
+) -> None:
     waypoints = torch.tensor([[[0.0], [1.0]], [[0.0], [0.1]]])
     options = TrapezoidalPlanOptions(
         sample_method=TrajectorySampleMethod.TIME,
         sample_interval=0.05,
+        backend=backend,
+        stop_at_waypoints=False,
+        blend_tolerance=blend_tolerance,
     )
 
     result = _plan_linear_profiles(waypoints, options)
@@ -964,6 +1038,62 @@ def test_time_sampling_tail_pads_shorter_rows() -> None:
     assert torch.allclose(result.positions[:, -1], waypoints[:, -1])
     assert result.duration[0] > result.duration[1]
     assert torch.count_nonzero(result.dt[1] == 0.0) > 1
+    times = result.dt.cumsum(dim=1)
+    finished = times[1] >= times[1, -1]
+    torch.testing.assert_close(
+        result.positions[1, finished],
+        waypoints[1, -1:].expand_as(result.positions[1, finished]),
+        rtol=0.0,
+        atol=0.0,
+    )
+    assert torch.count_nonzero(result.velocities[1, finished]) == 0
+    assert torch.count_nonzero(result.accelerations[1, finished]) == 0
+
+
+@pytest.mark.parametrize("blend_tolerance", [0.0, 0.05])
+def test_constraint_report_uses_joint_limits_for_nonunit_paths(
+    blend_tolerance: float,
+) -> None:
+    limits = {"velocity": [0.8, 0.4], "acceleration": [1.0, 0.5], "jerk": [2.0, 1.0]}
+    result = _plan_linear_profiles(
+        torch.tensor([[[0.0, 0.0], [2.0, -0.5]], [[0.0, 0.0], [0.0, 0.0]]]),
+        TrapezoidalPlanOptions(
+            profile="double_s",
+            constraints=limits,
+            stop_at_waypoints=False,
+            blend_tolerance=blend_tolerance,
+        ),
+    )
+    report = result.constraint_report
+    for derivative, joint_limits in limits.items():
+        torch.testing.assert_close(
+            report[f"{derivative}_limit"], torch.full((2,), max(joint_limits))
+        )
+    assert report["within_limits"].all()
+
+
+@pytest.mark.parametrize("profile_name", ["trapezoidal", "double_s"])
+def test_warp_sampling_clamps_outside_multisegment_trajectory(
+    profile_name: str,
+) -> None:
+    limits = torch.tensor([[0.8, 0.4], [0.6, 0.3]])
+    profile = ScalarTimeLaw.build(
+        profile_name=profile_name,
+        velocity_limit=limits,
+        acceleration_limit=torch.ones_like(limits),
+        jerk_limit=torch.full_like(limits, 2.0),
+    )
+    durations = profile.durations.sum(dim=(-2, -1))
+    times = torch.stack((-torch.ones_like(durations), durations + 1.0), dim=1)
+    starts = torch.tensor([[[0.0], [1.0]], [[2.0], [3.0]]])
+    deltas = torch.ones_like(starts)
+    expected = profile.compose(times, starts, deltas, backend="torch")
+    actual = profile.compose(times, starts, deltas, backend="warp")
+    for value, reference in zip(actual, expected):
+        torch.testing.assert_close(value, reference, atol=2e-5, rtol=2e-5)
+    torch.testing.assert_close(
+        actual[0][..., 0], torch.tensor([[0.0, 2.0], [2.0, 4.0]])
+    )
 
 
 @pytest.mark.parametrize(

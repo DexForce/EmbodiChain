@@ -19,7 +19,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from embodichain.lab.sim.planners.bezier import (
+from embodichain.lab.sim.motion.planners.bezier import (
     BezierPath,
     bezier_arc_length,
     compose_quintic_blend_state,

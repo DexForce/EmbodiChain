@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Compatibility aliases for ``embodichain.compute.kinematics._warp.opw``."""
+
 from __future__ import annotations
 
 from embodichain.compute.kinematics._warp.opw import (

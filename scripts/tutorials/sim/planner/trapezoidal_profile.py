@@ -26,7 +26,7 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/embodichain-matplotlib")
 import matplotlib.pyplot as plt
 import torch
 
-from embodichain.lab.sim.planners.trapezoidal_planner import (
+from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
     TrapezoidalPlanOptions,
     _plan_linear_profiles,
 )

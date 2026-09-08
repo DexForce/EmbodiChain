@@ -7,12 +7,12 @@
 | Planner registry | `embodichain/lab/sim/motion/planners/__init__.py` |
 | Base planner class & config | `embodichain/lab/sim/motion/planners/base_planner.py` → `BasePlanner`, `BasePlannerCfg`, `CollisionWorldInfo`, `PlanOptions`, `validate_plan_options` |
 | TOPPRA planner | `embodichain/lab/sim/motion/planners/toppra_planner.py` → `ToppraPlanner`, `ToppraPlannerCfg`, `ToppraPlanOptions` |
-| Trapezoidal planner | `embodichain/lab/sim/planners/trapezoidal_planner.py` → `TrapezoidalPlanner`, `TrapezoidalPlannerCfg`, `TrapezoidalPlanOptions` |
-| Bézier path geometry | `embodichain/lab/sim/planners/bezier.py` → `BezierPath` and internal quintic waypoint blending helpers |
-| Cartesian SE(3) line | `embodichain/lab/sim/planners/se3.py` → `plan_se3_line`, `SE3LineResult` |
-| Shared scalar timing | `embodichain/lab/sim/planners/_scalar_time_law.py` → `ScalarTimeLaw`, `ScalarState` |
-| Continuous blend constraints | `embodichain/lab/sim/planners/_blend_constraints.py` → Bernstein derivative bounds and phase interval bounds |
-| Trapezoidal Warp kernels | `embodichain/utils/warp/kinematics/trapezoidal_warp.py` → batched profile construction and sampling kernels |
+| Trapezoidal planner | `embodichain/lab/sim/motion/planners/trapezoidal_planner.py` → `TrapezoidalPlanner`, `TrapezoidalPlannerCfg`, `TrapezoidalPlanOptions` |
+| Bézier path geometry | `embodichain/lab/sim/motion/planners/bezier.py` → `BezierPath` and internal quintic waypoint blending helpers |
+| Cartesian SE(3) line | `embodichain/lab/sim/motion/planners/se3.py` → `plan_se3_line`, `SE3LineResult` |
+| Shared scalar timing | `embodichain/lab/sim/motion/planners/_scalar_time_law.py` → `ScalarTimeLaw`, `ScalarState` |
+| Continuous blend constraints | `embodichain/lab/sim/motion/planners/_blend_constraints.py` → Bernstein derivative bounds and phase interval bounds |
+| Trapezoidal Warp kernels | `embodichain/compute/kinematics/_warp/trapezoidal.py` → batched profile construction and sampling kernels |
 | Neural planner | `embodichain/lab/sim/motion/planners/neural_planner.py` → `NeuralPlanner`, `NeuralPlannerCfg`, `NeuralPlanOptions` |
 | cuRobo planner | `embodichain/lab/sim/motion/planners/curobo/curobo_planner.py` → `CuroboPlanner`, `CuroboPlannerCfg`, `CuroboWorldCfg`, `CuroboPlanOptions` |
 | Planner assets | `embodichain/data/assets/planner_assets.py` → `download_neural_planner_checkpoint()` |
@@ -168,6 +168,11 @@ to `None`; planner-specific diagnostics cannot be generically recomputed.
   `SceneRegistry` before starting execution.
 
 ## Shared trajectory computations
+
+Trapezoidal and Double-S Warp profile construction and sampling live in
+`compute/kinematics/_warp/trapezoidal.py`. The scalar timing layer imports this
+compute implementation directly. `utils/warp/kinematics/trapezoidal_warp.py`
+retains compatibility aliases; compute does not import simulation modules.
 
 `embodichain.compute.trajectory` owns pure interpolation, path resampling,
 and keyframe-based warping. `interpolate_with_distance` retains keyframes;

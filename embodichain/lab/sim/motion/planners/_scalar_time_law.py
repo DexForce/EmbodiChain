@@ -344,7 +344,7 @@ def _build_scalar_profile(
         use_warp = False
     if use_warp:
         try:
-            from embodichain.utils.warp.kinematics.trapezoidal_warp import (
+            from embodichain.compute.kinematics._warp.trapezoidal import (
                 build_profile_warp,
             )
         except ImportError:
@@ -468,7 +468,7 @@ def _compose_profile_samples(
                 raise ValueError("The Warp trajectory backend requires float32 input.")
         else:
             try:
-                from embodichain.utils.warp.kinematics.trapezoidal_warp import (
+                from embodichain.compute.kinematics._warp.trapezoidal import (
                     compose_profile_samples_warp,
                 )
             except ImportError:

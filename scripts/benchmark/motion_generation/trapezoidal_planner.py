@@ -30,7 +30,7 @@ from pathlib import Path
 import psutil
 import torch
 
-from embodichain.lab.sim.planners.trapezoidal_planner import (
+from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
     TrapezoidalPlanOptions,
     _plan_linear_profiles,
 )

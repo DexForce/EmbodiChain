@@ -957,18 +957,18 @@ embodichain.lab.sim.motion.planners.curobo.curobo_yaml
 embodichain.lab.sim.motion.planners.neural_planner
 --------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.motion_generator
+.. currentmodule:: embodichain.lab.sim.motion.planners.neural_planner
 
 .. autosummary::
 
-   MotionGenerator
-   MotionGenCfg
-   MotionGenOptions
+   NeuralPlanner
+   NeuralPlannerCfg
+   NeuralPlanOptions
 
-embodichain.lab.sim.planners.bezier
------------------------------------
+embodichain.lab.sim.motion.planners.bezier
+------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.bezier
+.. currentmodule:: embodichain.lab.sim.motion.planners.bezier
 
 Differentiable quadratic and quintic Bézier geometry, including
 HolisticMotion-compatible waypoint blending and path-constraint projection.
@@ -988,17 +988,6 @@ by ``table_count`` independently of the output sample count.
 
 .. automethod:: BezierPath.parameter_at_arc_length
 
-embodichain.lab.sim.planners.neural_planner
--------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.planners.neural_planner
-
-.. autosummary::
-
-   NeuralPlanner
-   NeuralPlannerCfg
-   NeuralPlanOptions
-
 embodichain.lab.sim.motion.planners.toppra_planner
 --------------------------------------------------
 
@@ -1010,10 +999,10 @@ embodichain.lab.sim.motion.planners.toppra_planner
    ToppraPlannerCfg
    ToppraPlanOptions
 
-embodichain.lab.sim.planners.se3
---------------------------------
+embodichain.lab.sim.motion.planners.se3
+---------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.se3
+.. currentmodule:: embodichain.lab.sim.motion.planners.se3
 
 SE(3) screw interpolation and constrained Cartesian line trajectories with
 explicit twist, acceleration, jerk, and timing outputs.
@@ -1023,10 +1012,10 @@ explicit twist, acceleration, jerk, and timing outputs.
    SE3LineResult
    plan_se3_line
 
-embodichain.lab.sim.planners.trapezoidal_planner
-------------------------------------------------
+embodichain.lab.sim.motion.planners.trapezoidal_planner
+-------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.trapezoidal_planner
+.. currentmodule:: embodichain.lab.sim.motion.planners.trapezoidal_planner
 
 .. autosummary::
 
@@ -1048,8 +1037,8 @@ trajectories.
    build_profile_warp
    compose_profile_samples_warp
 
-embodichain.lab.sim.planners.utils
-----------------------------------
+embodichain.lab.sim.motion.planners.utils
+-----------------------------------------
 
 .. currentmodule:: embodichain.lab.sim.motion.planners.utils
 
@@ -1291,10 +1280,10 @@ embodichain.lab.task_program.semantics.scene
    :members:
    :no-index:
 
-embodichain.lab.sim.solvers.base_solver
--------------------------------------
+embodichain.lab.sim.motion.solvers.base_solver
+----------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.solvers.base_solver
+.. currentmodule:: embodichain.lab.sim.motion.solvers.base_solver
 
 Shared solver configuration and runtime contracts for IK, FK, joint limits,
 and optional continuous batch IK. Continuous selection defaults to unsupported;
@@ -1306,8 +1295,8 @@ the protected ``_select_continuous_ik_path`` hook for batched candidates.
    BaseSolver
    SolverCfg
 
-embodichain.lab.sim.solvers.neural_ik_solver
---------------------------------------------
+embodichain.lab.sim.motion.solvers.neural_ik_solver
+---------------------------------------------------
 
 .. currentmodule:: embodichain.lab.sim.motion.solvers.neural_ik_solver
 
@@ -1325,10 +1314,10 @@ embodichain.lab.sim.motion.solvers.null_space_posture_task
 
    NullSpacePostureTask
 
-embodichain.lab.sim.solvers.opw_solver
---------------------------------------
+embodichain.lab.sim.motion.solvers.opw_solver
+---------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.solvers.opw_solver
+.. currentmodule:: embodichain.lab.sim.motion.solvers.opw_solver
 
 Configuration and runtime solver for analytic OPW forward and inverse
 kinematics of compatible six-axis manipulators.
@@ -1338,8 +1327,8 @@ kinematics of compatible six-axis manipulators.
    OPWSolver
    OPWSolverCfg
 
-embodichain.lab.sim.solvers.pink_solver
----------------------------------------
+embodichain.lab.sim.motion.solvers.pink_solver
+----------------------------------------------
 
 .. currentmodule:: embodichain.lab.sim.motion.solvers.pink_solver
 

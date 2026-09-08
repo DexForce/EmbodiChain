@@ -31,6 +31,35 @@ Worker details:
 - `TIME` sampling can produce per-env waypoint counts; shorter trajectories are tail-padded by repeating the final waypoint and `duration` records the real endpoint per env.
 - Per-env failures set `success[b] = False` and fill the env's trajectory with its start qpos; other envs continue. `BrokenProcessPool` tears the pool down and rebuilds it on the next call.
 
+### TrapezoidalPlanner
+
+`TrapezoidalPlanOptions` selects trapezoidal or Double-S timing for joint
+waypoints, with optional quintic corner blending. `TIME` sampling pads shorter
+batch rows at their exact final position with zero velocity and acceleration,
+starting at each row's actual endpoint. Padding has zero arrival intervals.
+
+With `stop_at_waypoints=False`, straight runs are compressed using normalized
+edge directions and a cosine tolerance relative to the first edge of each
+retained run. Small waypoint spacing does not change the angular test, and
+successive small turns cannot accumulate into an unchecked shortcut.
+Positive `blend_tolerance` requires `stop_at_waypoints=False`; conflicting
+settings raise `ValueError` both during option construction and at planning
+entry, including when options have been mutated after construction.
+
+Constraint reports use joint units for both derivative peaks and `*_limit`
+summaries. Each summary limit is the maximum configured limit over joints;
+per-joint utilization and `within_limits` retain heterogeneous limits. The
+projected scalar path limits are internal timing inputs, not report limits.
+
+Torch and Warp scalar sampling clamp times outside the trajectory to the
+endpoint state. Scalar trapezoidal acceleration uses the one-sided phase value
+at an endpoint; the joint planner explicitly turns completed rows into holds.
+
+The tutorial `scripts/tutorials/sim/planner/trapezoidal_planner.py` replays
+position samples by interpolating targets at physics ticks. A partial final
+tick preserves total duration divided by replay speed. Zero-time samples do
+not advance physics; multiple environments require identical timing rows.
+
 ### NeuralPlanner (experimental)
 
 Learning-based EEF waypoint planner. Franka Panda only.
@@ -46,7 +75,7 @@ Learning-based EEF waypoint planner. Franka Panda only.
 Unified interface for trajectory planning with optional pre-interpolation.
 
 - Wraps a `BasePlanner` instance (resolved from `planner_cfg.planner_type`).
-- Supported planner types: TOPPRA, NeuralPlanner, and cuRobo.
+- Supported planner types: TOPPRA, TrapezoidalPlanner, NeuralPlanner, and cuRobo.
 - `MotionGenCfg.planner_cfg` is **MISSING** — must be provided.
 - `generate()` and `interpolate_trajectory()` are env-batched (`B, N, DOF`).
 - `generate()` always returns a normalized `PlanResult`; failed rows hold the

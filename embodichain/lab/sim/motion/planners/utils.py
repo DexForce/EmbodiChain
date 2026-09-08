@@ -216,6 +216,9 @@ class PlanResult:
     joint plans also provide conservative ``*_upper_bound_per_joint`` fields;
     their ``within_limits`` is based on these continuous bounds. Trapezoidal
     acceleration jumps are not jerk constrained and have an infinite jerk bound.
+    TrapezoidalPlanner reports ``*_limit`` summaries in joint units as the
+    maximum configured limit over joints; use per-joint utilization fields to
+    assess heterogeneous limits.
     """
 
     def __post_init__(self) -> None:

@@ -146,9 +146,15 @@ class _Simulation:
     def __init__(self, physics_dt: float = 0.01) -> None:
         self.sim_config = SimpleNamespace(physics_dt=physics_dt)
         self.update_steps: list[int] = []
+        self.elapsed = 0.0
+        self.arrival_times: list[float] = []
 
-    def update(self, step: int) -> None:
+    def update(self, step: int, physics_dt: float | None = None) -> None:
         self.update_steps.append(step)
+        self.elapsed += step * (
+            self.sim_config.physics_dt if physics_dt is None else physics_dt
+        )
+        self.arrival_times.append(self.elapsed)
 
 
 def test_plot_font_style_has_readable_cjk_fallback_and_hierarchy() -> None:
@@ -464,8 +470,73 @@ def test_replay_uses_explicit_dt_to_advance_physics() -> None:
         realtime=False,
     )
 
-    assert simulation.update_steps == [1, 2, 3]
-    assert len(robot.commands) == positions.shape[1]
+    assert simulation.elapsed == pytest.approx(dt.sum().item())
+    torch.testing.assert_close(robot.commands[-1], positions[:, -1])
+
+
+@pytest.mark.parametrize("samples", [3, 200, 1000])
+@pytest.mark.parametrize("speed", [0.5, 1.0, 2.0])
+def test_replay_preserves_duration_and_interpolates_physics_ticks(
+    samples: int, speed: float
+) -> None:
+    robot = _Robot(batch_size=1, dtype=torch.float64)
+    simulation = _Simulation()
+    # The final tick is deliberately shorter than physics_dt.
+    times = torch.linspace(0.0, 0.053, samples, dtype=torch.float64)
+    positions = times[None, :, None].expand(1, -1, 6).clone()
+    dt = torch.diff(times, prepend=times.new_zeros(1))[None]
+    replay_plan(
+        simulation, robot, "left_arm", positions, dt, replay_speed=speed, realtime=False
+    )
+    assert simulation.elapsed == pytest.approx(times[-1].item() / speed, abs=1e-12)
+    assert len(simulation.update_steps) <= 11
+    # One initial command, then the interpolated target of each physics tick.
+    assert len(robot.commands) == len(simulation.arrival_times) + 1
+    for arrival, command in zip(simulation.arrival_times, robot.commands[1:]):
+        torch.testing.assert_close(command, torch.full_like(command, arrival * speed))
+    torch.testing.assert_close(robot.commands[-1], positions[:, -1])
+
+
+def test_replay_zero_duration_hold_does_not_advance_physics() -> None:
+    robot = _Robot(batch_size=1)
+    simulation = _Simulation()
+    positions = torch.full((1, 10, 6), 0.25)
+    replay_plan(
+        simulation, robot, "left_arm", positions, torch.zeros(1, 10), realtime=False
+    )
+    assert simulation.update_steps == []
+    torch.testing.assert_close(robot.commands[-1], positions[:, -1])
+
+
+def test_replay_interpolates_nonuniform_samples_and_skips_zero_intervals() -> None:
+    robot = _Robot(batch_size=1, dtype=torch.float64)
+    simulation = _Simulation()
+    positions = torch.tensor([0.0, 1.0, 1.0, 2.0, 2.0], dtype=torch.float64)
+    positions = positions[None, :, None].expand(1, -1, 6)
+    dt = torch.tensor([[0.0, 0.015, 0.0, 0.017, 0.0]], dtype=torch.float64)
+    replay_plan(simulation, robot, "left_arm", positions, dt, realtime=False)
+    expected = [0.0, 0.01 / 0.015, 1.0 + 0.005 / 0.017, 1.0 + 0.015 / 0.017, 2.0]
+    assert simulation.elapsed == pytest.approx(0.032)
+    assert len(robot.commands) == len(expected)
+    for command, position in zip(robot.commands, expected):
+        torch.testing.assert_close(command, torch.full_like(command, position))
+
+
+@pytest.mark.parametrize("interval", [-0.01, float("nan"), float("inf")])
+def test_replay_rejects_invalid_timing_before_commands(interval: float) -> None:
+    robot = _Robot(batch_size=1)
+    simulation = _Simulation()
+    with pytest.raises(ValueError, match="finite non-negative"):
+        replay_plan(
+            simulation,
+            robot,
+            "left_arm",
+            torch.zeros(1, 2, 6),
+            torch.tensor([[0.0, interval]]),
+            realtime=False,
+        )
+    assert robot.commands == []
+    assert simulation.update_steps == []
 
 
 def test_replay_rejects_per_environment_timing_mismatch() -> None:

@@ -27,7 +27,7 @@ import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Articulation, Robot
 from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
-from embodichain.lab.sim.solvers.base_solver import BaseSolver
+from embodichain.lab.sim.motion.solvers.base_solver import BaseSolver
 from embodichain.data import get_data_path
 
 # Define control parts

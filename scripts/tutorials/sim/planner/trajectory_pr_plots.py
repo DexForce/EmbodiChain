@@ -28,13 +28,13 @@ import matplotlib.pyplot as plt
 import torch
 from matplotlib.figure import Figure
 
-from embodichain.lab.sim.planners.bezier import BezierPath
-from embodichain.lab.sim.planners.se3 import plan_se3_line
-from embodichain.lab.sim.planners.trapezoidal_planner import (
+from embodichain.lab.sim.motion.planners.bezier import BezierPath
+from embodichain.lab.sim.motion.planners.se3 import plan_se3_line
+from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
     TrapezoidalPlanOptions,
     _plan_linear_profiles,
 )
-from embodichain.lab.sim.planners.utils import PlanResult
+from embodichain.lab.sim.motion.planners.utils import PlanResult
 
 Scenario = Literal[
     "bezier", "trapezoidal", "double-s", "blend", "minimum-duration", "se3"
@@ -58,6 +58,7 @@ def _plan(
                 "jerk": [4.0, 3.0],
             },
             sample_interval=501,
+            stop_at_waypoints=blend_tolerance == 0.0,
             blend_tolerance=blend_tolerance,
             minimum_duration=minimum_duration,
             backend="torch",

@@ -20,7 +20,7 @@ import torch
 import warp as wp
 import pytest
 
-from embodichain.utils.warp.kinematics.opw_solver import (
+from embodichain.compute.kinematics._warp.opw import (
     opw_ik_path_select_kernel,
     wp_vec6f,
 )

@@ -25,6 +25,8 @@ from embodichain.lab.sim.motion.solvers import (
     OPWSolverCfg,
     URSolverCfg,
 )
+from embodichain.lab.sim.motion.solvers.opw_solver import OPWSolver
+from embodichain.lab.sim.motion.solvers.pytorch_solver import PytorchSolver
 
 UR5_DH_PARAMETERS = {
     "d1": 0.089159,

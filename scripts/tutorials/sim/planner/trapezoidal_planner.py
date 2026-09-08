@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_right
 import math
 import os
 import time
@@ -34,17 +35,21 @@ from mpl_toolkits.mplot3d.axes3d import Axes3D
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.planners import (
+from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
     MotionGenerator,
     MotionGenOptions,
+)
+from embodichain.lab.sim.motion.planners import (
     PlanResult,
     PlanState,
     TrapezoidalPlannerCfg,
     TrapezoidalPlanOptions,
     BezierPath,
 )
-from embodichain.lab.sim.planners.trapezoidal_planner import _plan_linear_profiles
+from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
+    _plan_linear_profiles,
+)
 from embodichain.lab.sim.robots import CobotMagicCfg
 from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
@@ -576,25 +581,54 @@ def replay_plan(
     replay_speed: float = DEFAULT_REPLAY_SPEED,
     realtime: bool = True,
 ) -> None:
-    """Drive a joint plan according to its explicit trajectory timing."""
-    if positions.ndim != 3 or dt.shape != positions.shape[:2]:
+    """Interpolate joint targets onto physics ticks using arrival intervals.
+
+    Zero-time samples do not advance physics. The last tick may be shorter
+    than ``physics_dt`` so simulated and wall-clock duration match the plan,
+    scaled by ``replay_speed``, independently of the output sample count.
+    """
+    if (
+        positions.ndim != 3
+        or min(positions.shape[:2]) == 0
+        or dt.shape != positions.shape[:2]
+    ):
         raise ValueError("positions and dt must have shapes (B, N, DOF) and (B, N).")
-    if replay_speed <= 0.0:
-        raise ValueError("replay_speed must be greater than zero.")
+    if not bool(torch.isfinite(dt).all().item()) or bool((dt < 0.0).any().item()):
+        raise ValueError("dt must contain finite non-negative arrival intervals.")
+    if not math.isfinite(replay_speed) or replay_speed <= 0.0:
+        raise ValueError("replay_speed must be finite and greater than zero.")
     if positions.shape[0] > 1 and not torch.allclose(dt, dt[:1].expand_as(dt)):
         raise ValueError(
             "replay_plan requires one environment or identical dt rows across environments."
         )
     physics_dt = float(sim.sim_config.physics_dt)
+    if not math.isfinite(physics_dt) or physics_dt <= 0.0:
+        raise ValueError("physics_dt must be finite and greater than zero.")
+    arrivals = dt[0].detach().to(device="cpu", dtype=torch.float64) / replay_speed
+    arrival_times = arrivals.cumsum(dim=0).tolist()
+    duration = arrival_times[-1]
+
+    def command_at(elapsed: float) -> torch.Tensor:
+        upper = bisect_right(arrival_times, elapsed)
+        if upper == len(arrival_times):
+            return positions[:, -1]
+        if upper == 0:
+            return positions[:, 0]
+        lower = upper - 1
+        alpha = (elapsed - arrival_times[lower]) / (
+            arrival_times[upper] - arrival_times[lower]
+        )
+        return torch.lerp(positions[:, lower], positions[:, upper], alpha)
+
+    robot.set_qpos(command_at(0.0), name=control_part)
     wall_start = time.perf_counter()
-    target_elapsed = 0.0
-    for sample_index, command in enumerate(positions.transpose(0, 1)):
-        sample_duration = float(dt[:, sample_index].max().item()) / replay_speed
-        robot.set_qpos(command, name=control_part)
-        physics_steps = max(1, math.ceil(sample_duration / physics_dt))
-        sim.update(step=physics_steps)
+    elapsed = 0.0
+    for tick in range(1, math.ceil(duration / physics_dt) + 1):
+        target_elapsed = min(tick * physics_dt, duration)
+        robot.set_qpos(command_at(target_elapsed), name=control_part)
+        sim.update(physics_dt=target_elapsed - elapsed, step=1)
+        elapsed = target_elapsed
         if realtime:
-            target_elapsed += sample_duration
             remaining = wall_start + target_elapsed - time.perf_counter()
             if remaining > 0.0:
                 time.sleep(remaining)

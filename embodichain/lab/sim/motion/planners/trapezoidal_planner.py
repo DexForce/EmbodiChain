@@ -68,8 +68,10 @@ class TrapezoidalPlanOptions(PlanOptions):
             duration. Slower trajectories retain the same path and limits.
         stop_at_waypoints: Whether every supplied waypoint is a rest point. When
             false, redundant points on straight, same-direction runs are removed.
-        collinearity_tolerance: Cosine tolerance used by waypoint compression.
+        collinearity_tolerance: Cosine tolerance relative to the first edge of
+            each retained straight run during waypoint compression.
         blend_tolerance: Non-negative corner deviation used for quintic blends.
+            Positive values require ``stop_at_waypoints=False``.
         backend: Profile-construction and sampling backend. ``auto`` selects
             Warp for CUDA float32 trajectories and Torch otherwise.
     """
@@ -147,6 +149,14 @@ class TrapezoidalPlanOptions(PlanOptions):
             raise ValueError("blend_tolerance must be finite and non-negative.")
         if self.backend not in {"auto", "torch", "warp"}:
             raise ValueError("backend must be 'auto', 'torch', or 'warp'.")
+        self._validate_waypoint_policy()
+
+    def _validate_waypoint_policy(self) -> None:
+        """Reject corner blending when the caller requires waypoint stops."""
+        if self.stop_at_waypoints and self.blend_tolerance > 0.0:
+            raise ValueError(
+                "Positive blend_tolerance requires stop_at_waypoints=False."
+            )
 
 
 def _compress_collinear_waypoints(
@@ -157,7 +167,8 @@ def _compress_collinear_waypoints(
 
     Rows may retain different numbers of points. Shorter rows are padded by
     repeating their final point, which the profile builder treats as zero-time
-    segments.
+    segments. Every edge in a straight run is compared against its first
+    edge, so locally small turns cannot accumulate into an unchecked shortcut.
     """
     if waypoints.shape[1] <= 2:
         return waypoints
@@ -180,20 +191,31 @@ def _compress_collinear_waypoints(
     if deduplicated_size <= 2:
         return deduplicated
     edges = deduplicated[:, 1:] - deduplicated[:, :-1]
-    previous = edges[:, :-1]
-    following = edges[:, 1:]
-    previous_norm = torch.linalg.vector_norm(previous, dim=-1)
-    following_norm = torch.linalg.vector_norm(following, dim=-1)
-    active = (previous_norm > epsilon) & (following_norm > epsilon)
-    cosine = (previous * following).sum(dim=-1) / (
-        previous_norm * following_norm
-    ).clamp_min(epsilon)
-    straight = active & (cosine >= 1.0 - tolerance)
+    norms = torch.linalg.vector_norm(edges, dim=-1, keepdim=True)
+    directions = edges / torch.where(norms > 0.0, norms, torch.ones_like(norms))
     point_ids = torch.arange(deduplicated_size, device=waypoints.device)[None]
     last_point = (deduplicated_count - 1)[:, None]
     keep = (point_ids == 0) | (point_ids == last_point)
     real_interior = (point_ids[:, 1:-1] > 0) & (point_ids[:, 1:-1] < last_point)
-    keep[:, 1:-1] |= real_interior & ~straight
+    reference = directions[:, 0]
+    # For unit vectors, ||u-v||² = 2(1-cos(theta)). This avoids a dimensional
+    # epsilon on a product of lengths and cancellation in 1-cos(theta).
+    squared_tolerance = 2.0 * tolerance
+    real_edges = point_ids[:, :-1] < last_point
+    aligned = (directions - reference[:, None]).square().sum(
+        dim=-1
+    ) <= squared_tolerance
+    if bool((aligned | ~real_edges).all().item()):
+        return torch.stack((deduplicated[:, 0], deduplicated[:, -1]), dim=1)
+
+    # Advance all batch rows together, without a host synchronization per point.
+    # Reset the reference only at a retained corner, never at a removed point.
+    for index in range(1, directions.shape[1]):
+        turn = real_interior[:, index - 1] & (
+            (directions[:, index] - reference).square().sum(dim=-1) > squared_tolerance
+        )
+        keep[:, index] |= turn
+        reference = torch.where(turn[:, None], directions[:, index], reference)
     retained_count = keep.sum(dim=1)
     output_count = max(2, int(retained_count.max().item()))
     output = deduplicated[:, -1:].expand(-1, output_count, -1).clone()
@@ -416,6 +438,10 @@ def _plan_blended_profiles(
     positions[:, 0], positions[:, -1] = waypoints[:, 0], waypoints[:, -1]
     velocities[:, 0] = velocities[:, -1] = 0.0
     accelerations[:, 0] = accelerations[:, -1] = 0.0
+    finished = times >= times[:, -1:]
+    positions = torch.where(finished[..., None], waypoints[:, -1:], positions)
+    velocities.masked_fill_(finished[..., None], 0.0)
+    accelerations.masked_fill_(finished[..., None], 0.0)
     dt = torch.diff(times, dim=1, prepend=torch.zeros_like(times[:, :1]))
     if options.profile == "double_s":
         joint_jerks = torch.stack(
@@ -492,6 +518,7 @@ def _plan_linear_profiles(
     options: TrapezoidalPlanOptions,
 ) -> PlanResult:
     """Plan batched piecewise-linear joint paths without simulation state."""
+    options._validate_waypoint_policy()
     if waypoints.ndim != 3 or waypoints.shape[1] < 2 or waypoints.shape[2] < 1:
         raise ValueError("waypoints must have shape (B, K, DOF) with K >= 2.")
     if not waypoints.is_floating_point() or not bool(
@@ -611,9 +638,11 @@ def _plan_linear_profiles(
         backend=options.backend,
     )
     positions[:, 0] = waypoints[:, 0]
-    positions[:, -1] = waypoints[:, -1]
-    velocities[:, -1] = 0.0
-    accelerations[:, -1] = 0.0
+    # TIME sampling repeats the endpoint of shorter rows to fill the batch.
+    finished = times >= times[:, -1:]
+    positions = torch.where(finished[..., None], waypoints[:, -1:], positions)
+    velocities.masked_fill_(finished[..., None], 0.0)
+    accelerations.masked_fill_(finished[..., None], 0.0)
     dt = torch.diff(times, dim=1, prepend=torch.zeros_like(times[:, :1]))
     success = torch.ones(batch_size, dtype=torch.bool, device=waypoints.device)
     if bool(stationary_path.any().item()):
@@ -623,13 +652,20 @@ def _plan_linear_profiles(
         if options.minimum_duration is None:
             dt[stationary_path] = 0.0
     # Keep a backend-independent diagnostic report for callers that need to
-    # validate the realized trajectory against projected limits.  Values are
-    # per environment and are computed from the returned samples.
+    # compare realized joint derivatives and joint limits in the same units.
+    # Scalar summary limits are the maxima of the configured per-joint limits;
+    # the per-joint utilization fields retain heterogeneous limit information.
+    joint_velocity_limit = _limit_tensor(options.constraints["velocity"], waypoints)
+    joint_acceleration_limit = _limit_tensor(
+        options.constraints["acceleration"], waypoints
+    )
+    joint_jerk_limit = _limit_tensor(options.constraints.get("jerk", 1.0), waypoints)
     report = {
         "peak_velocity": velocities.abs().amax(dim=(1, 2)),
         "peak_acceleration": accelerations.abs().amax(dim=(1, 2)),
-        "velocity_limit": velocity_limit.amax(dim=1),
-        "acceleration_limit": acceleration_limit.amax(dim=1),
+        "velocity_limit": joint_velocity_limit.amax().expand(batch_size),
+        "acceleration_limit": joint_acceleration_limit.amax().expand(batch_size),
+        "jerk_limit": joint_jerk_limit.amax().expand(batch_size),
     }
     # Use analytic phase jerk. Finite differences across trapezoidal
     # acceleration jumps otherwise produce sample-rate-dependent spikes.
@@ -637,13 +673,6 @@ def _plan_linear_profiles(
         (profile.jerks[..., None] * delta[:, :, None, :]).abs().amax(dim=(1, 2, 3))
     )
     report["peak_jerk"] = peak_jerk
-    if jerk_limit is not None:
-        report["jerk_limit"] = jerk_limit.amax(dim=1)
-    joint_velocity_limit = _limit_tensor(options.constraints["velocity"], waypoints)
-    joint_acceleration_limit = _limit_tensor(
-        options.constraints["acceleration"], waypoints
-    )
-    joint_jerk_limit = _limit_tensor(options.constraints.get("jerk", 1.0), waypoints)
     peak_velocity_joint = velocities.abs().amax(dim=1)
     peak_acceleration_joint = accelerations.abs().amax(dim=1)
     peak_jerk_joint = (

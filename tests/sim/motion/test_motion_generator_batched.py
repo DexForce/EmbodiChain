@@ -30,6 +30,10 @@ from embodichain.lab.sim.motion.motion_generator import (
     MotionGenerator,
     MotionGenOptions,
 )
+from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
+    TrapezoidalPlanner,
+    TrapezoidalPlanOptions,
+)
 from embodichain.lab.sim.motion.planners.utils import PlanState, PlanResult, MoveType
 
 BATCH_SIZE = 2
@@ -85,7 +89,10 @@ def test_generate_preserves_trapezoidal_constraint_report(
         for qpos in ([0.0, 0.0], [1.0, 0.0], [1.0, 1.0])
     ]
     options = TrapezoidalPlanOptions(
-        profile="double_s", blend_tolerance=0.1, sample_interval=101
+        profile="double_s",
+        stop_at_waypoints=False,
+        blend_tolerance=0.1,
+        sample_interval=101,
     )
     raw = planner.plan(targets, options)
     result = generator.generate(
