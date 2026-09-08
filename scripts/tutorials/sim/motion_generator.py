@@ -23,7 +23,6 @@ from collections.abc import Sequence
 import numpy as np
 import torch
 
-from embodichain.compute.trajectory import differentiate_positions, resample_in_time
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
@@ -33,6 +32,10 @@ from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
     MotionGenOptions,
     MotionGenerator,
+)
+from embodichain.lab.sim.motion.execution import (
+    JointTrajectoryPlaybackCfg,
+    play_joint_trajectory,
 )
 from embodichain.lab.sim.motion.planners import (
     PlanState,
@@ -136,6 +139,8 @@ def move_robot_along_trajectory(
         qpos_trajectory: Joint positions shaped ``(B, N, DOF)``, ``(N, DOF)``,
             or a sequence of waypoint tensors.
         qvel_trajectory: Matching native planner velocities, when available.
+            Playback validates this shape but recomputes velocities after
+            retiming to the executed control grid.
         dt: Per-waypoint arrival intervals shaped ``(B, N)``.
     """
     if isinstance(qpos_trajectory, Sequence):
@@ -153,35 +158,16 @@ def move_robot_along_trajectory(
             "qpos_trajectory must have shape (B, N, DOF) or (N, DOF), "
             f"got {tuple(qpos_trajectory.shape)}."
         )
-    if dt.shape != qpos_trajectory.shape[:2]:
-        raise ValueError("dt must match the trajectory batch and waypoint dimensions.")
     if qvel_trajectory is not None and qvel_trajectory.shape != qpos_trajectory.shape:
         raise ValueError("qvel_trajectory must have the same shape as qpos_trajectory.")
-    if not torch.allclose(dt, dt[:1].expand_as(dt)):
-        raise ValueError(
-            "Playback requires the same waypoint timing in every environment."
-        )
-
-    grid_dt = sim.sim_config.physics_dt
-    if torch.allclose(dt[:, 1:], torch.full_like(dt[:, 1:], grid_dt)):
-        positions, playback_dt = qpos_trajectory, dt
-        velocities = qvel_trajectory
-        if velocities is None:
-            velocities = differentiate_positions(positions, playback_dt)
-    else:
-        duration = float(dt[0, 1:].sum())
-        interval_count = max(1, int(np.ceil(duration / grid_dt)))
-        positions, playback_dt = resample_in_time(
-            qpos_trajectory, dt, interval_count + 1
-        )
-        velocities = differentiate_positions(positions, playback_dt)
-    joint_ids = robot.get_joint_ids(arm_name)
-    for index in range(positions.shape[1] - 1):
-        robot.set_qpos(qpos=positions[:, index], joint_ids=joint_ids)
-        robot.set_qvel(qvel=velocities[:, index], joint_ids=joint_ids)
-        sim.update(physics_dt=float(playback_dt[0, index + 1]), step=1)
-    robot.set_qpos(qpos=positions[:, -1], joint_ids=joint_ids)
-    robot.set_qvel(qvel=torch.zeros_like(positions[:, -1]), joint_ids=joint_ids)
+    play_joint_trajectory(
+        sim,
+        robot,
+        positions=qpos_trajectory,
+        dt=dt,
+        joint_ids=robot.get_joint_ids(arm_name),
+        cfg=JointTrajectoryPlaybackCfg(joint_command_mode="position_velocity"),
+    )
 
 
 def create_demo_trajectory(
