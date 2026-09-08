@@ -189,8 +189,3 @@ class PhysicsBackend(ABC):
     def supports_contact_sensor(self) -> bool:
         """Whether this backend supports the native contact sensor."""
         return False
-
-    @property
-    def can_disable_manual_update(self) -> bool:
-        """Whether ``set_manual_update(False)`` is permitted on this backend."""
-        return True

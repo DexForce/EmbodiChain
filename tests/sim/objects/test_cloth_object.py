@@ -90,7 +90,6 @@ class BaseSoftObjectTest:
         # Create the simulation instance
         self.sim = SimulationManager(sim_cfg)
 
-        # Enable manual physics update for precise control
         self.num_envs = 4
 
         cloth_verts, cloth_faces = create_2d_grid_mesh(

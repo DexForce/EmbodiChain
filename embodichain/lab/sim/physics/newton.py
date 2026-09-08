@@ -190,6 +190,6 @@ class NewtonPhysicsBackend(PhysicsBackend):
         return True
 
     @property
-    def can_disable_manual_update(self) -> bool:
-        # Newton cannot switch between manual and automatic update.
-        return False
+    def supports_contact_sensor(self) -> bool:
+        # ContactSensor consumes the backend-neutral Scene ContactQuery API.
+        return True

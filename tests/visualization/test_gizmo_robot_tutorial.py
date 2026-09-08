@@ -27,7 +27,7 @@ pytestmark = pytest.mark.no_sim
 
 
 @pytest.mark.parametrize("work_duration", [0.002, 0.050])
-def test_gizmo_loop_advances_manual_physics_and_paces_frames(
+def test_gizmo_loop_advances_physics_and_paces_frames(
     monkeypatch: pytest.MonkeyPatch,
     work_duration: float,
 ) -> None:

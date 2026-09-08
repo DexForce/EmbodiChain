@@ -45,7 +45,7 @@ python scripts/tutorials/sim/gizmo_robot.py --viser
 
 The tutorial opts into immediate native activation with
 `robot_ik_gizmo=GizmoCfg(ik_start_enabled=True)`. It sets the initial robot pose
-before opening the window, then its ordinary manual-physics loop creates and
+before opening the window, then its explicit physics loop creates and
 updates the controller:
 
 ```python

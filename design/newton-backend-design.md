@@ -84,7 +84,7 @@ name for operational decisions:
 Capability predicates drive the `add_*` guards (see Parity Matrix below):
 `supports_robot`, deformable topology flags and their soft/cloth compatibility
 aliases, `supports_rigid_object_group`, `supports_rigid_constraints`,
-`supports_contact_sensor`, and `can_disable_manual_update`.
+and `supports_contact_sensor`.
 
 `SimulationManager.prepare()` owns the convergent readiness sequence: commit or
 rebuild the dirty Spawn scene, apply runtime config, call the backend runtime
@@ -193,7 +193,7 @@ dexsim fix lives on dexsim branch `yueci/adapt-embodichain` (commit `d0e86bb02`)
 
 `tests/sim/test_backend_parity.py` is the single source of truth for which
 features each backend supports (`BACKEND_CAPABILITIES` table). It pins that each
-backend's `supports_*`/`can_disable_manual_update` flags match the table, every
+backend's `supports_*` flags match the table, every
 manager feature guards raise `NotImplementedError` iff their capability is
 false, and the matrix covers every flag and backend. Current matrix:
 
@@ -205,7 +205,6 @@ false, and the matrix covers every flag and backend. Current matrix:
 | rigid_object_group       | yes     | yes    |
 | rigid_constraints        | yes     | no     |
 | contact_sensor           | yes     | no     |
-| can_disable_manual_update| yes     | no     |
 
 ### Currently Unsupported Newton APIs
 

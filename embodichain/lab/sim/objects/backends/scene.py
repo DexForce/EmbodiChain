@@ -397,6 +397,16 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
         super().__init__(batch, device, len(batch))
         self.scene = scene
         self._validate_homogeneous_layout()
+        layouts = tuple(self.batch.joint_layouts_per_articulation)
+        self._joint_dof_columns = torch.as_tensor(
+            (
+                [layout.dof_start for layout in layouts[0]]
+                if layouts
+                else list(range(self.batch.dof_width))
+            ),
+            dtype=torch.long,
+            device=device,
+        )
         self._articulation_ids = torch.arange(
             len(batch), dtype=torch.int32, device=device
         )
@@ -572,21 +582,8 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
         )
 
     def _joint_columns(self, joint_ids: Sequence[int] | torch.Tensor) -> torch.Tensor:
-        layouts = self.batch.joint_layouts_per_articulation
-        if not layouts:
-            return _rows(joint_ids, self.dof, self.device)
-        reference = layouts[0]
-        ids = _rows(joint_ids, len(reference), self.device)
-        columns: list[int] = []
-        for joint_id in ids.detach().cpu().tolist():
-            layout = reference[joint_id]
-            if layout.dof_count != 1:
-                raise NotImplementedError(
-                    "SceneArticulationView needs DexSim DOF selection for "
-                    f"multi-DOF joint {layout.name!r}."
-                )
-            columns.append(layout.dof_start)
-        return torch.as_tensor(columns, dtype=torch.long, device=self.device)
+        ids = _rows(joint_ids, len(self._joint_dof_columns), self.device)
+        return self._joint_dof_columns[ids]
 
     def _apply_joint_selection(
         self,
@@ -669,10 +666,17 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
             dtype=torch.float32,
             device=self.device,
         )
+        root_zeros = torch.zeros(
+            (len(rows), 3),
+            dtype=torch.float32,
+            device=self.device,
+        )
         selected = self.batch.select(rows)
         _checked_batch_call(selected, "apply_joint_velocity", zeros)
         _checked_batch_call(selected, "apply_joint_target_velocity", zeros)
         _checked_batch_call(selected, "apply_joint_force", zeros)
+        _checked_batch_call(selected, "apply_root_linear_velocity", root_zeros)
+        _checked_batch_call(selected, "apply_root_angular_velocity", root_zeros)
 
     def compute_kinematics(self, env_ids: Sequence[int] | torch.Tensor) -> None:
         rows = _rows(env_ids, self._row_count, self.device)

@@ -62,7 +62,6 @@ def main():
 
     # Create the simulation instance
     sim = SimulationManager(sim_cfg)
-    sim.set_manual_update(True)
 
     # Add two cubes to the scene
     cube1: RigidObject = sim.add_rigid_object(

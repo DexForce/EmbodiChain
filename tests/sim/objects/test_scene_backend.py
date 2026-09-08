@@ -232,11 +232,31 @@ class _SelectedArticulationBatch:
         self,
         values: torch.Tensor,
         *,
-        dof_ids: torch.Tensor,
+        dof_ids: torch.Tensor | None = None,
     ) -> int:
-        columns = dof_ids.detach().cpu().to(dtype=torch.long)
+        columns = (
+            torch.arange(self.owner.dof_width)
+            if dof_ids is None
+            else dof_ids.detach().cpu().to(dtype=torch.long)
+        )
         self.owner.force[self.rows[:, None], columns] = values
         self.owner.last_dof_ids = tuple(columns.tolist())
+        return len(self.rows)
+
+    def apply_joint_velocity(self, values: torch.Tensor) -> int:
+        self.owner.velocity[self.rows] = values
+        return len(self.rows)
+
+    def apply_joint_target_velocity(self, values: torch.Tensor) -> int:
+        self.owner.target_velocity[self.rows] = values
+        return len(self.rows)
+
+    def apply_root_linear_velocity(self, values: torch.Tensor) -> int:
+        self.owner.root_linear_velocity[self.rows] = values
+        return len(self.rows)
+
+    def apply_root_angular_velocity(self, values: torch.Tensor) -> int:
+        self.owner.root_angular_velocity[self.rows] = values
         return len(self.rows)
 
     def fetch_root_pose(self, out: torch.Tensor) -> int:
@@ -264,6 +284,14 @@ class _ArticulationBatch:
         self.dof_width = 3
         self.link_width = 1
         self.force = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        self.velocity = self.force.clone()
+        self.target_velocity = self.force.clone()
+        self.root_linear_velocity = torch.tensor(
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+        )
+        self.root_angular_velocity = torch.tensor(
+            [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]
+        )
         # Scene articulation batches use xyzw + xyz layout.
         self.root_pose = torch.tensor(
             [
@@ -315,6 +343,18 @@ class _ArticulationEntity:
 
     def get_joint_effort_limit(self) -> list[float]:
         return [3.0] * 3
+
+
+class _NoHostTransferTensor(torch.Tensor):
+    """Tensor selection that fails if production code copies it to the host."""
+
+    @staticmethod
+    def __new__(cls, values: list[int]) -> _NoHostTransferTensor:
+        return torch.as_tensor(values, dtype=torch.long).as_subclass(cls)
+
+    def cpu(self, *args, **kwargs):
+        del args, kwargs
+        raise AssertionError("joint selection was copied to CPU")
 
 
 def test_is_newton_scene_requires_current_scene_batch_api() -> None:
@@ -566,6 +606,41 @@ def test_articulation_partial_force_preserves_other_rows_and_dofs() -> None:
     )
     assert batch.selections == [(1,)]
     assert batch.last_dof_ids == (1,)
+
+
+def test_articulation_joint_mapping_stays_on_the_view_device() -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(
+        SimpleNamespace(backend="newton"),
+        batch,
+        torch.device("cpu"),
+    )
+
+    columns = view._joint_columns(_NoHostTransferTensor([1]))
+
+    assert torch.equal(columns, torch.tensor([1]))
+
+
+def test_articulation_clear_dynamics_clears_selected_root_and_joint_motion() -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(
+        SimpleNamespace(backend="newton"),
+        batch,
+        torch.device("cpu"),
+    )
+
+    view.clear_dynamics(env_ids=torch.tensor([1]))
+
+    assert torch.equal(batch.velocity[0], torch.tensor([1.0, 2.0, 3.0]))
+    assert torch.equal(batch.target_velocity[0], torch.tensor([1.0, 2.0, 3.0]))
+    assert torch.equal(batch.force[0], torch.tensor([1.0, 2.0, 3.0]))
+    assert torch.equal(batch.root_linear_velocity[0], torch.tensor([1.0, 2.0, 3.0]))
+    assert torch.equal(batch.root_angular_velocity[0], torch.tensor([7.0, 8.0, 9.0]))
+    assert not torch.count_nonzero(batch.velocity[1])
+    assert not torch.count_nonzero(batch.target_velocity[1])
+    assert not torch.count_nonzero(batch.force[1])
+    assert not torch.count_nonzero(batch.root_linear_velocity[1])
+    assert not torch.count_nonzero(batch.root_angular_velocity[1])
 
 
 def test_newton_idempotent_root_pose_write_is_skipped() -> None:

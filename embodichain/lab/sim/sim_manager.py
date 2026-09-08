@@ -485,7 +485,7 @@ class SimulationManager:
         - manager the scenes and the simulation environment.
             - parallel scenes simulation on both CPU and GPU.
             - create and setup the rendering related settings, eg. environment map, lighting, materials, etc.
-            - physics simulation management, eg. time step, manual update, etc.
+            - physics simulation management, including time steps and explicit stepping.
             - interactive control via gizmo and window callbacks events.
 
     Args:
@@ -1583,6 +1583,22 @@ class SimulationManager:
         self.physics.sync_render_state(result)
         self._synced_spawn_render_topology_revision = topology_revision
 
+    def sync_render_state(self) -> None:
+        """Publish current physics state to render resources without stepping.
+
+        Use this after direct state writes, such as an environment reset, and
+        before reading cameras or publishing a visualization frame.
+
+        Raises:
+            RuntimeError: If the Spawn scene has not been prepared.
+        """
+        result = self.spawn_result
+        if result is None:
+            raise RuntimeError(
+                "Render-state synchronization requires a prepared Spawn scene."
+            )
+        self.physics.sync_render_state(result)
+
     def enable_physics(self, enable: bool) -> None:
         """Enable or disable physics simulation.
 
@@ -1590,25 +1606,6 @@ class SimulationManager:
             enable (bool): whether to enable physics simulation.
         """
         self._world.enable_physics(enable)
-
-    def set_manual_update(self, enable: bool) -> None:
-        """Retain the explicit-update compatibility switch.
-
-        Physics is always advanced by :meth:`update`; background stepping is
-        no longer supported. Existing callers may still assert manual mode.
-
-        Args:
-            enable: Must be ``True``.
-
-        Raises:
-            ValueError: If automatic physics updates are requested.
-        """
-        if not enable:
-            raise ValueError(
-                "Automatic physics updates are not supported; call update() "
-                "to advance the simulation explicitly."
-            )
-        self._world.set_manual_update(True)
 
     def init_gpu_physics(self) -> None:
         """Prepare the Spawn-owned physics runtime.
@@ -3442,6 +3439,11 @@ class SimulationManager:
             raise ValueError(
                 f"Unsupported sensor type {sensor_type!r}. Supported types: "
                 f"{sorted(self.SUPPORTED_SENSOR_TYPES)}."
+            )
+        if sensor_type == "ContactSensor" and not self.physics.supports_contact_sensor:
+            raise NotImplementedError(
+                f"ContactSensor is not supported by the {self.physics.name} "
+                "physics backend."
             )
         if isinstance(sensor_factory, type) and issubclass(sensor_factory, Camera):
             if len(self._arenas) != self.num_envs:

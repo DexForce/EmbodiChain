@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Control a UR10 end effector with a Gizmo and manual physics stepping."""
+"""Control a UR10 end effector with a Gizmo and explicit physics stepping."""
 
 from __future__ import annotations
 

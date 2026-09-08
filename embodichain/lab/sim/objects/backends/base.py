@@ -394,7 +394,7 @@ class ArticulationViewBase(ABC):
 
     @abstractmethod
     def clear_dynamics(self, env_ids: Sequence[int] | torch.Tensor) -> None:
-        """Clear joint velocities, target velocities, and forces."""
+        """Clear root/joint velocities, target velocities, and forces."""
         ...
 
     @abstractmethod

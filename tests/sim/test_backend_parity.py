@@ -48,12 +48,9 @@ BACKEND_CAPABILITIES: dict[str, dict[str, bool]] = {
     "robot": {"default": True, "newton": True},
     "volume_deformables": {"default": False, "newton": True},
     "surface_deformables": {"default": False, "newton": True},
-    "soft_bodies": {"default": False, "newton": True},
-    "cloth": {"default": False, "newton": True},
     "rigid_object_group": {"default": True, "newton": True},
     "rigid_constraints": {"default": True, "newton": False},
-    "contact_sensor": {"default": True, "newton": False},
-    "can_disable_manual_update": {"default": True, "newton": False},
+    "contact_sensor": {"default": True, "newton": True},
 }
 
 BACKENDS: dict[str, type[PhysicsBackend]] = {
@@ -63,17 +60,14 @@ BACKENDS: dict[str, type[PhysicsBackend]] = {
 
 # Map each capability flag to the SimulationManager.add_* method whose
 # NotImplementedError guard consults it. ``None`` means the flag is consulted
-# elsewhere (e.g. set_manual_update) rather than an add_* guard.
+# elsewhere rather than an add_* guard.
 CAPABILITY_TO_ADD_METHOD: dict[str, str | None] = {
     "robot": "add_robot",
     "volume_deformables": "add_deformable_object",
     "surface_deformables": "add_deformable_object",
-    "soft_bodies": None,
-    "cloth": None,
     "rigid_object_group": "add_rigid_object_group",
     "rigid_constraints": None,
     "contact_sensor": None,
-    "can_disable_manual_update": None,
 }
 
 
@@ -89,9 +83,7 @@ def test_backend_name_matches(backend_name: str) -> None:
 
 
 @pytest.mark.parametrize("backend_name", list(BACKENDS))
-@pytest.mark.parametrize(
-    "feature", [f for f in BACKEND_CAPABILITIES if f != "can_disable_manual_update"]
-)
+@pytest.mark.parametrize("feature", list(BACKEND_CAPABILITIES))
 def test_supports_flags_match_matrix(backend_name: str, feature: str) -> None:
     """Each backend's supports_* property matches the parity matrix."""
     backend = _make_backend(backend_name)
@@ -100,13 +92,6 @@ def test_supports_flags_match_matrix(backend_name: str, feature: str) -> None:
     assert (
         actual is expected
     ), f"{backend_name}.supports_{feature} = {actual}, matrix says {expected}"
-
-
-@pytest.mark.parametrize("backend_name", list(BACKENDS))
-def test_can_disable_manual_update_matches_matrix(backend_name: str) -> None:
-    backend = _make_backend(backend_name)
-    expected = BACKEND_CAPABILITIES["can_disable_manual_update"][backend_name]
-    assert backend.can_disable_manual_update is expected
 
 
 def test_rigid_constraint_guard_uses_backend_capability() -> None:
@@ -120,7 +105,7 @@ def test_rigid_constraint_guard_uses_backend_capability() -> None:
 
 def test_contact_sensor_guard_uses_backend_capability() -> None:
     """Contact sensors fail at the capability boundary before preparation."""
-    backend = _make_backend("newton")
+    backend = SimpleNamespace(name="third_party", supports_contact_sensor=False)
     sim = _make_sim_with_backend(backend)
     sim._sensors = {}
     sim.SUPPORTED_SENSOR_TYPES = {"ContactSensor": object()}
@@ -192,11 +177,11 @@ def test_add_method_guard_maps_to_capability(
 
 
 def test_matrix_covers_all_capability_flags() -> None:
-    """Every supports_* / can_disable_manual_update flag is in the matrix."""
+    """Every supports_* flag is in the matrix."""
     flag_names = {
-        name[len("supports_") :] if name.startswith("supports_") else name
+        name[len("supports_") :]
         for name in dir(PhysicsBackend)
-        if name.startswith("supports_") or name == "can_disable_manual_update"
+        if name.startswith("supports_")
     }
     matrix_features = set(BACKEND_CAPABILITIES)
     assert (

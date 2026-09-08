@@ -260,7 +260,7 @@ host-side writes and disables CUDA Graph replay, while shape-material and joint
 trajectory controls remain graph-compatible. Register all controls before
 `prepare()` and never reach into `_spawn_scene.builder` from a task or demo.
 
-`scripts/tutorials/sim/gizmo_robot.py` supports only manual physics. It initializes
+`scripts/tutorials/sim/gizmo_robot.py` advances physics through `sim.update()`. It initializes
 GPU physics after robot creation when needed, sets both current and target
 joint positions, and advances once before opening the window. It explicitly
 sets `GizmoCfg(ik_start_enabled=True)` so the native controller activates on the
@@ -817,8 +817,8 @@ Entity/IK gizmo configuration is owned by [native gizmos](../sim-visualization/n
 - Apply Newton collision and articulation-joint configuration to the
   source-translated Spawn descriptors before the first model build; post-bind
   object initialization is only for state and supported live batch properties.
-- Manual update is the default; normal environment stepping must advance
-  physics through `SimulationManager.update()`.
+- Physics advances only through `SimulationManager.update()`; there is no
+  public stepping-mode configuration or switch.
 - Drawing markers and publishing visualization do not advance physics.
   Use `capture_visualization(force=True)` to publish marker edits while paused.
 - Reset only the requested environment rows and honor

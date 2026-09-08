@@ -1628,6 +1628,25 @@ def test_prepare_retries_render_state_sync_without_recommit() -> None:
     sim._world.update.assert_not_called()
 
 
+def test_sync_render_state_publishes_current_state_without_stepping() -> None:
+    """Explicit publication must refresh render state without advancing physics."""
+    result = MagicMock()
+    spawn_scene = MagicMock()
+    spawn_scene.builder.is_finalized = True
+    spawn_scene.builder.result = result
+    sync_render_state = MagicMock()
+
+    sim = object.__new__(SimulationManager)
+    sim._spawn_scene = spawn_scene
+    sim._world = MagicMock()
+    sim.physics = SimpleNamespace(sync_render_state=sync_render_state)
+
+    sim.sync_render_state()
+
+    sync_render_state.assert_called_once_with(result)
+    sim._world.update.assert_not_called()
+
+
 def test_add_camera_uses_owning_manager_render_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

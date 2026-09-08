@@ -39,12 +39,20 @@ class _ResetEnv(BaseEnv):
     """BaseEnv reset surface without constructing a simulator."""
 
     def __init__(self) -> None:
+        self.reset_events: list[str] = []
         self.cfg = SimpleNamespace(seed=None)
         self._num_envs = 1
         self.sim = SimpleNamespace(
             device=torch.device("cpu"),
-            reset_objects_state=MagicMock(),
-            capture_visualization_safely=MagicMock(),
+            reset_objects_state=MagicMock(
+                side_effect=lambda **_: self.reset_events.append("reset_objects")
+            ),
+            sync_render_state=MagicMock(
+                side_effect=lambda: self.reset_events.append("sync_render")
+            ),
+            capture_visualization_safely=MagicMock(
+                side_effect=lambda **_: self.reset_events.append("capture")
+            ),
         )
         self._profiler = _ProfilerStub()
         self._task_success = torch.zeros(1, dtype=torch.bool)
@@ -59,10 +67,12 @@ class _ResetEnv(BaseEnv):
 
     def _initialize_episode(self, env_ids: torch.Tensor, **kwargs) -> None:
         del env_ids, kwargs
+        self.reset_events.append("initialize_episode")
         self.initial_random_value = float(self.np_random.random())
 
     def get_obs(self, **kwargs) -> dict[str, float]:
         del kwargs
+        self.reset_events.append("get_obs")
         return {"random": self.initial_random_value}
 
     def get_info(self, **kwargs) -> dict:
@@ -92,3 +102,18 @@ def test_reset_seed_replays_gym_rng_and_reseeds_event_manager(monkeypatch) -> No
     env.event_manager.set_seed.assert_called_with(2027)
     assert torch.backends.cudnn.benchmark is False
     assert torch.backends.cudnn.deterministic is True
+
+
+def test_reset_publishes_episode_state_before_visual_observation() -> None:
+    """Reset state must reach render consumers before capture and observations."""
+    env = _ResetEnv()
+
+    env.reset()
+
+    assert env.reset_events == [
+        "reset_objects",
+        "initialize_episode",
+        "sync_render",
+        "capture",
+        "get_obs",
+    ]
