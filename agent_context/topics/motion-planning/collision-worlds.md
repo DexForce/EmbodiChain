@@ -40,10 +40,13 @@ states or goals are batched:
   different poses relative to their local robot bases, such as per-env pose
   randomization.
 
-The multi-env scene is cloned from the tensor-backed scene generated using env
-0; enabling the flag does not load distinct initial simulator poses for other
-rows. Per-env differences require registration in `dynamic_obstacle_names` and
-current `(B, 4, 4)` world poses in
+The multi-env scene is cloned from the cached tensor-backed scene dictionary
+generated using env 0; enabling the flag does not load distinct initial
+simulator poses for other rows. Each clone remains a dictionary until cuRobo
+0.8 constructs its own `SceneCfg`, because its multi-env list parser expects a
+dictionary per environment rather than pre-built `SceneCfg` instances. Per-env
+differences require registration in `dynamic_obstacle_names` and current
+`(B, 4, 4)` world poses in
 `CuroboPlanOptions.dynamic_obstacle_poses`. Independent worlds replicate scene
 data and collision caches, so retain the shared default for identical rebased
 layouts.

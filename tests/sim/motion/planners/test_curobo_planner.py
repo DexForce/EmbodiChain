@@ -436,6 +436,24 @@ def test_backend_disables_curobo_self_collision(monkeypatch):
     }
 
 
+def test_multi_env_scene_model_clones_scene_dictionaries_independently():
+    planner = object.__new__(CuroboPlanner)
+    scene_model = {
+        "voxel": {
+            "block": {
+                "feature_tensor": torch.ones((2, 2, 2), dtype=torch.float16),
+            }
+        }
+    }
+
+    copies = planner._materialize_multi_env_scene_model(scene_model, batch_size=2)
+
+    assert all(isinstance(scene, dict) for scene in copies)
+    assert copies[0] is not copies[1]
+    copies[0]["voxel"]["block"]["feature_tensor"].zero_()
+    assert torch.all(copies[1]["voxel"]["block"]["feature_tensor"] == 1.0)
+
+
 def test_runtime_robot_config_adds_only_curobo_compatibility_placeholders(tmp_path):
     config_path = tmp_path / "robot.yml"
     config_path.write_text(

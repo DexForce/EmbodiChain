@@ -17,9 +17,9 @@
 """Optional cuRobo V2 + CUDA integration test.
 
 Skipped entirely when cuRobo or CUDA is unavailable. When both are present,
-it builds a Panda profile + static cuboid world, plans a collision-aware EEF
-move through the EmbodiChain ``MotionGenerator`` API, and verifies the
-``PlanResult`` contract.
+it builds a Panda profile with shared and per-environment collision worlds,
+plans Cartesian and joint-space moves through the EmbodiChain motion APIs, and
+verifies the resulting trajectories and dynamic obstacle updates.
 """
 
 from __future__ import annotations
@@ -32,6 +32,8 @@ import torch
 pytest.importorskip("curobo")
 if not torch.cuda.is_available():
     pytest.skip("cuRobo V2 requires CUDA", allow_module_level=True)
+
+pytestmark = [pytest.mark.requires_sim, pytest.mark.gpu]
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg  # noqa: E402
 from embodichain.lab.sim.objects import RigidObjectCfg  # noqa: E402
@@ -83,7 +85,6 @@ def _make_sim_robot(num_envs: int = 1):
     return sim, robot, block
 
 
-@pytest.mark.slow
 def test_curobo_v2_plans_around_a_static_cuboid_obstacle():
     sim, robot, block = _make_sim_robot()
     try:
@@ -133,7 +134,6 @@ def test_curobo_v2_plans_around_a_static_cuboid_obstacle():
         SimulationManager.flush_cleanup_queue()
 
 
-@pytest.mark.slow
 def test_curobo_v2_plans_around_rigid_object_voxel_world():
     """Exercise convex-hull preprocessing and voxel ESDF planning end to end."""
     sim, robot, block = _make_sim_robot()
@@ -177,7 +177,6 @@ def test_curobo_v2_plans_around_rigid_object_voxel_world():
         SimulationManager.flush_cleanup_queue()
 
 
-@pytest.mark.slow
 def test_curobo_v2_plans_a_joint_space_move():
     """Route a ``JOINT_MOVE`` through V2 ``plan_cspace`` on CUDA."""
     sim, robot, block = _make_sim_robot()
@@ -213,7 +212,6 @@ def test_curobo_v2_plans_a_joint_space_move():
         SimulationManager.flush_cleanup_queue()
 
 
-@pytest.mark.slow
 def test_curobo_v2_multi_env_worlds_are_independent():
     """Apply the first dynamic update to both in-process collision worlds."""
     sim, robot, block = _make_sim_robot(num_envs=2)

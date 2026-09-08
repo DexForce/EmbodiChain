@@ -1234,15 +1234,26 @@ class CuroboPlanner(BasePlanner):
     def _materialize_multi_env_scene_model(
         self, scene_model: "Any | None", batch_size: int
     ) -> list["Any"]:
-        """Clone env 0's voxel scene for every independent collision world."""
+        """Clone env 0's scene dictionary for each independent collision world.
+
+        cuRobo 0.8 accepts one instantiated ``SceneCfg`` for a shared world, but
+        its multi-environment list branch calls ``SceneCfg.create`` on every
+        element. Keep the entries as dictionaries so both analytic and voxel
+        obstacles follow that supported construction path.
+        """
         if batch_size < 1:
             logger.log_error(
                 f"multi-env cuRobo batch_size must be positive, got {batch_size}.",
                 ValueError,
             )
         if scene_model is None:
-            return [self._bindings.Scene.create({}) for _ in range(batch_size)]
-        return [scene_model.clone() for _ in range(batch_size)]
+            return [{} for _ in range(batch_size)]
+        if not isinstance(scene_model, Mapping):
+            raise TypeError(
+                "multi-env cuRobo scene_model must be a scene dictionary, got "
+                f"{type(scene_model).__name__}."
+            )
+        return [deepcopy(scene_model) for _ in range(batch_size)]
 
     def _get_backend(
         self,
@@ -1832,7 +1843,10 @@ class CuroboPlanner(BasePlanner):
             voxel["feature_tensor"] = voxel["feature_tensor"].to(
                 device=self._curobo_device, dtype=torch.float16
             )
-        return self._bindings.Scene.create(runtime_data)
+        # MotionPlannerCfg.create() accepts this dictionary directly. Keeping
+        # the raw representation is required for multi_env, where cuRobo 0.8
+        # applies SceneCfg.create() separately to every list element.
+        return runtime_data
 
     def _world_scene_cache_key(self, world_cfg: CuroboWorldCfg) -> str:
         """Hash physical collision geometry, initial poses, and policy settings."""
