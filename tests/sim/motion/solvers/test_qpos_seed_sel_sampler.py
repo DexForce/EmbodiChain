@@ -27,11 +27,54 @@ from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.motion.solvers.qpos_seed_sel_sampler import (
     QposSeedSelSampler,
+    _pose_error_twist,
 )
 from embodichain.utils.utility import reset_all_seeds
 
 _DB_SIZE = 5000
 _NUM_TARGETS = 24
+
+
+def _rot_x(angle: float) -> torch.Tensor:
+    pose = torch.eye(4)
+    c, s = torch.cos(torch.tensor(angle)), torch.sin(torch.tensor(angle))
+    pose[1, 1], pose[1, 2], pose[2, 1], pose[2, 2] = c, -s, s, c
+    return pose
+
+
+class TestPoseErrorTwist:
+    """Rotation-error stability over the whole rotation range (no sim needed)."""
+
+    def test_exact_pi_rotation(self):
+        cur = torch.eye(4).unsqueeze(0)
+        tgt = _rot_x(torch.pi).unsqueeze(0)
+        twist = _pose_error_twist(cur, tgt)
+        assert abs(twist[0, 3:].norm().item() - torch.pi) < 1e-5
+
+    def test_near_pi_rotation(self):
+        angle = torch.pi - 1e-3
+        cur = torch.eye(4).unsqueeze(0)
+        tgt = _rot_x(angle).unsqueeze(0)
+        twist = _pose_error_twist(cur, tgt)
+        assert abs(twist[0, 3:].norm().item() - angle) < 1e-4
+
+    def test_small_and_moderate_rotations(self):
+        for angle in (1e-4, 0.5, 2.0):
+            cur = torch.eye(4).unsqueeze(0)
+            tgt = _rot_x(angle).unsqueeze(0)
+            twist = _pose_error_twist(cur, tgt)
+            assert abs(twist[0, 3:].norm().item() - angle) < 1e-4
+
+    def test_flipped_candidate_not_assigned_zero_cost(self):
+        """A 180-degree-error candidate must rank behind an aligned one."""
+        target = torch.eye(4).unsqueeze(0)
+        aligned = torch.eye(4).unsqueeze(0)
+        aligned[0, 0, 3] = 0.05  # small position offset, same orientation
+        flipped = _rot_x(torch.pi).unsqueeze(0)  # same position, opposite pose
+        cost_aligned = _pose_error_twist(aligned, target).norm().item()
+        cost_flipped = _pose_error_twist(flipped, target).norm().item()
+        assert cost_flipped > 3.0
+        assert cost_flipped > cost_aligned
 
 
 class TestQposSeedSelSampler:
@@ -183,6 +226,53 @@ class TestQposSeedSelSampler:
         assert sel >= 0.8
         # The database was built lazily by the first get_ik call.
         assert sel_solver._seed_sampler.database_size == _DB_SIZE
+
+    # ------------------------------------------------------------------ capped retrieval
+
+    def test_db_smaller_than_requested_seed_count(self):
+        """Reviewer case: db_size=2, num_samples=5, batch=3 -> (15, dof)."""
+        sampler = self._make_sampler(num_samples=5, db_size=2)
+        target, _ = self._reachable_targets(3)
+        seed = torch.zeros(self.dof)
+        out = sampler.sample(
+            seed, self.lower, self.upper, batch_size=3, target_xpos=target
+        )
+        assert out.shape == (15, self.dof)
+        grouped = out.view(3, 5, self.dof)
+        assert torch.allclose(grouped[:, 0], seed.expand(3, self.dof))
+        # Padded slots must still be valid configurations.
+        assert (grouped[:, 1:] >= self.lower - 1e-6).all()
+        assert (grouped[:, 1:] <= self.upper + 1e-6).all()
+
+    def test_num_samples_exceeds_k_max(self):
+        """Retrieval capped by k_max must still honour the size contract."""
+        sampler = self._make_sampler(num_samples=6, k_max=2)
+        target, _ = self._reachable_targets(4)
+        seed = torch.zeros(self.dof)
+        out = sampler.sample(
+            seed, self.lower, self.upper, batch_size=4, target_xpos=target
+        )
+        assert out.shape == (24, self.dof)
+        grouped = out.view(4, 6, self.dof)
+        assert torch.allclose(grouped[:, 0], seed.expand(4, self.dof))
+        assert (grouped[:, 1:] >= self.lower - 1e-6).all()
+        assert (grouped[:, 1:] <= self.upper + 1e-6).all()
+
+    def test_capped_retrieval_without_caller_seed(self):
+        """use_caller_seed=False must also honour the size contract."""
+        sampler = self._make_sampler(num_samples=5, db_size=2, use_caller_seed=False)
+        target, _ = self._reachable_targets(3)
+        out = sampler.sample(
+            torch.zeros(self.dof),
+            self.lower,
+            self.upper,
+            batch_size=3,
+            target_xpos=target,
+        )
+        assert out.shape == (15, self.dof)
+        grouped = out.view(3, 5, self.dof)
+        assert (grouped >= self.lower - 1e-6).all()
+        assert (grouped <= self.upper + 1e-6).all()
 
     # ------------------------------------------------------------------ rebuild
 

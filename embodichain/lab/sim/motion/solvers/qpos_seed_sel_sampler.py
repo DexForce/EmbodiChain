@@ -42,6 +42,7 @@ from typing import Callable
 import torch
 
 from embodichain.utils import logger
+from embodichain.utils.math import axis_angle_from_quat, quat_from_matrix
 
 from .qpos_seed_sampler import QposSeedSampler
 
@@ -66,23 +67,11 @@ def _pose_error_twist(cur: torch.Tensor, tgt: torch.Tensor) -> torch.Tensor:
     """
     dp = tgt[:, :3, 3] - cur[:, :3, 3]
     rel = tgt[:, :3, :3] @ cur[:, :3, :3].transpose(1, 2)
-    cos = ((rel[:, 0, 0] + rel[:, 1, 1] + rel[:, 2, 2]) - 1.0) * 0.5
-    angle = torch.acos(cos.clamp(-1.0, 1.0))
-    axis = torch.stack(
-        [
-            rel[:, 2, 1] - rel[:, 1, 2],
-            rel[:, 0, 2] - rel[:, 2, 0],
-            rel[:, 1, 0] - rel[:, 0, 1],
-        ],
-        dim=-1,
-    )
-    sin = torch.sin(angle)
-    scale = torch.where(
-        sin.abs() < 1e-6,
-        torch.full_like(sin, 0.5),
-        angle / (2.0 * sin + 1e-20),
-    )
-    return torch.cat([dp, axis * scale.unsqueeze(-1)], dim=-1)
+    # Quaternion route: numerically stable over the whole rotation range,
+    # including relative rotations at and near 180 degrees where a direct
+    # skew-symmetric axis extraction degenerates to zero.
+    rotvec = axis_angle_from_quat(quat_from_matrix(rel.contiguous()))
+    return torch.cat([dp, rotvec], dim=-1)
 
 
 class QposSeedSelSampler(QposSeedSampler):
@@ -234,6 +223,43 @@ class QposSeedSelSampler(QposSeedSampler):
         order = step.pow(2).sum(dim=-1).argsort(dim=1)
         return self._db_qpos[torch.gather(indices, 1, order[:, :k])]
 
+    def _pad_with_random(
+        self,
+        seeds: torch.Tensor,
+        count: int,
+        lower_limits: torch.Tensor,
+        upper_limits: torch.Tensor,
+    ) -> torch.Tensor:
+        """Pad retrieved seeds up to ``count`` slots per target.
+
+        Retrieval is capped by the database size and by ``k_max``, so it can
+        return fewer candidates than requested. Shortfall slots are filled
+        with uniform random draws within the limits — the parent sampler's
+        behaviour — so the ``batch_size * num_samples`` output contract holds
+        for every configuration.
+
+        Args:
+            seeds: Retrieved seeds with shape ``(B, k_got, dof)``.
+            count: Required number of slots per target.
+            lower_limits: ``(dof,)`` lower joint limits.
+            upper_limits: ``(dof,)`` upper joint limits.
+
+        Returns:
+            torch.Tensor: Seeds with shape ``(B, count, dof)``.
+        """
+        shortfall = count - seeds.shape[1]
+        if shortfall <= 0:
+            return seeds[:, :count]
+        random_fill = torch.rand(
+            seeds.shape[0],
+            shortfall,
+            self.dof,
+            device=seeds.device,
+            dtype=seeds.dtype,
+        )
+        random_fill = lower_limits + random_fill * (upper_limits - lower_limits)
+        return torch.cat([seeds, random_fill], dim=1)
+
     # ------------------------------------------------------------------ sampling
 
     def sample(
@@ -258,7 +284,11 @@ class QposSeedSelSampler(QposSeedSampler):
         Returns:
             torch.Tensor: ``(batch_size * num_samples, dof)`` joint seeds,
             target-major, slot ``0`` holding the caller seed unless
-            ``use_caller_seed=False``.
+            ``use_caller_seed=False``. The shape contract holds for every
+            configuration: when retrieval returns fewer candidates than
+            requested (database smaller than the seed count, or
+            ``num_samples - 1 > k_max``), the shortfall is filled with
+            uniform random draws within the limits.
         """
         if target_xpos is None:
             return super().sample(qpos_seed, lower_limits, upper_limits, batch_size)
@@ -287,12 +317,18 @@ class QposSeedSelSampler(QposSeedSampler):
             n_retrieved = self.num_samples - 1
             if n_retrieved == 0:
                 return seed_head.reshape(-1, self.dof)
-            retrieved = self._query(target_xpos, n_retrieved)
+            retrieved = self._pad_with_random(
+                self._query(target_xpos, n_retrieved),
+                n_retrieved,
+                lower_limits,
+                upper_limits,
+            )
             joint_seeds = torch.cat([seed_head, retrieved], dim=1)
         else:
-            joint_seeds = self._query(target_xpos, self.num_samples)
-            if joint_seeds.shape[1] < self.num_samples:
-                # Database smaller than num_samples: pad with the caller seed.
-                pad = seed_head.repeat(1, self.num_samples - joint_seeds.shape[1], 1)
-                joint_seeds = torch.cat([joint_seeds, pad], dim=1)
+            joint_seeds = self._pad_with_random(
+                self._query(target_xpos, self.num_samples),
+                self.num_samples,
+                lower_limits,
+                upper_limits,
+            )
         return joint_seeds.reshape(-1, self.dof)
