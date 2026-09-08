@@ -104,5 +104,5 @@ See Also
 --------
 
 - :doc:`/tutorial/robot` — Using robots in simulation
-- :doc:`/overview/sim/solvers/index` — IK solver reference
+- :doc:`/overview/sim/motion/solvers/index` — IK solver reference
 - :doc:`/resources/robot/index` — Existing robot documentation

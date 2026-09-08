@@ -1,390 +1,121 @@
-# EmbodiChain — Developer Reference
-
-## Project Agent Context Routing
-
-EmbodiChain keeps agent-facing context in a structured topic registry:
-
-- `agent_context/` — agent-readable Markdown context, indexed by `agent_context/MAP.yaml`
-- `docs/source/` — human-facing Sphinx documentation
-- `.agents/skills/project-dev-context/` — the skill that routes project-context and codebase-navigation requests
-- `.claude/skills/` and `.github/copilot/` — thin tool-specific adapters that point back to `.agents/skills/`
-
-When a request says things like:
-
-- `reference project development docs`
-- `reference project context`
-- `where is X`
-- `where do I change X`
-- `配置或默认值在哪里`
-- `入口或注册逻辑在哪里`
-
-the agent should:
-
-1. Read `agent_context/MAP.yaml` first
-2. Resolve the topic by `id`, `aliases`, then `keywords`
-3. For context reads, load only the matched Markdown files under
-   `agent_context/`
-4. For navigation, verify matched facts against the current
-   `source_of_truth`; if no topic matches, use `rg --files` and `rg -n`
-   against the current tree
-5. Report the owning entry point, resolution path, recommended change site,
-   and focused validation surface when relevant
-6. Avoid reading `docs/source/` unless the user explicitly asks for the
-   Sphinx documentation
-
-Available topics: `simulation-system`, `env-framework`,
-`manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`,
-`sim-visualization`, `motion-planning`, `atomic-actions`, `task-programs`,
-`rl-learning`, `configclass-pattern`, `randomization`.
-
----
-
-## Package Name
-
-**IMPORTANT**: The distribution and primary Python package name is `embodichain`
-(all lowercase, one word). The same wheel also bundles the official tasks under
-the `embodichain_tasks` import package.
-- Repository folder: `EmbodiChain` (PascalCase)
-- Distribution/core package: `embodichain` (lowercase)
-- Bundled task import package: `embodichain_tasks`
-
-## Project Structure
-
-```
-EmbodiChain/
-├── .agents/                      # Canonical in-repo agent skills
-│   └── skills/
-├── .claude/                      # Claude adapters for canonical skills
-│   └── skills/
-├── embodichain/                  # Main Python package
-│   ├── data/                     # Assets, datasets, constants, enums
-│   ├── data_pipeline/            # Datasets and online data streaming
-│   ├── gen_sim/                  # Scene Engine and SimReady generation pipelines
-│   ├── learning/                 # Learning systems
-│   │   └── rl/                   # RL: PPO/GRPO/APG, buffers, collectors, policies
-│   ├── lab/                      # Simulation lab
-│   │   ├── task_program/         # Embodied Task Program language, semantics, compiler, runtime, integrations
-│   │   │   ├── language/         # Schema/AST, strict decoder, validation, loader
-│   │   │   ├── semantics/        # Semantic Calls, scene/profile/effect/evidence contracts
-│   │   │   ├── compiler/         # AST compilation and Semantic Call lowering
-│   │   │   ├── runtime/          # Sequential/parallel Semantic Call execution
-│   │   │   └── integrations/     # Explicit environment and simulation assembly
-│   │   ├── visualization/        # Browser visualization protocol, runtime, and Viser backend
-│   │   ├── gym/                  # OpenAI Gym-compatible environments
-│   │   │   ├── envs/             # BaseEnv, EmbodiedEnv, narrow Task Program Gym bridge
-│   │   │   │   ├── managers/     # Observation, event, reward, record, dataset managers
-│   │   │   │   │   └── randomization/  # Physics, geometry, spatial, visual randomizers
-│   │   │   │   ├── action_bank/  # Configurable action primitives
-│   │   │   │   └── wrapper/      # Env wrappers (e.g. no_fail)
-│   │   │   └── utils/            # Gym registration, misc helpers
-│   │   ├── sim/                  # Simulation core
-│   │   │   ├── atomic_actions/   # Typed planning and execution primitives
-│   │   │   ├── objects/          # Robot, RigidObject, Articulation, Light, Gizmo, SoftObject
-│   │   │   ├── sensors/          # Camera, StereoCamera, BaseSensor
-│   │   │   ├── robots/           # Robot-specific configs and params (dexforce_w1, cobotmagic)
-│   │   │   ├── planners/         # Motion planners (TOPPRA, motion generator)
-│   │   │   ├── solvers/          # IK solvers (SRS, OPW, pink, pinocchio, pytorch)
-│   │   │   └── workspace/        # Reachability analysis and runtime workspace queries
-│   │   ├── devices/              # Real-device controllers
-│   │   └── scripts/              # Environment, preview, and analysis entry points
-│   ├── toolkits/                 # Standalone tools
-│   │   ├── acd/                  # URDF convex-decomposition CLI
-│   │   ├── graspkit/pg_grasp/    # Parallel-gripper grasp sampling
-│   │   └── urdf_assembly/        # URDF builder utilities
-│   └── utils/                    # Shared utilities
-│       ├── configclass.py        # @configclass decorator
-│       ├── logger.py             # Project logger
-│       ├── math/                 # Tensor math helpers
-│       └── warp/kinematics/      # GPU kinematics via Warp
-├── embodichain_tasks/            # Official tasks/configs bundled in the main wheel as an import package
-├── docs/                         # Sphinx documentation source + build
-│   └── source/                   # .md doc pages (overview, quick_start, features, resources)
-├── tests/                        # Test suite
-├── .github/                      # CI workflows, issue/PR templates, Copilot adapters
-├── pyproject.toml                # Distribution metadata and unified CLI entry point
-├── setup.py                      # Package setup
-└── VERSION                       # Package version file
-```
-
-Official tasks use a task-first layout:
-
-- Import-registered Python entry point: `embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`
-- Import-registered tasks may keep an inline runnable deployment at
-  `embodichain_tasks/configs/tasks/<category-path>/<task>/env.{json,yaml}`
-- Componentized tasks use a reusable physical-environment `env.yaml`, owning
-  exactly one explicit `physics: default|newton` backend, its optional matching
-  `physics_config`, simulation-scene entities, and ordinary environment values,
-  plus one or more runnable `task.<embodiment>.yaml` deployments; the reusable
-  environment contains no `id`, robot, sensor, or Task Program fields
-- Optional Task Program components: `<task config>/task_program/`, containing
-  `program.yaml` and `integration.yaml`; the integration owns its nested
-  semantic `scene_binding`
-- Reusable embodiment and execution-policy components:
-  `embodichain_tasks/configs/components/{embodiments,execution_policies}/`.
-  An embodiment owns one simulation robot, its sensor suite, and its Task
-  Program-facing `skill_profile` declaration when that semantic metadata is
-  needed.
-- Optional RL configuration: `<task config>/agents/<algorithm>.{json,yaml}`
-
-The category path starts with a top-level task family and may include a
-subdomain. For example, tableware tasks belong under
-`manipulation/tableware`, while a general manipulation task can live directly
-under `manipulation`.
-
-Keep `@register_env` in the task-named module. Do not create a same-named
-per-task Python package for a single entry point, or Python `scenario` / `mdp`
-modules when the existing JSON/YAML config and manager functors express the
-task. Organize tasks by task family, optional subdomain, and task identity,
-not by solution method such as `task_program` or `rl`.
-
-Any Gym deployment, including an import-registered handwritten-demo task, may
-select `environment.component`, `embodiment.component`, and `scene.component`.
-`config_to_cfg()` expands those components before ordinary environment parsing.
-A deployment must choose either an environment component or inline environment
-and scene fields, and either an embodiment component or inline
-`robot`/`sensor` fields, never both. An embodiment
-component may omit `skill_profile`. A scene component is always physical-only;
-Task Program semantic roots and affordances live in the task integration's
-nested `scene_binding`. The original inline Gym format remains supported.
-Every inline runnable Gym config must declare exactly one
-`physics: default|newton` backend. An environment component owns both `physics`
-and `physics_config`; its deployment cannot repeat or override either field.
-Launcher `--physics` may confirm the file-owned backend but cannot switch it.
-Use a separate environment config for each backend and keep every
-`physics_config` field valid for the backend declared in that same file.
-
-A supported configuration-defined Task Program may omit `<task>.py`:
-declare `environment.component`,
-`task_program.{program,integration,execution_policy}`, and
-`embodiment.component` in a runnable task deployment. The reusable environment
-is independent of Task Program and can also be selected by handwritten tasks.
-`config_to_cfg()` composes those typed YAML components,
-checks that scene-binding targets exist in the physical scene, validates the
-scene/embodiment contracts, binds the trusted integration IDs into the
-otherwise embodiment-independent program, and registers the common
-`EmbodiedEnv`. Component files do not use compatibility `version` fields.
-
----
-
-## Code Style
-
-### Formatting
-
-- **Formatter**: `black==26.3.1` — run before every commit.
-  ```bash
-  black .
-  ```
-- Use the `/pre-commit-check` skill before committing to catch all CI violations locally.
-
-### File Headers
-
-Every source file begins with the Apache 2.0 copyright header:
-
-```python
-# ----------------------------------------------------------------------------
-# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ----------------------------------------------------------------------------
-```
-
-### Type Annotations
-
-- Use full type hints on all public APIs.
-- Use `from __future__ import annotations` at the top of every file.
-- Use `TYPE_CHECKING` guards for circular-import-safe imports.
-- Prefer `A | B` over `Union[A, B]`.
-
-### Configuration Pattern (`@configclass`)
-
-All configuration objects use the `@configclass` decorator (similar to Isaac Lab's pattern):
-
-```python
-from embodichain.utils import configclass
-from dataclasses import MISSING
-
-@configclass
-class MyManagerCfg:
-    param_a: float = 1.0
-    param_b: str = MISSING  # required — must be set by caller
-```
-
-### Functor / Manager Pattern
-
-Managers (observation, event, reward, randomization) use a `Functor`/`FunctorCfg` pattern with two styles:
-
-- **Function-style**: a plain function with signature `(env, env_ids, ...) -> None`.
-- **Class-style**: a class inheriting `Functor`, with `__init__(cfg, env)` and `__call__(env, env_ids, ...)`.
-
-Registered in a manager config via `FunctorCfg(func=..., params={...})`.
-
-Use the `/add-functor` skill to scaffold new functors with the correct signature and module placement.
-
-### Docstrings
-
-Use Google-style docstrings with Sphinx directives:
-
-```python
-def my_function(env, env_ids, scale: float = 1.0) -> None:
-    """Short one-line summary.
-
-    Longer description if needed.
-
-    .. attention::
-        Note a non-obvious behavior here.
-
-    .. tip::
-        Helpful usage hint.
-
-    Args:
-        env: The environment instance.
-        env_ids: Target environment IDs.
-        scale: Scaling factor applied to the result.
-
-    Returns:
-        Description if not None.
-
-    Raises:
-        ValueError: If the entity type is unsupported.
-    """
-```
-
-### Module Exports
-
-Define `__all__` in every public module to declare the exported API:
-
-```python
-__all__ = ["MyClass", "my_function"]
-```
-
-### Documentation
-
-- Docs are built with **Sphinx** using **Markdown** source files (`docs/source/`).
-- Check public API coverage without modifying files:
-  ```bash
-  python docs/scripts/check_api_docs.py
-  ```
-- Use the `/update-api-docs` skill to generate or update documentation for
-  missing public exports; the checker itself never writes documentation.
-- Build locally:
-  ```bash
-  pip install -r docs/requirements.txt
-  cd docs && make html
-  # Preview at docs/build/html/index.html
-  ```
-- If you encounter locale errors: `export LC_ALL=C.UTF-8; export LANG=C.UTF-8`
-
----
-
-## Contributing Guide
-
-### Bug Reports
-
-Use the **Bug Report** issue template (`.github/ISSUE_TEMPLATE/bug.md`). Title format: `[Bug Report] Short description`.
-
-Include:
-- Clear description of the bug
-- Minimal reproduction steps and stack trace
-- System info: commit hash, OS, GPU model, CUDA version, GPU driver version
-- Confirm you checked for duplicate issues
-
-### Feature Requests / Proposals
-
-Use the **Proposal** issue template (`.github/ISSUE_TEMPLATE/proposal.md`). Title format: `[Proposal] Short description`.
-
-Include:
-- Description of the feature and its core capabilities
-- Motivation and problem it solves
-- Any related existing issues
-
-### Pull Requests
-
-1. **Fork** the repository and create a focused branch.
-2. **Keep PRs small** — one logical change per PR.
-3. **Format** the code with `black==26.3.1` before submitting.
-4. **Update documentation** for any public API changes.
-5. **Add tests** that prove your fix or feature works.
-6. Use the `/pr` skill to create PRs following the project's template and label conventions.
-
-Use the `/review-pr` skill for read-only, evidence-backed review of a PR,
-branch, commit, patch, or working-tree diff. Keep review separate from
-`/pre-commit-check`, which runs local readiness gates, and `/pr`, which drafts
-or creates the pull request.
-
-### Adding a New Robot
-
-Refer to `docs/source/guides/add_robot.rst` for a detailed guide. The basic structure requires:
-
-- A config class (inheriting from `RobotCfg`)
-- URDF configuration for the robot
-- Control parts definition
-- IK solver configuration
-- Drive properties for joint physics
-
-For complex robots with multiple variants (like `dexforce_w1`), use a package structure with `types.py`, `params.py`, `utils.py`, and `cfg.py`.
-
-Also add robot documentation in `docs/source/resources/robot/` (see existing examples: `cobotmagic.md`, `dexforce_w1.md`) and update `docs/source/resources/robot/index.rst` to include the new robot.
-
-### Adding a New Task Environment
-
-Use the `/add-task-env` skill to route a new task to an environment-only
-baseline, handwritten expert trajectory, Task Program expert trajectory, or RL
-implementation. The skill creates a Python task entry point only when the
-selected route requires one.
-
-### Adding a Task Program
-
-Use the `/add-task-program` skill to author a program, generate its trusted
-integration configuration, attach embodiment-specific deployments, or validate
-and repair an existing configured Task Program.
-
-### Adding an Embodiment Component
-
-Use the `/add-embodiment-component` skill to package one simulation robot,
-its sensor suite, and an optional Task Program-facing `skill_profile` for reuse
-across tasks.
-
-### Adding a Semantic Call
-
-Use the `/add-semantic-call` skill to expose an Atomic Skill through a
-registered Task Program call or to make a deliberate built-in language change.
-
-### Adding Functors
-
-Use the `/add-functor` skill to scaffold observation, reward, event, action, dataset, or randomization functors with the correct signature, style, and module placement.
-
-### Writing Tests
-
-Use the `/add-test` skill to scaffold tests with the correct file placement, style (pytest vs class), mock patterns, and project conventions.
-
----
-
-## Skills Quick Reference
-
-Canonical skill instructions live under `.agents/skills/<skill>/SKILL.md`.
-Tool-specific adapter files should stay thin and point back to the canonical skill.
-
-| Skill | Command | Purpose |
-|-------|---------|---------|
-| Add Atomic Action | `/add-atomic-action` | Scaffold a new simulation atomic action |
-| Add Task Env | `/add-task-env` | Route and scaffold environment, expert, and RL task variants |
-| Add Task Program | `/add-task-program` | Author, integrate, deploy, validate, or repair a Task Program |
-| Add Embodiment Component | `/add-embodiment-component` | Add a reusable robot/sensor/skill-profile component |
-| Add Semantic Call | `/add-semantic-call` | Expose an Atomic Skill as a Task Program Semantic Call |
-| Add Functor | `/add-functor` | Scaffold observation/reward/event/action/dataset/randomization functors |
-| Add Test | `/add-test` | Scaffold tests following project conventions |
-| Update API Docs | `/update-api-docs` | Document public exports reported by the read-only API checker |
-| Pre-Commit Check | `/pre-commit-check` | Run all local CI checks before committing |
-| Review PR | `/review-pr` | Review changes for actionable regressions and architecture violations |
-| Create PR | `/pr` | Create a PR following the project template |
-| Benchmark | `/benchmark` | Write benchmark scripts for EmbodiChain modules |
+# EmbodiChain — Developer reference
+
+## Project context
+
+Read `agent_context/MAP.yaml` first for project context or code navigation,
+then follow [.agents/skills/project-dev-context/SKILL.md](.agents/skills/project-dev-context/SKILL.md).
+Load only the matched overview; follow its detail links when the request needs
+them. Verify relevant facts against current code before recommending a change.
+`MAP.yaml` is the sole topic inventory; conventions are loaded for context
+maintenance, not ordinary reads. Do not read `docs/source/` unless the user
+asks for Sphinx documentation.
+
+Canonical skills live under `.agents/skills/`. `.claude/skills/` and
+`.github/copilot/` contain thin adapters, not independent instructions.
+
+## Package and architecture
+
+The distribution and primary import package are **`embodichain`**, lowercase
+and one word. The repository directory is `EmbodiChain`; the same wheel
+bundles official tasks as the **`embodichain_tasks`** import package.
+
+| Area | Owner |
+|---|---|
+| CLI dispatch / task discovery | `embodichain/cli/` |
+| Shared numerical algorithms | `embodichain/compute/` |
+| Assets and download registry | `embodichain/data/` |
+| Online datasets and depth video | `embodichain/data_pipeline/` |
+| Scene Engine and SimReady generation | `embodichain/gen_sim/` |
+| Simulation world, objects, sensors, solvers, planning | `embodichain/lab/sim/` |
+| Gym environments and manager functors | `embodichain/lab/gym/` |
+| Task Program language, semantics, compiler, runtime and integrations | `embodichain/lab/task_program/` |
+| Browser visualization | `embodichain/lab/visualization/` |
+| RL algorithms, policies, collectors and trainers | `embodichain/learning/rl/` |
+| Real-device controllers / standalone tools | `embodichain/lab/devices/`, `embodichain/toolkits/` |
+| Shared config and math utilities | `embodichain/utils/` |
+| Official task entry points / components / deployments | `embodichain_tasks/` |
+
+Shared numerical algorithms belong to `compute/<domain>/`, with Warp kernels
+under private `_warp/` packages. Compute must not import `lab`, simulation
+objects or environment managers. Stateful solvers remain in `lab/sim/motion/solvers`;
+contact-data adaptation belongs to sensors. New trajectory consumers import
+`embodichain.compute.trajectory`; existing `utils/warp` and pure
+`lab/sim/utility/action_utils` exports remain compatibility surfaces.
+
+Motion APIs live under `embodichain.lab.sim.motion.{solvers,planners,workspace,expansion}`.
+`motion/motion_generator.py` owns `MotionGenerator`, `MotionGenCfg`, and
+`MotionGenOptions`, composing the planner backends. Planners do not re-export it.
+The motion parent and workspace analyzer exports remain lazy to preserve Robot
+initialization. Trajectory augmentation owns candidates, operators, coverage and
+generation bookkeeping; execution, reset and persistence belong to host integrations.
+
+## Task ownership
+
+Organize official tasks by family, optional subdomain and task identity.
+Keep import registration in the task-named module at
+`embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`; configs belong
+under `embodichain_tasks/configs/tasks/<category-path>/<task>/`. Do not add a
+same-named Python package for one entry point or `scenario` / `mdp` modules when
+existing config fields and manager functors express the task.
+
+Physical environments, robot/sensor embodiments, and Task Program semantic
+integration have separate owners. Component selections cannot duplicate the
+inline fields they own. A supported configuration-defined Task Program may
+omit the Python task module. Follow the authoritative
+[configuration and registration contract](agent_context/topics/env-framework/configuration.md)
+and `/add-task-env` before adding a deployment.
+
+Every inline runnable Gym config and reusable physical environment declares
+exactly one `physics: default|newton` backend. An environment component owns
+its optional matching `physics_config`; a deployment cannot repeat or override
+either field. Launcher `--physics` may confirm the file-owned backend but does
+not switch it. Use a separate environment config for each backend.
+
+## Code and validation
+
+- Run **`black==26.3.1`**, using `black .`, before every commit.
+- Use `/pre-commit-check` for proportional checks. New fixes/features need
+  focused tests that prove their behavior; use `/add-test` for project patterns.
+- New source files use the Apache 2.0 copyright header from
+  [.agents/skills/pre-commit-check/SKILL.md](.agents/skills/pre-commit-check/SKILL.md),
+  with DexForce's 2021–2026 copyright. Preserve existing third-party licenses.
+- Add `from __future__ import annotations`; fully annotate public APIs, prefer
+  `A | B`, and guard circular imports with `TYPE_CHECKING`.
+- Use `@configclass` for configuration objects. Annotated `MISSING` defaults
+  require `cfg.validate()` after assembly; construction may leave them unresolved.
+- Define `__all__` for public modules. Use Google-style docstrings with Sphinx
+  directives where they explain non-obvious behavior.
+- Manager functors have manager-specific signatures; use `/add-functor`.
+- Update public API docs with `/update-api-docs`; the read-only coverage gate is
+  `python docs/scripts/check_api_docs.py`. Sphinx sources live in `docs/source/`;
+  build with `pip install -r docs/requirements.txt`, then `make -C docs html`.
+  For locale errors use `LC_ALL=C.UTF-8` and `LANG=C.UTF-8`.
+- When routed behavior changes, review affected context in the same change:
+  `python .agents/skills/project-dev-context/scripts/context.py affected --base origin/main`.
+  Follow the context skill for updating and checking it.
+
+## Contribution routes
+
+Use `.github/ISSUE_TEMPLATE/bug.md` for `[Bug Report]` issues with a minimal
+reproduction and commit/OS/GPU/CUDA/driver details; check duplicates first.
+Use `.github/ISSUE_TEMPLATE/proposal.md` for `[Proposal]` motivation and scope.
+Keep branches and PRs focused on one logical change and use the PR template.
+
+| Skill | Use |
+|---|---|
+| `/project-dev-context` | Navigate, read, refresh or add project context |
+| `/add-task-env` | Select environment-only, handwritten expert, Task Program or RL task route |
+| `/add-task-program` | Author, integrate, deploy, validate or repair a program |
+| `/add-embodiment-component` | Reuse a robot, sensors and optional skill profile |
+| `/add-semantic-call` | Expose an Atomic Skill as a Semantic Call |
+| `/add-atomic-action` | Add typed action planning/execution |
+| `/add-robot` | Add robot config and kinematic-chain wiring |
+| `/add-solver` | Add IK/FK solver, docs, tests and benchmark |
+| `/add-functor` | Add observation, reward, event, action, dataset or randomization operation |
+| `/add-test` | Add focused tests with project conventions |
+| `/benchmark` | Write a benchmark using project patterns |
+| `/update-api-docs` | Synchronize public API documentation |
+| `/pre-commit-check` | Validate readiness proportionally |
+| `/review-pr` | Review a change for evidence-backed regressions |
+| `/pr` | Draft or create a single or stacked PR |
+| `/release` | Prepare or publish release artifacts |

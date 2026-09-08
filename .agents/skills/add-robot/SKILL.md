@@ -47,7 +47,7 @@ A cfg's `_build_defaults` must populate:
 - `control_parts` (Dict[str, List[str]]; joint names support regex)
 - `solver_cfg` (Dict[str, SolverCfg]; keys match `control_parts`)
 - `joint_drive_props` (JointDrivePropertiesCfg)
-- `attrs` (RigidBodyAttributesCfg)
+- `attrs` (RigidBodyPhysicsCfg)
 
 `build_pk_serial_chain` must read from `_pk_urdf_path` (a property for
 constant-path robots, a method for variant-dependent paths). The PK chain's DOF
@@ -150,7 +150,7 @@ Do not copy those semantic declarations into the robot class.
 | `control_parts` | Dict[str, List[str]] | Joint groups for control |
 | `solver_cfg` | Dict[str, SolverCfg] | IK solver configurations |
 | `joint_drive_props` | JointDrivePropertiesCfg | Joint drive, limits, friction, and armature |
-| `attrs` | RigidBodyAttributesCfg | Rigid-body physics attributes |
+| `attrs` | RigidBodyPhysicsCfg | Rigid-body physics attributes |
 | variant fields | enum / str / bool | Optional subclass fields |
 | `_pk_urdf_path` | property or method → str | URDF for the FK/IK serial chain |
 
@@ -160,5 +160,5 @@ Do not copy those semantic declarations into the robot class.
 - Registry: `embodichain/lab/sim/robots/__init__.py`
 - Docs: `docs/source/resources/robot/<name>.md`
 - Tests: `tests/sim/objects/test_robot_cfg.py`
-- Base class: `embodichain/lab/sim/cfg.py` (`RobotCfg`)
+- Base class: `embodichain/lab/sim/cfg/robot.py` (`RobotCfg`)
 - Guide: `docs/source/guides/add_robot.rst` · Tutorial: `docs/source/tutorial/add_robot.rst`

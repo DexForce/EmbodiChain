@@ -27,7 +27,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
     RobotCfg,
 )
-from embodichain.lab.sim.workspace import RobotWorkspaceCfg
+from embodichain.lab.sim.motion.workspace import RobotWorkspaceCfg
 from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
 from embodichain.lab.sim.robots.dexforce_w1.params import W1ArmKineParams
 from embodichain.lab.sim.robots.dexforce_w1.types import (
@@ -46,7 +46,7 @@ from embodichain.lab.sim.robots.dexforce_w1.utils import (
     build_dexforce_w1_assembly_urdf_cfg,
     build_dexforce_w1_control_parts,
 )
-from embodichain.lab.sim.solvers import SRSSolverCfg
+from embodichain.lab.sim.motion.solvers import SRSSolverCfg
 from embodichain.utils import configclass
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 
@@ -439,7 +439,7 @@ def test_robotcfg_to_dict_roundtrip():
 from embodichain.lab.sim.robots.cobotmagic import CobotMagicCfg
 from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
 from embodichain.lab.sim.robots.ur_robot import URRobotCfg
-from embodichain.lab.sim.solvers import OPWSolverCfg
+from embodichain.lab.sim.motion.solvers import OPWSolverCfg
 
 
 def test_cobotmagic_from_dict_and_roundtrip():
@@ -560,7 +560,7 @@ def test_cobotmagic_pk_dof_matches_control_parts():
 # URRobotCfg -- UR family (ur3 / ur3e / ur5 / ur5e / ur10 / ur10e)
 # --------------------------------------------------------------------------- #
 
-from embodichain.lab.sim.solvers import URSolverCfg
+from embodichain.lab.sim.motion.solvers import URSolverCfg
 
 UR_TYPES = ["ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e"]
 

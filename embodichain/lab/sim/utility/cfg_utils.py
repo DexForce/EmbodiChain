@@ -23,7 +23,7 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
 )
 from embodichain.lab.sim.cfg.rigid import _rigid_body_physics_from_dict
-from embodichain.lab.sim.solvers import SolverCfg
+from embodichain.lab.sim.motion.solvers import SolverCfg
 from embodichain.utils import is_configclass, logger
 
 _ConfigT = TypeVar("_ConfigT")

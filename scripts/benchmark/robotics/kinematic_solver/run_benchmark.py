@@ -35,9 +35,12 @@ import psutil
 import torch
 
 from embodichain.data import get_data_path
-from embodichain.lab.sim.solvers.opw_solver import OPWSolverCfg
-from embodichain.lab.sim.solvers.pytorch_solver import PytorchSolver, PytorchSolverCfg
-from embodichain.lab.sim.solvers.ur_solver import URSolver, URSolverCfg
+from embodichain.lab.sim.motion.solvers.opw_solver import OPWSolverCfg
+from embodichain.lab.sim.motion.solvers.pytorch_solver import (
+    PytorchSolver,
+    PytorchSolverCfg,
+)
+from embodichain.lab.sim.motion.solvers.ur_solver import URSolver, URSolverCfg
 
 OPW_LOWER_LIMITS = [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944]
 OPW_UPPER_LIMITS = [2.618, 3.14159, 0.0, 1.745, 1.22, 2.0944]

@@ -15,7 +15,7 @@ gold standard for structure and style.
 - User asks to "add a solver", "add an IK solver", "add a kinematic solver"
 - A new robot family needs a closed-form / numerical / Warp-kernel IK backend
 - The request names a solver that does not yet exist under
-  `embodichain/lab/sim/solvers/`
+  `embodichain/lab/sim/motion/solvers/`
 
 ## The Four Artifacts
 
@@ -24,18 +24,18 @@ the conventions below.
 
 | # | Artifact | Path |
 |---|----------|------|
-| 1 | Solver module | `embodichain/lab/sim/solvers/<name>_solver.py` |
+| 1 | Solver module | `embodichain/lab/sim/motion/solvers/<name>_solver.py` |
 | 2 | (GPU/Warp only) Warp kernel | `embodichain/utils/warp/kinematics/<name>_solver.py` |
-| 3 | Sphinx docs page | `docs/source/overview/sim/solvers/<name>_solver.md` |
-| 4 | Unit test | `tests/sim/solvers/test_<name>_solver.py` |
+| 3 | Sphinx docs page | `docs/source/overview/sim/motion/solvers/<name>_solver.md` |
+| 4 | Unit test | `tests/sim/motion/solvers/test_<name>_solver.py` |
 | 5 | Benchmark entry | extend `scripts/benchmark/robotics/kinematic_solver/run_benchmark.py` |
 
 Plus two registration edits:
 
 - Export the new `Cfg` + `Solver` classes from
-  `embodichain/lab/sim/solvers/__init__.py`.
+  `embodichain/lab/sim/motion/solvers/__init__.py`.
 - Add the docs page to the toctree in
-  `docs/source/overview/sim/solvers/index.rst`.
+  `docs/source/overview/sim/motion/solvers/index.rst`.
 
 ## Steps
 
@@ -53,7 +53,7 @@ Ask the user (only what is not already stated):
 
 ### 2. Write the Solver Module
 
-File: `embodichain/lab/sim/solvers/<name>_solver.py`
+File: `embodichain/lab/sim/motion/solvers/<name>_solver.py`
 
 Required pieces (mirror `ur_solver.py`):
 
@@ -90,7 +90,7 @@ from __future__ import annotations
 import torch
 import numpy as np
 from embodichain.utils import configclass
-from embodichain.lab.sim.solvers import SolverCfg, BaseSolver
+from embodichain.lab.sim.motion.solvers import SolverCfg, BaseSolver
 from embodichain.data import get_data_path
 
 
@@ -172,7 +172,7 @@ For pure-PyTorch / numerical solvers, skip this step entirely and implement
 ### 4. Register in `__init__.py`
 
 Add the import + keep `__all__` (if present) consistent in
-`embodichain/lab/sim/solvers/__init__.py`:
+`embodichain/lab/sim/motion/solvers/__init__.py`:
 
 ```python
 from .foo_solver import FooSolverCfg, FooSolver
@@ -180,7 +180,7 @@ from .foo_solver import FooSolverCfg, FooSolver
 
 ### 5. Write the Docs Page
 
-File: `docs/source/overview/sim/solvers/<name>_solver.md` — mirror the structure
+File: `docs/source/overview/sim/motion/solvers/<name>_solver.md` — mirror the structure
 of `ur_solver.md`:
 
 1. `# <Name>Solver` — one-paragraph intro (what it solves, why it's fast / what
@@ -198,7 +198,7 @@ of `ur_solver.md`:
 7. **How It Works** — numbered explanation of the solve pipeline.
 8. **References** — markdown links.
 
-Then add the page to the toctree in `docs/source/overview/sim/solvers/index.rst`:
+Then add the page to the toctree in `docs/source/overview/sim/motion/solvers/index.rst`:
 
 ```rst
 .. toctree::
@@ -211,7 +211,7 @@ Then add the page to the toctree in `docs/source/overview/sim/solvers/index.rst`
 
 ### 6. Write the Unit Test
 
-File: `tests/sim/solvers/test_<name>_solver.py` — follow `test_ur_solver.py`
+File: `tests/sim/motion/solvers/test_<name>_solver.py` — follow `test_ur_solver.py`
 exactly:
 
 - Apache header + `from __future__ import annotations` (after header).
@@ -266,16 +266,16 @@ to the `benchmark` skill (`.agents/skills/benchmark/SKILL.md`).
 
 ```bash
 conda activate embodichain
-black embodichain/lab/sim/solvers/<name>_solver.py
+black embodichain/lab/sim/motion/solvers/<name>_solver.py
 black embodichain/utils/warp/kinematics/<name>_solver.py   # if added
-black tests/sim/solvers/test_<name>_solver.py
+black tests/sim/motion/solvers/test_<name>_solver.py
 black scripts/benchmark/robotics/kinematic_solver/run_benchmark.py
 ```
 
 Run the unit test (CPU class is enough for a quick check):
 
 ```bash
-pytest tests/sim/solvers/test_<name>_solver.py::TestFooSolver -v
+pytest tests/sim/motion/solvers/test_<name>_solver.py::TestFooSolver -v
 ```
 
 Smoke-run the benchmark for the new solver only:
@@ -296,7 +296,7 @@ Finally, run the `/pre-commit-check` skill to catch all CI violations locally.
 - [ ] Solver inherits `BaseSolver`, sets `self.dof`, implements `get_ik`
 - [ ] `__all__` declared in the solver module
 - [ ] Google-style docstrings with Sphinx directives (`.. tip::`, `.. attention::`)
-- [ ] Cfg + Solver exported from `embodichain/lab/sim/solvers/__init__.py`
+- [ ] Cfg + Solver exported from `embodichain/lab/sim/motion/solvers/__init__.py`
 - [ ] Docs page added to `index.rst` toctree
 - [ ] Test covers FK↔IK round-trip + unreachable-pose failure, CPU & CUDA classes
 - [ ] Benchmark entry added with CPU (+CUDA) timing, accuracy, and the 3-table report
@@ -308,8 +308,8 @@ Finally, run the `/pre-commit-check` skill to catch all CI violations locally.
 |---------|-----|
 | Reimplementing FK / TCP / joint limits in the solver | Reuse `BaseSolver.get_fk`, `set_tcp`, `set_qpos_limits` |
 | Putting the Warp kernel inside the solver module | Put `@wp.kernel`/`@wp.struct` in `embodichain/utils/warp/kinematics/<name>_solver.py` and import it |
-| Not exporting the Cfg/Solver from `__init__.py` | Add the import line so `from embodichain.lab.sim.solvers import FooSolverCfg` works |
-| Forgetting the docs toctree entry | Add the `.md` to `docs/source/overview/sim/solvers/index.rst` |
+| Not exporting the Cfg/Solver from `__init__.py` | Add the import line so `from embodichain.lab.sim.motion.solvers import FooSolverCfg` works |
+| Forgetting the docs toctree entry | Add the `.md` to `docs/source/overview/sim/motion/solvers/index.rst` |
 | Test only checks happy-path IK | Must verify FK↔IK round-trip equality AND an unreachable-pose returns `False` |
 | Creating a separate benchmark file | Extend the unified `run_benchmark.py` instead |
 | Skipping `black` / pre-commit | CI checks every file including tests and benchmarks |
@@ -319,13 +319,13 @@ Finally, run the `/pre-commit-check` skill to catch all CI violations locally.
 
 | Action | Command / Path |
 |--------|----------------|
-| Reference solver | `embodichain/lab/sim/solvers/ur_solver.py` |
+| Reference solver | `embodichain/lab/sim/motion/solvers/ur_solver.py` |
 | Reference Warp kernel | `embodichain/utils/warp/kinematics/ur_solver.py` |
-| Reference docs | `docs/source/overview/sim/solvers/ur_solver.md` |
-| Reference test | `tests/sim/solvers/test_ur_solver.py` |
+| Reference docs | `docs/source/overview/sim/motion/solvers/ur_solver.md` |
+| Reference test | `tests/sim/motion/solvers/test_ur_solver.py` |
 | Benchmark file | `scripts/benchmark/robotics/kinematic_solver/run_benchmark.py` |
 | Python env | `conda activate embodichain` |
-| Run test (CPU) | `pytest tests/sim/solvers/test_<name>_solver.py::TestFooSolver -v` |
+| Run test (CPU) | `pytest tests/sim/motion/solvers/test_<name>_solver.py::TestFooSolver -v` |
 | Run benchmark | `python -m scripts.benchmark.robotics.kinematic_solver.run_benchmark -s <name>` |
 | Format | `black <changed files>` |
 | Pre-commit | `/pre-commit-check` |

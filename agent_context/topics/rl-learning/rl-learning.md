@@ -64,9 +64,9 @@ Select this path with `trainer.gym_config`.
 
 Simulator environments use standard rollouts. A differentiable algorithm on
 this path is rejected. Simulator tasks with a supported training configuration
-declare `supports_rl=True` in `@register_env`; `embodichain list-task` displays
-them with `[Simulator, RL]` instead of treating the simulator registry as a
-mutually exclusive capability group.
+declare `supports_rl=True` in `@register_env`. Task listing is implemented
+in `embodichain/cli/list_task.py`; capability and config discovery belong to
+[environment configuration](../env-framework/configuration.md).
 
 Direct callers of `train_from_config()` that bypass `cli()` must ensure
 task packages and init hooks needed by a simulator environment have already
@@ -84,15 +84,12 @@ as a mapping with `name` and `cfg`.
 boundary.
 
 Variable-horizon APG environments may also implement
-`ScheduledDifferentiableVecEnv.prepare_differentiable_rollout()`. The returned
+`ScheduledDifferentiableVecEnv.prepare_differentiable_rollout()`. Its
 `DifferentiableRolloutSpec` selects the next reset's complete horizon,
 per-environment objective scale, and scalar rollout metadata.
 
 This path supports both standard algorithms and differentiable algorithms,
 but currently rejects distributed training and environment profiling.
-`trainer.seed` seeds Python, NumPy, Torch, CUDA, and Warp before environment
-construction. Set `trainer.torch_deterministic: true` when a reference run
-requires PyTorch deterministic algorithms in addition to seeded sampling.
 
 ## Rollout and Trainer Routing
 
@@ -122,24 +119,11 @@ use it as padding. The collector writes into the preallocated rollout and the
 algorithm consumes it after collection.
 
 The differentiable path does not copy transitions into the standard buffer.
-It has two explicitly configured modes:
-
-- `rollout_mode: segmented` preserves the action-to-reward graph within TBPTT
-  segments. `segment_length` sets detach boundaries and `update_horizon`
-  controls the optimizer budget.
-- `rollout_mode: complete` resets before every independent microbatch and
-  preserves one graph across the entire environment-provided horizon. It masks
-  rewards after the first done, applies the rollout's objective scale, and
-  averages `gradient_accumulation_steps` full trajectories before one optimizer
-  step. It never shortens a scheduled horizon to satisfy `total_timesteps`.
-  When no explicit timestep budget is configured, CLI `iterations` maps to an
-  exact optimizer-update budget so changing the K distribution does not change
-  the number of gradient steps.
-
-Complete mode can clamp actions to the environment space and install a
-per-environment action-adjoint norm hook. Non-finite adjoint rows are zeroed;
-finite rows are clipped independently using an overflow-safe norm. APG also
-supports a pre-clip policy-gradient safety limit that skips unsafe updates.
+It supports explicitly configured `segmented` TBPTT rollouts and `complete`
+rollouts that reset before each independent microbatch, retain the full
+environment-provided horizon, mask post-terminal rewards, and accumulate full
+trajectory gradients before one optimizer step. Read the training detail for
+the complete-rollout safety and normalization contracts.
 
 ## Component Ownership
 
@@ -163,80 +147,8 @@ consume observations and write action, log-probability, entropy, and value
 fields needed by their algorithm. Differentiable policies must expose
 graph-preserving action sampling.
 
-## Training and Evaluation Lifecycle
-
-The standard trainer repeats:
-
-1. start and collect a rollout;
-2. update the algorithm;
-3. log train metrics;
-4. evaluate when the configured step boundary is reached;
-5. save periodic and best-evaluation checkpoints.
-
-Evaluation uses an independent environment and
-`evaluate_episodes()`. It counts completed asynchronous episodes, reports
-terminal metrics, temporarily switches the policy to evaluation mode, and
-restores its prior mode.
-
-Checkpoints include policy parameters, trainer and complete-rollout counters,
-best-evaluation state, observation-normalizer state when enabled, and optimizer
-or LR-scheduler state when present. Evaluation reuses the frozen training
-normalizer without updating its statistics.
-
-On the simulator path, distributed mode initializes NCCL, assigns one CUDA
-device per local rank, wraps the policy in
-`DistributedDataParallel`, aggregates step and episode statistics, and
-keeps logging, evaluation, and checkpoint ownership on rank zero.
-Differentiable algorithms and lightweight learning environments do not
-currently support this distributed path.
-
-## Official Examples
-
-| Example | Environment path | Config location |
-|---------|------------------|-----------------|
-| CartPole | registered simulator Gym env | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/` |
-| PushCube | registered simulator Gym env | `embodichain_tasks/configs/tasks/manipulation/push_cube/agents/` |
-| PointMass PPO | registered lightweight env, standard rollout | `embodichain_tasks/configs/tasks/classic_control/point_mass/agents/ppo.yaml` |
-| PointMass APG | differentiable lightweight env | `embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml` |
-| Newton planar reach | experimental differentiable FK reference | `embodichain/learning/rl/experimental/newton/` |
-
-`PointMassRL` is the reference environment for comparing standard and
-differentiable training over the same task dynamics. The Newton planar-reach
-example is an experimental gradient reference, not a general simulator task.
-
-## Extension Points
-
-### Add an Algorithm
-
-1. Implement a `BaseAlgorithm` subclass and config under `algo/`.
-2. Declare the correct `RolloutKind`.
-3. Register the config/class pair in `algo/__init__.py`.
-4. Add focused algorithm, routing, and rollout-contract tests.
-
-### Add a Policy
-
-1. Implement the `Policy` contract under `models/`.
-2. Register it in `models/__init__.py`.
-3. Ensure its outputs satisfy every intended algorithm.
-4. Provide graph-preserving sampling if used with differentiable rollouts.
-
-### Add a Lightweight Environment
-
-1. Implement `LearningVecEnv`, or `DifferentiableVecEnv` for APG.
-2. Register the factory with `@register_learning_env`.
-3. Ensure finished rows auto-reset while returning terminal reward/done with
-   the next initial observation.
-4. For variable complete APG rollouts, implement
-   `ScheduledDifferentiableVecEnv` and return the full non-truncated horizon.
-5. Expose `observation_normalize_mask` when semantic dimensions must remain
-   raw during normalization.
-6. Add an official config under
-   `embodichain_tasks/configs/tasks/<domain>/<task>/agents/` when it is a
-   bundled task.
-
-Use `add-task-env` for simulator-backed task environments and
-`manager-functor` for their observation, reward, event, and action
-components.
+Read [training and extension](training.md) for evaluation, checkpoints,
+distributed ownership, official examples and adding algorithms/policies/envs.
 
 ## Invariants
 
@@ -248,10 +160,10 @@ components.
 - The standard buffer holds at most one unconsumed rollout.
 - APG must retain differentiable rewards until its optimizer boundary;
   `detach_state()` must not reset or resample the task.
-- Complete APG mode must reset once per independent rollout, detach only after
+- Complete APG must reset once per independent rollout, detach only after
   backward, and exclude post-terminal auto-reset rewards from its objective.
-- Observation normalization statistics stay frozen throughout each complete
-  rollout and semantic mask/type fields remain unnormalized.
+- Observation statistics stay frozen during each complete rollout; semantic
+  mask/type fields remain unnormalized.
 - GRPO environment count must satisfy its grouping contract.
 - Evaluation must use completed episodes and an independent environment.
 - Only rank zero owns external logging and checkpoints in distributed runs.
@@ -267,7 +179,7 @@ components.
 | Policy dimension mismatch | Policy config disagrees with the built environment's observation or action space |
 | Standard buffer is already full | A rollout was started before the previous one was consumed with `get()` |
 | APG gradients disappear | Actions were sampled under `no_grad`, transitions were copied/detached, or the state was detached too early |
-| Long-horizon APG accuracy is lower than the reference | `rollout_mode` is still `segmented`, the scheduled horizon was truncated, return scaling is missing, or observation normalization differs |
+| Long-horizon APG accuracy is lower than the reference | `rollout_mode` is still segmented, the scheduled horizon was truncated, return scaling is missing, or observation normalization differs |
 | One environment poisons every APG row | Action-adjoint clipping is disabled or non-finite row filtering is bypassed |
 | GRPO reshape or grouping fails | `num_envs` is not divisible by `group_size` |
 | Evaluation never completes | The environment does not emit completed asynchronous episodes or terminal metrics correctly |

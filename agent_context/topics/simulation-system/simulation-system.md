@@ -5,6 +5,7 @@
 | What | Path |
 |------|------|
 | Public simulation package | `embodichain/lab/sim/__init__.py` |
+| Motion capability namespace | `embodichain/lab/sim/motion/__init__.py` |
 | World and scene owner | `embodichain/lab/sim/sim_manager.py` → `SimulationManager` |
 | Global simulation config | `embodichain/lab/sim/sim_manager.py` → `SimulationManagerCfg` |
 | Spawn lifecycle coordinator | `embodichain/lab/sim/spawn/scene.py` → `SpawnScene` |
@@ -15,7 +16,8 @@
 
 `embodichain.lab.sim` exports the manager, its config, shared material
 types, `BatchEntity`, and the simulation profiler. Import a specialized
-object, sensor, solver, planner, or atomic-action API from its own subpackage.
+object, sensor, or atomic-action API from its own subpackage. Solver, planner,
+workspace, and trajectory-augmentation APIs live under `embodichain.lab.sim.motion`.
 
 ## Ownership
 
@@ -311,11 +313,12 @@ Spawn selects its concrete solver at finalization.
 | Common deformable contract and Newton particle-set adapters | `objects/deformable/` | `sim-visualization` for export |
 | Camera, stereo camera, contact sensor | `sensors/` | `sensor-system` |
 | Robot-specific configuration | `robots/` | `robot-system` |
-| Inverse kinematics | `solvers/` | `ik-solvers` |
-| Trajectory and motion generation | `planners/` | `motion-planning` |
+| Inverse kinematics | `motion/solvers/` | `ik-solvers` |
+| Trajectory and motion generation | `motion/planners/` | `motion-planning` |
+| Trajectory candidates, augmentation, coverage, generation bookkeeping | `motion/expansion/` | `motion-planning` |
 | Typed action planning and execution | `atomic_actions/` | `atomic-actions` |
 | Task Program Semantic Calls and robot profiles | `embodichain/lab/task_program/semantics/` | `task-programs` |
-| Reachability analysis and runtime workspace queries | `workspace/` | `robot-system` |
+| Reachability analysis and runtime workspace queries | `motion/workspace/` | `robot-workspace` |
 | Browser scene export and Viser runtime | `embodichain/lab/visualization/` | `sim-visualization` |
 
 Use the narrow topic when a request names one of these subsystems. Use
@@ -329,6 +332,20 @@ those constructors and otherwise depend on the shared view contracts.
 `RigidBodyData` and `ArticulationData` require a finalized `Scene`; the former
 raw `PhysicsScene`/native-entity adapters and direct materialized-object
 construction path have been removed.
+
+`motion/__init__.py` resolves its public subpackages and `motion_generator` module lazily. Keep it free
+of eager planner imports: `Robot` needs solver and runtime workspace types
+during initialization, while planners resolve robots through
+`SimulationManager`. Workspace analyzer/visualization exports retain their own
+lazy boundary. Import concrete APIs from the corresponding `motion` subpackage;
+the former `sim.solvers`, `sim.planners`, and `sim.workspace` paths have no
+compatibility packages.
+
+Trajectory augmentation owns value contracts, operators, coverage, and session
+bookkeeping. Its algorithms do not import Gym or perform environment execution,
+reset, or dataset I/O; those operations belong to host integrations. Its public
+import follows the normal `lab/sim` lifecycle and does not promise an isolated
+toolkit import. Atomic Actions remain above the motion capabilities.
 
 `Articulation.get_parent_joint_chain(link_name)` is the public topology query
 for integrations that need link ancestry. It returns immediate-parent-first
@@ -348,7 +365,6 @@ asset registry and environment count, then coordinates creation and attachment.
 `qpos_joint_names`. Stochastic surface sampling and Atomic Action geometry keys
 do not belong to the simulation object; use
 `atomic_actions.sample_initial_articulation_geometry()` for that adaptation.
-
 ## Configuration Flow
 
 `SimulationManagerCfg.physics_cfg` is the backend selector as well as the
@@ -709,6 +725,8 @@ updated field-by-field, never replaced wholesale by a partial config. The
 former flat `RigidBodyAttributesCfg` and `RigidBodyAttributesOverrideCfg`
 types have been removed. New and migrated definitions use the grouped schema,
 where `None` means “leave the source/backend value unchanged.”
+
+Entity/IK gizmo configuration is owned by [native gizmos](../sim-visualization/native-gizmos.md).
 
 ## Where to Make Changes
 

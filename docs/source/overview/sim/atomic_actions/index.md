@@ -926,7 +926,7 @@ See {doc}`builtin_actions` for the shipped skill catalog and visual demos, and
   robot profiles, and effects
 - {doc}`../../task_program/robot_profiles` — embodiment resources and presets
 - {doc}`../../task_program/index` — semantic task compilation and execution
-- {doc}`../planners/motion_generator` — the motion generator owned by the engine
+- {doc}`../motion/planners/motion_generator` — the motion generator owned by the engine
 - {doc}`../sim_robot` — robot control parts and kinematic configuration
 - {doc}`/tutorial/atomic_actions` — static, closed-loop, and recovery examples
 - `scripts/tutorials/atomic_action/moving_target_recovery.py` — runnable runner

@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, TypeVar
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.planners.utils import PlanResult
+from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain.lab.sim.robots import FrankaPandaCfg
 
 from . import planners as _builtin_planners  # noqa: F401 - registry side effects

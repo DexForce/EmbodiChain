@@ -14,6 +14,9 @@
 | Robot executable smoke entry points | Each specified robot module's ``__main__`` block |
 | DexforceW1 config package | `embodichain/lab/sim/robots/dexforce_w1/` |
 | CobotMagic config | `embodichain/lab/sim/robots/cobotmagic.py` |
+| Solver APIs | `embodichain/lab/sim/motion/solvers/__init__.py` |
+| Workspace runtime and config | `embodichain/lab/sim/motion/workspace/runtime.py`, `cfg.py` |
+| Workspace offline analysis | `embodichain/lab/sim/motion/workspace/analyzer.py` |
 | Add-robot tutorial | `docs/source/tutorial/add_robot.rst` |
 | Add-robot quick-reference | `docs/source/guides/add_robot.rst` |
 
@@ -29,6 +32,23 @@ A `Robot` is instantiated with a `RobotCfg` and a list of DexSim `Articulation` 
 Robot FK/IK and end-effector pose APIs use the EmbodiChain convention:
 quaternions are `xyzw`, and 7D poses are `xyz + xyzw`. Solver or planner
 adapters convert only when their external library uses another order.
+
+## Motion and Workspace Integration
+
+- `Robot` imports solver APIs and runtime workspace types from
+  `embodichain.lab.sim.motion`. `RobotCfg.from_dict()` resolves solver
+  `class_type` names against `embodichain.lab.sim.motion.solvers`.
+- `RobotCfg.workspace_cfg` maps control-part names to `RobotWorkspaceCfg`.
+  `Robot.get_workspace(name)` lazily loads the configured cache on first use;
+  robot construction does not read workspace cache files.
+- `Robot.attach_workspace()` accepts a prebuilt `RobotWorkspace` and moves it
+  to the robot device. `Robot.sample_reachable_pose()` uses the runtime cache
+  to return bounded batched workspace samples.
+- `motion` subpackages load lazily, and workspace analyzer/visualization APIs
+  retain a separate lazy export boundary. Do not introduce offline analysis
+  imports into the Robot initialization path.
+- Focused workspace coverage lives under `tests/sim/motion/workspace/`; solver
+  tests live under `tests/sim/motion/solvers/`.
 
 ## RobotCfg Pattern
 
@@ -230,32 +250,24 @@ names.
 limits before the Default or Newton model is built; do not add a post-bind
 Newton rebuild for initial limits.
 
-## Adding a New Robot
+## Extension route
 
-Full guide: `docs/source/tutorial/add_robot.rst` · Quick reference: `docs/source/guides/add_robot.rst`
+Use `/add-robot` for configuration hooks, registry exports, docs and focused
+tests. Use `/add-embodiment-component` to reuse a robot with sensors in Gym
+deployments. For reachability caches and sampling, read
+[robot workspace](../robot-workspace/robot-workspace.md).
 
-Minimal checklist:
-1. Create a `@configclass` inheriting `RobotCfg`.
-2. Override `_build_defaults(self, init_dict=None)` — read variant fields from `init_dict`, then populate `urdf_cfg`, `control_parts`, `solver_cfg`, `joint_drive_props` and `attrs`.
-3. Keep `from_dict` as the 3-line template (`cls()` → `_build_defaults` → `merge_robot_cfg`) unless version-derived state requires an explicitly documented post-merge step.
-4. Define `control_parts` mapping part names to joint name lists.
-5. Configure `solver_cfg` (one `SolverCfg` per control part).
-6. Implement `build_pk_serial_chain` reading from `_pk_urdf_path` (property for constant paths, method for variant-dependent).
-7. For robots with variants, use a sub-package with `types.py` (enums + `__all__`), `cfg.py` (variant-aware `_build_defaults`), optional `params.py` / `utils.py` helpers (see `dexforce_w1/` as example).
-8. Export from `embodichain/lab/sim/robots/__init__.py` and set `__all__`.
-9. Add robot docs in `docs/source/resources/robot/` and update `docs/source/resources/robot/index.rst`.
-10. Test — a `__main__` smoke test + the DOF drift guard + `preview-asset` CLI.
+## Available robots
 
-Serialization (`to_dict` / `save_to_file`) is normally inherited. A robot-specific
-override requires documented raw/final semantics and regression tests for default,
-custom-transform, component-version, and public-builder round-trips.
-
-## Available Robots
+The authoritative inventory is `robots/__init__.py`; exported configs include:
 
 | Robot | Config Class | Module | Structure | Notes |
 |---|---|---|---|---|
 | DexForce W1 | `DexforceW1Cfg` | `embodichain/lab/sim/robots/dexforce_w1/` | Package (`cfg.py`, `types.py`, `specs.py`, `hand_specs.py`, `params.py`, `utils.py`) | Humanoid; robot and hand versions are independently registered |
 | CobotMagic | `CobotMagicCfg` | `embodichain/lab/sim/robots/cobotmagic.py` | Single file | Dual-arm; 6-DOF arms + 2-DOF grippers; portable collision envelope, Default-native root iterations, OPW solver |
+| Franka Panda | `FrankaPandaCfg` | `embodichain/lab/sim/robots/franka_panda.py` | Single file | Panda preset |
+| Universal Robots | `URRobotCfg` | `embodichain/lab/sim/robots/ur_robot.py` | Single file | UR family presets |
+| Composed dual arm | `DualArmRobotCfg`, `build_dual_arm_cfg` | `embodichain/lab/sim/robots/dual_arm.py` | Single file | Reusable dual-arm assembly |
 
 ## Executable smoke programs
 

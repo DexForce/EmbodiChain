@@ -36,7 +36,7 @@ from .tracking import TrackingPolicy, TrackingRuntime
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
-    from embodichain.lab.sim.planners import MotionGenerator
+    from embodichain.lab.sim.motion.motion_generator import MotionGenerator
     from embodichain.toolkits.graspkit import GraspPoseGenerator
 
     from .execution import ExecutionSession

@@ -28,7 +28,7 @@ from embodichain.lab.sim.robots.dual_arm import (
     resolve_mounts,
 )
 from embodichain.lab.sim.robots.ur_robot import URRobotCfg
-from embodichain.lab.sim.solvers import URSolverCfg
+from embodichain.lab.sim.motion.solvers import URSolverCfg
 
 # --------------------------------------------------------------------------- #
 # resolve_mounts

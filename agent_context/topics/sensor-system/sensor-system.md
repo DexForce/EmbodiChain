@@ -226,3 +226,11 @@ are required. Default CPU and Newton identify registered static shapes.
   query-local, backend-neutral actor identity. Use `get_actor_info()` or
   `item_user_ids`, not `RigidObject.get_user_ids()`.
 - **View attribute flags** — `Camera.get_view_attrib()` computes `dr.ViewFlags` from enabled booleans. Adding a new data type requires both the `enable_*` flag and the corresponding `ViewFlags` bit.
+
+## Contact computation ownership
+
+`lab/sim/sensors/_warp/contact.py` owns `scatter_contact_data`, whose fixed
+contact columns, environment IDs, and per-environment capacity belong to
+the sensor integration. The generic tiled-image kernel lives separately in
+`compute/image/_warp/tiling.py`. The old `utils.warp.kernels` image export is
+an alias; its contact export resolves the sensor implementation on demand.

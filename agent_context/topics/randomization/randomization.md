@@ -90,85 +90,35 @@ The `__init__.py` of the randomization package re-exports everything via `from .
 - `shared_sample=True` → one scale sample shared across all objects in the list.
 - `_normalize_env_ids` helper: if `env_ids is None`, targets all environments.
 
-## Randomization as Events
+## Event scheduling and reproducibility
 
-Randomizers are wired into tasks using `EventCfg`, which extends `FunctorCfg`:
+Wire randomizers with named `EventCfg` entries (`mode="startup"`, `"reset"` or
+`"interval"`). `interval_step` controls the interval; `is_global=True` shares a
+counter, while the default uses per-row counters. Configuration and callable
+scaffolding are owned by [manager-functor](../manager-functor/manager-functor.md)
+and `/add-functor`.
 
-```python
-@configclass
-class EventCfg(FunctorCfg):
-    mode: Literal["startup", "interval", "reset"] = "reset"
-    interval_step: int = 10
-    is_global: bool = False
-```
+`BaseEnv` establishes the seed before scene construction. `EventManager` derives
+a stable seed from `(seed, phase, mode, functor_name, invocation)` for each
+constructor/call scope. `_scoped_random_seed()` temporarily seeds Python,
+NumPy, Torch CPU and the selected CUDA device, then restores their previous
+states, including on exceptions.
 
-### Modes
+- Class-functor construction has its own phase, separate from event calls.
+- `set_seed()` resets invocation and interval counters; a repeated seed rewinds
+  streams. `None` disables scoped seeding and uses the ambient RNG state.
+- Adding another named functor does not consume this functor's stream.
+- Renaming a functor changes its stream. Invocation order and selected row
+  batches still matter; this is not an independent RNG stream per environment row.
 
-| Mode | When applied | Use case |
-|---|---|---|
-| `startup` | Once when environment initializes | One-time scene setup (e.g., fixed material assignment) |
-| `reset` | Every environment reset | Domain randomization per episode |
-| `interval` | Every `interval_step` env steps | Continuous perturbation during episode |
+For reproducibility changes, inspect `event_manager.py` and the effective seed
+propagation in `base_env.py` / `embodied_env.py`. Run
+`tests/gym/envs/test_env_seed.py` and
+`tests/gym/envs/managers/test_event_manager_seed.py`.
 
-### `is_global`
-
-- `True` → same interval counter for all envs.
-- `False` → per-env independent interval counters.
-
-### Wiring example
-
-```python
-@configclass
-class MyTaskEventCfg:
-    randomize_obj_mass = EventCfg(
-        func=randomize_rigid_object_mass,
-        mode="reset",
-        params={
-            "entity_cfg": SceneEntityCfg(uid="target_object"),
-            "mass_range": (0.1, 0.5),
-            "relative": False,
-        },
-    )
-
-    randomize_obj_pose = EventCfg(
-        func=randomize_rigid_object_pose,
-        mode="reset",
-        params={
-            "entity_cfg": SceneEntityCfg(uid="target_object"),
-            "position_range": ([-0.05, -0.05, 0.0], [0.05, 0.05, 0.0]),
-            "rotation_range": ([0, 0, -45], [0, 0, 45]),
-        },
-    )
-```
-
-Each `EventCfg` attribute in the config class becomes a named event functor managed by `EventManager`.
-
-## How to Add a Randomizer
-
-1. Use the `/add-functor` skill to scaffold the function with correct signature.
-2. Place function-style randomizers in the appropriate file under `embodichain/lab/gym/envs/managers/randomization/` (physics, visual, spatial, or geometry).
-3. Signature: `def randomize_*(env: EmbodiedEnv, env_ids: torch.Tensor | None, entity_cfg: SceneEntityCfg, **params) -> None`.
-4. Add the function name to `__all__` in the source file.
-5. The `__init__.py` uses wildcard imports, so `__all__` membership is sufficient for export.
-6. Wire it in a task config via `EventCfg(func=your_function, mode="reset", params={...})`.
-
-For class-style randomizers (stateful), inherit from `Functor` and implement `__init__(cfg, env)` + `__call__(env, env_ids, ...)`.
-
-## Configuration
-
-### `FunctorCfg` (base)
-
-```python
-@configclass
-class FunctorCfg:
-    func: Callable | Functor = MISSING     # function or callable class
-    params: dict[str, Any] = dict()         # keyword args passed to func
-    extra: dict[str, Any] = dict()          # metadata (e.g., output shape)
-```
-
-### `SceneEntityCfg`
-
-Used in `params` to reference simulation objects by `uid`. The manager resolves the entity from `SimulationManager` at initialization.
+Workspace-aware spatial sampling uses
+[robot workspace](../robot-workspace/robot-workspace.md); validate it with
+`tests/gym/envs/managers/test_workspace_randomization.py`.
 
 ### Range conventions
 
@@ -182,7 +132,6 @@ Used in `params` to reference simulation objects by `uid`. The manager resolves 
 Randomizers use `embodichain.utils.math.sample_uniform(...)` for uniform
 sampling where applicable. Physics samples are allocated on the target object's
 device, not assumed to share `env.device`.
-
 ## Common Failure Modes
 
 | Symptom | Likely cause |

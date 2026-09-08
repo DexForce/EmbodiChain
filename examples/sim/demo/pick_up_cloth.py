@@ -46,7 +46,7 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim.objects import SurfaceDeformableObject, RigidObject, Robot
 from embodichain.lab.sim.robots import URRobotCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
-from embodichain.lab.sim.utility.action_utils import interpolate_with_nums
+from embodichain.compute.trajectory import interpolate_with_nums
 from embodichain.lab.visualization import visualization_cfg_from_args
 
 CLOTH_SIZE = 0.3

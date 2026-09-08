@@ -24,10 +24,10 @@ from dataclasses import dataclass, field
 from tensordict import TensorDict
 
 from embodichain.lab.sim.cfg import RobotCfg, RobotWorkspaceCfg
-from embodichain.lab.sim.solvers import SolverCfg, BaseSolver
+from embodichain.lab.sim.motion.solvers import SolverCfg, BaseSolver
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.sim.utility.tensor import to_tensor
-from embodichain.lab.sim.workspace.runtime import (
+from embodichain.lab.sim.motion.workspace.runtime import (
     RobotWorkspace,
     WorkspaceSample,
 )

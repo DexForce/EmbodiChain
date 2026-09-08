@@ -25,9 +25,9 @@ import torch
 import warp as wp
 from tensordict import TensorDict
 
-from embodichain.lab.sim.sensors.base_sensor import BaseSensor, SensorCfg
+from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
+from embodichain.lab.sim.sensors._warp.contact import scatter_contact_data
 from embodichain.utils import configclass, logger
-from embodichain.utils.warp.kernels import scatter_contact_data
 
 if TYPE_CHECKING:
     from dexsim.scene import ContactActorInfo, ContactQuery, ContactQueryCapabilities

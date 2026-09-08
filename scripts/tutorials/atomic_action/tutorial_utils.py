@@ -55,12 +55,8 @@ from embodichain.lab.sim.cfg import (
     physics_cfg_for_backend,
 )
 from embodichain.lab.sim.objects import RigidObject, Robot
-from embodichain.lab.sim.planners import (
-    CuroboPlannerCfg,
-    MotionGenCfg,
-    MotionGenerator,
-    ToppraPlannerCfg,
-)
+from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
+from embodichain.lab.sim.motion.planners import CuroboPlannerCfg, ToppraPlannerCfg
 from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
@@ -238,6 +234,8 @@ def _tutorial_physics_cfg(
             "integrator": "implicitfast",
             "iterations": 20,
             "ls_iterations": 100,
+            "nconmax": 1_000,
+            "njmax": 2_000,
             "cone": "elliptic",
             "impratio": 1_000.0,
             "use_mujoco_contacts": True,

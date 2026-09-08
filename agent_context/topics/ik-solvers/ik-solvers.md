@@ -9,11 +9,11 @@
 
 | File | Role |
 |---|---|
-| `embodichain/lab/sim/solvers/__init__.py` | Public re-exports for all solver classes and configs |
-| `embodichain/lab/sim/solvers/base_solver.py` | `BaseSolver` ABC + `SolverCfg` base config |
-| `embodichain/lab/sim/cfg.py` | `RobotCfg.solver_cfg` — where solver config is wired into a robot |
-| `embodichain/lab/sim/solvers/qpos_seed_sampler.py` | `QposSeedSampler` — random joint-seed generation |
-| `embodichain/lab/sim/solvers/null_space_posture_task.py` | `NullSpacePostureTask` — Pink null-space posture objective |
+| `embodichain/lab/sim/motion/solvers/__init__.py` | Public re-exports for all solver classes and configs |
+| `embodichain/lab/sim/motion/solvers/base_solver.py` | `BaseSolver` ABC + `SolverCfg` base config |
+| `embodichain/lab/sim/cfg/robot.py` | `RobotCfg.solver_cfg` — where solver config is wired into a robot |
+| `embodichain/lab/sim/motion/solvers/qpos_seed_sampler.py` | `QposSeedSampler` — random joint-seed generation |
+| `embodichain/lab/sim/motion/solvers/null_space_posture_task.py` | `NullSpacePostureTask` — Pink null-space posture objective |
 | `embodichain/lab/sim/utility/solver_utils.py` | Helpers: `create_pk_serial_chain`, `build_reduced_pinocchio_robot`, `validate_iteration_params`, `compute_pinocchio_fk` |
 
 ---
@@ -26,47 +26,18 @@ and joint-limit management.  A `SolverCfg` subclass is instantiated
 inside `RobotCfg` and its `init_solver()` factory method produces the
 concrete `BaseSolver` instance at runtime.
 
+Import solver classes and configs from `embodichain.lab.sim.motion.solvers`.
+`RobotCfg.from_dict()` resolves configured `class_type` names against
+that public module. The `motion` parent loads subpackages lazily; adding solver
+exports must not eagerly import planners or workspace analyzers into the Robot
+initialization path. Warp kernels live under `embodichain/compute/kinematics/_warp/`.
+Focused solver tests live under `tests/sim/motion/solvers/`.
+
 All solvers use a `pytorch_kinematics` serial chain (`pk_serial_chain`)
 for FK and Jacobian computation. `torch.compile` is applied to the FK
 path for performance.
 
 ---
-
-## Solver Hierarchy
-
-Gizmo solver selection belongs to `embodichain/lab/sim/objects/gizmo.py`, not
-to a new solver subclass. Native DexSim `IKGizmoController` remains the
-controller in both modes: `GizmoCfg.ik_solver="dexsim"` selects Newton IK;
-`"embodichain"` adapts `robot.get_solver(control_part)` for the native window
-and Viser. It preserves configured solver convergence/limits, maps joint names
-between solver and robot order, and holds current qpos on failure/non-finite
-results. Gizmo root/end links must match the configured solver; TCP overrides
-are converted without mutating that solver. See the robot gizmo example's
-`--ik-solver pink` option for an executable Pink configuration.
-
-```
-SolverCfg  (@configclass, abstract)
-  ├── SRSSolverCfg
-  ├── OPWSolverCfg
-  ├── PytorchSolverCfg
-  ├── PinocchioSolverCfg
-  ├── PinkSolverCfg
-  └── DifferentialSolverCfg
-
-BaseSolver  (ABCMeta)
-  ├── SRSSolver
-  ├── OPWSolver
-  ├── PytorchSolver
-  ├── PinocchioSolver
-  ├── PinkSolver
-  └── DifferentialSolver
-```
-
-`SolverCfg.init_solver()` is the abstract factory; each subclass
-overrides it to construct the matching `BaseSolver` subclass.
-
----
-
 ## Available Solvers
 
 | Solver | Algorithm | When to use | Key dependencies |
@@ -76,6 +47,8 @@ overrides it to construct the matching `BaseSolver` subclass.
 | **PytorchSolver** | Iterative damped-least-squares via `pytorch_kinematics` | General-purpose GPU solver; good default for arbitrary URDFs | `pytorch_kinematics` |
 | **PinocchioSolver** | Iterative IK via Pinocchio + optional CasADi | High-accuracy IK with full rigid-body dynamics model | `pinocchio`, `casadi` (optional) |
 | **PinkSolver** | Task-based IK via Pink (QP optimisation) | Multi-task IK (e.g., dual-arm, posture + EE control, null-space tasks) | `pinocchio`, `pink` |
+| **URSolver** | UR analytical IK | UR kinematic families | `warp` |
+| **NeuralIKSolver** | Learned IK | Model-dependent inference; inspect its config/checkpoint contract | `torch` |
 | **DifferentialSolver** | Differential IK (Jacobian pseudo-inverse / SVD / DLS) | Real-time velocity-level IK; supports relative-mode commands | (none beyond core) |
 
 ---
@@ -105,7 +78,7 @@ Dict factory: `SolverCfg.from_dict(dict) → SolverCfg` resolves `class_type` dy
 
 | Method | Signature | Notes |
 |---|---|---|
-| `get_ik` | `(target_pose: Tensor[4,4], joint_seed, num_samples) → (success: Tensor, joints: Tensor)` | Abstract. Returns `(num_envs,)` bool + `(num_envs, dof)` joint positions |
+| `get_ik` | `(target_pose: Tensor[4,4], joint_seed, num_samples) → (success: Tensor, joints: Tensor)` | Concrete solvers determine candidate axes; see the shape contract below |
 | `get_fk` | `(qpos: Tensor) → Tensor[batch,4,4]` | Concrete. Uses compiled `pk_serial_chain` FK + TCP |
 | `get_jacobian` | `(qpos, locations, jac_type) → Tensor` | Concrete. Returns `(batch, 6, dof)` full / `(batch, 3, dof)` trans/rot |
 | `set_tcp` / `get_tcp` | `(np.ndarray[4,4])` | Set/get tool-center-point |
@@ -115,137 +88,27 @@ Dict factory: `SolverCfg.from_dict(dict) → SolverCfg` resolves `class_type` dy
 
 ---
 
-## Configuration
+## Shape and coordinate contract
 
-### In `RobotCfg` (`embodichain/lab/sim/cfg.py`)
+Do not infer a universal `(N, dof)` result from the abstract interface. Pink
+returns joint candidates as `(N, 1, dof)`. On Pytorch's normal result path,
+nearest mode retains that singleton solution axis and `return_all_solutions=True`
+returns `(N, num_samples, dof)`. Its early all-targets-failed path currently
+returns `(N, dof)` even when all solutions were requested. Check the concrete
+solver, failure branch and success-mask contract
+before selecting/squeezing a candidate. Preserve batch size one.
 
-```python
-@configclass
-class RobotCfg(ArticulationCfg):
-    solver_cfg: Union[SolverCfg, Dict[str, SolverCfg], None] = None
-```
+The solver consumes poses relative to its configured chain root and applies its
+TCP transform; integrations own world/root conversion and robot/solver joint
+ordering. Validate frames, radians, device and joint limits at that boundary.
 
-- **Single-part robot**: `solver_cfg = PytorchSolverCfg(...)`.
-- **Multi-part robot** (e.g., dual-arm): `solver_cfg = {"right_arm": SRSSolverCfg(...), "left_arm": SRSSolverCfg(...)}`.
-  Keys must match `control_parts` names in `RobotCfg`.
+## Wiring and detailed tuning
 
-### Iterative solver common params
-
-`PytorchSolverCfg`, `PinocchioSolverCfg`, `PinkSolverCfg`, and
-`DifferentialSolverCfg` share these fields:
-
-| Field | Default | Purpose |
-|---|---|---|
-| `pos_eps` | `5e-4` | Position convergence tolerance |
-| `rot_eps` | `5e-4` | Rotation convergence tolerance |
-| `max_iterations` | 500–1000 | Iteration cap |
-| `dt` | `0.1` | Numerical integration step |
-| `damp` | `1e-6` | Damping for numerical stability |
-| `is_only_position_constraint` | `False` | Ignore orientation in IK |
-| `num_samples` | 5–30 | Random seeds per solve |
-
-### DifferentialSolver-specific
-
-- `ik_method`: `"pinv"`, `"svd"`, `"trans"`, `"dls"` — Jacobian inversion strategy.
-- `ik_params`: auto-populated defaults per method (e.g., `k_val`, `lambda_val`).
-- `command_type`: `"position"` or `"pose"`.
-- `use_relative_mode`: delta commands relative to current pose.
-
-### PinkSolver-specific
-
-- `variable_input_tasks` contains exactly one `pink.tasks.FrameTask` targeted
-  by the single-pose IK API and may include other task types. Additional fixed
-  frame constraints belong in `fixed_input_tasks`.
-- `mesh_path`: path for Pinocchio URDF mesh loading.
-- `show_ik_warnings` / `fail_on_joint_limit_violation`: error-handling behaviour.
-- Supports single-pose and sequential batch IK while preserving one seed per
-  target and returning a consistent `(N,)`, `(N, 1, dof)` result contract.
-- End-effector targets are interpreted as TCP poses; the configured TCP is
-  removed before setting the controlled Pink frame target. Targets remain
-  relative to `root_link_name` even when that link is offset from the URDF root.
-- Convergence is checked against the single targeted variable FrameTask. Maximum-iteration,
-  stagnation, and solver-exception exits report failure and preserve the
-  corresponding input seed.
-- Adaptive controls (`stagnation_tolerance`, `stagnation_iterations`,
-  `max_backtracks`, `damping_growth`, `damping_decay`, and `max_damping`)
-  use a lexicographic merit that prioritizes FrameTask progress and considers
-  only controllable projected null-space posture error as a secondary term.
-  They increase regularization and terminate stalled solves early.
-- Effective limits intersect URDF, user-configured, and runtime robot limits,
-  then synchronize the result into the reduced Pinocchio model in Pink order.
-
-### SRSSolver-specific
-
-- `dh_params`, `link_lengths`, `rotation_directions`, `T_b_ob`, `T_e_oe`: kinematic model params.
-- `sort_ik`: whether to rank solutions by distance to seed.
-- `search_mode`: `"seeded"` computes the seed's geometric shoulder-elbow-wrist
-  arm angle and searches redundancy angles radially around it; if the configured
-  radial step cannot produce `num_samples` distinct angles in one revolution,
-  the incomplete radial prefix is replaced by a complete seed-centered uniform
-  full-circle grid. `"full"` samples the complete `[-pi, pi)` interval directly.
-- `redundancy_step`: angular increment used by seed-centered search.
-- Requesting all solutions always uses full-space redundancy sampling.
-- CPU and CUDA derive the reference plane in the base frame and use the same
-  signed arm-angle, shoulder-azimuth degeneracy rule, and periodic
-  nearest-solution formulas. Shoulder azimuth is set to zero only when the
-  shoulder-to-wrist projection onto the XY plane is near zero.
-- At shoulder or wrist Euler singularities, both analytical backends preserve
-  the seed's free coupled joint and solve the remaining coupled angle, avoiding
-  arbitrary equivalent-angle jumps near singular configurations.
-- Candidate revolute angles are shifted by integer multiples of `2*pi` into
-  the configured joint limits, choosing the representation nearest the seed.
-- Runtime `set_tcp()` and `set_ik_nearest_weight()` calls synchronize the CPU
-  and Warp analytical-backend caches immediately.
-- CPU target/reference-plane geometry is precomputed per target and elbow
-  branch. CUDA derives target/config/angle indices directly from the Warp
-  thread id, and all-solution sorting uses device-side tensor sorting rather
-  than a serial quadratic Warp sort.
-- Warp arm-angle and IK scratch arrays are reused by shape within a solver
-  instance to avoid repeated device allocations during steady-state calls.
-- Periodic-equivalent all-solutions candidates are greedily deduplicated
-  against retained representatives on CPU before indexing the original device
-  tensor, preserving order without allocating quadratic GPU scratch space.
-- Requires `num_envs` in `init_solver()`.
-
-Focused performance and accuracy validation is available at
-`scripts/benchmark/robotics/kinematic_solver/srs_solver.py`; it compares CPU
-and available CUDA backends in seeded and full redundancy-search modes.
-
-### OPWSolver-specific
-
-- `a1, a2, b, c1–c4, offsets, flip_axes, has_parallelogram`: OPW kinematic parameters.
-- `safe_margin`: joint-limit safety margin in radians.
-
----
-
-## Seed Sampling and Null-Space Tasks
-
-### `QposSeedSampler` (`qpos_seed_sampler.py`)
-
-Used by iterative solvers (e.g., `PytorchSolver`) to generate joint-seed
-batches for IK multi-start:
-
-- `__init__(num_samples, dof, device)`
-- `sample(qpos_seed, lower_limits, upper_limits, batch_size) → Tensor[batch*num_samples, dof]`
-  - First sample = provided seed; remaining are uniform-random within limits.
-- `repeat_target_xpos(target_xpos, num_samples)` — repeats target poses to match expanded seed batch.
-
-### `NullSpacePostureTask` (`null_space_posture_task.py`)
-
-A `pink.tasks.Task` subclass for posture control in the null space of
-higher-priority tasks.
-
-- Error: a Pinocchio manifold difference masked in tangent space (`nv`), with
-  an empty joint selection meaning all actuated joints while floating-base
-  coordinates are always excluded.
-- Jacobian: null-space projector `N(q) = I − J_primary⁺ · J_primary`.
-- Add it to either `variable_input_tasks` or `fixed_input_tasks`; PinkSolver
-  initializes it, includes it in QP solving, and uses its controllable projected
-  error only as a secondary backtracking merit behind FrameTask progress. It
-  updates its simulator-ordered target through
-  `update_null_space_joint_targets()`.
-
----
+`SolverCfg.from_dict()` resolves `class_type`; `init_solver()` creates the concrete solver.
+Wire configs through `RobotCfg.solver_cfg`; multi-part keys follow `control_parts`.
+Read [solver details](solver-details.md) for iterative parameters, Pink/SRS/OPW behavior,
+`QposSeedSampler` and null-space posture tasks. Gizmo adaptation belongs to
+`objects/gizmo.py`; see [native gizmos](../sim-visualization/native-gizmos.md).
 
 ## Common Failure Modes
 
@@ -255,7 +118,17 @@ higher-priority tasks.
 | Joint limits mismatch warnings at init | `user_qpos_limits` shape is wrong | Must be `[2, DOF]` or `[DOF, 2]` |
 | `"Kinematic chain is not initialized"` in FK | `pk_serial_chain` creation failed | Check `urdf_path`, `end_link_name`, `root_link_name` are valid |
 | Solver picks distant IK solution | `ik_nearest_weight` not tuned | Set per-joint weights to prefer important joints |
-| `ImportError` for pinocchio / pink / warp | Optional dependency missing | Install: `pip install pin==2.7.0`, `pip install pin-pink==3.4.0`, or `pip install warp-lang` |
+| `ImportError` for pinocchio / pink / warp | Optional dependency missing | Use the dependency declarations in `pyproject.toml` / `setup.py` for this checkout |
 | `solver_cfg` keys don't match `control_parts` | Multi-part robot misconfiguration | Dict keys in `solver_cfg` must exactly match `control_parts` names |
 | DifferentialSolver oscillates near target | `damp` too low or `dt` too large | Increase `damp` or decrease `dt` |
 | Pink solver ignores orientation | `is_only_position_constraint = True` | Set to `False` for full-pose IK |
+
+## Computation ownership
+
+OPW, SRS, and UR Warp implementations live in
+`embodichain/compute/kinematics/_warp/{opw,srs,ur}.py`. The existing
+`lab.sim.motion.solvers` classes own configuration, state, device buffers, and
+solver interfaces. The compute kernels do not import simulation modules.
+`utils/warp/kinematics/*_solver.py` are compatibility aliases.
+Validate kernel import/compilation with `tests/compute/test_imports.py` and
+solver behavior with the corresponding `tests/sim/motion/solvers/` tests.

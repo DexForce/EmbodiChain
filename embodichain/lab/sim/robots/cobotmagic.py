@@ -30,7 +30,7 @@ from embodichain.lab.sim.cfg import (
     URDFCfg,
     JointDrivePropertiesCfg,
 )
-from embodichain.lab.sim.solvers import SolverCfg, OPWSolverCfg
+from embodichain.lab.sim.motion.solvers import SolverCfg, OPWSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.data import get_data_path
 from embodichain.utils import configclass

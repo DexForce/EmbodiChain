@@ -27,7 +27,7 @@ from typing import Literal
 from embodichain.data import get_data_path
 
 from ..shapes import MeshCfg, MeshCollisionApproximation, MeshCollisionCfg, ShapeCfg
-from ..workspace.cfg import RobotWorkspaceCfg
+from ..motion.workspace.cfg import RobotWorkspaceCfg
 from .articulation import (
     ArticulationCfg,
     ArticulationRootPropertiesCfg,
