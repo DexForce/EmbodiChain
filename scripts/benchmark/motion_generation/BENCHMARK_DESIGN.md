@@ -50,7 +50,7 @@ physical task success.
 
 ### 2.1 Current NeuralPlanner capability boundary
 
-`embodichain/lab/sim/planners/neural_planner.py` currently:
+`embodichain/lab/sim/motion/planners/neural_planner.py` currently:
 
 - directly supports only `MoveType.EEF_MOVE`;
 - uses a 7-DoF waypoint Transformer checkpoint, currently centered on Franka;

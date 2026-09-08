@@ -219,7 +219,7 @@ def _add_objects(
                 init_rot=tuple(init_rot),
                 body_scale=tuple(body_scale),
                 max_convex_hull_num=max_convex_hull_num,
-                acd_method="vhacd",  # Use vhacd by default.
+                acd_method="visacd",  # Use visacd by default.
             )
         )
         print(f"[{label}] {uid}: pos={init_pos} rot={init_rot} scale={body_scale}")

@@ -89,4 +89,4 @@ robot = sim.add_robot(cfg=cfg)
 ## See Also
 
 - :doc:`/guides/add_robot` - Adding a new robot (quick reference)
-- :doc:`/overview/sim/solvers/index` - IK solver reference
+- :doc:`/overview/sim/motion/solvers/index` - IK solver reference

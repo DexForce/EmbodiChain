@@ -42,7 +42,7 @@ from embodichain.lab.sim.robots.dexforce_w1.types import (
     DexforceW1ArmSide,
     DexforceW1Version,
 )
-from embodichain.lab.sim.solvers.srs_solver import SRSSolverCfg
+from embodichain.lab.sim.motion.solvers.srs_solver import SRSSolverCfg
 from embodichain.utils.logger import set_log_level
 
 DEFAULT_SIZES = (1, 16, 128)

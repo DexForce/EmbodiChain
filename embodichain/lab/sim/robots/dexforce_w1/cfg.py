@@ -217,7 +217,7 @@ class DexforceW1Cfg(RobotCfg):
 
     def _build_default_solver_cfg(self):
         """Build the version-matched default SRS solver configuration."""
-        from embodichain.lab.sim.solvers import SRSSolverCfg
+        from embodichain.lab.sim.motion.solvers import SRSSolverCfg
         from embodichain.lab.sim.robots.dexforce_w1.params import (
             W1ArmKineParams,
         )

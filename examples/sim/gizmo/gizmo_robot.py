@@ -13,9 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""
-Gizmo-Robot Example: Test Gizmo class on a robot (UR10)
-"""
+"""Control a UR10 end effector with a native DexSim or Viser Gizmo."""
 
 from __future__ import annotations
 
@@ -26,7 +24,11 @@ import argparse
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.sim.solvers import PytorchSolverCfg
+from embodichain.lab.sim.motion.solvers import PinkSolverCfg, PytorchSolverCfg
+from embodichain.lab.sim.objects import (
+    GizmoCfg,
+    create_robot_ik_gizmo_controller,
+)
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     RobotCfg,
@@ -34,7 +36,6 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
 )
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim.solvers import PinkSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 
@@ -47,6 +48,12 @@ def main():
         description="Create a simulation scene with SimulationManager"
     )
     add_env_launcher_args_to_parser(parser)
+    parser.add_argument(
+        "--ik-solver",
+        choices=("dexsim", "pytorch", "pink"),
+        default="dexsim",
+        help="IK solver; the native window always uses DexSim's IKGizmoController.",
+    )
     args = parser.parse_args()
 
     # Configure the simulation
@@ -61,11 +68,34 @@ def main():
     )
 
     sim = SimulationManager(sim_cfg)
-    sim.set_manual_update(False)
 
     # Get UR10 URDF path
     ur10_urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
     gripper_urdf_path = get_data_path("DH_PGC_140_50_M/DH_PGC_140_50_M.urdf")
+
+    # Native IK needs only chain metadata. Build an EmbodiChain solver only
+    # when explicitly selected, and share the same TCP configuration.
+    gizmo_cfg = GizmoCfg(
+        ik_solver="dexsim" if args.ik_solver == "dexsim" else "embodichain",
+        ik_root_link_name="base_link",
+        ik_end_link_name="ee_link",
+        ik_tcp_pose=[
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.12],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    )
+    solver_cfg = None
+    if args.ik_solver != "dexsim":
+        solver_type = PinkSolverCfg if args.ik_solver == "pink" else PytorchSolverCfg
+        solver_cfg = {
+            "arm": solver_type(
+                root_link_name=gizmo_cfg.ik_root_link_name,
+                end_link_name=gizmo_cfg.ik_end_link_name,
+                tcp=gizmo_cfg.ik_tcp_pose,
+            )
+        }
 
     # Create UR10 robot
     robot_cfg = RobotCfg(
@@ -77,53 +107,50 @@ def main():
             ]
         ),
         control_parts={
-            "arm": ["JOINT[0-9]"],
+            "arm": ["Joint[0-9]"],
             "hand": ["FINGER[1-2]"],
         },
-        solver_cfg={
-            "arm": PytorchSolverCfg(
-                end_link_name="ee_link",
-                root_link_name="base_link",
-                tcp=[
-                    [0.0, 1.0, 0.0, 0.0],
-                    [-1.0, 0.0, 0.0, 0.0],
-                    [0.0, 0.0, 1.0, 0.12],
-                    [0.0, 0.0, 0.0, 1.0],
-                ],
-                num_samples=30,
-            )
-        },
+        solver_cfg=solver_cfg,
         drive_pros=JointDrivePropertiesCfg(
-            stiffness={"JOINT[0-9]": 1e4, "FINGER[1-2]": 1e2},
-            damping={"JOINT[0-9]": 1e3, "FINGER[1-2]": 1e1},
-            max_effort={"JOINT[0-9]": 1e5, "FINGER[1-2]": 1e3},
+            stiffness={"Joint[0-9]": 1e4, "FINGER[1-2]": 1e2},
+            damping={"Joint[0-9]": 1e3, "FINGER[1-2]": 1e1},
+            max_effort={"Joint[0-9]": 1e5, "FINGER[1-2]": 1e3},
             drive_type="force",
         ),
         init_qpos=[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0, 0.0, 0.0],
     )
     robot = sim.add_robot(cfg=robot_cfg)
+    if sim.is_use_gpu_physics:
+        sim.init_gpu_physics()
 
     # Set initial joint positions
     initial_qpos = torch.tensor(
         [[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0]],
         dtype=torch.float32,
-        device="cpu",
+        device=sim.device,
     )
     joint_ids = robot.get_joint_ids("arm")
+    robot.set_qpos(qpos=initial_qpos, joint_ids=joint_ids, target=False)
     robot.set_qpos(qpos=initial_qpos, joint_ids=joint_ids)
-
-    time.sleep(0.2)  # Wait for a moment to ensure everything is set up
+    sim.update(step=1)
 
     native_window_opened = False
     if not args.headless:
         native_window_opened = sim.open_window()
 
-    # Enable gizmo using the new API
-    if native_window_opened or args.viser:
+    native_control = None
+    if native_window_opened:
+        native_control = create_robot_ik_gizmo_controller(
+            robot,
+            control_part="arm",
+            cfg=gizmo_cfg,
+            world=sim.get_world(),
+        )
+    elif args.viser:
         sim.enable_gizmo(
             uid="ur10_gizmo_test",
             control_part="arm",
-            enable_native=native_window_opened,
+            gizmo_cfg=gizmo_cfg,
         )
         if not sim.has_gizmo("ur10_gizmo_test", control_part="arm"):
             logger.log_error("Failed to enable gizmo!")
@@ -136,25 +163,27 @@ def main():
     logger.log_info("Gizmo-Robot example started!")
     if native_window_opened or args.viser:
         logger.log_info("Use the gizmo to drag the robot end-effector (EE)")
+    if native_window_opened:
+        logger.log_info("Press I to show or hide the native robot IK Gizmo")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
-    run_simulation(sim)
+    run_simulation(sim, native_control)
 
 
-def run_simulation(sim: SimulationManager):
+def run_simulation(sim: SimulationManager, native_control=None):
     step_count = 0
     try:
-        last_time = time.time()
+        last_time = time.perf_counter()
         last_step = 0
         while True:
-            time.sleep(0.033)  # 30Hz
-            # Update all gizmos managed by sim
-            sim.update_gizmos()
-            sim.capture_visualization_safely()
+            frame_start = time.perf_counter()
+            if native_control is not None:
+                native_control[0].update()
+            sim.update(step=1)
             step_count += 1
 
             if step_count % 100 == 0:
-                current_time = time.time()
+                current_time = time.perf_counter()
                 elapsed = current_time - last_time
                 fps = (
                     sim.num_envs * (step_count - last_step) / elapsed
@@ -164,6 +193,9 @@ def run_simulation(sim: SimulationManager):
                 logger.log_info(f"Simulation step: {step_count}, FPS: {fps:.2f}")
                 last_time = current_time
                 last_step = step_count
+
+            elapsed = time.perf_counter() - frame_start
+            time.sleep(max(0.0, sim.sim_config.physics_dt - elapsed))
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")
     finally:

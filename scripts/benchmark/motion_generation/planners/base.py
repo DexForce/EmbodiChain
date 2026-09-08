@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.planners.utils import PlanResult
+from embodichain.lab.sim.motion.planners.utils import PlanResult
 
 from ..config import PlannerSpecCfg, stable_hash
 from ..models import AlgorithmRole, BenchmarkCase, PlannerMetadata

@@ -17,10 +17,12 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
-from embodichain.utils.utility import load_config, save_config
+import embodichain.utils.utility as utility_module
+from embodichain.utils.utility import load_config, read_all_folder_images, save_config
 
 
 @pytest.fixture
@@ -87,6 +89,34 @@ class TestLoadConfig:
         )
 
         assert loaded["id"] == "PourWater-v1"
+
+
+def test_read_all_folder_images_uses_stable_path_order(monkeypatch, tmp_path) -> None:
+    """Seeded texture selection sees the same catalog order across filesystems."""
+    monkeypatch.setattr(
+        os,
+        "walk",
+        lambda path: [(str(path), [], ["z.png", "a.png", "m.png"])],
+    )
+    monkeypatch.setattr(utility_module.cv2, "imread", lambda path: path)
+    monkeypatch.setattr(
+        utility_module.cv2,
+        "cvtColor",
+        lambda image, color_conversion: image,
+    )
+    monkeypatch.setattr(
+        utility_module,
+        "tqdm",
+        lambda values, **kwargs: values,
+    )
+
+    images = read_all_folder_images(str(tmp_path))
+
+    assert images == [
+        str(tmp_path / "a.png"),
+        str(tmp_path / "m.png"),
+        str(tmp_path / "z.png"),
+    ]
 
 
 if __name__ == "__main__":

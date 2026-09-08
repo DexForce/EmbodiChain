@@ -1,6 +1,6 @@
 # Runtime Workspace Sampling
 
-The `embodichain.lab.sim.workspace` package can reuse a cached workspace during
+The `embodichain.lab.sim.motion.workspace` package can reuse a cached workspace during
 environment resets. Runtime sampling selects a reachable joint configuration
 from the cache and asks the target `Robot` to recompute forward kinematics for
 each environment. This accounts for the current robot-base pose instead of
@@ -14,7 +14,7 @@ that a collision-free trajectory exists from the robot's current state.
 Workspace caches are configured per robot control part:
 
 ```python
-from embodichain.lab.sim.workspace import RobotWorkspaceCfg
+from embodichain.lab.sim.motion.workspace import RobotWorkspaceCfg
 
 workspace_cfg = {
     "left_arm": RobotWorkspaceCfg(
@@ -103,7 +103,7 @@ their previous object pose.
 ## Package layout
 
 ```text
-embodichain/lab/sim/workspace/
+embodichain/lab/sim/motion/workspace/
 ├── runtime.py       # RobotWorkspace and WorkspaceSample
 ├── cfg.py           # RobotWorkspaceCfg
 ├── analyzer.py      # WorkspaceAnalyzer

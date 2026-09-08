@@ -38,13 +38,11 @@ The simulation stack can be read from the bottom up:
     |   `-- contact sensors
     |-- browser visualization
     |   `-- Viser scene, cameras, overlays, and runtime telemetry
-    |-- solvers
-    |   |-- forward kinematics
-    |   |-- inverse kinematics
-    |   `-- differential kinematics
-    |-- planners
-    |   |-- joint-space and Cartesian trajectory generation
-    |   `-- time parameterization and sampling utilities
+    |-- motion
+    |   |-- solvers: forward, inverse, and differential kinematics
+    |   |-- planners: paths, time parameterization, and sampling
+    |   |-- workspace: reachability analysis and runtime queries
+    |   `-- expansion: candidates, coverage, and generation accounting
     `-- atomic actions
         `-- reusable manipulation primitives built from assets, solvers, and planners
 
@@ -87,15 +85,22 @@ Submodule Relationships
      - Produce perception data such as color, depth, segmentation, stereo disparity, and contacts.
      - Attach to world frames, robot links, or monitored bodies and return
        batched tensors for downstream policies or datasets.
-   * - Solvers
+   * - Motion / solvers
      - Compute FK, IK, and differential kinematics for robots and articulations.
      - Translate task-space goals into joint-space commands used by planners,
        controllers, and actions.
-   * - Planners
+   * - Motion / planners
      - Generate joint-space or Cartesian trajectories with interpolation,
        timing, and feasibility handling.
      - Use robot state and solver results to produce trajectories that can be
        replayed in the manager loop.
+   * - Motion / workspace
+     - Analyze reachability and cache workspace samples for runtime queries.
+     - Supplies candidate robot configurations and poses for motion workflows.
+   * - Motion / trajectory augmentation
+     - Vary annotated trajectories and track candidate budgets and coverage.
+     - Receives planning, rollout, validation, and persistence results from
+       explicit host integrations.
    * - Atomic actions
      - Package complete manipulation primitives such as move, pick, and place.
      - Compose semantic targets, solvers, planners, and robot control into
@@ -134,9 +139,10 @@ Choosing Where to Start
 - Use :doc:`sim_sensor` when adding camera, stereo, or contact observations.
 - Use :doc:`viser_visualization` when inspecting a headless or remote scene in
   a browser.
-- Use :doc:`solvers/index` when a robot needs FK, IK, or velocity-level
+- Use :doc:`motion/index` for the shared robot motion package and its boundaries.
+- Use :doc:`motion/solvers/index` when a robot needs FK, IK, or velocity-level
   kinematics.
-- Use :doc:`planners/index` when a target pose or joint goal must become a
+- Use :doc:`motion/planners/index` when a target pose or joint goal must become a
   time-ordered trajectory.
 - Use :doc:`atomic actions <atomic_actions/index>` when building scripted
   manipulation from reusable motion primitives.
@@ -169,6 +175,5 @@ See Also
    sim_assets.md
    sim_sensor.md
    viser_visualization.md
-   solvers/index
-   planners/index
+   motion/index
    atomic_actions/index

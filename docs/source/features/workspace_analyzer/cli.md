@@ -194,7 +194,7 @@ configurations are converted to poses using each environment's current robot
 base:
 
 ```python
-from embodichain.lab.sim.workspace import RobotWorkspace
+from embodichain.lab.sim.motion.workspace import RobotWorkspace
 
 workspace = RobotWorkspace.from_cache(entry, device="cuda")
 indices = workspace.sample_indices(16, strategy="voxel_uniform")
@@ -207,7 +207,7 @@ integration.
 To look up an entry by its inputs from Python, use the analyzer's cache key:
 
 ```python
-from embodichain.lab.sim.workspace.caches import (
+from embodichain.lab.sim.motion.workspace.caches import (
     ResultsCache, compute_cache_key,
 )
 # metadata = analyzer._build_cache_key_metadata(num_samples)  # same inputs

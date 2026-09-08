@@ -19,8 +19,7 @@
 # ``image_writer.py`` and ``configs/video.py``), Apache-2.0.
 #
 # Vendored verbatim in math so that sidecar depth videos produced here are
-# binary-compatible with the official lerobot 0.6.0 reader once EmbodiChain
-# raises its Python baseline to 3.12 (see issue #424, Path B).
+# binary-compatible with the official lerobot 0.6.0 reader (see issue #424).
 
 """Depth quantization/dequantization for compressed depth sidecar videos.
 
@@ -32,7 +31,7 @@ because it allocates more quanta to near-range depth, matching the
 
 The math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's
 ``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and
-:mod:`torch` -- all of which run on Python 3.10/3.11. See issue #424.
+:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.
 """
 
 from __future__ import annotations

@@ -28,7 +28,7 @@ from tensordict import TensorDict
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.utils import logger, configclass
-from embodichain.utils.warp.kernels import scatter_contact_data
+from embodichain.lab.sim.sensors._warp.contact import scatter_contact_data
 
 
 @configclass

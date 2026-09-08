@@ -53,7 +53,7 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
     URDFCfg,
 )
-from embodichain.lab.sim.solvers import SolverCfg
+from embodichain.lab.sim.motion.solvers import SolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
 from embodichain.lab.sim.robots.ur_robot import URRobotCfg
