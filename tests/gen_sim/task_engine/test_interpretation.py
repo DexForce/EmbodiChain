@@ -17,10 +17,31 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
 from embodichain.gen_sim.task_engine import interpretation as interpretation_module
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"model": "mimo-v2-flash", "base_url": "https://api.xiaomimimo.com/v1"},
+        {"model": "compatible-model", "base_url": "https://provider.example/v1"},
+    ],
+    ids=["mimo", "other-openai-compatible"],
+)
+def test_structured_output_uses_json_mode(settings: dict[str, str]) -> None:
+    client = Mock()
+    schema = {"type": "object", "properties": {"task": {"type": "string"}}}
+
+    result = interpretation_module._structured_output_runnable(
+        client, schema, settings=settings
+    )
+
+    client.with_structured_output.assert_called_once_with(schema, method="json_mode")
+    assert result is client.with_structured_output.return_value
 
 
 def _write_dotenv(path: Path) -> None:

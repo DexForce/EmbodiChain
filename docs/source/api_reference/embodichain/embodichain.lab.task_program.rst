@@ -24,6 +24,7 @@ embodichain.lab.task_program
       BarrierCfg
       WaitStablePostCfg
       ObjectNearTargetValidatorCfg
+      ObjectNearRelativeTargetValidatorCfg
       ArticulationJointPositionValidatorCfg
       TaskProgramCompiler
       CompiledTaskProgram
@@ -96,6 +97,9 @@ Schema
    :members:
 
 .. autoclass:: ObjectNearTargetValidatorCfg
+   :members:
+
+.. autoclass:: ObjectNearRelativeTargetValidatorCfg
    :members:
 
 .. autoclass:: ArticulationJointPositionValidatorCfg

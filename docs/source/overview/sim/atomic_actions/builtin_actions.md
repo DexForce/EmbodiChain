@@ -231,9 +231,10 @@ control-part adapter resolves current joint-backed endpoints through
 `Robot.control_parts`; custom adapters may instead return mobile, whole-body, or
 other runtime targets.
 
-`MoveJoints` is intentionally `agent_visible=False`: it is useful for home,
-recovery, calibration, and scripted postures, but is not exposed to an Action
-Agent by default.
+`MoveJoints` is also the canonical implementation for home, recovery,
+calibration, and other embodiment-named postures. Semantic callers should
+constrain those uses through a registered call and keep the named target in the
+robot profile.
 
 ## Shared goal and configuration rules
 
@@ -253,7 +254,11 @@ Explicit pose tensors use `(4, 4)` or `(B, 4, 4)`. Waypoint-capable fields in
 `EndEffectorPoseGoal` and `PlaceGoal` also accept `(B, N, 4, 4)`.
 `SceneEntityPose` resolves to the latest `(B, 4, 4)` pose from each
 `SceneSnapshot`, checks optional perception confidence, and registers that
-entity as a recovery dependency.
+entity as a recovery dependency. `world_displacement` keeps a translation in
+the world frame after local composition. `world_orientation` replaces the
+tracked entity's rotation before applying `relative_pose`, allowing a target to
+track a moving reference position while retaining a grounded world-frame
+orientation.
 
 | Skill / field | `SceneEntityPose` accepted | Automatic scene-motion replan |
 |---|---:|---:|
@@ -379,7 +384,7 @@ than an EEF pose.
 | Motion | joint planning/interpolation from observed qpos; supports joint waypoints |
 | Completion | `JOINT_GOAL_REACHED` |
 | Effect | none |
-| Agent visibility | hidden by default (`agent_visible=False`) |
+| Agent visibility | visible |
 
 `target` accepts an explicit qpos tensor with shape `(control_dof,)`,
 `(B, control_dof)`, or `(B, N, control_dof)`, or a non-empty string resolved

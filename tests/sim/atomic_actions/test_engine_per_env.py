@@ -186,6 +186,24 @@ class PhaseGateAction(DynamicAction):
         )
 
 
+class FailedPhaseGateAction(PhaseGateAction):
+    """Fully failed planning attempt that never reaches a gated segment."""
+
+    skill_id: ClassVar[str] = "failed_phase_gate"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        return self.failed_plan(
+            request,
+            context,
+            message="No feasible grasp was found.",
+        )
+
+
 class EffectAction(DynamicAction):
     """Dynamic test action that declares an attachment effect."""
 
@@ -846,13 +864,14 @@ def _destination_invocation(
 def _phase_gate_invocation(
     engine: AtomicActionEngine,
     *,
+    skill_id: str = PhaseGateAction.skill_id,
     segment_name: str = "commit",
     max_action_retries: int = 2,
 ) -> ActionInvocation[EndEffectorPoseGoal]:
     """Build a test invocation whose core owns one named segment gate."""
     base = _invocation(
         engine,
-        skill_id=PhaseGateAction.skill_id,
+        skill_id=skill_id,
         max_action_retries=max_action_retries,
     )
     return replace(
@@ -948,6 +967,28 @@ def test_phase_effect_gate_requires_a_noninitial_named_segment(
             (_phase_gate_invocation(engine, segment_name=segment_name),),
             _context(0.0, 0.0, 0.2, 0),
         )
+
+
+def test_fully_failed_plan_preserves_diagnostics_before_phase_gate_validation() -> None:
+    engine, _ = _engine()
+    action = FailedPhaseGateAction()
+    engine.register(action)
+
+    session = engine.start(
+        (
+            _phase_gate_invocation(
+                engine,
+                skill_id=FailedPhaseGateAction.skill_id,
+            ),
+        ),
+        _context(0.0, 0.0, 0.2, 0),
+    )
+
+    assert not session.active_plan.plan_success.any()
+    assert session.active_plan.diagnostics.failure == PlanningFailure(
+        "planning_failed",
+        retryable=True,
+    )
 
 
 def test_unresolved_phase_effect_gate_replays_preceding_command_for_full_cohort() -> (

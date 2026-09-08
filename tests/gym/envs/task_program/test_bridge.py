@@ -956,6 +956,29 @@ def test_joint_encoder_emits_full_qpos_and_holds_inactive_rows() -> None:
     assert torch.equal(action[1], qpos[1])
 
 
+def test_joint_encoder_holds_unaddressed_joints_at_controller_targets() -> None:
+    """A scoped command must not chase measured drift on another resource."""
+    current = torch.zeros(BATCH_SIZE, ROBOT_DOF)
+    controller_targets = torch.full_like(current, 0.5)
+    encoder = RuntimeCommandFrameEncoder(
+        _QposProvider(current),
+        hold_qpos_provider=lambda env_ids: controller_targets.clone(),
+    )
+
+    action = encoder.encode(
+        _joint_frame(
+            duration=STEP_DT,
+            active_mask=torch.tensor([True, False]),
+        )
+    )
+
+    assert torch.equal(action[0, torch.tensor([1, 3])], torch.tensor([10.0, 30.0]))
+    assert torch.equal(
+        action[0, torch.tensor([0, 2, 4])], controller_targets[0, [0, 2, 4]]
+    )
+    assert torch.equal(action[1], controller_targets[1])
+
+
 def test_frame_encoder_supports_registered_future_transport() -> None:
     encoder = RuntimeCommandFrameEncoder(
         _QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF))

@@ -58,6 +58,7 @@ from .control import (
     GRASP_COMMAND,
     JointPositionCommand,
     OPEN_COMMAND,
+    PARK_COMMAND,
 )
 from .core import AtomicAction, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
@@ -360,6 +361,7 @@ __all__ = [
     "OPEN_COMMAND",
     "ObservationProvider",
     "ObservedArticulationJointState",
+    "PARK_COMMAND",
     "PickUp",
     "PickUpOptions",
     "Place",

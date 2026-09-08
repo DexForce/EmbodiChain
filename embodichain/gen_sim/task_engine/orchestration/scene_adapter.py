@@ -26,19 +26,19 @@ import json
 from pathlib import Path
 from typing import Any
 
-from embodichain.gen_sim.action_engine.generation.models import PreparedScene
-from embodichain.gen_sim.action_engine.generation.source_scene import (
-    prepare_scene,
-    resolve_source_scene,
+from embodichain.gen_sim.task_engine.orchestration.grounding import (
+    GroundingCaller,
+    ground_scene_references,
 )
-from embodichain.gen_sim.action_engine.tasks.assembly import (
+from embodichain.gen_sim.task_engine.orchestration.scene_inventory import (
     SceneInventory,
     validate_source_compatibility,
     validate_target_compatibility,
 )
-from embodichain.gen_sim.action_engine.tasks.grounding import (
-    GroundingCaller,
-    ground_scene_references,
+from embodichain.gen_sim.task_engine.orchestration.source_scene import (
+    PreparedScene,
+    prepare_scene,
+    resolve_source_scene,
 )
 from embodichain.gen_sim.task_engine import TaskCandidate, TaskCandidateSet
 from embodichain.gen_sim.task_engine.interpretation import (
