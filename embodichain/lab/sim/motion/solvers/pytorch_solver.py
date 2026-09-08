@@ -340,7 +340,7 @@ class PytorchSolver(BaseSolver):
                                             Can be:
                                             - 1D tensor of shape (dof,): Single seed for all target positions
                                             - 2D tensor of shape (batch_size, dof): Individual seed per position
-                                            If None, defaults to zero configuration. Defaults to None.
+                                            If None, defaults to the joint-range midpoint. Defaults to None.
             num_samples (int | None): The number of random samples to generate. Must be positive.
                                      Defaults to None.
             return_all_solutions (bool, optional): If True, returns all valid solutions found.
@@ -361,7 +361,7 @@ class PytorchSolver(BaseSolver):
 
         # Prepare qpos_seed
         if qpos_seed is None:
-            qpos_seed = torch.zeros(self.dof, device=self.device)
+            qpos_seed = self.get_default_qpos_seed()
         else:
             qpos_seed = torch.as_tensor(qpos_seed, device=self.device)
 

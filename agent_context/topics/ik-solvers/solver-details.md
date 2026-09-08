@@ -93,6 +93,16 @@ and available CUDA backends in seeded and full redundancy-search modes.
 
 ## Seed Sampling and Null-Space Tasks
 
+### Default seed (`BaseSolver.get_default_qpos_seed`)
+
+When `get_ik` receives no seed, every solver falls back to the joint-range
+midpoint from `BaseSolver.get_default_qpos_seed()` — never a zero
+configuration, which violates the limits of some robots (Franka FR3 joints 4
+and 6) and biases nearest-solution selection toward the bounds. Pinocchio
+resets its internal `init_qpos` to this default on seedless calls instead of
+reusing the previous call's seed; UR accepts a missing seed instead of
+crashing. Pink keeps its own limit-projected neutral configuration.
+
 ### `QposSeedSampler` (`qpos_seed_sampler.py`)
 
 Used by iterative solvers (e.g., `PytorchSolver`) to generate joint-seed
