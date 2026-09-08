@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Pick up a cloth with a UR10 gripper using the Newton MJVBD solver."""
+"""Pick up a cloth with a UR10 gripper using the Newton DexUni solver."""
 
 from __future__ import annotations
 
@@ -244,7 +244,7 @@ def get_grasp_traj(
 ) -> torch.Tensor:
     """Build the full robot trajectory without materializing the scene.
 
-    MJVBD cloth manipulation uses an external kinematic articulation.  The
+    DexUni cloth manipulation uses an external kinematic articulation.  The
     trajectory therefore has to be registered before ``sim.prepare()`` so the
     Newton runtime can interpolate joint poses and velocities at every
     substep.
@@ -396,7 +396,7 @@ def main() -> None:
     if args.physics != "newton":
         parser.error("Cloth requires --physics newton.")
     if not str(args.device).startswith("cuda"):
-        parser.error("Newton MJVBD cloth simulation requires a CUDA device.")
+        parser.error("Newton DexUni cloth simulation requires a CUDA device.")
     # Configure the simulation
     sim_cfg = SimulationManagerCfg(
         width=1920,
@@ -415,7 +415,7 @@ def main() -> None:
         physics_cfg=NewtonPhysicsCfg(
             num_substeps=12,
             solver_cfg={
-                "solver_type": "mjvbd",
+                "solver_type": "dexuni",
                 "iterations": 24,
                 "particle_enable_self_contact": True,
                 "particle_self_contact_radius": 0.002,
@@ -431,7 +431,7 @@ def main() -> None:
                 "soft_contact_kd": CLOTH_RIGID_CONTACT_KD,
                 "soft_contact_mu": CLOTH_RIGID_CONTACT_MU,
                 # Use the mixed material stiffness immediately instead of
-                # ramping new contacts from the low MJVBD default.
+                # ramping new contacts from the low DexUni default.
                 "rigid_contact_k_start": CLOTH_RIGID_CONTACT_KE,
                 "rigid_body_particle_contact_buffer_size": 512,
                 "rigid_contact_max": 0,
@@ -440,6 +440,8 @@ def main() -> None:
                 "step_rigid_bodies": False,
                 "self_contact_bvh_rebuild_interval_frames": 1,
             },
+            # DexUni owns its particle-shape contacts and collision detection.
+            collision_cfg=None,
         ),
         visualization=visualization_cfg_from_args(args),
     )

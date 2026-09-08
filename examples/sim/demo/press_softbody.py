@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Press a soft cow with a UR10 using the Newton MJVBD solver."""
+"""Press a soft cow with a UR10 using the Newton DexUni solver."""
 
 from __future__ import annotations
 
@@ -27,7 +27,6 @@ from dexsim.utility.path import get_resources_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
-    NewtonCollisionPipelineCfg,
     NewtonPhysicsCfg,
     RenderCfg,
     VolumeDeformableObjectCfg,
@@ -70,7 +69,7 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
-    """Create the Newton MJVBD simulation manager."""
+    """Create the Newton DexUni simulation manager."""
     config = SimulationManagerCfg(
         width=1920,
         height=1080,
@@ -87,7 +86,7 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
             device=args.device,
             num_substeps=NUM_SUBSTEPS,
             solver_cfg={
-                "solver_type": "mjvbd",
+                "solver_type": "dexuni",
                 "iterations": SOLVER_ITERATIONS,
                 "particle_enable_self_contact": False,
                 "particle_self_contact_radius": 0.005,
@@ -102,12 +101,11 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
                 "soft_contact_kd": SOFT_CONTACT_KD,
                 "soft_contact_mu": SOFT_CONTACT_MU,
                 # The registered trajectory updates the robot kinematically at
-                # every Newton substep; MJVBD only needs to solve the soft body.
+                # every Newton substep; DexUni only needs to solve the soft body.
                 "step_rigid_bodies": False,
             },
-            collision_cfg=NewtonCollisionPipelineCfg(
-                soft_contact_margin=SOFT_CONTACT_MARGIN,
-            ),
+            # DexUni owns its particle-shape contacts and collision detection.
+            collision_cfg=None,
         ),
         visualization=visualization_cfg_from_args(args),
     )

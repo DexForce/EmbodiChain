@@ -262,6 +262,6 @@ may be left over from an earlier update.
 - **`filter_by_user_ids(item_user_ids, env_ids=None)`**: Filter contact report by contact actor IDs. The method name is retained for compatibility. Optionally filter by specific environment IDs.
 - **`set_contact_point_visibility(visible, rgba, point_size, env_ids=None)`**: Enable/disable visualization of contact points with customizable color and size. Optionally visualize only specific environments.
 
-Newton MuJoCo-Warp exposes contact forces, so both impulse fields are available. Other supported Newton rigid solvers currently expose contact geometry with zero-valued impulse fields. MuJoCo CPU mode does not expose device contact buffers, and MJVBD does not currently publish rigid contacts through `ContactQuery`; those modes are therefore unsupported by this sensor.
+Newton MuJoCo-Warp exposes contact forces, so both impulse fields are available. Other supported Newton rigid solvers currently expose contact geometry with zero-valued impulse fields. MuJoCo CPU mode does not expose device contact buffers, and DexUni does not currently publish rigid contacts through `ContactQuery`; those modes are therefore unsupported by this sensor.
 
 Default Direct GPU reports static counterparts with actor ID `-1` because its raw contact buffer does not expose their object identity. To monitor a dynamic body or articulation link against arbitrary static geometry, select the dynamic/link object and set `filter_need_both_actor=False`. Default CPU and Newton can identify registered static shapes.

@@ -68,9 +68,9 @@ and articulation links are classified separately.
 | Empty scene or independent rigid bodies only | `XPBDSolverCfg` | `xpbd` | Newton collision pipeline |
 | Articulations, with or without independent rigid bodies | `MJWarpSolverCfg` | `mujoco_warp` | MuJoCo Warp collision pipeline |
 | Cloth or soft bodies, optionally with rigid bodies | `VBDSolverCfg` | `vbd` | Newton collision pipeline; VBD may handle deformable self-contact |
-| Cloth or soft bodies with articulations, optionally with rigid bodies | `MJVBDSolverCfg` | `mjvbd` | Newton particle-shape soft contacts; MuJoCo rigid collision is disabled |
+| Cloth or soft bodies with articulations, optionally with rigid bodies | `DexUniSolverCfg` | `dexuni` | Newton particle-shape soft contacts; MuJoCo rigid collision is disabled |
 
-The current MJVBD path does not generate rigid-rigid or rigid-ground contacts.
+The current DexUni path does not generate rigid-rigid or rigid-ground contacts.
 MuJoCo Warp still advances rigid bodies and articulations, while Newton's soft
 contact kernels handle deformable particle-shape contacts.
 
@@ -110,8 +110,8 @@ sim_config = SimulationManagerCfg(
 )
 ```
 
-EmbodiChain mapping configs recognize `auto`, `mujoco_warp` (or `mjwarp`),
-`mjvbd`, `xpbd`, `semi_implicit`, `featherstone`, and `vbd`. A DexSim
+EmbodiChain mapping configs recognize `auto`, `dexuni`, `mujoco_warp` (or
+`mjwarp`), `xpbd`, `semi_implicit`, `featherstone`, and `vbd`. A DexSim
 `NewtonSolverCfg` object may also be assigned directly when another explicit
 solver class is required. AutoSolver never selects `DFSPHSolverCfg`,
 `FeatherstoneSolverCfg`, or `SemiImplicitSolverCfg`. In particular,
@@ -125,13 +125,13 @@ Volume soft bodies and surface cloth are supported through
 requires all of the following:
 
 - CUDA execution.
-- `auto`, `xpbd`, `semi_implicit`, `vbd`, or `mjvbd` as the configured solver.
+- `auto`, `dexuni`, `xpbd`, `semi_implicit`, or `vbd` as the configured solver.
 - `requires_grad=False`.
 - All deformable declarations before the first `prepare()`/scene finalization.
 
 This list is the integration's admission check, not a claim that every solver
 has identical material, self-collision, or joint behavior. Choose a solver for
-the complete scene, including any articulated robot. In particular, the MJVBD
+the complete scene, including any articulated robot. In particular, the DexUni
 rigid-contact limitation above matters when a robot or object must also collide
 with the ground or other rigid bodies. A solver accepted by upstream Newton
 may still lack an EmbodiChain deformable adapter or operation.
@@ -147,7 +147,9 @@ With `mujoco_warp`, `solver_cfg.use_mujoco_contacts` selects whether the solver
 uses its internal collision path or Newton-generated rigid contacts. An
 external `collision_cfg` does not by itself make the solver consume those
 contacts. Confirm the active path before tuning its capacities or margins.
-MJVBD uses particle-shape soft contacts and does not publish rigid contacts.
+DexUni owns collision detection and its particle-shape contacts, so set
+`collision_cfg=None` when selecting it explicitly. It does not publish rigid
+contacts through the current query path.
 
 | `collision_cfg` field | Default | Meaning |
 | :--- | :--- | :--- |
@@ -174,7 +176,7 @@ reports the query's capabilities at runtime:
 | MuJoCo-Warp on CUDA | Available | Normal and friction impulse data available. |
 | Other supported Newton rigid solvers | Available | Geometry-only paths use zero-valued impulse fields. |
 | MuJoCo CPU mode | Device contact buffers unavailable | Unsupported by this sensor path. |
-| MJVBD | Rigid contacts not published through `ContactQuery` | Unsupported by this sensor path. |
+| DexUni | Rigid contacts not published through `ContactQuery` | Unsupported by this sensor path. |
 
 Check `sensor.contact_capabilities` before interpreting measurements. Zero
 impulse on a geometry-only solver does not mean absence of a contact candidate.

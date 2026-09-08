@@ -150,7 +150,7 @@ def parse_arguments() -> argparse.Namespace:
     if args.physics != "newton":
         parser.error("T-shirt folding requires --physics newton.")
     if not str(args.device).startswith("cuda"):
-        parser.error("Newton MJVBD cloth simulation requires a CUDA device.")
+        parser.error("Newton DexUni cloth simulation requires a CUDA device.")
     if args.num_envs != 1:
         parser.error("This trajectory scene currently supports --num_envs 1.")
     if not math.isfinite(args.dt) or args.dt <= 0.0:
@@ -318,7 +318,7 @@ def initialize_simulation(
     *,
     use_cuda_graph: bool,
 ) -> SimulationManager:
-    """Create the EmbodiChain manager with the reference MJVBD settings."""
+    """Create the EmbodiChain manager with the reference DexUni settings."""
     cfg = SimulationManagerCfg(
         width=1920,
         height=1080,
@@ -337,7 +337,7 @@ def initialize_simulation(
             num_substeps=NUM_SUBSTEPS,
             use_cuda_graph=use_cuda_graph,
             solver_cfg={
-                "solver_type": "mjvbd",
+                "solver_type": "dexuni",
                 "iterations": SOLVER_ITERATIONS,
                 "particle_enable_self_contact": True,
                 "particle_self_contact_radius": 0.002,
@@ -355,6 +355,8 @@ def initialize_simulation(
                 "soft_contact_kd": 5.0e-2,
                 "soft_contact_mu": 0.5,
             },
+            # DexUni owns its particle-shape contacts and collision detection.
+            collision_cfg=None,
         ),
         visualization=visualization_cfg_from_args(args),
     )

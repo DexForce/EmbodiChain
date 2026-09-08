@@ -192,7 +192,7 @@ resolves every configured UID to per-Arena Spawn handles and creates one
   Spawn path/link identity.
 - `contact_capabilities` reports whether the backend supplies geometry,
   normal impulse, and friction impulse. Newton MuJoCo-Warp provides all three;
-  other supported Newton rigid solvers may provide geometry only. MJVBD does
+  other supported Newton rigid solvers may provide geometry only. DexUni does
   not currently publish rigid contacts through `ContactQuery`.
 
 The existing TensorDict shape and field names remain stable. `user_ids` now

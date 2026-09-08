@@ -158,7 +158,7 @@ exposes `add/get_deformable_object()` for both topologies.
 Only the Newton backend is registered; the Default backend intentionally
 reports both deformable capabilities as unsupported. Declaration requires CUDA
 and a particle-capable Newton solver (`xpbd`, `semi_implicit`, `vbd`, or
-`mjvbd`), rejects gradient mode and post-finalization additions, and compiles
+`dexuni`), rejects gradient mode and post-finalization additions, and compiles
 directly to DexSim 0.5 `SoftBodyDesc` or `ClothDesc`. Runtime state is fetched
 and applied through `Scene.create_particle_set_batch()`; direct DexSim
 `SoftBody`/`ClothBody` buffers and the old utility loaders are not supported.
@@ -399,6 +399,10 @@ still select `semi_implicit` explicitly because AutoSolver does not choose a
 differentiable solver. Before finalization, EmbodiChain treats `auto` as
 unresolved; after finalization, `NewtonPhysicsBackend.solver_type` reads the
 concrete type from DexSim's World-owned backend.
+Explicit coupled articulation/deformable configurations use `dexuni` or
+`DexUniSolverCfg`. DexUni owns collision detection and its particle-shape
+contacts, so explicit configurations set `collision_cfg=None` instead of
+tuning the external pipeline.
 MuJoCo-Warp mappings may set `enable_multiccd: true`; EmbodiChain forwards it
 to DexSim's `MJWarpSolverCfg`, which passes it to Newton `SolverMuJoCo`.
 Enabling it changes contact generation (up to four contacts per geometry pair)

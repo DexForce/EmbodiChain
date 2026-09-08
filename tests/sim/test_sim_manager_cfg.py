@@ -435,15 +435,30 @@ def test_newton_physics_cfg_accepts_explicit_auto_solver_mapping() -> None:
 
 
 @pytest.mark.no_sim
-def test_newton_physics_cfg_accepts_mjvbd_solver_alias() -> None:
-    from dexsim.engine.newton_physics import MJVBDSolverCfg
+@pytest.mark.parametrize(
+    ("config_key", "solver_name"),
+    [("solver_type", "dexuni"), ("class_type", "DexUniSolverCfg")],
+)
+def test_newton_physics_cfg_accepts_dexuni_solver_mapping(
+    config_key: str,
+    solver_name: str,
+) -> None:
+    from dexsim.engine.newton_physics import DexUniSolverCfg
 
-    cfg = NewtonPhysicsCfg(solver_cfg={"class_type": "MJVBDSolverCfg"})
+    cfg = NewtonPhysicsCfg(
+        solver_cfg={
+            config_key: solver_name,
+            "iterations": 12,
+            "step_rigid_bodies": False,
+        }
+    )
 
     dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
 
-    assert isinstance(dexsim_cfg.solver_cfg, MJVBDSolverCfg)
-    assert dexsim_cfg.solver_cfg.solver_type == "mjvbd"
+    assert isinstance(dexsim_cfg.solver_cfg, DexUniSolverCfg)
+    assert dexsim_cfg.solver_cfg.solver_type == "dexuni"
+    assert dexsim_cfg.solver_cfg.iterations == 12
+    assert dexsim_cfg.solver_cfg.step_rigid_bodies is False
 
 
 @pytest.mark.no_sim
