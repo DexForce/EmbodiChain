@@ -85,3 +85,80 @@ def test_resampling_handles_repeated_time_and_zero_duration() -> None:
     torch.testing.assert_close(positions[0, :, 0], torch.linspace(0, 1, 4))
     assert torch.equal(positions[1], torch.full((4, 1), 2.0))
     torch.testing.assert_close(intervals.sum(dim=1), dt.sum(dim=1))
+
+
+def test_retime_exact_grid_uses_fixed_intervals_and_rest_boundaries() -> None:
+    positions = torch.tensor([[[0.0], [1.0], [2.0]]])
+    dt = torch.tensor([[0.0, 0.5, 0.5]])
+
+    retimed, velocities, intervals, valid_counts = trajectory.retime_to_control_grid(
+        positions, dt, control_dt=0.5
+    )
+
+    torch.testing.assert_close(retimed, positions)
+    torch.testing.assert_close(intervals, dt)
+    torch.testing.assert_close(velocities[0, :, 0], torch.tensor([0.0, 2.0, 0.0]))
+    assert torch.equal(valid_counts, torch.tensor([3]))
+
+
+def test_retime_off_grid_stretches_duration_without_changing_path_phase() -> None:
+    positions = torch.tensor([[[0.0], [1.0]]])
+    dt = torch.tensor([[0.0, 0.75]])
+
+    retimed, velocities, intervals, valid_counts = trajectory.retime_to_control_grid(
+        positions, dt, control_dt=0.5
+    )
+
+    torch.testing.assert_close(retimed[0, :, 0], torch.tensor([0.0, 0.5, 1.0]))
+    torch.testing.assert_close(intervals, torch.tensor([[0.0, 0.5, 0.5]]))
+    torch.testing.assert_close(velocities[0, :, 0], torch.tensor([0.0, 1.0, 0.0]))
+    assert torch.equal(valid_counts, torch.tensor([3]))
+
+
+def test_retime_pads_short_rows_with_terminal_holds() -> None:
+    positions = torch.tensor(
+        [
+            [[0.0], [1.0], [2.0]],
+            [[2.0], [3.0], [3.0]],
+        ]
+    )
+    dt = torch.tensor([[0.0, 0.5, 0.5], [0.0, 0.5, 0.0]])
+
+    retimed, velocities, intervals, valid_counts = trajectory.retime_to_control_grid(
+        positions, dt, control_dt=0.5
+    )
+
+    torch.testing.assert_close(retimed[1, :, 0], torch.tensor([2.0, 3.0, 3.0]))
+    torch.testing.assert_close(intervals[1], torch.tensor([0.0, 0.5, 0.0]))
+    assert torch.equal(velocities[1], torch.zeros_like(velocities[1]))
+    assert torch.equal(valid_counts, torch.tensor([3, 2]))
+
+
+def test_retime_zero_duration_returns_one_hold_sample() -> None:
+    positions = torch.tensor([[[2.0], [2.0]]])
+    dt = torch.zeros(1, 2)
+
+    retimed, velocities, intervals, valid_counts = trajectory.retime_to_control_grid(
+        positions, dt, control_dt=0.1
+    )
+
+    assert retimed.shape == (1, 1, 1)
+    assert torch.equal(retimed, torch.tensor([[[2.0]]]))
+    assert torch.equal(velocities, torch.zeros_like(retimed))
+    assert torch.equal(intervals, torch.zeros(1, 1))
+    assert torch.equal(valid_counts, torch.tensor([1]))
+
+
+@pytest.mark.parametrize("control_dt", [0.0, -0.1, float("inf"), float("nan")])
+def test_retime_rejects_invalid_control_period(control_dt: float) -> None:
+    with pytest.raises(ValueError, match="control_dt"):
+        trajectory.retime_to_control_grid(
+            torch.zeros(1, 2, 1), torch.tensor([[0.0, 0.1]]), control_dt
+        )
+
+
+def test_retime_rejects_nonzero_first_arrival_offset() -> None:
+    with pytest.raises(ValueError, match="first.*zero"):
+        trajectory.retime_to_control_grid(
+            torch.zeros(1, 2, 1), torch.tensor([[0.1, 0.1]]), control_dt=0.1
+        )

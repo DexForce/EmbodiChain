@@ -23,12 +23,17 @@ from __future__ import annotations
 
 from .interpolation import interpolate_with_distance, interpolate_with_nums
 from .resampling import resample_with_distance
-from .timing import differentiate_positions, resample_in_time
+from .timing import (
+    differentiate_positions,
+    resample_in_time,
+    retime_to_control_grid,
+)
 from .warping import sort_and_padding_key_frame, warp_trajectory_qpos
 
 __all__ = [
     "differentiate_positions",
     "resample_in_time",
+    "retime_to_control_grid",
     "interpolate_with_distance",
     "interpolate_with_nums",
     "resample_with_distance",

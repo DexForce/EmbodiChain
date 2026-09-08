@@ -18,9 +18,15 @@
 
 from __future__ import annotations
 
+import math
+
 import torch
 
-__all__ = ["differentiate_positions", "resample_in_time"]
+__all__ = [
+    "differentiate_positions",
+    "resample_in_time",
+    "retime_to_control_grid",
+]
 
 
 def _validate_timing(positions: torch.Tensor, dt: torch.Tensor) -> None:
@@ -131,3 +137,107 @@ def resample_in_time(
     result[:, 0], result[:, -1] = positions[:, 0], positions[:, -1]
     intervals = torch.cat([dt[:, :1], query.diff(dim=1)], dim=1)
     return result, intervals
+
+
+def retime_to_control_grid(
+    positions: torch.Tensor,
+    dt: torch.Tensor,
+    control_dt: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Retimes a joint path to a fixed command period without speeding it up.
+
+    Each row's source duration ``T`` is quantized to
+    ``ceil(T / control_dt) * control_dt``. Positions are sampled at uniformly
+    spaced phases of the source path, while returned arrival intervals use the
+    fixed destination period. Shorter rows are padded with terminal holds.
+
+    Args:
+        positions: Joint samples with shape ``(B, N, D)``.
+        dt: Source arrival intervals with shape ``(B, N)``. The first interval
+            must be zero.
+        control_dt: Positive finite destination command period in seconds.
+
+    Returns:
+        Retimed positions, recomputed velocities, destination arrival
+        intervals, and valid sample counts. The first and last valid velocity
+        of every row are zero.
+
+    Raises:
+        ValueError: If the trajectory timing or destination period is invalid.
+    """
+    _validate_timing(positions, dt)
+    if positions.shape[1] == 0:
+        raise ValueError("Cannot retime an empty trajectory.")
+    if (
+        isinstance(control_dt, bool)
+        or not isinstance(control_dt, (int, float))
+        or not math.isfinite(control_dt)
+        or control_dt <= 0
+    ):
+        raise ValueError("control_dt must be a positive finite number.")
+    if (dt[:, 0] != 0).any():
+        raise ValueError("The first arrival interval must be zero.")
+
+    destination_dt = float(control_dt)
+    durations = dt[:, 1:].sum(dim=1)
+    interval_counts: list[int] = []
+    for duration in durations.detach().cpu().tolist():
+        ratio = duration / destination_dt
+        nearest = round(ratio)
+        tolerance = max(1.0e-9, abs(ratio) * 1.0e-7)
+        interval_counts.append(
+            int(
+                nearest
+                if math.isclose(ratio, nearest, abs_tol=tolerance)
+                else math.ceil(ratio)
+            )
+        )
+
+    valid_counts = torch.tensor(
+        [count + 1 for count in interval_counts],
+        dtype=torch.long,
+        device=positions.device,
+    )
+    sample_count = int(valid_counts.max().item())
+    sample_indices = torch.arange(sample_count, device=dt.device, dtype=dt.dtype)
+    count_tensor = valid_counts.sub(1).to(dtype=dt.dtype)
+    fractions = sample_indices.unsqueeze(0) / count_tensor.clamp_min(1).unsqueeze(1)
+    fractions = fractions.clamp(max=1)
+
+    source_times = dt.cumsum(dim=1)
+    query = durations.unsqueeze(1) * fractions
+    upper = torch.searchsorted(
+        source_times.contiguous(), query.contiguous(), right=True
+    ).clamp(max=positions.shape[1] - 1)
+    lower = (upper - 1).clamp(min=0)
+    t0 = source_times.gather(1, lower)
+    t1 = source_times.gather(1, upper)
+    span = t1 - t0
+    weight = torch.where(
+        span > 0,
+        (query - t0) / torch.where(span > 0, span, torch.ones_like(span)),
+        torch.zeros_like(span),
+    )
+    dimensions = positions.shape[-1]
+    q0 = positions.gather(1, lower.unsqueeze(-1).expand(-1, -1, dimensions))
+    q1 = positions.gather(1, upper.unsqueeze(-1).expand(-1, -1, dimensions))
+    retimed = torch.lerp(q0, q1, weight.to(positions.dtype).unsqueeze(-1))
+    retimed[:, 0] = positions[:, 0]
+    terminal_indices = valid_counts.sub(1)
+    rows = torch.arange(positions.shape[0], device=positions.device)
+    retimed[rows, terminal_indices] = positions[:, -1]
+
+    intervals = torch.zeros(
+        positions.shape[0], sample_count, dtype=dt.dtype, device=dt.device
+    )
+    valid_mask = sample_indices.unsqueeze(0) < valid_counts.unsqueeze(1)
+    intervals[:, 1:] = torch.where(
+        valid_mask[:, 1:],
+        torch.as_tensor(destination_dt, dtype=dt.dtype, device=dt.device),
+        0,
+    )
+    velocities = differentiate_positions(retimed, intervals)
+    velocities[:, 0] = 0
+    velocities[rows, terminal_indices] = 0
+    velocities = torch.where(valid_mask.unsqueeze(-1), velocities, 0)
+    return retimed, velocities, intervals, valid_counts
