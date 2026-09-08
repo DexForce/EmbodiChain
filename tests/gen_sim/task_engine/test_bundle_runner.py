@@ -27,6 +27,16 @@ from embodichain.gen_sim.task_engine import _bundle_runner
 from embodichain.gen_sim.task_engine._bundle_runner import _exception_metadata
 
 
+@pytest.mark.parametrize("argv, expected_seed", [([], 0), (["--seed", "7"], 7)])
+def test_runner_parser_preserves_seed_with_shared_launcher(
+    argv: list[str], expected_seed: int
+) -> None:
+    """Compose the real launcher without registering its seed argument twice."""
+    parser = _bundle_runner._runner_parser()
+
+    assert parser.parse_args(argv).seed == expected_seed
+
+
 def test_exception_metadata_preserves_explicit_causal_chain() -> None:
     """The report retains the physical planner error hidden by demo cleanup."""
     try:
