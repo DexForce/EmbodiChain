@@ -65,6 +65,7 @@ from embodichain.lab.gym.envs.demo import (
     DemoSegmentResult,
 )
 from embodichain.lab.gym.envs.types import ControllerAction
+from embodichain.lab.gym.envs.expert_trajectory import ExpertTrajectoryCfg
 from embodichain.lab.gym.envs.managers import (
     EventManager,
     ObservationManager,
@@ -206,6 +207,9 @@ class EmbodiedEnvCfg(EnvCfg):
 
     Please refer to the :class:`embodichain.lab.gym.envs.managers.ActionManager` class for more details.
     """
+
+    expert_trajectory: ExpertTrajectoryCfg = ExpertTrajectoryCfg()
+    """Source-neutral expert trajectory control and recording settings."""
 
     extensions: Union[Dict[str, Any], None] = None
     """Extension parameters for task-specific configurations.
