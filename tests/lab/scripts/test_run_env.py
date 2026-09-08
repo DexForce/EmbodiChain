@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -125,8 +126,7 @@ def test_legacy_action_list_displays_episode_and_segment_indices(
 
     assert generated
     assert progress.call_args.kwargs["desc"] == (
-        f"Executing episode #{EPISODE_INDEX}, segment {ACTION_LIST_INDEX + 1}/1: "
-        "legacy"
+        f"Ep {EPISODE_INDEX} · Seg {ACTION_LIST_INDEX + 1}/1 · legacy"
     )
     assert len(progress.call_args.args[0]) == 1
     assert progress.call_args.kwargs["file"] is sys.stdout
@@ -145,14 +145,46 @@ def test_task_program_progress_displays_repeated_segment_position(capsys) -> Non
     )
 
     assert generated
-    output = capsys.readouterr().out
+    output = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
     for index in range(1, REPEATED_PICK_PLACE_SEGMENT_COUNT + 1):
         assert (
-            f"Executing episode #{EPISODE_INDEX}, segment {index}/"
-            f"{REPEATED_PICK_PLACE_SEGMENT_COUNT}: move_cube: 100%|"
+            f"Steps  [fixed]    Ep {EPISODE_INDEX} · Seg {index}/"
+            f"{REPEATED_PICK_PLACE_SEGMENT_COUNT} · move_cube 100%"
         ) in output
     total = REPEATED_PICK_PLACE_SEGMENT_STEP_COUNT
     assert output.count(f"{total}/{total}") == REPEATED_PICK_PLACE_SEGMENT_COUNT
+
+
+def test_progress_wrapper_formats_known_step_total(capsys) -> None:
+    """Sized action sequences render a complete step progress bar."""
+    actions = (object(), object())
+
+    for _ in run_env._progress_wrapper(actions, "Ep 1 · Seg 1/1 · move_cube"):
+        pass
+
+    output = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
+    assert "Steps  [fixed]    Ep 1 · Seg 1/1 · move_cube" in output
+    assert "100%" in output
+    assert "2/2" in output
+    assert " step/s]" in output
+
+
+def test_progress_wrapper_formats_unknown_step_total_as_activity(capsys) -> None:
+    """Lazy action streams finish an indeterminate bar without a percentage."""
+    actions = (object() for _ in range(2))
+
+    for _ in run_env._progress_wrapper(
+        actions, "Ep 1 · Seg 1/1 · pour_and_return_bottle"
+    ):
+        pass
+
+    output = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
+    assert (
+        "Steps  [dynamic]  Ep 1 · Seg 1/1 · pour_and_return_bottle "
+        "│━━━━━━━━━━│ ✓ 2 steps"
+    ) in output
+    assert " step/s]" in output
+    assert "0%" not in output
 
 
 def test_run_env_syncs_viser_images_each_step_by_default() -> None:
@@ -573,6 +605,58 @@ def test_main_counts_max_episodes_as_persisted_env_rows(monkeypatch) -> None:
 
     assert calls == [(0, (0, 1, 2)), (3, (0, 1))]
     assert sum(len(env_ids) for _, env_ids in calls) == 5
+
+
+def _run_successful_collection(monkeypatch) -> None:
+    """Run the collection UI around a deterministic successful generator."""
+    env = _ResetTrackingEnv(num_envs=3)
+    args = SimpleNamespace(
+        replay=False,
+        preview=False,
+        save_path="",
+        save_video=False,
+        debug_mode=False,
+        regenerate=False,
+        record_trajectory=False,
+    )
+    monkeypatch.setattr(run_env, "generate_function", lambda *args, **kwargs: True)
+    run_env.main(
+        args,
+        env,
+        {"id": GYM_ID, "max_episodes": 5, "demo_max_attempts": 2},
+    )
+
+
+def test_main_displays_total_episode_progress_for_vector_batches(
+    monkeypatch, capsys
+) -> None:
+    """Collection progress counts persisted rows rather than vector batches."""
+    _run_successful_collection(monkeypatch)
+
+    output = capsys.readouterr().out
+    assert "Collecting episodes" in output
+    assert "100%" in output
+    assert "5/5" in output
+
+
+def test_main_prints_compact_collection_summary(monkeypatch, capsys) -> None:
+    """The run header exposes the settings needed to interpret progress."""
+    _run_successful_collection(monkeypatch)
+
+    output = capsys.readouterr().out
+    assert "EmbodiChain · Run Task" in output
+    assert f"Task        {GYM_ID}" in output
+    assert "Episodes    5" in output
+    assert "Parallel    3 environments" in output
+    assert "Attempts    2 per batch" in output
+
+
+def test_main_prints_clean_collection_completion(monkeypatch, capsys) -> None:
+    """A completed run ends with one concise success line."""
+    _run_successful_collection(monkeypatch)
+
+    output = capsys.readouterr().out
+    assert "✓ Collection complete · 5 episodes saved in 2 batches" in output
 
 
 def test_generate_function_rejects_runner_owned_segment_count() -> None:
