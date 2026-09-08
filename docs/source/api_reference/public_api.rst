@@ -467,7 +467,7 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnv
 
 embodichain.lab.task_program.integrations.simulation.handover
------------------------------------------------------------
+-------------------------------------------------------------
 
 .. currentmodule:: embodichain.lab.task_program.integrations.simulation.handover
 
@@ -1037,10 +1037,15 @@ embodichain.lab.sim.objects.gizmo
 
 .. currentmodule:: embodichain.lab.sim.objects.gizmo
 
+Native robot targets use DexSim's controller with Newton IK by default.
+Set ``GizmoCfg.ik_solver="embodichain"`` to reuse the robot control part's
+configured solver, including PinkSolver; Viser uses the same solver adapter.
+
 .. autosummary::
 
    Gizmo
    GizmoCfg
+   create_robot_ik_gizmo_controller
 
 embodichain.lab.sim.objects.rigid_object
 ----------------------------------------
@@ -1085,10 +1090,10 @@ embodichain.lab.sim.objects.soft_object
    SoftObject
    SoftObjectCfg
 
-embodichain.lab.sim.planners.base_planner
------------------------------------------
+embodichain.lab.sim.motion.planners.base_planner
+------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.base_planner
+.. currentmodule:: embodichain.lab.sim.motion.planners.base_planner
 
 .. autosummary::
 
@@ -1098,10 +1103,10 @@ embodichain.lab.sim.planners.base_planner
    BasePlanner
    validate_plan_options
 
-embodichain.lab.sim.planners.curobo.curobo_planner
---------------------------------------------------
+embodichain.lab.sim.motion.planners.curobo.curobo_planner
+---------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.curobo.curobo_planner
+.. currentmodule:: embodichain.lab.sim.motion.planners.curobo.curobo_planner
 
 .. autosummary::
 
@@ -1111,31 +1116,20 @@ embodichain.lab.sim.planners.curobo.curobo_planner
    CuroboPlannerCfg
    CuroboWorldCfg
 
-embodichain.lab.sim.planners.curobo.curobo_yaml
------------------------------------------------
+embodichain.lab.sim.motion.planners.curobo.curobo_yaml
+------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.curobo.curobo_yaml
+.. currentmodule:: embodichain.lab.sim.motion.planners.curobo.curobo_yaml
 
 .. autosummary::
 
    generate_curobo_robot_yaml
    generate_curobo_world_yaml
 
-embodichain.lab.sim.planners.motion_generator
----------------------------------------------
+embodichain.lab.sim.motion.planners.neural_planner
+--------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.motion_generator
-
-.. autosummary::
-
-   MotionGenerator
-   MotionGenCfg
-   MotionGenOptions
-
-embodichain.lab.sim.planners.neural_planner
--------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.planners.neural_planner
+.. currentmodule:: embodichain.lab.sim.motion.planners.neural_planner
 
 .. autosummary::
 
@@ -1143,10 +1137,10 @@ embodichain.lab.sim.planners.neural_planner
    NeuralPlannerCfg
    NeuralPlanOptions
 
-embodichain.lab.sim.planners.toppra_planner
--------------------------------------------
+embodichain.lab.sim.motion.planners.toppra_planner
+--------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.toppra_planner
+.. currentmodule:: embodichain.lab.sim.motion.planners.toppra_planner
 
 .. autosummary::
 
@@ -1154,10 +1148,10 @@ embodichain.lab.sim.planners.toppra_planner
    ToppraPlannerCfg
    ToppraPlanOptions
 
-embodichain.lab.sim.planners.utils
-----------------------------------
+embodichain.lab.sim.motion.planners.utils
+-----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.utils
+.. currentmodule:: embodichain.lab.sim.motion.planners.utils
 
 .. autosummary::
 
@@ -1397,49 +1391,49 @@ embodichain.lab.task_program.semantics.scene
    :members:
    :no-index:
 
-embodichain.lab.sim.solvers.neural_ik_solver
---------------------------------------------
+embodichain.lab.sim.motion.solvers.neural_ik_solver
+---------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.solvers.neural_ik_solver
+.. currentmodule:: embodichain.lab.sim.motion.solvers.neural_ik_solver
 
 .. autosummary::
 
    NeuralIKSolverCfg
    NeuralIKSolver
 
-embodichain.lab.sim.solvers.null_space_posture_task
----------------------------------------------------
+embodichain.lab.sim.motion.solvers.null_space_posture_task
+----------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.solvers.null_space_posture_task
+.. currentmodule:: embodichain.lab.sim.motion.solvers.null_space_posture_task
 
 .. autosummary::
 
    NullSpacePostureTask
 
-embodichain.lab.sim.solvers.pytorch_solver
-------------------------------------------
+embodichain.lab.sim.motion.solvers.pink_solver
+----------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.solvers.pytorch_solver
-
-.. autosummary::
-
-   PytorchSolverCfg
-   PytorchSolver
-
-embodichain.lab.sim.solvers.pink_solver
----------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.solvers.pink_solver
+.. currentmodule:: embodichain.lab.sim.motion.solvers.pink_solver
 
 .. autosummary::
 
    PinkSolver
    PinkSolverCfg
 
-embodichain.lab.sim.solvers.srs_solver
---------------------------------------
+embodichain.lab.sim.motion.solvers.pytorch_solver
+-------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.solvers.srs_solver
+.. currentmodule:: embodichain.lab.sim.motion.solvers.pytorch_solver
+
+.. autosummary::
+
+   PytorchSolverCfg
+   PytorchSolver
+
+embodichain.lab.sim.motion.solvers.srs_solver
+---------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.solvers.srs_solver
 
 .. autosummary::
 
@@ -1455,10 +1449,10 @@ embodichain.lab.sim.utility.render_utils
 
    select_default_renderer
 
-embodichain.lab.sim.workspace.caches.cache_utils
-------------------------------------------------
+embodichain.lab.sim.motion.workspace.caches.cache_utils
+-------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.caches.cache_utils
+.. currentmodule:: embodichain.lab.sim.motion.workspace.caches.cache_utils
 
 .. autosummary::
 
@@ -1472,10 +1466,10 @@ embodichain.lab.sim.workspace.caches.cache_utils
    show_session_info
    show_total_size
 
-embodichain.lab.sim.workspace.caches.results_cache
---------------------------------------------------
+embodichain.lab.sim.motion.workspace.caches.results_cache
+---------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.caches.results_cache
+.. currentmodule:: embodichain.lab.sim.motion.workspace.caches.results_cache
 
 .. autosummary::
 
@@ -1485,149 +1479,149 @@ embodichain.lab.sim.workspace.caches.results_cache
    serialize_results
    deserialize_results
 
-embodichain.lab.sim.workspace.constraints.base_constraint
----------------------------------------------------------
+embodichain.lab.sim.motion.workspace.constraints.base_constraint
+----------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.constraints.base_constraint
+.. currentmodule:: embodichain.lab.sim.motion.workspace.constraints.base_constraint
 
 .. autosummary::
 
    IConstraintChecker
    BaseConstraintChecker
 
-embodichain.lab.sim.workspace.constraints.workspace_constraint
---------------------------------------------------------------
+embodichain.lab.sim.motion.workspace.constraints.workspace_constraint
+---------------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.constraints.workspace_constraint
+.. currentmodule:: embodichain.lab.sim.motion.workspace.constraints.workspace_constraint
 
 .. autosummary::
 
    WorkspaceConstraintChecker
 
-embodichain.lab.sim.workspace.samplers.base_sampler
----------------------------------------------------
+embodichain.lab.sim.motion.workspace.samplers.base_sampler
+----------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.samplers.base_sampler
+.. currentmodule:: embodichain.lab.sim.motion.workspace.samplers.base_sampler
 
 .. autosummary::
 
    ISampler
    BaseSampler
 
-embodichain.lab.sim.workspace.samplers.gaussian_sampler
--------------------------------------------------------
+embodichain.lab.sim.motion.workspace.samplers.gaussian_sampler
+--------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.samplers.gaussian_sampler
+.. currentmodule:: embodichain.lab.sim.motion.workspace.samplers.gaussian_sampler
 
 .. autosummary::
 
    GaussianSampler
 
-embodichain.lab.sim.workspace.samplers.halton_sampler
------------------------------------------------------
+embodichain.lab.sim.motion.workspace.samplers.halton_sampler
+------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.samplers.halton_sampler
+.. currentmodule:: embodichain.lab.sim.motion.workspace.samplers.halton_sampler
 
 .. autosummary::
 
    HaltonSampler
 
-embodichain.lab.sim.workspace.samplers.importance_sampler
----------------------------------------------------------
+embodichain.lab.sim.motion.workspace.samplers.importance_sampler
+----------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.samplers.importance_sampler
+.. currentmodule:: embodichain.lab.sim.motion.workspace.samplers.importance_sampler
 
 .. autosummary::
 
    ImportanceSampler
 
-embodichain.lab.sim.workspace.samplers.iniform_sampler
-------------------------------------------------------
+embodichain.lab.sim.motion.workspace.samplers.iniform_sampler
+-------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.samplers.iniform_sampler
+.. currentmodule:: embodichain.lab.sim.motion.workspace.samplers.iniform_sampler
 
 .. autosummary::
 
    UniformSampler
 
-embodichain.lab.sim.workspace.samplers.lhs_sampler
---------------------------------------------------
+embodichain.lab.sim.motion.workspace.samplers.lhs_sampler
+---------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.samplers.lhs_sampler
+.. currentmodule:: embodichain.lab.sim.motion.workspace.samplers.lhs_sampler
 
 .. autosummary::
 
    LatinHypercubeSampler
 
-embodichain.lab.sim.workspace.samplers.random_sampler
------------------------------------------------------
+embodichain.lab.sim.motion.workspace.samplers.random_sampler
+------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.samplers.random_sampler
+.. currentmodule:: embodichain.lab.sim.motion.workspace.samplers.random_sampler
 
 .. autosummary::
 
    RandomSampler
 
-embodichain.lab.sim.workspace.samplers.sobol_sampler
-----------------------------------------------------
+embodichain.lab.sim.motion.workspace.samplers.sobol_sampler
+-----------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.samplers.sobol_sampler
+.. currentmodule:: embodichain.lab.sim.motion.workspace.samplers.sobol_sampler
 
 .. autosummary::
 
    SobolSampler
 
-embodichain.lab.sim.workspace.visualizers.axis_visualizer
----------------------------------------------------------
+embodichain.lab.sim.motion.workspace.visualizers.axis_visualizer
+----------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.visualizers.axis_visualizer
+.. currentmodule:: embodichain.lab.sim.motion.workspace.visualizers.axis_visualizer
 
 .. autosummary::
 
    AxisVisualizer
 
-embodichain.lab.sim.workspace.visualizers.base_visualizer
----------------------------------------------------------
+embodichain.lab.sim.motion.workspace.visualizers.base_visualizer
+----------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.visualizers.base_visualizer
+.. currentmodule:: embodichain.lab.sim.motion.workspace.visualizers.base_visualizer
 
 .. autosummary::
 
    IVisualizer
    BaseVisualizer
 
-embodichain.lab.sim.workspace.visualizers.point_cloud_visualizer
-----------------------------------------------------------------
+embodichain.lab.sim.motion.workspace.visualizers.point_cloud_visualizer
+-----------------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.visualizers.point_cloud_visualizer
+.. currentmodule:: embodichain.lab.sim.motion.workspace.visualizers.point_cloud_visualizer
 
 .. autosummary::
 
    PointCloudVisualizer
 
-embodichain.lab.sim.workspace.visualizers.sphere_visualizer
------------------------------------------------------------
+embodichain.lab.sim.motion.workspace.visualizers.sphere_visualizer
+------------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.visualizers.sphere_visualizer
+.. currentmodule:: embodichain.lab.sim.motion.workspace.visualizers.sphere_visualizer
 
 .. autosummary::
 
    SphereVisualizer
 
-embodichain.lab.sim.workspace.visualizers.visualizer_factory
-------------------------------------------------------------
+embodichain.lab.sim.motion.workspace.visualizers.visualizer_factory
+-------------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.visualizers.visualizer_factory
+.. currentmodule:: embodichain.lab.sim.motion.workspace.visualizers.visualizer_factory
 
 .. autosummary::
 
    VisualizerFactory
    create_visualizer
 
-embodichain.lab.sim.workspace.visualizers.voxel_visualizer
-----------------------------------------------------------
+embodichain.lab.sim.motion.workspace.visualizers.voxel_visualizer
+-----------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.visualizers.voxel_visualizer
+.. currentmodule:: embodichain.lab.sim.motion.workspace.visualizers.voxel_visualizer
 
 .. autosummary::
 
@@ -1681,6 +1675,22 @@ embodichain.lab.visualization.cli
    add_viser_args_to_parser
    visualization_cfg_from_args
 
+embodichain.lab.visualization.picker
+------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.picker
+
+Browser picking caches triangle geometry and returns the closest node hit by
+a world-space ray. The Viser worker pairs this geometry with poses from the
+same scene revision before producing a pick command.
+
+.. autosummary::
+
+   ScenePicker
+
+.. autoclass:: ScenePicker
+   :members:
+
 embodichain.lab.visualization.protocol
 --------------------------------------
 
@@ -1702,6 +1712,7 @@ embodichain.lab.visualization.protocol
    JointControlSpec
    JointControlState
    MeshGeometry
+   PickCommand
    PointCloudOverlay
    SceneFrame
    SceneManifest

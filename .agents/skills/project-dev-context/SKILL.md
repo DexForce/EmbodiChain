@@ -1,123 +1,84 @@
 ---
 name: project-dev-context
 description: >
-  Route EmbodiChain development-context and codebase-navigation requests through
-  agent_context/MAP.yaml. Use when asked to locate files, configs, defaults,
-  entry points, registration paths, or change sites; explain a code or
-  configuration resolution chain; reference project context; refresh or write
-  context; register a context topic; or work with a named topic such as
-  simulation-system, env-framework, rl-learning, manager-functor, ik-solvers,
-  or atomic-actions. Chinese triggers include 文件在哪里、配置或默认值在哪里、
+  Route EmbodiChain project-context and codebase-navigation requests through
+  agent_context/MAP.yaml. Use to locate files, configs, defaults, entry points,
+  registration paths or change sites; explain resolution chains; read, refresh
+  or add project context. Chinese triggers include 文件在哪里、配置或默认值在哪里、
   入口或注册逻辑在哪里、应该修改哪个文件、参考项目上下文、刷新项目上下文。
 ---
 
-# Project Development Context and Codebase Navigation
+# Project context and navigation
 
-## Start here
+## Select and route
 
-- Read `agent_context/MAP.yaml` first
-- Read `references/context-system.md` for routing rules
-- Read `agents/openai.yaml` for the canonical agent metadata
-- Read `agent_context/conventions/*.md` when creating or updating context files
+Read `agent_context/MAP.yaml` first. Select **navigate** (current code facts),
+**read** (context), **refresh** (update a topic), or **add** (register a topic).
+Specialized skills such as `/add-robot` own implementation; use this skill for
+orientation and context maintenance.
 
-## Select the operation
+Use the deterministic helper when matching is unclear or needs verification:
 
-- **navigate**: locate a file, symbol, config, default, entry point,
-  registration path, or recommended change site.
-- **read**: load the matched agent context without changing it.
-- **refresh**: rebuild an existing topic from its current
-  `source_of_truth`.
-- **add**: create and register a new topic from current source code.
+```bash
+python .agents/skills/project-dev-context/scripts/context.py route 'QUERY'
+```
 
-An explicit refresh or add request determines the mode. If the user asks to
-implement work covered by a specialized skill such as `add-robot`,
-`add-solver`, or `add-functor`, let that skill own the implementation and
-use this skill only for orientation or mapped context.
+Match a complete topic `id` first, including an explicitly named id within a
+request; otherwise match aliases, then keywords. ASCII tokens have boundaries,
+so `sim` does not match `simready`; Chinese phrases support substring matching.
+Within the first matching alias/keyword tier, prefer the longest matching
+phrase, then additional distinct matches. Equal best matches remain candidates;
+never silently choose the first topic in MAP.
 
-## Route the request
+For ambiguity, use the request's subsystem/owning path to narrow candidates,
+or inspect the specific symbol in their source files. If that still leaves
+different answers, ask one concise clarifying question. For example,
+`SceneManifest` belongs to both visualization and Task Program semantics;
+`visualization SceneManifest` identifies the visualization topic.
 
-1. Resolve the topic through `agent_context/MAP.yaml`.
-2. Match in this order: exact `id`, then `aliases`, then `keywords`.
-3. For a matched read request, load only the Markdown files in `paths`.
-4. For a matched navigation request, load the mapped topic and verify the
-   relevant path or behavior against the current `source_of_truth`.
-5. For an unmatched navigation request:
-   - list candidate files with `rg --files`;
-   - search symbols, flags, config keys, registries, and imports with `rg -n`;
-   - inspect the closest package `__init__.py`, config loader, registry,
-     test, and entry point as relevant;
-   - inspect `pyproject.toml` and `embodichain/__main__.py` for CLI or
-     package-discovery questions.
-6. Do not add a topic merely because navigation did not match. Propose or add
-   one only when the user requests it or the missing area is recurring.
-7. Do not read `docs/source/` unless the user explicitly asks for Sphinx
-   documentation.
+## Read progressively
 
-Never treat topic Markdown as a substitute for current code. For navigation,
-report only paths and behavior verified in the working tree.
+1. Load only the selected topic's `paths` (the overview).
+2. Follow only the overview's detail links relevant to the question.
+   `related_topics` is navigation metadata, not an automatic load list.
+3. For navigation, inspect the relevant symbols in `source_of_truth`, expanding
+   to callees/tests as needed. A listed directory is a search scope, not a
+   request to read every file. Current code takes precedence over context prose.
+4. If nothing matches, use `rg --files` and `rg -n` for symbols, flags, config
+   keys, registries and imports. CLI ownership starts in `embodichain/cli/` and
+   `pyproject.toml`; `embodichain/__main__.py` is an entry wrapper.
+5. Do not read `docs/source/` unless the user asks for Sphinx documentation.
 
-## Navigation answer contract
+Do not load writing conventions, this skill's reference schema or agent UI
+metadata for ordinary reads/navigation. Answer with the owning entry point,
+resolution path, recommended change site and focused validation when relevant.
 
-Include the parts relevant to the request:
+## Maintain context
 
-- the entry point or owning location;
-- the call, registration, or configuration-resolution path;
-- the file or symbol to change;
-- the focused tests or documentation affected by that change.
+For refresh/add, read `references/context-system.md` and the conventions in
+`defaults.write_contexts`. Use current implementation as evidence, not old notes.
+Keep one owner for each contract and link from other topics. Preserve stable
+topic ids and overview paths; linked detail pages carry optional depth.
 
-## Explicit refresh mode
+Find topics potentially affected by a code change:
 
-Use explicit refresh mode when the request is phrased like:
+```bash
+python .agents/skills/project-dev-context/scripts/context.py affected --base origin/main
+python .agents/skills/project-dev-context/scripts/context.py affected embodichain/lab/gym/envs/base_env.py
+```
 
-- `refresh <topic> context`
-- `update <topic> context`
-- `根据当前实现刷新 <topic> 上下文`
-- `重写 <topic> 项目上下文`
+Review affected topics in the same change; this is an impact hint, not proof
+that prose is stale or that unchanged paths are fresh. Update relevant prose,
+source pointers, watch scopes and routing terms. Add a topic for a requested or
+recurring missing domain, not automatically for every unmatched lookup.
 
-In refresh mode:
+After editing:
 
-1. Resolve the topic in `agent_context/MAP.yaml`
-2. Re-read the files listed in `source_of_truth`
-3. Rewrite the mapped topic Markdown from current implementation, not stale notes
-4. Update `aliases`, `keywords`, `paths`, `related_topics` if needed
-5. Load and follow `agent_context/conventions/*.md`
+```bash
+python .agents/skills/project-dev-context/scripts/context.py check
+python -m pytest -q -c /dev/null --noconftest tests/test_agent_context_map.py tests/test_agent_context_tools.py
+```
 
-## Add mode
-
-1. Choose a stable kebab-case topic id.
-2. Read the current source files that define the topic.
-3. Write one focused Markdown file under
-   `agent_context/topics/<topic-id>/`.
-4. Register the topic in `agent_context/MAP.yaml`.
-5. Load and follow `agent_context/conventions/*.md`.
-
-## Update contract
-
-If code behavior changes a routed topic, update all relevant pieces in the same change:
-- the matching file under `agent_context/topics/...`
-- `agent_context/MAP.yaml` if topic metadata changed
-- `AGENTS.md` if routing guidance changed
-- `.agents/skills/project-dev-context/references/context-system.md` if routing behavior changed
-- `.claude/skills/project-dev-context/SKILL.md` if Claude adapter wording changed
-- `.github/copilot/project-dev-context.md` if Copilot adapter wording changed
-
-## Source-of-truth
-
-This skill stores the routing procedure, not project facts. Canonical project
-context lives in:
-- `agent_context/MAP.yaml`
-- `agent_context/topics/**/*.md`
-- `agent_context/conventions/*.md`
-
-## Map schema
-
-`agent_context/MAP.yaml` topic entry fields:
-
-- `id` — stable kebab-case identifier
-- `title` — human-readable title
-- `aliases` — alternate names for matching
-- `keywords` — search terms for fuzzy matching
-- `paths` — Markdown files under `agent_context/` to load
-- `source_of_truth` — source code files that define the behavior
-- `related_topics` — other topic ids for cross-reference
-- `status` — `active` or `deprecated`
+Validate representative natural-language routes before and after routing changes,
+including ambiguous and unmatched requests. Thin adapters only point here;
+they need changes only when their local entry hints change.

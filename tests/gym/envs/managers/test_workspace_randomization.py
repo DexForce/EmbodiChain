@@ -23,7 +23,7 @@ from embodichain.lab.gym.envs.managers.event_manager import EventManager
 from embodichain.lab.gym.envs.managers.randomization.spatial import (
     sample_rigid_object_pose_from_workspace,
 )
-from embodichain.lab.sim.workspace import WorkspaceSample
+from embodichain.lab.sim.motion.workspace import WorkspaceSample
 
 
 class _MockRobot:

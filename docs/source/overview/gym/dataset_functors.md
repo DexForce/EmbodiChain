@@ -205,7 +205,7 @@ Depth has two storage modes:
 When ``depth_video.enable=True`` and an HEVC encoder (``libx265``) is available,
 ``LeRobotRecorder`` writes each episode's depth maps as a single-channel
 ``gray12le`` video encoded losslessly with HEVC. This is issue #424 *Path A*:
-an EmbodiChain-owned depth writer that works on Python 3.10/3.11 with LeRobot
+an EmbodiChain-owned depth writer that works on Python 3.10--3.12 with LeRobot
 0.4.4, without modifying the installed LeRobot package.
 
 - Depth is quantized to 12-bit codes (logarithmic by default) and packed into
@@ -226,8 +226,7 @@ an EmbodiChain-owned depth writer that works on Python 3.10/3.11 with LeRobot
 
 - The metadata schema (``is_depth_map``, ``video.depth_min/max/shift/use_log``,
   ``video.codec``, ``video.pix_fmt``) is aligned with the official LeRobot 0.6.0
-  depth pipeline, so sidecar videos remain readable once EmbodiChain upgrades to
-  Python 3.12 (issue #424, Path B).
+  depth pipeline, so sidecar videos remain readable by the official reader.
 - If no HEVC encoder is available, recording silently falls back to numeric
   depth features (PR #422) rather than failing.
 - Segmentation masks are always kept as exact numeric features; they are never

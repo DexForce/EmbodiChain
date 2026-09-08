@@ -26,7 +26,7 @@ The visualizers module enables:
 Fast rendering for large datasets.
 
 ```python
-from embodichain.lab.sim.workspace.visualizers import PointCloudVisualizer
+from embodichain.lab.sim.motion.workspace.visualizers import PointCloudVisualizer
 
 visualizer = PointCloudVisualizer(backend='open3d', point_size=2.0)
 ```
@@ -38,7 +38,7 @@ visualizer = PointCloudVisualizer(backend='open3d', point_size=2.0)
 Volumetric representation for occupancy maps.
 
 ```python
-from embodichain.lab.sim.workspace.visualizers import VoxelVisualizer
+from embodichain.lab.sim.motion.workspace.visualizers import VoxelVisualizer
 
 visualizer = VoxelVisualizer(backend='open3d', voxel_size=0.01)
 ```
@@ -50,7 +50,7 @@ visualizer = VoxelVisualizer(backend='open3d', voxel_size=0.01)
 Smooth visualization for reachability zones.
 
 ```python
-from embodichain.lab.sim.workspace.visualizers import SphereVisualizer
+from embodichain.lab.sim.motion.workspace.visualizers import SphereVisualizer
 
 visualizer = SphereVisualizer(backend='open3d', sphere_radius=0.005)
 ```
@@ -62,7 +62,7 @@ visualizer = SphereVisualizer(backend='open3d', sphere_radius=0.005)
 Coordinate frame visualization for poses and transformations.
 
 ```python
-from embodichain.lab.sim.workspace.visualizers import AxisVisualizer
+from embodichain.lab.sim.motion.workspace.visualizers import AxisVisualizer
 
 visualizer = AxisVisualizer(backend='sim_manager', sim_manager=sim, axis_length=0.15)
 ```
@@ -75,7 +75,7 @@ visualizer = AxisVisualizer(backend='sim_manager', sim_manager=sim, axis_length=
 
 ```python
 import numpy as np
-from embodichain.lab.sim.workspace.visualizers import create_visualizer
+from embodichain.lab.sim.motion.workspace.visualizers import create_visualizer
 
 # Generate workspace data
 points = np.random.rand(1000, 3) * 2 - 1  # Random points in [-1, 1]³
@@ -103,7 +103,7 @@ visualizer.visualize(points, colors)
 ### Factory Pattern
 
 ```python
-from embodichain.lab.sim.workspace.visualizers import VisualizerFactory
+from embodichain.lab.sim.motion.workspace.visualizers import VisualizerFactory
 
 factory = VisualizerFactory()
 visualizer = factory.create_visualizer('voxel', backend='open3d', voxel_size=0.02)
@@ -140,7 +140,7 @@ axis_viz = factory.create_visualizer('axis', backend='sim_manager', sim_manager=
 **Quick Creation**:
 
 ```python
-from embodichain.lab.sim.workspace.visualizers import create_visualizer
+from embodichain.lab.sim.motion.workspace.visualizers import create_visualizer
 import numpy as np
 
 # Create any visualizer

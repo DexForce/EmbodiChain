@@ -44,12 +44,12 @@ from typing import Callable
 import psutil
 import torch
 
-from embodichain.lab.sim.planners.curobo.curobo_planner import (
+from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     CuroboPlanner,
     _CuroboBackend,
     _CuroboProfile,
 )
-from embodichain.lab.sim.planners.utils import PlanResult
+from embodichain.lab.sim.motion.planners.utils import PlanResult
 
 # =============================================================================
 # OLD (HEAD) implementations - verbatim loop logic, parameterized by device.

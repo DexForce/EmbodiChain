@@ -61,7 +61,7 @@ _ASSET_PHYSICS_ATTRS = {
     "min_position_iters": 32,  # Use extra position iterations for stable contacts.
     "min_velocity_iters": 8,  # Use extra velocity iterations for stable contacts.
 }
-_FIXED_MAX_CONVEX_HULL_NUM = 16  # Shared VHACD hull budget for settling and export.
+_FIXED_MAX_CONVEX_HULL_NUM = 16  # Shared VisACD hull budget for settling and export.
 
 
 @dataclass(frozen=True)

@@ -26,7 +26,8 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     import torch
 
-    from embodichain.lab.sim.planners import MotionGenOptions, PlanOptions
+    from embodichain.lab.sim.motion.motion_generator import MotionGenOptions
+    from embodichain.lab.sim.motion.planners import PlanOptions
 
 
 class DynamicCollisionMode(str, Enum):
@@ -116,7 +117,9 @@ class MotionPolicy:
         Returns:
             Independently owned options for :class:`MotionGenerator`.
         """
-        from embodichain.lab.sim.planners.motion_generator import MotionGenOptions
+        from embodichain.lab.sim.motion.motion_generator import (
+            MotionGenOptions,
+        )
 
         return MotionGenOptions(
             strategy=self.strategy,

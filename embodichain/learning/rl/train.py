@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import random
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -56,6 +57,15 @@ from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.lab.gym.envs.managers.cfg import EventCfg
+
+
+def _seed_training_rng(seed: int, device: torch.device) -> None:
+    """Seed policy/trainer RNGs without changing deterministic-kernel settings."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if device.type == "cuda":
+        torch.cuda.manual_seed_all(seed)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -373,6 +383,7 @@ def train_from_config(
     eval_freq = int(trainer_cfg.get("eval_freq", 10000))
     save_freq = int(trainer_cfg.get("save_freq", 50000))
     num_eval_episodes = int(trainer_cfg.get("num_eval_episodes", 5))
+    eval_seed = int(trainer_cfg.get("eval_seed", seed + 10_000))
     headless = bool(trainer_cfg.get("headless", True))
     renderer = trainer_cfg.get("renderer", "hybrid")
     gpu_id = int(trainer_cfg.get("gpu_id", 0))
@@ -414,11 +425,8 @@ def train_from_config(
 
     # Seeds
     effective_seed = seed + rank
-    np.random.seed(effective_seed)
-    torch.manual_seed(effective_seed)
+    _seed_training_rng(effective_seed, device)
     torch.backends.cudnn.deterministic = True
-    if device.type == "cuda":
-        torch.cuda.manual_seed_all(effective_seed)
 
     # Outputs
     if distributed:
@@ -447,6 +455,7 @@ def train_from_config(
 
     gym_config_data = load_config(str(gym_config_path))
     gym_env_cfg = config_to_cfg(gym_config_data, manager_modules=get_manager_modules())
+    gym_env_cfg.seed = effective_seed
     if num_envs is not None:
         gym_env_cfg.num_envs = int(num_envs)
 
@@ -480,7 +489,7 @@ def train_from_config(
         )
 
     env = build_env(gym_config_data["id"], base_env_cfg=gym_env_cfg)
-    sample_obs, _ = env.reset()
+    sample_obs, _ = env.reset(seed=effective_seed)
     sample_obs_td = dict_to_tensordict(sample_obs, device)
     obs_dim = flatten_dict_observation(sample_obs_td).shape[-1]
     flat_obs_space = env.flattened_observation_space
@@ -491,12 +500,17 @@ def train_from_config(
     if enable_eval and rank == 0:
         eval_gym_env_cfg = deepcopy(gym_env_cfg)
         eval_gym_env_cfg.num_envs = num_eval_envs
+        eval_gym_env_cfg.seed = eval_seed
         eval_gym_env_cfg.sim_cfg.headless = True
         eval_gym_env_cfg.profiler = None
         eval_env = build_env(gym_config_data["id"], base_env_cfg=eval_gym_env_cfg)
         logger.log_info(
             f"Evaluation environment created (num_envs={num_eval_envs}, headless=True)"
         )
+
+    # Environment construction intentionally uses task/evaluation seeds. Reset
+    # the trainer stream so policy initialization is independent of scene work.
+    _seed_training_rng(effective_seed, device)
 
     # Build Policy via registry
     policy_name = policy_block["name"]
@@ -591,6 +605,7 @@ def train_from_config(
             mode=mode,
             params=params,
             interval_step=interval_step,
+            is_global=event_info.get("is_global", False),
         )
     # Parse eval events (only if evaluation is enabled)
     if enable_eval:
@@ -607,6 +622,7 @@ def train_from_config(
                 mode=mode,
                 params=params,
                 interval_step=interval_step,
+                is_global=event_info.get("is_global", False),
             )
     trainer = Trainer(
         policy=policy,
@@ -627,7 +643,7 @@ def train_from_config(
         distributed=distributed,
         rank=rank,
         world_size=world_size,
-        eval_seed=int(trainer_cfg.get("eval_seed", seed + 10_000)),
+        eval_seed=eval_seed,
         best_eval_metric=trainer_cfg.get("best_eval_metric", "eval/avg_reward"),
         best_eval_mode=trainer_cfg.get("best_eval_mode", "max"),
     )

@@ -16,132 +16,103 @@
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
-
-import yaml
+from types import ModuleType
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-_AGENT_CONTEXT_ROOT = _REPOSITORY_ROOT / "agent_context"
-_MAP_PATH = _AGENT_CONTEXT_ROOT / "MAP.yaml"
-_REQUIRED_TOPIC_FIELDS = {
-    "id",
-    "title",
-    "aliases",
-    "keywords",
-    "paths",
-    "source_of_truth",
-    "related_topics",
-    "status",
-}
+_HELPER_PATH = (
+    _REPOSITORY_ROOT / ".agents/skills/project-dev-context/scripts/context.py"
+)
+
+
+def _load_helper() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("agent_context_helper", _HELPER_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _load_context_map() -> dict:
-    with _MAP_PATH.open(encoding="utf-8") as stream:
-        return yaml.safe_load(stream)
+    return _load_helper().load_map(_REPOSITORY_ROOT)
 
 
 def _topics_by_id() -> dict[str, dict]:
     return {topic["id"]: topic for topic in _load_context_map()["topics"]}
 
 
-def test_topic_ids_are_unique() -> None:
-    topics = _load_context_map()["topics"]
-    topic_ids = [topic["id"] for topic in topics]
+def test_repository_context_map_is_valid() -> None:
+    helper = _load_helper()
+    data = helper.load_map(_REPOSITORY_ROOT)
 
-    assert len(topic_ids) == len(set(topic_ids))
-
-
-def test_topic_entries_use_the_required_schema() -> None:
-    errors: list[str] = []
-    for topic in _load_context_map()["topics"]:
-        missing = _REQUIRED_TOPIC_FIELDS - set(topic)
-        if missing:
-            errors.append(
-                f"{topic.get('id', '<missing-id>')}: missing {sorted(missing)}"
-            )
-        if topic.get("status") not in {"active", "deprecated"}:
-            errors.append(
-                f"{topic.get('id', '<missing-id>')}: invalid status "
-                f"{topic.get('status')!r}"
-            )
-
-    assert errors == []
+    assert helper.validate_map(_REPOSITORY_ROOT, data) == []
 
 
-def test_related_topics_reference_registered_ids() -> None:
+def test_map_registers_the_supported_context_domains() -> None:
     topics = _topics_by_id()
-    invalid_relations = [
-        f"{topic_id} -> {related_id}"
-        for topic_id, topic in topics.items()
-        for related_id in topic["related_topics"]
-        if related_id not in topics
-    ]
+    expected_topic_ids = {
+        "simulation-system",
+        "env-framework",
+        "manager-functor",
+        "ik-solvers",
+        "robot-system",
+        "sensor-system",
+        "sim-visualization",
+        "motion-planning",
+        "rl-learning",
+        "configclass-pattern",
+        "randomization",
+        "atomic-actions",
+        "task-programs",
+        "gen-sim",
+        "data-assets",
+        "data-pipeline",
+        "robot-workspace",
+    }
 
-    assert invalid_relations == []
+    assert set(topics) == expected_topic_ids
 
 
-def test_simulation_and_rl_topics_cover_their_primary_entry_points() -> None:
+def test_new_topics_cover_their_owning_packages() -> None:
     topics = _topics_by_id()
+    expected_source_prefixes = {
+        "gen-sim": "embodichain/gen_sim/",
+        "data-assets": "embodichain/data/",
+        "data-pipeline": "embodichain/data_pipeline/",
+        "robot-workspace": "embodichain/lab/sim/motion/workspace/",
+    }
+
+    for topic_id, prefix in expected_source_prefixes.items():
+        assert any(
+            path.startswith(prefix) for path in topics[topic_id]["source_of_truth"]
+        )
+
+
+def test_topic_paths_name_only_the_default_overview() -> None:
+    topics = _topics_by_id()
+
+    assert all(len(topic["paths"]) == 1 for topic in topics.values())
+
+
+def test_representative_queries_route_against_the_repository_map() -> None:
+    helper = _load_helper()
+    data = helper.load_map(_REPOSITORY_ROOT)
+    expected_routes = {
+        "参考 env-framework 上下文，查 target_control_frequency 的配置优先级": [
+            "env-framework"
+        ],
+        "SceneManifest 在哪里定义？": ["sim-visualization", "task-programs"],
+        "visualization SceneManifest 在哪里定义？": ["sim-visualization"],
+        "机器人工作空间缓存从哪里加载？": ["robot-workspace"],
+        "OnlineDataEngine 采样失败后怎么处理？": ["data-pipeline"],
+        "SimReady pipeline 的入口在哪里？": ["gen-sim"],
+        "get_data_path 如何解析资产路径？": ["data-assets"],
+    }
 
     assert {
-        "embodichain/lab/sim/__init__.py",
-        "embodichain/lab/sim/sim_manager.py",
-        "embodichain/lab/gym/envs/base_env.py",
-    } <= set(topics["simulation-system"]["source_of_truth"])
-    assert {
-        "embodichain/__main__.py",
-        "embodichain/learning/rl/train.py",
-        "embodichain/learning/rl/utils/trainer.py",
-        "embodichain_tasks/configs/tasks/",
-    } <= set(topics["rl-learning"]["source_of_truth"])
-
-
-def test_simulation_and_rl_topics_have_operational_sections() -> None:
-    topics = _topics_by_id()
-    required_sections = {
-        "## Entry Points",
-        "## Invariants",
-        "## Common Failure Modes",
-    }
-    missing_sections: list[str] = []
-
-    for topic_id in ("simulation-system", "rl-learning"):
-        context_path = _AGENT_CONTEXT_ROOT / topics[topic_id]["paths"][0]
-        content = context_path.read_text(encoding="utf-8")
-        for section in required_sections:
-            if section not in content:
-                missing_sections.append(f"{topic_id}: {section}")
-
-    assert missing_sections == []
-
-
-def test_representative_navigation_terms_have_one_owner() -> None:
-    expected_owners = {
-        "simulation manager": "simulation-system",
-        "SimulationManager": "simulation-system",
-        "viser": "sim-visualization",
-        "rl config": "rl-learning",
-        "train-rl": "rl-learning",
-        "ik solver": "ik-solvers",
-    }
-    topics = _load_context_map()["topics"]
-    actual_owners: dict[str, set[str]] = {}
-
-    for term in expected_owners:
-        normalized_term = term.casefold()
-        actual_owners[term] = {
-            topic["id"]
-            for topic in topics
-            if normalized_term
-            in {
-                candidate.casefold()
-                for candidate in [*topic["aliases"], *topic["keywords"]]
-            }
-        }
-
-    assert actual_owners == {
-        term: {topic_id} for term, topic_id in expected_owners.items()
-    }
+        query: helper.route_topics(data, query) for query in expected_routes
+    } == expected_routes
 
 
 def test_project_context_adapters_reference_the_canonical_skill() -> None:

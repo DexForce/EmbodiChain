@@ -4,7 +4,7 @@
 Create a solver
 ===============
 
-.. currentmodule:: embodichain.lab.sim.solvers
+.. currentmodule:: embodichain.lab.sim.motion.solvers
 
 Overview
 ~~~~~~~~

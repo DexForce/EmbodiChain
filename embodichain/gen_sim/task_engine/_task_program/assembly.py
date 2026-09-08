@@ -75,7 +75,8 @@ class TaskAdapterFactory:
         self.registration.assert_unchanged()
         motion_factory = None
         if self.cartesian_approaches:
-            from embodichain.lab.sim.planners import MotionGenCfg, ToppraPlannerCfg
+            from embodichain.lab.sim.motion.motion_generator import MotionGenCfg
+            from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
             from .motion import ApproachMotionGenerator
 
             motion_factory = lambda: ApproachMotionGenerator(

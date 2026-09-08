@@ -5,6 +5,7 @@
 | What | Path |
 |------|------|
 | Public simulation package | `embodichain/lab/sim/__init__.py` |
+| Motion capability namespace | `embodichain/lab/sim/motion/__init__.py` |
 | World and scene owner | `embodichain/lab/sim/sim_manager.py` → `SimulationManager` |
 | Global simulation config | `embodichain/lab/sim/sim_manager.py` → `SimulationManagerCfg` |
 | Object and physics configs | `embodichain/lab/sim/cfg.py` |
@@ -13,7 +14,8 @@
 
 `embodichain.lab.sim` exports the manager, its config, shared material
 types, `BatchEntity`, and the simulation profiler. Import a specialized
-object, sensor, solver, planner, or atomic-action API from its own subpackage.
+object, sensor, or atomic-action API from its own subpackage. Solver, planner,
+workspace, and trajectory-augmentation APIs live under `embodichain.lab.sim.motion`.
 
 ## Ownership
 
@@ -59,9 +61,10 @@ EnvCfg.sim_cfg
 the scene can be assembled before a native window is opened. It sets
 `SimulationManagerCfg.num_envs` from `EnvCfg.num_envs`.
 
-`SimulationManager` enables physics, selects manual physics updates, creates
-the configured arenas, installs default plane/background/lighting resources,
-and starts configured visualization during initialization. A Viser backend
+`SimulationManager` fixes the native world to explicit physics updates before
+enabling physics or assembling scene resources. It creates the configured arenas,
+installs default plane/background/lighting resources, and starts configured
+visualization during initialization. A Viser backend
 forces `headless=True`; Viser and the native DexSim window are mutually
 exclusive.
 
@@ -69,6 +72,15 @@ exclusive.
 then advances the world for the requested number of physics steps. Each
 environment control step normally calls it with
 `sim_steps_per_control`.
+
+`scripts/tutorials/sim/gizmo_robot.py` supports only manual physics. It initializes
+GPU physics after robot creation when needed, sets both current and target
+joint positions, and advances once before opening the window. It explicitly
+sets `GizmoCfg(ik_start_enabled=True)` so the native controller activates on the
+first update after opening the window. Its loop only
+calls `sim.update(step=1)`; the manager owns native IK updates and Viser
+commands/capture. The loop is paced by `physics_dt` and has no automatic
+physics polling path.
 
 `ArticulationCfg.enable_gravity` defaults to `True`. During articulation
 construction, `Articulation` applies this explicit runtime flag to every native
@@ -85,16 +97,31 @@ flag later for all or selected environment indices.
 | Rigid, deformable, articulation, robot, light, constraint, gizmo | `objects/` | `robot-system` for robots |
 | Camera, stereo camera, contact sensor | `sensors/` | `sensor-system` |
 | Robot-specific configuration | `robots/` | `robot-system` |
-| Inverse kinematics | `solvers/` | `ik-solvers` |
-| Trajectory and motion generation | `planners/` | `motion-planning` |
+| Inverse kinematics | `motion/solvers/` | `ik-solvers` |
+| Trajectory and motion generation | `motion/planners/` | `motion-planning` |
+| Trajectory candidates, augmentation, coverage, generation bookkeeping | `motion/expansion/` | `motion-planning` |
 | Typed action planning and execution | `atomic_actions/` | `atomic-actions` |
 | Task Program Semantic Calls and robot profiles | `embodichain/lab/task_program/semantics/` | `task-programs` |
-| Reachability analysis and runtime workspace queries | `workspace/` | `robot-system` |
+| Reachability analysis and runtime workspace queries | `motion/workspace/` | `robot-workspace` |
 | Browser scene export and Viser runtime | `embodichain/lab/visualization/` | `sim-visualization` |
 
 Use the narrow topic when a request names one of these subsystems. Use
 `simulation-system` for the overall `lab/sim` architecture, manager
 lifecycle, scene ownership, or cross-module flow.
+
+`motion/__init__.py` resolves its public subpackages and `motion_generator` module lazily. Keep it free
+of eager planner imports: `Robot` needs solver and runtime workspace types
+during initialization, while planners resolve robots through
+`SimulationManager`. Workspace analyzer/visualization exports retain their own
+lazy boundary. Import concrete APIs from the corresponding `motion` subpackage;
+the former `sim.solvers`, `sim.planners`, and `sim.workspace` paths have no
+compatibility packages.
+
+Trajectory augmentation owns value contracts, operators, coverage, and session
+bookkeeping. Its algorithms do not import Gym or perform environment execution,
+reset, or dataset I/O; those operations belong to host integrations. Its public
+import follows the normal `lab/sim` lifecycle and does not promise an isolated
+toolkit import. Atomic Actions remain above the motion capabilities.
 
 `Articulation.get_parent_joint_chain(link_name)` is the public topology query
 for integrations that need link ancestry. It returns immediate-parent-first
@@ -102,13 +129,61 @@ for integrations that need link ancestry. It returns immediate-parent-first
 origin, axis, and optional limits. Consumers must not reach into
 `BatchEntity._entities` or retain backend-native joint-info objects.
 
+`Articulation.get_link_render_nodes(link_name)` is the explicit render-attachment
+query, inherited by Robot. It validates every instance and returns live render
+nodes in environment order; those nodes must not be used after asset destruction.
+`sensors.attachment.resolve_parent_nodes()` owns camera parent-name resolution
+using public asset queries. `SimulationManager.add_sensor()` only supplies the
+asset registry and environment count, then coordinates creation and attachment.
+
 `Articulation` also exposes deterministic link meshes through
 `get_link_vert_face()` and named-state FK through `compute_fk()` with
 `qpos_joint_names`. Stochastic surface sampling and Atomic Action geometry keys
 do not belong to the simulation object; use
 `atomic_actions.sample_initial_articulation_geometry()` for that adaptation.
 
+Entity/IK gizmo configuration is owned by [native gizmos](../sim-visualization/native-gizmos.md).
+
 ## Configuration Flow
+
+### Gizmo ownership
+
+Native entity manipulation belongs to DexSim 0.5.0. The first successful native
+window open enables its world-owned `EntityGizmoManipulator` by default, after
+the scene and default plane are ready. The manager registers the default plane
+as a static external target. `SimulationManagerCfg.enable_entity_gizmo=False`
+opts out; Gym deployments accept the same top-level JSON/YAML field through
+`gym.utils.gym_utils.config_to_cfg()`.
+
+`sim.enable_entity_gizmo(config)` explicitly enables/configures the controller;
+`sim.disable_entity_gizmo()` also cancels pending automatic enablement before
+the first window. These explicit calls take precedence over the startup default.
+Query through `sim.get_world().get_entity_gizmo()`. DexSim owns window
+detach/reopen and controller state; reopening never reapplies the default or
+overwrites an explicit native disable. Pure headless and Viser runs do not
+automatically create a native entity controller.
+
+`SimulationManagerCfg.robot_ik_gizmo` defaults to `GizmoCfg()`. During normal
+updates the manager registers robot control parts with complete solver chain/TCP
+metadata in single-environment interactive runs. Pure headless, read-only Viser, and
+multi-environment runs do not register automatic controls. The first native I
+press creates DexSim's `IKGizmoController` by default;
+`GizmoCfg(ik_start_enabled=True)` opts into activation on the first update with
+an open window. The startup attempt is consumed once, including on failure;
+later key presses can retry. Viser constructs IK on its first drag.
+Registration never writes drive targets. `Gizmo` owns managed native input and
+target-node cleanup, detaches input on window close, and reattaches the same
+controller on reopen. Robot removal releases all its managed controls.
+
+Set `robot_ik_gizmo=None` to opt out or supply `GizmoCfg` overrides; Gym
+JSON/YAML accepts the same mapping/null. `enable_gizmo()` can override one part,
+and `disable_gizmo()` prevents automatic recreation (all parts when omitted).
+The explicit `create_robot_ik_gizmo_controller()` factory still returns
+caller-owned controllers; a weak registry prevents automatic duplicates.
+Both robot paths
+default to native Newton IK; `GizmoCfg(ik_solver="embodichain")` adapts the
+control part's existing solver, such as PinkSolver. Both support one environment
+and write only selected non-mimic joint drive targets through `Robot`.
 
 `SimulationManagerCfg` owns window size, headless mode, rendering, GPU/CPU
 selection, arena count and spacing, physics timestep, physics and GPU-memory
@@ -119,9 +194,34 @@ step ratio. CLI and task config loaders may override runtime fields before
 constructing the environment. Trace those overrides through the caller rather
 than changing a default in the manager blindly.
 
+`RenderCfg.apply_to_dexsim_config()` owns renderer, sampling, tone mapping,
+and `DLSSCfg` conversion into `WorldConfig`. DLSS settings apply to `hybrid`,
+`fast-rt`, and `rt`, after automatic renderer resolution. Defaults enable
+window and offscreen DLSS, with independent RR/SR switches,
+Balanced quality, and zero render dimensions for engine-derived scaling.
+Always forward the master switch, including `False`. Headless initialization
+must retain DLSS settings because offscreen cameras or a later window can use
+them. The actual window/camera owns output size; compatibility target fields
+must not resize it. Explicit internal dimensions and `upsample_ratio` only
+affect FastRT/OfflineRT windows; hybrid and offscreen cameras derive internal
+size from their own output and quality. DexSim initializes DLSS lazily on a
+rendered frame, so config tests do not qualify GPU/NGX support.
+
+`gym/utils/gym_utils.py:config_to_cfg()` decodes task `render_cfg.dlss`
+mappings into `DLSSCfg` before constructing `RenderCfg`. DLSS switches require
+booleans; ratio/exposure settings require real numbers, excluding booleans.
+Malformed scalar types raise a field-specific `ValueError` during construction
+and are rechecked before native conversion after mutable config edits. Focused
+coverage lives in `tests/sim/test_cfg.py`, `tests/sim/test_sim_manager.py`, and
+`tests/gym/utils/test_gym_utils.py`.
+
 Object-specific configuration belongs in `lab/sim/cfg.py` or the
 corresponding robot/sensor module. Scene composition belongs in
 `EmbodiedEnv` or a task config, not in `SimulationManagerCfg`.
+
+For mesh collision decomposition, `MeshCfg.acd_method` defaults to `"visacd"`
+with DexSim 0.5.0; it requires CUDA support. `"coacd"` and `"vhacd"` remain
+supported explicit options.
 
 ## Where to Make Changes
 
@@ -144,8 +244,11 @@ corresponding robot/sensor module. Scene composition belongs in
 - Keep batched object and sensor state aligned with the manager's arena count.
 - Build scene assets before explicitly initializing GPU physics. The manager
   will warn and initialize lazily on the first update if this was missed.
-- Manual update is the default; normal environment stepping must advance
-  physics through `SimulationManager.update()`.
+- Physics advances through explicit `SimulationManager.update()` calls.
+  Interactive loops own their fixed physics timestep and optional wall-clock
+  pacing.
+- Drawing markers and publishing visualization do not advance physics.
+  Use `capture_visualization(force=True)` to publish marker edits while paused.
 - Reset only the requested environment rows and honor
   `excluded_uids` for resources detached from automatic reset.
 - `destroy()` queues deferred cleanup. Tests and non-exiting standalone

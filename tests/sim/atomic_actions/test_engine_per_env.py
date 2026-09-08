@@ -84,7 +84,7 @@ from embodichain.lab.sim.atomic_actions import (
     TrajectorySegment,
 )
 from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
-from embodichain.lab.sim.planners import PlanOptions
+from embodichain.lab.sim.motion.planners import PlanOptions
 
 CONTROL_DT = 0.02
 

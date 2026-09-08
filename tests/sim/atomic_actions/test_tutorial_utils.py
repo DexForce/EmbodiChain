@@ -34,7 +34,7 @@ from embodichain.lab.sim.atomic_actions import (
     ArticulationAffordanceGeometry,
     TimedTrajectory,
 )
-from embodichain.lab.sim.solvers import BaseSolver
+from embodichain.lab.sim.motion.solvers import BaseSolver
 from scripts.tutorials.atomic_action.dynamic_obstacle_recovery import (
     _animate_obstacle_to_pose,
     _blocking_obstacle_pose,
@@ -543,7 +543,9 @@ def test_ur_tutorial_solver_limits_skip_noop_hard_limit_warning(factory) -> None
         upper_qpos_limits=solver_limits[:, 1].clone(),
     )
 
-    with patch("embodichain.lab.sim.solvers.base_solver.logger.log_warning") as warning:
+    with patch(
+        "embodichain.lab.sim.motion.solvers.base_solver.logger.log_warning"
+    ) as warning:
         BaseSolver.update_with_robot_limit(solver, UR_RUNTIME_QPOS_LIMITS)
 
     assert not warning.called
