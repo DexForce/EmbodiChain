@@ -76,7 +76,7 @@ topics:
   title: IK Solver System
   aliases: [ik solver, inverse kinematics, IK 求解器, 逆运动学]
   keywords: [BaseSolver, SolverCfg, SRSSolver, OPWSolver, URSolver, PinkSolver, PytorchSolver, PinocchioSolver,
-    DifferentialSolver, NeuralIKSolver, QposSeedSampler, NullSpacePostureTask, compute kinematics, Warp
+    DifferentialSolver, NeuralIKSolver, QposSeedSampler, QposSeedSelSampler, NullSpacePostureTask, compute kinematics, Warp
       kinematics]
   paths: [topics/ik-solvers/ik-solvers.md]
   source_of_truth:

@@ -30,6 +30,7 @@ from embodichain.compute.trajectory import (
     interpolate_with_nums,
     resample_in_time,
     resample_with_distance,
+    retime_to_control_grid,
     sort_and_padding_key_frame,
     warp_trajectory_qpos,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "interpolate_with_nums",
     "resample_in_time",
     "resample_with_distance",
+    "retime_to_control_grid",
     "sort_and_padding_key_frame",
     "warp_trajectory_qpos",
 ]

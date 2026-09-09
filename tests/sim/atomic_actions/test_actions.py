@@ -1576,8 +1576,14 @@ def test_planner_timing_is_preserved_in_simple_action() -> None:
     payloads = _joint_command_payloads(plan, "arm")
     assert trajectory.duration.tolist() == pytest.approx([0.3, 0.3])
     assert all(payload.velocities is not None for payload in payloads)
-    assert torch.all(
-        torch.stack([payload.velocities for payload in payloads[:-1]], dim=1) == 0.5
+    assert payloads[0].velocities is not None
+    assert torch.count_nonzero(payloads[0].velocities) == 0
+    payload_velocities = torch.stack(
+        [payload.velocities for payload in payloads[1:-1]], dim=1
+    )
+    torch.testing.assert_close(
+        payload_velocities,
+        torch.full_like(payload_velocities, 0.5),
     )
 
     assert torch.count_nonzero(payloads[-1].velocities) == 0
@@ -4950,7 +4956,7 @@ def test_position_only_motion_policy_emits_explicit_zero_velocity() -> None:
             assert torch.count_nonzero(endpoint.payload.velocities) == 0
 
 
-def test_move_held_object_preserves_native_arm_derivatives() -> None:
+def test_move_held_object_retimes_arm_derivatives() -> None:
     generator = _motion_generator()
     q = torch.tensor([0.0, 0.1, 0.3]).view(1, 3, 1).expand(NUM_ENVS, -1, ARM_DOF)
     generator.generate = Mock(
@@ -4971,7 +4977,12 @@ def test_move_held_object_preserves_native_arm_derivatives() -> None:
         _context(task),
     )
     trajectory = _joint_trajectory(plan)
+    assert trajectory.velocities is not None
+    # Both source segments move at 1 rad/s: 0.1/0.1 and 0.2/0.2.
     torch.testing.assert_close(
-        trajectory.velocities[:, 0, :ARM_DOF], torch.full((NUM_ENVS, ARM_DOF), 0.7)
+        trajectory.velocities[:, 1:-1, :ARM_DOF],
+        torch.ones_like(trajectory.velocities[:, 1:-1, :ARM_DOF]),
     )
+    assert torch.count_nonzero(trajectory.velocities[:, 0]) == 0
+    assert torch.count_nonzero(trajectory.velocities[:, -1]) == 0
     assert torch.count_nonzero(trajectory.velocities[:, :, ARM_DOF:]) == 0
