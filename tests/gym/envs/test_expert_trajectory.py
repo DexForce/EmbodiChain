@@ -97,7 +97,8 @@ def test_plan_result_is_the_canonical_expert_trajectory_input() -> None:
 
 def test_untimed_position_velocity_trajectory_requires_velocity() -> None:
     source = PlanResult(
-        success=torch.ones(1, dtype=torch.bool),positions=torch.zeros(1, 2, 1))
+        success=torch.ones(1, dtype=torch.bool), positions=torch.zeros(1, 2, 1)
+    )
 
     with pytest.raises(ValueError, match="velocities"):
         prepare_expert_joint_trajectory(
@@ -111,8 +112,7 @@ def test_position_mode_preserves_untimed_positions_without_velocity() -> None:
     positions = torch.tensor([[[0.0], [1.0]]])
 
     prepared = prepare_expert_joint_trajectory(
-        PlanResult(
-        success=torch.ones(1, dtype=torch.bool),positions=positions),
+        PlanResult(success=torch.ones(1, dtype=torch.bool), positions=positions),
         control_dt=0.1,
         joint_command_mode="position",
     )
