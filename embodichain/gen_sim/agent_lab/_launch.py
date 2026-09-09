@@ -30,6 +30,7 @@ import time
 import psutil
 
 from .catalog import write_json
+from .usage import UsageMeter
 from .session import (
     _environment,
     _process,
@@ -38,7 +39,11 @@ from .session import (
     execute_script,
 )
 
-_BOOTSTRAP_PROMPT = "Read START.md in this workspace and carry out the objective recorded there and in environment.json."
+_BOOTSTRAP_PROMPT = (
+    "Read START.md in this workspace and carry out the objective recorded there and in environment.json. "
+    "Before handing off, read ../usage.json and reflect cumulative elapsed time and token usage, "
+    "including source and completeness. Never guess or overwrite host-measured statistics."
+)
 
 
 def _codex_command(
@@ -110,6 +115,7 @@ def _launch(
     )
     _write_heartbeat(root, record)
     heartbeat.start()
+    meter = UsageMeter(root, "launch")
     # This host reads only execution requests; it never supplies task advice.
     try:
         result = _process(
@@ -135,14 +141,25 @@ def _launch(
         else:
             record["status"] = "interrupted"
             raise
-    except Exception:
-        record["status"] = "failed"
+    except Exception as exc:
+        record.update(status="failed", error=f"{type(exc).__name__}: {exc}")
         raise
     finally:
         stopped.set()
         heartbeat.join()
         write_json(root / "launch.json", record)
         write_json(output / "launch.json", record)
+        from .delivery import finalize_run
+
+        try:
+            delivery = finalize_run(root, usage_meter=meter)
+        finally:
+            meter.close()
+        print(f"[Agent Lab] Final report: {root / 'final/report.md'}", flush=True)
+        print(
+            f"[Agent Lab] Final video: {root / 'final/video.mp4' if delivery['video'] else 'none'}",
+            flush=True,
+        )
     return record
 
 
@@ -209,6 +226,7 @@ def _workspace_main(root: Path, arguments: list[str]) -> None:
     inspect.add_argument("--attempt", type=Path, required=True)
     commands.add_parser("status")
     commands.add_parser("stop")
+    commands.add_parser("usage")
     args = parser.parse_args(arguments)
     if args.command == "inspect":
         from .report import inspect_attempt
@@ -220,6 +238,8 @@ def _workspace_main(root: Path, arguments: list[str]) -> None:
         )
     elif args.command == "status":
         print((root / "launch.json").read_text())
+    elif args.command == "usage":
+        print((root / "usage.json").read_text())
     elif args.command == "stop":
         host = _check_host(root)
         staging = root / "stop.tmp"

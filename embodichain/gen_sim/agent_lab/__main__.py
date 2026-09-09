@@ -21,9 +21,12 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 import json
+import os
 from pathlib import Path
 import sys
 import signal
+
+import psutil
 
 from .catalog import Task, read_catalog
 from .session import (
@@ -60,6 +63,11 @@ def main() -> None:
     inventory.add_argument("--assets", type=Path, default=repo / "gym_project/task100")
     inspect = commands.add_parser("inspect")
     inspect.add_argument("--attempt", type=Path, required=True)
+    finalize = commands.add_parser(
+        "finalize", help="Publish or recover final delivery without running simulation"
+    )
+    finalize.add_argument("--run-dir", type=Path, required=True)
+    finalize.add_argument("--attempt", type=Path)
     for name in ("prepare", "solve"):
         command = commands.add_parser(name)
         selection = command.add_mutually_exclusive_group(required=True)
@@ -120,6 +128,25 @@ def main() -> None:
         raise SystemExit(
             result if isinstance(result, int) else result["process"]["returncode"]
         )
+    elif args.command == "finalize":
+        from .delivery import finalize_run
+
+        result = finalize_run(args.run_dir.resolve(), attempt=args.attempt)
+        print(
+            json.dumps(
+                {
+                    "result": str(args.run_dir.resolve() / "final/result.json"),
+                    "report": str(args.run_dir.resolve() / "final/report.md"),
+                    "video": (
+                        str(args.run_dir.resolve() / "final/video.mp4")
+                        if result["video"]
+                        else None
+                    ),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     elif args.command == "inventory":
         tasks = read_catalog(args.assets)
         print(
@@ -151,12 +178,55 @@ def main() -> None:
 
         print(json.dumps(inspect_attempt(args.attempt), ensure_ascii=False, indent=2))
     elif args.command == "run":
-        result = execute_script(
-            args.run_dir.resolve(),
-            args.script.resolve(),
-            args.config.resolve() if args.config else None,
-            timeout=args.timeout,
-        )
+        from .delivery import finalize_run
+        from .catalog import write_json
+        from .usage import UsageMeter
+
+        root = args.run_dir.resolve()
+        brokered = os.environ.get("GENSIM_LAB_BROKER") == str(root)
+        execution = {
+            "entrypoint": "run",
+            "status": "running",
+            "pid": os.getpid(),
+            "created_at": psutil.Process().create_time(),
+        }
+        if not brokered:
+            write_json(root / "delivery_state.json", execution)
+        meter = None if brokered else UsageMeter(root, "run")
+        result = None
+        try:
+            result = execute_script(
+                root,
+                args.script.resolve(),
+                args.config.resolve() if args.config else None,
+                timeout=args.timeout,
+            )
+            process = result["process"]
+            execution.update(
+                status=(
+                    "timed_out"
+                    if process.get("timed_out")
+                    else "completed" if process.get("returncode") == 0 else "failed"
+                ),
+                process=process,
+            )
+        except KeyboardInterrupt:
+            execution["status"] = "interrupted"
+            raise
+        except Exception as exc:
+            execution.update(status="failed", error=f"{type(exc).__name__}: {exc}")
+            raise
+        finally:
+            if not brokered:
+                write_json(root / "delivery_state.json", execution)
+                try:
+                    finalize_run(
+                        root,
+                        attempt=result["attempt"] if result else None,
+                        usage_meter=meter,
+                    )
+                finally:
+                    meter.close()
         if result["process"]["returncode"] or not result["worker"].get(
             "execution_completed"
         ):

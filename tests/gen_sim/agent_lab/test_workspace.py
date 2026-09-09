@@ -190,7 +190,7 @@ def test_workspace_help_needs_no_live_host(tmp_path: Path) -> None:
         timeout=15,
     )
     assert result.returncode == 0, result.stderr
-    assert "run,inspect,status,stop" in result.stdout
+    assert "run,inspect,status,stop,usage" in result.stdout
 
 
 def test_workspace_client_discovers_host_without_inherited_environment(

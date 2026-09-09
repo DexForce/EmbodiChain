@@ -67,6 +67,7 @@ def _process(
     interactive: bool = False,
 ) -> dict:
     started = time.monotonic()
+    started_at = time.time()
     timed_out = False
     interrupted = False
     with (
@@ -91,6 +92,7 @@ def _process(
             "pid": process.pid,
             "created_at": psutil.Process(process.pid).create_time(),
             "command": command,
+            "started_at": started_at,
         }
         write_json(output / "process.json", identity)
         try:
@@ -109,12 +111,14 @@ def _process(
             timed_out = isinstance(exc, subprocess.TimeoutExpired)
             interrupted = not timed_out
             _stop_tree(process)
+    elapsed = time.monotonic() - started
     record = {
         **identity,
         "returncode": process.returncode,
         "timed_out": timed_out,
         "interrupted": interrupted,
-        "wall_seconds": time.monotonic() - started,
+        "wall_seconds": elapsed,
+        "ended_at": started_at + elapsed,
     }
     write_json(output / "process.json", record)
     if interrupted:
@@ -265,6 +269,21 @@ def execute_script(
         frozen_config = attempt / "lab.json"
         shutil.copy2(config, frozen_config)
         command += ["--config", str(frozen_config)]
+    from .delivery import _hash
+
+    input_files = [path for path in code.rglob("*") if path.is_file()]
+    if config is not None:
+        input_files.append(frozen_config)
+    write_json(
+        attempt / "inputs.json",
+        {
+            "script": str(frozen_script.relative_to(attempt)),
+            "files_sha256": {
+                str(path.relative_to(attempt)): _hash(path)
+                for path in sorted(input_files)
+            },
+        },
+    )
     env = _environment(Path(manifest["repo"]))
     env["PYTHONPATH"] = str(code) + os.pathsep + env["PYTHONPATH"]
     process = _process(command, cwd=code, output=attempt, timeout=timeout, env=env)
@@ -458,6 +477,11 @@ frames after trials. Do not infer motion from target qpos or exit code alone.
 
 Hard search deadline (Unix seconds): {deadline:.0f}. Check the current time.
 Reserve the last two minutes for a clean successful full episode and summary.
+Read {root / 'usage.json'} for host-measured cumulative time and reported token
+usage. State its scope, as_of and completeness in your handoff. Never estimate
+total tokens from response length, add cached/reasoning subsets again, or count
+only the final successful attempt. Do not edit usage.json. The host refreshes
+the final totals after you stop; your own copy is only a progress snapshot.
 When you have a reproducible candidate, write candidate.json with keys script,
 config, rationale (paths relative to this workspace). Otherwise preserve your
 best attempt and write a concrete failure diagnosis. Keep all failed videos.
@@ -474,6 +498,54 @@ def solve(
     sandbox: str = "workspace-write",
 ) -> dict:
     """Let Codex iterate freely, then replay its candidate outside the agent."""
+    from .delivery import finalize_run
+    from .usage import UsageMeter
+
+    execution = {
+        "entrypoint": "solve",
+        "status": "running",
+        "pid": os.getpid(),
+        "created_at": psutil.Process().create_time(),
+        "model": model or _DEFAULT_MODEL,
+        "reasoning_effort": reasoning_effort,
+    }
+    write_json(root / "search.json", execution)
+    meter = UsageMeter(root, "solve")
+    try:
+        return _solve(
+            root,
+            minutes=minutes,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            sandbox=sandbox,
+            execution=execution,
+        )
+    except KeyboardInterrupt:
+        execution["status"] = "interrupted"
+        raise
+    except Exception as exc:
+        execution.update(status="failed", error=f"{type(exc).__name__}: {exc}")
+        raise
+    finally:
+        if execution["status"] == "running":
+            execution["status"] = "completed"
+        write_json(root / "search.json", execution)
+        try:
+            finalize_run(root, usage_meter=meter)
+        finally:
+            meter.close()
+        print(f"[Agent Lab] Final report: {root / 'final/report.md'}", flush=True)
+
+
+def _solve(
+    root: Path,
+    *,
+    minutes: float,
+    model: str | None,
+    reasoning_effort: str,
+    sandbox: str,
+    execution: dict,
+) -> dict:
     model = model or _DEFAULT_MODEL
     manifest = json.loads((root / "run.json").read_text())
     total_deadline = time.time() + minutes * 60
@@ -542,6 +614,14 @@ def solve(
             env=env,
             prompt=prompt,
             service=lambda: _serve_requests(root, deadline),
+        )
+        execution.update(
+            status=(
+                "timed_out"
+                if process["timed_out"]
+                else "completed" if process["returncode"] == 0 else "failed"
+            ),
+            process=process,
         )
         for line in (output / "stdout.log").read_text().splitlines():
             if line.startswith("{"):

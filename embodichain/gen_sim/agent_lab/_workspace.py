@@ -48,6 +48,7 @@ environment.json 提供项目导航、解释器和本轮目标。项目代码可
   程序，不要求 solve(lab)。GENSIM_LAB_OUTPUT 指向本次独立产物目录。
 - `python3 lab.py inspect --attempt /absolute/attempt`：解码视频、汇总实际运动。
 - `python3 lab.py status`：查看宿主与预算；`python3 lab.py stop`：停止本轮并保留产物。
+- `python3 lab.py usage`：读取宿主计量的累计耗时与 token 用量。
 
 运行器在宿主执行 GPU 请求；不要在 Codex 的受限 shell 中直接启动 CUDA worker。
 若没有正在运行的宿主，工具会立即说明应如何启动，不会无限等待。
@@ -80,6 +81,29 @@ incomplete / candidate）、attempts（产物路径）、evidence（观察依据
 task_completed（是否完整完成题目）、limitations（尚未证明的内容）。
 这是你的声明，仍需外部复核。保存简洁 notes.md；需要完整任务重跑时另写
 candidate.json，包含 script、config、rationale。不要等待外部对话指挥下一步。
+
+## 最终交付
+
+在 handoff.json 增加 selected_attempt，值为本轮目录下的 attempts/<尝试ID>，
+明确选出最能代表结果的一次完整尝试，不能把不同尝试拼成成功视频。
+即使只完成部分目标或失败，也应选择对应录像并写清限制；尚未开始仿真时用 null。
+先写 handoff.json，再停止。宿主统一生成 ../final/result.json、report.md 和
+可用时的 video.mp4；不要自己编辑 final/，不要把最后一次尝试自动当作最好的一次。
+未指定录像时宿主仅选择最近可解码的诊断录像，并标注未选择、未验收。
+视频和报告缺失的修复由宿主 finalize 命令完成，不需要重新执行仿真。
+
+## 耗时和 Token 用量
+
+交接必须反映本轮累计全程耗时及 token 用量；先读取 ../usage.json。
+使用宿主记录，不根据回答长度、感觉或账户额度变化猜测 token。
+说明统计范围、as_of 时间和数据完整性：reported 是已有完整用量事件，
+partial 是已观察下界，unavailable 是未知而非零。耗时 reconstructed 是旧记录重建。
+本轮所有启动、续跑、失败及重试都应计入，不能只报最后一次成功尝试。
+Codex 耗时包含工具与仿真等待，不是纯思考时间；耗时子项有重叠，不能重复相加。
+缓存输入、推理输出是子项，不要在输入加输出总量上再加一次。
+在 handoff.json 中用 usage_file 指向 ../usage.json，可以用中文 usage_notes
+解释主要开销与限制。不要编辑 usage.json 或自行覆盖最终报告中的宿主计量。
+你读到的是阶段快照，结束后宿主会补齐最终累计值；不将这些计数称为实际账单金额。
 """
 
 _BRIDGE = '''"""Local entry point; environment selection belongs to the workspace."""
@@ -113,6 +137,7 @@ def _write_workspace(root: Path, manifest: dict) -> None:
             "objective": manifest.get("objective", "solve"),
             "robot_preset": "lab.json; replaceable before an episode",
             "budget": "../launch.json records the current deadline",
+            "usage_file": "../usage.json",
         },
     )
     write_json(
@@ -150,6 +175,9 @@ def _write_workspace(root: Path, manifest: dict) -> None:
         encoding="utf-8",
     )
     (workspace / "lab.py").write_text(_BRIDGE)
+    from .usage import refresh_usage
+
+    refresh_usage(root)
     write_json(
         root / "bootstrap_hashes.json",
         {

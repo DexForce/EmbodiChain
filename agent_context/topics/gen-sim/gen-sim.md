@@ -18,6 +18,7 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | General asset ingest | `simready_pipeline/pipeline/ingest.py`: `ingest_one_asset()` |
 | Web app configuration | `gradio_ui/gradio_app.py`, `app_env.py` |
 | Session-owned subprocesses | `gradio_ui/app_processes.py`: `SessionProcessRegistry` |
+| Open-ended coding experiments and final delivery | `agent_lab/__main__.py`: `prepare`, `launch`, `run`, `solve`, `resume`, `finalize` |
 
 Generate: validate input → VLM understanding → geometry/articulation generation
 → placement refinement → export. Segmentation, geometry and articulation
@@ -57,12 +58,30 @@ environment files.
 
 ## Focused validation
 
+Agent Lab is an opt-in coding experiment host, not a Task Program interpreter.
+`delivery.py:finalize_run()` owns the versioned `final/result.json`, derived Markdown
+report and optional validated MP4. Launch/search/standalone-run lifecycle owners
+finalize after cleanup; `finalize` also recovers existing artifacts without simulation.
+Selection is run-scoped and explicit where possible; diagnostic fallback never means
+best or task success. Immutable `.deliveries/` revisions are published through an
+atomic `final` symlink; originals and previous publications remain intact.
+`usage.py` owns host interval metering and linked Codex usage metadata collection.
+Live `usage.json` is numeric-only; final resources and the report share one snapshot.
+Counter resets/resumes and cached/reasoning subcounts cannot be blindly summed.
+Missing data stays unavailable/partial; old process timing is reconstructed rather
+than treated as complete host timing. Finalization without a live meter does not
+add recovery wall time to a historical run.
+See the [experiment guide](../../../embodichain/gen_sim/agent_lab/README.md) for the
+delivery contract, video selection, recording limits and recovery commands.
+
 | Change | Tests |
 |---|---|
 | Portable scene/pose/overwrite contract | `tests/gen_sim/scene_engine/test_scene_core_and_export.py` |
 | Edit plans and graph | `tests/gen_sim/scene_engine/test_scene_edit.py`, `test_scene_edit_plan.py`, `test_scene_graph.py` |
 | Ingest formats and metadata | `tests/gen_sim/simready_pipeline/` |
 | UI roots/auth/session workflow | `tests/gen_sim/gradio_ui/` |
+| Agent Lab final artifacts, lifecycle and recovery | `tests/gen_sim/agent_lab/test_delivery.py` plus retained real-run videos |
+| Run-scoped timing and token accounting | `tests/gen_sim/agent_lab/test_usage.py` plus linked real Codex metadata |
 
 Select provider-backed or simulator conversion tests only when that runtime
 boundary changes; source/unit checks do not establish remote service quality.

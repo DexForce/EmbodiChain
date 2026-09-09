@@ -84,4 +84,5 @@ documentation. CI runs this same checker after style checks and before tests.
    :maxdepth: 1
 
    embodichain/embodichain.gen_sim.task_engine
+   gen_sim_agent_lab
    public_api
