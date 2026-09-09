@@ -113,6 +113,23 @@ batches for IK multi-start:
   - First sample = provided seed; remaining are uniform-random within limits.
 - `repeat_target_xpos(target_xpos, num_samples)` — repeats target poses to match expanded seed batch.
 
+### `QposSeedSelSampler` (`qpos_seed_sel_sampler.py`)
+
+Database-driven drop-in extension of `QposSeedSampler` (SELIK-style retrieval).
+Slots after the caller seed come from a lazily built Sobol FK database: pose-space
+kNN (position + Frobenius rotation, `rot_scale` metres/radian) re-ranked by the
+predicted joint step `||J⁺·Δpose||` when a Jacobian provider is configured.
+
+- Opt-in through `PytorchSolverCfg.enable_seed_selection` with `seed_db_size`
+  and `seed_rot_scale`; default off preserves shipped behaviour exactly.
+- The database stores flange poses (no TCP), so runtime `set_tcp()` never
+  invalidates it; `get_ik` queries with its TCP-stripped target.
+- Joint-limit changes trigger an automatic rebuild; `sample()` without a
+  `target_xpos` falls back to the parent's uniform-random behaviour.
+- Cost: build ~11 ms / 6 MB at 20k entries on GPU (one-time, lazy); query
+  adds <1 ms per `get_ik` call (~0.2% of a solve).
+- Analytic solvers (SRS/OPW/UR) do not consume seeds and are unaffected.
+
 ### `NullSpacePostureTask` (`null_space_posture_task.py`)
 
 A `pink.tasks.Task` subclass for posture control in the null space of

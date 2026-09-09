@@ -149,3 +149,12 @@ Neural IK Solver
     :members:
     :inherited-members:
     :show-inheritance:
+
+Seed Selection
+--------------
+
+.. currentmodule:: embodichain.lab.sim.motion.solvers.qpos_seed_sel_sampler
+
+.. autoclass:: QposSeedSelSampler
+    :members:
+    :show-inheritance:
