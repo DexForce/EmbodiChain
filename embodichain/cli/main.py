@@ -95,6 +95,11 @@ COMMANDS = (
         help="Generate convex collision meshes for a URDF.",
     ),
     Command(
+        name="calibrate-dynamics",
+        target="embodichain.toolkits.dynamics_calibration.cli:main",
+        help="Audit, tune, and qualify effective robot drive parameters.",
+    ),
+    Command(
         name="benchmark",
         target="scripts.benchmark.__main__:main",
         help="Run EmbodiChain performance benchmarks.",

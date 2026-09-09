@@ -28,6 +28,10 @@ Available Toolkits
      - Samples antipodal contacts, constructs grasp poses, and filters
        collisions for parallel-jaw grippers.
      - Annotate graspable regions and generate candidate grasps for manipulation.
+   * - :doc:`Dynamics Calibration <dynamics_calibration>`
+     - Audits robot assets, tunes effective drive parameters in isolated runs,
+       and applies hard gates on held-out trajectories.
+     - Produce a reviewable drive overlay for one application and backend.
 
 Choosing a Toolkit
 ------------------
@@ -37,6 +41,9 @@ robot but its collision meshes are unsuitable for simulation. Use URDF assembly
 when the robot is distributed across multiple component files. Use grasp
 generation after the target object's mesh is ready and a manipulation workflow
 needs feasible end-effector poses.
+
+Use dynamics calibration after a robot asset passes generic SimReady checks and
+an application needs reproducible stiffness, damping, armature, or limit tuning.
 
 The asset tools can be chained: preprocess component collision meshes, assemble
 the components into one URDF, and then load the resulting robot in a grasping
@@ -48,3 +55,4 @@ task.
    URDF Convex Decomposition <convex_decomposition>
    URDF Assembly <urdf_assembly>
    Parallel-Gripper Grasp Generation <grasp_generator>
+   Dynamics Calibration <dynamics_calibration>

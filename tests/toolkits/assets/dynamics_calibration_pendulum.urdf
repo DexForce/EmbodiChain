@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<!--
+Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+SPDX-License-Identifier: Apache-2.0
+-->
+<robot name="dynamics_calibration_pendulum">
+  <link name="base">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+    </inertial>
+    <collision>
+      <geometry><box size="0.1 0.1 0.1"/></geometry>
+    </collision>
+  </link>
+  <link name="arm">
+    <inertial>
+      <origin xyz="0 0 0.25" rpy="0 0 0"/>
+      <mass value="1"/>
+      <inertia ixx="0.022" ixy="0" ixz="0" iyy="0.022" iyz="0" izz="0.002"/>
+    </inertial>
+    <collision>
+      <origin xyz="0 0 0.25" rpy="0 0 0"/>
+      <geometry><box size="0.05 0.05 0.5"/></geometry>
+    </collision>
+  </link>
+  <joint name="joint1" type="revolute">
+    <parent link="base"/>
+    <child link="arm"/>
+    <origin xyz="0 0 0.05" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.5" upper="1.5" effort="100" velocity="10"/>
+    <dynamics damping="0.1" friction="0"/>
+  </joint>
+</robot>
