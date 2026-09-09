@@ -40,6 +40,23 @@ from .session import (
 __all__ = ["main"]
 
 
+def _prepare_run(args: argparse.Namespace, repo: Path) -> Path:
+    task = (
+        Task(**json.loads(args.task_file.read_text()))
+        if args.task_file
+        else read_catalog(args.assets)[args.task]
+    )
+    root = create_run(
+        task,
+        repo=repo,
+        output_root=args.output_root,
+        objective=args.objective,
+        robot_component=args.robot_component,
+    )
+    print(f"[Agent Lab] Run directory: {root}", flush=True)
+    return root
+
+
 def main() -> None:
     """Inventory assets, prepare experiments, execute scripts, or launch Codex."""
 
@@ -68,7 +85,7 @@ def main() -> None:
     )
     finalize.add_argument("--run-dir", type=Path, required=True)
     finalize.add_argument("--attempt", type=Path)
-    for name in ("prepare", "solve"):
+    for name in ("prepare", "solve", "pipeline"):
         command = commands.add_parser(name)
         selection = command.add_mutually_exclusive_group(required=True)
         selection.add_argument("--task")
@@ -83,13 +100,24 @@ def main() -> None:
         command.add_argument(
             "--output-root", type=Path, default=repo / "outputs/task100"
         )
-        if name == "solve":
+        if name in ("solve", "pipeline"):
             command.add_argument("--minutes", type=float, default=45)
             command.add_argument("--model", default=_DEFAULT_MODEL)
             command.add_argument(
                 "--reasoning-effort", default=_DEFAULT_REASONING_EFFORT
             )
-            command.add_argument("--sandbox", default="workspace-write")
+            if name == "solve":
+                command.add_argument("--sandbox", default="workspace-write")
+            else:
+                mode = command.add_mutually_exclusive_group()
+                mode.add_argument(
+                    "--batch", action="store_true", help="Run unattended (default)"
+                )
+                mode.add_argument(
+                    "--window",
+                    action="store_true",
+                    help="Open an interactive Codex window instead",
+                )
     run = commands.add_parser("run")
     run.add_argument("--run-dir", type=Path, required=True)
     run.add_argument("--script", type=Path, required=True)
@@ -111,14 +139,19 @@ def main() -> None:
     launch.add_argument("--batch", action="store_true")
     launch.add_argument("--window", action="store_true")
     args = parser.parse_args()
-    if args.command == "launch":
+    if args.command in ("launch", "pipeline"):
         from ._launch import _launch, _launch_window
 
         method = _launch_window if args.window else _launch
+        root = (
+            _prepare_run(args, repo)
+            if args.command == "pipeline"
+            else args.run_dir.resolve()
+        )
         result = method(
-            args.run_dir.resolve(),
+            root,
             minutes=args.minutes,
-            batch=args.batch,
+            batch=not args.window if args.command == "pipeline" else args.batch,
             model=args.model,
             effort=args.reasoning_effort,
         )
@@ -232,19 +265,7 @@ def main() -> None:
         ):
             sys.exit(1)
     else:
-        task = (
-            Task(**json.loads(args.task_file.read_text()))
-            if args.task_file
-            else read_catalog(args.assets)[args.task]
-        )
-        root = create_run(
-            task,
-            repo=repo,
-            output_root=args.output_root,
-            objective=args.objective,
-            robot_component=args.robot_component,
-        )
-        print(f"[Agent Lab] Run directory: {root}", flush=True)
+        root = _prepare_run(args, repo)
         if args.command == "solve":
             print(
                 json.dumps(

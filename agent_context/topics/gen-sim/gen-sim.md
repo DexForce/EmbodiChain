@@ -18,7 +18,7 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | General asset ingest | `simready_pipeline/pipeline/ingest.py`: `ingest_one_asset()` |
 | Web app configuration | `gradio_ui/gradio_app.py`, `app_env.py` |
 | Session-owned subprocesses | `gradio_ui/app_processes.py`: `SessionProcessRegistry` |
-| Open-ended coding experiments and final delivery | `agent_lab/__main__.py`: `prepare`, `launch`, `run`, `solve`, `resume`, `finalize` |
+| Open-ended coding experiments and final delivery | `agent_lab/__main__.py`: `pipeline`, `prepare`, `launch`, `run`, `solve`, `resume`, `finalize` |
 
 Generate: validate input → VLM understanding → geometry/articulation generation
 → placement refinement → export. Segmentation, geometry and articulation
@@ -59,6 +59,9 @@ environment files.
 ## Focused validation
 
 Agent Lab is an opt-in coding experiment host, not a Task Program interpreter.
+`pipeline` combines preparation and the new launch path in one command, defaulting
+to a full-task objective and unattended execution; `--window` selects interactive
+launch. It does not route through the legacy solve/resume loop.
 `delivery.py:finalize_run()` owns the versioned `final/result.json`, derived Markdown
 report and optional validated MP4. Launch/search/standalone-run lifecycle owners
 finalize after cleanup; `finalize` also recovers existing artifacts without simulation.

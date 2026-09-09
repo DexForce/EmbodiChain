@@ -14,11 +14,17 @@
 source "/home/dex/miniconda3/etc/profile.d/conda.sh"
 conda activate embodichain040
 python -B -m embodichain.gen_sim.agent_lab inventory
-python -B -m embodichain.gen_sim.agent_lab prepare --task task1187 --objective cold_start
-python -B -m embodichain.gen_sim.agent_lab launch \
-  --run-dir "/上一步输出的绝对运行目录" --minutes 15 --window
+python -B -m embodichain.gen_sim.agent_lab pipeline --task task1187 --minutes 45
 ```
 
+`pipeline` 一次完成创建新工作区、启动全新 Codex 和最终交付，不需要手填 `--run-dir`。
+默认完整任务目标 `solve`、非交互运行、`gpt-6-astra / xhigh` 和 45 分钟预算。
+替换 `--task` 选择其他任务；加 `--window` 改为独立交互窗口，加 `--objective cold_start`
+只验证接入与控制。`--batch` 可显式指定默认自动模式，不能与 pipeline 的 `--window` 同时使用。
+还支持 `--task-file`、`--assets`、`--output-root`、`--robot-component`、`--model` 和
+`--reasoning-effort`。它复用新 `launch` 流程，不调用旧的 `solve/resume` 搜索循环。
+
+需要分步准备或检查工作区时，仍可使用 `prepare` 后接 `launch --run-dir`。
 `launch` 默认是交互式 Codex；`--window` 在 Linux GNOME Terminal 中打开新窗口，
 省略则使用当前终端。首次目录信任由用户在 Codex 窗口确认，不修改全局信任设置。
 加 `--batch` 使用同一套工作区入口执行自动化测试，不需要图形终端或目录信任交互。
