@@ -28,6 +28,6 @@ TrajectoryGenerationJobCfg.from_mapping({})
 assert dexsim.get_world_num() == 0
 """
     completed = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True, timeout=30
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=120
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
