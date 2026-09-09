@@ -47,7 +47,7 @@ from embodichain.utils.math import get_pc_center_box
 GRASP_ANNOTATOR_CACHE_DIR = (
     Path.home() / ".cache" / "embodichain" / "grasp_annotator_cache"
 )
-VERSION_TAG = "v0.0.2"
+VERSION_TAG = "v0.0.3"
 
 
 __all__: list[str] = []
@@ -527,7 +527,7 @@ class _AntipodalMeshBackend:
         if obj_longest_axis is None:
             origin_points_masked = origin_points_
             hit_points_masked = hit_points_
-            part_verts = mesh_vert_transformed
+            mesh_part_center = get_pc_center_box(mesh_vert_transformed)
         else:
             axis = torch.as_tensor(
                 obj_longest_axis,
@@ -596,8 +596,14 @@ class _AntipodalMeshBackend:
             mesh_vert_transformed, left_to_right_arm_direction
         )
         mesh_projection_range = mesh_projection.max() - mesh_projection.min()
-        left_threshold = mesh_projection.min() + 0.5 * mesh_projection_range
-        right_threshold = mesh_projection.min() + 0.5 * mesh_projection_range
+        left_threshold = (
+            mesh_projection.min()
+            + (0.5 - middle_empty_ratio / 2) * mesh_projection_range
+        )
+        right_threshold = (
+            mesh_projection.max()
+            - (0.5 - middle_empty_ratio / 2) * mesh_projection_range
+        )
         pair_centers = 0.5 * (origin_points_ + hit_points_)
         pair_projection = torch.matmul(pair_centers, left_to_right_arm_direction)
 
