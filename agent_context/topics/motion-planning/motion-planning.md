@@ -192,6 +192,11 @@ explicitly opt-in. Environment experts instead use the environment-owned
 `step_dt` and `ExpertTrajectoryCfg` contract in
 [Environment framework](../env-framework/env-framework.md).
 
+`PlanResult` is the canonical timed trajectory contract for both simulation
+and Gym execution. Expert dataset code encodes the already prepared qpos/qvel
+action and does not perform a second trajectory retiming pass. The legacy
+`ExpertJointTrajectory` wrapper is accepted only for compatibility.
+
 `scripts/tutorials/sim/motion_generator.py` and the neural planner example
 replay timed trajectories on an explicit physics/control grid and recompute
 velocity references if playback retimes them. The cuRobo example teleports

@@ -14,11 +14,16 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Source-neutral expert joint trajectory and action contracts."""
+"""Expert action encoding at the Gym and dataset boundary.
+
+Trajectory timing remains owned by :class:`PlanResult` and the shared compute
+trajectory helpers.  The legacy ``ExpertJointTrajectory`` wrapper is accepted
+by the preparation adapter for compatibility, but new callers should pass a
+``PlanResult`` directly.
+"""
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Literal, Sequence, cast
 
@@ -26,6 +31,7 @@ import torch
 from tensordict import TensorDictBase
 
 from embodichain.compute.trajectory import retime_to_control_grid
+from embodichain.lab.sim.motion.planners import PlanResult
 from embodichain.utils import configclass
 
 JointCommandMode = Literal["position", "position_velocity"]
@@ -214,19 +220,23 @@ def build_expert_action_spec(
 
 
 def prepare_expert_joint_trajectory(
-    trajectory: ExpertJointTrajectory,
+    trajectory: PlanResult,
     *,
     control_dt: float,
     joint_command_mode: JointCommandMode,
-) -> ExpertJointTrajectory:
-    """Prepare source samples for a destination's fixed command clock.
+) -> PlanResult:
+    """Prepare a planner result for a destination's fixed command clock.
+
+    ``PlanResult`` is the canonical trajectory type.  The older
+    ``ExpertJointTrajectory`` input remains a compatibility shim and is
+    converted immediately; it is not used by the environment execution path.
 
     Timed trajectories are retimed to ``control_dt`` and their velocities are
     recomputed. Untimed position-velocity trajectories must provide velocity
     samples explicitly.
 
     Args:
-        trajectory: Source joint samples and optional arrival intervals.
+        trajectory: Planner result with positions and explicit timing.
         control_dt: Positive destination command period in seconds.
         joint_command_mode: Position-only or position-velocity output mode.
 
@@ -237,50 +247,53 @@ def prepare_expert_joint_trajectory(
         TypeError: If ``trajectory`` has the wrong type.
         ValueError: If timing, mode, or required velocity data is invalid.
     """
-    if not isinstance(trajectory, ExpertJointTrajectory):
-        raise TypeError("trajectory must be an ExpertJointTrajectory.")
+    if isinstance(trajectory, ExpertJointTrajectory):
+        if joint_command_mode == "position_velocity" and trajectory.velocities is None:
+            raise ValueError(
+                "An untimed position_velocity trajectory requires explicit velocities."
+            )
+        source_dt = trajectory.dt
+        if source_dt is None:
+            source_dt = torch.zeros(
+                trajectory.positions.shape[:2],
+                dtype=trajectory.positions.dtype,
+                device=trajectory.positions.device,
+            )
+            if trajectory.positions.shape[1] > 1:
+                source_dt[:, 1:] = float(control_dt)
+        trajectory = PlanResult(
+            success=torch.ones(
+                trajectory.positions.shape[0],
+                dtype=torch.bool,
+                device=trajectory.positions.device,
+            ),
+            positions=trajectory.positions,
+            velocities=trajectory.velocities,
+            accelerations=None,
+            dt=source_dt,
+        )
+    elif not isinstance(trajectory, PlanResult):
+        raise TypeError("trajectory must be a PlanResult.")
     mode = _validate_joint_command_mode(joint_command_mode)
     if (
         isinstance(control_dt, bool)
         or not isinstance(control_dt, (int, float))
-        or not math.isfinite(control_dt)
+        or not torch.isfinite(torch.tensor(float(control_dt)))
         or control_dt <= 0
     ):
         raise ValueError("control_dt must be a positive finite number.")
 
-    if trajectory.dt is not None:
-        positions, velocities, dt, _ = retime_to_control_grid(
-            trajectory.positions,
-            trajectory.dt,
-            control_dt,
-        )
-        return ExpertJointTrajectory(
-            positions=positions,
-            velocities=velocities if mode == "position_velocity" else None,
-            dt=dt,
-        )
-
-    sample_count = trajectory.positions.shape[1]
-    dt = torch.zeros(
-        trajectory.positions.shape[:2],
-        dtype=trajectory.positions.dtype,
-        device=trajectory.positions.device,
+    if trajectory.positions is None or trajectory.dt is None:
+        raise ValueError("PlanResult must contain positions and explicit dt.")
+    positions, velocities, dt, _ = retime_to_control_grid(
+        trajectory.positions, trajectory.dt, control_dt
     )
-    if sample_count > 1:
-        dt[:, 1:] = float(control_dt)
-    velocities = trajectory.velocities
-    if mode == "position_velocity":
-        if velocities is None:
-            raise ValueError(
-                "An untimed position_velocity trajectory requires explicit velocities."
-            )
-        velocities = velocities.clone()
-        velocities[:, -1] = 0
-    else:
-        velocities = None
-    return ExpertJointTrajectory(
-        positions=trajectory.positions,
-        velocities=velocities,
+    return PlanResult(
+        success=trajectory.success,
+        xpos_list=None,
+        positions=positions,
+        velocities=velocities if mode == "position_velocity" else None,
+        accelerations=None,
         dt=dt,
     )
 

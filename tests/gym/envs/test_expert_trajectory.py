@@ -30,6 +30,7 @@ from embodichain.lab.gym.envs.expert_trajectory import (
     encode_expert_action,
     prepare_expert_joint_trajectory,
 )
+from embodichain.lab.sim.motion.planners import PlanResult
 
 
 def test_expert_command_mode_defaults_to_position() -> None:
@@ -70,6 +71,28 @@ def test_timed_expert_trajectory_is_retimed_and_velocity_is_derived() -> None:
         prepared.velocities[0, :, 0], torch.tensor([0.0, 1.0, 0.0])
     )
     torch.testing.assert_close(prepared.dt, torch.tensor([[0.0, 0.5, 0.5]]))
+
+
+def test_plan_result_is_the_canonical_expert_trajectory_input() -> None:
+    result = PlanResult(
+        success=torch.ones(1, dtype=torch.bool),
+        positions=torch.tensor([[[0.0], [1.0]]]),
+        dt=torch.tensor([[0.0, 0.75]]),
+    )
+
+    prepared = prepare_expert_joint_trajectory(
+        result,
+        control_dt=0.5,
+        joint_command_mode="position_velocity",
+    )
+
+    assert isinstance(prepared, PlanResult)
+    torch.testing.assert_close(
+        prepared.positions[0, :, 0], torch.tensor([0.0, 0.5, 1.0])
+    )
+    torch.testing.assert_close(
+        prepared.velocities[0, :, 0], torch.tensor([0.0, 1.0, 0.0])
+    )
 
 
 def test_untimed_position_velocity_trajectory_requires_velocity() -> None:
