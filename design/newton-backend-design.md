@@ -82,9 +82,11 @@ name for operational decisions:
   without manager-side type checks.
 
 Capability predicates drive the `add_*` guards (see Parity Matrix below):
-`supports_robot`, deformable topology flags and their soft/cloth compatibility
-aliases, `supports_rigid_object_group`, `supports_rigid_constraints`,
-and `supports_contact_sensor`.
+`supports_robot`, `supports_volume_deformables`,
+`supports_surface_deformables`, `supports_rigid_object_group`,
+`supports_rigid_constraints`, and `supports_contact_sensor`. Contact-sensor
+support is re-evaluated after solver auto-selection because it depends on the
+resolved Newton solver and execution device.
 
 `SimulationManager.prepare()` owns the convergent readiness sequence: commit or
 rebuild the dirty Spawn scene, apply runtime config, call the backend runtime
@@ -195,26 +197,18 @@ dexsim fix lives on dexsim branch `yueci/adapt-embodichain` (commit `d0e86bb02`)
 features each backend supports (`BACKEND_CAPABILITIES` table). It pins that each
 backend's `supports_*` flags match the table, every
 manager feature guards raise `NotImplementedError` iff their capability is
-false, and the matrix covers every flag and backend. Current matrix:
-
-| feature                  | default | newton |
-|--------------------------|---------|--------|
-| robot                    | yes     | yes    |
-| soft_bodies              | yes     | no     |
-| cloth                    | yes     | no     |
-| rigid_object_group       | yes     | yes    |
-| rigid_constraints        | yes     | no     |
-| contact_sensor           | yes     | no     |
+false, and the matrix covers every flag and backend. Do not copy that static
+table into this historical record. Newton contact sensors additionally require a
+runtime path that publishes a
+`ContactQuery`. MuJoCo-Warp on CPU and DexUni are rejected after the concrete
+solver/device pair is known.
 
 ### Currently Unsupported Newton APIs
 
-`SimulationManager` explicitly rejects these asset types on Newton (per the
-parity matrix):
-
-- `add_soft_object(...)`
-- `add_cloth_object(...)`
-- `create_rigid_constraint(...)`
-- `add_sensor(ContactSensorCfg(...))`
+`SimulationManager` explicitly rejects rigid constraints on Newton. Volume and
+surface deformables are supported through `VolumeDeformableObjectCfg` and
+`SurfaceDeformableObjectCfg`; contact sensors are supported only on the runtime
+paths listed in the capability matrix above.
 
 Newton does support `RigidObjectGroup`; it is an env-major view over the same
 Scene rigid-body batch used by individual objects.
@@ -234,9 +228,11 @@ Articulation Newton-native **per-link** contact/shape params (`ke`/`kd`/`margin`
 no per-link contact-material setter); a warning fires at spawn. Common fields are
 applied.
 
-### Verified Tests
+### Validation Inventory
 
-Newton integration is covered across headless and GPU suites:
+These commands are the intended focused coverage surfaces; their presence is
+not a claim that the current checkout passed them. A release record must attach
+the exact commit, dependency build, command, and result:
 
 ```bash
 pytest -q tests/sim/objects/test_rigid_object.py
@@ -249,6 +245,10 @@ pytest -q tests/sim/test_sim_manager.py tests/sim/test_sim_manager_cfg.py
 
 Do not copy historical pass counts into this document; report results from the
 current checkout and dependency build.
+
+Release qualification still needs real-simulation evidence for a reset-first
+camera frame, a floating-base partial reset, representative rigid-only and
+mixed deformable tasks, destroy/recreate, and steady-state control throughput.
 
 ## Improvements To Make
 
@@ -279,12 +279,11 @@ current checkout and dependency build.
 - Validate SDF rigid mesh creation and collision behavior on Newton.
 - Fix or document kinematic pose-lock semantics.
 
-### Object Groups, Soft, Cloth
+### Object Groups and Deformables
 
 - Maintain Newton rigid-object-group parity through the Scene rigid-body batch.
-- Keep soft and cloth fail-fast until there is an explicit Newton design and
-  test coverage. dexsim exposes `SoftBodyObject`/`add_softbody`/`add_clothbody`
-  (requires the VBD solver) — feasible but substantial.
+- Expand mixed rigid/articulation/deformable qualification across AutoSolver
+  outcomes, especially DexUni's rigid-contact limitation.
 
 ### Articulation / Robot
 
@@ -364,7 +363,8 @@ Done:
 Remaining:
 
 7. Add rigid-only Newton gym smoke tests.
-10. Add soft/cloth support after a dedicated Newton object design and tests.
+10. Add mixed-scene deformable qualification for the supported volume/surface
+    object APIs and their AutoSolver outcomes.
 11. Newton-native per-link contact params for articulations (after dexsim
     exposes a per-link shape-material setter).
 12. Full migration off legacy `PhysicalAttr` to dexsim's spawn descriptors
@@ -389,6 +389,13 @@ PhysicsBackend abstraction:
 - `SimulationManager.prepare()` delegates backend runtime preparation and render
   publication once per topology revision (`test_sim_manager.py`), while
   `SpawnScene`/DexSim own commit and rebuild state (`spawn/test_scene.py`).
+- Newton manager resets restore all articulation state through one native
+  `ArticulationBatch.clear_dynamics()` per selected set of worlds. This clears
+  drive targets, velocities, forces, solver warm-start state, kinematics, and
+  external wrenches; MuJoCo-Warp rejects excluding only some articulations from
+  those worlds because its warm-start state is world-scoped.
+- Partial joint control writes preserve untouched rows/DOFs through reusable
+  device tensors and avoid DexSim's host-materialized selected-DOF path.
 
 Simulation:
 

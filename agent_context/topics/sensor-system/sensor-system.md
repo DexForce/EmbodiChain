@@ -48,12 +48,12 @@ BatchEntity
 ### Backend support
 
 Camera and stereo-camera creation are backend-neutral render features and are
-supported with both Default and Newton physics. `ContactSensor` currently
-depends on the Default backend's native contact-query path. The manager checks
-`PhysicsBackend.supports_contact_sensor` and rejects it on Newton before sensor
-construction with `NotImplementedError`; do not infer support merely because
-Newton itself computes contacts. A Newton contact sensor requires an explicit
-backend-neutral query adapter and parity tests before enabling that capability.
+supported with both Default and Newton physics. `ContactSensor` uses the shared
+DexSim Scene query on both backends. The manager checks
+`PhysicsBackend.supports_contact_sensor` before preparation and again after a
+Newton AutoSolver resolves. MuJoCo-Warp on CPU and DexUni are rejected because
+those runtime paths do not publish the required contact buffers/query; other
+Newton rigid solvers can expose geometry without impulse data.
 
 ## Sensor Configuration
 

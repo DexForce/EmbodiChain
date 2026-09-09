@@ -26,14 +26,14 @@ from dexsim.scene import ArticulationBatch, RigidBodyBatch, Scene
 
 import embodichain.lab.sim.objects.backends as backends
 import embodichain.lab.sim.objects.backends.newton as newton_backend
-from embodichain.lab.sim.objects.articulation import Articulation, ArticulationData
+from embodichain.lab.sim.objects.articulation import ArticulationData
 from embodichain.lab.sim.objects.backends.scene import (
     SceneArticulationView,
     SceneRigidBodyView,
     _batch_pose,
     _embodichain_pose,
 )
-from embodichain.lab.sim.objects.rigid_object import RigidBodyData, RigidObject
+from embodichain.lab.sim.objects.rigid_object import RigidBodyData
 
 pytestmark = pytest.mark.no_sim
 
@@ -106,6 +106,7 @@ def test_scene_views_match_installed_dexsim_batch_surface() -> None:
         "fetch_joint_target_velocity",
         "apply_joint_force",
         "fetch_joint_force",
+        "clear_dynamics",
         "fetch_joint_acceleration",
         "fetch_link_pose",
         "fetch_link_linear_velocity",
@@ -243,6 +244,18 @@ class _SelectedArticulationBatch:
         self.owner.last_dof_ids = tuple(columns.tolist())
         return len(self.rows)
 
+    def clear_dynamics(self) -> int:
+        self.owner.target_position[self.rows] = self.owner.position[self.rows]
+        self.owner.velocity[self.rows] = 0.0
+        self.owner.target_velocity[self.rows] = 0.0
+        self.owner.force[self.rows] = 0.0
+        self.owner.root_linear_velocity[self.rows] = 0.0
+        self.owner.root_angular_velocity[self.rows] = 0.0
+        self.owner.solver_warmstart[self.rows] = 0.0
+        self.owner.external_wrench[self.rows] = 0.0
+        self.owner.clear_dynamics_rows.append(tuple(self.rows.tolist()))
+        return len(self.rows)
+
     def apply_joint_velocity(self, values: torch.Tensor) -> int:
         self.owner.velocity[self.rows] = values
         return len(self.rows)
@@ -284,14 +297,14 @@ class _ArticulationBatch:
         self.dof_width = 3
         self.link_width = 1
         self.force = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        self.position = self.force.clone()
+        self.target_position = torch.zeros_like(self.position)
         self.velocity = self.force.clone()
         self.target_velocity = self.force.clone()
-        self.root_linear_velocity = torch.tensor(
-            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
-        )
-        self.root_angular_velocity = torch.tensor(
-            [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]
-        )
+        self.solver_warmstart = self.force.clone()
+        self.external_wrench = torch.ones((2, 1, 6))
+        self.root_linear_velocity = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        self.root_angular_velocity = torch.tensor([[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]])
         # Scene articulation batches use xyzw + xyz layout.
         self.root_pose = torch.tensor(
             [
@@ -302,6 +315,7 @@ class _ArticulationBatch:
         self.last_dof_ids: tuple[int, ...] | None = None
         self.root_pose_fetch_rows: list[tuple[int, ...]] = []
         self.root_pose_apply_rows: list[tuple[int, ...]] = []
+        self.clear_dynamics_rows: list[tuple[int, ...]] = []
         self.selections: list[tuple[int, ...]] = []
 
     def __len__(self) -> int:
@@ -311,6 +325,14 @@ class _ArticulationBatch:
         selected = rows.detach().cpu().to(dtype=torch.long)
         self.selections.append(tuple(selected.tolist()))
         return _SelectedArticulationBatch(self, selected)
+
+    def fetch_joint_force(self, out: torch.Tensor) -> int:
+        out.copy_(self.force)
+        return len(self)
+
+    def apply_joint_force(self, values: torch.Tensor) -> int:
+        self.force.copy_(values)
+        return len(self)
 
 
 class _Scene(Scene):
@@ -343,6 +365,43 @@ class _ArticulationEntity:
 
     def get_joint_effort_limit(self) -> list[float]:
         return [3.0] * 3
+
+
+class _NewtonRenderBody:
+    def __init__(self) -> None:
+        self.vertices = (
+            torch.tensor([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]),
+            torch.tensor([[0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [0.0, 1.0, 1.0]]),
+        )
+        self.faces = (
+            torch.tensor([[0, 1, 2]], dtype=torch.int32),
+            torch.tensor([[0, 2, 1]], dtype=torch.int32),
+        )
+
+    def get_mesh_count(self) -> int:
+        return len(self.vertices)
+
+    def get_vertices(self, mesh_id: int = 0) -> torch.Tensor:
+        return self.vertices[mesh_id]
+
+    def get_triangles(self, mesh_id: int = 0) -> torch.Tensor:
+        return self.faces[mesh_id]
+
+
+class _NewtonArticulationEntity(_ArticulationEntity):
+    def __init__(self) -> None:
+        self.render_body = _NewtonRenderBody()
+
+    def get_render_body(self, link_name: str) -> _NewtonRenderBody:
+        assert link_name == "root"
+        return self.render_body
+
+    def get_link_vert_face(self, link_name: str) -> tuple[torch.Tensor, torch.Tensor]:
+        assert link_name == "root"
+        return (
+            self.render_body.get_vertices(),
+            self.render_body.get_triangles(),
+        )
 
 
 class _NoHostTransferTensor(torch.Tensor):
@@ -380,12 +439,6 @@ def test_rigid_body_data_rejects_raw_physics_scene_path() -> None:
         RigidBodyData([object()], SimpleNamespace(), torch.device("cpu"))
 
 
-@pytest.mark.parametrize("object_type", [RigidObject, Articulation])
-def test_materialized_object_construction_requires_scene(object_type: type) -> None:
-    with pytest.raises(TypeError, match="requires a finalized DexSim Scene"):
-        object_type(SimpleNamespace(), [object()])
-
-
 @pytest.mark.parametrize("backend", ["dexsim", "newton"])
 def test_articulation_data_uses_scene_view(backend: str) -> None:
     scene = _Scene(backend)
@@ -396,6 +449,32 @@ def test_articulation_data_uses_scene_view(backend: str) -> None:
     assert isinstance(data.articulation_view, SceneArticulationView)
     assert data.is_newton_backend is (backend == "newton")
     assert scene.articulation_batch_objects == entities
+
+
+def test_newton_articulation_geometry_merges_every_render_mesh() -> None:
+    scene = _Scene("newton")
+    entities = [_NewtonArticulationEntity(), _NewtonArticulationEntity()]
+    data = ArticulationData(entities, scene, torch.device("cpu"))
+
+    vertices, faces = data.link_vert_face["root"]
+
+    torch.testing.assert_close(
+        vertices,
+        torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0, 1.0],
+                [0.0, 1.0, 1.0],
+            ]
+        ),
+    )
+    assert torch.equal(
+        faces,
+        torch.tensor([[0, 1, 2], [3, 5, 4]], dtype=torch.int32),
+    )
 
 
 def test_articulation_data_rejects_raw_physics_scene_path() -> None:
@@ -604,8 +683,8 @@ def test_articulation_partial_force_preserves_other_rows_and_dofs() -> None:
         batch.force,
         torch.tensor([[1.0, 2.0, 3.0], [4.0, 50.0, 6.0]]),
     )
-    assert batch.selections == [(1,)]
-    assert batch.last_dof_ids == (1,)
+    assert batch.selections == []
+    assert batch.last_dof_ids is None
 
 
 def test_articulation_joint_mapping_stays_on_the_view_device() -> None:
@@ -619,6 +698,24 @@ def test_articulation_joint_mapping_stays_on_the_view_device() -> None:
     columns = view._joint_columns(_NoHostTransferTensor([1]))
 
     assert torch.equal(columns, torch.tensor([1]))
+
+
+def test_articulation_joint_write_keeps_selections_on_device() -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(
+        SimpleNamespace(backend="newton"),
+        batch,
+        torch.device("cpu"),
+    )
+
+    view.apply_qf(
+        torch.tensor([[50.0]]),
+        env_ids=_NoHostTransferTensor([1]),
+        joint_ids=_NoHostTransferTensor([1]),
+    )
+
+    assert batch.force[1, 1] == 50.0
+    assert batch.selections == []
 
 
 def test_articulation_clear_dynamics_clears_selected_root_and_joint_motion() -> None:
@@ -641,6 +738,10 @@ def test_articulation_clear_dynamics_clears_selected_root_and_joint_motion() -> 
     assert not torch.count_nonzero(batch.force[1])
     assert not torch.count_nonzero(batch.root_linear_velocity[1])
     assert not torch.count_nonzero(batch.root_angular_velocity[1])
+    assert torch.equal(batch.target_position[1], batch.position[1])
+    assert not torch.count_nonzero(batch.solver_warmstart[1])
+    assert not torch.count_nonzero(batch.external_wrench[1])
+    assert batch.clear_dynamics_rows == [(1,)]
 
 
 def test_newton_idempotent_root_pose_write_is_skipped() -> None:

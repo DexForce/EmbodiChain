@@ -20,7 +20,9 @@ owned by DexSim's ``Scene`` and batch classes. EmbodiChain adapts logical row
 selections and its public pose convention ``(x, y, z, qx, qy, qz, qw)``;
 backend-specific native compatibility work is delegated to narrow hooks.
 
-Row and DOF selection is delegated to DexSim's public batches.
+Read-only row selection uses DexSim's public batches. Selected joint writes
+scatter into reusable full-batch tensors on the target device so the control
+path does not materialize DexSim selection indices on the host.
 """
 
 from __future__ import annotations
@@ -63,17 +65,28 @@ def _checked_batch_call(
     return status
 
 
-def _rows(
+def _selection_values(
     selection: Sequence[int] | torch.Tensor | None,
-    count: int,
-    device: torch.device,
+    valid_values: torch.Tensor,
+    *,
+    label: str,
 ) -> torch.Tensor:
     if selection is None:
-        return torch.arange(count, dtype=torch.long, device=device)
-    result = torch.as_tensor(selection, dtype=torch.long, device=device).reshape(-1)
-    if torch.any(result < 0) or torch.any(result >= count):
-        raise IndexError(f"Batch row selection is outside [0, {count}).")
-    return result
+        return valid_values
+    result = torch.as_tensor(
+        selection,
+        dtype=torch.long,
+        device=valid_values.device,
+    ).reshape(-1)
+    try:
+        # ``index_select`` validates bounds on the tensor's device.  Unlike a
+        # Python boolean reduction, this does not synchronize CUDA selections
+        # back to the host on every control write.
+        return torch.index_select(valid_values, 0, result)
+    except IndexError:
+        raise IndexError(
+            f"{label} selection is outside [0, {len(valid_values)})."
+        ) from None
 
 
 def _batch_pose(data: torch.Tensor) -> torch.Tensor:
@@ -99,6 +112,21 @@ class _SceneBatchSelectionAdapter:
         self.batch = batch
         self.device = device
         self._row_count = row_count
+        self._row_indices = torch.arange(
+            row_count,
+            dtype=torch.long,
+            device=device,
+        )
+
+    def _select_rows(
+        self,
+        selection: Sequence[int] | torch.Tensor | None,
+    ) -> torch.Tensor:
+        return _selection_values(
+            selection,
+            self._row_indices,
+            label="Batch row",
+        )
 
     def _fetch_rows(
         self,
@@ -117,7 +145,7 @@ class _SceneBatchSelectionAdapter:
             _checked_batch_call(self.batch, method_name, out)
             return out
 
-        rows = _rows(selection, self._row_count, self.device)
+        rows = self._select_rows(selection)
         expected_shape = (len(rows), *tail_shape)
         if tuple(out.shape) != expected_shape:
             raise ValueError(
@@ -135,7 +163,7 @@ class _SceneBatchSelectionAdapter:
         selection: Sequence[int] | torch.Tensor,
         tail_shape: tuple[int, ...],
     ) -> None:
-        rows = _rows(selection, self._row_count, self.device)
+        rows = self._select_rows(selection)
         expected_shape = (len(rows), *tail_shape)
         if tuple(values.shape) != expected_shape:
             raise ValueError(
@@ -410,6 +438,7 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
         self._articulation_ids = torch.arange(
             len(batch), dtype=torch.int32, device=device
         )
+        self._joint_apply_scratch: dict[str, torch.Tensor] = {}
 
     def _validate_homogeneous_layout(self) -> None:
         """Require the uniform topology promised by one EC Articulation."""
@@ -543,7 +572,7 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
     def apply_root_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | torch.Tensor
     ) -> None:
-        rows = _rows(env_ids, self._row_count, self.device)
+        rows = self._select_rows(env_ids)
         batch_pose = _batch_pose(pose.to(self.device, torch.float32))
         expected_shape = (len(rows), 7)
         if tuple(batch_pose.shape) != expected_shape:
@@ -581,19 +610,25 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
             (7,),
         )
 
-    def _joint_columns(self, joint_ids: Sequence[int] | torch.Tensor) -> torch.Tensor:
-        ids = _rows(joint_ids, len(self._joint_dof_columns), self.device)
-        return self._joint_dof_columns[ids]
+    def _joint_columns(
+        self, joint_ids: Sequence[int] | torch.Tensor | None
+    ) -> torch.Tensor:
+        return _selection_values(
+            joint_ids,
+            self._joint_dof_columns,
+            label="Joint",
+        )
 
     def _apply_joint_selection(
         self,
         values: torch.Tensor,
-        env_ids: Sequence[int] | torch.Tensor,
-        joint_ids: Sequence[int] | torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor | None,
+        joint_ids: Sequence[int] | torch.Tensor | None,
         *,
         apply_method: str,
+        fetch_method: str,
     ) -> None:
-        rows = _rows(env_ids, self._row_count, self.device)
+        rows = self._select_rows(env_ids)
         columns = self._joint_columns(joint_ids)
         values = values.to(device=self.device, dtype=torch.float32)
         expected = (len(rows), len(columns))
@@ -602,19 +637,34 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
                 f"Expected selected joint data shape {expected}, got "
                 f"{tuple(values.shape)}."
             )
-        if len(rows) and len(columns):
-            _checked_batch_call(
-                self.batch.select(rows),
-                apply_method,
-                values,
-                dof_ids=columns,
+        if not len(rows) or not len(columns):
+            return
+        if env_ids is None and joint_ids is None:
+            _checked_batch_call(self.batch, apply_method, values)
+            return
+
+        # DexSim's selected-articulation path currently materializes indices
+        # as host NumPy arrays.  Keep the control path device-native by
+        # updating a reusable full-batch tensor and applying it without
+        # ``batch.select`` or ``dof_ids``.
+        scratch = self._joint_apply_scratch.get(apply_method)
+        scratch_shape = (self._row_count, self.batch.dof_width)
+        if scratch is None or tuple(scratch.shape) != scratch_shape:
+            scratch = torch.empty(
+                scratch_shape,
+                dtype=torch.float32,
+                device=self.device,
             )
+            self._joint_apply_scratch[apply_method] = scratch
+        _checked_batch_call(self.batch, fetch_method, scratch)
+        scratch[rows[:, None], columns] = values
+        _checked_batch_call(self.batch, apply_method, scratch)
 
     def apply_qpos(
         self,
         qpos: torch.Tensor,
-        env_ids: Sequence[int] | torch.Tensor,
-        joint_ids: Sequence[int] | torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor | None,
+        joint_ids: Sequence[int] | torch.Tensor | None,
         *,
         target: bool,
     ) -> None:
@@ -625,13 +675,16 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
             apply_method=(
                 "apply_joint_target_position" if target else "apply_joint_position"
             ),
+            fetch_method=(
+                "fetch_joint_target_position" if target else "fetch_joint_position"
+            ),
         )
 
     def apply_qvel(
         self,
         qvel: torch.Tensor,
-        env_ids: Sequence[int] | torch.Tensor,
-        joint_ids: Sequence[int] | torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor | None,
+        joint_ids: Sequence[int] | torch.Tensor | None,
         *,
         target: bool,
     ) -> None:
@@ -642,44 +695,33 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
             apply_method=(
                 "apply_joint_target_velocity" if target else "apply_joint_velocity"
             ),
+            fetch_method=(
+                "fetch_joint_target_velocity" if target else "fetch_joint_velocity"
+            ),
         )
 
     def apply_qf(
         self,
         qf: torch.Tensor,
-        env_ids: Sequence[int] | torch.Tensor,
-        joint_ids: Sequence[int] | torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor | None,
+        joint_ids: Sequence[int] | torch.Tensor | None,
     ) -> None:
         self._apply_joint_selection(
             qf,
             env_ids,
             joint_ids,
             apply_method="apply_joint_force",
+            fetch_method="fetch_joint_force",
         )
 
     def clear_dynamics(self, env_ids: Sequence[int] | torch.Tensor) -> None:
-        rows = _rows(env_ids, self._row_count, self.device)
+        rows = self._select_rows(env_ids)
         if not len(rows):
             return
-        zeros = torch.zeros(
-            (len(rows), self.batch.dof_width),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        root_zeros = torch.zeros(
-            (len(rows), 3),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        selected = self.batch.select(rows)
-        _checked_batch_call(selected, "apply_joint_velocity", zeros)
-        _checked_batch_call(selected, "apply_joint_target_velocity", zeros)
-        _checked_batch_call(selected, "apply_joint_force", zeros)
-        _checked_batch_call(selected, "apply_root_linear_velocity", root_zeros)
-        _checked_batch_call(selected, "apply_root_angular_velocity", root_zeros)
+        _checked_batch_call(self.batch.select(rows), "clear_dynamics")
 
     def compute_kinematics(self, env_ids: Sequence[int] | torch.Tensor) -> None:
-        rows = _rows(env_ids, self._row_count, self.device)
+        rows = self._select_rows(env_ids)
         if not len(rows):
             return
         _checked_batch_call(self.batch.select(rows), "compute_kinematics")

@@ -30,9 +30,12 @@ binding a fake ``physics`` onto a bare ``SimulationManager`` via
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
+import torch
 
+import embodichain.lab.sim.sim_manager as sim_manager_module
 from embodichain.lab.sim.physics import (
     DefaultPhysicsBackend,
     NewtonPhysicsBackend,
@@ -113,6 +116,63 @@ def test_contact_sensor_guard_uses_backend_capability() -> None:
 
     with pytest.raises(NotImplementedError, match="ContactSensor"):
         sim.add_sensor(sensor_cfg)
+
+
+@pytest.mark.parametrize(
+    "solver_type,runtime_device,expected",
+    [
+        ("mujoco_warp", "cuda:0", True),
+        ("mujoco_warp", "cpu", False),
+        ("dexuni", "cuda:0", False),
+        ("xpbd", "cpu", True),
+    ],
+)
+def test_newton_contact_sensor_capability_depends_on_runtime(
+    solver_type: str,
+    runtime_device: str,
+    expected: bool,
+) -> None:
+    backend = NewtonPhysicsBackend(SimpleNamespace())
+    backend._configured_solver_type = solver_type
+    backend._runtime_device = runtime_device
+
+    assert backend.supports_contact_sensor is expected
+
+
+def test_contact_sensor_capability_is_rechecked_after_prepare(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _ContactSensorBase:
+        pass
+
+    created: list[object] = []
+
+    class _ContactSensorFactory(_ContactSensorBase):
+        def __init__(self, *_args, **_kwargs) -> None:
+            created.append(self)
+
+    class _RuntimeCapability:
+        name = "newton"
+        supported = True
+
+        @property
+        def supports_contact_sensor(self) -> bool:
+            return self.supported
+
+    backend = _RuntimeCapability()
+    sim = _make_sim_with_backend(backend)
+    sim._sensors = {}
+    sim.device = torch.device("cpu")
+    sim.SUPPORTED_SENSOR_TYPES = {"ContactSensor": _ContactSensorFactory}
+    sim.prepare = MagicMock(side_effect=lambda: setattr(backend, "supported", False))
+    sensor_cfg = SimpleNamespace(sensor_type="ContactSensor", uid="contact")
+    monkeypatch.setattr(sim_manager_module, "ContactSensor", _ContactSensorBase)
+
+    with pytest.raises(NotImplementedError, match="ContactSensor"):
+        sim.add_sensor(sensor_cfg)
+
+    sim.prepare.assert_called_once_with()
+    assert created == []
 
 
 def _make_sim_with_backend(backend: PhysicsBackend) -> SimulationManager:

@@ -30,6 +30,7 @@ import pytest
 import torch
 
 import embodichain.lab.sim.sim_manager as sim_manager_module
+import embodichain.lab.visualization as visualization_module
 from embodichain.lab.sim.cfg import (
     DefaultPhysicsCfg,
     DLSSCfg,
@@ -346,6 +347,7 @@ def _make_visualization_sim_manager() -> (
     sim._is_initialized_gpu_physics = False
     sim._world = FakeWorld()
     sim.prepare = MagicMock()
+    sim.sync_render_state = MagicMock()
     sim._window_record_state = None
     sim._visualization_runtime = runtime
     sim._visualization_overlays = None
@@ -483,6 +485,7 @@ def test_sim_update_refreshes_dirty_visualization_and_captures_current_state() -
         True,
     ]
     assert all(call["overlays"] is None for call in runtime.capture_calls)
+    assert sim.sync_render_state.call_count == 2
 
 
 @pytest.mark.parametrize("step", [0, 1, 3])
@@ -1044,6 +1047,69 @@ def test_start_visualization_rejects_open_native_window() -> None:
         sim.start_visualization()
 
 
+def test_start_visualization_does_not_prepare_an_empty_declaration_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Starting Viser must not finalize Newton before assets are declared."""
+
+    class _Exporter:
+        def __init__(self, sim: SimulationManager, cfg: object) -> None:
+            self.sim = sim
+            self.cfg = cfg
+
+    class _Runtime:
+        def __init__(self, exporter: _Exporter, cfg: object) -> None:
+            self.exporter = exporter
+            self.cfg = cfg
+            self.endpoint = "http://127.0.0.1:8080"
+            self.is_running = False
+            self.captures = 0
+
+        def start(self) -> None:
+            self.is_running = True
+
+        def capture(self, **_kwargs: object) -> None:
+            self.captures += 1
+
+    monkeypatch.setattr(visualization_module, "SceneExporter", _Exporter)
+    monkeypatch.setattr(visualization_module, "VisualizationRuntime", _Runtime)
+
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(
+        visualization=SimpleNamespace(
+            backend="viser",
+            allow_commands=False,
+            viser_server=SimpleNamespace(host="127.0.0.1"),
+        )
+    )
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(is_finalized=False),
+    )
+    sim._rigid_objects = {}
+    sim._rigid_object_groups = {}
+    sim._deformable_objects = {}
+    sim._articulations = {}
+    sim._robots = {}
+    sim._sensors = {}
+    sim._visualization_runtime = None
+    sim._visualization_topology_revision = 0
+    sim._visualization_manifest_topology_revision = -1
+    sim._visualization_error_reported = False
+    sim._visualization_sim_step = 0
+    sim._visualization_sim_time = 0.0
+    sim._visualization_overlays = None
+    sim.is_window_opened = False
+    sim.prepare = MagicMock()
+    sim.sync_render_state = MagicMock()
+
+    runtime = sim.start_visualization()
+
+    sim.prepare.assert_not_called()
+    sim.sync_render_state.assert_not_called()
+    assert runtime is not None
+    assert runtime.captures == 1
+
+
 @pytest.mark.parametrize(
     "headless,entity_gizmo,backend,expected_gizmo",
     [
@@ -1158,6 +1224,20 @@ def test_constructor_starts_visualization_after_default_scene(
     ] + (["entity_gizmo"] if expected_gizmo else [])
     assert sim._spawn_scene is spawn_scene
     assert sim._arenas == []
+
+
+def test_render_camera_group_syncs_state_before_rendering() -> None:
+    lifecycle: list[str] = []
+    sim = object.__new__(SimulationManager)
+    sim.sync_render_state = MagicMock(side_effect=lambda: lifecycle.append("sync"))
+    sim._world = SimpleNamespace(
+        render_camera_group=lambda _group_ids: lifecycle.append("render")
+    )
+    sim._log_scene_summary = lambda: lifecycle.append("summary")
+
+    sim.render_camera_group([3])
+
+    assert lifecycle == ["sync", "render", "summary"]
 
 
 def test_register_kinematic_joint_trajectory_expands_each_arena() -> None:
@@ -1831,6 +1911,10 @@ def _make_camera_attachment_manager(num_envs: int = 2) -> SimulationManager:
     sim._articulations = {}
     sim._sensors = {}
     sim._visualization_topology_revision = 0
+    sim._arenas = [object() for _ in range(num_envs)]
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(result=object()),
+    )
     return sim
 
 
@@ -1847,8 +1931,14 @@ def test_add_camera_attaches_resolved_nodes_only_when_parent_is_configured(
     camera_type = StereoCamera if stereo else Camera
     cfg = cfg_type(uid="camera", extrinsics=CameraCfg.ExtrinsicsCfg(parent=parent))
     camera = object.__new__(camera_type)
+    camera.cfg = cfg
     camera.attach_to_parent_nodes = MagicMock()
-    sim.SUPPORTED_SENSOR_TYPES = {cfg.sensor_type: lambda cfg, device: camera}
+
+    class CameraFactory(camera_type):
+        def __new__(cls, *_args, **_kwargs):
+            return camera
+
+    sim.SUPPORTED_SENSOR_TYPES = {cfg.sensor_type: CameraFactory}
 
     assert sim.add_sensor(cfg) is camera
     assert sim._sensors["camera"] is camera
@@ -1864,7 +1954,13 @@ def test_add_camera_attaches_resolved_nodes_only_when_parent_is_configured(
 def test_add_camera_validates_parent_before_allocating_views() -> None:
     sim = _make_camera_attachment_manager()
     factory = MagicMock()
-    sim.SUPPORTED_SENSOR_TYPES = {"Camera": factory}
+
+    class CameraFactory(Camera):
+        def __new__(cls, *_args, **_kwargs):
+            factory()
+            return object.__new__(Camera)
+
+    sim.SUPPORTED_SENSOR_TYPES = {"Camera": CameraFactory}
     cfg = CameraCfg(uid="camera", extrinsics=CameraCfg.ExtrinsicsCfg(parent="missing"))
 
     with pytest.raises(ValueError, match="was not found"):
@@ -1970,6 +2066,7 @@ def test_stop_window_record_waits_for_background_export(monkeypatch) -> None:
 
 def test_reset_objects_state_includes_deformable_assets() -> None:
     sim = object.__new__(SimulationManager)
+    sim.physics = SimpleNamespace(name="default")
     sim._robots = {}
     sim._articulations = {}
     sim._rigid_objects = {}
@@ -1985,3 +2082,85 @@ def test_reset_objects_state_includes_deformable_assets() -> None:
 
     sim._deformable_objects["soft"].reset.assert_called_once_with([1])
     sim._deformable_objects["cloth"].reset.assert_called_once_with([1])
+
+
+def test_newton_reset_clears_all_articulations_in_selected_worlds_together() -> None:
+    sim = object.__new__(SimulationManager)
+    robot = MagicMock()
+    articulation = MagicMock()
+    native_batch = MagicMock()
+    spawn_result = SimpleNamespace(create_articulation_batch=MagicMock())
+    spawn_result.create_articulation_batch.return_value = native_batch
+    handles = {
+        "robot": ("robot_0", "robot_1"),
+        "arm": ("arm_0", "arm_1"),
+    }
+    sim.physics = SimpleNamespace(name="newton", solver_type="mujoco_warp")
+    sim.num_envs = 2
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(is_finalized=True, result=spawn_result),
+        handles=lambda uid: handles[uid],
+    )
+    sim._robots = {"robot": robot}
+    sim._articulations = {"arm": articulation}
+    sim._rigid_objects = {}
+    sim._rigid_object_groups = {}
+    sim._deformable_objects = {}
+    sim._lights = {}
+    sim._sensors = {}
+
+    sim.reset_objects_state(env_ids=[1])
+
+    robot.reset.assert_called_once_with([1], clear_dynamics=False)
+    articulation.reset.assert_called_once_with([1], clear_dynamics=False)
+    spawn_result.create_articulation_batch.assert_called_once_with(["robot_1", "arm_1"])
+    native_batch.clear_dynamics.assert_called_once_with()
+
+
+def test_newton_reset_rejects_excluding_one_articulation_from_selected_worlds() -> None:
+    sim = object.__new__(SimulationManager)
+    robot = MagicMock()
+    articulation = MagicMock()
+    sim.physics = SimpleNamespace(name="newton", solver_type="mujoco_warp")
+    sim._robots = {"robot": robot}
+    sim._articulations = {"arm": articulation}
+    sim._rigid_objects = {}
+    sim._rigid_object_groups = {}
+    sim._deformable_objects = {}
+    sim._lights = {}
+    sim._sensors = {}
+
+    with pytest.raises(NotImplementedError, match="excluded Newton articulations"):
+        sim.reset_objects_state(env_ids=[0], excluded_uids=["robot"])
+
+    robot.reset.assert_not_called()
+    articulation.reset.assert_not_called()
+
+
+def test_newton_non_mujoco_reset_allows_excluding_an_articulation() -> None:
+    sim = object.__new__(SimulationManager)
+    robot = MagicMock()
+    articulation = MagicMock()
+    native_batch = MagicMock()
+    spawn_result = SimpleNamespace(create_articulation_batch=MagicMock())
+    spawn_result.create_articulation_batch.return_value = native_batch
+    sim.physics = SimpleNamespace(name="newton", solver_type="xpbd")
+    sim.num_envs = 2
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(is_finalized=True, result=spawn_result),
+        handles=lambda _uid: ("arm_0", "arm_1"),
+    )
+    sim._robots = {"robot": robot}
+    sim._articulations = {"arm": articulation}
+    sim._rigid_objects = {}
+    sim._rigid_object_groups = {}
+    sim._deformable_objects = {}
+    sim._lights = {}
+    sim._sensors = {}
+
+    sim.reset_objects_state(env_ids=[0], excluded_uids=["robot"])
+
+    robot.reset.assert_not_called()
+    articulation.reset.assert_called_once_with([0], clear_dynamics=False)
+    spawn_result.create_articulation_batch.assert_called_once_with(["arm_0"])
+    native_batch.clear_dynamics.assert_called_once_with()

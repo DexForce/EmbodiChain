@@ -639,13 +639,53 @@ class ArticulationData:
         """
         link_vert_face = dict()
         for link_name in self.link_names:
-            verts, faces = self.entities[0].get_link_vert_face(link_name)
+            verts, faces = self._entity_link_vert_face(self.entities[0], link_name)
             vertices_tensor = torch.as_tensor(
                 verts, dtype=torch.float32, device=self.device
             )
             faces_tensor = torch.as_tensor(faces, dtype=torch.int32, device=self.device)
             link_vert_face[link_name] = (vertices_tensor, faces_tensor)
         return link_vert_face
+
+    def _entity_link_vert_face(
+        self,
+        entity: object,
+        link_name: str,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Read complete link geometry through the active backend boundary."""
+        if not self.is_newton_backend:
+            return entity.get_link_vert_face(link_name)
+
+        render_body = entity.get_render_body(link_name)
+        if render_body is None:
+            return (
+                np.empty((0, 3), dtype=np.float32),
+                np.empty((0, 3), dtype=np.int32),
+            )
+
+        mesh_count = int(render_body.get_mesh_count())
+        if mesh_count == 0:
+            return (
+                np.empty((0, 3), dtype=np.float32),
+                np.empty((0, 3), dtype=np.int32),
+            )
+
+        vertex_parts: list[np.ndarray] = []
+        face_parts: list[np.ndarray] = []
+        vertex_offset = 0
+        for mesh_id in range(mesh_count):
+            vertices = np.asarray(
+                render_body.get_vertices(mesh_id),
+                dtype=np.float32,
+            )
+            faces = np.asarray(
+                render_body.get_triangles(mesh_id),
+                dtype=np.int32,
+            )
+            vertex_parts.append(vertices)
+            face_parts.append(faces + vertex_offset)
+            vertex_offset += len(vertices)
+        return np.concatenate(vertex_parts), np.concatenate(face_parts)
 
 
 class Articulation(BatchEntity):
@@ -1928,8 +1968,8 @@ class Articulation(BatchEntity):
         qpos = qpos.clamp(selected_limits[..., 0], selected_limits[..., 1])
         self._data.articulation_view.apply_qpos(
             qpos,
-            local_env_ids,
-            local_joint_ids,
+            None if env_ids is None else local_env_ids,
+            None if joint_ids is None else local_joint_ids,
             target=target,
         )
         if target:
@@ -2007,8 +2047,8 @@ class Articulation(BatchEntity):
 
         self._data.articulation_view.apply_qvel(
             qvel,
-            local_env_ids,
-            local_joint_ids,
+            None if env_ids is None else local_env_ids,
+            None if joint_ids is None else local_joint_ids,
             target=target,
         )
         if target:
@@ -2032,7 +2072,7 @@ class Articulation(BatchEntity):
             joint_ids (Sequence[int] | None, optional): Joint indices to apply the efforts. If None, applies to all joints.
             env_ids (Sequence[int] | None, optional): Environment indices. Defaults to all indices.
         """
-        local_env_ids = self._all_indices if env_ids is None else env_ids
+        local_env_ids = self._resolve_env_ids(env_ids)
 
         if not isinstance(qf, torch.Tensor):
             qf = torch.as_tensor(qf, dtype=torch.float32, device=self.device)
@@ -2047,18 +2087,13 @@ class Articulation(BatchEntity):
                 f"Length of env_ids {len(local_env_ids)} does not match qf length {len(qf)}."
             )
 
-        if joint_ids is None:
-            local_joint_ids = torch.arange(
-                self.dof, device=self.device, dtype=torch.int32
-            )
-        elif not isinstance(joint_ids, torch.Tensor):
-            local_joint_ids = torch.as_tensor(
-                joint_ids, dtype=torch.int32, device=self.device
-            )
-        else:
-            local_joint_ids = joint_ids.to(device=self.device, dtype=torch.int32)
+        local_joint_ids = self._resolve_joint_ids(joint_ids)
 
-        self._data.articulation_view.apply_qf(qf, local_env_ids, local_joint_ids)
+        self._data.articulation_view.apply_qf(
+            qf,
+            None if env_ids is None else local_env_ids,
+            None if joint_ids is None else local_joint_ids,
+        )
 
     def get_qf(self) -> torch.Tensor:
         """Get the current generalized efforts (qf) of the articulation.
@@ -2807,7 +2842,20 @@ class Articulation(BatchEntity):
         )
         self.reset()
 
-    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+    def reset(
+        self,
+        env_ids: Sequence[int] | None = None,
+        *,
+        clear_dynamics: bool = True,
+    ) -> None:
+        """Restore configured state for selected articulation instances.
+
+        Args:
+            env_ids: Environment indices to reset. Defaults to all instances.
+            clear_dynamics: Whether to clear native dynamics immediately. The
+                simulation manager disables this only while coordinating one
+                Newton clear across every articulation in selected worlds.
+        """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
         self.cfg: ArticulationCfg
@@ -2863,7 +2911,8 @@ class Articulation(BatchEntity):
         # Set drive target to hold position.
         self.set_qpos(qpos, target=True, env_ids=local_env_ids)
 
-        self.clear_dynamics(env_ids=local_env_ids)
+        if clear_dynamics:
+            self.clear_dynamics(env_ids=local_env_ids)
 
         self._data.articulation_view.compute_kinematics(local_env_ids)
         if self.device.type == "cpu" and not self._data.is_newton_backend:

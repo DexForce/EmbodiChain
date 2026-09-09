@@ -32,6 +32,7 @@ from pathlib import Path
 from copy import deepcopy
 from datetime import datetime
 from functools import cached_property, partial
+from numbers import Integral
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -88,6 +89,7 @@ from embodichain.lab.sim.sensors import (
     StereoCamera,
     ContactSensor,
 )
+from embodichain.lab.sim.sensors.attachment import resolve_parent_nodes
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     PhysicsBackendCfg,
@@ -961,7 +963,15 @@ class SimulationManager:
         """Start the configured live visualizer and publish the current scene."""
         if self.sim_config.visualization.backend == "none":
             return None
-        if getattr(self, "_spawn_scene", None) is not None:
+        visualizable_assets = (
+            getattr(self, "_rigid_objects", {}),
+            getattr(self, "_rigid_object_groups", {}),
+            getattr(self, "_deformable_objects", {}),
+            getattr(self, "_articulations", {}),
+            getattr(self, "_robots", {}),
+            getattr(self, "_sensors", {}),
+        )
+        if getattr(self, "_spawn_scene", None) is not None and any(visualizable_assets):
             self.prepare()
         if getattr(self, "is_window_opened", False):
             raise RuntimeError(
@@ -997,6 +1007,11 @@ class SimulationManager:
         )
         self._visualization_error_reported = False
         logger.log_info(f"Viser visualization ready at {runtime.endpoint}")
+        if (
+            getattr(self, "_spawn_scene", None) is not None
+            and self.spawn_result is not None
+        ):
+            self.sync_render_state()
         runtime.capture(
             sim_step=self._visualization_sim_step,
             sim_time=self._visualization_sim_time,
@@ -1043,6 +1058,7 @@ class SimulationManager:
             != self._visualization_topology_revision
         ):
             self.refresh_visualization()
+        self.sync_render_state()
         return runtime.capture(
             sim_step=self._visualization_sim_step,
             sim_time=self._visualization_sim_time,
@@ -1624,7 +1640,7 @@ class SimulationManager:
         self.prepare()
 
     def render_camera_group(self, group_ids: list[int]) -> None:
-        """Render all camera group in the simulation.
+        """Synchronize physics state and render camera groups.
 
         Args:
             group_ids (list[int]): The list of camera group ids to render.
@@ -1632,6 +1648,7 @@ class SimulationManager:
         Note: This interface is only valid when Ray Tracing rendering backend is enabled.
         """
 
+        self.sync_render_state()
         self._world.render_camera_group(group_ids)
         self._log_scene_summary()
 
@@ -3451,18 +3468,34 @@ class SimulationManager:
                     "Camera creation requires all Spawn Arenas to be "
                     f"prepared ({len(self._arenas)} of {self.num_envs} ready)."
                 )
+            parent_nodes = None
+            if (
+                sensor_cfg.extrinsics.parent is not None
+                and self._spawn_scene.builder.result is not None
+            ):
+                # Resolve before allocating native camera views so an invalid
+                # parent cannot leave partially constructed render resources.
+                parent_nodes = self._resolve_spawn_sensor_parent_nodes(
+                    sensor_cfg.extrinsics.parent
+                )
             sensor = sensor_factory(
                 sensor_cfg,
                 self.device,
                 owner=self,
             )
-            if sensor_cfg.extrinsics.parent is not None:
-                if self._spawn_scene.builder.result is not None:
-                    self._attach_camera_parent(sensor)
+            if parent_nodes is not None:
+                sensor.attach_to_parent_nodes(parent_nodes)
         elif isinstance(sensor_factory, type) and issubclass(
             sensor_factory, ContactSensor
         ):
             self.prepare()
+            # ``solver_type='auto'`` is resolved while preparing the Spawn
+            # scene, so the early capability check above is not sufficient.
+            if not self.physics.supports_contact_sensor:
+                raise NotImplementedError(
+                    f"ContactSensor is not supported by the {self.physics.name} "
+                    "physics backend with the resolved solver/device."
+                )
             sensor = sensor_factory(
                 sensor_cfg,
                 self.device,
@@ -3506,54 +3539,7 @@ class SimulationManager:
             **self._articulations,
             **self._robots,
         }
-        asset_uid: str | None = None
-        link_name = parent
-        if "/" in parent:
-            candidate_uid, candidate_link = parent.split("/", maxsplit=1)
-            if candidate_uid in assets:
-                asset_uid = candidate_uid
-                link_name = candidate_link
-
-        matches: list[tuple[str, list[object]]] = []
-        for uid, asset in assets.items():
-            if asset_uid is not None and uid != asset_uid:
-                continue
-            handles = list(getattr(asset, "_entities", ()))
-            if len(handles) != self.num_envs:
-                continue
-            if link_name not in handles[0].get_link_names():
-                continue
-
-            nodes: list[object] = []
-            for handle in handles:
-                if link_name not in handle.get_link_names():
-                    raise RuntimeError(
-                        f"Articulation {uid!r} has heterogeneous link topology; "
-                        f"link {link_name!r} is missing in one Arena."
-                    )
-                render_body = handle.get_render_body(link_name)
-                if render_body is None:
-                    raise RuntimeError(
-                        f"Articulation {uid!r} link {link_name!r} has no public "
-                        "render node for camera attachment."
-                    )
-                nodes.append(render_body.render_node())
-            matches.append((uid, nodes))
-
-        if len(matches) == 1:
-            return matches[0][1]
-        if len(matches) > 1:
-            owners = ", ".join(uid for uid, _ in matches)
-            raise ValueError(
-                f"Camera parent link {link_name!r} is ambiguous across assets "
-                f"[{owners}]; use '<asset_uid>/{link_name}'."
-            )
-        scope = f" on asset {asset_uid!r}" if asset_uid is not None else ""
-        raise ValueError(
-            f"Camera parent link {link_name!r} was not found{scope} in any "
-            "Spawn-bound Robot or Articulation. Attachment to arbitrary render "
-            "nodes is not yet supported by the Spawn-only bridge."
-        )
+        return resolve_parent_nodes(parent, assets, self.num_envs)
 
     def get_sensor(self, uid: str) -> BaseSensor | None:
         """Get a sensor by its UID.
@@ -4358,12 +4344,48 @@ class SimulationManager:
             excluded_uids (Sequence[str] | None): List of asset UIDs to exclude from resetting. If None, reset all assets.
         """
         excluded_uids = set(excluded_uids) if excluded_uids is not None else set()
+        articulation_uids = tuple(self._robots) + tuple(self._articulations)
+        reset_articulation_uids = tuple(
+            uid for uid in articulation_uids if uid not in excluded_uids
+        )
+        use_coordinated_newton_clear = bool(
+            self.physics.name == "newton" and reset_articulation_uids
+        )
+        excluded_articulation_uids = excluded_uids.intersection(articulation_uids)
+        solver_type = getattr(self.physics, "solver_type", None)
+        requires_complete_world_clear = solver_type in {
+            None,
+            "auto",
+            "mujoco_warp",
+        }
+        if (
+            use_coordinated_newton_clear
+            and requires_complete_world_clear
+            and excluded_articulation_uids
+        ):
+            raise NotImplementedError(
+                "Resetting selected worlds with excluded Newton articulations "
+                "is unsupported because solver state must be cleared for every "
+                "articulation in each selected world."
+            )
+        newton_articulation_batch = None
+        if use_coordinated_newton_clear:
+            newton_articulation_batch = self._newton_articulation_reset_batch(
+                reset_articulation_uids,
+                env_ids,
+            )
         for uid, robot in self._robots.items():
             if uid not in excluded_uids:
-                robot.reset(env_ids)
+                if use_coordinated_newton_clear:
+                    robot.reset(env_ids, clear_dynamics=False)
+                else:
+                    robot.reset(env_ids)
         for uid, articulation in self._articulations.items():
             if uid not in excluded_uids:
-                articulation.reset(env_ids)
+                if use_coordinated_newton_clear:
+                    articulation.reset(env_ids, clear_dynamics=False)
+                else:
+                    articulation.reset(env_ids)
         for uid, rigid_obj in self._rigid_objects.items():
             if uid not in excluded_uids:
                 rigid_obj.reset(env_ids)
@@ -4379,6 +4401,55 @@ class SimulationManager:
         for uid, sensor in self._sensors.items():
             if uid not in excluded_uids:
                 sensor.reset(env_ids)
+        if use_coordinated_newton_clear:
+            self._clear_newton_articulation_dynamics(newton_articulation_batch)
+
+    def _newton_articulation_reset_batch(
+        self,
+        articulation_uids: Sequence[str],
+        env_ids: Sequence[int] | None,
+    ) -> Any:
+        """Create the complete Newton articulation batch for selected worlds."""
+        result = self.spawn_result
+        if result is None:
+            raise RuntimeError(
+                "Newton articulation reset requires a prepared Spawn scene."
+            )
+        selected_env_ids = (
+            list(range(self.num_envs))
+            if env_ids is None
+            else torch.as_tensor(env_ids, dtype=torch.long).reshape(-1).tolist()
+        )
+        invalid_env_ids = [
+            env_id
+            for env_id in selected_env_ids
+            if env_id < 0 or env_id >= self.num_envs
+        ]
+        if invalid_env_ids:
+            raise IndexError(
+                f"Environment selection {invalid_env_ids} is outside "
+                f"[0, {self.num_envs})."
+            )
+        handles = []
+        for uid in articulation_uids:
+            uid_handles = self._spawn_scene.handles(uid)
+            if len(uid_handles) != self.num_envs:
+                raise RuntimeError(
+                    f"Articulation {uid!r} exposes {len(uid_handles)} Spawn "
+                    f"handles for {self.num_envs} environments."
+                )
+            handles.extend(uid_handles[env_id] for env_id in selected_env_ids)
+        return result.create_articulation_batch(handles)
+
+    @staticmethod
+    def _clear_newton_articulation_dynamics(batch: Any) -> None:
+        """Clear complete native articulation state for selected worlds."""
+        status = batch.clear_dynamics()
+        if isinstance(status, Integral) and status < 0:
+            raise RuntimeError(
+                "DexSim Scene articulation clear_dynamics failed with "
+                f"status {status}."
+            )
 
     def export_usd(self, fpath: str) -> bool:
         """Export the current simulation scene to a USD file.

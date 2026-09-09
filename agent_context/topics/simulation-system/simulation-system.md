@@ -87,6 +87,7 @@ EnvCfg.sim_cfg
        → update task state, observations, rewards, and termination
   → BaseEnv.reset()
        → SimulationManager.reset_objects_state(env_ids)
+           → Newton clears all articulations in each selected world through one native batch
        → task episode-initialization hook
   → BaseEnv.close()
        → profiler report
@@ -112,6 +113,13 @@ property writes do not change these snapshots. During reset, only the selected
 environment rows are restored before dynamics are cleared and the configured
 pose is reapplied; reset-mode event functors then run from this clean physical
 baseline in the episode-initialization hook.
+
+Newton articulation reset is coordinated at manager scope. All registered
+robots and articulations in each selected world are restored first, then one
+complete Scene articulation batch clears drive targets, velocities, forces,
+solver warm-start state, kinematics, and external wrenches. Excluding only some
+articulations from a selected MuJoCo-Warp world is rejected because that solver
+cannot clear the world's warm-start state safely from an incomplete selection.
 
 ## Quaternion and pose convention
 
@@ -180,7 +188,16 @@ live native articulation. Newton defers physical materialization until
 `prepare()`: EmbodiChain first reads exact URDF metadata through a disposable
 render-only skeleton, applies the source-name overlays, and then builds the
 immutable Newton model once. A Viser backend forces `headless=True`; Viser and
-the native DexSim window are mutually exclusive.
+the native DexSim window are mutually exclusive. Standalone-manager
+construction may start an empty Viser server before callers declare assets;
+that startup does not call `prepare()` or finalize Spawn. The first
+asset-bearing `prepare()` therefore remains the single initial Newton topology
+commit, and a subsequent visualization capture republishes the changed scene
+manifest.
+
+The former public `set_manual_update()` switch is removed. The manager owns
+manual mode internally, and `SimulationManager.update()` is the only supported
+physics-time advancement boundary.
 
 `SpawnScene` always requests DexSim replication with
 `collision_policy="isolated"`. Consequently, when `num_envs > 1`, all
@@ -210,6 +227,12 @@ simulation time. Facade binding, render publication, and sensor attachment
 remain retryable; already completed declarations are not reconfigured or
 rebound. `init_gpu_physics()` and `finalize_newton_physics()` remain
 compatibility aliases, but new code should call `prepare()`.
+
+`NewtonPhysicsCfg.sync_to_renderer` defaults to `None`, preserving DexSim's
+consumer-aware per-step policy instead of forcing scene-transform publication
+for state-only headless training. `SimulationManager.render_camera_group()` and
+the environment reset-observation path explicitly publish render state on
+demand, so camera correctness does not depend on enabling every-step sync.
 
 `CameraCfg.extrinsics.parent` accepts either an unambiguous articulation link
 name or `"<asset_uid>/<link_name>"`; the resolver returns the corresponding
@@ -778,17 +801,27 @@ Entity/IK gizmo configuration is owned by [native gizmos](../sim-visualization/n
   runtime properties, or `supports_*` capabilities. Use `physics.name` only for
   diagnostics, dispatch registries, and the public compatibility predicates.
 - Keep unsupported features explicit: Default owns native rigid constraints and
-  `ContactSensor`; Newton currently advertises neither. Both backends support
-  rigid-object groups, articulations, and robots.
+  Newton does not. Both backends support rigid-object groups, articulations,
+  robots, and `ContactSensor`, but Newton rechecks contact support after solver
+  resolution and rejects MuJoCo-Warp on CPU and DexUni.
 - Treat `add_*()` as declaration. Call `prepare()` before consuming native
   handles, link/joint metadata, batched state, or physics results.
 - Keep `prepare()` convergent and retryable: do not mark a declaration bound
   until its full facade construction succeeds.
 - Keep backend render-state publication free of physics steps. Newton's initial
   state sync must not advance its simulation step or time.
+- Do not let empty Viser startup finalize the Spawn scene before standalone
+  callers declare assets. Initial Newton materialization belongs to the first
+  asset-bearing `prepare()`.
+- Combine every render-body mesh segment when exporting Newton articulation
+  links, offsetting triangle indices for the concatenated vertex buffer; a
+  zero-mesh link exports empty arrays without querying mesh zero.
 - Treat resource UIDs as registry identities; retrieve and mutate resources
   through the manager instead of maintaining a parallel scene registry.
 - Keep batched object and sensor state aligned with the manager's arena count.
+- Keep articulation control selections on their tensor device. Partial joint
+  writes preserve untouched rows/DOFs through reusable full-batch tensors and
+  must not call DexSim's host-materialized selected-DOF path.
 - Create deformables only with the Newton backend on CUDA and a supported
   particle solver; Default-backend soft/cloth compatibility is intentionally
   absent.
@@ -844,6 +877,8 @@ Entity/IK gizmo configuration is owned by [native gizmos](../sim-visualization/n
 | Scene resource cannot be found or the wrong object is returned | UID mismatch or code bypassed the manager registry |
 | Link/joint metadata is empty or state access fails after `add_*()` | The declared facade has not crossed `SimulationManager.prepare()` yet |
 | CUDA/Newton physics data is stale after a topology or descriptor mutation | Call `prepare()` so the dirty Spawn result can rebuild and rebind runtime views |
+| Newton Viser shows only the grid and articulation link poses become non-finite | Viser finalized an empty Spawn scene before standalone asset declaration; keep empty visualization startup non-finalizing and let the first asset-bearing `prepare()` commit topology |
+| Newton articulation export warns that mesh 0 is out of range or omits visual parts | The link has zero or multiple render meshes; skip empty render bodies and concatenate every mesh with corrected triangle offsets |
 | Adding a soft or cloth object fails immediately on the Default backend | Deformables are Newton-only; select a supported Newton particle solver on CUDA |
 | A replicated file-backed soft body fails render upload because clone vertex counts differ | DexSim's cloned render mesh does not match the template embedding topology; use a compatible mesh/single environment while the DexSim 0.5 clone path is corrected |
 | Warp module compile/load lines appear during Newton initialization | `NewtonPhysicsCfg.suppress_warp_kernel_logs` was explicitly disabled, or compilation happened outside the managed preparation scope |

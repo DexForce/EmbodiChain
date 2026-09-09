@@ -109,8 +109,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
             raise RuntimeError(
                 "Newton backend is unavailable for render-state synchronization."
             )
-        backend.sync_to_dexsim(result.world)
-        backend.sync_particle_fluids(result.world)
+        backend.sync_to_renderer(result.world)
 
     def prepare_for_teardown(self) -> None:
         """Release Newton render views while Spawn still owns their parents."""
@@ -191,5 +190,20 @@ class NewtonPhysicsBackend(PhysicsBackend):
 
     @property
     def supports_contact_sensor(self) -> bool:
-        # ContactSensor consumes the backend-neutral Scene ContactQuery API.
-        return True
+        # ContactSensor consumes the backend-neutral Scene ContactQuery API,
+        # but not every Newton solver/device pair currently publishes that
+        # query. Keep this runtime-sensitive so ``solver_type='auto'`` can be
+        # rechecked after Spawn finalization resolves the concrete solver.
+        solver_type = self.solver_type
+        if solver_type is None:
+            return True
+        solver_type = solver_type.lower()
+        if solver_type.endswith("dexuni"):
+            return False
+        runtime_device = self._runtime_device
+        if runtime_device is None:
+            runtime_device = str(getattr(self._manager, "device", ""))
+        return not (
+            solver_type.endswith("mujoco_warp")
+            and runtime_device.lower().startswith("cpu")
+        )

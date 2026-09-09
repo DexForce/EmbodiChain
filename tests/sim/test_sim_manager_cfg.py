@@ -146,6 +146,18 @@ def test_newton_physics_cfg_forwards_cuda_default_to_dexsim() -> None:
 
 
 @pytest.mark.no_sim
+@pytest.mark.parametrize("sync_to_renderer", [None, False, True])
+def test_newton_physics_cfg_forwards_render_sync_policy(
+    sync_to_renderer: bool | None,
+) -> None:
+    cfg = NewtonPhysicsCfg(sync_to_renderer=sync_to_renderer)
+
+    dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
+
+    assert dexsim_cfg.sync_to_renderer is sync_to_renderer
+
+
+@pytest.mark.no_sim
 def test_newton_physics_cfg_requires_dexsim_auto_solver_api(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -248,9 +260,10 @@ def test_newton_warp_log_suppression_covers_world_update() -> None:
         _visualization_sim_step=0,
         _visualization_sim_time=0.0,
         _window_record_state=None,
+        _log_scene_summary=lambda: None,
     )
     try:
-        SimulationManager.update(manager, physics_dt=0.01)
+        SimulationManager.update(manager, physics_dt=0.01, step=1)
         assert observed_log_levels == [sim_manager.wp.LOG_WARNING]
         assert sim_manager.wp.config.log_level == previous_log_level
     finally:
@@ -358,14 +371,11 @@ def test_newton_teardown_skips_cpu_devices(
     render_sync.clear.assert_called_once_with()
 
 
-def test_newton_backend_syncs_render_state_without_physics_step(
+def test_newton_backend_uses_unified_render_sync_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     world = object()
-    native_backend = SimpleNamespace(
-        sync_to_dexsim=MagicMock(),
-        sync_particle_fluids=MagicMock(),
-    )
+    native_backend = SimpleNamespace(sync_to_renderer=MagicMock())
     monkeypatch.setattr(
         "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
         lambda candidate: native_backend if candidate is world else None,
@@ -374,8 +384,7 @@ def test_newton_backend_syncs_render_state_without_physics_step(
 
     backend.sync_render_state(SimpleNamespace(world=world))
 
-    native_backend.sync_to_dexsim.assert_called_once_with(world)
-    native_backend.sync_particle_fluids.assert_called_once_with(world)
+    native_backend.sync_to_renderer.assert_called_once_with(world)
 
 
 @pytest.mark.parametrize(

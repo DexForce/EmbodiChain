@@ -33,6 +33,19 @@ EmbodiChain does not fall back to a hard-coded concrete solver when that API is
 unavailable.
 :::
 
+This checkout declares `dexsim_engine==0.5.0`. The local qualification stack
+used for this guide was DexSim
+`0.5.0+0ca054dd21e30b49d0521bd1bcc558f7fc7d53db`, Newton `1.4.0`, and
+Warp `1.15.0`. Record the full local DexSim build identifier because patch
+builds can carry integration fixes beyond the base package version. After
+declaring the complete scene, inspect the resolved runtime contract directly:
+
+```python
+sim.prepare()
+print(sim.physics.solver_type)
+print(sim.physics.supports_contact_sensor)
+```
+
 ## Configuration reference
 
 Scene parameters belong to `NewtonPhysicsCfg`; per-object collision, material,
@@ -49,6 +62,7 @@ such as `gpu_memory`, `bounce_threshold`, and `enable_ccd` do not belong here.
 | `collision_cfg` | `NewtonCollisionPipelineCfg()` | External Newton collision pipeline; consumption depends on the selected solver. `None` disables this external pipeline. |
 | `requires_grad` | `False` | Differentiable model; requires explicit `semi_implicit` and disables CUDA Graph capture. |
 | `use_cuda_graph` | `True` | Request graph capture when supported; unavailable on CPU and disabled in gradient mode. |
+| `sync_to_renderer` | `None` | Per-step render sync policy: DexSim auto mode by default, always with `True`, never with `False`. Camera rendering still syncs on demand. |
 | `debug_mode` | `False` | Additional runtime diagnostics. |
 | `suppress_warp_kernel_logs` | `True` | Suppress Warp startup/kernel compilation messages; warnings and errors remain visible. |
 | `visualizer_enabled` | `False` | DexSim Newton diagnostic visualizer; separate from the ordinary camera renderer and Viser. |
@@ -73,6 +87,14 @@ and articulation links are classified separately.
 The current DexUni path does not generate rigid-rigid or rigid-ground contacts.
 MuJoCo Warp still advances rigid bodies and articulations, while Newton's soft
 contact kernels handle deformable particle-shape contacts.
+
+This changes task semantics, not just performance. For example, adding cloth
+to a robot manipulation scene can make AutoSolver switch from MuJoCo-Warp to
+DexUni; the cloth can interact through particle-shape contacts while an
+existing loose rigid object may stop colliding with the robot or ground. If the
+task requires those rigid contacts, do not qualify the DexUni result as an
+equivalent migration: choose a supported rigid-only solver/scene split or keep
+the task on a backend whose complete contact set is validated.
 
 ### Additional upstream resolver rules
 
@@ -195,12 +217,15 @@ physics_cfg = NewtonPhysicsCfg(
 )
 ```
 
-This enables differentiable model state; it does not turn an ordinary Gym
-rollout, arbitrary state mutation, or every asset into a differentiable
-computation. Use the learning integration described in
-{doc}`/overview/rl/algorithm`. AutoSolver and deformable state mutation are
-rejected in this mode. Upstream support for other differentiable solvers does
-not expand the current EmbodiChain contract.
+This enables the current differentiable **kinematics bridge**. It does not step
+the configured semi-implicit solver, run collision detection, or make an
+ordinary Gym rollout and arbitrary state mutation differentiable. The packaged
+Franka reach APG example differentiates task-defined FK, action, and reward
+kernels recorded on a Warp tape; it is not evidence of differentiable contact
+dynamics or a solver-backed training rollout. Use the learning integration
+described in {doc}`/overview/rl/algorithm`. AutoSolver and deformable state
+mutation are rejected in this mode. Upstream support for other differentiable
+solvers does not expand the current EmbodiChain contract.
 
 For ordinary CUDA simulation, `use_cuda_graph=True` is a request, not evidence
 that capture has completed. The startup summary distinguishes pending,

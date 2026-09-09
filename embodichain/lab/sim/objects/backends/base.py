@@ -362,8 +362,8 @@ class ArticulationViewBase(ABC):
     def apply_qpos(
         self,
         qpos: torch.Tensor,
-        env_ids: Sequence[int] | torch.Tensor,
-        joint_ids: Sequence[int] | torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor | None,
+        joint_ids: Sequence[int] | torch.Tensor | None,
         *,
         target: bool,
     ) -> None:
@@ -374,8 +374,8 @@ class ArticulationViewBase(ABC):
     def apply_qvel(
         self,
         qvel: torch.Tensor,
-        env_ids: Sequence[int] | torch.Tensor,
-        joint_ids: Sequence[int] | torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor | None,
+        joint_ids: Sequence[int] | torch.Tensor | None,
         *,
         target: bool,
     ) -> None:
@@ -386,15 +386,15 @@ class ArticulationViewBase(ABC):
     def apply_qf(
         self,
         qf: torch.Tensor,
-        env_ids: Sequence[int] | torch.Tensor,
-        joint_ids: Sequence[int] | torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor | None,
+        joint_ids: Sequence[int] | torch.Tensor | None,
     ) -> None:
         """Apply joint forces for selected envs and joints."""
         ...
 
     @abstractmethod
     def clear_dynamics(self, env_ids: Sequence[int] | torch.Tensor) -> None:
-        """Clear root/joint velocities, target velocities, and forces."""
+        """Clear backend-owned articulation dynamics for selected environments."""
         ...
 
     @abstractmethod

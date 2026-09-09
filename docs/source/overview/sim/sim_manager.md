@@ -83,6 +83,21 @@ experiments, or the supported differentiable path. For rigid robot tasks that
 can run on either backend, validate the target task with each configuration;
 shared APIs do not guarantee identical trajectories or contact responses.
 
+Newton runtime qualification is more specific than the backend name:
+
+| Solver/device path | Rigid/articulation stepping | Deformables | `ContactSensor` | Status boundary |
+| :--- | :--- | :--- | :--- | :--- |
+| MuJoCo-Warp, CUDA | Supported | No | Geometry + impulse | Primary articulated-rigid path. |
+| MuJoCo-Warp, CPU | Supported | No | Unsupported | CPU contact buffers are not exposed to the sensor. |
+| XPBD, CUDA | Supported | Scene-dependent | Geometry-only where available | Validate the exact task. |
+| VBD, CUDA | Limited by scene | Volume/surface | Geometry-only where available | Deformable-focused path. |
+| DexUni, CUDA | Coupled articulation/deformable stepping | Volume/surface | Unsupported | No rigid-rigid or rigid-ground contact publication/current solve path. |
+| Semi-implicit, CUDA, gradients | Not stepped by `DifferentiableEnv` | Unsupported | Unsupported | Kinematics bridge only. |
+
+AutoSolver chooses from finalized scene contents, so query
+`sim.physics.solver_type` and runtime capabilities after `prepare()` rather
+than treating `physics: newton` as a complete support claim.
+
 ### Common configuration and devices
 
 All backends inherit these parameters from {class}`~cfg.PhysicsBackendCfg`:

@@ -517,6 +517,14 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     This is ignored for gradient mode and is unavailable on a CPU device.
     """
 
+    sync_to_renderer: bool | None = None
+    """Automatic Newton-to-render sync policy for each physics update.
+
+    ``None`` preserves DexSim's consumer-aware default, ``True`` always syncs,
+    and ``False`` disables per-step sync. Camera rendering still performs an
+    explicit on-demand sync through :class:`SimulationManager`.
+    """
+
     debug_mode: bool = False
     """Whether to enable additional Newton runtime diagnostics."""
 
@@ -642,7 +650,7 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             "requires_grad": self.requires_grad,
             "suppress_warp_kernel_logs": self.suppress_warp_kernel_logs,
             "collision_pipeline_cfg": collision_pipeline_cfg,
-            "sync_to_dexsim": True,
+            "sync_to_renderer": self.sync_to_renderer,
         }
         if solver_cfg is not None:
             newton_cfg_args["solver_cfg"] = solver_cfg
