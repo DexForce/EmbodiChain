@@ -256,7 +256,7 @@ class NeuralIKSolver(BaseSolver):
         target_quat = convert_quat(quat_from_matrix(target_xpos[:, :3, :3]), to="xyzw")
 
         if qpos_seed is None:
-            qpos_seed = torch.zeros(B, self.dof, device=self.device)
+            qpos_seed = self.get_default_qpos_seed().unsqueeze(0).repeat(B, 1)
         else:
             qpos_seed = torch.as_tensor(
                 qpos_seed, device=self.device, dtype=torch.float32
