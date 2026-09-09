@@ -289,7 +289,7 @@ def _usage_lines(resources: dict) -> list[str]:
     total = count("total_tokens")
     if tokens["status"] == "partial" and tokens["total_tokens"] is not None:
         total = "至少 " + total
-    return [
+    lines = [
         "## 累计耗时与用量",
         f"- **累计全程耗时：{'至少 ' if timing['status'] == 'partial' and timing['total_wall_seconds'] is not None else ''}{duration(timing['total_wall_seconds'])}**；{labels[timing['status']]}。",
         f"- Codex 会话累计：{duration(timing['codex_wall_seconds'])}，包含工具和仿真等待，不是纯思考时间。",
@@ -303,6 +303,27 @@ def _usage_lines(resources: dict) -> list[str]:
         "- 历史记录重建可能遗漏未记录的宿主初始化/整理开销；完整来源与统计边界见 result.json.resources。",
         "",
     ]
+    configurations = resources.get("configurations", [])
+    if configurations:
+        lines += [
+            "### 启动配置分段",
+            "以下耗时和 token 按启动记录；请求配置不等于已确认的实际配置。",
+            "| 启动 | 请求模型 / 强度 | 会话记录中的模型 / 强度 | 耗时（秒） | Token / 完整性 |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for item in configurations:
+            observed = (
+                "; ".join(
+                    f"{s['model']} / {s['reasoning_effort']}"
+                    for s in item["observed_settings"]
+                )
+                or "未取得"
+            )
+            lines.append(
+                f"| {item['invocation']} | {item['requested_model']} / {item['requested_reasoning_effort']} | {observed} | {item['wall_seconds']} | {item['total_tokens']} / {item['token_status']} |"
+            )
+        lines += ["", "中途换模型或强度时，全程用量不能全部归到最后一次配置。", ""]
+    return lines
 
 
 def _report(result: dict) -> str:
@@ -317,7 +338,7 @@ def _report(result: dict) -> str:
         f"- 验证范围：`{result['assessment']['scope']}`",
         "- 任务结论：尚未独立验收。退出码、可播放录像及 Codex 声明均不自动证明任务成功。",
         f"- Codex 声明状态：`{result['assessment']['agent_claim'].get('status', '未提交状态')}`；声明完整任务完成：`{result['assessment']['agent_claim'].get('task_completed', '未声明')}`",
-        f"- 本轮声明模式：`{run.get('mode')}`；模型：`{result['execution'].get('model')}`；思考强度：`{result['execution'].get('reasoning_effort')}`",
+        f"- 本轮声明模式：`{run.get('mode')}`；最近启动请求的模型：`{result['execution'].get('model')}`；思考强度：`{result['execution'].get('reasoning_effort')}`。各次启动见分段记录。",
         "",
         "## 任务",
         str(run.get("instruction") or "未记录任务描述"),

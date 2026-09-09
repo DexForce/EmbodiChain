@@ -24,6 +24,28 @@ python -B -m embodichain.gen_sim.agent_lab pipeline --task task1187 --minutes 45
 还支持 `--task-file`、`--assets`、`--output-root`、`--robot-component`、`--model` 和
 `--reasoning-effort`。它复用新 `launch` 流程，不调用旧的 `solve/resume` 搜索循环。
 
+### 模型与思考强度
+
+```bash
+python -B -m embodichain.gen_sim.agent_lab pipeline \
+  --task task1187 --minutes 45 --model gpt-6-astra --reasoning-effort xhigh
+```
+
+模型 ID 与思考强度作为 CLI 配置传入，不由任务提示词选择。`pipeline`、`launch` 和新建
+`solve` 未指定时使用 `gpt-6-astra / xhigh`，不会修改个人全局配置。
+旧入口 `resume` 未指定的项分别继承最近一次启动记录；只传 `--model` 会保留原思考强度，
+只传 `--reasoning-effort` 会保留原模型。没有历史配置时才使用项目默认值。
+配置继承不改变会话语义：`resume` 仍是旧 solve 的续跑入口，不是 pipeline/launch 的会话恢复接口。
+
+框架拒绝空参数，但不硬编码所有可用模型及模型/强度组合。不支持的配置由 Codex 后端报错，
+错误退出保留日志并返回非零 CLI 状态，不静默换模型或降低强度。
+做模型对比应为每组配置创建独立 run，固定任务、资产、种子和预算。
+
+`usage.json.configurations` 和最终报告按每次启动列出请求配置、Codex 会话元数据中
+观察到的配置、会话耗时、token 与完整性。观察记录缺失时显示未取得，不用请求值冒充。
+同一启动中观察到多种配置时保留配置集合，不推算每个模型的花费；会话元数据也不证明
+服务端内部实际路由。中途换配置的全程用量不能统一归到最后一个模型。
+
 需要分步准备或检查工作区时，仍可使用 `prepare` 后接 `launch --run-dir`。
 `launch` 默认是交互式 Codex；`--window` 在 Linux GNOME Terminal 中打开新窗口，
 省略则使用当前终端。首次目录信任由用户在 Codex 窗口确认，不修改全局信任设置。
@@ -78,8 +100,9 @@ python3 lab.py stop
 
 `solve`、`resume` 保留供旧实验重跑，它们带自动续轮与候选重跑，**不是冷启动验证入口**。
 使用已经登录的本地 Codex CLI，不复制认证文件、不切换模型供应商。启动和续跑都显式
-使用 `gpt-6-astra` 与 `xhigh`，不依赖个人默认配置。只有显式传入 `--model` 或
-`--reasoning-effort` 才覆盖，并在每个 `codex/turn_*/agent_settings.json` 中记录。
+使用解析后的模型与强度，不依赖个人默认配置；新实验默认 `gpt-6-astra / xhigh`。
+`resume` 继承上次配置，显式传入 `--model` 或 `--reasoning-effort` 则单项覆盖，
+并在每个 `codex/turn_*/agent_settings.json` 中记录。
 每个任务创建独立 Git 工作目录供 Codex 写代码，默认
 `workspace-write` 沙箱；GPU 仿真请求由沙箱外的宿主监督器执行，并通过文件队列回传。
 原仓库供检索与导入，不应直接修改。候选是受信任的任意 Python，宿主执行器不是恶意代码沙箱。

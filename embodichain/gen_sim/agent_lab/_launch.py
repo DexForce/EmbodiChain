@@ -35,6 +35,7 @@ from .session import (
     _environment,
     _process,
     _run_id,
+    _resolve_agent_settings,
     _serve_requests,
     execute_script,
 )
@@ -71,7 +72,7 @@ def _codex_command(
         "--model",
         model,
         "-c",
-        f'model_reasoning_effort="{effort}"',
+        f"model_reasoning_effort={json.dumps(effort)}",
         "-c",
         "memories.use_memories=false",
         "-c",
@@ -85,6 +86,7 @@ def _codex_command(
 def _launch(
     root: Path, *, minutes: float, batch: bool, model: str, effort: str
 ) -> dict:
+    model, effort = _resolve_agent_settings(root, model, effort)
     manifest = json.loads((root / "run.json").read_text())
     if (root / "launch.json").exists():
         _check_host(root, required=False)

@@ -126,8 +126,13 @@ def main() -> None:
     resume = commands.add_parser("resume")
     resume.add_argument("--run-dir", type=Path, required=True)
     resume.add_argument("--minutes", type=float, default=45)
-    resume.add_argument("--model", default=_DEFAULT_MODEL)
-    resume.add_argument("--reasoning-effort", default=_DEFAULT_REASONING_EFFORT)
+    resume.add_argument(
+        "--model", help="Override the previous model; omitted values are inherited"
+    )
+    resume.add_argument(
+        "--reasoning-effort",
+        help="Override the previous effort; omitted values are inherited",
+    )
     resume.add_argument("--sandbox", default="workspace-write")
     launch = commands.add_parser(
         "launch", help="Start a new Codex from the self-contained workspace"
@@ -193,19 +198,16 @@ def main() -> None:
             )
         )
     elif args.command == "resume":
-        print(
-            json.dumps(
-                solve(
-                    args.run_dir.resolve(),
-                    minutes=args.minutes,
-                    model=args.model,
-                    reasoning_effort=args.reasoning_effort,
-                    sandbox=args.sandbox,
-                ),
-                ensure_ascii=False,
-                indent=2,
-            )
+        result = solve(
+            args.run_dir.resolve(),
+            minutes=args.minutes,
+            model=args.model,
+            reasoning_effort=args.reasoning_effort,
+            sandbox=args.sandbox,
         )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if result.get("agent_error"):
+            sys.exit(1)
     elif args.command == "inspect":
         from .report import inspect_attempt
 
@@ -267,19 +269,16 @@ def main() -> None:
     else:
         root = _prepare_run(args, repo)
         if args.command == "solve":
-            print(
-                json.dumps(
-                    solve(
-                        root,
-                        minutes=args.minutes,
-                        model=args.model,
-                        reasoning_effort=args.reasoning_effort,
-                        sandbox=args.sandbox,
-                    ),
-                    ensure_ascii=False,
-                    indent=2,
-                )
+            result = solve(
+                root,
+                minutes=args.minutes,
+                model=args.model,
+                reasoning_effort=args.reasoning_effort,
+                sandbox=args.sandbox,
             )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            if result.get("agent_error"):
+                sys.exit(1)
 
 
 if __name__ == "__main__":

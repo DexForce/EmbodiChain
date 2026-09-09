@@ -28,6 +28,107 @@ from embodichain.gen_sim.agent_lab import session
 from embodichain.gen_sim.agent_lab.session import _process, _prompt
 
 
+@pytest.mark.parametrize(
+    "model,effort,expected",
+    [
+        (None, None, ("custom-model", "medium")),
+        ("another-model", None, ("another-model", "medium")),
+        (None, "high", ("custom-model", "high")),
+        ("another-model", "low", ("another-model", "low")),
+    ],
+)
+def test_settings_inherit_independently(
+    tmp_path: Path, model, effort, expected
+) -> None:
+    previous = tmp_path / "codex/turn_003"
+    previous.mkdir(parents=True)
+    (previous / "agent_settings.json").write_text(
+        json.dumps({"model": "custom-model", "reasoning_effort": "medium"})
+    )
+    assert session._resolve_agent_settings(tmp_path, model, effort) == expected
+
+
+def test_settings_default_only_when_no_previous_configuration(tmp_path: Path) -> None:
+    assert session._resolve_agent_settings(tmp_path, None, None) == (
+        "gpt-6-astra",
+        "xhigh",
+    )
+    with pytest.raises(ValueError, match="non-empty"):
+        session._resolve_agent_settings(tmp_path, "", "high")
+
+
+def test_resume_passes_inherited_settings_and_does_not_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "workspace/candidate.json").write_text(
+        json.dumps({"script": "old.py", "config": "old.json"})
+    )
+    previous = tmp_path / "codex/turn_001"
+    previous.mkdir(parents=True)
+    (previous / "agent_settings.json").write_text(
+        json.dumps({"model": "custom-model", "reasoning_effort": "medium"})
+    )
+    (tmp_path / "session.json").write_text(
+        json.dumps({"thread_id": "thread", "turns": 1})
+    )
+    (tmp_path / "run.json").write_text(
+        json.dumps(
+            {
+                "task": {
+                    "instruction": "move",
+                    "acceptance": "stable",
+                    "source_dir": "/assets",
+                    "image": "",
+                    "asset_status": "exported",
+                },
+                "repo": str(tmp_path),
+                "python": sys.executable,
+            }
+        )
+    )
+    commands = []
+
+    def fake_process(command, *, output, **kwargs):
+        commands.append(command)
+        (output / "stdout.log").write_text("")
+        return {"returncode": 1, "timed_out": False}
+
+    monkeypatch.setattr(session, "_process", fake_process)
+
+    def unexpected_replay(*args, **kwargs):
+        raise AssertionError("A backend failure must not replay a stale candidate")
+
+    monkeypatch.setattr(session, "execute_script", unexpected_replay)
+    result = session.solve(tmp_path, minutes=1)
+    assert len(commands) == 1
+    assert commands[0][commands[0].index("--model") + 1] == "custom-model"
+    assert 'model_reasoning_effort="medium"' in commands[0]
+    assert result["agent_error"]["returncode"] == 1
+
+
+def test_resume_cli_leaves_omitted_settings_unset_and_propagates_backend_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from embodichain.gen_sim.agent_lab import __main__ as cli
+
+    captured = {}
+
+    def fake_solve(root, **kwargs):
+        captured.update(kwargs)
+        return {"status": "no_candidate", "agent_error": {"returncode": 1}}
+
+    monkeypatch.setattr(cli, "solve", fake_solve)
+    monkeypatch.setattr(
+        sys, "argv", ["agent-lab", "resume", "--run-dir", str(tmp_path)]
+    )
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+    assert error.value.code == 1
+    assert captured["model"] is None
+    assert captured["reasoning_effort"] is None
+
+
 def test_process_preserves_nonzero_exit_and_both_streams(tmp_path: Path) -> None:
     result = _process(
         [

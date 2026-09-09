@@ -489,18 +489,65 @@ Write brief experiment notes to notes.md so subsequent turns can resume.
 """
 
 
+def _resolve_agent_settings(
+    root: Path, model: str | None, effort: str | None
+) -> tuple[str, str]:
+    """Resolve each omitted value independently, without changing global config."""
+    saved = {}
+    if model is None or effort is None:
+        paths = list((root / "codex").glob("*/agent_settings.json")) + list(
+            (root / "codex").glob("*/launch.json")
+        )
+
+        def started(path: Path) -> float:
+            process = path.parent / "process.json"
+            record = json.loads(process.read_text()) if process.is_file() else {}
+            return record.get(
+                "started_at", record.get("created_at", path.stat().st_mtime)
+            )
+
+        if paths:
+            saved = json.loads(max(paths, key=started).read_text())
+        else:
+            records = [
+                p for p in (root / "search.json", root / "launch.json") if p.is_file()
+            ]
+            if records:
+                saved = json.loads(
+                    max(records, key=lambda p: p.stat().st_mtime).read_text()
+                )
+    model = model if model is not None else saved.get("model") or _DEFAULT_MODEL
+    effort = (
+        effort
+        if effort is not None
+        else saved.get("reasoning_effort") or _DEFAULT_REASONING_EFFORT
+    )
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("model must be a non-empty model identifier")
+    if not isinstance(effort, str) or not effort.strip():
+        raise ValueError(
+            "reasoning-effort must be a non-empty value supported by the Codex backend"
+        )
+    return model, effort
+
+
 def solve(
     root: Path,
     *,
     minutes: float,
     model: str | None = None,
-    reasoning_effort: str = _DEFAULT_REASONING_EFFORT,
+    reasoning_effort: str | None = None,
     sandbox: str = "workspace-write",
 ) -> dict:
-    """Let Codex iterate freely, then replay its candidate outside the agent."""
+    """Let Codex iterate freely, then replay its candidate outside the agent.
+
+    Omitted model/effort values inherit the most recent recorded invocation
+    independently; runs without prior settings use the project defaults.
+    """
     from .delivery import finalize_run
     from .usage import UsageMeter
 
+    model, reasoning_effort = _resolve_agent_settings(root, model, reasoning_effort)
     execution = {
         "entrypoint": "solve",
         "status": "running",
@@ -599,7 +646,7 @@ def _solve(
             "--model",
             model,
             "-c",
-            f'model_reasoning_effort="{reasoning_effort}"',
+            f"model_reasoning_effort={json.dumps(reasoning_effort)}",
         ]
         command += ["-"]
         print(f"[Agent Lab] Codex turn {turn}: {output}", flush=True)
@@ -623,6 +670,12 @@ def _solve(
             ),
             process=process,
         )
+        if process["returncode"] != 0 and not process["timed_out"]:
+            execution["agent_error"] = {
+                "returncode": process["returncode"],
+                "stderr": str(output / "stderr.log"),
+                "message": "Codex failed; no model or effort fallback was applied.",
+            }
         for line in (output / "stdout.log").read_text().splitlines():
             if line.startswith("{"):
                 try:
@@ -633,6 +686,8 @@ def _solve(
                 if event.get("type") == "thread.started":
                     thread_id = event["thread_id"]
         write_json(root / "session.json", {"thread_id": thread_id, "turns": turn})
+        if execution.get("agent_error"):
+            break
         candidate = root / "workspace" / "candidate.json"
         if candidate.exists():
             value = json.loads(candidate.read_text())
@@ -665,6 +720,7 @@ def _solve(
         "task_success": None,
         "thread_id": thread_id,
         "turns": turn,
+        "agent_error": execution.get("agent_error"),
     }
     write_json(root / "summary.json", result)
     return result

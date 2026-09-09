@@ -162,6 +162,13 @@ def _rollout_turns(path: Path, until: float) -> list[dict]:
                 "turn_id": identity,
                 "started_at": _stamp(event.get("timestamp")),
                 "cwd": payload.get("cwd"),
+                "observed_model": payload.get("model"),
+                "observed_reasoning_effort": payload.get(
+                    "effort",
+                    (payload.get("collaboration_mode") or {})
+                    .get("settings", {})
+                    .get("reasoning_effort"),
+                ),
                 "first": None,
                 "last": None,
                 "values": None,
@@ -287,6 +294,7 @@ def _invocation_usage(
             and window[0] <= turn["started_at"] <= window[1]
         ]
     result = []
+    settings = _json(output / "agent_settings.json") or _json(output / "launch.json")
     for index in range(max(current + 1, len(completed), len(turns), 1)):
         turn = turns[index] if index < len(turns) else {}
         values = completed.get(index, turn.get("values"))
@@ -308,6 +316,10 @@ def _invocation_usage(
                 "invocation": output.name,
                 "thread_id": thread,
                 "turn_id": turn.get("turn_id"),
+                "requested_model": settings.get("model"),
+                "requested_reasoning_effort": settings.get("reasoning_effort"),
+                "observed_model": turn.get("observed_model"),
+                "observed_reasoning_effort": turn.get("observed_reasoning_effort"),
                 "tokens": values,
                 "status": (
                     "reported"
@@ -348,6 +360,7 @@ def collect_usage(
     sources = []
     missing_timing = False
     invocations = 0
+    configurations = []
     for kind, pattern in (
         ("codex", "codex/*/process.json"),
         ("simulation", "attempts/*/process.json"),
@@ -383,6 +396,19 @@ def collect_usage(
             if kind == "codex":
                 invocations += 1
                 rows = _invocation_usage(root, path.parent, window or (0, 0), home)
+                settings = _json(path.parent / "agent_settings.json") or _json(
+                    path.parent / "launch.json"
+                )
+                configurations.append(
+                    {
+                        "invocation": path.parent.name,
+                        "requested_model": settings.get("model"),
+                        "requested_reasoning_effort": settings.get("reasoning_effort"),
+                        "wall_seconds": (
+                            round(window[1] - window[0], 6) if window else None
+                        ),
+                    }
+                )
                 for row in rows:
                     old = observations.get(row["key"])
                     if old is None or (
@@ -396,6 +422,35 @@ def collect_usage(
                     ):
                         observations[row["key"]] = row
     rows = list(observations.values())
+    for configuration in configurations:
+        selected = [
+            row for row in rows if row["invocation"] == configuration["invocation"]
+        ]
+        known_values = [
+            row["tokens"]["total_tokens"]
+            for row in selected
+            if row["tokens"] is not None
+        ]
+        configuration.update(
+            total_tokens=sum(known_values) if known_values else None,
+            token_status=(
+                "reported"
+                if selected and all(row["status"] == "reported" for row in selected)
+                else "partial" if known_values else "unavailable"
+            ),
+            observed_settings=[
+                {"model": model, "reasoning_effort": effort}
+                for model, effort in sorted(
+                    {
+                        (row["observed_model"], row["observed_reasoning_effort"])
+                        for row in selected
+                        if row["observed_model"] is not None
+                        or row["observed_reasoning_effort"] is not None
+                    },
+                    key=str,
+                )
+            ],
+        )
     known = [row for row in rows if row["tokens"] is not None]
     token_status = (
         "unavailable"
@@ -429,6 +484,7 @@ def collect_usage(
     return {
         "schema_version": "agent-lab-usage/v1",
         "scope": "current_run_only",
+        "configurations": configurations,
         "as_of": max(
             [window[1] for window in all_intervals]
             + [row["sampled_at"] for row in rows if row.get("sampled_at") is not None],

@@ -62,6 +62,11 @@ Agent Lab is an opt-in coding experiment host, not a Task Program interpreter.
 `pipeline` combines preparation and the new launch path in one command, defaulting
 to a full-task objective and unattended execution; `--window` selects interactive
 launch. It does not route through the legacy solve/resume loop.
+Model and effort are explicit CLI options. New launches use project defaults;
+legacy resume inherits each omitted value from the latest invocation record.
+Backend configuration failures do not trigger model/effort fallback. Usage and
+reports retain per-invocation requested and session-observed settings separately;
+missing observations remain unknown rather than copied from requested settings.
 `delivery.py:finalize_run()` owns the versioned `final/result.json`, derived Markdown
 report and optional validated MP4. Launch/search/standalone-run lifecycle owners
 finalize after cleanup; `finalize` also recovers existing artifacts without simulation.

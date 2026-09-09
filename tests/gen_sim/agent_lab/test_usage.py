@@ -353,3 +353,44 @@ def test_duplicate_process_record_is_counted_once(tmp_path: Path) -> None:
     assert result["tokens"]["total_tokens"] == 110
     assert result["tokens"]["invocations"] == 1
     assert result["timing"]["codex_wall_seconds"] == 20
+
+
+def test_usage_separates_requested_configurations_and_observed_metadata(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    for name, start, model, effort, value in [
+        ("one", 100, "model-a", "medium", 100),
+        ("two", 200, "model-b", "high", 200),
+    ]:
+        output = process(
+            tmp_path,
+            "codex/" + name,
+            start,
+            20,
+            [
+                {"type": "thread.started", "thread_id": name},
+                {"type": "turn.completed", "usage": counts(value)},
+            ],
+        )
+        write_json(
+            output / "agent_settings.json", {"model": model, "reasoning_effort": effort}
+        )
+    rollout(home, "two", tmp_path / "workspace", [("turn", 201, [200], True)])
+    path = home / "sessions/1970/01/01/rollout-two.jsonl"
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    for event in events:
+        if event.get("type") == "turn_context":
+            event["payload"].update(model="observed-model-b", effort="high")
+    path.write_text("".join(json.dumps(event) + "\n" for event in events))
+    result = collect_usage(tmp_path, codex_home=home)
+    assert result["tokens"]["total_tokens"] == 330
+    first, second = result["configurations"]
+    assert first["requested_model"] == "model-a"
+    assert first["total_tokens"] == 110
+    assert first["observed_settings"] == []
+    assert second["requested_model"] == "model-b"
+    assert second["total_tokens"] == 220
+    assert second["observed_settings"] == [
+        {"model": "observed-model-b", "reasoning_effort": "high"}
+    ]
