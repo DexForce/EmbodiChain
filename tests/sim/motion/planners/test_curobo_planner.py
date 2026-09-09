@@ -1025,7 +1025,8 @@ def test_curobo_reuses_non_graph_backend():
                     binding,
                     MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
-            )
+            ),
+            context=engine.initial_context(control_dt=0.1),
         )
         success = result.plan_success
         trajectory = result.trajectory.positions
@@ -1044,7 +1045,8 @@ def test_curobo_reuses_non_graph_backend():
                     binding,
                     MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
-            )
+            ),
+            context=engine.initial_context(control_dt=0.1),
         )
         success = result.plan_success
         assert bool(success.item()), "second plan failed"
@@ -1082,7 +1084,8 @@ def test_curobo_uses_accelerator_with_cpu_physics():
                     binding,
                     MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
-            )
+            ),
+            context=engine.initial_context(control_dt=0.1),
         )
         success = result.plan_success
         trajectory = result.trajectory.positions
