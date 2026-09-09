@@ -24,7 +24,6 @@ from tensordict import TensorDict
 
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnvCfg
 from embodichain.lab.gym.envs.expert_trajectory import (
-    ExpertJointTrajectory,
     ExpertTrajectoryCfg,
     build_expert_action_spec,
     encode_expert_action,
@@ -52,7 +51,8 @@ def test_embodied_environment_owns_expert_trajectory_configuration() -> None:
 
 
 def test_timed_expert_trajectory_is_retimed_and_velocity_is_derived() -> None:
-    source = ExpertJointTrajectory(
+    source = PlanResult(
+        success=torch.ones(1, dtype=torch.bool),
         positions=torch.tensor([[[0.0], [1.0]]]),
         velocities=torch.full((1, 2, 1), 99.0),
         dt=torch.tensor([[0.0, 0.75]]),
@@ -96,7 +96,8 @@ def test_plan_result_is_the_canonical_expert_trajectory_input() -> None:
 
 
 def test_untimed_position_velocity_trajectory_requires_velocity() -> None:
-    source = ExpertJointTrajectory(positions=torch.zeros(1, 2, 1))
+    source = PlanResult(
+        success=torch.ones(1, dtype=torch.bool),positions=torch.zeros(1, 2, 1))
 
     with pytest.raises(ValueError, match="velocities"):
         prepare_expert_joint_trajectory(
@@ -110,7 +111,8 @@ def test_position_mode_preserves_untimed_positions_without_velocity() -> None:
     positions = torch.tensor([[[0.0], [1.0]]])
 
     prepared = prepare_expert_joint_trajectory(
-        ExpertJointTrajectory(positions=positions),
+        PlanResult(
+        success=torch.ones(1, dtype=torch.bool),positions=positions),
         control_dt=0.1,
         joint_command_mode="position",
     )

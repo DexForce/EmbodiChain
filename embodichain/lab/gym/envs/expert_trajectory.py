@@ -40,7 +40,6 @@ EXPERT_TRAJECTORY_SCHEMA_VERSION = 1
 __all__ = [
     "EXPERT_TRAJECTORY_SCHEMA_VERSION",
     "ExpertActionSpec",
-    "ExpertJointTrajectory",
     "ExpertTrajectoryCfg",
     "JointCommandMode",
     "build_expert_action_spec",
@@ -70,71 +69,6 @@ class ExpertTrajectoryCfg:
 
     def __post_init__(self) -> None:
         self.joint_command_mode = _validate_joint_command_mode(self.joint_command_mode)
-
-
-@dataclass(frozen=True, slots=True)
-class ExpertJointTrajectory:
-    """Environment-batched expert joint samples with optional source timing.
-
-    Args:
-        positions: Floating joint positions with shape ``(B, N, D)``.
-        velocities: Optional matching source velocity samples.
-        dt: Optional non-negative arrival intervals with shape ``(B, N)``.
-    """
-
-    positions: torch.Tensor
-    velocities: torch.Tensor | None = None
-    dt: torch.Tensor | None = None
-
-    def __post_init__(self) -> None:
-        positions = self.positions
-        if not isinstance(positions, torch.Tensor):
-            raise TypeError("positions must be a torch.Tensor.")
-        if positions.dim() != 3 or not positions.is_floating_point():
-            raise ValueError("positions must be floating point with shape (B, N, D).")
-        if 0 in positions.shape:
-            raise ValueError("positions dimensions must all be non-zero.")
-        if not torch.isfinite(positions).all():
-            raise ValueError("positions must contain only finite values.")
-
-        velocities = self.velocities
-        if velocities is not None:
-            if not isinstance(velocities, torch.Tensor):
-                raise TypeError("velocities must be a torch.Tensor or None.")
-            if velocities.shape != positions.shape:
-                raise ValueError("velocities must match positions shape.")
-            if velocities.device != positions.device:
-                raise ValueError("velocities and positions must share a device.")
-            if (
-                not velocities.is_floating_point()
-                or not torch.isfinite(velocities).all()
-            ):
-                raise ValueError("velocities must contain only finite floating values.")
-
-        dt = self.dt
-        if dt is not None:
-            if not isinstance(dt, torch.Tensor):
-                raise TypeError("dt must be a torch.Tensor or None.")
-            if dt.shape != positions.shape[:2] or dt.device != positions.device:
-                raise ValueError("dt must match positions batch, samples, and device.")
-            if (
-                not dt.is_floating_point()
-                or not torch.isfinite(dt).all()
-                or (dt < 0).any()
-            ):
-                raise ValueError("dt must contain finite non-negative intervals.")
-            if (dt[:, 0] != 0).any():
-                raise ValueError("The first arrival interval must be zero.")
-            if ((dt[:, 1:] == 0) & (positions.diff(dim=1) != 0).any(dim=-1)).any():
-                raise ValueError("A zero time interval cannot change position.")
-
-        object.__setattr__(self, "positions", positions.detach().clone())
-        object.__setattr__(
-            self,
-            "velocities",
-            None if velocities is None else velocities.detach().clone(),
-        )
-        object.__setattr__(self, "dt", None if dt is None else dt.detach().clone())
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,10 +161,6 @@ def prepare_expert_joint_trajectory(
 ) -> PlanResult:
     """Prepare a planner result for a destination's fixed command clock.
 
-    ``PlanResult`` is the canonical trajectory type.  The older
-    ``ExpertJointTrajectory`` input remains a compatibility shim and is
-    converted immediately; it is not used by the environment execution path.
-
     Timed trajectories are retimed to ``control_dt`` and their velocities are
     recomputed. Untimed position-velocity trajectories must provide velocity
     samples explicitly.
@@ -247,32 +177,7 @@ def prepare_expert_joint_trajectory(
         TypeError: If ``trajectory`` has the wrong type.
         ValueError: If timing, mode, or required velocity data is invalid.
     """
-    if isinstance(trajectory, ExpertJointTrajectory):
-        if joint_command_mode == "position_velocity" and trajectory.velocities is None:
-            raise ValueError(
-                "An untimed position_velocity trajectory requires explicit velocities."
-            )
-        source_dt = trajectory.dt
-        if source_dt is None:
-            source_dt = torch.zeros(
-                trajectory.positions.shape[:2],
-                dtype=trajectory.positions.dtype,
-                device=trajectory.positions.device,
-            )
-            if trajectory.positions.shape[1] > 1:
-                source_dt[:, 1:] = float(control_dt)
-        trajectory = PlanResult(
-            success=torch.ones(
-                trajectory.positions.shape[0],
-                dtype=torch.bool,
-                device=trajectory.positions.device,
-            ),
-            positions=trajectory.positions,
-            velocities=trajectory.velocities,
-            accelerations=None,
-            dt=source_dt,
-        )
-    elif not isinstance(trajectory, PlanResult):
+    if not isinstance(trajectory, PlanResult):
         raise TypeError("trajectory must be a PlanResult.")
     mode = _validate_joint_command_mode(joint_command_mode)
     if (
