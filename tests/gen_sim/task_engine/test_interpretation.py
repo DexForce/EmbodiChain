@@ -24,6 +24,21 @@ import pytest
 from embodichain.gen_sim.task_engine import interpretation as interpretation_module
 
 
+def test_prompt_and_repair_guidance_use_mechanism_semantics() -> None:
+    prompt = interpretation_module._instruction_prompt("Open and close the drawer.")
+    assert "also E6 with target_state=closed" in prompt
+    assert "revolute door is E7" in prompt
+    assert "Closing or pushing in a drawer is E7" not in prompt
+    catalog = interpretation_module._intent_capability_catalog()
+    assert "prismatic" in catalog["E6"]["semantics"]
+    assert "revolute" in catalog["E7"]["semantics"]
+    guidance = interpretation_module._instruction_repair_guidance(
+        interpretation_module._MissingRequiredObjectError("missing object")
+    )
+    assert "For E6 the drawer or sliding tray" in guidance
+    assert "for E7 the hinged door" in guidance
+
+
 @pytest.mark.parametrize(
     "settings",
     [

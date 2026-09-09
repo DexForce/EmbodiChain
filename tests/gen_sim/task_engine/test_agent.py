@@ -25,6 +25,7 @@ import pytest
 from embodichain.gen_sim.task_engine.contracts import (
     SUCCESS_SPEC_SCHEMA,
     TASK_DRAFT_SCHEMA,
+    canonical_hash,
     validate_success_spec,
     validate_task_candidate,
     validate_task_draft,
@@ -37,6 +38,7 @@ from embodichain.gen_sim.task_engine.agent import (
 )
 from embodichain.gen_sim.task_engine.interpretation import (
     InstructionDraftResult,
+    interpret_instruction_draft,
     validate_instruction_intent,
 )
 from embodichain.gen_sim.task_engine.orchestration.contracts import (
@@ -145,6 +147,157 @@ def test_scene_request_and_success_are_deterministic_contract_derivations():
         }
     ]
     assert success["terms"] == [{"step_id": "orient", "type": "object_upright"}]
+
+
+@pytest.mark.parametrize(
+    ("task_type", "target_state", "affordance"),
+    [
+        ("E6", "open", "slideable"),
+        ("E6", "closed", "slideable"),
+        ("E7", "open", "openable"),
+    ],
+)
+def test_articulation_intent_derives_mechanism_requirements(
+    task_type: str, target_state: str, affordance: str
+) -> None:
+    step = _step(reference="articulated part")
+    step.update(
+        task_type=task_type,
+        target_state=target_state,
+        required_arm="left_arm",
+        orientation_goal="none",
+    )
+    candidate = TaskAgent(interpreter=lambda *_args, **_kwargs: _result(step)).generate(
+        "interaction", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+
+    assert validate_task_candidate(candidate) == candidate
+    normalized = candidate["draft"]["steps"][0]
+    assert (
+        normalized["task_type"],
+        normalized["target_state"],
+        normalized["required_arm"],
+    ) == (task_type, target_state, "left_arm")
+    reference = candidate["scene_request"]["references"][0]
+    assert reference["source_structure"] == "articulation"
+    assert reference["affordances"] == ["articulated", affordance]
+    assert reference["initial_state"] == {}
+    assert candidate["success_spec"]["terms"] == [
+        {"step_id": "step_01", "type": "articulation_joint_near"}
+    ]
+
+
+def test_legacy_e7_closing_candidate_requires_regeneration_without_relabeling() -> None:
+    step = _step(reference="drawer")
+    step.update(task_type="E6", target_state="open", orientation_goal="none")
+    candidate = TaskAgent(interpreter=lambda *_args, **_kwargs: _result(step)).generate(
+        "legacy", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    legacy_step = candidate["draft"]["steps"][0]
+    legacy_step.update(task_type="E7", target_state="closed")
+    candidate["scene_request"]["references"][0]["affordances"] = [
+        "articulated",
+        "pushable",
+    ]
+    candidate["semantic_hash"] = canonical_hash(candidate["draft"]["steps"])
+    before = deepcopy(candidate)
+
+    with pytest.raises(ValueError, match="E7.*regenerate"):
+        validate_task_candidate(candidate)
+    assert candidate == before
+
+
+def test_legacy_e6_candidate_cannot_reuse_pull_only_scene_requirements() -> None:
+    step = _step(reference="drawer")
+    step.update(task_type="E6", target_state="open", orientation_goal="none")
+    candidate = TaskAgent(interpreter=lambda *_args, **_kwargs: _result(step)).generate(
+        "legacy", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    candidate["scene_request"]["references"][0]["affordances"] = [
+        "articulated",
+        "pullable",
+    ]
+    before = deepcopy(candidate)
+
+    with pytest.raises(ValueError, match="scene_request must be derived exactly"):
+        validate_task_candidate(candidate)
+    assert candidate == before
+
+
+def test_place_open_close_intent_preserves_arm_order_and_drawer_identity() -> None:
+    place = _step(step_id="place", reference="eyeglasses")
+    place.update(
+        task_type="E1",
+        target=_selector("scene_ref", reference="cup"),
+        relation="right_of",
+        required_arm="right_arm",
+        orientation_goal="none",
+    )
+    opened = _step(step_id="open", reference="drawer")
+    opened.update(
+        task_type="E6",
+        target_state="open",
+        required_arm="right_arm",
+        orientation_goal="none",
+        depends_on=["place"],
+    )
+    closed = deepcopy(opened)
+    closed.update(
+        id="close",
+        object=_selector("step_result", step_id="open"),
+        target_state="closed",
+        required_arm="left_arm",
+        depends_on=["open"],
+    )
+    declared = {"steps": [place, opened, closed]}
+
+    candidate = TaskAgent(caller=lambda **_kwargs: deepcopy(declared)).generate(
+        "place_open_close",
+        "Use the right arm to place the glasses to the right of the cup, then "
+        "open the drawer with the right arm, then close it with the left arm.",
+        candidate_count=1,
+    )["candidates"][0]
+    steps = candidate["draft"]["steps"]
+    assert [(s["task_type"], s["target_state"], s["required_arm"]) for s in steps] == [
+        ("E1", "none", "right_arm"),
+        ("E6", "open", "right_arm"),
+        ("E6", "closed", "left_arm"),
+    ]
+    assert [s["depends_on"] for s in steps] == [[], ["step_01"], ["step_02"]]
+    assert steps[2]["object"] == _selector("step_result", step_id="step_02")
+    assert len(candidate["scene_request"]["references"]) == 3
+
+
+def test_model_repair_preserves_requested_drawer_closing() -> None:
+    legacy = _step(reference="drawer")
+    legacy.update(
+        task_type="E7",
+        target_state="closed",
+        required_arm="left_arm",
+        orientation_goal="none",
+    )
+    corrected = {**legacy, "task_type": "E6"}
+    prompts = []
+
+    def caller(**kwargs):
+        prompts.append(kwargs["prompt"])
+        return {"steps": [deepcopy(legacy if len(prompts) == 1 else corrected)]}
+
+    result = interpret_instruction_draft(
+        "Close the sliding drawer with the left arm.", caller=caller
+    )
+    assert result.attempts == 2
+    assert result.intent["steps"] == [corrected]
+    assert "Do not change the requested operation" in prompts[1]
+
+
+def test_persistently_legacy_e7_closing_output_is_not_automatically_migrated() -> None:
+    step = _step(reference="drawer")
+    step.update(task_type="E7", target_state="closed", orientation_goal="none")
+    with pytest.raises(ValueError, match="after one repair.*E7"):
+        interpret_instruction_draft(
+            "Close the drawer.", caller=lambda **_kwargs: {"steps": [deepcopy(step)]}
+        )
 
 
 @pytest.mark.parametrize(
@@ -986,9 +1139,9 @@ def test_semantic_planner_preserves_e5_direction_and_terminal_behavior(
 
 
 @pytest.mark.parametrize(
-    ("task_type", "target_state"), [("E6", "open"), ("E7", "closed")]
+    ("task_type", "target_state"), [("E6", "open"), ("E6", "closed"), ("E7", "open")]
 )
-def test_semantic_planner_rejects_out_of_scope_articulation_slide(
+def test_semantic_planner_keeps_articulation_execution_gated(
     task_type: str,
     target_state: str,
 ) -> None:

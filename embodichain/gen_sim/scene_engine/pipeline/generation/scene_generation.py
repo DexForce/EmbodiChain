@@ -385,7 +385,17 @@ def _generate_articulated_usdcs(
             )
         # Run serially so the stage ends only after every required USDC is saved.
         generated_usdc_path = articulated_generation_client.generate_articulated_usdc(
-            prompt=scene_object.description,
+            prompt=(
+                f"Object: {scene_object.name} ({scene_object.category}). "
+                f"{scene_object.description}\n"
+                "Reconstruct all functional movable parts visible in the reference, "
+                "including switches, buttons, knobs, doors and drawers. Use real "
+                "revolute or prismatic joints with physically meaningful axes and "
+                "motion limits, connected to valid rigid-body links. Do not fuse "
+                "movable parts into the base or add an unrelated token joint. "
+                "Deliver a self-contained USDC with an articulation root, meshes, "
+                "and enabled non-fixed joints. A rigid GLB proxy is not sufficient."
+            ),
             image_path=scene_object.visible_rgba_path,
             output_path=resolved_output_root / f"{scene_object.id}.usdc",
         )

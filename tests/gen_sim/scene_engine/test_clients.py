@@ -261,6 +261,35 @@ def test_articulated_generation_client_posts_image_and_returns_server_json(
     assert session.post_call["data"] == {"prompt": "a cabinet with one opening door"}
 
 
+@pytest.mark.parametrize("defect", ["empty", "root", "joint", "body", "limits"])
+def test_articulated_usdc_rejects_invalid_physics(tmp_path: Path, defect: str) -> None:
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    path = tmp_path / "asset.usdc"
+    if defect == "empty":
+        path.touch()
+    else:
+        stage = Usd.Stage.CreateNew(str(path))
+        root = UsdGeom.Xform.Define(stage, "/Asset").GetPrim()
+        if defect != "root":
+            UsdPhysics.ArticulationRootAPI.Apply(root)
+        for name in ("base", "lever"):
+            prim = UsdGeom.Cube.Define(stage, f"/Asset/{name}").GetPrim()
+            UsdPhysics.RigidBodyAPI.Apply(prim)
+        if defect != "joint":
+            joint = UsdPhysics.RevoluteJoint.Define(stage, "/Asset/hinge")
+            joint.CreateBody0Rel().SetTargets(["/Asset/base"])
+            joint.CreateBody1Rel().SetTargets(
+                ["/missing" if defect == "body" else "/Asset/lever"]
+            )
+            joint.CreateAxisAttr("X")
+            joint.CreateLowerLimitAttr(10 if defect == "limits" else -10)
+            joint.CreateUpperLimitAttr(10)
+        stage.GetRootLayer().Save()
+    with pytest.raises(RuntimeError, match="Invalid articulation USDC"):
+        articulated_generation._validate_articulated_usdc(path)
+
+
 def test_image_generation_client_posts_prompt_and_writes_png(
     tmp_path: Path,
 ) -> None:

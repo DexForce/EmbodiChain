@@ -55,6 +55,28 @@ access requires complete basic auth; repository/dotenv path restrictions belong
 to `app_env.py`. Existing process environment values take precedence over loaded
 environment files.
 
+## Task Engine semantics and execution scope
+
+`task_engine/ontology.py` owns scene-independent task meaning and capability
+requirements; `task_engine/interpretation.py` owns strict intent validation and
+model guidance. E6 is a prismatic part opened or closed (`target_state=open` or
+`closed`, `slideable`); E7 is a revolute door opened (`target_state=open`,
+`openable`). Closing a drawer remains E6 regardless of the selected arm.
+Closing a hinged door is not represented by either contract.
+
+`task_engine/agent.py` derives SceneRequest requirements from that ontology;
+`task_engine/orchestration/scene_adapter.py` checks declared capabilities without
+aliasing legacy `pullable`/`pushable` labels. Empty capability metadata remains
+unknown, not proof of native joint type. Native joint qualification is deferred
+until execution integration.
+
+Persisted candidates must match the current intent and exactly derived scene
+request. Regenerate legacy E7 closing candidates and E6/E7 candidates with old
+capability declarations; do not silently relabel them. The serialized field
+layout is unchanged. E6-E9 execution is still rejected by Task Engine's
+`workflow.py`, `semantic_planner.py`, and `task_program_bundle.py`; corrected
+interpretation does not enable a runtime route or establish physical qualification.
+
 ## Focused validation
 
 | Change | Tests |
@@ -63,6 +85,7 @@ environment files.
 | Edit plans and graph | `tests/gen_sim/scene_engine/test_scene_edit.py`, `test_scene_edit_plan.py`, `test_scene_graph.py` |
 | Ingest formats and metadata | `tests/gen_sim/simready_pipeline/` |
 | UI roots/auth/session workflow | `tests/gen_sim/gradio_ui/` |
+| Task intent and scene capability contracts | `tests/gen_sim/task_engine/test_agent.py`, `test_interpretation.py`, `orchestration/test_scene_adapter.py` |
 
 Select provider-backed or simulator conversion tests only when that runtime
 boundary changes; source/unit checks do not establish remote service quality.

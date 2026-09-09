@@ -591,6 +591,56 @@ def test_explicit_scene_semantic_conflict_is_incompatible(
     assert "state 'orientation' conflicts" in reference["reasons"][0]
 
 
+@pytest.mark.parametrize(
+    ("task_type", "state", "declared_affordance", "compatible"),
+    [
+        ("E6", "open", "slideable", True),
+        ("E6", "closed", "slideable", True),
+        ("E7", "open", "openable", True),
+        ("E6", "open", "openable", False),
+        ("E7", "open", "slideable", False),
+        ("E6", "open", "pullable", False),
+        ("E7", "open", "pushable", False),
+    ],
+)
+def test_binding_uses_mechanism_affordances_without_aliasing_legacy_labels(
+    task_type: str, state: str, declared_affordance: str, compatible: bool
+) -> None:
+    candidate = _candidate("interaction", "mechanism")
+    step = candidate["draft"]["steps"][0]
+    step.update(task_type=task_type, target_state=state, orientation_goal="none")
+    candidate["scene_request"] = derive_scene_request(candidate["draft"])
+    candidate["success_spec"] = derive_success_spec(candidate["draft"])
+    candidate["semantic_hash"] = canonical_hash([step])
+
+    def grounder(**_kwargs):
+        return {
+            "bindings": [
+                {
+                    "reference_id": "upright.object",
+                    "status": "resolved",
+                    "uids": ["mechanism"],
+                    "confidence": 1.0,
+                }
+            ]
+        }
+
+    result = SceneAdapter(grounding_caller=grounder).select_objects(
+        _candidate_set([candidate]),
+        [
+            {
+                "uid": "mechanism",
+                "role": "articulation",
+                "init_pos": [0, 0, 0.7],
+                "affordances": ["articulated", declared_affordance],
+            }
+        ],
+    )
+    assert result.selected_candidate_id == ("interaction" if compatible else None)
+    reference = result.binding_report["candidates"][0]["references"][0]
+    assert reference["status"] == ("resolved" if compatible else "incompatible")
+
+
 def test_scene_adapter_accepts_passive_support_target_and_rejects_self_reference(
     scene_export: Path,
 ) -> None:

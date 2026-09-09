@@ -18,6 +18,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import math
 import mimetypes
 from pathlib import Path
 import time
@@ -116,10 +118,26 @@ class ArticulatedGenerationClient:
                 "Articulated Generation Server response must contain a request_id."
             )
 
+        resolved_output_path = Path(output_path).expanduser().resolve()
+        resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+        evidence_path = resolved_output_path.with_suffix(".request.json")
+        evidence = {
+            "request_id": request_id,
+            "base_url": self._base_url,
+            "image_sha256": hashlib.sha256(Path(image_path).read_bytes()).hexdigest(),
+            "prompt": prompt,
+            "submitted_at": time.time(),
+            "response": response_data,
+        }
+        evidence_path.write_text(json.dumps(evidence, indent=2) + "\n")
+
         deadline = time.monotonic() + self._timeout_s
         while True:
             response_data = self._request_json("get", f"/tasks/{request_id}")
             status = response_data.get("status")
+            if status not in {"queued", "running", "waiting"}:
+                evidence["response"] = response_data
+                evidence_path.write_text(json.dumps(evidence, indent=2) + "\n")
             if status == "succeeded":
                 break
             if status in {"failed", "cancelled"}:
@@ -148,13 +166,12 @@ class ArticulatedGenerationClient:
             )
         _validate_relative_path(usdc_path, "usdc artifact path")
 
-        resolved_output_path = Path(output_path).expanduser().resolve()
-        resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_output_path = resolved_output_path.with_name(
-            f".{resolved_output_path.name}.part"
+            f".{resolved_output_path.stem}.part.usdc"
         )
         try:
             temporary_output_path.write_bytes(self._request_content("get", usdc_path))
+            _validate_articulated_usdc(temporary_output_path)
             temporary_output_path.replace(resolved_output_path)
         except BaseException:
             temporary_output_path.unlink(missing_ok=True)
@@ -235,6 +252,65 @@ class ArticulatedGenerationClient:
 
     def _url(self, path: str) -> str:
         return urljoin(self._base_url, path.lstrip("/"))
+
+
+def _validate_articulated_usdc(path: str | Path) -> None:
+    """Reject structurally invalid physics; this is not semantic/runtime acceptance."""
+    from pxr import Usd, UsdPhysics
+
+    try:
+        path = Path(path)
+        if not path.is_file() or not path.stat().st_size:
+            raise ValueError("missing or empty file")
+        stage = Usd.Stage.Open(str(path))
+        if stage is None:
+            raise ValueError("cannot open USD stage")
+        prims = list(stage.Traverse())
+        if not any(p.HasAPI(UsdPhysics.ArticulationRootAPI) for p in prims):
+            raise ValueError("missing articulation root")
+        movable = []
+        for prim in prims:
+            if not prim.IsA(UsdPhysics.Joint):
+                continue
+            joint = UsdPhysics.Joint(prim)
+            if joint.GetJointEnabledAttr().Get() is False:
+                continue
+            bodies = []
+            for relationship in (joint.GetBody0Rel(), joint.GetBody1Rel()):
+                targets = relationship.GetTargets()
+                if len(targets) > 1:
+                    raise ValueError(f"multiple joint targets: {prim.GetPath()}")
+                for target in targets:
+                    body = stage.GetPrimAtPath(target)
+                    if not body or not body.HasAPI(UsdPhysics.RigidBodyAPI):
+                        raise ValueError(f"invalid rigid body target: {target}")
+                    bodies.append(target)
+            if not bodies or len(set(bodies)) != len(bodies):
+                raise ValueError(f"invalid joint bodies: {prim.GetPath()}")
+            if prim.IsA(UsdPhysics.FixedJoint):
+                continue
+            if prim.IsA(UsdPhysics.RevoluteJoint):
+                typed = UsdPhysics.RevoluteJoint(prim)
+            elif prim.IsA(UsdPhysics.PrismaticJoint):
+                typed = UsdPhysics.PrismaticJoint(prim)
+            else:
+                raise ValueError(f"unsupported movable joint type: {prim.GetTypeName()}")
+            lower = typed.GetLowerLimitAttr().Get()
+            upper = typed.GetUpperLimitAttr().Get()
+            if (
+                typed.GetAxisAttr().Get() not in {"X", "Y", "Z"}
+                or lower is None
+                or upper is None
+                or math.isnan(lower)
+                or math.isnan(upper)
+                or lower >= upper
+            ):
+                raise ValueError(f"invalid axis or motion range: {prim.GetPath()}")
+            movable.append(prim.GetPath())
+        if not movable:
+            raise ValueError("no enabled non-fixed joint")
+    except Exception as exc:
+        raise RuntimeError(f"Invalid articulation USDC {path}: {exc}") from exc
 
 
 def _load_dotenv_config() -> dict[str, Any]:
