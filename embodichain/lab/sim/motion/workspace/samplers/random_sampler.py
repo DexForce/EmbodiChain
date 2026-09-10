@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import numpy as np
 import torch
 from typing import Union, TYPE_CHECKING
@@ -93,7 +95,9 @@ class RandomSampler(BaseSampler):
         n_dims = bounds.shape[0]
 
         # Generate random samples in [0, 1]^n_dims using torch
-        samples_unit = torch.rand(num_samples, n_dims, device=self.device)
+        samples_unit = torch.rand(
+            num_samples, n_dims, device=self.device, generator=self.generator
+        )
 
         # Scale to the actual bounds
         samples = self._scale_samples(samples_unit, bounds)

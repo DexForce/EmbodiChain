@@ -112,6 +112,13 @@ class WorkspaceAnalyzerConfig:
     metric: MetricConfig = None
     """Metric configuration."""
 
+    retain_diagnostics: bool = True
+    """Retain rejected points and per-target diagnostics; disable for runtime caches."""
+    sample_within_constraints: bool = False
+    """Sample only the permitted domain. Reachability is then conditional on that domain."""
+    max_sampling_rounds: int = 32
+    """Bounded refill rounds for constrained sampling; exhaustion raises ValueError."""
+
     ik_samples_per_point: int = 1
     """For Cartesian mode: number of random joint seeds to try for each Cartesian point."""
     reference_pose: Any | None = None
@@ -150,6 +157,8 @@ class WorkspaceAnalyzerConfig:
 
     def __post_init__(self):
         """Initialize sub-configs with defaults if not provided."""
+        if self.ik_samples_per_point < 1 or self.max_sampling_rounds < 1:
+            raise ValueError("IK seed count and sampling rounds must be positive")
         if self.sampling is None:
             self.sampling = SamplingConfig()
         if self.cache is None:
@@ -197,10 +206,8 @@ class WorkspaceAnalyzer:
         # Check multi-environment compatibility and add protection
         self._check_num_envs_compatibility()
 
-        # Use sim_manager's device if available, otherwise default to CPU
-        self.device = (
-            sim_manager.device if sim_manager is not None else torch.device("cpu")
-        )
+        # Keep sampling and kinematics on the simulation or robot device.
+        self.device = sim_manager.device if sim_manager is not None else robot.device
 
         # Determine control part name from config
         self.control_part_name = self._determine_control_part(
@@ -345,44 +352,29 @@ class WorkspaceAnalyzer:
             RandomSampler,
         )
 
-        temp_sampler = RandomSampler(seed=self.config.sampling.seed)
+        temp_sampler = RandomSampler(
+            seed=self.config.sampling.seed,
+            device=self.device,
+        )
 
         # Sample joint space to compute FK bounds
         joint_samples = temp_sampler.sample(num_samples=1000, bounds=self.qpos_limits)
 
-        # Compute FK for all samples with progress tracking
-        workspace_pts_list = []
-
-        pbar = self._create_optimized_tqdm(
-            range(len(joint_samples)),
-            desc="Computing Workspace Bounds (FK)",
-            unit="cfg",
-            color="cyan",
-            emoji="📏",
-        )
-
-        successful_fk = 0
-        for i in pbar:
-            qpos = joint_samples[i : i + 1]  # Keep batch dimension
-            try:
-                pose = self.robot.compute_fk(
-                    qpos=qpos,
-                    name=self.control_part_name,
-                    to_matrix=True,
-                )
-                position = pose[:, :3, 3]  # Extract position
-                workspace_pts_list.append(position)
-                successful_fk += 1
-            except Exception:
-                continue
-
-            # Update progress bar with success rate
-            self._update_progress_with_stats(
-                pbar, i, successful_fk, metric_name="FK success", show_rate=True
+        # A single batched FK avoids one Python call and one solver dispatch per
+        # sample. Failed batches preserve the existing fallback bounds.
+        try:
+            poses = self.robot.compute_batch_fk(
+                qpos=joint_samples.unsqueeze(0),
+                name=self.control_part_name,
+                env_ids=[0],
+                to_matrix=True,
             )
+            workspace_pts = poses[0, :, :3, 3]
+        except Exception as exc:
+            logger.log_warning(f"Batched FK failed while estimating bounds: {exc}")
+            workspace_pts = torch.empty((0, 3), device=self.device)
 
-        if workspace_pts_list:
-            workspace_pts = torch.cat(workspace_pts_list, dim=0)
+        if len(workspace_pts) > 0:
             # Compute min/max bounds for each dimension
             min_bounds = workspace_pts.min(dim=0).values
             max_bounds = workspace_pts.max(dim=0).values
@@ -630,6 +622,119 @@ class WorkspaceAnalyzer:
         )
         return joint_samples
 
+    def _sphere_parameters(self) -> tuple[torch.Tensor, float]:
+        """Resolve explicit sphere geometry without inferring it from sampled points."""
+        cfg = self.config
+        bounds = cfg.constraint_bounds
+        if bounds is not None:
+            bounds = torch.as_tensor(bounds, dtype=torch.float32, device=self.device)
+        center = cfg.sphere_center
+        if center is None:
+            if bounds is None:
+                raise ValueError(
+                    "Sphere sampling requires a center or constraint_bounds"
+                )
+            center = bounds.mean(dim=1)
+        center = torch.as_tensor(center, dtype=torch.float32, device=self.device)
+        radius = cfg.sphere_radius
+        if radius is None:
+            if bounds is None:
+                raise ValueError(
+                    "Sphere sampling requires a radius or constraint_bounds"
+                )
+            half = (bounds[:, 1] - bounds[:, 0]) / 2
+            if cfg.sphere_radius_mode == "inscribed":
+                radius = float(half.min())
+            elif cfg.sphere_radius_mode == "circumscribed":
+                radius = float(torch.linalg.vector_norm(half))
+            else:
+                raise ValueError("Unknown sphere_radius_mode")
+        if center.shape != (3,) or radius <= 0:
+            raise ValueError("Sphere requires a 3D center and a positive radius")
+        return center, float(radius)
+
+    def _check_constraints(self, points: torch.Tensor) -> torch.Tensor:
+        """Apply workspace exclusions and the optional geometric domain."""
+        valid = self.constraint_checker.check_constraints(points)
+        if self.config.constraint_type == "sphere":
+            center, radius = self._sphere_parameters()
+            valid &= ((points - center) ** 2).sum(dim=-1) <= radius**2
+        elif self.config.constraint_type == "box":
+            bounds = torch.as_tensor(
+                self.config.constraint_bounds, device=points.device, dtype=points.dtype
+            )
+            if bounds.shape != (3, 2):
+                raise ValueError("Box constraint_bounds must have shape (3, 2)")
+            valid &= ((points >= bounds[:, 0]) & (points <= bounds[:, 1])).all(-1)
+        elif self.config.constraint_type is not None:
+            raise ValueError(f"Unknown constraint_type: {self.config.constraint_type}")
+        return valid
+
+    def _sample_in_domain(
+        self, bounds: torch.Tensor, num_samples: int, transform=None
+    ) -> torch.Tensor:
+        """Generate a bounded number of proposal batches, retaining only valid points."""
+        if self.sampler.get_strategy_name() not in ("random", "sobol", "lhs"):
+            raise ValueError("Constrained sampling supports random, sobol, and lhs")
+        bounds = bounds.clone().to(dtype=torch.float32, device=self.device)
+        sphere = self.config.constraint_type == "sphere" and transform is None
+        if transform is None:
+            cfg = self.config.constraint
+            if cfg.min_bounds is not None:
+                bounds[:, 0] = torch.maximum(
+                    bounds[:, 0], bounds.new_tensor(cfg.min_bounds)
+                )
+            if cfg.max_bounds is not None:
+                bounds[:, 1] = torch.minimum(
+                    bounds[:, 1], bounds.new_tensor(cfg.max_bounds)
+                )
+            bounds[2, 0] = max(float(bounds[2, 0]), cfg.ground_height)
+            if self.config.constraint_type == "box":
+                box = torch.as_tensor(
+                    self.config.constraint_bounds,
+                    device=self.device,
+                    dtype=bounds.dtype,
+                )
+                bounds[:, 0] = torch.maximum(bounds[:, 0], box[:, 0])
+                bounds[:, 1] = torch.minimum(bounds[:, 1], box[:, 1])
+        if (bounds[:, 0] >= bounds[:, 1]).any():
+            raise ValueError("Sampling bounds have no positive-volume intersection")
+        accepted = []
+        remaining = num_samples
+        for _ in range(self.config.max_sampling_rounds):
+            count = min(max(remaining, 64), max(num_samples, 64))
+            if sphere:
+                center, radius = self._sphere_parameters()
+                unit = self.sampler.sample(
+                    num_samples=count, bounds=bounds.new_tensor([[0, 1]] * 3)
+                )
+                z = 2 * unit[:, 0] - 1
+                phi = 2 * torch.pi * unit[:, 1]
+                radial = torch.sqrt(torch.clamp(1 - z * z, min=0))
+                direction = torch.stack(
+                    (radial * torch.cos(phi), radial * torch.sin(phi), z), dim=1
+                )
+                points = center + radius * unit[:, 2:3].pow(1 / 3) * direction
+                in_bounds = ((points >= bounds[:, 0]) & (points <= bounds[:, 1])).all(
+                    -1
+                )
+            else:
+                points = self.sampler.sample(num_samples=count, bounds=bounds)
+                if transform is not None:
+                    points = transform(points)
+                in_bounds = torch.ones(
+                    len(points), dtype=torch.bool, device=self.device
+                )
+            points = points[in_bounds & self._check_constraints(points)][:remaining]
+            accepted.append(points)
+            remaining -= len(points)
+            if not remaining:
+                return torch.cat(accepted)
+        raise ValueError(
+            f"Constrained sampling exhausted {self.config.max_sampling_rounds} rounds; "
+            f"accepted {num_samples - remaining}/{num_samples} points"
+        )
+
     def sample_cartesian_space(self, num_samples: int | None = None) -> torch.Tensor:
         """Sample Cartesian positions within workspace bounds.
 
@@ -660,10 +765,15 @@ class WorkspaceAnalyzer:
             )
             cartesian_bounds = self._compute_dynamic_workspace_bounds()
 
-        # Sample from Cartesian space using bounds
-        cartesian_samples = self.sampler.sample(
-            bounds=cartesian_bounds, num_samples=num_samples
-        )
+        # Sample from Cartesian space using bounds.  Sobol/LHS samplers perform
+        # their own vectorized generation; constraints are filtered in one pass
+        # before the considerably more expensive IK stage.
+        if self.config.sample_within_constraints:
+            cartesian_samples = self._sample_in_domain(cartesian_bounds, num_samples)
+        else:
+            cartesian_samples = self.sampler.sample(
+                bounds=cartesian_bounds, num_samples=num_samples
+            )
 
         # Check how many samples pass workspace constraints
         valid_bounds = self.constraint_checker.check_bounds(cartesian_samples)
@@ -733,10 +843,21 @@ class WorkspaceAnalyzer:
             plane_bounds = plane_bounds.to(self.device)
 
         # Generate 2D samples and convert to 3D
-        plane_samples_2d = self.sampler.sample(num_samples, bounds=plane_bounds)
-        plane_samples_3d = self._plane_to_world_optimized(
-            plane_samples_2d, plane_normal, plane_point
-        )
+        if self.config.sample_within_constraints:
+            plane_samples_3d = self._sample_in_domain(
+                plane_bounds,
+                num_samples,
+                transform=lambda uv: self._plane_to_world_optimized(
+                    uv, plane_normal, plane_point
+                ),
+            )
+        else:
+            plane_samples_2d = self.sampler.sample(
+                num_samples=num_samples, bounds=plane_bounds
+            )
+            plane_samples_3d = self._plane_to_world_optimized(
+                plane_samples_2d, plane_normal, plane_point
+            )
 
         logger.log_info(
             f"Generated {num_samples} plane samples using {self.sampler.get_strategy_name()}"
@@ -904,6 +1025,7 @@ class WorkspaceAnalyzer:
             current_pose = self.robot.compute_fk(
                 qpos=self.robot.get_qpos()[None, :],  # Add batch dimension
                 name=self.control_part_name,
+                env_ids=[0],
                 to_matrix=True,
             )
             # Use current end-effector position projected to a reasonable height
@@ -942,7 +1064,7 @@ class WorkspaceAnalyzer:
         num_samples = len(joint_configs)
         batch_size = batch_size or self.config.sampling.batch_size
         # Cap batch size to total samples
-        batch_size = min(batch_size, num_samples)
+        batch_size = max(1, min(batch_size, num_samples))
 
         logger.log_info(
             f"Computing FK for {num_samples} samples (batch_size={batch_size})..."
@@ -972,6 +1094,7 @@ class WorkspaceAnalyzer:
                 poses = self.robot.compute_batch_fk(
                     qpos=qpos_batch,
                     name=self.control_part_name,
+                    env_ids=[0],
                     to_matrix=True,
                 )
 
@@ -979,7 +1102,7 @@ class WorkspaceAnalyzer:
                 positions = poses[0, :, :3, 3]
 
                 # Vectorized constraint check for entire batch
-                valid_mask = self.constraint_checker.check_constraints(positions)
+                valid_mask = self._check_constraints(positions)
 
                 if valid_mask.any():
                     workspace_points_list.append(positions[valid_mask])
@@ -1057,12 +1180,10 @@ class WorkspaceAnalyzer:
         num_samples = len(cartesian_points)
         ik_samples_per_point = self.config.ik_samples_per_point
         batch_size = batch_size or self.config.sampling.batch_size
-        batch_size = min(batch_size, num_samples)
+        batch_size = max(1, min(batch_size, num_samples))
 
         # Pre-filter by workspace constraints (vectorized)
-        valid_cartesian_mask = self.constraint_checker.check_constraints(
-            cartesian_points
-        )
+        valid_cartesian_mask = self._check_constraints(cartesian_points)
 
         logger.log_info(
             f"Pre-filtered Cartesian points: {valid_cartesian_mask.sum()}/{num_samples} "
@@ -1115,9 +1236,13 @@ class WorkspaceAnalyzer:
             # Each position is repeated ik_samples_per_point times so that a single
             # compute_batch_ik call covers all (n_valid * K) targets at once.
             # Shape: (1, n_valid * K, 4, 4)
-            base_pose = current_ee_pose.unsqueeze(1).expand(1, n_valid, 4, 4).clone()
-            base_pose[0, :, :3, 3] = valid_positions
-            target_poses = base_pose.repeat_interleave(ik_samples_per_point, dim=1)
+            target_poses = (
+                current_ee_pose.reshape(1, 1, 1, 4, 4)
+                .expand(1, n_valid, ik_samples_per_point, 4, 4)
+                .clone()
+            )
+            target_poses[0, :, :, :3, 3] = valid_positions[:, None, :]
+            target_poses = target_poses.reshape(1, n_valid * ik_samples_per_point, 4, 4)
 
             # Generate all random seeds at once: (1, n_valid * K, num_joints)
             all_seeds = random_sampler.sample(
@@ -1125,32 +1250,34 @@ class WorkspaceAnalyzer:
             ).unsqueeze(0)
 
             try:
-                logger.set_log_level("ERROR")
                 success, qpos = self.robot.compute_batch_ik(
                     pose=target_poses,
                     joint_seed=all_seeds,
                     name=self.control_part_name,
-                )
-                logger.set_log_level("INFO")
-
-                # Reshape results from flat batch to (n_valid, K)
-                success_2d = success[0].reshape(n_valid, ik_samples_per_point)
-                qpos_3d = qpos[0].reshape(
-                    n_valid, ik_samples_per_point, self.num_joints
+                    env_ids=[0],
                 )
 
-                # Success rate: fraction of seeds that solved IK for each point
-                success_rates_batch = success_2d.float().mean(dim=1)  # (n_valid,)
+                if ik_samples_per_point == 1:
+                    any_success = success[0].bool()
+                    success_rates_batch = any_success.float()
+                    best_qpos = qpos[0]
+                else:
+                    # Reshape results from flat batch to (n_valid, K)
+                    success_2d = success[0].reshape(n_valid, ik_samples_per_point)
+                    qpos_3d = qpos[0].reshape(
+                        n_valid, ik_samples_per_point, self.num_joints
+                    )
 
-                # Pick the joint config from the first successful seed per point
-                any_success = success_2d.any(dim=1)  # (n_valid,)
-                first_success_idx = success_2d.float().argmax(dim=1)  # (n_valid,)
-                best_qpos = qpos_3d[
-                    torch.arange(n_valid, device=self.device), first_success_idx
-                ]  # (n_valid, num_joints)
+                    # Success rate: fraction of seeds that solved IK for each point
+                    success_rates_batch = success_2d.float().mean(dim=1)  # (n_valid,)
 
+                    # Pick the joint config from the first successful seed per point
+                    any_success = success_2d.any(dim=1)  # (n_valid,)
+                    first_success_idx = success_2d.float().argmax(dim=1)  # (n_valid,)
+                    best_qpos = qpos_3d[
+                        torch.arange(n_valid, device=self.device), first_success_idx
+                    ]  # (n_valid, num_joints)
             except Exception as e:
-                logger.set_log_level("INFO")
                 logger.log_warning(
                     f"IK computation failed for batch [{batch_start}:{batch_end}]: {e}"
                 )
@@ -1226,9 +1353,9 @@ class WorkspaceAnalyzer:
             hasattr(self.config, "reference_pose")
             and self.config.reference_pose is not None
         ):
-            reference_pose = self.config.reference_pose
-            if isinstance(reference_pose, np.ndarray):
-                reference_pose = torch.from_numpy(reference_pose).to(self.device)
+            reference_pose = torch.as_tensor(
+                self.config.reference_pose, dtype=torch.float32, device=self.device
+            )
             if reference_pose.dim() == 2:
                 reference_pose = reference_pose.unsqueeze(0)
             logger.log_info("Using provided reference pose for IK target orientation")
@@ -1241,6 +1368,7 @@ class WorkspaceAnalyzer:
             current_ee_pose = self.robot.compute_fk(
                 name=self.control_part_name,
                 qpos=current_qpos.unsqueeze(0),
+                env_ids=[0],
                 to_matrix=True,
             )
             logger.log_info("Computing reference pose from current robot configuration")
@@ -1440,6 +1568,18 @@ class WorkspaceAnalyzer:
         results["metrics"] = metrics
         results["config"] = self.config
         results["analysis_time"] = time.time() - start_time
+
+        if (
+            not self.config.retain_diagnostics
+            and self.current_mode != AnalysisMode.JOINT_SPACE
+        ):
+            mask = results.pop("reachability_mask")
+            results["success_rates"] = results["success_rates"][mask]
+            results.pop("all_points")
+            results.pop("workspace_points")
+            self.workspace_points = results["reachable_points"]
+            self.success_rates = results["success_rates"]
+            self.reachability_mask = None
 
         # Cache results (disk results cache; no-op when cache_dir is unset).
         if self._has_results_cache():
@@ -1763,7 +1903,10 @@ class WorkspaceAnalyzer:
                 if self.current_mode == AnalysisMode.CARTESIAN_SPACE
                 else "Plane sampling"
             )
-            if self.success_rates is not None and hasattr(self, "reachability_mask"):
+            if (
+                self.success_rates is not None
+                and getattr(self, "reachability_mask", None) is not None
+            ):
                 if filtered_to_reachable:
                     # Points have been pre-filtered, but we still need to check IK reachability
                     # Only color as green if we have verified IK solutions
@@ -1980,7 +2123,7 @@ class WorkspaceAnalyzer:
             self.current_mode
             in [AnalysisMode.CARTESIAN_SPACE, AnalysisMode.PLANE_SAMPLING]
             and not self.config.visualization.show_unreachable_points
-            and hasattr(self, "reachability_mask")
+            and getattr(self, "reachability_mask", None) is not None
         ):
             # Only show reachable points
             reachable_mask = self.reachability_mask.cpu().numpy()
@@ -2172,8 +2315,23 @@ class WorkspaceAnalyzer:
                 "max_bounds": _tensor_to_list(constraint.max_bounds),
                 "joint_limits_scale": constraint.joint_limits_scale,
                 "ground_height": constraint.ground_height,
+                "exclude_zones": [
+                    [_tensor_to_list(lo), _tensor_to_list(hi)]
+                    for lo, hi in constraint.exclude_zones
+                ],
             },
             "ik_samples_per_point": cfg.ik_samples_per_point,
+            "sampling_revision": 2,
+            "retain_diagnostics": cfg.retain_diagnostics,
+            "sample_within_constraints": cfg.sample_within_constraints,
+            "max_sampling_rounds": cfg.max_sampling_rounds,
+            "geometry": {
+                "type": cfg.constraint_type,
+                "bounds": _tensor_to_list(cfg.constraint_bounds),
+                "center": _tensor_to_list(cfg.sphere_center),
+                "radius": cfg.sphere_radius,
+                "radius_mode": cfg.sphere_radius_mode,
+            },
         }
 
         if cfg.reference_pose is not None:
@@ -2246,7 +2404,9 @@ class WorkspaceAnalyzer:
             self.current_mode = AnalysisMode(mode_str) if mode_str else None
         except ValueError:
             self.current_mode = None
-        self.workspace_points = results.get("workspace_points")
+        self.workspace_points = results.get(
+            "workspace_points", results.get("reachable_points")
+        )
         self.joint_configurations = results.get("joint_configurations")
         self.success_rates = results.get("success_rates")
         if mode_str in ("cartesian_space", "plane_sampling"):

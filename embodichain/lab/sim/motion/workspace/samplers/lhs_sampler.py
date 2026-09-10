@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import numpy as np
 import torch
 from typing import Union
@@ -97,7 +99,7 @@ class LatinHypercubeSampler(BaseSampler):
             )
             self.optimization = None
 
-    def sample(
+    def _sample_from_bounds(
         self, bounds: torch.Tensor | np.ndarray, num_samples: int
     ) -> torch.Tensor:
         """Generate Latin Hypercube samples within the given bounds.
@@ -170,7 +172,7 @@ class LatinHypercubeSampler(BaseSampler):
         """
         # Create LHS engine
         lhs_engine = qmc.LatinHypercube(
-            d=n_dims, strength=strength, optimization=self.optimization, seed=self.seed
+            d=n_dims, strength=strength, optimization=self.optimization, seed=self.rng
         )
 
         # Generate samples

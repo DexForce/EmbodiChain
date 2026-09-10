@@ -27,6 +27,7 @@ from embodichain.compute.kinematics._warp.ur import (
     ur_ik_kernel,
 )
 import math
+from ._buffers import _with_ik_buffers
 from embodichain.utils.device_utils import standardize_device_string
 
 
@@ -133,7 +134,11 @@ class URSolver(BaseSolver):
         self._tcp_inv = np.eye(4, dtype=float)
         self._tcp_inv[:3, :3] = self.tcp_xpos[:3, :3].T
         self._tcp_inv[:3, 3] = -self._tcp_inv[:3, :3] @ self.tcp_xpos[:3, 3]
+        self._tcp_inv_tensor = torch.tensor(
+            self._tcp_inv, dtype=torch.float32, device=self.device
+        )
 
+    @_with_ik_buffers
     def get_ik(
         self,
         target_xpos: torch.Tensor,
@@ -160,7 +165,7 @@ class URSolver(BaseSolver):
             target_xpos_batch = target_xpos[None, :, :]
         else:
             target_xpos_batch = target_xpos
-        tcp_inv = torch.tensor(self._tcp_inv, dtype=torch.float32, device=self.device)
+        tcp_inv = self._tcp_inv_tensor
         target_xpos_batch = target_xpos_batch @ tcp_inv[None, :, :]
         n_sample = target_xpos_batch.shape[0]
 
@@ -178,8 +183,10 @@ class URSolver(BaseSolver):
         wp_device = standardize_device_string(self.device)
         # Flatten target poses to a 1-D float array for the Warp kernel.
         xpos_wp = wp.from_torch(target_xpos_batch.reshape(-1))
-        all_qpos_wp = wp.zeros(n_sample * N_SOL * DOF, dtype=float, device=wp_device)
-        all_ik_valid_wp = wp.zeros(n_sample * N_SOL, dtype=int, device=wp_device)
+        all_qpos_wp = self._ik_buffers.zeros(
+            "qpos", n_sample, N_SOL * DOF, torch.float32
+        )
+        all_ik_valid_wp = self._ik_buffers.zeros("valid", n_sample, N_SOL, torch.int32)
         lower_qpos_limits_wp = wp.from_torch(self.lower_qpos_limits)
         upper_qpos_limits_wp = wp.from_torch(self.upper_qpos_limits)
         wp.launch(
@@ -208,7 +215,7 @@ class URSolver(BaseSolver):
         )
 
         if return_all_solutions:
-            return all_solutions_validity, all_solutions
+            return all_solutions_validity.clone(), all_solutions.clone()
         # Select ik qpos based on the closest distance to the seed qpos
         qpos_seed_expanded = qpos_seed.unsqueeze(1).expand(-1, N_SOL, -1)
         distances = torch.norm(

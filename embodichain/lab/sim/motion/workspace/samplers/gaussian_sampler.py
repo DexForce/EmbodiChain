@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import numpy as np
 import torch
 from typing import Union
@@ -172,7 +174,9 @@ class GaussianSampler(BaseSampler):
             Clipped samples (num_samples, n_dims).
         """
         # Generate Gaussian samples
-        samples = torch.randn(num_samples, mean.shape[0], device=self.device)
+        samples = torch.randn(
+            num_samples, mean.shape[0], device=self.device, generator=self.generator
+        )
         samples = mean + samples * std
 
         # Clip to bounds
@@ -215,7 +219,12 @@ class GaussianSampler(BaseSampler):
             num_generate = max(num_needed * 2, 100)  # Generate 2x to reduce rejections
 
             # Generate Gaussian samples
-            samples = torch.randn(num_generate, mean.shape[0], device=self.device)
+            samples = torch.randn(
+                num_generate,
+                mean.shape[0],
+                device=self.device,
+                generator=self.generator,
+            )
             samples = mean + samples * std
 
             # Check which samples are within bounds

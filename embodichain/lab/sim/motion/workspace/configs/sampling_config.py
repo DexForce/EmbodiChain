@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+
+from __future__ import annotations
 from enum import Enum
 from dataclasses import dataclass
 from typing import Callable
@@ -78,4 +80,4 @@ class SamplingConfig:
     def __post_init__(self):
         """Set default strategy after initialization."""
         if self.strategy is None:
-            self.strategy = SamplingStrategy.UNIFORM
+            self.strategy = SamplingStrategy.SOBOL

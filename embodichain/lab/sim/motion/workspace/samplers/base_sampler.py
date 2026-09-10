@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import numpy as np
 import torch
 from abc import ABC, abstractmethod
@@ -83,10 +85,8 @@ class BaseSampler(ABC):
         self.rng = np.random.RandomState(seed)
         self.device = device if device is not None else torch.device("cpu")
 
-        # Set torch seed
-        torch.manual_seed(seed)
-        if self.device.type == "cuda":
-            torch.cuda.manual_seed(seed)
+        self.device = torch.device(self.device)
+        self.generator = torch.Generator(device=self.device).manual_seed(seed)
 
     def sample(
         self, num_samples: int, bounds: torch.Tensor | np.ndarray | None = None

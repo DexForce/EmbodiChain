@@ -20,6 +20,7 @@ import torch
 import numpy as np
 import warp as wp
 import polars as pl
+from ._buffers import _with_ik_buffers
 
 from itertools import product
 from typing import Union, Tuple, Any, Literal, TYPE_CHECKING
@@ -228,6 +229,7 @@ class OPWSolver(BaseSolver):
         """
         return self.get_ik_warp(target_xpos, qpos_seed, return_all_solutions, **kwargs)
 
+    @_with_ik_buffers
     def get_ik_warp(
         self,
         target_xpos: torch.Tensor,
@@ -250,45 +252,36 @@ class OPWSolver(BaseSolver):
         """
         N_SOL = 8
         DOF = 6
-        n_sample = target_xpos.shape[0]
         kernel_device = standardize_device_string(self.device)
 
         if target_xpos.shape == (4, 4):
             target_xpos_batch = target_xpos[None, :, :].to(kernel_device)
         else:
             target_xpos_batch = target_xpos.to(kernel_device)
+        n_sample = target_xpos_batch.shape[0]
         target_xpos_wp = wp.from_torch(target_xpos_batch.reshape(-1))
 
-        all_qpos_wp = wp.zeros(
-            n_sample * N_SOL * DOF,
-            dtype=float,
-            device=standardize_device_string(kernel_device),
+        all_qpos_wp = self._ik_buffers.zeros(
+            "qpos", n_sample, N_SOL * DOF, torch.float32
         )
-        all_ik_valid_wp = wp.zeros(
-            n_sample * N_SOL, dtype=int, device=standardize_device_string(kernel_device)
-        )
+        all_ik_valid_wp = self._ik_buffers.zeros("valid", n_sample, N_SOL, torch.int32)
 
         # TODO: whether require gradient
         offsets_ = self.offsets.to(standardize_device_string(kernel_device))
         sign_corrections_ = self.sign_corrections.to(
             standardize_device_string(kernel_device)
         )
-        lower_limits_ = wp_vec6f(
-            self.lower_qpos_limits[0],
-            self.lower_qpos_limits[1],
-            self.lower_qpos_limits[2],
-            self.lower_qpos_limits[3],
-            self.lower_qpos_limits[4],
-            self.lower_qpos_limits[5],
+        # Pack both vectors in one host transfer instead of converting twelve
+        # CUDA scalars separately. Reading live limits preserves setter/in-place
+        # updates without an invalidation cache.
+        limits = (
+            torch.stack((self.lower_qpos_limits, self.upper_qpos_limits))
+            .detach()
+            .cpu()
+            .tolist()
         )
-        upper_limits_ = wp_vec6f(
-            self.upper_qpos_limits[0],
-            self.upper_qpos_limits[1],
-            self.upper_qpos_limits[2],
-            self.upper_qpos_limits[3],
-            self.upper_qpos_limits[4],
-            self.upper_qpos_limits[5],
-        )
+        lower_limits_ = wp_vec6f(*limits[0])
+        upper_limits_ = wp_vec6f(*limits[1])
         wp.launch(
             kernel=opw_ik_kernel,
             dim=(n_sample),
@@ -309,7 +302,7 @@ class OPWSolver(BaseSolver):
         if return_all_solutions:
             all_qpos = wp.to_torch(all_qpos_wp).reshape(n_sample, N_SOL, DOF)
             all_ik_valid = wp.to_torch(all_ik_valid_wp).reshape(n_sample, N_SOL)
-            return all_ik_valid, all_qpos
+            return all_ik_valid.clone(), all_qpos.clone()
         if qpos_seed is not None:
             if qpos_seed.shape == (
                 n_sample,
@@ -335,15 +328,13 @@ class OPWSolver(BaseSolver):
             qpos_seed_wp = wp.from_torch(qpos_seed)
         all_qpos_wp = all_qpos_wp.reshape((n_sample, N_SOL, DOF))
         all_ik_valid_wp = all_ik_valid_wp.reshape((n_sample, N_SOL))
-        joint_weight = kwargs.get("joint_weight", torch.ones(size=(DOF,), dtype=float))
-        joint_weight_wp = wp_vec6f(
-            joint_weight[0],
-            joint_weight[1],
-            joint_weight[2],
-            joint_weight[3],
-            joint_weight[4],
-            joint_weight[5],
+        joint_weight = kwargs.get("joint_weight")
+        weights = (
+            [1.0] * DOF
+            if joint_weight is None
+            else torch.as_tensor(joint_weight).detach().cpu().tolist()
         )
+        joint_weight_wp = wp_vec6f(*weights)
         best_ik_result_wp = wp.zeros(
             (n_sample, 6), dtype=float, device=standardize_device_string(kernel_device)
         )

@@ -969,17 +969,14 @@ class Robot(Articulation):
 
         qpos_ = qpos.to(self.device)
         n_batch = qpos_.shape[1]
-        qpos_batch = qpos_.reshape(-1, solver.dof)
-        xpos_batch = solver.get_fk(qpos=qpos_batch)
+        xpos_batch = solver.get_fk_batch(qpos_)
 
         # get xpos from link root
         base_xpos_n_envs = self.get_link_pose(
             link_name=solver.root_link_name, env_ids=local_env_ids, to_matrix=True
         )
-        base_xpos_batch = (
-            base_xpos_n_envs[:, None, :, :].repeat(1, n_batch, 1, 1).reshape(-1, 4, 4)
-        )
-        result_matrix = torch.bmm(base_xpos_batch, xpos_batch)
+        result_matrix = torch.matmul(base_xpos_n_envs[:, None], xpos_batch)
+        result_matrix = result_matrix.reshape(-1, 4, 4)
 
         if to_matrix:
             result_matrix = result_matrix.reshape(len(local_env_ids), n_batch, 4, 4)
@@ -1073,22 +1070,18 @@ class Robot(Articulation):
             link_name=solver.root_link_name, env_ids=local_env_ids, to_matrix=True
         )
         base_inv_xpos_n_envs = torch.inverse(base_xpos_n_envs)
-        base_inv_xpos_batch = (
-            base_inv_xpos_n_envs[:, None, :, :]
-            .repeat(1, n_batch, 1, 1)
-            .reshape(-1, 4, 4)
+        pose_batch = torch.matmul(
+            base_inv_xpos_n_envs[:, None],
+            pose_batch.reshape(len(local_env_ids), n_batch, 4, 4),
         )
-        pose_batch = torch.bmm(base_inv_xpos_batch, pose_batch)
-
-        joint_seed_batch = joint_seed.reshape(-1, n_dof)
-        ret, qpos_batch = solver.get_ik(
+        return solver.get_ik_batch(
             target_xpos=pose_batch,
-            qpos_seed=joint_seed_batch,
-            return_all_solutions=False,
+            qpos_seed=(
+                to_tensor(joint_seed, device=self.device)
+                if joint_seed is not None
+                else None
+            ),
         )
-        ret = ret.reshape(len(local_env_ids), n_batch)
-        qpos = qpos_batch.reshape(len(local_env_ids), n_batch, n_dof)
-        return ret, qpos
 
     def _init_control_parts(self, control_parts: Dict[str, List[str]]) -> None:
         """Initialize the control parts of the robot.
