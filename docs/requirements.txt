@@ -9,3 +9,4 @@ sphinxcontrib-bibtex==2.6.5
 sphinx-design==0.6.1
 sphinx-autodoc-typehints==2.3.0
 pypandoc-binary==1.17
+packaging>=23.0
