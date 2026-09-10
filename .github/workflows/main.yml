@@ -6,7 +6,7 @@ on:
     tags:
       - 'v*'
   pull_request:
-    branches: [main]
+    branches: [main, 'release/**']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -219,6 +219,7 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
+          from email.parser import Parser
           from pathlib import Path
           from zipfile import ZipFile
 
@@ -237,6 +238,13 @@ jobs:
           with ZipFile(wheels[0]) as wheel:
               members = set(wheel.namelist())
               entry_points = wheel.read(f"{dist_info}entry_points.txt").decode()
+              metadata = Parser().parsestr(wheel.read(f"{dist_info}METADATA").decode())
+              runtime_version = wheel.read("embodichain/VERSION").decode().strip()
+              if metadata["Version"] != version or runtime_version != version:
+                  raise SystemExit(
+                      f"Wheel version mismatch: expected={version}, "
+                      f"metadata={metadata['Version']}, runtime={runtime_version}"
+                  )
 
           source_task_configs = {
               path.as_posix()
