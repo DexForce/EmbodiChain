@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import os
-from dexsim.utility.path import get_resources_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     RenderCfg,
@@ -30,10 +29,11 @@ from embodichain.lab.sim.objects import (
     SoftObject,
     SoftObjectCfg,
 )
+from embodichain.data import get_data_path
 import pytest
 import torch
 
-COW_PATH = get_resources_data_path("Model", "cow", "cow.obj")
+COW_PATH = get_data_path("Cow/cow2.obj")
 
 
 def test_degenerate_soft_body_surface_is_empty() -> None:
@@ -72,7 +72,7 @@ class BaseSoftObjectTest:
             cfg=SoftObjectCfg(
                 uid="cow",
                 shape=MeshCfg(
-                    fpath=get_resources_data_path("Model", "cow", "cow.obj"),
+                    fpath=get_data_path("Cow/cow2.obj"),
                 ),
                 init_pos=[0.0, 0.0, 3.0],
                 voxel_attr=SoftbodyVoxelAttributesCfg(

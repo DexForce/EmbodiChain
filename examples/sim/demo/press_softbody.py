@@ -26,8 +26,6 @@ import numpy as np
 import time
 import torch
 
-from dexsim.utility.path import get_resources_data_path
-
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot, SoftObject
@@ -125,7 +123,7 @@ def create_soft_cow(sim: SimulationManager) -> SoftObject:
         cfg=SoftObjectCfg(
             uid="cow",
             shape=MeshCfg(
-                fpath=get_resources_data_path("Model", "cow", "cow2.obj"),
+                fpath=get_data_path("Cow/cow2.obj"),
             ),
             init_rot=[0, 90, 0],
             init_pos=[0.45, -0.1, 0.12],
