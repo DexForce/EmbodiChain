@@ -25,9 +25,12 @@ from embodichain.data import get_data_path
 from embodichain.compute.kinematics._warp.ur import (
     URParam,
     ur_ik_kernel,
+    ur_ik_nearest_kernel,
 )
 import math
 from embodichain.utils.device_utils import standardize_device_string
+
+__all__ = ["URSolverCfg", "URSolver"]
 
 
 @configclass
@@ -140,19 +143,24 @@ class URSolver(BaseSolver):
         qpos_seed: torch.Tensor | None = None,
         return_all_solutions: bool = False,
         **kwargs,
-    ):
-        """Compute target joint positions using OPW inverse kinematics.
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute target joint positions using UR inverse kinematics.
 
         Args:
             target_xpos (torch.Tensor): Current end-effector pose, shape (n_sample, 4, 4).
-            qpos_seed (torch.Tensor): Current joint positions, shape (n_sample, num_joints).
-            return_all_solutions (bool, optional): Whether to return all IK solutions or just the best one. Defaults to False.
+            qpos_seed (torch.Tensor): Current joint positions, shape (n_sample, 6)
+                or (1, 6). Defaults to the joint-limit midpoint.
+            return_all_solutions (bool, optional): Whether to return all 512
+                candidates. False selects the nearest valid candidate inside
+                the Warp kernel without allocating the full candidate tensor.
             **kwargs: Additional keyword arguments for future extensions.
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor]:
-                - target_joints (torch.Tensor): Computed target joint positions, shape (n_sample, n_solution, num_joints).
-                - success (torch.Tensor): Boolean tensor indicating IK solution validity for each environment, shape (n_sample,).
+                - success (torch.Tensor): Boolean validity, shape (n_sample,)
+                  or (n_sample, 512) when all solutions are requested.
+                - target_joints (torch.Tensor): Joint positions, shape
+                  (n_sample, 6) or (n_sample, 512, 6), respectively.
         """
         N_SOL = 512
         DOF = 6
@@ -164,7 +172,7 @@ class URSolver(BaseSolver):
         target_xpos_batch = target_xpos_batch @ tcp_inv[None, :, :]
         n_sample = target_xpos_batch.shape[0]
 
-        if qpos_seed is None:
+        if qpos_seed is None and not return_all_solutions:
             # A missing seed previously crashed at the nearest-solution step;
             # default to the feasibility-safe joint-range midpoint.
             qpos_seed = (
@@ -178,10 +186,44 @@ class URSolver(BaseSolver):
         wp_device = standardize_device_string(self.device)
         # Flatten target poses to a 1-D float array for the Warp kernel.
         xpos_wp = wp.from_torch(target_xpos_batch.reshape(-1))
-        all_qpos_wp = wp.zeros(n_sample * N_SOL * DOF, dtype=float, device=wp_device)
-        all_ik_valid_wp = wp.zeros(n_sample * N_SOL, dtype=int, device=wp_device)
         lower_qpos_limits_wp = wp.from_torch(self.lower_qpos_limits)
         upper_qpos_limits_wp = wp.from_torch(self.upper_qpos_limits)
+
+        if not return_all_solutions:
+            # Match PyTorch's promotion in weight * (float32 candidates - seed),
+            # including double-precision seeds and broadcast/noncontiguous seeds.
+            selection_dtype = torch.promote_types(torch.float32, qpos_seed.dtype)
+            selection_dtype = torch.promote_types(
+                selection_dtype, self.ik_nearest_weight.dtype
+            )
+            seed = (
+                qpos_seed.to(device=device, dtype=selection_dtype)
+                .expand(n_sample, DOF)
+                .contiguous()
+            )
+            weights = self.ik_nearest_weight.to(
+                device=device, dtype=selection_dtype
+            ).contiguous()
+            best_qpos_wp = wp.empty((n_sample, DOF), dtype=float, device=wp_device)
+            best_valid_wp = wp.empty(n_sample, dtype=int, device=wp_device)
+            wp.launch(
+                kernel=ur_ik_nearest_kernel,
+                dim=n_sample,
+                inputs=[
+                    xpos_wp,
+                    self._ur_params,
+                    lower_qpos_limits_wp,
+                    upper_qpos_limits_wp,
+                    wp.from_torch(seed),
+                    wp.from_torch(weights),
+                ],
+                outputs=[best_qpos_wp, best_valid_wp],
+                device=wp_device,
+            )
+            return wp.to_torch(best_valid_wp).bool(), wp.to_torch(best_qpos_wp)
+
+        all_qpos_wp = wp.zeros(n_sample * N_SOL * DOF, dtype=float, device=wp_device)
+        all_ik_valid_wp = wp.zeros(n_sample * N_SOL, dtype=int, device=wp_device)
         wp.launch(
             kernel=ur_ik_kernel,
             dim=(n_sample,),
@@ -207,19 +249,7 @@ class URSolver(BaseSolver):
             .to(device=device)
         )
 
-        if return_all_solutions:
-            return all_solutions_validity, all_solutions
-        # Select ik qpos based on the closest distance to the seed qpos
-        qpos_seed_expanded = qpos_seed.unsqueeze(1).expand(-1, N_SOL, -1)
-        distances = torch.norm(
-            self.ik_nearest_weight * (all_solutions - qpos_seed_expanded), dim=-1
-        )
-        # fill invalid solutions with inf distance
-        distances[~all_solutions_validity] = float("inf")
-        closest_indices = torch.argmin(distances, dim=1)
-        ik_qpos = all_solutions[torch.arange(n_sample), closest_indices]
-        ik_validity = all_solutions_validity[torch.arange(n_sample), closest_indices]
-        return ik_validity, ik_qpos
+        return all_solutions_validity, all_solutions
 
     @staticmethod
     def dh_matrix(theta_i, d_i, a_i, alpha_i):

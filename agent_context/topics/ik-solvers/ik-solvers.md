@@ -130,5 +130,14 @@ OPW, SRS, and UR Warp implementations live in
 `lab.sim.motion.solvers` classes own configuration, state, device buffers, and
 solver interfaces. The compute kernels do not import simulation modules.
 `utils/warp/kinematics/*_solver.py` are compatibility aliases.
+
+`URSolver.get_ik(return_all_solutions=False)` uses `ur_ik_nearest_kernel` to
+generate, validate and select the seed-weighted nearest candidate in local
+storage, returning joints `(N, 6)` and validity `(N,)`. It retains the eight
+analytical branches and 64 periodic combinations per branch without writing
+the full candidate tensor. `return_all_solutions=True` uses `ur_ik_kernel` and
+preserves the ordered joints `(N, 512, 6)` and validity `(N, 512)`, including
+repeated representatives when no shifted value fits the joint limits.
+
 Validate kernel import/compilation with `tests/compute/test_imports.py` and
 solver behavior with the corresponding `tests/sim/motion/solvers/` tests.
