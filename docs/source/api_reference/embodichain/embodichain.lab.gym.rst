@@ -39,6 +39,7 @@ Base Environment Classes
     :members:
     :inherited-members:
     :show-inheritance:
+    :exclude-members: acquire_generation_lease, release_generation_lease, generation_epoch, observe_generation_commands
 
     The foundational environment class that provides the core functionality for all EmbodiChain RL environments.
     This class extends the Gymnasium ``Env`` interface with multi-environment support and robotic-specific features.
@@ -56,6 +57,7 @@ Embodied Environment Classes
     :members:
     :inherited-members:
     :show-inheritance:
+    :exclude-members: acquire_generation_lease, release_generation_lease, generation_epoch, prepare_generation_episode, observe_generation_commands
 
     An advanced environment class that provides additional features for embodied AI research, including
     sophisticated observation management, event handling, and multi-modal sensor integration.
@@ -66,6 +68,10 @@ Embodied Environment Classes
 
     Configuration class for embodied environments with extended settings for lighting, observation management,
     and advanced simulation features.
+
+Generation lease and preparation methods are documented with the owning
+:doc:`environment APIs <embodichain.lab.gym.envs>` and the
+:doc:`fixed-scene generation guide </overview/trajectory_generation>`.
 
 Utilities Module (utils)
 -------------------------
@@ -134,4 +140,3 @@ Miscellaneous Utilities
 .. automodule:: embodichain.lab.gym.utils.misc
 
     Miscellaneous utility functions for environment development and debugging.
-

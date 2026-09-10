@@ -27,6 +27,8 @@ component ownership, path resolution, config-owned IDs, and task listing.
 Read [execution](execution.md) for hooks, bridge acceptance, reset ordering,
 wrappers, and replay. Read [profiling](profiling.md) only for instrumentation.
 
+For fixed-scene collection, see [generation preparation and explicit demo candidates](execution.md#fixed-scene-generation-preparation-base_envpy-embodied_envpy). The host owns a full-batch generation lease and validated preparation epochs.
+
 ## Timing contract
 
 `BaseEnv._configure_timing()` resolves `EnvCfg` before constructing the scene:

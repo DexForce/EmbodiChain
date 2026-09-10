@@ -22,6 +22,12 @@ topics:
   - embodichain/lab/sim/objects/articulation.py
   - embodichain/lab/sim/objects/gizmo.py
   - embodichain/lab/gym/envs/base_env.py
+  - embodichain/lab/sim/motion/solvers/__init__.py
+  - embodichain/lab/sim/motion/planners/__init__.py
+  - embodichain/lab/sim/motion/workspace/__init__.py
+  - embodichain/lab/sim/motion/expansion/__init__.py
+  - embodichain/lab/trajectory_generation/initial_state.py
+  - embodichain/lab/trajectory_generation/integrations/sim.py
   watch_paths: [embodichain/lab/sim/sim_manager.py, embodichain/lab/sim/cfg.py, embodichain/lab/sim/objects/,
     tests/sim/]
   related_topics: [env-framework, robot-system, sensor-system, sim-visualization, ik-solvers, motion-planning,
@@ -29,9 +35,34 @@ topics:
   status: active
 - id: env-framework
   title: Environment Framework
-  aliases: [env framework, environment framework, task registration, list task, 环境框架, 任务环境]
-  keywords: [BaseEnv, EmbodiedEnv, EnvCfg, register_env, list-task, run-env, target_control_frequency,
-    sim_steps_per_control, step_dt, environment.component, embodiment.component, ControllerAction, EnvProfiler]
+  aliases:
+  - env framework
+  - environment framework
+  - task registration
+  - list task
+  - 环境框架
+  - 任务环境
+  - generation lease
+  - controlled episode preparation
+  - 受控初态准备
+  keywords:
+  - BaseEnv
+  - EmbodiedEnv
+  - EnvCfg
+  - register_env
+  - list-task
+  - run-env
+  - target_control_frequency
+  - sim_steps_per_control
+  - step_dt
+  - environment.component
+  - embodiment.component
+  - ControllerAction
+  - EnvProfiler
+  - acquire_generation_lease
+  - prepare_generation_episode
+  - generation_epoch
+  - FixedSceneHost
   paths: [topics/env-framework/env-framework.md]
   source_of_truth:
   - embodichain/cli/main.py
@@ -44,6 +75,7 @@ topics:
   - embodichain/lab/gym/envs/embodied_env.py
   - embodichain/lab/gym/envs/demo.py
   - embodichain/lab/gym/utils/profiler.py
+  - embodichain/lab/trajectory_generation/initial_state.py
   watch_paths: [embodichain/lab/gym/envs/base_env.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/gym/envs/demo.py,
     embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_env.py,
     embodichain_tasks/, tests/gym/envs/]
@@ -84,20 +116,51 @@ topics:
   - embodichain/lab/sim/motion/solvers/null_space_posture_task.py
   - embodichain/lab/sim/utility/solver_utils.py
   - embodichain/compute/kinematics/
+  - embodichain/lab/sim/cfg.py
+  - embodichain/lab/sim/motion/__init__.py
+  - embodichain/lab/sim/motion/solvers/srs_solver.py
+  - embodichain/lab/sim/motion/solvers/opw_solver.py
+  - embodichain/lab/sim/motion/solvers/pinocchio_solver.py
+  - embodichain/lab/sim/motion/solvers/differential_solver.py
   watch_paths: [embodichain/lab/sim/motion/solvers/, embodichain/lab/sim/utility/solver_utils.py, embodichain/compute/kinematics/,
     tests/sim/motion/solvers/, tests/compute/]
   related_topics: [simulation-system, robot-system, motion-planning]
   status: active
 - id: robot-system
   title: Robot System
-  aliases: [robot system, robot config, 机器人配置, 机器人系统]
-  keywords: [RobotCfg, control_parts, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg, FrankaPandaCfg,
-    URRobotCfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg]
+  aliases:
+  - robot system
+  - robot config
+  - 机器人配置
+  - 机器人系统
+  - robot workspace
+  - workspace analysis
+  - 机器人工作空间
+  keywords:
+  - RobotCfg
+  - control_parts
+  - build_pk_serial_chain
+  - DexforceW1Cfg
+  - CobotMagicCfg
+  - FrankaPandaCfg
+  - URRobotCfg
+  - DualArmRobotCfg
+  - merge_robot_cfg
+  - JointDrivePropertiesCfg
+  - workspace
+  - RobotWorkspaceCfg
+  - RobotWorkspace
+  - WorkspaceAnalyzer
+  - reachability
   paths: [topics/robot-system/robot-system.md]
   source_of_truth:
   - embodichain/lab/sim/objects/robot.py
   - embodichain/lab/sim/robots/
   - embodichain/lab/sim/cfg.py
+  - embodichain/lab/sim/motion/workspace/__init__.py
+  - embodichain/lab/sim/motion/workspace/cfg.py
+  - embodichain/lab/sim/motion/workspace/runtime.py
+  - embodichain/lab/sim/motion/workspace/analyzer.py
   watch_paths: [embodichain/lab/sim/robots/, embodichain/lab/sim/objects/robot.py, embodichain/lab/sim/cfg.py]
   related_topics: [simulation-system, ik-solvers, motion-planning, sensor-system, sim-visualization, robot-workspace]
   status: active
@@ -138,9 +201,26 @@ topics:
 - id: motion-planning
   title: Motion Planning
   aliases: [motion planning, trajectory planning, motion expansion, trajectory expansion, trajectory augmentation, fixed scene trajectory augmentation, 轨迹扩增, 运动规划, 轨迹规划]
-  keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, CuroboPlanner, NeuralPlanner,
-    expansion, GenerationSession, TrajectoryAugmentationCfg, CandidateTrajectoryBatch,
-    collision world, compute trajectory, trajectory resampling, trajectory warping]
+  keywords:
+  - BasePlanner
+  - PlanState
+  - PlanResult
+  - MotionGenerator
+  - ToppraPlanner
+  - CuroboPlanner
+  - NeuralPlanner
+  - expansion
+  - GenerationSession
+  - TrajectoryAugmentationCfg
+  - CandidateTrajectoryBatch
+  - collision world
+  - compute trajectory
+  - trajectory resampling
+  - trajectory warping
+  - GenerationRunner
+  - FixedSceneHost
+  - QposRolloutExecutor
+  - trajectory_generation
   paths: [topics/motion-planning/motion-planning.md]
   source_of_truth:
   - embodichain/lab/sim/motion/planners/base_planner.py
@@ -153,6 +233,25 @@ topics:
   - embodichain/lab/sim/motion/expansion/
   - embodichain/compute/trajectory/
   - embodichain/lab/sim/utility/action_utils.py
+  - embodichain/lab/sim/motion/__init__.py
+  - embodichain/lab/sim/motion/planners/neural_planner.py
+  - embodichain/lab/sim/motion/expansion/__init__.py
+  - embodichain/lab/sim/motion/expansion/contracts.py
+  - embodichain/lab/sim/motion/expansion/cfg.py
+  - embodichain/lab/sim/motion/expansion/operators.py
+  - embodichain/lab/sim/motion/expansion/coverage.py
+  - embodichain/lab/sim/motion/expansion/session.py
+  - embodichain/lab/trajectory_generation/runner.py
+  - embodichain/lab/trajectory_generation/execution.py
+  - embodichain/lab/trajectory_generation/initial_state.py
+  - embodichain/lab/trajectory_generation/integrations/sim.py
+  - embodichain/lab/trajectory_generation/integrations/planning.py
+  - embodichain/lab/trajectory_generation/sinks.py
+  - examples/sim/motion/trajectory_generation/free_motion.py
+  - examples/sim/motion/trajectory_generation/cube_grasp_parallel.py
+  - examples/sim/motion/trajectory_generation/cube_pickup_collection.py
+  - embodichain/lab/trajectory_generation/integrations/atomic.py
+  - embodichain/lab/trajectory_generation/integrations/contact.py
   watch_paths: [embodichain/lab/sim/motion/motion_generator.py, tests/sim/motion/test_motion_generator.py,
     tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/, embodichain/lab/sim/motion/expansion/,
     tests/sim/motion/expansion/, embodichain/lab/sim/utility/action_utils.py, embodichain/compute/trajectory/,

@@ -17,7 +17,8 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from numbers import Integral, Real
 
 import torch
@@ -136,6 +137,11 @@ class BaseEnv(gym.Env):
         **kwargs,
     ):
         self.cfg = cfg
+        self._generation_lease_owner: object | None = None
+        self._generation_epoch = 0
+        self._generation_prepared = False
+        self._generation_preparing = False
+        self._generation_no_auto_reset = False
 
         # the number of envs to be simulated in parallel.
         self._num_envs = self.cfg.num_envs
@@ -820,6 +826,108 @@ class BaseEnv(gym.Env):
         """
         pass
 
+    @property
+    def generation_epoch(self) -> int:
+        """Return the revision used to invalidate generation runtime bindings.
+
+        Acquisition, release, each controlled preparation attempt, and normal
+        resets advance this revision, including preparations that fail.
+        """
+        return getattr(self, "_generation_epoch", 0)
+
+    def acquire_generation_lease(self, owner: object) -> None:
+        """Reserve this complete environment batch for controlled generation.
+
+        The environment and simulator share one owner identity. The same owner
+        may acquire its lease repeatedly. While reserved, normal resets are
+        rejected and automatic resets are disabled. The caller must prepare a
+        generation episode before stepping and serialize host access.
+
+        Args:
+            owner: Identity token retained until release; must not be ``None``.
+
+        Raises:
+            ValueError: If the owner is ``None``.
+            RuntimeError: If another owner already holds the lease.
+        """
+        if owner is None:
+            raise ValueError("A generation lease owner must not be None.")
+        current = getattr(self, "_generation_lease_owner", None)
+        sim_owner = getattr(self.sim, "_trajectory_generation_owner", None)
+        if current is owner:
+            self._require_generation_lease(owner)
+            return
+        if current is not None or sim_owner is not None:
+            raise RuntimeError(
+                "The environment or simulator already has a generation lease owner."
+            )
+        self.sim._trajectory_generation_owner = owner
+        self._generation_lease_owner = owner
+        self._generation_epoch = self.generation_epoch + 1
+        self._generation_prepared = False
+        self._generation_no_auto_reset = True
+
+    def _require_generation_lease(self, owner: object) -> None:
+        """Require the same lease identity on the environment and simulator."""
+        if (
+            owner is None
+            or getattr(self, "_generation_lease_owner", None) is not owner
+            or getattr(self.sim, "_trajectory_generation_owner", None) is not owner
+        ):
+            raise RuntimeError("The caller does not own the generation lease.")
+
+    def release_generation_lease(self, owner: object) -> None:
+        """Release generation ownership without saving or resetting an episode.
+
+        Args:
+            owner: The identity token used to acquire the lease.
+
+        Raises:
+            RuntimeError: If the caller is not the owner or preparation is active.
+        """
+        self._require_generation_lease(owner)
+        if getattr(self, "_generation_preparing", False):
+            raise RuntimeError("Cannot release a generation lease during preparation.")
+        if getattr(self, "_generation_command_observer", None) is not None:
+            raise RuntimeError(
+                "Cannot release a generation lease during command observation."
+            )
+        self.sim._trajectory_generation_owner = None
+        self._generation_lease_owner = None
+        self._generation_epoch = self.generation_epoch + 1
+        self._generation_prepared = False
+        self._generation_no_auto_reset = False
+
+    @contextmanager
+    def observe_generation_commands(
+        self, owner: object, observer: Callable[[], None]
+    ) -> Iterator[None]:
+        """Observe successfully submitted controller commands before physics.
+
+        The callback runs after ``_step_action`` returns and before simulation
+        advances. It can read actual robot targets without action postprocessing
+        changing the evidence. Exceptions propagate after command submission;
+        callers must count the attempt and safely stop the robot. Only the
+        generation lease owner may install one serialized observer.
+
+        Args:
+            owner: Current generation lease identity.
+            observer: Callback invoked once per submitted batched command.
+
+        Yields:
+            Control while the observer is installed.
+        """
+        self._require_generation_lease(owner)
+        if not callable(observer):
+            raise TypeError("The generation command observer must be callable.")
+        if getattr(self, "_generation_command_observer", None) is not None:
+            raise RuntimeError("A generation command observer is already installed.")
+        self._generation_command_observer = (owner, observer)
+        try:
+            yield
+        finally:
+            self._generation_command_observer = None
+
     def reset(
         self, seed: int | None = None, options: dict | None = None
     ) -> Tuple[EnvObs, Dict]:
@@ -831,7 +939,15 @@ class BaseEnv(gym.Env):
 
         Returns:
             A tuple containing the observations and infos.
+
+        Raises:
+            RuntimeError: If a generation lease owns this environment batch.
         """
+        if getattr(self, "_generation_lease_owner", None) is not None:
+            raise RuntimeError(
+                "Normal reset is disabled while a generation lease is held."
+            )
+        self._generation_epoch = self.generation_epoch + 1
         if seed is not None:
             seed = self._set_seed(seed)
         super().reset(seed=seed)
@@ -895,13 +1011,27 @@ class BaseEnv(gym.Env):
 
         Returns:
             A tuple contraining the observation, reward, terminated, truncated, and info dictionary.
+
+        Raises:
+            RuntimeError: If generation owns the batch without a successfully
+                prepared episode.
         """
+
+        if getattr(self, "_generation_lease_owner", None) is not None and not getattr(
+            self, "_generation_prepared", False
+        ):
+            raise RuntimeError("Prepare a valid generation episode before stepping.")
 
         with self._profiler.section("step", is_root=True):
             with self._profiler.section("preprocess_action"):
                 action = self._preprocess_action(action=action)
             with self._profiler.section("step_action"):
                 action = self._step_action(action=action)
+            command_observer = getattr(self, "_generation_command_observer", None)
+            if command_observer is not None:
+                observer_owner, observer = command_observer
+                self._require_generation_lease(observer_owner)
+                observer()
 
             with self._profiler.section("sim_update"):
                 self.sim.update(self.physics_dt, self.cfg.sim_steps_per_control)
@@ -957,6 +1087,7 @@ class BaseEnv(gym.Env):
             if not (
                 getattr(self, "_replay_no_auto_reset", False)
                 or getattr(self, "_demo_no_auto_reset", False)
+                or getattr(self, "_generation_no_auto_reset", False)
             ):
                 reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
                 if len(reset_env_ids) > 0:

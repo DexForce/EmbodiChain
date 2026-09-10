@@ -932,6 +932,237 @@ def test_session_completes_incremental_command_sequence() -> None:
     assert final.eligible_mask.tolist() == [True]
 
 
+def _candidate_plan(
+    action: DynamicAction,
+    request: ResolvedActionRequest,
+    context: PlanningContext,
+) -> ActionPlan:
+    """Materialize a selected candidate without invoking the skill planner."""
+    target = torch.full_like(context.robot.qpos, 0.7)
+    return action.build_plan(
+        request,
+        context,
+        success=True,
+        trajectory=TimedTrajectory.from_uniform_step(
+            torch.stack((context.robot.qpos, target), dim=1),
+            env_ids=context.env_ids,
+            step_dt=0.1,
+        ),
+    )
+
+
+def test_initial_plan_provider_consumes_candidate_then_plans_later_invocation() -> None:
+    engine, action = _engine()
+    initial = _context(0.0, 0.0, 0.2, 0)
+    invocation = _invocation(engine)
+    provider = Mock(
+        side_effect=lambda request, context: _candidate_plan(action, request, context)
+    )
+
+    session = engine.start(
+        (invocation, replace(invocation, invocation_id="next-call")),
+        initial,
+        initial_plan_provider=provider,
+    )
+    assert action.plan_count == 0
+    request, measured = provider.call_args.args
+    assert isinstance(request, ResolvedActionRequest)
+    assert measured is initial
+    session.tick(initial)
+    selected = session.tick(_context(0.1, 0.0, 0.2, 0))
+    torch.testing.assert_close(
+        _joint_positions(selected.command), torch.full((1, 2), 0.7)
+    )
+    session.tick(_context(0.2, 0.7, 0.2, 0))
+    restarted = session.tick(_context(0.3, 0.7, 0.2, 0))
+    torch.testing.assert_close(
+        _joint_positions(restarted.command), torch.full((1, 2), 0.7)
+    )
+    following = session.tick(_context(0.4, 0.7, 0.2, 0))
+    torch.testing.assert_close(
+        _joint_positions(following.command), torch.full((1, 2), 0.2)
+    )
+    completed = session.tick(_context(0.5, 0.2, 0.2, 0))
+    assert completed.status is ExecutionStatus.COMPLETED
+    assert action.plan_count == 1
+    assert action.requests[0].invocation_id == "next-call"
+    provider.assert_called_once()
+
+
+def test_initial_plan_provider_does_not_replace_recovery_planner() -> None:
+    engine, action = _engine()
+    initial = _context(0.0, 0.0, 0.2, 0)
+    provider = Mock(
+        side_effect=lambda request, context: _candidate_plan(action, request, context)
+    )
+    session = engine.start(
+        (_invocation(engine),), initial, initial_plan_provider=provider
+    )
+    session.tick(initial)
+
+    recovered = session.tick(_context(0.1, 0.0, 0.4, 1))
+    assert ExecutionEventKind.REPLANNED in {event.kind for event in recovered.events}
+    assert action.plan_count == 1
+    assert session.plan_attempts[-1].plan.planned_scene_version == 1
+    provider.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("skill_id", "another-skill", "skill_id must match"),
+        ("invocation_id", "old-call", "correlation id"),
+        ("invocation_revision", 1, "request revision"),
+        ("planned_scene_version", 1, "planning scene version"),
+        ("planned_collision_world_revision", (1,), "collision-world revision"),
+    ),
+)
+def test_initial_plan_provider_rejects_mismatched_plan(
+    field: str, value: object, message: str
+) -> None:
+    engine, action = _engine()
+
+    def provider(
+        request: ResolvedActionRequest, context: PlanningContext
+    ) -> ActionPlan:
+        return replace(_candidate_plan(action, request, context), **{field: value})
+
+    with pytest.raises(ValueError, match=message):
+        engine.start(
+            (_invocation(engine),),
+            _context(0.0, 0.0, 0.2, 0),
+            initial_plan_provider=provider,
+        )
+    assert action.plan_count == 0
+
+
+def test_initial_plan_provider_rejects_wrong_result_type() -> None:
+    engine, _ = _engine()
+    with pytest.raises(TypeError, match="must return an ActionPlan"):
+        engine.start(
+            (_invocation(engine),),
+            _context(0.0, 0.0, 0.2, 0),
+            initial_plan_provider=Mock(return_value=None),
+        )
+
+
+def test_initial_plan_provider_cannot_command_an_unbound_target() -> None:
+    engine, action = _engine()
+
+    def provider(
+        request: ResolvedActionRequest, context: PlanningContext
+    ) -> ActionPlan:
+        plan = _candidate_plan(action, request, context)
+        frames = tuple(
+            replace(
+                frame,
+                commands=tuple(
+                    replace(command, target=JointPositionTarget("unbound", (0, 1)))
+                    for command in frame.commands
+                ),
+            )
+            for frame in plan.commands.frames
+        )
+        return replace(plan, commands=replace(plan.commands, frames=frames))
+
+    with pytest.raises(ValueError, match="not authorized"):
+        engine.start(
+            (_invocation(engine),),
+            _context(0.0, 0.0, 0.2, 0),
+            initial_plan_provider=provider,
+        )
+
+
+def test_initial_plan_provider_receives_new_request_after_reset() -> None:
+    engine, action = _engine()
+    invocation = _invocation(engine)
+    provider = Mock(
+        side_effect=lambda request, context: _candidate_plan(action, request, context)
+    )
+    before = _context(1.0, 0.3, 0.2, 5)
+    after = _context(0.0, 0.0, 0.2, 0)
+
+    first = engine.start((invocation,), before, initial_plan_provider=provider)
+    second = engine.start((invocation,), after, initial_plan_provider=provider)
+
+    first_request, first_context = provider.call_args_list[0].args
+    second_request, second_context = provider.call_args_list[1].args
+    assert first_request is not second_request
+    assert first_context is before
+    assert second_context is after
+    torch.testing.assert_close(
+        _joint_positions(first.tick(before).command), before.robot.qpos
+    )
+    torch.testing.assert_close(
+        _joint_positions(second.tick(after).command), after.robot.qpos
+    )
+    assert action.plan_count == 0
+
+
+def test_initial_plan_provider_preserves_required_collision_binding() -> None:
+    engine, action = _engine()
+    provider = Mock(
+        side_effect=lambda request, context: _candidate_plan(action, request, context)
+    )
+    with pytest.raises(ValueError, match="dynamic_collision_mode='required'"):
+        engine.start(
+            (
+                _invocation(
+                    engine, dynamic_collision_mode=DynamicCollisionMode.REQUIRED
+                ),
+            ),
+            _context(0.0, 0.0, 0.2, 0),
+            initial_plan_provider=provider,
+        )
+    provider.assert_not_called()
+
+
+def test_initial_plan_provider_cannot_bypass_phase_gate_validation() -> None:
+    engine, _ = _engine()
+    action = PhaseGateAction()
+    engine.register(action)
+    provider = Mock(
+        side_effect=lambda request, context: _candidate_plan(action, request, context)
+    )
+    with pytest.raises(ValueError, match="missing segment 'commit'"):
+        engine.start(
+            (_phase_gate_invocation(engine),),
+            _context(0.0, 0.0, 0.2, 0),
+            initial_plan_provider=provider,
+        )
+    assert action.plan_count == 0
+
+
+def test_initial_plan_provider_keeps_physical_effect_verification() -> None:
+    engine, _ = _engine()
+    action = EffectAction()
+    engine.register(action)
+    initial = _context(0.0, 0.0, 0.2, 0)
+    provider = Mock(side_effect=action._plan)
+    session = engine.start(
+        (_invocation(engine, skill_id=action.skill_id),),
+        initial,
+        initial_plan_provider=provider,
+    )
+    session.tick(initial)
+    session.tick(_context(0.1, 0.0, 0.2, 0))
+    waiting = session.tick(_context(0.2, 0.2, 0.2, 0))
+    assert waiting.pending_effect is not None
+    assert waiting.status is ExecutionStatus.RUNNING
+    assert waiting.task_state.get_held_object("arm") is None
+    completed = session.tick(
+        _context(0.3, 0.2, 0.2, 0),
+        effect_result=_effect_result(
+            waiting.pending_effect.verification_id,
+            torch.tensor([True]),
+            torch.tensor([False]),
+        ),
+    )
+    assert completed.status is ExecutionStatus.COMPLETED
+    assert completed.task_state.get_held_object("arm") is not None
+    provider.assert_called_once()
+
+
 @pytest.mark.parametrize(
     ("segment_name", "message"),
     (("missing", "missing segment"), ("prepare", "first trajectory segment")),

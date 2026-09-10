@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import Enum
 import math
-from typing import TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
 import torch
 
@@ -325,9 +325,14 @@ class ExecutionSession:
         context: PlanningContext,
         *,
         eligible_mask: torch.Tensor | None = None,
+        initial_plan_provider: (
+            Callable[[ResolvedActionRequest, PlanningContext], ActionPlan] | None
+        ) = None,
     ) -> None:
         if not invocations:
             raise ValueError("ExecutionSession requires at least one invocation.")
+        if initial_plan_provider is not None and not callable(initial_plan_provider):
+            raise TypeError("initial_plan_provider must be callable.")
         engine._validate_context(context)
         self._engine = engine
         self._requests: tuple[ResolvedActionRequest, ...] = tuple(
@@ -388,7 +393,11 @@ class ExecutionSession:
         )
         self._queued_events: list[ExecutionEvent] = []
         if self._status is ExecutionStatus.RUNNING:
-            self._plan_current(context, ExecutionEventKind.ACTION_PLANNED)
+            self._plan_current(
+                context,
+                ExecutionEventKind.ACTION_PLANNED,
+                plan_provider=initial_plan_provider,
+            )
         else:
             self._queued_events.append(
                 self._event(
@@ -1145,10 +1154,14 @@ class ExecutionSession:
         self,
         context: PlanningContext,
         event_kind: ExecutionEventKind,
+        *,
+        plan_provider: (
+            Callable[[ResolvedActionRequest, PlanningContext], ActionPlan] | None
+        ) = None,
     ) -> None:
         """Plan the current invocation from the latest observation."""
         request = self._requests[self._invocation_index]
-        plan = self._engine._plan_request(request, context)
+        plan = self._engine._plan_request(request, context, plan_provider=plan_provider)
         self._install_plan(plan, context, event_kind)
 
     def _install_plan(

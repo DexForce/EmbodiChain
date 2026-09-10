@@ -8,11 +8,13 @@ not directly import Gym or own simulation stepping. Public imports pass through
 ``embodichain.lab`` and ``embodichain.lab.sim`` initialization and therefore
 require the normal simulation dependencies.
 
-This is the motion core for fixed-scene expert generation. Physical
-initial-state restoration, planning, rollout execution, task validation, and
-episode persistence must be supplied by separate host integrations. Those
-integrations provide actual observations and commands, validation evidence,
-and persistence confirmations; this package does not instantiate them.
+This is the motion core for fixed-scene expert generation. Full-batch physical
+initial-state restoration, supported free-motion EEF/qpos checks, actual qpos
+execution, the synchronous runner, and episode persistence are provided by the
+separate :doc:`generation host API <embodichain.lab.trajectory_generation>`.
+That layer supplies actual observations and commands, validation evidence, and
+persistence confirmations. The low-level candidate execution entry points in the
+simulation and Gym layers are separate from this value-only API.
 
 .. currentmodule:: embodichain.lab.sim.motion.expansion
 

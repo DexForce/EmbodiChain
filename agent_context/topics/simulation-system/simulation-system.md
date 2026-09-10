@@ -123,6 +123,21 @@ reset, or dataset I/O; those operations belong to host integrations. Its public
 import follows the normal `lab/sim` lifecycle and does not promise an isolated
 toolkit import. Atomic Actions remain above the motion capabilities.
 
+`FixedSceneHost` in `embodichain/lab/trajectory_generation/initial_state.py`
+reserves an entire simulator batch for capture/restore and publishes only
+validated `PreparedBatch` epochs. It compares both the physical adapter's
+structure signature and the trusted profile's fixed-condition signature;
+acquisition verifies the captured physical state before accepting it. Normal
+`SimulationManager.reset_objects_state()` calls fail while this host owns the
+batch. Its physical adapter restores state directly, and a Gym-backed host
+also uses the controlled generation lease/preparation boundary described in
+`env-framework`.
+
+`SimulationManager.simulation_time` is the read-only sum of successful manual
+`update()` physics steps. Generation records elapsed control time from this
+counter; preparation setters that update the native world directly are outside
+this clock and occur before the rollout timestamp origin is captured.
+
 `Articulation.get_parent_joint_chain(link_name)` is the public topology query
 for integrations that need link ancestry. It returns immediate-parent-first
 `ArticulationJointKinematics` values containing copied names, joint type,

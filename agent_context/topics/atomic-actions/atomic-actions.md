@@ -124,3 +124,18 @@ python docs/scripts/check_api_docs.py
 For public API changes also run the docs checker tests and Sphinx dummy build.
 For simulator adapters add an environment-level test that exercises normal
 `env.step()` consumption and safe cancellation.
+
+## Offline PickUp export for fixed-scene collection
+
+`lab/trajectory_generation/integrations/atomic.py::export_pickup_templates`
+exports a successful MoveEndEffector → PickUp compilation into protected phase
+qpos templates. It retains approach/close/lift boundaries, expands passive
+mimic geometry and appends real hold commands. Only transit permits residuals.
+`cube_pickup_collection.py` uses this source with full-state/contact validation
+and confirmed LeRobot persistence across repeated full-batch restoration.
+
+This is an offline atomic source: the qpos executor owns physical validation;
+no projected `HeldObjectState` is committed as observed evidence. It does not
+consume `initial_plan_provider` or run AtomicActionRuntime tracking/recovery.
+The runtime adapter and contact-aware Gym source/host matrix remain separate
+acceptance work. Keep the existing runtime and task-state contracts intact.

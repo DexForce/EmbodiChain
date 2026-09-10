@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from math import log
 from functools import wraps
 from datetime import datetime
@@ -83,6 +83,7 @@ from embodichain.data import get_data_path
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim.motion.expansion import ValidationResult
     from embodichain.lab.task_program import CompiledTaskProgram, TaskProgramCfg
     from embodichain.lab.task_program.integrations import (
         TaskProgramAdapterFactory,
@@ -574,6 +575,85 @@ class EmbodiedEnv(BaseEnv):
         self._seed_recording_state(obs, reset_ids)
         return obs, info
 
+    def prepare_generation_episode(
+        self,
+        owner: object,
+        *,
+        prepare: Callable[[], None],
+        restore: Callable[[], None],
+        settle: Callable[[], None],
+        verify: Callable[[], ValidationResult],
+    ) -> tuple[EnvObs, Dict[str, Any]]:
+        """Discard buffered evidence and prepare the whole leased batch.
+
+        Freeze any previous episode before calling this method. Host callbacks
+        own deterministic task/controller preparation, physical restoration,
+        settling, and initial-state verification. They must not call ``step``
+        or ``reset``. Reset/interval events and environment seeding are never
+        run here. Standard managers and observation histories are reset after
+        settling, before verification checks their initial state. Recording is
+        seeded only after successful verification and fresh observation capture.
+
+        Every attempt invalidates earlier generation epochs. A failed attempt
+        leaves stepping disabled until another preparation succeeds.
+
+        Args:
+            owner: The current generation lease identity.
+            prepare: Initialize deterministic task and controller state.
+            restore: Restore the host's complete captured initial state.
+            settle: Advance the host through its explicit settling policy.
+            verify: Return nonempty, all-passed initial-state evidence.
+
+        Returns:
+            The prepared observation and task information for the entire batch.
+
+        Raises:
+            RuntimeError: If the lease is invalid, preparation is active, or
+                initial-state verification does not pass.
+            TypeError: If callbacks are not callable or verification returns
+                something other than ``ValidationResult``.
+        """
+        from embodichain.lab.sim.motion.expansion import ValidationResult
+
+        self._require_generation_lease(owner)
+        if getattr(self, "_generation_preparing", False):
+            raise RuntimeError("Generation episode preparation is already active.")
+        self._generation_epoch = self.generation_epoch + 1
+        self._generation_prepared = False
+        self._active_task_program_bridge = None
+        if not all(
+            callable(callback) for callback in (prepare, restore, settle, verify)
+        ):
+            raise TypeError("Generation preparation requires four callable callbacks.")
+        env_ids = torch.arange(self.num_envs, dtype=torch.long, device=self.device)
+        self._generation_preparing = True
+        try:
+            self._finish_camera_recordings(env_ids, save_data=False)
+            self._clear_episode_recording_state(env_ids)
+            self._elapsed_steps.zero_()
+            self._task_success.zero_()
+            self._traj_raw_action = None
+            prepare()
+            restore()
+            settle()
+            self._reset_episode_managers(env_ids)
+            validation = verify()
+            if not isinstance(validation, ValidationResult):
+                raise TypeError(
+                    "Initial-state verification must return ValidationResult."
+                )
+            if not validation.accepted:
+                raise RuntimeError(
+                    "Generation initial-state verification did not pass."
+                )
+            obs = self.get_obs()
+            info = self.get_info()
+            self._seed_recording_state(obs, env_ids)
+            self._generation_prepared = True
+            return obs, info
+        finally:
+            self._generation_preparing = False
+
     def _seed_recording_state(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
         """Seed all enabled recorders from the current environment state."""
         self._seed_expert_observations(obs, env_ids)
@@ -943,22 +1023,9 @@ class EmbodiedEnv(BaseEnv):
                             env_ids=env_ids_to_save,
                         )
 
-        # Save recorded camera data before resetting
-        if self.cfg.events and self.event_manager is not None:
-            from embodichain.lab.gym.envs.managers.record import record_camera_data
-
-            with self._profiler.section("record_camera_save"):
-                for mode_cfgs in self.event_manager._mode_functor_cfgs.values():
-                    for functor_cfg in mode_cfgs:
-                        if isinstance(functor_cfg.func, record_camera_data):
-                            if save_data:
-                                functor_cfg.func.save_and_clear(
-                                    env_ids=env_ids_to_process
-                                )
-                            else:
-                                functor_cfg.func.discard_and_clear(
-                                    env_ids=env_ids_to_process
-                                )
+        EmbodiedEnv._finish_camera_recordings(
+            self, env_ids_to_process, save_data=save_data
+        )
 
         # Auto-save + reset the per-env trajectory buffer for environments being
         # reset. Use getattr so this no-ops on envs/subclasses that don't allocate
@@ -973,34 +1040,7 @@ class EmbodiedEnv(BaseEnv):
                 for env_id in env_ids_to_process.tolist():
                     self._save_trajectory_for_env(env_id)
 
-        _traj_steps = getattr(self, "_traj_steps", None)
-        if _traj_steps is not None:
-            _traj_steps[env_ids_to_process] = 0
-
-        # Clear episode buffers only after every recorder has consumed them.
-        if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
-            self._clear_expert_rollout_rows(env_ids_to_process)
-            rollout_steps = getattr(self, "rollout_steps", None)
-            if rollout_steps is not None:
-                rollout_ids = env_ids_to_process.to(rollout_steps.device)
-                rollout_steps[rollout_ids] = 0
-                self.current_rollout_step = int(rollout_steps.max().item())
-
-        episode_metadata = getattr(self, "_demo_episode_metadata", None)
-        if episode_metadata is not None:
-            for env_id in env_ids_to_process.cpu().tolist():
-                episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
-        active_segment_ids = getattr(self, "_demo_active_segment_ids", None)
-        if active_segment_ids is not None:
-            demo_ids = env_ids_to_process.to(active_segment_ids.device)
-            active_segment_ids[demo_ids] = 0
-            self._demo_active_mask[demo_ids] = True
-            self._demo_segment_participants[demo_ids] = False
-            self._demo_active_segment_start_steps[demo_ids] = 0
-            self._demo_active_rollout_start_steps[demo_ids] = 0
-            self._demo_steps[demo_ids] = 0
-
-        self.episode_success_status[env_ids_to_process] = False
+        EmbodiedEnv._clear_episode_recording_state(self, env_ids_to_process)
 
         # apply events such as randomization for environments that need a reset
         if self.cfg.events:
@@ -1008,6 +1048,59 @@ class EmbodiedEnv(BaseEnv):
                 with self._profiler.section("event_reset"):
                     self.event_manager.apply(mode="reset", env_ids=env_ids)
 
+        EmbodiedEnv._reset_episode_managers(self, env_ids)
+
+    def _finish_camera_recordings(
+        self, env_ids: torch.Tensor, *, save_data: bool
+    ) -> None:
+        """Finish selected camera buffers without changing event streams."""
+        if self.cfg.events and self.event_manager is not None:
+            from embodichain.lab.gym.envs.managers.record import record_camera_data
+
+            with self._profiler.section("record_camera_save"):
+                for mode_cfgs in self.event_manager._mode_functor_cfgs.values():
+                    for functor_cfg in mode_cfgs:
+                        if isinstance(functor_cfg.func, record_camera_data):
+                            if save_data:
+                                functor_cfg.func.save_and_clear(env_ids=env_ids)
+                            else:
+                                functor_cfg.func.discard_and_clear(env_ids=env_ids)
+
+    def _clear_episode_recording_state(self, env_ids: torch.Tensor) -> None:
+        """Discard episode buffers and annotations without saving or events."""
+        _traj_steps = getattr(self, "_traj_steps", None)
+        if _traj_steps is not None:
+            _traj_steps[env_ids] = 0
+
+        # Clear episode buffers only after every recorder has consumed them.
+        if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
+            self._clear_expert_rollout_rows(env_ids)
+            rollout_steps = getattr(self, "rollout_steps", None)
+            if rollout_steps is not None:
+                rollout_ids = env_ids.to(rollout_steps.device)
+                rollout_steps[rollout_ids] = 0
+                self.current_rollout_step = int(rollout_steps.max().item())
+
+        episode_metadata = getattr(self, "_demo_episode_metadata", None)
+        if episode_metadata is not None:
+            for env_id in env_ids.cpu().tolist():
+                episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
+        active_segment_ids = getattr(self, "_demo_active_segment_ids", None)
+        if active_segment_ids is not None:
+            demo_ids = env_ids.to(active_segment_ids.device)
+            active_segment_ids[demo_ids] = 0
+            self._demo_active_mask[demo_ids] = True
+            self._demo_segment_participants[demo_ids] = False
+            self._demo_active_segment_start_steps[demo_ids] = 0
+            self._demo_active_rollout_start_steps[demo_ids] = 0
+            self._demo_steps[demo_ids] = 0
+
+        self.episode_success_status[env_ids] = False
+
+    def _reset_episode_managers(
+        self, env_ids: Sequence[int] | torch.Tensor | None
+    ) -> None:
+        """Reset observation history, reward, and dataset functors only."""
         # reset observation manager for environments that need a reset
         # This clears any cached data in observation functors (e.g., physics attributes)
         if self.cfg.observations:

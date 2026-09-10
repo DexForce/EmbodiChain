@@ -60,6 +60,8 @@ the object nor certifies the grasp.
 
 Focused augmentation tests live under `tests/sim/motion/expansion/`.
 
+Read [fixed-scene trajectory generation](trajectory-generation.md) for host restoration, qpos rollout, offline PickUp sources, contact validation, and confirmed dataset persistence.
+
 ## Choose the owning layer
 
 - `BasePlanner` and `PlanState` / `PlanResult` define planning interfaces.

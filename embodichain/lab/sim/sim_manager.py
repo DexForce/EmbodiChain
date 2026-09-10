@@ -832,6 +832,16 @@ class SimulationManager:
 
         self._world.render_camera_group(group_ids)
 
+    @property
+    def simulation_time(self) -> float:
+        """Seconds successfully advanced through :meth:`update` since construction.
+
+        Manual-step hosts can use differences of this clock for observation
+        timestamps. Direct backend updates performed outside this manager,
+        including some object preparation setters, are not included.
+        """
+        return self._visualization_sim_time
+
     def update(self, physics_dt: float | None = None, step: int = 10) -> None:
         """Advance physics explicitly and publish the resulting simulation state.
 
@@ -3280,7 +3290,14 @@ class SimulationManager:
         Args:
             env_ids (Sequence[int] | None): The environment IDs to reset. If None, reset all environments.
             excluded_uids (Sequence[str] | None): List of asset UIDs to exclude from resetting. If None, reset all assets.
+
+        Raises:
+            RuntimeError: If a fixed-scene generation host owns this batch.
         """
+        if getattr(self, "_trajectory_generation_owner", None) is not None:
+            raise RuntimeError(
+                "Normal scene reset is disabled while a generation host owns the batch."
+            )
         excluded_uids = set(excluded_uids) if excluded_uids is not None else set()
         for uid, robot in self._robots.items():
             if uid not in excluded_uids:

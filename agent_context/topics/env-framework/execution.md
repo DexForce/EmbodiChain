@@ -49,6 +49,68 @@ Read this when the request needs these details. [Topic overview](env-framework.m
 - A structured controller `TensorDict` may carry auxiliary fields such as
   `ik_success`, but it must contain at least one supported control key.
 
+### Explicit demonstration candidates (`demo.py`)
+
+- `execute_demo_episode(env, segments=...)` accepts one `DemoSegment` or a lazy
+  iterable of segments. Explicit segments bypass both task planning factories;
+  combining them with planning keyword arguments raises `ValueError` before
+  recording begins. An empty iterable executes no candidate and does not fall
+  back to task planning.
+- `segments=None` preserves `resolve_demo_segments()` and its legacy
+  `create_demo_action_list()` fallback. Both paths validate segment types lazily
+  and fill missing instructions from dataset metadata without changing the
+  supplied segment.
+- Explicit candidates use the same normal action processing, per-row masks,
+  validators, cancellation/abort handshake, and recording lifecycle as task
+  plans. Auto-reset remains suspended during execution; the caller owns the
+  later commit or discard boundary. Supplying a candidate does not restore its
+  initial state.
+- Focused coverage: `tests/gym/envs/test_demo.py` and the Task Program bridge
+  and completion tests under `tests/gym/envs/task_program/`.
+
+### Fixed-scene generation preparation (`base_env.py`, `embodied_env.py`)
+
+- `BaseEnv.acquire_generation_lease(owner)` reserves the complete environment
+  batch by owner identity. Same-owner acquisition is idempotent; other owners
+  are rejected. The generation flag disables auto-reset independently of demo
+  and replay flags. Ordinary `reset()` fails before seeding or state mutation
+  while the lease is held.
+- `EmbodiedEnv.prepare_generation_episode(owner, *, prepare, restore, settle,
+  verify)` is the full-batch discard-and-prepare boundary. Freeze prior episode
+  evidence first: this method clears camera buffers, expert/trajectory counts,
+  demo annotations, success state, and the active Task Program bridge without
+  saving pending episodes.
+- Preparation runs deterministic task/controller initialization, physical
+  restoration, settling, standard manager reset, and nonempty all-passed
+  `ValidationResult` verification
+  through trusted callbacks. It does not run startup/reset/interval events or
+  rewind environment/event RNGs. The host profile owns required initialization
+  and certifies any interval events that remain active during later rollouts.
+- Observation/history, reward, and dataset managers reset before verification;
+  `get_obs()` and `get_info()` then refresh the initial observation/task state,
+  and recording seeds from that settled state. Preparation does not use Gym
+  `step()` or write a training transition. Failure leaves stepping disabled.
+- `generation_epoch` advances on lease acquisition/release, every preparation
+  attempt, and normal resets. Failed preparation invalidates previous epochs.
+  `FixedSceneHost` in `embodichain/lab/trajectory_generation/initial_state.py`
+  matches candidate bindings against this epoch and verifies physical/task
+  initial state before publishing a `PreparedBatch` or Gym first frame.
+- `BaseEnv.observe_generation_commands(owner, callback)` observes a successfully
+  submitted `_step_action` command before physics. The observer requires the
+  same generation lease and does not issue a second command or step.
+  `execute_demo_episode` exposes `step_observer(result, active_before_step)` and
+  `row_step_limits` so the qpos executor records real returned observations and
+  stops each short row's recording before batch padding/holds.
+- `FixedSceneHost.initial_observation(binding)` copies the prepared Gym first
+  frame without a second `get_obs()` or history update.
+- `release_generation_lease(owner)` restores normal reset behavior without
+  saving, resetting, or modifying demo/replay flags. Callers serialize access;
+  the host remains the sole simulation stepper while the lease is active.
+- Focused coverage: `tests/gym/envs/test_fixed_scene_preparation.py`, including
+  real Gym lifecycle methods wired to `FixedSceneHost` through fake physical
+  ports; physical adapters have separate tests under
+  `tests/lab/trajectory_generation/`.
+
 ### Task Program completion (`embodied_env.py`, `task_program/bridge.py`)
 
 - `EmbodiedEnvCfg.task_program` remains opt-in. A registered task may attach

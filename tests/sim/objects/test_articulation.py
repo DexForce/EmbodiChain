@@ -44,6 +44,17 @@ ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 NUM_ARENAS = 10
 
 
+@pytest.mark.no_sim
+def test_root_link_name_reads_registered_native_entity() -> None:
+    """Initial-state capture resolves the actual root through native entities."""
+    articulation = object.__new__(Articulation)
+    articulation._entities = [
+        SimpleNamespace(get_root_link_name=lambda: "fixed_robot_base")
+    ]
+
+    assert articulation.root_link_name == "fixed_robot_base"
+
+
 class _GravityEntity:
     """Record native gravity calls for an articulation test double."""
 

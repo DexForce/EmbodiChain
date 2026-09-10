@@ -127,11 +127,14 @@ and the `$add-task-program` read-only deployment inspector.
 
 ## Atomic actions, motion planning, and IK
 
-**Paths:** `embodichain/lab/sim/atomic_actions/**`, `planners/**`,
-`solvers/**`, and grasp/workspace utilities that feed plans.
+**Paths:** `embodichain/lab/sim/atomic_actions/**`,
+`embodichain/lab/sim/motion/{planners,solvers,workspace,expansion}/**`,
+and grasp utilities that feed plans.
 
 Check:
 
+- The `motion` parent and workspace analyzer exports retain lazy loading;
+  Robot initialization must not eagerly load planners or offline analyzers.
 - Goal, options, affordance, requirement, binding, plan, command, effect, and
   evidence types remain coherent across registration, planning, compilation,
   execution, tracking, and verification.

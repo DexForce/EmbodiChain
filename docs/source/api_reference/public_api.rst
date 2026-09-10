@@ -612,21 +612,6 @@ embodichain.lab.sim.atomic_actions.execution
    ExecutionStatus
    ExecutionTick
 
-embodichain.lab.sim.atomic_actions.verification
-------------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.atomic_actions.verification
-
-.. autosummary::
-
-   EffectExpectationResult
-   EffectVerificationRequest
-   EffectVerificationResult
-   HeldObjectGuardRequest
-   HeldObjectGuardResult
-   PhaseEffectGateRequest
-   PhaseEffectGateResult
-
 embodichain.lab.sim.atomic_actions.goals
 ----------------------------------------
 
@@ -829,94 +814,20 @@ embodichain.lab.sim.atomic_actions.transports
    EndpointCommandRouter
    EndpointCommandTransport
 
-embodichain.lab.sim.objects.articulation
-----------------------------------------
+embodichain.lab.sim.atomic_actions.verification
+------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.objects.articulation
-
-.. autosummary::
-
-   ArticulationData
-   Articulation
-   ArticulationJointKinematics
-
-embodichain.lab.sim.objects.cloth_object
-----------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.objects.cloth_object
+.. currentmodule:: embodichain.lab.sim.atomic_actions.verification
 
 .. autosummary::
 
-   ClothBodyData
-   ClothObject
-   ClothObjectCfg
-
-embodichain.lab.sim.objects.constraint
---------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.objects.constraint
-
-.. autosummary::
-
-   RigidConstraint
-
-embodichain.lab.sim.objects.gizmo
----------------------------------
-
-.. currentmodule:: embodichain.lab.sim.objects.gizmo
-
-Native robot targets use DexSim's controller with Newton IK by default.
-Set ``GizmoCfg.ik_solver="embodichain"`` to reuse the robot control part's
-configured solver, including PinkSolver; Viser uses the same solver adapter.
-
-.. autosummary::
-
-   Gizmo
-   GizmoCfg
-   create_robot_ik_gizmo_controller
-
-embodichain.lab.sim.objects.rigid_object
-----------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.objects.rigid_object
-
-.. autosummary::
-
-   RigidBodyData
-   RigidObject
-   RigidObjectCfg
-
-embodichain.lab.sim.objects.rigid_object_group
-----------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.objects.rigid_object_group
-
-.. autosummary::
-
-   RigidBodyGroupData
-   RigidObjectGroup
-   RigidObjectGroupCfg
-
-embodichain.lab.sim.objects.robot
----------------------------------
-
-.. currentmodule:: embodichain.lab.sim.objects.robot
-
-.. autosummary::
-
-   ControlGroup
-   Robot
-
-embodichain.lab.sim.objects.soft_object
----------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.objects.soft_object
-
-.. autosummary::
-
-   SoftBodyData
-   SoftObject
-   SoftObjectCfg
+   EffectExpectationResult
+   EffectVerificationRequest
+   EffectVerificationResult
+   HeldObjectGuardRequest
+   HeldObjectGuardResult
+   PhaseEffectGateRequest
+   PhaseEffectGateResult
 
 embodichain.lab.sim.motion.planners.base_planner
 ------------------------------------------------
@@ -953,6 +864,17 @@ embodichain.lab.sim.motion.planners.curobo.curobo_yaml
 
    generate_curobo_robot_yaml
    generate_curobo_world_yaml
+
+embodichain.lab.sim.motion.motion_generator
+----------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.motion_generator
+
+.. autosummary::
+
+   MotionGenerator
+   MotionGenCfg
+   MotionGenOptions
 
 embodichain.lab.sim.motion.planners.neural_planner
 --------------------------------------------------
@@ -993,232 +915,6 @@ embodichain.lab.sim.motion.planners.utils
    interpolate_xpos
    interpolate_xpos_batched
 
-embodichain.lab.sim.robots.cobotmagic
--------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.cobotmagic
-
-.. autosummary::
-
-   CobotMagicCfg
-
-embodichain.lab.sim.robots.dexforce_w1.hand_specs
--------------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.hand_specs
-
-.. autosummary::
-
-   W1HandSideSpec
-   W1HandSpec
-   get_default_w1_hand_version
-   get_w1_hand_spec
-   normalize_w1_hand_mappings
-
-embodichain.lab.sim.robots.dexforce_w1.specs
---------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.specs
-
-.. autosummary::
-
-   W1VersionSpec
-   get_w1_version_spec
-
-embodichain.lab.sim.robots.dexforce_w1.types
---------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.types
-
-.. autosummary::
-
-   DexforceW1Version
-   DexforceW1HandVersion
-   DexforceW1ArmSide
-   DexforceW1Type
-   DexforceW1HandBrand
-
-embodichain.lab.sim.robots.dexforce_w1.utils
---------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.utils
-
-.. autosummary::
-
-   ChassisManager
-   TorsoManager
-   HeadManager
-   ArmManager
-   HandManager
-   EyesManager
-   build_dexforce_w1_assembly_urdf_cfg
-
-embodichain.lab.sim.robots.dual_arm
------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dual_arm
-
-.. autosummary::
-
-   DualArmRobotCfg
-   build_dual_arm_cfg
-   resolve_mounts
-
-embodichain.lab.sim.robots.franka_panda
----------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.franka_panda
-
-.. autosummary::
-
-   FrankaPandaCfg
-
-embodichain.lab.sim.robots.ur_robot
------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.ur_robot
-
-.. autosummary::
-
-   URRobotCfg
-
-embodichain.lab.sim.sensors.camera
-----------------------------------
-
-.. currentmodule:: embodichain.lab.sim.sensors.camera
-
-.. autosummary::
-
-   Camera
-   CameraCfg
-
-embodichain.lab.sim.sim_manager
--------------------------------
-
-.. currentmodule:: embodichain.lab.sim.sim_manager
-
-.. autosummary::
-
-   SIM_CACHE_DIR
-   MATERIAL_CACHE_DIR
-   CONVEX_DECOMP_DIR
-   REACHABLE_XPOS_DIR
-
-embodichain.lab.task_program.semantics.calls
-------------------------------------------------
-
-.. currentmodule:: embodichain.lab.task_program.semantics.calls
-
-.. autosummary::
-
-   DeclarativeValue
-   HandOver
-   Pick
-   Place
-   PlaceRelationTarget
-   RegisteredSemanticCall
-   SemanticCallCatalog
-   SemanticCallDescriptor
-   SemanticCallSpec
-   SemanticPose
-   builtin_semantic_call_catalog
-
-.. automodule:: embodichain.lab.task_program.semantics.calls
-   :members:
-   :no-index:
-
-embodichain.lab.task_program.semantics.integration
-------------------------------------------------------
-
-.. currentmodule:: embodichain.lab.task_program.semantics.integration
-
-.. autosummary::
-
-   BoundSemanticCall
-   LinkedSemanticCall
-   PathPart
-   SceneEntityManifest
-   SceneManifest
-   SemanticDiagnostic
-   SemanticIntegrationManifest
-   SemanticValidationError
-
-.. automodule:: embodichain.lab.task_program.semantics.integration
-   :members:
-   :no-index:
-
-embodichain.lab.task_program.semantics.effects
---------------------------------------------------
-
-.. automodule:: embodichain.lab.task_program.semantics.effects
-   :members:
-   :no-index:
-
-embodichain.lab.task_program.semantics.evidence
----------------------------------------------------
-
-.. automodule:: embodichain.lab.task_program.semantics.evidence
-   :members:
-   :no-index:
-
-embodichain.lab.task_program.semantics.profiles
----------------------------------------------------
-
-.. currentmodule:: embodichain.lab.task_program.semantics.profiles
-
-.. autosummary::
-
-   AmbiguousSkillBindingError
-   BoundRobotSkillProfile
-   ControlPartEndpoint
-   ControlPartEndpointAdapter
-   EffectAssurance
-   EndpointResolution
-   ProfileValidationError
-   ResourceEndpoint
-   ResourceEndpointAdapter
-   ResolvedRobotResource
-   ResolvedResourceEndpoint
-   ResolvedSkillBinding
-   ResourceBinding
-   ResourceClaim
-   RobotResource
-   RobotSkillProfile
-   SkillPolicyPreset
-   UnsupportedSkillError
-   WorkflowRecoveryPolicy
-
-embodichain.lab.task_program.semantics.scene
-------------------------------------------------
-
-.. currentmodule:: embodichain.lab.task_program.semantics.scene
-
-.. autosummary::
-
-   AmbiguousSceneAffordanceError
-   GRASP_AFFORDANCE_CAPABILITY
-   PLACE_IN_AFFORDANCE_CAPABILITY
-   PLACE_ON_AFFORDANCE_CAPABILITY
-   RegistrySceneProvider
-   SceneAffordanceRef
-   SceneArticulationRef
-   SceneCollisionRole
-   SceneCollisionWorldMode
-   SceneDynamics
-   SceneEntityRef
-   SceneEntityMetadata
-   SceneEntityRegistration
-   SceneEntityStateProvider
-   SceneGeometryProvider
-   SceneLinkRef
-   SceneObjectRef
-   SceneRegistry
-   UnsupportedSceneAffordanceError
-
-.. automodule:: embodichain.lab.task_program.semantics.scene
-   :members:
-   :no-index:
-
 embodichain.lab.sim.motion.solvers.neural_ik_solver
 ---------------------------------------------------
 
@@ -1257,15 +953,6 @@ embodichain.lab.sim.motion.solvers.srs_solver
 
    SRSSolver
    SRSSolverCfg
-
-embodichain.lab.sim.utility.render_utils
-----------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.utility.render_utils
-
-.. autosummary::
-
-   select_default_renderer
 
 embodichain.lab.sim.motion.workspace.caches.cache_utils
 -------------------------------------------------------
@@ -1444,6 +1131,330 @@ embodichain.lab.sim.motion.workspace.visualizers.voxel_visualizer
 .. autosummary::
 
    VoxelVisualizer
+
+embodichain.lab.sim.objects.articulation
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.objects.articulation
+
+.. autosummary::
+
+   ArticulationData
+   Articulation
+   ArticulationJointKinematics
+
+embodichain.lab.sim.objects.cloth_object
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.objects.cloth_object
+
+.. autosummary::
+
+   ClothBodyData
+   ClothObject
+   ClothObjectCfg
+
+embodichain.lab.sim.objects.constraint
+--------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.objects.constraint
+
+.. autosummary::
+
+   RigidConstraint
+
+embodichain.lab.sim.objects.gizmo
+---------------------------------
+
+.. currentmodule:: embodichain.lab.sim.objects.gizmo
+
+Native robot targets use DexSim's controller with Newton IK by default.
+Set ``GizmoCfg.ik_solver="embodichain"`` to reuse the robot control part's
+configured solver, including PinkSolver; Viser uses the same solver adapter.
+
+.. autosummary::
+
+   Gizmo
+   GizmoCfg
+   create_robot_ik_gizmo_controller
+
+embodichain.lab.sim.objects.rigid_object
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.objects.rigid_object
+
+.. autosummary::
+
+   RigidBodyData
+   RigidObject
+   RigidObjectCfg
+
+embodichain.lab.sim.objects.rigid_object_group
+----------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.objects.rigid_object_group
+
+.. autosummary::
+
+   RigidBodyGroupData
+   RigidObjectGroup
+   RigidObjectGroupCfg
+
+embodichain.lab.sim.objects.robot
+---------------------------------
+
+.. currentmodule:: embodichain.lab.sim.objects.robot
+
+.. autosummary::
+
+   ControlGroup
+   Robot
+
+embodichain.lab.sim.objects.soft_object
+---------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.objects.soft_object
+
+.. autosummary::
+
+   SoftBodyData
+   SoftObject
+   SoftObjectCfg
+
+embodichain.lab.sim.robots.cobotmagic
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.robots.cobotmagic
+
+.. autosummary::
+
+   CobotMagicCfg
+
+embodichain.lab.sim.robots.dexforce_w1.hand_specs
+-------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.hand_specs
+
+.. autosummary::
+
+   W1HandSideSpec
+   W1HandSpec
+   get_default_w1_hand_version
+   get_w1_hand_spec
+   normalize_w1_hand_mappings
+
+embodichain.lab.sim.robots.dexforce_w1.specs
+--------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.specs
+
+.. autosummary::
+
+   W1VersionSpec
+   get_w1_version_spec
+
+embodichain.lab.sim.robots.dexforce_w1.types
+--------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.types
+
+.. autosummary::
+
+   DexforceW1Version
+   DexforceW1HandVersion
+   DexforceW1ArmSide
+   DexforceW1Type
+   DexforceW1HandBrand
+
+embodichain.lab.sim.robots.dexforce_w1.utils
+--------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.utils
+
+.. autosummary::
+
+   ChassisManager
+   TorsoManager
+   HeadManager
+   ArmManager
+   HandManager
+   EyesManager
+   build_dexforce_w1_assembly_urdf_cfg
+
+embodichain.lab.sim.robots.dual_arm
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.robots.dual_arm
+
+.. autosummary::
+
+   DualArmRobotCfg
+   build_dual_arm_cfg
+   resolve_mounts
+
+embodichain.lab.sim.robots.franka_panda
+---------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.robots.franka_panda
+
+.. autosummary::
+
+   FrankaPandaCfg
+
+embodichain.lab.sim.robots.ur_robot
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.robots.ur_robot
+
+.. autosummary::
+
+   URRobotCfg
+
+embodichain.lab.sim.sensors.camera
+----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.camera
+
+.. autosummary::
+
+   Camera
+   CameraCfg
+
+embodichain.lab.sim.sim_manager
+-------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sim_manager
+
+.. autosummary::
+
+   SIM_CACHE_DIR
+   MATERIAL_CACHE_DIR
+   CONVEX_DECOMP_DIR
+   REACHABLE_XPOS_DIR
+
+embodichain.lab.sim.utility.render_utils
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.utility.render_utils
+
+.. autosummary::
+
+   select_default_renderer
+
+embodichain.lab.task_program.semantics.calls
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.task_program.semantics.calls
+
+.. autosummary::
+
+   DeclarativeValue
+   HandOver
+   Pick
+   Place
+   PlaceRelationTarget
+   RegisteredSemanticCall
+   SemanticCallCatalog
+   SemanticCallDescriptor
+   SemanticCallSpec
+   SemanticPose
+   builtin_semantic_call_catalog
+
+.. automodule:: embodichain.lab.task_program.semantics.calls
+   :members:
+   :no-index:
+
+embodichain.lab.task_program.semantics.effects
+--------------------------------------------------
+
+.. automodule:: embodichain.lab.task_program.semantics.effects
+   :members:
+   :no-index:
+
+embodichain.lab.task_program.semantics.evidence
+---------------------------------------------------
+
+.. automodule:: embodichain.lab.task_program.semantics.evidence
+   :members:
+   :no-index:
+
+embodichain.lab.task_program.semantics.integration
+------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.task_program.semantics.integration
+
+.. autosummary::
+
+   BoundSemanticCall
+   LinkedSemanticCall
+   PathPart
+   SceneEntityManifest
+   SceneManifest
+   SemanticDiagnostic
+   SemanticIntegrationManifest
+   SemanticValidationError
+
+.. automodule:: embodichain.lab.task_program.semantics.integration
+   :members:
+   :no-index:
+
+embodichain.lab.task_program.semantics.profiles
+---------------------------------------------------
+
+.. currentmodule:: embodichain.lab.task_program.semantics.profiles
+
+.. autosummary::
+
+   AmbiguousSkillBindingError
+   BoundRobotSkillProfile
+   ControlPartEndpoint
+   ControlPartEndpointAdapter
+   EffectAssurance
+   EndpointResolution
+   ProfileValidationError
+   ResourceEndpoint
+   ResourceEndpointAdapter
+   ResolvedRobotResource
+   ResolvedResourceEndpoint
+   ResolvedSkillBinding
+   ResourceBinding
+   ResourceClaim
+   RobotResource
+   RobotSkillProfile
+   SkillPolicyPreset
+   UnsupportedSkillError
+   WorkflowRecoveryPolicy
+
+embodichain.lab.task_program.semantics.scene
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.task_program.semantics.scene
+
+.. autosummary::
+
+   AmbiguousSceneAffordanceError
+   GRASP_AFFORDANCE_CAPABILITY
+   PLACE_IN_AFFORDANCE_CAPABILITY
+   PLACE_ON_AFFORDANCE_CAPABILITY
+   RegistrySceneProvider
+   SceneAffordanceRef
+   SceneArticulationRef
+   SceneCollisionRole
+   SceneCollisionWorldMode
+   SceneDynamics
+   SceneEntityRef
+   SceneEntityMetadata
+   SceneEntityRegistration
+   SceneEntityStateProvider
+   SceneGeometryProvider
+   SceneLinkRef
+   SceneObjectRef
+   SceneRegistry
+   UnsupportedSceneAffordanceError
+
+.. automodule:: embodichain.lab.task_program.semantics.scene
+   :members:
+   :no-index:
 
 embodichain.lab.visualization.backends
 --------------------------------------

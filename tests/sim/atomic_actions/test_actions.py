@@ -2064,6 +2064,252 @@ def test_pick_normalizes_integer_batch_ik_success_masks() -> None:
     assert qpos.shape == (NUM_ENVS, 3, 2, ARM_DOF)
 
 
+@pytest.mark.parametrize("all_empty", (False, True))
+def test_pick_empty_grasp_rows_return_safe_pose_and_failure_mask(
+    all_empty: bool,
+) -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    empty = (torch.empty(0, 4, 4), torch.empty(0))
+    valid_pose = torch.eye(4).unsqueeze(0)
+    valid_pose[:, 0, 3] = 0.3
+    _GRASP_GENERATORS[id(action)].get_valid_grasp_poses = Mock(
+        return_value=[empty, empty if all_empty else (valid_pose, torch.zeros(1))]
+    )
+    action._select_feasible_grasp_variants = Mock(
+        side_effect=lambda poses, *_: (
+            poses,
+            torch.ones(poses.shape[:2], dtype=torch.bool),
+        )
+    )
+    safe_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    safe_pose[:, 1, 3] = 0.4
+    generator.robot.compute_fk.side_effect = None
+    generator.robot.compute_fk.return_value = safe_pose
+
+    success, selected = action._resolve_grasp_pose(
+        ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, entity_id="target"
+        ),
+        torch.eye(4).repeat(NUM_ENVS, 1, 1),
+        torch.zeros(NUM_ENVS, ARM_DOF),
+        JointPositionTarget("arm", tuple(range(ARM_DOF))),
+        "hand",
+        PickUpOptions(),
+        torch.tensor((0.0, 0.0, -1.0)),
+    )
+
+    assert success.tolist() == [False, not all_empty]
+    torch.testing.assert_close(selected[0], safe_pose[0])
+    if all_empty:
+        action._select_feasible_grasp_variants.assert_not_called()
+        torch.testing.assert_close(selected, safe_pose)
+    else:
+        passed_poses = action._select_feasible_grasp_variants.call_args.args[0]
+        torch.testing.assert_close(passed_poses[0, 0], safe_pose[0])
+        torch.testing.assert_close(selected[1], valid_pose[0])
+
+
+def test_pick_padding_cannot_become_a_feasible_grasp() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    _GRASP_GENERATORS[id(action)].get_valid_grasp_poses = Mock(
+        return_value=[
+            (torch.eye(4).repeat(1, 1, 1), torch.zeros(1)),
+            (torch.eye(4).repeat(2, 1, 1), torch.zeros(2)),
+        ]
+    )
+    action._select_feasible_grasp_variants = Mock(
+        side_effect=lambda poses, *_: (
+            poses,
+            torch.tensor([[False, True], [True, True]]),
+        )
+    )
+    success, _ = action._resolve_grasp_pose(
+        ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, entity_id="target"
+        ),
+        torch.eye(4).repeat(NUM_ENVS, 1, 1),
+        torch.zeros(NUM_ENVS, ARM_DOF),
+        JointPositionTarget("arm", tuple(range(ARM_DOF))),
+        "hand",
+        PickUpOptions(),
+        torch.tensor((0.0, 0.0, -1.0)),
+    )
+    assert success.tolist() == [False, True]
+
+
+@pytest.mark.parametrize(
+    "invalid_kind",
+    (
+        "nan_cost",
+        "infinite_cost",
+        "negative_infinite_cost",
+        "nan_pose",
+        "infinite_pose",
+        "reflection",
+        "nonorthogonal_rotation",
+        "invalid_bottom_row",
+    ),
+)
+def test_pick_invalid_grasp_never_reaches_ik_or_hides_valid_peer(
+    invalid_kind: str,
+) -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    invalid_pose = torch.eye(4)
+    invalid_pose[0, 3] = 0.1
+    invalid_cost = 0.0
+    if invalid_kind == "nan_cost":
+        invalid_cost = float("nan")
+    elif invalid_kind == "infinite_cost":
+        invalid_cost = float("inf")
+    elif invalid_kind == "negative_infinite_cost":
+        invalid_cost = -float("inf")
+    elif invalid_kind == "nan_pose":
+        invalid_pose[0, 3] = float("nan")
+    elif invalid_kind == "infinite_pose":
+        invalid_pose[0, 0] = float("inf")
+    elif invalid_kind == "reflection":
+        invalid_pose[0, 0] = -1.0
+    elif invalid_kind == "nonorthogonal_rotation":
+        invalid_pose[0, 0] = 2.0
+    else:
+        invalid_pose[3, 0] = 1.0
+    valid_pose = torch.eye(4)
+    valid_pose[0, 3] = 0.3
+    _GRASP_GENERATORS[id(action)].get_valid_grasp_poses = Mock(
+        return_value=[
+            (
+                torch.stack((invalid_pose, valid_pose)),
+                torch.tensor([invalid_cost, 1.0]),
+            ),
+            (invalid_pose.unsqueeze(0), torch.tensor([invalid_cost])),
+        ]
+    )
+    safe_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    safe_pose[:, 1, 3] = 0.4
+    generator.robot.compute_fk.side_effect = None
+    generator.robot.compute_fk.return_value = safe_pose
+
+    def feasible_candidates(
+        poses: torch.Tensor, *_: object
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert torch.isfinite(poses).all()
+        torch.testing.assert_close(poses[:, 0], safe_pose)
+        return poses, torch.ones(poses.shape[:2], dtype=torch.bool)
+
+    action._select_feasible_grasp_variants = Mock(side_effect=feasible_candidates)
+    success, selected = action._resolve_grasp_pose(
+        ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, entity_id="target"
+        ),
+        torch.eye(4).repeat(NUM_ENVS, 1, 1),
+        torch.zeros(NUM_ENVS, ARM_DOF),
+        JointPositionTarget("arm", tuple(range(ARM_DOF))),
+        "hand",
+        PickUpOptions(),
+        torch.tensor((0.0, 0.0, -1.0)),
+    )
+
+    assert success.tolist() == [True, False]
+    torch.testing.assert_close(selected[0], valid_pose)
+    torch.testing.assert_close(selected[1], safe_pose[1])
+
+
+@pytest.mark.parametrize("cost_offset", (0.0, 10000.0))
+def test_pick_finite_costs_choose_stable_minimum_without_magic_threshold(
+    cost_offset: float,
+) -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    poses = torch.eye(4).repeat(3, 1, 1)
+    poses[:, 0, 3] = torch.tensor([0.1, 0.2, 0.3])
+    _GRASP_GENERATORS[id(action)].get_valid_grasp_poses = Mock(
+        return_value=[
+            (poses, torch.tensor([2.0, 1.0, 1.0]) + cost_offset),
+            (poses, torch.tensor([0.5, 2.0, 1.0]) + cost_offset),
+        ]
+    )
+    action._select_feasible_grasp_variants = Mock(
+        side_effect=lambda poses, *_: (
+            poses,
+            torch.ones(poses.shape[:2], dtype=torch.bool),
+        )
+    )
+    success, selected = action._resolve_grasp_pose(
+        ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, entity_id="target"
+        ),
+        torch.eye(4).repeat(NUM_ENVS, 1, 1),
+        torch.zeros(NUM_ENVS, ARM_DOF),
+        JointPositionTarget("arm", tuple(range(ARM_DOF))),
+        "hand",
+        PickUpOptions(),
+        torch.tensor((0.0, 0.0, -1.0)),
+    )
+    assert success.all()
+    torch.testing.assert_close(selected, poses[torch.tensor([1, 0])])
+
+
+@pytest.mark.parametrize("bad_qpos", (float("nan"), float("inf"), 99.0))
+def test_pick_failed_ik_preserves_last_valid_seed(bad_qpos: float) -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    poses = torch.eye(4).repeat(NUM_ENVS, 1, 2, 1, 1)
+    seed = torch.full((NUM_ENVS, ARM_DOF), 0.25)
+
+    def compute_batch_ik(
+        *, pose: torch.Tensor, name: str, joint_seed: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        success = torch.tensor([[False, True], [True, True]])
+        qpos = joint_seed + 0.1
+        qpos[0, 0] = bad_qpos
+        # A backend incorrectly flagging a NaN result as success must also fail.
+        qpos[1, 0] = float("nan")
+        return success, qpos
+
+    generator.robot.compute_batch_ik.side_effect = compute_batch_ik
+    success, qpos = action._compute_batch_candidate_ik(
+        poses, seed, JointPositionTarget("arm", tuple(range(ARM_DOF)))
+    )
+    assert success.tolist() == [[[False, True]], [[False, True]]]
+    torch.testing.assert_close(qpos[:, 0, 0], seed)
+    torch.testing.assert_close(qpos[:, 0, 1], seed + 0.1)
+    assert torch.isfinite(qpos).all()
+
+
+def test_pick_failed_pregrasp_ik_never_passes_nan_seed_to_later_stages() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    seeds: list[torch.Tensor] = []
+
+    def compute_batch_ik(
+        *, pose: torch.Tensor, name: str, joint_seed: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert torch.isfinite(joint_seed).all()
+        seeds.append(joint_seed.clone())
+        success = torch.ones(pose.shape[:2], dtype=torch.bool)
+        qpos = joint_seed + 0.1
+        if len(seeds) == 1:
+            success[0] = False
+            qpos[0] = float("nan")
+        return success, qpos
+
+    generator.robot.compute_batch_ik.side_effect = compute_batch_ik
+    _, success = action._select_feasible_grasp_variants(
+        torch.eye(4).repeat(NUM_ENVS, 1, 1, 1),
+        torch.zeros(NUM_ENVS, ARM_DOF),
+        torch.eye(4).repeat(NUM_ENVS, 1, 1),
+        JointPositionTarget("arm", tuple(range(ARM_DOF))),
+        PickUpOptions(downstream_object_target_poses=(torch.eye(4),)),
+        torch.tensor((0.0, 0.0, -1.0)),
+    )
+    assert success.tolist() == [[False], [True]]
+    assert len(seeds) == 4  # Pregrasp, grasp, lift, and downstream target.
+    torch.testing.assert_close(seeds[1][0], torch.zeros_like(seeds[1][0]))
+
+
 def test_pick_maps_canonical_grasp_frames_to_the_robot_eef() -> None:
     """Endpoint calibration is applied after canonical grasp generation."""
     generator = _motion_generator()

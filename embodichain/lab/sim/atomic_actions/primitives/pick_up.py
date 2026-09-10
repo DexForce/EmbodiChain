@@ -574,8 +574,19 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         )
         num_envs = object_pose.shape[0]
         n_max_pose = max(r[0].shape[0] for r in grasp_poses_result)
-        grasp_xpos_padding = torch.zeros(
-            (num_envs, n_max_pose, 4, 4), dtype=torch.float32, device=self.device
+        safe_pose = self.robot.compute_fk(
+            qpos=start_qpos,
+            name=manipulator.control_part,
+            to_matrix=True,
+        )
+        if n_max_pose == 0:
+            return (
+                torch.zeros(num_envs, dtype=torch.bool, device=self.device),
+                safe_pose,
+            )
+        grasp_xpos_padding = safe_pose[:, None].expand(-1, n_max_pose, -1, -1).clone()
+        candidate_mask = torch.zeros(
+            (num_envs, n_max_pose), dtype=torch.bool, device=self.device
         )
         grasp_cost_padding = torch.full(
             (num_envs, n_max_pose),
@@ -585,16 +596,47 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         )
         for i in range(num_envs):
             n_pose = grasp_poses_result[i][0].shape[0]
+            if n_pose == 0:
+                continue
             grasp_poses = grasp_poses_result[i][0].to(
-                device=self.device, dtype=torch.float32
+                device=self.device, dtype=grasp_xpos_padding.dtype
             )
             grasp_costs = grasp_poses_result[i][1].to(
                 device=self.device, dtype=torch.float32
             )
-            grasp_xpos_padding[i, :n_pose] = grasp_poses
-            grasp_cost_padding[i, :n_pose] = grasp_costs
-            grasp_xpos_padding[i, n_pose:] = grasp_poses[0]
-            grasp_cost_padding[i, n_pose:] = grasp_costs[0]
+            valid = torch.isfinite(grasp_costs) & torch.isfinite(grasp_poses).all(
+                dim=(-2, -1)
+            )
+            # Validate finite transforms before any rotation math or batch IK.
+            # Invalid candidates remain masked even if the safe placeholder is
+            # itself reachable by the robot.
+            checked_poses = torch.where(
+                valid[:, None, None], grasp_poses, safe_pose[i]
+            ).to(dtype=torch.float64)
+            rotation = checked_poses[:, :3, :3]
+            valid &= torch.isclose(
+                checked_poses[:, 3],
+                checked_poses.new_tensor((0.0, 0.0, 0.0, 1.0)),
+                atol=1.0e-6,
+                rtol=0.0,
+            ).all(dim=-1)
+            valid &= torch.isclose(
+                rotation.transpose(-2, -1) @ rotation,
+                torch.eye(3, dtype=rotation.dtype, device=rotation.device),
+                atol=1.0e-6,
+                rtol=0.0,
+            ).all(dim=(-2, -1))
+            valid &= torch.isclose(
+                torch.linalg.det(rotation),
+                rotation.new_tensor(1.0),
+                atol=1.0e-6,
+                rtol=0.0,
+            )
+            grasp_xpos_padding[i, :n_pose] = torch.where(
+                valid[:, None, None], grasp_poses, safe_pose[i]
+            )
+            grasp_cost_padding[i, :n_pose] = torch.where(valid, grasp_costs, torch.inf)
+            candidate_mask[i, :n_pose] = valid
         grasp_xpos_padding, ik_success = self._select_feasible_grasp_variants(
             grasp_xpos_padding,
             start_qpos,
@@ -603,13 +645,17 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             options,
             approach_direction,
         )
-        grasp_cost_masked = torch.where(ik_success, grasp_cost_padding, 10000.0)
+        grasp_cost_masked = torch.where(
+            candidate_mask & ik_success, grasp_cost_padding, torch.inf
+        )
         best_cost, best_idx = grasp_cost_masked.min(dim=1)
-        is_success = best_cost < 9999.0
+        is_success = torch.isfinite(best_cost)
         best_grasp_xpos = grasp_xpos_padding[
             torch.arange(num_envs, device=self.device), best_idx
         ]
-        return is_success, best_grasp_xpos
+        return is_success, torch.where(
+            is_success[:, None, None], best_grasp_xpos, safe_pose
+        )
 
     def _select_feasible_grasp_variants(
         self,
@@ -767,8 +813,14 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             name=manipulator.control_part,
             joint_seed=flat_seed,
         )
+        success = is_success.to(device=self.device, dtype=torch.bool)
+        success = success.reshape(num_envs, n_pose * n_variant)
+        success &= torch.isfinite(qpos).all(dim=-1)
+        # A failed solver may return NaNs or an arbitrary finite configuration.
+        # Keep its last valid seed so it cannot contaminate the next stage's IK.
+        qpos = torch.where(success[..., None], qpos, flat_seed)
         return (
-            is_success.to(device=self.device, dtype=torch.bool).reshape(
+            success.reshape(
                 num_envs,
                 n_pose,
                 n_variant,

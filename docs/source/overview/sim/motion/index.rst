@@ -27,12 +27,12 @@ public imports still use the normal ``lab`` and ``sim`` initialization path.
      - Explicit qpos templates and candidates, constrained geometric and timing
        variation, measured coverage, and bounded generation accounting.
 
-Trajectory augmentation provides the core contracts and operators. Physical
-initial-state restoration, planning, rollout execution, task validation, and
-dataset persistence must be supplied by host integrations. The core accepts
-their evidence and persistence receipts without creating those services. See the
+Trajectory augmentation provides the core contracts and operators. The
+:doc:`generation host layer </overview/trajectory_generation>` supplies
+full-batch restoration, qpos execution, measured validation and confirmed
+persistence for free motion and offline atomic PickUp sources. See the
 :doc:`augmentation API </api_reference/embodichain/embodichain.lab.sim.motion.expansion>`
-for the implemented boundaries.
+for the core boundaries.
 
 Migrating Existing Imports
 --------------------------
@@ -55,7 +55,8 @@ imports, string-based module references in configuration, and custom extensions:
 Their nested modules follow the same mapping. Solver ``class_type`` names such
 as ``URSolver`` still resolve through ``RobotCfg.from_dict()``. Existing tests
 and examples now live under ``tests/sim/motion/`` and ``examples/sim/motion/``.
-Warp kinematics kernels remain at ``embodichain.utils.warp.kinematics``.
+Warp kinematics kernels live under ``embodichain.compute.kinematics._warp``;
+``embodichain.utils.warp.kinematics`` retains compatibility exports.
 
 .. toctree::
    :maxdepth: 1

@@ -649,18 +649,36 @@ def resolve_demo_segments(env: Any, **kwargs: Any) -> Iterable[DemoSegment]:
             else (DemoSegment(actions, name="legacy", metadata={"segment_count": 1}),)
         )
 
+    return _validated_demo_segments(
+        segments,
+        fallback_instruction=_dataset_instruction(env),
+        source="create_demo_segments()",
+    )
+
+
+def _validated_demo_segments(
+    segments: Iterable[DemoSegment] | DemoSegment | None,
+    *,
+    fallback_instruction: str,
+    source: str,
+) -> Iterable[DemoSegment]:
+    """Normalize a segment source without eagerly consuming lazy plans."""
     if segments is None:
         return ()
     if isinstance(segments, DemoSegment):
         segments = (segments,)
-
-    fallback_instruction = _dataset_instruction(env)
+    try:
+        iterator = iter(segments)
+    except TypeError as exc:
+        raise TypeError(
+            f"{source} must be a DemoSegment or an iterable of DemoSegment objects."
+        ) from exc
 
     def _validate() -> Iterable[DemoSegment]:
-        for segment in segments:
+        for segment in iterator:
             if not isinstance(segment, DemoSegment):
                 raise TypeError(
-                    "create_demo_segments() must yield DemoSegment objects, "
+                    f"{source} must yield DemoSegment objects, "
                     f"got {type(segment).__name__}."
                 )
             if segment.instruction is None:
@@ -673,14 +691,17 @@ def resolve_demo_segments(env: Any, **kwargs: Any) -> Iterable[DemoSegment]:
 def execute_demo_episode(
     env: Any,
     *,
+    segments: Iterable[DemoSegment] | DemoSegment | None = None,
     episode_index: int = 0,
     execution_cfg: DemoExecutionCfg | None = None,
     attempt_id: int = 0,
     should_stop: StopPredicate | None = None,
     progress: ProgressWrapper | None = None,
+    step_observer: Callable[[Any, tuple[bool, ...]], None] | None = None,
+    row_step_limits: tuple[int, ...] | None = None,
     **plan_kwargs: Any,
 ) -> DemoEpisodeResult:
-    """Plan and execute every segment in one environment episode.
+    """Execute supplied segments or plan one environment demonstration episode.
 
     Auto-reset is suspended for the duration of execution. The caller owns the
     transaction boundary and must explicitly call ``env.reset()`` to commit a
@@ -689,18 +710,36 @@ def execute_demo_episode(
 
     Args:
         env: Gym environment or wrapper.
+        segments: Explicit candidate segments, consumed lazily without calling
+            the environment's planning methods. ``None`` retains task-owned
+            planning. Explicit segments cannot be combined with planning
+            arguments.
         episode_index: Logical episode identifier used in metadata and logs.
         execution_cfg: Collector-owned output settings. Defaults to continuous
             episode persistence.
         attempt_id: Zero-based identifier for this collection attempt.
         should_stop: Optional callback checked before every action.
         progress: Optional wrapper such as ``tqdm`` for action iterables.
+        step_observer: Optional callback receiving the unchanged ``env.step``
+            result and the rows active for that transition. It runs before
+            terminal handling, without querying observations again.
+        row_step_limits: Optional full-batch action counts for supplied ragged
+            trajectories. Zero skips a row. Finished rows stop recording and
+            receive normal demo hold commands while others finish; their task
+            success is checked at the final batch boundary. ``None`` preserves
+            ordinary segment execution.
         **plan_kwargs: Arguments forwarded to the task's planning method.
 
     Returns:
         A :class:`DemoEpisodeResult` describing segment spans and terminal
         state.
+
+    Raises:
+        TypeError: If a segment source contains values other than DemoSegment.
+        ValueError: If explicit segments and planning arguments are combined.
     """
+    if segments is not None and plan_kwargs:
+        raise ValueError("Explicit segments cannot be combined with plan_kwargs.")
     if execution_cfg is None:
         execution_cfg = DemoExecutionCfg()
     elif not isinstance(execution_cfg, DemoExecutionCfg):
@@ -710,6 +749,18 @@ def execute_demo_episode(
 
     target = _env_target(env)
     num_envs = int(getattr(target, "num_envs", 1))
+    if step_observer is not None and not callable(step_observer):
+        raise TypeError("step_observer must be callable or None.")
+    if row_step_limits is not None:
+        row_step_limits = tuple(row_step_limits)
+        if (
+            segments is None
+            or len(row_step_limits) != num_envs
+            or any(type(value) is not int or value < 0 for value in row_step_limits)
+        ):
+            raise ValueError(
+                "row_step_limits require explicit segments and one nonnegative action count per row."
+            )
     begin_episode = _get_env_callable(env, "_begin_demo_episode_recording")
     begin_segment = _get_env_callable(env, "_begin_demo_segment_recording")
     end_segment = _get_env_callable(env, "_end_demo_segment_recording")
@@ -719,7 +770,10 @@ def execute_demo_episode(
     set_active_mask = _get_env_callable(env, "_set_demo_active_mask")
     success_fn = _get_env_callable(env, "is_task_success")
 
-    active = [True] * num_envs
+    active = [
+        row_step_limits is None or row_step_limits[row] > 0 for row in range(num_envs)
+    ]
+    row_exhausted = [False] * num_envs
 
     def publish_active_mask() -> None:
         """Publish executor liveness to recording hooks and action masking."""
@@ -757,7 +811,15 @@ def execute_demo_episode(
 
     try:
         segment_count = 0
-        segments = iter(resolve_demo_segments(env, **plan_kwargs))
+        segment_iterator = iter(
+            resolve_demo_segments(env, **plan_kwargs)
+            if segments is None
+            else _validated_demo_segments(
+                segments,
+                fallback_instruction=_dataset_instruction(env),
+                source="segments",
+            )
+        )
         while any(active):
             if should_stop is not None and should_stop():
                 fatal_reason = "interrupted"
@@ -768,7 +830,7 @@ def execute_demo_episode(
                 publish_active_mask()
                 break
             try:
-                segment = next(segments)
+                segment = next(segment_iterator)
             except StopIteration:
                 break
 
@@ -846,7 +908,8 @@ def execute_demo_episode(
 
                 active_before_step = tuple(active)
                 try:
-                    _, _, terminated_value, truncated_value, info = env.step(action)
+                    step_result = env.step(action)
+                    _, _, terminated_value, truncated_value, info = step_result
                 except Exception as exc:
                     action_error = exc
                     actions_exhausted = False
@@ -858,6 +921,14 @@ def execute_demo_episode(
                 for env_id, was_active in enumerate(active_before_step):
                     if was_active:
                         lengths[env_id] += 1
+                if step_observer is not None:
+                    try:
+                        step_observer(step_result, active_before_step)
+                    except Exception as exc:
+                        action_error = exc
+                        actions_exhausted = False
+                        segment_reason = "step_observation_failed"
+                        break
 
                 step_terminated = _as_bool_tuple(terminated_value, num_envs)
                 step_truncated = _as_bool_tuple(truncated_value, num_envs)
@@ -925,11 +996,17 @@ def execute_demo_episode(
                         actions_exhausted = False
                         break
 
+                if row_step_limits is not None:
+                    for env_id, is_active in enumerate(active):
+                        if is_active and lengths[env_id] >= row_step_limits[env_id]:
+                            active[env_id] = False
+                            row_exhausted[env_id] = True
+                            terminal_reasons[env_id] = "trajectory_exhausted"
                 publish_active_mask()
                 if not any(active):
                     # Every row reached episode-level success. Stop this segment
                     # and do not request another lazy segment.
-                    actions_exhausted = False
+                    actions_exhausted = any(row_exhausted)
                     break
                 if should_stop is not None and should_stop():
                     actions_exhausted = False
@@ -1036,10 +1113,13 @@ def execute_demo_episode(
                         continue
                     if completed_by_env[env_id] and success[env_id]:
                         segment_successes[env_id] = True
-                    elif active[env_id] and validation[env_id]:
+                    elif (active[env_id] or row_exhausted[env_id]) and validation[
+                        env_id
+                    ]:
                         segment_successes[env_id] = True
-                    elif active[env_id]:
+                    elif active[env_id] or row_exhausted[env_id]:
                         validation_failed = True
+                        row_exhausted[env_id] = False
                         segment_failure_reasons[env_id] = "segment_validation_failed"
                         terminal_reasons[env_id] = "segment_validation_failed"
 
@@ -1114,7 +1194,7 @@ def execute_demo_episode(
                     terminal_reasons[env_id] = fatal_reason
                     active[env_id] = False
             publish_active_mask()
-        elif fatal_reason is None and any(active):
+        elif fatal_reason is None and (any(active) or any(row_exhausted)):
             # Normal plan exhaustion validates only rows that have not already
             # reached sticky episode success. Legacy expert tasks use
             # is_task_success() for this final validation.
@@ -1125,7 +1205,7 @@ def execute_demo_episode(
             )
             final_success = _as_bool_tuple(success_source, num_envs)
             for env_id, is_active in enumerate(active):
-                if not is_active:
+                if not is_active and not row_exhausted[env_id]:
                     continue
                 success[env_id] = final_success[env_id]
                 completed_by_env[env_id] = final_success[env_id]

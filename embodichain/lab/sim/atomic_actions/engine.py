@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Iterable, Mapping, TYPE_CHECKING
+from typing import Callable, Iterable, Mapping, TYPE_CHECKING
 
 import torch
 
@@ -349,6 +349,10 @@ class AtomicActionEngine:
         self,
         request: ResolvedActionRequest,
         context: PlanningContext | None = None,
+        *,
+        plan_provider: (
+            Callable[[ResolvedActionRequest, PlanningContext], ActionPlan] | None
+        ) = None,
     ) -> ActionPlan:
         """Plan an already-resolved request without rebuilding its snapshot.
 
@@ -359,6 +363,8 @@ class AtomicActionEngine:
         Args:
             request: Immutable request previously returned by :meth:`_resolve`.
             context: Optional latest planning state; captured when omitted.
+            plan_provider: Initial-plan materializer supplied by a new session.
+                Recovery leaves this unset and invokes the registered planner.
 
         Returns:
             Validated side-effect-free action plan.
@@ -372,7 +378,11 @@ class AtomicActionEngine:
             )
         current = self.initial_context() if context is None else context
         self._validate_context(current)
-        plan = action.plan(request, current)
+        plan = (
+            action.plan(request, current)
+            if plan_provider is None
+            else action._plan_with_provider(request, current, plan_provider)
+        )
         self._validate_plan(plan, current, request)
         return plan
 
@@ -524,6 +534,9 @@ class AtomicActionEngine:
         context: PlanningContext | None = None,
         *,
         eligible_mask: torch.Tensor | None = None,
+        initial_plan_provider: (
+            Callable[[ResolvedActionRequest, PlanningContext], ActionPlan] | None
+        ) = None,
     ) -> ExecutionSession:
         """Start incremental execution for a grounded invocation sequence.
 
@@ -534,6 +547,13 @@ class AtomicActionEngine:
             eligible_mask: Optional per-environment cohort allowed to execute.
                 Ineligible rows remain excluded for the whole session. All rows
                 are eligible when omitted.
+            initial_plan_provider: Optional materializer for the first invocation's
+                initial plan. It receives a newly resolved request with current
+                collision options and the initial measured context. Its result
+                passes ordinary plan, endpoint, tracking, and phase-gate checks.
+                Later invocations and recovery use the registered skill planner.
+                Rebuild candidate bindings and effects from these inputs; do not
+                reuse a plan or execution session across environment resets.
 
         Returns:
             Stateful execution session advanced by ``session.tick(...)``.
@@ -546,6 +566,7 @@ class AtomicActionEngine:
             tuple(invocations),
             initial,
             eligible_mask=eligible_mask,
+            initial_plan_provider=initial_plan_provider,
         )
 
     def _validate_context(self, context: PlanningContext) -> None:

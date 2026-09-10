@@ -303,9 +303,9 @@ class CuroboAutoGenCfg:
 
     ``None`` (default) uses ``$XDG_CACHE_HOME/embodichain_curobo`` or
     ``~/.cache/embodichain_curobo``. The cache key hashes the generator version,
-    URDF path, URDF content, control part, tool frame, and fit parameters, so
-    editing the URDF, changing the fit settings, or a generator update
-    regenerates automatically.
+    URDF path, URDF content, control part, tool frame, fit parameters, and initial
+    values of locked joints. Changing their static collision geometry or a
+    generator update regenerates automatically.
     """
 
     fit_type: str = "voxel"
@@ -856,9 +856,10 @@ class CuroboPlanner(BasePlanner):
         The samples are not replanned or replaced. They are mapped from the
         simulator's control-part order into the exact cuRobo model, then checked
         against joint bounds, self-collision, and the live world collision
-        checker. Calling the configuration validator once per horizon sample
-        works around cuRobo 0.8's configuration-only ``validate`` contract while
-        retaining batched environments.
+        checker. The cuRobo 0.8 convenience validators pass obsolete tensor
+        arguments to the scene cost and flatten trajectory dimensions. Calling
+        its bound, self, and scene costs with the actual kinematics state avoids
+        both issues while retaining batched environments.
         """
         if (
             not isinstance(trajectory, torch.Tensor)
@@ -934,13 +935,42 @@ class CuroboPlanner(BasePlanner):
             else nullcontext()
         )
         with device_context:
+            checker = backend.collision_checker
             for sample_index in range(horizon):
                 sample = curobo_trajectory[:, sample_index : sample_index + 1]
-                valid = backend.collision_checker.validate(
-                    sample,
-                    env_query_idx=env_query_idx,
+                state = checker.get_kinematics(sample)
+                if sample_index == 0:
+                    checker.setup_batch_tensors(batch_size, 1)
+                    if checker.self_collision_cost is None:
+                        raise RuntimeError("cuRobo self-collision cost is unavailable.")
+                    if checker.collision_constraint is not None:
+                        checker.collision_constraint.update_num_spheres(
+                            state.robot_spheres.shape[-2], batch_size, 1
+                        )
+                    elif self.cfg.world.rigid_objects:
+                        raise RuntimeError(
+                            "cuRobo scene-collision cost is unavailable."
+                        )
+                costs = [
+                    checker.get_bound(sample),
+                    checker.get_self_collision(state.robot_spheres),
+                ]
+                if checker.collision_constraint is not None:
+                    costs.append(
+                        checker.collision_constraint.forward(
+                            state, idxs_env_query=env_query_idx
+                        )
+                    )
+                valid = torch.ones(
+                    batch_size, device=self._curobo_device, dtype=torch.bool
                 )
-                samples.append(valid[:, 0].to(torch.bool))
+                for cost in costs:
+                    valid &= (
+                        (torch.isfinite(cost) & (cost == 0))
+                        .reshape(batch_size, -1)
+                        .all(dim=1)
+                    )
+                samples.append(valid)
         return torch.stack(samples, dim=1).to(trajectory.device)
 
     def __init__(self, cfg: CuroboPlannerCfg) -> None:
@@ -1268,11 +1298,18 @@ class CuroboPlanner(BasePlanner):
         batch_size: int,
         planning_mode: MoveType = MoveType.EEF_MOVE,
     ) -> "_CuroboBackend":
-        """Return a cached in-process backend for one goal-buffer shape."""
+        """Reuse a backend only while its locked-joint model remains unchanged."""
         multi_env = bool(self.cfg.world.multi_env)
         key = (control_part, int(batch_size), multi_env, planning_mode)
+        lock_signature = self._locked_joint_signature(control_part)
         if key in self._backend_cache:
-            return self._backend_cache[key]
+            cached = self._backend_cache[key]
+            if cached.robot_lock_signature != lock_signature:
+                raise RuntimeError(
+                    "cuRobo locked-joint configuration changed after backend "
+                    "creation. Call planner.close() before rebuilding its model."
+                )
+            return cached
 
         profile = self._materialize_profile(control_part)
         sim_joint_names = self._resolve_sim_joint_names(control_part)
@@ -1366,6 +1403,7 @@ class CuroboPlanner(BasePlanner):
                         f"cuRobo capture coordinator release failed: {exc}"
                     )
 
+        backend.robot_lock_signature = lock_signature
         self._backend_cache[key] = backend
         logger.log_info(
             f"cuRobo in-process backend ready for '{control_part}' "
@@ -1741,7 +1779,7 @@ class CuroboPlanner(BasePlanner):
         tool_frame: str | None,
         auto: CuroboAutoGenCfg,
     ) -> str:
-        """Hash the URDF path/content and fit parameters into a stable cache key."""
+        """Hash geometry, fit settings, and locked joint values into a cache key."""
         hasher = hashlib.md5()
         hasher.update(_CUROBO_ROBOT_YAML_GENERATOR_VERSION.encode("utf-8"))
         hasher.update(urdf_path.encode("utf-8"))
@@ -1758,7 +1796,29 @@ class CuroboPlanner(BasePlanner):
         hasher.update(str(auto.surface_radius).encode("utf-8"))
         hasher.update(str(auto.iterations).encode("utf-8"))
         hasher.update(str(auto.collision_sphere_buffer).encode("utf-8"))
+        hasher.update(self._locked_joint_signature(control_part).encode("utf-8"))
         return hasher.hexdigest()
+
+    def _locked_joint_signature(self, control_part: str) -> str:
+        """Identify the static joint values shared by disk and runtime models."""
+        # Match generate_curobo_robot_yaml's initial-state resolution. Joints
+        # outside the control part become static collision geometry, so reusing
+        # a YAML with different gripper/other-arm values is unsafe.
+        joint_names = tuple(self.robot.joint_names)
+        initial = self.robot.cfg.init_qpos
+        initial = [] if initial is None else list(initial)
+        if len(initial) != len(joint_names):
+            try:
+                initial = self.robot.get_qpos()[0].detach().cpu().tolist()
+            except Exception:
+                initial = [0.0] * len(joint_names)
+        controlled = tuple((self.robot.control_parts or {}).get(control_part, ()))
+        locked = tuple(
+            (name, float(value))
+            for name, value in zip(joint_names, initial)
+            if name not in controlled
+        )
+        return repr((controlled, locked))
 
     def _auto_generate_world_yaml(self, world_cfg: CuroboWorldCfg) -> str:
         """Return a cached cuRobo world YAML path generated from ``rigid_objects``.
@@ -2528,6 +2588,7 @@ class _CuroboBackend:
     use_cuda_graph: bool
     planning_mode: MoveType
     collision_checker: "Any | None" = None
+    robot_lock_signature: str | None = None
     # Lazily-built device-tensor caches for the shared post-processing. The
     # cuRobo joint order and the profile's fixed transforms are stable for a
     # planner's life, so these are built once on first use and reused across

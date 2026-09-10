@@ -347,6 +347,125 @@ def test_handwritten_motion_generator_segment_declares_exact_progress_total() ->
     env._stack_block.clear_dynamics.assert_called_once()
 
 
+@pytest.mark.parametrize("single_segment", [False, True])
+def test_execute_demo_episode_consumes_explicit_candidate_without_replanning(
+    single_segment: bool,
+) -> None:
+    env = _SegmentedEnv()
+    env.create_demo_segments = Mock(side_effect=AssertionError("must not replan"))
+    env.metadata = {"dataset": {"instruction": {"lang": "Lift the selected object"}}}
+    env._begin_demo_episode_recording = Mock()
+    env._begin_demo_segment_recording = Mock()
+    env._end_demo_episode_recording = Mock()
+    candidate = DemoSegment(actions=(2, 3), name="candidate")
+
+    result = execute_demo_episode(
+        env,
+        segments=candidate if single_segment else (candidate,),
+        episode_index=4,
+        attempt_id=2,
+    )
+
+    env.create_demo_segments.assert_not_called()
+    assert env.actions == [2, 3]
+    assert result.all_success
+    assert result.segments[0].name == "candidate"
+    assert result.segments[0].instruction == "Lift the selected object"
+    assert candidate.instruction is None
+    assert all(env.no_auto_reset_during_steps)
+    assert not env._demo_no_auto_reset
+    env._begin_demo_episode_recording.assert_called_once()
+    env._begin_demo_segment_recording.assert_called_once()
+    assert env.segment_results == list(result.segments)
+    env._end_demo_episode_recording.assert_called_once_with(result=result)
+
+
+def test_explicit_candidate_segments_and_actions_remain_lazy() -> None:
+    env = _SegmentedEnv()
+    env.create_demo_segments = Mock(side_effect=AssertionError("must not replan"))
+
+    def first_actions():
+        assert env.actions == []
+        yield 1
+        assert env.actions == [1]
+        yield 2
+
+    def candidates():
+        yield DemoSegment(actions=first_actions(), name="first")
+        assert env.actions == [1, 2]
+        yield DemoSegment(actions=(3,), name="second")
+
+    result = execute_demo_episode(env, segments=candidates())
+
+    assert result.all_success
+    assert env.actions == [1, 2, 3]
+    env.create_demo_segments.assert_not_called()
+
+
+def test_explicit_candidate_rejects_planning_arguments_before_lifecycle() -> None:
+    env = _SegmentedEnv()
+    env.create_demo_segments = Mock()
+    env._begin_demo_episode_recording = Mock()
+
+    with pytest.raises(ValueError, match="cannot be combined with plan_kwargs"):
+        execute_demo_episode(env, segments=DemoSegment(actions=(3,)), goal="other")
+
+    env.create_demo_segments.assert_not_called()
+    env._begin_demo_episode_recording.assert_not_called()
+    assert env.actions == []
+
+
+@pytest.mark.parametrize("segments", [42, "candidate", [object()]])
+def test_explicit_candidate_rejects_invalid_segment_source(segments: Any) -> None:
+    env = _SegmentedEnv()
+    env.create_demo_segments = Mock()
+
+    with pytest.raises(TypeError, match="segments must.*DemoSegment"):
+        execute_demo_episode(env, segments=segments)
+
+    env.create_demo_segments.assert_not_called()
+    assert env.actions == []
+    assert not env._demo_no_auto_reset
+
+
+def test_explicit_candidate_validates_later_segments_when_requested() -> None:
+    env = _SegmentedEnv()
+
+    def candidates():
+        yield DemoSegment(actions=(1,))
+        assert env.actions == [1]
+        yield "invalid segment"
+
+    with pytest.raises(TypeError, match="segments must yield DemoSegment"):
+        execute_demo_episode(env, segments=candidates())
+
+    assert env.actions == [1]
+    assert not env._demo_no_auto_reset
+
+
+def test_empty_explicit_candidates_do_not_fall_back_to_task_planning() -> None:
+    env = _SegmentedEnv()
+    env.create_demo_segments = Mock()
+
+    result = execute_demo_episode(env, segments=())
+
+    env.create_demo_segments.assert_not_called()
+    assert env.actions == []
+    assert result.length == 0
+    assert not result.all_success
+
+
+def test_none_segments_preserves_forwarding_legacy_planning_arguments() -> None:
+    env = _SegmentedEnv()
+    env.create_demo_segments = Mock(return_value=DemoSegment(actions=(3,)))
+
+    result = execute_demo_episode(env, segments=None, target_uid="object_a")
+
+    env.create_demo_segments.assert_called_once_with(target_uid="object_a")
+    assert env.actions == [3]
+    assert result.all_success
+
+
 class _LifecycleMetadataEnv:
     """Populate one shared metadata mapping at lazy lifecycle boundaries."""
 
@@ -472,11 +591,15 @@ class _GeneratorFailureEnv:
         )
 
 
-def test_action_generator_failure_safe_stops_before_propagating() -> None:
+@pytest.mark.parametrize("explicit_segments", [False, True])
+def test_action_generator_failure_safe_stops_before_propagating(
+    explicit_segments: bool,
+) -> None:
     env = _GeneratorFailureEnv()
+    segments = env.create_demo_segments() if explicit_segments else None
 
     with pytest.raises(RuntimeError, match="action generation") as error:
-        execute_demo_episode(env)
+        execute_demo_episode(env, segments=segments)
 
     assert isinstance(error.value.__cause__, ValueError)
     assert env.actions == [1, 0]
@@ -551,11 +674,15 @@ class _StaggeredVectorEnv:
         return torch.ones(self.num_envs, dtype=torch.bool)
 
 
-def test_execute_demo_episode_supports_staggered_vector_success() -> None:
+@pytest.mark.parametrize("explicit_segments", [False, True])
+def test_execute_demo_episode_supports_staggered_vector_success(
+    explicit_segments: bool,
+) -> None:
     """A completed row freezes while unfinished rows continue their shared plan."""
     env = _StaggeredVectorEnv()
 
-    result = execute_demo_episode(env)
+    segments = env.create_demo_segments() if explicit_segments else None
+    result = execute_demo_episode(env, segments=segments)
 
     assert env.actions == [1, 2, 3]
     assert env.masked_actions == [(2, (False, True)), (3, (False, True))]
@@ -849,11 +976,17 @@ class _CancellationEnv(_ValidatedSegmentEnv):
         return torch.ones(1, dtype=torch.bool)
 
 
-def test_cancellation_after_last_action_does_not_advance_lazy_plan() -> None:
+@pytest.mark.parametrize("explicit_segments", [False, True])
+def test_cancellation_after_last_action_does_not_advance_lazy_plan(
+    explicit_segments: bool,
+) -> None:
     """Cancellation is observed before validation or requesting another segment."""
     env = _CancellationEnv()
 
-    result = execute_demo_episode(env, should_stop=lambda: bool(env.actions))
+    segments = env.create_demo_segments() if explicit_segments else None
+    result = execute_demo_episode(
+        env, segments=segments, should_stop=lambda: bool(env.actions)
+    )
 
     assert env.actions == [1]
     assert not env.validator_called

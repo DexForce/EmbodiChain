@@ -292,12 +292,19 @@ robot's URDF and solver, so nothing robot-specific needs to be hardcoded:
 
 The generated YAML is cached on disk (default `$XDG_CACHE_HOME/embodichain_curobo`
 or `~/.cache/embodichain_curobo`) keyed by the URDF path, URDF content, control
-part, tool frame, and fit parameters, so editing the URDF or changing the fit
-settings regenerates automatically and subsequent inits reuse the cache. Tune the
+part, tool frame, non-control initial joint values, and fit parameters. The
+non-control values determine the generated `lock_joints` geometry, including the
+gripper opening. Editing those values, the URDF, or fit settings regenerates the
+corresponding cached profile; subsequent matching inits reuse it. Tune the
 fit with `CuroboPlannerCfg.auto_gen` (`fit_type="voxel"` by default for fast
 first-generation; `"morphit"` for best quality; `force=True` to bypass the cache).
 The default `sphere_density=0.1` keeps the per-link sphere count low (~80 for a
 Panda) so planning stays fast; raise it for tighter collision coverage.
+
+If non-control initial joint values change while a backend is active, cached
+backend reuse is rejected. Call `planner.close()` before rebuilding against the
+new locked-joint configuration. Changing only controlled-joint initial values
+does not invalidate the locked collision model.
 
 ## Generate a motion
 

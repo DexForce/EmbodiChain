@@ -196,6 +196,8 @@ Choosing Where to Start
 - Use :doc:`reward_functors` when composing RL reward terms.
 - Use :doc:`dataset_functors` when recording demonstrations or exporting
   datasets. Use this page for structured episode data, not debug video capture.
+- Use :doc:`/overview/trajectory_generation` when repeating candidate rollouts
+  from a caller-provided fixed initial state with exclusive batch ownership.
 
 Documentation Quality Notes
 ---------------------------

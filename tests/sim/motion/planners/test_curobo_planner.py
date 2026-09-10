@@ -701,7 +701,10 @@ def test_dynamic_update_uses_registry_id_in_curobo_backend():
     assert [(name, env_idx) for name, _, env_idx in updates] == [("registry_cube", 0)]
 
 
-def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order():
+@pytest.mark.parametrize("failing_cost", ["bound", "self", "scene"])
+def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order(
+    failing_cost,
+):
     """The collision gate preserves samples and maps simulator joint order."""
     planner = object.__new__(CuroboPlanner)
     planner.cfg = CuroboPlannerCfg(
@@ -716,12 +719,18 @@ def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order():
         joint_states.append((position.clone(), tuple(joint_names)))
         return SimpleNamespace(position=position)
 
-    def validate(sample, *, env_query_idx):
-        collision_queries.append((sample.clone(), env_query_idx.clone()))
-        validity = torch.ones(sample.shape[:2], dtype=torch.bool)
-        if len(collision_queries) == 2:
-            validity[1, 0] = False
-        return validity
+    def kinematics(sample):
+        return SimpleNamespace(position=sample, robot_spheres=sample.unsqueeze(-2))
+
+    def cost(kind, sample):
+        value = torch.zeros(sample.shape[:2])
+        if kind == failing_cost and sample[1, 0, 0] == pytest.approx(3.1):
+            value[1, 0] = 1.0
+        return value
+
+    def scene_cost(state, *, idxs_env_query):
+        collision_queries.append((state.position.clone(), idxs_env_query.clone()))
+        return cost("scene", state.position)
 
     planner._bindings = SimpleNamespace(
         JointState=SimpleNamespace(from_position=from_position),
@@ -729,7 +738,17 @@ def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order():
     backend = SimpleNamespace(
         sim_joint_names=["sim_left", "sim_right"],
         sim_to_curobo_col_idx=None,
-        collision_checker=SimpleNamespace(validate=validate),
+        collision_checker=SimpleNamespace(
+            get_kinematics=kinematics,
+            setup_batch_tensors=lambda batch, horizon: None,
+            self_collision_cost=object(),
+            get_bound=lambda sample: cost("bound", sample),
+            get_self_collision=lambda spheres: cost("self", spheres.squeeze(-2)),
+            collision_constraint=SimpleNamespace(
+                update_num_spheres=lambda count, batch, horizon: None,
+                forward=scene_cost,
+            ),
+        ),
         profile=SimpleNamespace(
             sim_to_curobo_joint_names={
                 "sim_left": "curobo_left",
@@ -1097,3 +1116,105 @@ def test_curobo_uses_accelerator_with_cpu_physics():
     finally:
         sim.destroy()
         SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.parametrize("use_current_fallback", [False, True])
+def test_robot_yaml_cache_invalidates_when_locked_joint_initial_state_changes(
+    tmp_path, monkeypatch, use_current_fallback
+):
+    """A changed gripper pose must rebuild its static collision geometry."""
+    import embodichain.lab.sim.motion.planners.curobo.curobo_yaml as yaml_module
+
+    urdf = tmp_path / "robot.urdf"
+    urdf.write_text("<robot name='cache-test'/>")
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="cache-test")
+    planner.cfg.auto_gen.cache_dir = str(tmp_path)
+    planner._curobo_device = torch.device("cpu")
+    current = torch.tensor([[0.0, 0.02]])
+    planner.robot = SimpleNamespace(
+        joint_names=("arm_joint", "finger_joint"),
+        control_parts={"arm": ["arm_joint"]},
+        cfg=SimpleNamespace(
+            fpath=str(urdf), init_qpos=None if use_current_fallback else [0.0, 0.02]
+        ),
+        get_qpos=lambda: current.clone(),
+    )
+    generated = []
+
+    def generate(robot, control_part, output_path, **kwargs):
+        from pathlib import Path
+
+        generated.append(output_path)
+        Path(output_path).write_text("robot_cfg: {}")
+        return output_path
+
+    monkeypatch.setattr(yaml_module, "generate_curobo_robot_yaml", generate)
+    original = planner._auto_generate_robot_yaml("arm", "tool")
+    assert planner._auto_generate_robot_yaml("arm", "tool") == original
+    assert len(generated) == 1
+    if use_current_fallback:
+        current[0, 1] = 0.04
+    else:
+        planner.robot.cfg.init_qpos[1] = 0.04
+    changed = planner._auto_generate_robot_yaml("arm", "tool")
+    assert changed != original
+    assert len(generated) == 2
+    if use_current_fallback:
+        current[0, 0] = 0.5
+    else:
+        planner.robot.cfg.init_qpos[0] = 0.5
+    assert planner._auto_generate_robot_yaml("arm", "tool") == changed
+
+
+@pytest.mark.parametrize("use_current_fallback", [False, True])
+def test_runtime_backend_rejects_changed_locked_joints_until_explicit_close(
+    use_current_fallback,
+):
+    """Runtime cache hits must obey the same lock signature as generated YAMLs."""
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(robot_uid="runtime-lock", use_cuda_graph=False)
+    planner._curobo_device = torch.device("cpu")
+    current = torch.tensor([[0.0, 0.02]])
+    planner.robot = SimpleNamespace(
+        joint_names=("arm_joint", "finger_joint"),
+        control_parts={"arm": ["arm_joint"]},
+        cfg=SimpleNamespace(init_qpos=None if use_current_fallback else [0.0, 0.02]),
+        get_qpos=lambda: current.clone(),
+    )
+    planner._backend_cache = {}
+    built, closed = [], []
+
+    def build(**kwargs):
+        backend = SimpleNamespace(planner=object(), use_cuda_graph=False)
+        built.append(backend)
+        return backend
+
+    planner._materialize_profile = lambda control_part: object()
+    planner._resolve_sim_joint_names = lambda control_part: ["arm_joint"]
+    planner._build_backend = build
+    planner._warmup_backend = lambda backend: None
+    planner._close_planner = closed.append
+
+    original = planner._get_backend("arm", 1)
+    assert planner._get_backend("arm", 1) is original
+    if use_current_fallback:
+        current[0, 0] = 0.5
+    else:
+        planner.robot.cfg.init_qpos[0] = 0.5
+    assert planner._get_backend("arm", 1) is original
+    if use_current_fallback:
+        current[0, 1] = 0.04
+    else:
+        planner.robot.cfg.init_qpos[1] = 0.04
+    with pytest.raises(RuntimeError, match="locked-joint configuration changed"):
+        planner._get_backend("arm", 1)
+    assert len(built) == 1
+    assert not closed
+
+    planner.close()
+    assert closed == [original.planner]
+    replacement = planner._get_backend("arm", 1)
+    assert replacement is not original
+    assert replacement.robot_lock_signature != original.robot_lock_signature
+    assert len(built) == 2

@@ -868,7 +868,7 @@ class Articulation(BatchEntity):
         Returns:
             str: The name of the root link.
         """
-        return self.entities[0].get_root_link_name()
+        return self._entities[0].get_root_link_name()
 
     @cached_property
     def joint_names(self) -> List[str]:
