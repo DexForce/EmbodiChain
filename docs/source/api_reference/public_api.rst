@@ -554,6 +554,20 @@ embodichain.lab.sim.atomic_actions.bindings
    JointPositionTarget
    RuntimeEndpointTarget
 
+embodichain.lab.sim.atomic_actions.candidates
+--------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.candidates
+
+Owned physical-row candidate evaluations and explicit selections. Evaluations
+are bound to the invocation and planning-context fingerprint; they cannot be
+moved between slots or reused after the context changes.
+
+.. autosummary::
+
+   AtomicCandidateBatch
+   AtomicCandidateSelection
+
 embodichain.lab.sim.atomic_actions.control
 ------------------------------------------
 
@@ -1759,6 +1773,15 @@ embodichain.toolkits.acd.urdf_modifider
 .. autosummary::
 
    URDFModifider
+
+embodichain.toolkits.graspkit.candidates
+---------------------------------------------
+
+.. currentmodule:: embodichain.toolkits.graspkit.candidates
+
+.. autosummary::
+
+   GraspCandidateBatch
 
 embodichain.toolkits.graspkit.pg_grasp.antipodal_sampler
 --------------------------------------------------------

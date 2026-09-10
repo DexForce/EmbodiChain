@@ -210,6 +210,17 @@ class GenerationSession:
                 target_per_geometry=coverage.target_per_cell,
             )
 
+    @property
+    def remaining_proposals(self) -> int:
+        """Remaining proposal capacity, including when ready work is outstanding.
+
+        Unlike :attr:`stop_reason`, this is an admission limit rather than a
+        signal to stop draining already planned or executing candidates.
+        """
+        if self.stop_reason:
+            return 0
+        return max(0, self._cfg.collection.max_proposals - self._counts["proposed"])
+
     def propose(
         self,
         case_id: str,

@@ -21,8 +21,11 @@ from __future__ import annotations
 import argparse
 import math
 import re
+import sys
 import time
+import traceback
 from collections.abc import Callable, Collection, Sequence
+from pathlib import Path
 from typing import Literal
 
 import torch
@@ -111,6 +114,7 @@ TutorialCliFeature = Literal[
     "grasp_sampling",
     "headless_play",
     "visualize_axes",
+    "affordance_multi_gen",
 ]
 TutorialRobot = Literal["ur5", "franka", "ur10"]
 TUTORIAL_ROBOTS: tuple[TutorialRobot, ...] = (
@@ -164,6 +168,17 @@ def create_tutorial_argument_parser(
     if "grasp_sampling" in features:
         parser.add_argument("--n_sample", type=int, default=10000)
         parser.add_argument("--force_reannotate", action="store_true")
+    if "affordance_multi_gen" in features:
+        parser.add_argument(
+            "--n_affordance_multi_gen",
+            "--n-affordance-multi-gen",
+            type=_positive_tutorial_count,
+            default=None,
+            help="Generate distinct affordance plans in N real environments. "
+            "When supplied, N overrides --num_envs; failed plans are filtered, not duplicated.",
+        )
+        parser.add_argument("--affordance_output", type=Path, default=None)
+        parser.add_argument("--affordance_seed", type=int, default=13)
     if "headless_play" in features:
         parser.add_argument(
             "--headless_play",
@@ -177,6 +192,17 @@ def create_tutorial_argument_parser(
             help="Skip drawing target coordinate-frame markers.",
         )
     return parser
+
+
+def _positive_tutorial_count(value: str) -> int:
+    """Decode an explicit positive physical environment count."""
+    try:
+        count = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("N must be a positive integer") from error
+    if count < 1:
+        raise argparse.ArgumentTypeError("N must be a positive integer")
+    return count
 
 
 def create_tutorial_simulation(
@@ -196,6 +222,11 @@ def create_tutorial_simulation(
     Returns:
         A simulation manager with the tutorial key light configured.
     """
+    multi_count = getattr(args, "n_affordance_multi_gen", None)
+    if multi_count is not None:
+        if type(multi_count) is not int or multi_count < 1:
+            raise ValueError("n_affordance_multi_gen must be a positive integer")
+        args.num_envs = multi_count
     sim = SimulationManager(
         SimulationManagerCfg(
             width=VIEWER_WIDTH,
@@ -232,6 +263,7 @@ def run_tutorial(main: Callable[[], None]) -> None:
         main: Zero-argument tutorial entry point.
     """
     interrupted = False
+    original_error: BaseException | None = None
     try:
         try:
             main()
@@ -241,17 +273,30 @@ def run_tutorial(main: Callable[[], None]) -> None:
             # destroying World first would make their later destructors unsafe.
             interrupted = True
             logger.log_info("Tutorial interrupted; shutting down cleanly.")
+        except BaseException as error:
+            original_error = error
+            # Completed tutorial frames can retain native objects through the
+            # active exception traceback even after main() has unwound.
+            traceback.clear_frames(error.__traceback__)
+            raise
     finally:
-        if SimulationManager.is_instantiated():
-            sim = SimulationManager.get_instance()
-            if not getattr(sim, "_is_constructed", False):
-                SimulationManager.reset(getattr(sim, "instance_id", 0))
-            else:
-                if sim.is_window_recording():
-                    sim.stop_window_record()
-                sim.wait_window_record_saves()
-                sim.destroy(exit_process=False)
-                SimulationManager.flush_cleanup_queue()
+        try:
+            if SimulationManager.is_instantiated():
+                sim = SimulationManager.get_instance()
+                if not getattr(sim, "_is_constructed", False):
+                    SimulationManager.reset(getattr(sim, "instance_id", 0))
+                else:
+                    if sim.is_window_recording():
+                        sim.stop_window_record()
+                    sim.wait_window_record_saves()
+                    sim.destroy(exit_process=False)
+                    SimulationManager.flush_cleanup_queue()
+        except Exception as cleanup_error:
+            if original_error is None:
+                raise
+            print(
+                f"Additional tutorial cleanup error: {cleanup_error!r}", file=sys.stderr
+            )
 
     if interrupted:
         raise SystemExit(130)
@@ -435,11 +480,15 @@ def create_parallel_jaw_grasp_pose_generator(
     n_sample: int,
     force_refresh: bool,
     opening_margin: float = 0.03,
+    max_candidates: int | None = None,
 ) -> AntipodalGraspPoseGenerator:
     """Create the standalone generator shared by tutorial planning paths."""
+    algorithm_kwargs = {"sample_count": n_sample}
+    if max_candidates is not None:
+        algorithm_kwargs["max_candidates"] = max_candidates
     return AntipodalGraspPoseGenerator(
         TUTORIAL_PARALLEL_JAW_MODEL,
-        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(sample_count=n_sample),
+        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(**algorithm_kwargs),
         collision_cfg=ParallelJawGraspCollisionCfg(
             opening_margin=opening_margin,
             point_sample_density=0.012,

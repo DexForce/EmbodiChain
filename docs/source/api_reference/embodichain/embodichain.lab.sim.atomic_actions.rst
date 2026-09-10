@@ -40,6 +40,10 @@ embodichain.lab.sim.atomic_actions
       PlanningFailure
       ActionPlan
       CompiledTrajectory
+      AtomicCandidateBatch
+      AtomicCandidateSelection
+      PickUpCandidateBatch
+      SlideCandidateBatch
 
    .. rubric:: Articulation geometry adaptation
 
@@ -306,6 +310,30 @@ Engine and execution
    :members:
 
 .. autoclass:: AtomicActionEngine
+   :members:
+
+Candidate planning keeps logical grasp choices separate from physical
+environment rows. ``enumerate_candidates`` evaluates all retained choices;
+``plan_candidate`` binds one choice per row through the normal scene and
+endpoint authorization path. ``compile`` accepts candidate-selection callbacks
+at each invocation's projected context and an initial ``eligible_mask``.
+Selected PickUp and Slide currently require ``ik_interp``. Their endpoint and
+sampled Cartesian IK checks do not certify collision freedom or physical grasp
+success. ``SlideCandidateBatch`` retains one candidate per raw grasp and the
+handle-local translation axis, without PickUp's extra roll variants. Its
+selected sequence includes approach, reach, close, pull/push and open; push
+also returns to the pre-grasp pose.
+
+.. autoclass:: AtomicCandidateBatch
+   :members:
+
+.. autoclass:: AtomicCandidateSelection
+   :members:
+
+.. autoclass:: PickUpCandidateBatch
+   :members:
+
+.. autoclass:: SlideCandidateBatch
    :members:
 
 .. autoclass:: ExecutionSession

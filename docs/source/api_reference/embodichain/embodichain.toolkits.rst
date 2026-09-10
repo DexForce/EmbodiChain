@@ -30,11 +30,23 @@ or installed in a higher-level planning runtime.
    :nosignatures:
 
    GraspPoseGenerator
+   GraspCandidateBatch
    ParallelJawGraspPoseGenerator
    ParallelJawGripperModelCfg
    get_parallel_jaw_gripper_model
 
 .. autoclass:: GraspPoseGenerator
+   :members:
+
+``get_grasp_candidates`` preserves ragged candidate poses, opening widths,
+costs, stable content IDs and rejection reasons in a padded batch. Invalid
+individual grasps remain masked; malformed shared tensor contracts raise.
+The antipodal implementation accepts an explicit local PyTorch generator;
+legacy custom generators retain their existing API and must explicitly support
+local randomness before accepting that option. Geometric validity does not
+establish robot IK, path collision freedom or successful physical grasping.
+
+.. autoclass:: GraspCandidateBatch
    :members:
 
 .. autoclass:: ParallelJawGraspPoseGenerator

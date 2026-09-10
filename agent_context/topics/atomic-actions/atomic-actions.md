@@ -57,6 +57,7 @@ a physical effect.
 | Invocation, binding, and policies | `invocation.py`, `bindings.py`, `policies.py`, `control.py` |
 | Robot/task/scene state | `state.py`, `scene.py` |
 | Plans and runtime commands | `plans.py`, `runtime_commands.py` |
+| Candidate values and selected grasp planning | `candidates.py`, `primitives/pick_up.py`, `primitives/slide.py` |
 | Session state machine | `execution.py` |
 | Verification request/result values | `verification.py` |
 | Runner and transports | `runner.py`, `transports.py`, `tracking.py` |
@@ -139,3 +140,33 @@ no projected `HeldObjectState` is committed as observed evidence. It does not
 consume `initial_plan_provider` or run AtomicActionRuntime tracking/recovery.
 The runtime adapter and contact-aware Gym source/host matrix remain separate
 acceptance work. Keep the existing runtime and task-state contracts intact.
+
+## Selected grasp planning
+
+`AtomicActionEngine.enumerate_candidates()` and `plan_candidate()` retain the
+normal request, scene-binding and endpoint-authorization boundaries. Optional
+primitive hooks cannot override framework-owned public planning methods.
+`AtomicCandidateBatch`/`AtomicCandidateSelection` bind evaluated data to the
+resolved invocation and projected context; modified or stale certificates are
+rejected. `compile(candidate_selections=..., eligible_mask=...)` calls selectors
+at the current projected start and propagates a monotonic alive mask.
+
+`PickUpCandidateBatch` retains all supplied grasps and both roll variants with
+phase IK anchors and rejection reasons. Its selected `ik_interp` path includes
+transit, Cartesian approach, close/settle and Cartesian lift; per-sample IK is
+seeded from the preceding accepted solution and checked by FK, joint limits
+and continuity. It does not certify collision freedom or physical grasp
+success. The legacy winner path keeps its previous selection semantics and
+shares pose normalization, not the new strict evaluator.
+
+`SlideCandidateBatch` retains one candidate per raw grasp with pre/grasp/slide
+IK anchors. The selected path preserves the handle-local translation axis,
+uses Cartesian reach/slide/return segments, and never reselects a winner.
+PickUp and Slide share strict IK/FK/limit/continuity checks in the private
+`primitives/_candidate_helpers.py`; selected plans do not certify contacts.
+
+Scheduling logical branches over real physical replicas and compact batch
+export belong to the [fixed-scene candidate source](../motion-planning/trajectory-generation.md#multi-grasp-atomic-candidate-source),
+not to primitive planners or Task Program semantics.
+The [live-row tutorial adapter](../motion-planning/trajectory-generation.md#live-row-affordance-tutorials)
+separately supports N distinct raw grasps over N physical environments.

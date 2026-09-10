@@ -348,6 +348,12 @@ PickUp Source and Contact Validation
    :nosignatures:
 
    export_pickup_templates
+   AtomicCandidateGenerationCfg
+   AtomicCandidateRejection
+   AtomicGenerationResult
+   AtomicTrajectoryGenerator
+   AtomicAffordanceBatch
+   plan_affordance_batch
 
 The export accepts exactly a successful ``MoveEndEffector`` → ``PickUp``
 compilation. It preserves the atomic phase boundaries, expands passive mimic
@@ -357,6 +363,94 @@ It produces qpos replay templates; it does not execute AtomicActionRuntime or
 commit the compilation's hypothetical symbolic effects.
 
 .. autofunction:: export_pickup_templates
+
+``AtomicTrajectoryGenerator`` provides a separate multi-grasp source. One
+canonical scene may occupy several verified real replica rows; independent
+grasp/roll branches are compiled in bounded waves. The supported sequence is
+optional MoveEndEffector/MoveJoints prefixes followed by one PickUp, using
+``ik_interp``. Failed grasp, IK and path branches are filtered independently.
+Output is a compact ``CandidateTrajectoryBatch`` with explicit timing, lengths,
+IDs and first-failure audit. Short rows repeat the final position with zero
+padding time; an all-failed result has shape ``(0, 0, D_full)``.
+
+This source does not step physics, change observed attachment state, or
+certify expert episodes. A shared ``GenerationSession`` requires an explicit
+passing collision validator for ready admission. Planning-only exports use
+private identity accounting without reserving confirmed coverage. Automatic
+IK retries/resampling, held-object suffixes, native candidate-capacity buckets
+and a general ``GenerationRunner.run_source`` are not implemented.
+
+.. autoclass:: AtomicCandidateGenerationCfg
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: AtomicCandidateRejection
+   :members:
+
+.. autoclass:: AtomicGenerationResult
+   :members:
+
+.. autoclass:: AtomicTrajectoryGenerator
+   :members:
+
+``plan_affordance_batch`` serves live-environment tutorials independently of
+the fixed-scene source. It accepts one selected-candidate PickUp or Slide
+invocation and assigns distinct raw grasp IDs to real rows, with bounded
+replacement after failed plans. ``AtomicAffordanceBatch.trajectory`` retains
+all physical rows on a shared control grid; rejected rows hold their observed
+start and never count toward ``compact_positions``. A complete result has one
+different raw grasp per requested row; partial and empty results are normal.
+The zero-time sample preserves the complete measured qpos, including passive
+constraint residuals; later samples expand mimic geometry.
+
+This adapter neither steps physics nor resets or certifies replicas. Callers
+own observed per-row scene updates and replay. Slide tutorials rebase each
+selected handle-local grasp to its actual post-pull handle pose before push.
+No collision, physical task success, or expert-data qualification is implied.
+
+.. autoclass:: AtomicAffordanceBatch
+   :members:
+
+.. autofunction:: plan_affordance_batch
+
+.. currentmodule:: embodichain.lab.trajectory_generation.integrations.atomic_affordance
+
+.. autosummary::
+   :nosignatures:
+
+   AtomicAffordanceBatch
+   plan_affordance_batch
+
+.. currentmodule:: embodichain.lab.trajectory_generation.integrations.atomic_candidates
+
+.. autosummary::
+   :nosignatures:
+
+   AtomicCandidateGenerationCfg
+   AtomicCandidateRejection
+   AtomicGenerationResult
+   AtomicTrajectoryGenerator
+
+.. currentmodule:: embodichain.lab.trajectory_generation.replicas
+
+.. autosummary::
+   :nosignatures:
+
+   CandidateSlotAssignment
+   SceneReplicaPool
+
+``SceneReplicaPool`` verifies equal source initial states, local-arena poses,
+joint order and trusted fixed-condition signatures before sharing slots.
+``from_host`` additionally binds the preparation epoch and checks the host on
+reuse. Pose equality alone does not prove equal collision geometry or physical
+parameters; the trusted preparation profile owns that evidence. Physical
+environment IDs remain unique and source identities never derive from slots.
+
+.. autoclass:: CandidateSlotAssignment
+   :members:
+
+.. autoclass:: SceneReplicaPool
+   :members:
 
 .. currentmodule:: embodichain.lab.trajectory_generation.integrations.contact
 

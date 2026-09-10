@@ -75,6 +75,7 @@ class _AntipodalMeshBackend:
         viser_port: int,
         use_largest_connected_component: bool,
         filter_ground_collision: bool,
+        sampling_seed: int | None = None,
     ) -> None:
         """Initialize the private backend for one target-local mesh.
 
@@ -91,6 +92,7 @@ class _AntipodalMeshBackend:
             use_largest_connected_component: Whether to retain only the largest
                 component of an interactive selection.
             filter_ground_collision: Whether to reject ground collisions.
+            sampling_seed: Optional isolated sample identity for cache separation.
         """
         self.device = vertices.device
         self.vertices = vertices
@@ -114,8 +116,15 @@ class _AntipodalMeshBackend:
         self._viser_port = viser_port
         self._use_largest_connected_component = use_largest_connected_component
         self._filter_ground_collision = filter_ground_collision
+        self._sampling_seed = sampling_seed
+        self._sampling_generator = (
+            None
+            if sampling_seed is None
+            else torch.Generator(device=self.device).manual_seed(sampling_seed)
+        )
         self._antipodal_sampler = AntipodalSampler(cfg=sampler_cfg)
         self._hit_point_pairs: torch.Tensor | None = None
+        self._sampled_pairs: dict[int | None, torch.Tensor] = {}
 
         # Load cached antipodal pairs for the whole mesh if available.
         cache_path = self._get_cache_dir(self.vertices, self.triangles)
@@ -124,6 +133,35 @@ class _AntipodalMeshBackend:
             self._hit_point_pairs = torch.tensor(
                 np.load(cache_path), dtype=torch.float32, device=self.device
             )
+            self._remember_sample()
+
+    def _remember_sample(self) -> None:
+        """Keep a bounded sample cache without duplicating collision geometry."""
+        if self._hit_point_pairs is not None:
+            self._sampled_pairs.pop(self._sampling_seed, None)
+            self._sampled_pairs[self._sampling_seed] = self._hit_point_pairs
+            while len(self._sampled_pairs) > 4:
+                self._sampled_pairs.pop(next(iter(self._sampled_pairs)))
+
+    def _select_sampling_seed(self, sampling_seed: int | None) -> None:
+        """Switch sample identity while retaining the immutable mesh geometry."""
+        if sampling_seed == self._sampling_seed:
+            return
+        self._remember_sample()
+        self._sampling_seed = sampling_seed
+        self._sampling_generator = (
+            None
+            if sampling_seed is None
+            else torch.Generator(device=self.device).manual_seed(sampling_seed)
+        )
+        self._hit_point_pairs = self._sampled_pairs.get(sampling_seed)
+        if self._hit_point_pairs is None:
+            cache_path = self._get_cache_dir(self.vertices, self.triangles)
+            if os.path.exists(cache_path):
+                self._hit_point_pairs = torch.tensor(
+                    np.load(cache_path), dtype=torch.float32, device=self.device
+                )
+                self._remember_sample()
 
     @property
     def is_prepared(self) -> bool:
@@ -306,10 +344,12 @@ class _AntipodalMeshBackend:
         return self._antipodal_sampler.sample(
             vertices=vertices,
             faces=triangles,
+            generator=self._sampling_generator,
         )
 
     def _cache_hit_point_pairs(self, hit_point_pairs: torch.Tensor):
         self._hit_point_pairs = hit_point_pairs
+        self._remember_sample()
         cache_path = self._get_cache_dir(self.vertices, self.triangles)
         self._save_cache(cache_path, hit_point_pairs)
 
@@ -322,6 +362,7 @@ class _AntipodalMeshBackend:
             f"{sampler_cfg.min_length:.17g}|{sampler_cfg.max_length:.17g}|"
             f"partial={self._interactive_annotation}|"
             f"largest={self._use_largest_connected_component}"
+            f"|sampling_seed={getattr(self, '_sampling_seed', None)}"
         ).encode("utf-8")
         md5_hash = hashlib.md5(vert_bytes + face_bytes + sampler_signature).hexdigest()
         cache_path = os.path.join(
@@ -491,6 +532,7 @@ class _AntipodalMeshBackend:
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool = True,
         visualize_collision: bool = False,
+        generator: torch.Generator | None = None,
     ):
         """Filter valid grasps, optionally to one projected half of the object.
 
@@ -502,6 +544,7 @@ class _AntipodalMeshBackend:
             is_positive_part: When an axis is supplied, select the positive
                 projected half if true and the negative half otherwise.
             visualize_collision: Whether to visualize collision checks.
+            generator: Optional local approach-perturbation RNG.
 
         Returns:
             Success, grasp poses, opening lengths, and grasp costs.
@@ -568,6 +611,7 @@ class _AntipodalMeshBackend:
             approach_direction=approach_direction,
             mesh_vert_transformed=part_verts,
             visualize_collision=visualize_collision,
+            generator=generator,
         )
 
     def get_dual_arm_valid_grasp_poses(
@@ -676,6 +720,7 @@ class _AntipodalMeshBackend:
         mesh_vert_transformed: torch.Tensor,
         object_pose: torch.Tensor,
         visualize_collision: bool = False,
+        generator: torch.Generator | None = None,
     ):
         grasp_x = F.normalize(hit_points_ - origin_points_, dim=-1)
         cos_angle = torch.clamp((grasp_x * approach_direction).sum(dim=-1), -1.0, 1.0)
@@ -703,7 +748,9 @@ class _AntipodalMeshBackend:
         approach_directions = [approach_direction]
         for _ in range(self._approach_direction_samples - 1):
             rota_direction = AntipodalSampler._random_rotate_unit_vectors(
-                approach_direction.unsqueeze(0), self._max_deviation_angle
+                approach_direction.unsqueeze(0),
+                self._max_deviation_angle,
+                generator=generator,
             )
             approach_directions.append(rota_direction[0])
         valid_grasp_poses_list = []
@@ -760,8 +807,12 @@ class _AntipodalMeshBackend:
         positive_angle = torch.abs(torch.acos(cos_angle))
         angle_cost = torch.abs(positive_angle - 0.5 * torch.pi) / (0.5 * torch.pi)
         center_distance = torch.norm(valid_centers - mesh_center, dim=-1)
-        center_cost = center_distance / center_distance.max()
-        length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
+        center_cost = center_distance / center_distance.max().clamp_min(
+            torch.finfo(center_distance.dtype).eps
+        )
+        length_cost = 1 - valid_open_lengths / valid_open_lengths.max().clamp_min(
+            torch.finfo(valid_open_lengths.dtype).eps
+        )
         total_cost = 0.25 * angle_cost + 0.25 * length_cost + 0.5 * center_cost
 
         n_valid = valid_grasp_poses.shape[0]

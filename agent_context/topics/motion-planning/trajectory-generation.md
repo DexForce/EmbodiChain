@@ -95,3 +95,69 @@ It is sampled validation, not continuous collision detection. Contact-aware
 Gym, atomic runtime replay, general via points and a registry/CLI remain work.
 Focused tests: `test_contact.py`, `test_atomic_source.py`, `test_episode_sinks.py`,
 `test_pickup_collection.py` under `tests/lab/trajectory_generation/`.
+
+## Multi-grasp atomic candidate source
+
+`integrations/atomic_candidates.py::AtomicTrajectoryGenerator` is a separate
+offline source, re-exported from `integrations/atomic.py`. It accepts a frozen
+`graspkit.GraspCandidateBatch`, preserves grasp/roll identities, and compiles
+optional same-arm MoveJoints/MoveEndEffector prefixes followed by one PickUp.
+Only `ik_interp` is supported. Prefixes cannot change the solver root or start
+with a held object. The engine evaluates selected grasps at the prefix's
+projected context, not at a stale pre-prefix qpos.
+
+`replicas.py::SceneReplicaPool` binds canonical source cases to distinct real
+physical rows. It verifies identical local-arena robot/object states and fixed
+conditions; host-backed pools also verify the preparation epoch before every
+wave. Logical candidates are scheduled in waves over those rows; env IDs are
+never duplicated and the backend batch size is never changed. A one-row host
+therefore materializes one full trajectory per wave.
+
+The source returns a compact `CandidateTrajectoryBatch` with
+`positions[B_out,N_max,D_full]`, arrival intervals, valid lengths, last-qpos
+padding, full joint names, phases and identities. Invalid grasp poses and
+failed IK/FK/limit/continuity/path checks remove only their candidate; audit
+records retain the first failing invocation/stage. An empty `(0,0,D_full)`
+result is normal. Proposal, output-count/byte/waypoint, wall-time and rejection
+record budgets are bounded. Retry/resampling and held-object suffixes are
+explicitly unsupported in this first source.
+
+Without an external validator, results are planning-only: no world-collision,
+physical grasp success or expert-data claim. An injected `GenerationSession`
+requires an explicit validator including `path_collision`; successful results
+enter its bounded ready queue, not committed coverage. The source does not
+add `GenerationRunner.run_source`, reset the simulator, or write a dataset.
+
+`examples/sim/motion/trajectory_generation/affordance_parallel.py` uses real
+antipodal mesh sampling and four same-case UR5 instances, writes
+`trajectories.npz` and `report.json`, and reports partial/empty batches.
+The sampler uses tutorial target-local gripper geometry, not support-plane or
+full-world collision validation. Focused CPU contracts are in
+`test_atomic_candidates.py`, `test_replicas.py`, and
+`test_affordance_parallel.py`; the latter also provides an opt-in GPU smoke test.
+
+## Live-row affordance tutorials
+
+`integrations/atomic_affordance.py::plan_affordance_batch`, re-exported from
+`integrations/atomic.py`, selects distinct raw grasp IDs over caller-owned real
+rows. It accepts a single PickUp or Slide invocation using `ik_interp`, with
+bounded replacement from remaining candidates after row-local failure.
+`AtomicAffordanceBatch.trajectory` holds all physical rows on one control grid;
+`compact_positions` exports only successful rows as `(B_success,T,D_full)`.
+Failed rows hold their observed start and never count as generated trajectories.
+The zero-time sample preserves measured passive residuals; subsequent samples
+expand mimic geometry. This adapter does not own resets, replica certification,
+GenerationSession accounting or physics acceptance.
+
+`scripts/tutorials/atomic_action/pickup.py` and `slide.py` accept
+`--n_affordance_multi_gen N`, overriding `--num_envs` to create N actual rows.
+Without this flag their legacy winner path is unchanged. Shared
+`affordance_utils.py` samples one raw set, reprojects object-local poses per env,
+and optionally writes compact NPZ/JSON via `--affordance_output`. N counts raw
+grasps, not PickUp roll variants; shortage returns partial/empty without copies.
+Slide push preserves each pull row's selected raw grasp and rebases it against
+the observed post-pull handle pose, using a fresh observed robot context.
+Qpos replay is a demonstration, not collision/contact or expert certification.
+
+Focused tests: `tests/lab/trajectory_generation/test_atomic_affordance.py` and
+`tests/sim/atomic_actions/test_{slide_candidates,tutorial_affordance,affordance_tutorials}.py`.

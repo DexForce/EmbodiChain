@@ -26,6 +26,7 @@ from types import MappingProxyType
 import torch
 
 from embodichain.utils import configclass
+from .candidates import GraspCandidateBatch
 
 __all__ = [
     "GraspPoseGenerator",
@@ -163,6 +164,54 @@ class GraspPoseGenerator(ABC):
     Task Program. Application code may call it directly or install the same
     service instance alongside a motion generator in a higher-level runtime.
     """
+
+    def get_grasp_candidates(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+        obj_longest_axis: torch.Tensor | None = None,
+        is_positive_part: bool | torch.Tensor = True,
+        generator: torch.Generator | None = None,
+        frame: str = "local_arena",
+    ) -> GraspCandidateBatch:
+        """Adapt legacy generators to owned, padded grasp candidates.
+
+        Args:
+            mesh_vertices: Target-local mesh vertices.
+            mesh_triangles: Target-local triangle indices.
+            obj_poses: Object transforms in the explicitly named frame.
+            approach_direction: Approach vectors in that same frame.
+            obj_longest_axis: Optional object-part selection axis.
+            is_positive_part: Select the positive projected object part.
+            generator: Optional local RNG; legacy services must override this
+                method to support it rather than silently ignore the stream.
+            frame: Named reference frame of the input and returned poses.
+
+        Returns:
+            Padded candidates with invalid individual entries masked out.
+        """
+        if generator is not None:
+            raise NotImplementedError(
+                "This legacy grasp generator does not support a local RNG."
+            )
+        results = self.get_valid_grasp_poses(
+            mesh_vertices=mesh_vertices,
+            mesh_triangles=mesh_triangles,
+            obj_poses=obj_poses,
+            approach_direction=approach_direction,
+            obj_longest_axis=obj_longest_axis,
+            is_positive_part=is_positive_part,
+        )
+        if len(results) != obj_poses.shape[0]:
+            raise ValueError(
+                "Grasp generator returned the wrong number of object rows."
+            )
+        return GraspCandidateBatch.from_ragged(
+            results, object_poses=obj_poses, frame=frame
+        )
 
     @abstractmethod
     def get_valid_grasp_poses(

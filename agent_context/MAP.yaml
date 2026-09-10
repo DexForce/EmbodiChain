@@ -220,6 +220,13 @@ topics:
   - FixedSceneHost
   - QposRolloutExecutor
   - trajectory_generation
+  - AtomicTrajectoryGenerator
+  - AtomicAffordanceBatch
+  - plan_affordance_batch
+  - n_affordance_multi_gen
+  - SceneReplicaPool
+  - affordance parallel trajectories
+  - affordance并行轨迹
   paths: [topics/motion-planning/motion-planning.md]
   source_of_truth:
   - embodichain/lab/sim/motion/planners/base_planner.py
@@ -250,11 +257,21 @@ topics:
   - examples/sim/motion/trajectory_generation/cube_grasp_parallel.py
   - examples/sim/motion/trajectory_generation/cube_pickup_collection.py
   - embodichain/lab/trajectory_generation/integrations/atomic.py
+  - embodichain/lab/trajectory_generation/integrations/atomic_candidates.py
+  - embodichain/lab/trajectory_generation/integrations/atomic_affordance.py
+  - scripts/tutorials/atomic_action/affordance_utils.py
+  - scripts/tutorials/atomic_action/pickup.py
+  - scripts/tutorials/atomic_action/slide.py
+  - embodichain/lab/trajectory_generation/replicas.py
+  - examples/sim/motion/trajectory_generation/affordance_parallel.py
   - embodichain/lab/trajectory_generation/integrations/contact.py
   watch_paths: [embodichain/lab/sim/motion/motion_generator.py, tests/sim/motion/test_motion_generator.py,
     tests/sim/motion/test_motion_generator_batched.py, embodichain/lab/sim/motion/planners/, embodichain/lab/sim/motion/expansion/,
     tests/sim/motion/expansion/, embodichain/lab/sim/utility/action_utils.py, embodichain/compute/trajectory/,
-    tests/sim/motion/planners/, tests/compute/]
+    tests/sim/motion/planners/, tests/compute/, embodichain/lab/trajectory_generation/,
+    tests/lab/trajectory_generation/, examples/sim/motion/trajectory_generation/,
+    scripts/tutorials/atomic_action/affordance_utils.py, scripts/tutorials/atomic_action/pickup.py,
+    scripts/tutorials/atomic_action/slide.py]
   related_topics: [simulation-system, robot-system, ik-solvers, atomic-actions]
   status: active
 - id: rl-learning
@@ -307,7 +324,8 @@ topics:
   title: Atomic Skills
   aliases: [atomic action, atomic skill, 原子动作, 原子技能]
   keywords: [AtomicActionEngine, PlanningContext, ExecutionSession, ExecutionRunner, ActionInvocation,
-    RecoveryPolicy, HeldObjectGuardRequest, PhaseEffectGateRequest, articulation_geometry]
+    RecoveryPolicy, HeldObjectGuardRequest, PhaseEffectGateRequest, articulation_geometry,
+    PickUpCandidateBatch, SlideCandidateBatch]
   paths: [topics/atomic-actions/atomic-actions.md]
   source_of_truth:
   - embodichain/lab/sim/atomic_actions/engine.py
@@ -318,7 +336,8 @@ topics:
   - embodichain/lab/sim/atomic_actions/runner.py
   - embodichain/lab/sim/atomic_actions/articulation_geometry.py
   - embodichain/lab/sim/atomic_actions/primitives/
-  watch_paths: [embodichain/lab/sim/atomic_actions/, tests/sim/atomic_actions/]
+  watch_paths: [embodichain/lab/sim/atomic_actions/, tests/sim/atomic_actions/,
+    scripts/tutorials/atomic_action/]
   related_topics: [simulation-system, motion-planning, robot-system, ik-solvers, task-programs]
   status: active
 - id: task-programs

@@ -19,12 +19,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import math
 from typing import Literal
 
 import torch
 
 from embodichain.toolkits.graspkit import (
+    GraspCandidateBatch,
     ParallelJawGraspPoseGenerator,
     ParallelJawGripperModelCfg,
 )
@@ -212,6 +214,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 "max_opening_width."
             )
         self._backends: dict[tuple[object, ...], _AntipodalMeshBackend] = {}
+        self._backend_sample_seeds: dict[tuple[object, ...], int | None] = {}
 
     @property
     def algorithm_cfg(self) -> AntipodalGraspPoseGeneratorCfg:
@@ -288,12 +291,19 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         self,
         mesh_vertices: torch.Tensor,
         mesh_triangles: torch.Tensor,
+        *,
+        sampling_seed: int | None = None,
     ) -> _AntipodalMeshBackend:
         """Return the lazily prepared backend for one mesh."""
         self._validate_geometry(mesh_vertices, mesh_triangles)
         key = self._geometry_key(mesh_vertices, mesh_triangles)
         backend = self._backends.get(key)
         if backend is not None:
+            if self._backend_sample_seeds[key] != sampling_seed:
+                backend._select_sampling_seed(sampling_seed)
+                if self._annotation_cfg.force_refresh or not backend.is_prepared:
+                    backend.annotate()
+                self._backend_sample_seeds[key] = sampling_seed
             return backend
 
         model = self._gripper_model
@@ -328,10 +338,12 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 annotation.use_largest_connected_component
             ),
             filter_ground_collision=collision.filter_ground_collision,
+            **({} if sampling_seed is None else {"sampling_seed": sampling_seed}),
         )
         if annotation.force_refresh or not backend.is_prepared:
             backend.annotate()
         self._backends[key] = backend
+        self._backend_sample_seeds[key] = sampling_seed
         return backend
 
     def prepare_mesh(
@@ -402,7 +414,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             )
         return value.to(device=device, dtype=torch.float32)
 
-    def get_valid_grasp_poses(
+    def _candidate_rows(
         self,
         *,
         mesh_vertices: torch.Tensor,
@@ -411,9 +423,13 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
-    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """Return ranked candidates, optionally from one projected axis end."""
-        backend = self._backend(mesh_vertices, mesh_triangles)
+        sampling_seed: int | None = None,
+        empty_failed: bool = False,
+    ) -> tuple[list[tuple[torch.Tensor, torch.Tensor]], list[torch.Tensor]]:
+        """Collect legacy rows and opening widths from one shared sampling pass."""
+        backend = self._backend(
+            mesh_vertices, mesh_triangles, sampling_seed=sampling_seed
+        )
         poses = self._object_poses(obj_poses, device=backend.device)
         directions = self._approach_directions(
             approach_direction,
@@ -458,12 +474,29 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                     f"({poses.shape[0]},)."
                 )
         results: list[tuple[torch.Tensor, torch.Tensor]] = []
+        opening_widths: list[torch.Tensor] = []
         for index, object_pose in enumerate(poses):
-            success, grasp_poses, _, costs = backend.get_valid_grasp_poses(
+            local_options = {}
+            if sampling_seed is not None:
+                # Independent streams make backend-cache warmth and row ordering
+                # irrelevant to a frozen request's approach perturbations.
+                payload = (
+                    sampling_seed,
+                    object_pose[:3, :3].detach().cpu().tolist(),
+                    directions[index].detach().cpu().tolist(),
+                )
+                row_seed = int.from_bytes(
+                    hashlib.sha256(repr(payload).encode()).digest()[:8], "little"
+                ) % (2**63 - 1)
+                local_options["generator"] = torch.Generator(
+                    device=backend.device
+                ).manual_seed(row_seed)
+            success, grasp_poses, widths, costs = backend.get_valid_grasp_poses(
                 object_pose=object_pose,
                 approach_direction=directions[index],
                 obj_longest_axis=None if axes is None else axes[index],
                 is_positive_part=bool(positive_parts[index].item()),
+                **local_options,
             )
             if grasp_poses.shape == (4, 4):
                 grasp_poses = grasp_poses.unsqueeze(0)
@@ -473,6 +506,14 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 logger.log_warning(
                     f"Failed to find valid grasp poses for object row {index}."
                 )
+                if empty_failed:
+                    results.append(
+                        (grasp_poses.new_empty((0, 4, 4)), costs.new_empty((0,)))
+                    )
+                    opening_widths.append(
+                        torch.empty(0, device=backend.device, dtype=torch.float32)
+                    )
+                    continue
                 costs = torch.full(
                     (grasp_poses.shape[0],),
                     torch.inf,
@@ -480,7 +521,122 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                     device=backend.device,
                 )
             results.append((grasp_poses, costs))
+            width_tensor = torch.as_tensor(
+                widths, device=backend.device, dtype=torch.float32
+            ).clone()
+            if width_tensor.ndim == 0:
+                width_tensor = width_tensor.unsqueeze(0)
+            opening_widths.append(width_tensor)
+        return results, opening_widths
+
+    def get_valid_grasp_poses(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+        obj_longest_axis: torch.Tensor | None = None,
+        is_positive_part: bool | torch.Tensor = True,
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """Return legacy ragged poses and costs from one sampling pass.
+
+        Args:
+            mesh_vertices: Object-local vertices.
+            mesh_triangles: Object-local triangle indices.
+            obj_poses: Batched object poses.
+            approach_direction: Approach vectors in the object-pose frame.
+            obj_longest_axis: Optional projected object-part axis.
+            is_positive_part: Whether to select the positive axis end.
+
+        Returns:
+            One ``(poses, costs)`` pair per input object.
+        """
+        results, _ = self._candidate_rows(
+            mesh_vertices=mesh_vertices,
+            mesh_triangles=mesh_triangles,
+            obj_poses=obj_poses,
+            approach_direction=approach_direction,
+            obj_longest_axis=obj_longest_axis,
+            is_positive_part=is_positive_part,
+        )
         return results
+
+    def get_grasp_candidates(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+        obj_longest_axis: torch.Tensor | None = None,
+        is_positive_part: bool | torch.Tensor = True,
+        generator: torch.Generator | None = None,
+        frame: str = "local_arena",
+    ) -> GraspCandidateBatch:
+        """Return masked grasps and widths with optional isolated randomness.
+
+        Args:
+            mesh_vertices: Object-local vertices.
+            mesh_triangles: Object-local triangle indices.
+            obj_poses: Batched object poses in ``frame``.
+            approach_direction: Approach vectors in ``frame``.
+            obj_longest_axis: Optional projected object-part axis.
+            is_positive_part: Whether to select the positive axis end.
+            generator: Local RNG. Exactly one seed is consumed per request;
+                separate mesh and approach streams make cache hits reproducible.
+            frame: Explicit reference frame of input and output poses.
+
+        Returns:
+            Owned padded candidates, with malformed individual grasps masked.
+        """
+        if generator is not None and not isinstance(generator, torch.Generator):
+            raise TypeError("generator must be a torch.Generator or None.")
+        sampling_seed = (
+            None
+            if generator is None
+            else int(
+                torch.randint(
+                    0, 2**63 - 1, (1,), generator=generator, device=generator.device
+                ).item()
+            )
+        )
+        results, widths = self._candidate_rows(
+            mesh_vertices=mesh_vertices,
+            mesh_triangles=mesh_triangles,
+            obj_poses=obj_poses,
+            approach_direction=approach_direction,
+            obj_longest_axis=obj_longest_axis,
+            is_positive_part=is_positive_part,
+            sampling_seed=sampling_seed,
+            empty_failed=True,
+        )
+        # Widths outside the configured physical opening range are candidates
+        # rejected by this model, not malformed shared batch metadata.
+        for (_, costs), row_widths in zip(results, widths):
+            if row_widths.shape != costs.shape:
+                raise ValueError(
+                    "Antipodal backend returned misaligned opening widths."
+                )
+            invalid_width = (row_widths < self._gripper_model.min_opening_width) | (
+                row_widths > self._gripper_model.max_opening_width
+            )
+            row_widths[invalid_width] = torch.nan
+        namespace = repr(
+            (
+                self._gripper_model.__dict__,
+                self._algorithm_cfg.__dict__,
+                self._collision_cfg.__dict__,
+                sampling_seed,
+            )
+        )
+        return GraspCandidateBatch.from_ragged(
+            results,
+            object_poses=obj_poses,
+            opening_widths=widths,
+            frame=frame,
+            id_namespace=namespace,
+        )
 
     def get_best_grasp_poses(
         self,
