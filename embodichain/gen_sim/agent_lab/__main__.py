@@ -52,6 +52,8 @@ def _prepare_run(args: argparse.Namespace, repo: Path) -> Path:
         output_root=args.output_root,
         objective=args.objective,
         robot_component=args.robot_component,
+        instruction=args.instruction,
+        reuse_policy=args.reuse_policy,
     )
     print(f"[Agent Lab] Run directory: {root}", flush=True)
     return root
@@ -91,7 +93,16 @@ def main() -> None:
         selection.add_argument("--task")
         selection.add_argument("--task-file", type=Path)
         command.add_argument(
+            "--instruction",
+            help="Replace the task goal on the same assets; original acceptance and difficulty are not inherited",
+        )
+        command.add_argument(
             "--objective", choices=["solve", "cold_start"], default="solve"
+        )
+        command.add_argument(
+            "--reuse-policy",
+            choices=["research", "isolated"],
+            help="Research permits qualified adapters/calibration; isolated excludes same-task historical answers",
         )
         command.add_argument("--robot-component", type=Path)
         command.add_argument(

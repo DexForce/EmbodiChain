@@ -118,6 +118,9 @@ def _launch(
     _write_heartbeat(root, record)
     heartbeat.start()
     meter = UsageMeter(root, "launch")
+    from .episode import EpisodeHost
+
+    episode_host = EpisodeHost(root, deadline)
     # This host reads only execution requests; it never supplies task advice.
     try:
         result = _process(
@@ -127,7 +130,7 @@ def _launch(
             timeout=minutes * 60,
             env=env,
             prompt=_BOOTSTRAP_PROMPT if batch else None,
-            service=lambda: _serve_requests(root, deadline),
+            service=lambda: _serve_requests(root, deadline, episode_host),
             interactive=not batch,
         )
         record.update(
@@ -149,6 +152,7 @@ def _launch(
     finally:
         stopped.set()
         heartbeat.join()
+        episode_host.close(force=True)
         write_json(root / "launch.json", record)
         write_json(output / "launch.json", record)
         from .delivery import finalize_run
@@ -229,8 +233,33 @@ def _workspace_main(root: Path, arguments: list[str]) -> None:
     commands.add_parser("status")
     commands.add_parser("stop")
     commands.add_parser("usage")
+    episode = commands.add_parser(
+        "session", help="Keep one physical scene alive across Python chunks"
+    )
+    episode.add_argument("operation", choices=["start", "exec", "observe", "close"])
+    episode.add_argument("--config", type=Path)
+    episode.add_argument("--script", type=Path)
+    episode.add_argument("--timeout", type=float, default=300)
     args = parser.parse_args(arguments)
-    if args.command == "inspect":
+    if args.command == "session":
+        from .episode import request_episode
+
+        if args.operation == "start" and args.config is None:
+            parser.error("session start requires --config")
+        if args.operation == "exec" and args.script is None:
+            parser.error("session exec requires --script")
+        result = request_episode(
+            root,
+            args.operation,
+            config=args.config.resolve() if args.config else None,
+            script=args.script.resolve() if args.script else None,
+            timeout=args.timeout,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        raise SystemExit(
+            1 if result.get("host_error") or result.get("ok") is False else 0
+        )
+    elif args.command == "inspect":
         from .report import inspect_attempt
 
         print(

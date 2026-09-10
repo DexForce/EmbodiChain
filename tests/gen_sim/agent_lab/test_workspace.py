@@ -59,6 +59,19 @@ def test_bootstrap_does_not_depend_on_task_identity(tmp_path: Path) -> None:
     assert guides[0] == guides[1]
 
 
+def test_bootstrap_leaves_robot_method_design_to_the_agent(tmp_path: Path) -> None:
+    (tmp_path / "workspace").mkdir()
+    _write_workspace(tmp_path, {"repo": "/repo", "python": sys.executable, "task": {}})
+    guide = (tmp_path / "workspace/START.md").read_text()
+    assert "启动器与实验规范" in guide
+    assert "你负责阅读 EmbodiChain" in guide
+    assert "共享库" in guide and "单独说明依据" in guide
+    assert "lab.tools" not in guide and "CuroboPlannerCfg" not in guide
+    assert "run --script experiment.py --timeout" in guide
+    assert not (tmp_path / "workspace/controller.py").exists()
+    assert not (tmp_path / "workspace/planner.py").exists()
+
+
 def test_prepare_accepts_non_task100_identity_and_explicit_robot(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -84,6 +97,29 @@ def test_prepare_accepts_non_task100_identity_and_explicit_robot(
         json.loads((root / "workspace/environment.json").read_text())["objective"]
         == "cold_start"
     )
+    assert json.loads((root / "run.json").read_text())["reuse_policy"] == "isolated"
+
+
+@pytest.mark.parametrize("policy", ["research", "isolated"])
+def test_reuse_policy_is_explicit_without_changing_full_task_objective(
+    tmp_path, policy
+):
+    (tmp_path / "workspace").mkdir()
+    _write_workspace(
+        tmp_path,
+        {
+            "repo": "/repo",
+            "python": sys.executable,
+            "task": {},
+            "objective": "solve",
+            "reuse_policy": policy,
+        },
+    )
+    env = json.loads((tmp_path / "workspace/environment.json").read_text())
+    assert env["reuse_policy"] == policy and env["objective"] == "solve"
+    guide = (tmp_path / "workspace/START.md").read_text()
+    assert "session exec" in guide and "reuse_log.json" in guide
+    assert "原始初态连续重跑" in guide
 
 
 @pytest.mark.parametrize("batch", [True, False])

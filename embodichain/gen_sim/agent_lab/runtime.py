@@ -20,8 +20,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from collections.abc import Iterator
+from contextlib import contextmanager
 import json
 from pathlib import Path
+import time
 from typing import Any
 
 import imageio.v2 as imageio
@@ -103,6 +105,10 @@ class Lab:
         self.cfg = cfg
         self.output = output
         self.output.mkdir(parents=True, exist_ok=True)
+        self._started = time.perf_counter()
+        self.started_at = time.time()
+        self.profile: dict[str, dict[str, float | int]] = {}
+        self.setup_seconds = None
         self.time = 0.0
         self.physics_steps = 0
         self.frames = 0
@@ -187,7 +193,7 @@ class Lab:
         # Keep a visual artifact even if the native GPU physics initializer aborts.
         self.camera.render()
         loaded = np.ascontiguousarray(np.asarray(self.camera.get_rgb_map())[..., :3])
-        imageio.imwrite(output / "loaded.png", loaded)
+        imageio.imwrite(output / "loaded.png", loaded, compress_level=1)
         self._writer.append_data(loaded)
         self.frames += 1
         if self.sim.is_use_gpu_physics:
@@ -214,6 +220,17 @@ class Lab:
         )
         self.capture("initial")
         self._next_capture = 1.0 / cfg.fps
+        self.setup_seconds = time.perf_counter() - self._started
+
+    @contextmanager
+    def _measure(self, name: str) -> Iterator[None]:
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            record = self.profile.setdefault(name, {"calls": 0, "wall_seconds": 0.0})
+            record["calls"] += 1
+            record["wall_seconds"] += time.perf_counter() - started
 
     def snapshot(self) -> dict[str, Any]:
         """Read actual positions, not desired commands or symbolic held state."""
@@ -237,30 +254,37 @@ class Lab:
 
     def capture(self, name: str | None = None) -> Path | None:
         """Append a frame to the streaming MP4 and optionally save a keyframe."""
-        self.camera.render()
-        frame = np.ascontiguousarray(np.asarray(self.camera.get_rgb_map())[..., :3])
-        self._writer.append_data(frame)
+        with self._measure("render_readback"):
+            self.camera.render()
+            frame = np.ascontiguousarray(np.asarray(self.camera.get_rgb_map())[..., :3])
+        with self._measure("video_submit"):
+            self._writer.append_data(frame)
         self.frames += 1
-        self._telemetry.write(json.dumps(self.snapshot(), allow_nan=False) + "\n")
-        imageio.imwrite(self.output / "latest.png", frame)
+        with self._measure("state_telemetry"):
+            self._telemetry.write(json.dumps(self.snapshot(), allow_nan=False) + "\n")
+        with self._measure("latest_png"):
+            imageio.imwrite(self.output / "latest.png", frame, compress_level=1)
         if name is not None:
             path = self.output / f"{name}.png"
-            imageio.imwrite(path, frame)
+            with self._measure("keyframe_png"):
+                imageio.imwrite(path, frame, compress_level=1)
             return path
         return None
 
     def _recorded_update(self, physics_dt: float | None = None, step: int = 10) -> None:
         dt = self.sim.sim_config.physics_dt if physics_dt is None else physics_dt
         for _ in range(step):
-            self._physics_update(physics_dt=dt, step=1)
+            with self._measure("physics_update"):
+                self._physics_update(physics_dt=dt, step=1)
             self.time += dt
             self.physics_steps += 1
-            current = self.robot.get_qpos().detach().clone()
-            if self._last_qpos is not None:
-                delta = float((current - self._last_qpos).abs().max())
-                self.max_joint_step = max(self.max_joint_step, delta)
-                self.max_joint_speed = max(self.max_joint_speed, delta / dt)
-            self._last_qpos = current
+            with self._measure("joint_observation"):
+                current = self.robot.get_qpos().detach().clone()
+                if self._last_qpos is not None:
+                    delta = float((current - self._last_qpos).abs().max())
+                    self.max_joint_step = max(self.max_joint_step, delta)
+                    self.max_joint_speed = max(self.max_joint_speed, delta / dt)
+                self._last_qpos = current
             if self.time + 1e-9 >= self._next_capture:
                 self.capture()
                 self._next_capture += 1.0 / self.cfg.fps
@@ -273,7 +297,14 @@ class Lab:
 
     def event(self, name: str, **measurements: Any) -> None:
         """Save a named milestone with caller-supplied measurements."""
-        self.events.append({"name": name, "time": self.time, **measurements})
+        self.events.append(
+            {
+                "name": name,
+                "time": self.time,
+                "worker_elapsed_seconds": time.perf_counter() - self._started,
+                **measurements,
+            }
+        )
         write_json(self.output / "events.json", self.events)
         self.capture(f"event_{len(self.events):03d}")
 
@@ -327,9 +358,23 @@ class Lab:
                         },
                     )
                 finally:
-                    self._writer.close()
+                    with self._measure("video_flush"):
+                        self._writer.close()
                     self._telemetry.close()
         finally:
+            write_json(
+                self.output / "profile.json",
+                {
+                    "started_at": self.started_at,
+                    "worker_elapsed_seconds": time.perf_counter() - self._started,
+                    "setup_seconds": self.setup_seconds,
+                    "png_compress_level": 1,
+                    "phases": self.profile,
+                    "note": "Host wall timings, including implicit waits; not GPU kernel timings. "
+                    "No additional CUDA synchronization. Setup overlaps initial capture. "
+                    "Video submission excludes encoder CPU work outside the caller; flush measured separately.",
+                },
+            )
             if self.sim is not None:
                 self.sim.destroy(exit_process=False)
                 SimulationManager.flush_cleanup_queue()

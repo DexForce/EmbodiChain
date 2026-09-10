@@ -4,6 +4,11 @@
 不是动作白名单。默认采用 B 模式：保留 GenSim 接触动力学，开放控制策略和机器人调参。
 原始资产不修改；资产修复属于需要另行确认的 C 模式。
 
+Agent Lab 只负责启动、实验规范与交付保证，不维护第二套机器人求解接口。
+宿主准备任务、资产路径和项目导航，提供通用 Python/GPU 执行、预算、录制、
+计量及报告；启动后的 Codex 自主使用 EmbodiChain API，编写控制器、规划适配和
+调参代码，产物留在本轮 workspace。共享库修复单独提出，不与启动功能捆绑。
+
 [API 参考](../../../docs/source/api_reference/gen_sim_agent_lab.rst) 记录本实验模块的接口。
 
 ## 开始运行
@@ -23,6 +28,31 @@ python -B -m embodichain.gen_sim.agent_lab pipeline --task task1187 --minutes 45
 只验证接入与控制。`--batch` 可显式指定默认自动模式，不能与 pipeline 的 `--window` 同时使用。
 还支持 `--task-file`、`--assets`、`--output-root`、`--robot-component`、`--model` 和
 `--reasoning-effort`。它复用新 `launch` 流程，不调用旧的 `solve/resume` 搜索循环。
+
+### 同资产自定义任务
+
+只需增加一个可选参数 `--instruction`，不需要额外提供验收参数：
+
+```bash
+python -B -m embodichain.gen_sim.agent_lab pipeline \
+  --task task1187 --instruction "拿起杯子，保持直立，再放回原位置。" \
+  --minutes 45 --model gpt-6-astra --reasoning-effort xhigh
+```
+
+不传时执行原输入的任务和验收要求；传入时沿用同一资产、参考图、导出场景和装配预设，
+用新指令完整替换旧任务。新指令本身也是验收依据，不沿用旧验收，不新增 `--acceptance`。
+Codex 在控制前通过 `task_interpretation.json` 记录理解和可测完成条件，不能通过降低条件
+宣称成功。该文件仍是模型提议，不是独立验收结论。
+
+`prepare`、`pipeline` 和旧 `solve` 均接受此参数，也可与 `--task-file` 配合。
+每次创建新 run；不在已有 `launch/resume` 目录中改写任务，不复用上次执行后的物理状态。
+更换指令不授权修改原始资产、初始布局或物理参数。
+
+`run.json.task` 和 `workspace/task.json` 保存实际任务，`run.json.source_task` 仅保存原输入
+用于溯源；工作区说明明确不执行来源任务。覆盖后的 `level` 留空，不继承原 L3/L4 等级。
+最终报告标为“自定义任务”，JSON 的 `run.task_variant=custom_instruction`、
+`acceptance_source=instruction`；原任务 ID 仍用于资产分组，实际结果以 run ID 和指令区分。
+空白覆盖参数会报错，不会悄悄运行默认任务。
 
 ### 模型与思考强度
 
@@ -227,7 +257,7 @@ python -B -m embodichain.gen_sim.agent_lab inspect --attempt "/absolute/attempt/
 `lab.scene.planner_objects` 提供源对象元数据与路径，`lab.scene.table_top_z` 是桌面高度。
 直接使用项目 API、NumPy、Torch、SciPy、抓取生成器或任意规划算法。
 
-可选便利函数：
+以下为原有兼容便利函数，不代表宿主推荐的控制算法：
 
 - `lab.step(seconds)`：推进仿真，默认一个 0.04 秒控制周期。
 - `lab.move_joints(qpos, part="left_arm", seconds=2)`：平滑发送关节目标。
@@ -246,6 +276,53 @@ python -B -m embodichain.gen_sim.agent_lab inspect --attempt "/absolute/attempt/
 每次执行冻结脚本及同目录辅助模块，保存运行器源代码快照与源资产指纹。
 时间预算包含搜索和最终重跑，预留至多五分钟重跑时间。`resume` 延续明确的会话 ID，
 不会使用可能属于另一个任务的 `--last`。
+
+## 分段 Python 调试
+
+`pipeline/launch` 宿主提供持久仿真进程；旧 `solve/resume` 仍只支持独立脚本。
+以下命令在生成的工作区执行：
+
+```bash
+python3 lab.py session start --config lab.json --timeout 180
+python3 lab.py session exec --script chunk.py --timeout 300
+python3 lab.py session observe
+python3 lab.py session close
+```
+
+`chunk.py` 是顶层 Python，自动提供 `lab`、持久 `state` 字典及前序定义。
+用 `result = ...` 返回可序列化数据或张量，不需要原子任务、固定动作语法或 `solve`。
+每段执行冻结源代码；Python 异常返回 traceback 并保留场景，普通观察不推进物理。
+已导入模块遵循 Python 缓存语义，修改后需要显式 reload。
+原生错误可能结束整个进程；超时、宿主退出会清理 worker，不自动重放任何动作。
+独立脚本与持久场景不并行占用同一宿主，切换前先 close。
+
+`attempts/episode_*/` 保留整段视频、逐段快照、commands 回复、chunks 源码、
+输入哈希及运行计量。分段诊断可以交付，但最终成功候选仍需从原始初态
+用独立 `solution.py` 连续重跑；不得拼接视频或跳过前缀。重跑时间属于本轮预算。
+
+## 项目能力与复用
+
+机器人、运动规划、IK/FK、接触传感器等能力由 EmbodiChain 原有模块提供。
+从 `agent_context/MAP.yaml` 查到对应代码和示例，再由 Codex 在实验工作区组合、
+调试或编写局部适配；不要求先实现通用机器人 SDK，也不规定必须采用某个规划器。
+必要时在实验副本验证兼容补丁，记录适用环境；主库修复另行评审。
+
+新建实验的 `--reuse-policy research` 默认允许复用已验证的通用适配器和资产校准，
+在 `reuse_log.json` 记录路径、哈希、资格依据、资产/机器人指纹和本轮复核。
+不是允许把未经检查的旧任务脚本冒充本轮成功，也不自动认证模型的校准声明。
+完整任务冷启动对照使用 `--objective solve --reuse-policy isolated`：
+隔离其他实验输出与同题历史答案，仍可使用项目通用基础设施。
+`--objective cold_start` 仍只做控制接入测试，默认 isolated，不用于完整成功率统计。
+
+旧实验的临时适配器、对照脚本和共享库补丁保留在实验输出及其冻结版本中，
+不是当前 pipeline 的依赖。复现旧实验应使用当时记录的代码版本，而非假定当前
+运行时仍包含旧的预置求解层。原视频、报告及尝试目录不因框架精简而删除。
+
+`profile.json` 记录初始化、物理、关节观测、渲染/回读、视频提交/刷新、状态和 PNG
+的宿主墙钟耗时。无额外 CUDA 同步，不能将等待归因直接当作 kernel 时间。
+PNG 使用无损压缩级别 1，保留每帧 MP4 和原有关键帧，不靠删除失败视频提速。
+本机 DexSim 在过长的资源路径下曾触发原生材质断言；实验输出优先使用较短路径，
+初始化失败应独立记录，不能当作机器人任务失败。
 
 ## 物理与验收
 

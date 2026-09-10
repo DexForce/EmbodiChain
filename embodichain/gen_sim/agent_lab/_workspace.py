@@ -28,27 +28,61 @@ _GUIDE = """# 实验工作区
 
 你从这个目录独立开始，不需要其他对话提供命令或解法。
 
+## 职责边界
+
+Agent Lab 是启动器与实验规范，不是机器人求解框架。宿主负责环境、执行通道、
+预算、录制、用量和交付；你负责阅读 EmbodiChain、选择方法、实现和验证任务。
+优先使用项目已有 API 与示例，不必先搭建通用工具库。从可检查的小实验开始，
+按实际图片、状态和错误迭代；控制器、规划适配和调参代码放在本轮 workspace。
+需要局部兼容时在工作区或实验副本验证并记录补丁，不自动修改主库；确需共享库
+修复则单独说明依据。不要把一次任务的临时方案直接升级为项目公共接口。
+
 ## 输入与环境
 
 先读 task.json、environment.json、physics.json 和 lab.json。
 task.json 是题目与验收，不包含规划路线或答案提示。
 environment.json 提供项目导航、解释器和本轮目标。项目代码可以自由查阅；
 从 agent_context/MAP.yaml 按需进入相关模块，不要机械扫描整个仓库。
-不要读取其他实验输出、历史会话、个人记忆或同题旧解法。当前工作区内
-本轮自己产生的代码、观察、失败和笔记可以继续使用。不要改原项目或原始资产。
+不要读取历史会话或个人记忆。当前工作区内本轮自己产生的代码、观察、失败和
+笔记可以继续使用。不要改原项目或原始资产。复用范围按 environment.json 的
+reuse_policy：research 允许查阅和复用经过验证的通用适配器及资产校准结果，
+无需重新开发机器人基础设施；不等于将历史任务脚本直接当成本轮成功。
+isolated 禁止读取其他实验输出及同题旧答案，但项目内通用工具仍可使用。
+复用时写 reuse_log.json：文件路径、SHA256、资格验证依据、适用机器人/资产指纹，
+以及本轮复核结果。校准必须与当前资产、尺度和坐标系匹配；不匹配时重新测量。
+该记录是可审计的复用声明，不是宿主自动认证。不要把未经验证的猜测标为校准。
+
+如果 environment.json 中 task_variant 为 custom_instruction，本次用户指令就是
+执行目标和验收依据。不要执行来源任务的旧描述、旧验收或继承其 L3/L4 难度。
+结合真实场景，在控制前写 task_interpretation.json，说明任务理解与可测完成条件；
+这些条件是对用户要求的展开，不是自行降低要求的授权。它们属于 Codex 提议，
+不自动成为独立验收结论。run.json 的 source_task 仅用于溯源，不是额外任务。
 
 ## 运行工具
 
 `python3 lab.py --help` 显示工具。它自动使用 environment.json 中的解释器，
 无需猜测 Python 路径或 GPU 请求队列的环境变量。
 
-- `python3 lab.py run --script probe.py --config lab.json --timeout 300`：
-  执行普通 `def solve(lab)`。可直接访问 lab.sim、robot、objects、articulations。
 - `python3 lab.py run --script experiment.py --timeout 300`：执行独立 Python
   程序，不要求 solve(lab)。GENSIM_LAB_OUTPUT 指向本次独立产物目录。
+- `python3 lab.py run --script probe.py --config lab.json --timeout 300`：
+  可选装配和录制预设，执行 `def solve(lab)`，直接访问真实 sim、robot 和对象。
 - `python3 lab.py inspect --attempt /absolute/attempt`：解码视频、汇总实际运动。
 - `python3 lab.py status`：查看宿主与预算；`python3 lab.py stop`：停止本轮并保留产物。
 - `python3 lab.py usage`：读取宿主计量的累计耗时与 token 用量。
+
+需要交互调试时，优先用持久会话，避免每次观察都重建场景或重跑前缀：
+- `python3 lab.py session start --config lab.json --timeout 180`：初始化一次。
+- `python3 lab.py session exec --script chunk.py --timeout 300`：执行顶层 Python，
+  不需要 solve(lab)。变量 lab、state 字典及前序定义保留；result 可返回 JSON/张量。
+- `python3 lab.py session observe`：读取当前状态和图片，不推进物理时间。
+- `python3 lab.py session close`：关闭并刷新完整视频，然后可启动新场景。
+
+只有显式 step/update 推进物理。普通 Python 异常保留现场并返回 traceback，
+不会自动复位、松爪、重试或重新执行动作。修改已 import 的模块需显式 reload，
+原生/CUDA 错误可能终止整个进程。宿主超时或退出会停止 worker 并保留已有产物。
+每段脚本及同目录依赖会冻结到 attempts/episode_*/chunks/，同一会话视频连续记录。
+session 仅是进程与代码生命周期，不接受动作 DSL，也不限制使用任意项目 API。
 
 运行器在宿主执行 GPU 请求；不要在 Codex 的受限 shell 中直接启动 CUDA worker。
 若没有正在运行的宿主，工具会立即说明应如何启动，不会无限等待。
@@ -67,9 +101,17 @@ environment.json 提供项目导航、解释器和本轮目标。项目代码可
 
 所有仿真尝试必须保留视频和实际状态，包括失败。使用 Lab 会自动记录；
 独立程序需自行接入记录，并在 GENSIM_LAB_OUTPUT 保存可检查产物。
-便利方法包括 step、move_joints、move_tcp、snapshot、event、capture。
-move_tcp 是单目标 IK 加关节插值，不保证笛卡尔直线或自动避障。
+Lab 提供 step、snapshot、event、capture。既有 move_joints / move_tcp 仅保留为
+可选兼容便利方法，不是推荐控制方案；后者只是单目标 IK 加关节插值，不保证避障。
+FK/IK、夹爪、接触、碰撞与规划直接查阅项目对应 API；宿主不另建机器人调用层。
+profile.json 分项记录物理、渲染、视频提交、PNG、状态读取的宿主墙钟时间，
+不额外同步 CUDA；不能把这些等待时间直接解释成 GPU kernel 时间。
 物体运动必须来自真实接触。控制目标、正常退出、视频存在都不是任务成功证明。
+
+分段调试可用于继续检查当前现场，不必为了下一次观察重跑已经执行的前缀。
+完整成功候选另写 solution.py，关闭会话后
+用 run 从原始初态连续重跑并保存视频。不得拼接片段、重置物体或读取状态快照
+来绕过前序操作。此重跑需预留在本轮预算内；没有重跑就明确写尚未验证。
 
 本轮 objective=cold_start 时：自主检查环境与场景，完成一次你自行选择的
 真实机器人控制实验，检查视频和实际 qpos，然后停止。可以只做有意义的
@@ -135,6 +177,9 @@ def _write_workspace(root: Path, manifest: dict) -> None:
             "python": manifest["python"],
             "project_map": str(Path(manifest["repo"]) / "agent_context/MAP.yaml"),
             "objective": manifest.get("objective", "solve"),
+            "reuse_policy": manifest.get("reuse_policy", "isolated"),
+            "task_variant": manifest.get("task_variant", "default"),
+            "acceptance_source": manifest.get("acceptance_source", "task"),
             "robot_preset": "lab.json; replaceable before an episode",
             "budget": "../launch.json records the current deadline",
             "usage_file": "../usage.json",
@@ -171,7 +216,7 @@ def _write_workspace(root: Path, manifest: dict) -> None:
     (workspace / "START.md").write_text(_GUIDE, encoding="utf-8")
     (workspace / "AGENTS.md").write_text(
         "# Agent Lab\n\n先阅读 START.md。当前工作区是独立实验，"
-        "不要读取历史会话、个人记忆、其他实验输出或同题旧解法。\n",
+        "不要读取历史会话或个人记忆；按 environment.json 的 reuse_policy 执行复用边界。\n",
         encoding="utf-8",
     )
     (workspace / "lab.py").write_text(_BRIDGE)

@@ -86,6 +86,63 @@ def make_attempt(
     return attempt
 
 
+def test_segmented_delivery_retains_code_integrity_and_requires_fresh_replay(run):
+    import hashlib
+
+    attempt = make_attempt(run, "episode_test")
+    chunk = attempt / "chunks/0001/code/probe.py"
+    chunk.parent.mkdir(parents=True)
+    chunk.write_text("lab.step(0.1)\n")
+    write_json(attempt / "experiment.json", {"execution_mode": "segmented"})
+    write_json(
+        attempt / "process.json",
+        {"returncode": 0, "command": ["python", "-m", "episode_worker"]},
+    )
+    write_json(
+        attempt / "inputs.json",
+        {
+            "files_sha256": {
+                "lab.json": hashlib.sha256(
+                    (attempt / "lab.json").read_bytes()
+                ).hexdigest(),
+                "chunks/0001/code/probe.py": hashlib.sha256(
+                    chunk.read_bytes()
+                ).hexdigest(),
+            }
+        },
+    )
+    finalize_run(run, attempt=attempt)
+    result = json.loads((run / "final/result.json").read_text())
+    reproduction = result["reproduction"]
+    assert reproduction["execution_mode"] == "segmented"
+    assert reproduction["fresh_replay_required"] is True
+    assert reproduction["file_integrity"] == "matched"
+    assert reproduction["command"] is None
+    assert result["assessment"]["task_success"] is None
+
+
+def test_provider_error_is_not_misattributed_to_worker_cleanup(run):
+    output = run / "codex/launch_one"
+    output.mkdir(parents=True)
+    write_json(
+        run / "launch.json",
+        {"status": "exited", "output": str(output), "process": {"returncode": 1}},
+    )
+    (output / "stdout.log").write_text(
+        json.dumps(
+            {
+                "type": "turn.failed",
+                "error": {"message": "Selected model is at capacity."},
+            }
+        )
+        + "\n"
+    )
+    finalize_run(run)
+    result = json.loads((run / "final/result.json").read_text())
+    assert result["execution"]["codex_error"] == "Selected model is at capacity."
+    assert "宿主收尾" in (run / "final/report.md").read_text()
+
+
 def test_explicit_selection_beats_last_attempt_and_claim_is_not_verdict(
     run: Path,
 ) -> None:

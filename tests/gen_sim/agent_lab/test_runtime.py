@@ -16,7 +16,8 @@
 
 from __future__ import annotations
 
-from embodichain.gen_sim.agent_lab.runtime import LabCfg, _scene_entities
+import pytest
+from embodichain.gen_sim.agent_lab.runtime import Lab, LabCfg, _scene_entities
 
 
 def test_scene_construction_matches_gensim_gym_order() -> None:
@@ -34,3 +35,17 @@ def test_config_instances_do_not_share_experiment_overrides() -> None:
     first, second = LabCfg(), LabCfg()
     first.robot_overrides["init_pos"] = [1, 2, 3]
     assert second.robot_overrides == {}
+
+
+def test_profiler_counts_failed_and_successful_operations(monkeypatch) -> None:
+    lab = Lab.__new__(Lab)
+    lab.profile = {}
+    clock = iter([1.0, 1.25, 2.0, 2.5])
+    monkeypatch.setattr(
+        "embodichain.gen_sim.agent_lab.runtime.time.perf_counter", lambda: next(clock)
+    )
+    with lab._measure("physics_update"):
+        pass
+    with pytest.raises(ValueError), lab._measure("physics_update"):
+        raise ValueError("failed update")
+    assert lab.profile == {"physics_update": {"calls": 2, "wall_seconds": 0.75}}

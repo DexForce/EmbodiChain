@@ -133,6 +133,22 @@ def _execution(root: Path, issues: list[str]) -> dict:
                 else "failed"
             ),
         }
+    if record.get("status") == "failed" and record.get("output"):
+        output = Path(record["output"]).resolve()
+        log = output / "stdout.log"
+        if output.is_relative_to(root) and log.is_file():
+            with log.open() as stream:
+                for line in stream:
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(event, dict):
+                        continue
+                    if event.get("type") == "turn.failed":
+                        record["codex_error"] = event.get("error", {}).get("message")
+                    elif event.get("type") == "turn.completed":
+                        record.pop("codex_error", None)
     stop = _read(root / "stop.json", issues)
     if record.get("status") == "paused_by_user" or (
         record.get("status") == "interrupted"
@@ -214,7 +230,14 @@ def _reproduction(root: Path, attempt: Path, manifest: dict, issues: list[str]) 
         Path(command[command.index("--script") + 1]) if "--script" in command else None
     )
     config = attempt / "lab.json"
-    code = attempt / "code"
+    segmented = (
+        _read(attempt / "experiment.json", issues).get("execution_mode") == "segmented"
+    )
+    code = attempt / ("chunks" if segmented else "code")
+    if segmented:
+        issues.append(
+            "Selected video is a segmented debugging episode, not an independently replayed solution"
+        )
     hashes = {
         str(path.relative_to(attempt)): _hash(path)
         for path in sorted(code.rglob("*"))
@@ -255,6 +278,8 @@ def _reproduction(root: Path, attempt: Path, manifest: dict, issues: list[str]) 
         if config.exists():
             replay += ["--config", str(config)]
     return {
+        "execution_mode": "segmented" if segmented else "script",
+        "fresh_replay_required": segmented,
         "command": shlex.join(replay) if replay else None,
         "cwd": manifest.get("repo"),
         "files_sha256": hashes,
@@ -293,7 +318,7 @@ def _usage_lines(resources: dict) -> list[str]:
         "## 累计耗时与用量",
         f"- **累计全程耗时：{'至少 ' if timing['status'] == 'partial' and timing['total_wall_seconds'] is not None else ''}{duration(timing['total_wall_seconds'])}**；{labels[timing['status']]}。",
         f"- Codex 会话累计：{duration(timing['codex_wall_seconds'])}，包含工具和仿真等待，不是纯思考时间。",
-        f"- 仿真进程累计：{duration(timing['simulation_wall_seconds'])}，不是仿真时钟或视频时长。子项可能重叠，不与全程耗时重复相加。",
+        f"- 仿真进程累计：{duration(timing['simulation_wall_seconds'])}，包含持久会话等待，不是实际计算时间、仿真时钟或视频时长。子项可能重叠，不与全程耗时重复相加。",
         f"- **Token 总量：{total}**；{labels[tokens['status']]}。",
         f"- 输入：{count('input_tokens')}；其中缓存命中：{count('cached_input_tokens')}；输出：{count('output_tokens')}。",
         f"- 推理输出子项：{count('reasoning_output_tokens')}。总量只按输入加输出计算，不再加缓存或推理子项。",
@@ -330,11 +355,18 @@ def _report(result: dict) -> str:
     run = result["run"]
     video = result["video"]
     lines = [
-        f"# 实验报告：{run.get('task_id') or run['run_id']}",
+        f"# 实验报告：{run.get('task_id') or run['run_id']}{'（自定义任务）' if run.get('task_variant') == 'custom_instruction' else ''}",
         "",
         *_usage_lines(result["resources"]),
         "## 结论",
         f"- 运行状态：`{result['execution'].get('status', 'unknown')}`",
+        *(
+            [
+                f"- Codex 终止原因：{result['execution']['codex_error']}。随后 worker 的中断可能是宿主收尾，不应倒置故障归因。"
+            ]
+            if result["execution"].get("codex_error")
+            else []
+        ),
         f"- 验证范围：`{result['assessment']['scope']}`",
         "- 任务结论：尚未独立验收。退出码、可播放录像及 Codex 声明均不自动证明任务成功。",
         f"- Codex 声明状态：`{result['assessment']['agent_claim'].get('status', '未提交状态')}`；声明完整任务完成：`{result['assessment']['agent_claim'].get('task_completed', '未声明')}`",
@@ -343,7 +375,11 @@ def _report(result: dict) -> str:
         "## 任务",
         str(run.get("instruction") or "未记录任务描述"),
         "",
-        f"验收要求：{run.get('acceptance') or '未记录'}",
+        (
+            "验收依据：本次用户指令。旧任务验收和难度不沿用；行动前形成的可测条件不自动等于独立验收。"
+            if run.get("acceptance_source") == "instruction"
+            else f"验收要求：{run.get('acceptance') or '未记录'}"
+        ),
         "",
         "## 视频",
     ]
@@ -367,6 +403,15 @@ def _report(result: dict) -> str:
         "以下内容来自 Codex 声明，不是整理器的独立验收结论；完整原文保留在 result.json。",
     ]
     claim = result["assessment"]["agent_claim"]
+    interpretation = result["assessment"].get("task_interpretation")
+    if interpretation:
+        lines += [
+            "",
+            "Codex 的任务理解与拟验证条件（提议，不是验收结论）：",
+            "```json",
+            json.dumps(interpretation, ensure_ascii=False, indent=2),
+            "```",
+        ]
     for key in ("summary", "rationale", "reason", "usage_notes"):
         if claim.get(key):
             lines += ["", str(claim[key])]
@@ -579,11 +624,16 @@ def finalize_run(
             "run_id": root.name,
             "directory": str(root),
             "task_id": manifest.get("task", {}).get("task_id"),
+            "task_variant": manifest.get("task_variant", "default"),
+            "acceptance_source": manifest.get("acceptance_source", "task"),
+            "source_task": manifest.get("source_task"),
+            "level": manifest.get("task", {}).get("level", ""),
             "instruction": manifest.get("task", {}).get("instruction"),
             "acceptance": manifest.get("task", {}).get("acceptance"),
             "mode": manifest.get("mode"),
             "approved_asset_changes": manifest.get("approved_asset_changes", []),
             "repo_revision": manifest.get("repo_revision"),
+            "reuse_policy": manifest.get("reuse_policy", "isolated"),
         },
         "execution": execution,
         "resources": collect_usage(root),
@@ -592,6 +642,9 @@ def finalize_run(
             "verification_status": "not_run",
             "task_success": None,
             "agent_claim": claim,
+            "task_interpretation": _read(
+                root / "workspace/task_interpretation.json", issues
+            ),
             "review_record": _read(root / "acceptance.json", issues),
         },
         "selection": {

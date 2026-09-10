@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from dataclasses import replace
 from collections.abc import Callable
 import json
 import hashlib
@@ -159,8 +160,26 @@ def create_run(
     output_root: Path,
     objective: str = "solve",
     robot_component: Path | None = None,
+    instruction: str | None = None,
+    reuse_policy: str | None = None,
 ) -> Path:
-    """Create a writable experiment workspace without modifying source assets."""
+    """Create a workspace, optionally replacing the goal on unchanged source assets.
+
+    An instruction override also replaces acceptance with the user's new goal
+    and clears inherited difficulty. The source task remains provenance only.
+    """
+    source_task = task.to_dict()
+    reuse_policy = reuse_policy or (
+        "isolated" if objective == "cold_start" else "research"
+    )
+    if reuse_policy not in {"research", "isolated"}:
+        raise ValueError("reuse_policy must be research or isolated")
+    if instruction is not None:
+        if not isinstance(instruction, str) or not instruction.strip():
+            raise ValueError(
+                "instruction must be non-empty; omit it to keep the original task"
+            )
+        task = replace(task, instruction=instruction, acceptance=instruction, level="")
     root = output_root.resolve() / task.task_id / _run_id()
     workspace = root / "workspace"
     workspace.mkdir(parents=True)
@@ -172,6 +191,11 @@ def create_run(
         root / "run.json",
         {
             "task": task.to_dict(),
+            "task_variant": (
+                "custom_instruction" if instruction is not None else "default"
+            ),
+            "acceptance_source": "instruction" if instruction is not None else "task",
+            "source_task": source_task if instruction is not None else None,
             "repo": str(repo.resolve()),
             "repo_revision": revision,
             "python": sys.executable,
@@ -181,6 +205,7 @@ def create_run(
             "created_at": datetime.now(timezone.utc).isoformat(),
             "mode": "B",
             "objective": objective,
+            "reuse_policy": reuse_policy,
         },
     )
     (root / "source.diff").write_bytes(
@@ -346,7 +371,7 @@ def _request_execution(
     return result
 
 
-def _serve_requests(root: Path, deadline: float) -> None:
+def _serve_requests(root: Path, deadline: float, episode_host=None) -> None:
     for request in sorted((root / "requests").glob("*.json")):
         if request.name.endswith((".reply.json", ".active.json")):
             continue
@@ -355,7 +380,17 @@ def _serve_requests(root: Path, deadline: float) -> None:
             continue
         active = request.with_suffix(".active.json")
         if active.exists():
-            attempt = Path(json.loads(active.read_text())["attempt"])
+            active_record = json.loads(active.read_text())
+            if "episode_operation" in active_record:
+                write_json(
+                    reply,
+                    {
+                        "host_error": "Interrupted episode request; no state or command was automatically replayed",
+                        **active_record,
+                    },
+                )
+                continue
+            attempt = Path(active_record["attempt"])
             process_path = attempt / "process.json"
             process = (
                 json.loads(process_path.read_text()) if process_path.exists() else {}
@@ -387,13 +422,37 @@ def _serve_requests(root: Path, deadline: float) -> None:
             continue
         job = json.loads(request.read_text())
         try:
-            result = execute_script(
-                root,
-                Path(job["script"]),
-                Path(job["config"]) if job.get("config") else None,
-                timeout=max(1, min(job["timeout"], deadline - time.time())),
-                request_path=request,
-            )
+            if "episode_operation" in job:
+                if episode_host is None:
+                    raise RuntimeError(
+                        "Persistent episodes require the launch/pipeline host"
+                    )
+                write_json(
+                    active,
+                    {
+                        "episode_operation": job["episode_operation"],
+                        "attempt": (
+                            str(episode_host.attempt) if episode_host.attempt else None
+                        ),
+                    },
+                )
+                result = episode_host.service(job)
+            else:
+                if (
+                    episode_host is not None
+                    and episode_host.process is not None
+                    and episode_host.process.poll() is None
+                ):
+                    raise RuntimeError(
+                        "Close the persistent episode before starting an independent run"
+                    )
+                result = execute_script(
+                    root,
+                    Path(job["script"]),
+                    Path(job["config"]) if job.get("config") else None,
+                    timeout=max(1, min(job["timeout"], deadline - time.time())),
+                    request_path=request,
+                )
         except Exception as exc:
             result = {"host_error": f"{type(exc).__name__}: {exc}"}
         staging = reply.with_suffix(".tmp")
@@ -419,6 +478,8 @@ def _prompt(root: Path, manifest: dict, deadline: float) -> str:
 Task: {task['instruction']}
 Acceptance: {task['acceptance']}
 Difficulty: {task.get('level', 'unspecified')}
+Task variant: {manifest.get('task_variant', 'default')}
+Acceptance source: {manifest.get('acceptance_source', 'task')}
 Source assets: {task['source_dir']}
 Reference image: {task['image']}
 Asset preparation state: {task['asset_status']}
@@ -427,6 +488,12 @@ Explicit user-approved asset changes: {approved_changes}
 Read the current project at {manifest['repo']}; start with agent_context/MAP.yaml
 and gen_sim/agent_lab/README.md. Read relevant implementations and examples, not
 the entire repository mechanically. This is open-book engineering, not blind testing.
+
+Agent Lab owns launch, execution, recording, accounting and delivery only.
+You own the task method and its implementation. Reuse existing project APIs;
+keep controllers and temporary compatibility adapters in this experiment's
+workspace or copy. Shared-library fixes require a separate review, not an
+automatic expansion of the experiment launcher.
 
 Use ANY useful approach: existing Atomic Skills, Task Program, MotionGenerator,
 direct IK, custom joint trajectories, feedback control, repeated grasp searches,
@@ -437,8 +504,16 @@ normal. You may change robot placement before execution. There is no action DSL.
 
 Inspect the reference and actual scene before choosing a method. Record observed
 scene suitability and blockers in scene_review.json. Derive goals from the task
-and observations, not answer-hint columns, personal memory or previous experiments.
+and observations, not answer-hint columns or personal memory.
+Reuse policy: {manifest.get('reuse_policy', 'isolated')}. Research permits qualified
+general adapters and asset calibration with reuse_log.json provenance, fingerprints
+and current-scene revalidation. Isolated forbids other experiment outputs and old
+same-task answers. Shared project infrastructure is allowed under either policy.
 Preserve every stage of the task's acceptance; partial progress is not completion.
+For a custom_instruction task, the supplied instruction is the goal and acceptance
+basis. Record measurable checks in task_interpretation.json before commanded
+control. Do not reuse the source task's acceptance or difficulty, or weaken the
+user's goal after a failed attempt. Source-task metadata is provenance only.
 
 Your writable code workspace is {root / 'workspace'}. All run artifacts belong
 under {root}. Original project code and assets are reference inputs: experiment
