@@ -262,13 +262,11 @@ def test_semantic_runtime_replans_after_dynamic_curobo_world_change() -> None:
                 planner_cfg=CuroboPlannerCfg(
                     robot_uid=ROBOT_UID,
                     auto_gen=CuroboAutoGenCfg(
-                        fit_type="morphit",
                         sphere_density=0.3,
                         collision_sphere_buffer=0.005,
                     ),
                     world=CuroboWorldCfg(
                         rigid_objects=[obstacle],
-                        obstacle_representation="cuboid",
                         dynamic_obstacle_names=[OBSTACLE_UID],
                         multi_env=False,
                     ),

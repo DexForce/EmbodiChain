@@ -77,7 +77,6 @@ OBSTACLE_UID = "dynamic_obstacle"
 CONTROL_PART = "arm"
 SAMPLE_COUNT = 80
 COMMAND_CYCLE_TIME = 0.1
-COLLISION_SPHERE_FIT_TYPE = "morphit"
 COLLISION_SPHERE_FIT_DENSITY = 0.3
 ROBOT_COLLISION_BUFFER = 0.0
 MOVE_AFTER_COMMAND = 12
@@ -431,17 +430,14 @@ def main() -> None:
         MotionGenCfg(
             planner_cfg=CuroboPlannerCfg(
                 robot_uid=robot.uid,
-                # The coarse default voxel fit under-covers the hand and
-                # fingertips. Keep the denser morphit fit, but no extra radius
+                # Keep MorphIt's fitted sphere set dense, but add no extra radius
                 # padding: 5 mm makes this tutorial's initial pose infeasible.
                 auto_gen=CuroboAutoGenCfg(
-                    fit_type=COLLISION_SPHERE_FIT_TYPE,
                     sphere_density=COLLISION_SPHERE_FIT_DENSITY,
                     collision_sphere_buffer=ROBOT_COLLISION_BUFFER,
                 ),
                 world=CuroboWorldCfg(
                     rigid_objects=[obstacle],
-                    obstacle_representation="cuboid",
                     dynamic_obstacle_names=[OBSTACLE_UID],
                     multi_env=args.num_envs > 1,
                 ),
