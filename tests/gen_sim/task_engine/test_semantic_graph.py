@@ -246,7 +246,7 @@ def test_coordinated_placement_checks_destination_after_release_and_cleanup() ->
             },
         },
     ]
-    graph["task_groups"] = [{"node_ids": ["transport", "park"]}]
+    graph["task_groups"] = [{"task_type": "E5", "node_ids": ["transport", "park"]}]
     scene = SimpleNamespace(
         planner_objects=({"runtime_uid": "tray", "init_pos": [0.0, 0.0, 0.75]},),
         table_top_z=0.72,
@@ -287,7 +287,7 @@ def test_cleanup_rechecks_public_position_validators_without_a_local_preset() ->
             },
         },
     ]
-    graph["task_groups"] = [{"node_ids": ["restore", "park"]}]
+    graph["task_groups"] = [{"task_type": "E3", "node_ids": ["restore", "park"]}]
     restore, park = _program_payload(graph, "pour")["program"]["items"]
     assert park["post"] == restore["post"]
     assert park["validators"] == restore["validators"]
@@ -341,7 +341,7 @@ def test_phase_one_bundle_rejects_unsupported_robot_profile(tmp_path: Path) -> N
         )
 
 
-@pytest.mark.parametrize("task_type", ["E6", "E7", "E8", "E9"])
+@pytest.mark.parametrize("task_type", ["E7", "E8", "E9"])
 def test_bundle_rejects_out_of_scope_tasks_before_writing_assets(
     tmp_path: Path, task_type: str
 ) -> None:
@@ -351,7 +351,7 @@ def test_bundle_rejects_out_of_scope_tasks_before_writing_assets(
     for group in graph["task_groups"]:
         group["task_type"] = task_type
     output = tmp_path / "bundle"
-    with pytest.raises(ValueError, match="only E1-E5"):
+    with pytest.raises(ValueError, match="only E1-E6"):
         generate_task_program_bundle(graph, None, output, robot_profile="dual_franka")
     assert not output.exists()
 
@@ -1010,8 +1010,9 @@ def test_stack_alignment_does_not_replace_support_acceptance_with_upright_only(
 @pytest.mark.parametrize(
     "call_id", ["simulation.coordinated_hold", "simulation.coordinated_transport"]
 )
+@pytest.mark.parametrize("max_episode_steps", [None, 5000])
 def test_coordinated_bundle_composes_against_unmodified_public_options(
-    tmp_path: Path, call_id: str
+    tmp_path: Path, call_id: str, max_episode_steps: int | None
 ) -> None:
     scene = _prepared_axis_scene(tmp_path)
     graph = _graph()
@@ -1044,7 +1045,14 @@ def test_coordinated_bundle_composes_against_unmodified_public_options(
         }
     ]
     generated, paths = generate_task_program_bundle(
-        graph, scene, tmp_path / "bundle", robot_profile="dual_franka"
+        graph,
+        scene,
+        tmp_path / "bundle",
+        robot_profile="dual_franka",
+        max_episode_steps=max_episode_steps,
+    )
+    assert load_config(paths.deployment)["max_episode_steps"] == (
+        10000 if max_episode_steps is None else max_episode_steps
     )
     _verify_program_projection(paths.program, generated)
     integration = load_config(paths.integration)

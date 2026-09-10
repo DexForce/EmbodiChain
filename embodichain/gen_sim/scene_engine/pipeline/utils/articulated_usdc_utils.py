@@ -18,6 +18,39 @@
 from __future__ import annotations
 
 from pathlib import Path
+import math
+import re
+
+
+def _read_revolute_qpos_limits(usdc_path: str | Path) -> dict[str, list[float]]:
+    """Preserve USD angular limits when a backend omits degree conversion."""
+    from pxr import Usd, UsdPhysics
+
+    stage = Usd.Stage.Open(str(usdc_path))
+    if stage is None:
+        raise ValueError(f"Cannot open articulated USDC: {usdc_path}")
+    limits = {}
+    for prim in stage.Traverse():
+        if not prim.IsA(UsdPhysics.RevoluteJoint):
+            continue
+        joint = UsdPhysics.RevoluteJoint(prim)
+        if joint.GetJointEnabledAttr().Get() is False:
+            continue
+        name = re.escape(prim.GetName())
+        if name in limits:
+            raise ValueError(f"Ambiguous revolute joint name: {prim.GetName()}")
+        lower, upper = joint.GetLowerLimitAttr().Get(), joint.GetUpperLimitAttr().Get()
+        if (
+            lower is None
+            or upper is None
+            or math.isnan(lower)
+            or math.isnan(upper)
+            or lower >= upper
+        ):
+            raise ValueError(f"Invalid revolute limits: {prim.GetPath()}")
+        if math.isfinite(lower) and math.isfinite(upper):
+            limits[name] = [math.radians(lower), math.radians(upper)]
+    return limits
 
 
 def _canonicalize_articulated_usdc_bottom_center(usdc_path: str | Path) -> Path:

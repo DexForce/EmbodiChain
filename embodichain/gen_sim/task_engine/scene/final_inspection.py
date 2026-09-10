@@ -313,6 +313,23 @@ def _measure_geometry(
     convert_y_up: bool,
 ) -> dict[str, Any] | None:
     shape = entry.get("shape")
+    if not isinstance(shape, Mapping) and entry.get("fpath"):
+        from .articulation_geometry import read_articulation_geometry
+
+        path = Path(str(entry["fpath"]))
+        if path.suffix.lower() not in {".usd", ".usda", ".usdc"}:
+            return None
+        geometry = read_articulation_geometry(path)
+        vertices = geometry.world_vertices(entry)
+        scale = np.asarray(_vector(entry.get("body_scale"), default=(1, 1, 1)))
+        return {
+            "bounds": np.stack((vertices.min(0), vertices.max(0))),
+            "local_extents": np.ptp(geometry.vertices * scale, axis=0),
+            "axis_transform": Rotation.from_euler(
+                "XYZ", _vector(entry.get("init_rot"), default=(0, 0, 0)), degrees=True
+            ).as_matrix(),
+            "shape_type": "Articulation",
+        }
     if not isinstance(shape, Mapping):
         return None
     shape_type = str(shape.get("shape_type", ""))

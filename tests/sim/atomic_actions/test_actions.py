@@ -93,6 +93,7 @@ from embodichain.lab.sim.atomic_actions import (
     SlideAffordance,
     Slide,
     SlideGoal,
+    SlideJointTarget,
     SlideOptions,
     RobotObservation,
     SceneEntityPose,
@@ -2861,6 +2862,173 @@ def test_slide_plans_expected_segments(
             planned_targets[-1][:, :3, 3],
             -expected_axis.expand(NUM_ENVS, -1) * options.approach_distance,
         )
+
+
+@pytest.mark.parametrize(
+    "target_position,positions,direction",
+    [(0.2, [0.0, 0.1], "push"), (0.0, [0.2, 0.1], "pull"), (0.2, [0.2, 0.1], "push")],
+)
+@pytest.mark.parametrize("axis_sign", [1, -1])
+def test_slide_joint_target_uses_fresh_row_local_motion(
+    target_position: float, positions: list[float], direction: str, axis_sign: int
+) -> None:
+    if axis_sign == -1:
+        direction = "pull" if direction == "push" else "push"
+    affordance = SlideAffordance(
+        mesh_vertices=torch.zeros(3, 3),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        translation_axis=torch.tensor([0.0, 1.0, 0.0]),
+        joint_name="drawer_joint",
+        joint_limits=(0.0, 0.3),
+    )
+    generator = _motion_generator()
+    action = _bind_action(generator, Slide())
+    goal = SlideGoal(
+        ObjectSemantics(affordance=affordance, geometry={}, entity_id="target"),
+        SceneEntityPose("target"),
+        joint_target=SlideJointTarget(
+            "drawer", "drawer_joint", target_position, axis_sign=axis_sign
+        ),
+    )
+    scene = replace(
+        _target_scene(torch.eye(4).repeat(NUM_ENVS, 1, 1), timestamp=0.0, version=0),
+        articulation_joints={
+            ("drawer", "drawer_joint"): ObservedArticulationJointState(
+                torch.tensor(positions)[:, None]
+            )
+        },
+    )
+    options = SlideOptions(
+        direction="pull", translation_distance=0.15, hand_interp_steps=3
+    )
+    invocation = ActionInvocation(
+        skill_id="slide",
+        goal=goal,
+        binding=_binding(action),
+        motion_policy=MotionPolicy(sample_count=24),
+        skill_options=options,
+    )
+    plan = _plan_action(action, invocation, _context(scene=scene))
+    assert plan.plan_success.tolist() == [True, True]
+    assert direction in [s.name for s in plan.segments]
+    lengths = Slide._motion_segment_lengths(24, 3, direction=direction)
+    poses = [c.kwargs["pose"] for c in generator.robot.compute_ik.call_args_list]
+    endpoint = poses[lengths[1] + lengths[2] - 2]
+    active = torch.tensor(positions) != target_position
+    assert torch.allclose(
+        endpoint[active, 1, 3],
+        (target_position - torch.tensor(positions)[active]) * axis_sign,
+        atol=1e-6,
+    )
+    reached = ~active
+    assert torch.equal(
+        plan.joint_trajectory.positions[reached],
+        torch.zeros_like(plan.joint_trajectory.positions[reached]),
+    )
+    assert options.translation_distance == 0.15 and options.direction == "pull"
+    # A fresh planning snapshot changes remaining motion without mutating the goal.
+    advanced = replace(
+        scene,
+        articulation_joints={
+            ("drawer", "drawer_joint"): ObservedArticulationJointState(
+                torch.full((NUM_ENVS, 1), target_position)
+            )
+        },
+    )
+    held = _plan_action(action, invocation, _context(scene=advanced))
+    assert held.plan_success.all()
+    assert [s.name for s in held.segments] == ["already_satisfied"]
+
+
+@pytest.mark.parametrize(
+    "case", ["missing", "wrong_joint", "outside", "stale", "mixed"]
+)
+def test_slide_joint_target_rejects_incompatible_binding_before_ik(case: str) -> None:
+    affordance = SlideAffordance(
+        mesh_vertices=torch.zeros(3, 3),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        joint_name="joint",
+        joint_limits=(0.0, 0.3),
+    )
+    target = SlideJointTarget(
+        "drawer",
+        "other" if case == "wrong_joint" else "joint",
+        0.4 if case == "outside" else 0.1,
+        axis_sign=1,
+    )
+    scene = replace(
+        SceneSnapshot.empty(),
+        timestamp=1.0 if case == "stale" else 0.0,
+        articulation_joints=(
+            {}
+            if case == "missing"
+            else {
+                ("drawer", "joint"): ObservedArticulationJointState(
+                    torch.tensor([[0.0], [0.2 if case == "mixed" else 0.0]])
+                )
+            }
+        ),
+    )
+    generator = _motion_generator()
+    action = _bind_action(generator, Slide())
+    invocation = ActionInvocation(
+        skill_id="slide",
+        goal=SlideGoal(
+            ObjectSemantics(affordance=affordance, geometry={}, entity_id="target"),
+            torch.eye(4),
+            joint_target=target,
+        ),
+        binding=_binding(action),
+    )
+    with pytest.raises(ValueError):
+        _plan_action(action, invocation, _context(scene=scene))
+    generator.robot.compute_ik.assert_not_called()
+
+
+@pytest.mark.parametrize("case", ["invalid_observation", "sampler_failure"])
+def test_slide_joint_target_preserves_reached_rows_when_other_rows_fail(
+    case: str,
+) -> None:
+    affordance = SlideAffordance(
+        mesh_vertices=torch.zeros(3, 3),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        joint_name="joint",
+        joint_limits=(0.0, 0.3),
+    )
+    generator = _motion_generator()
+    action = _bind_action(generator, Slide())
+    _GRASP_GENERATORS[id(action)].get_best_grasp_poses = Mock(
+        return_value=(
+            torch.zeros(NUM_ENVS, dtype=torch.bool),
+            torch.eye(4).repeat(NUM_ENVS, 1, 1),
+            torch.zeros(NUM_ENVS),
+        )
+    )
+    scene = replace(
+        SceneSnapshot.empty(),
+        articulation_joints={
+            ("drawer", "joint"): ObservedArticulationJointState(
+                torch.tensor([[0.2], [0.0]]),
+                valid_mask=torch.tensor([True, case != "invalid_observation"]),
+            )
+        },
+    )
+    invocation = ActionInvocation(
+        skill_id="slide",
+        goal=SlideGoal(
+            ObjectSemantics(affordance=affordance, geometry={}, entity_id="target"),
+            torch.eye(4),
+            joint_target=SlideJointTarget("drawer", "joint", 0.2, axis_sign=1),
+        ),
+        binding=_binding(action),
+    )
+    plan = _plan_action(action, invocation, _context(scene=scene))
+    assert plan.plan_success.tolist() == [True, False]
+    assert torch.equal(
+        plan.joint_trajectory.positions,
+        torch.zeros_like(plan.joint_trajectory.positions),
+    )
+    generator.robot.compute_ik.assert_not_called()
 
 
 def test_slide_holds_failed_environment() -> None:

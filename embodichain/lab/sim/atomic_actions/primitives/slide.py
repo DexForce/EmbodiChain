@@ -19,7 +19,8 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from numbers import Real
 from typing import ClassVar, Literal
 
 import torch
@@ -45,6 +46,7 @@ from embodichain.lab.sim.atomic_actions.invocation import (
 )
 from embodichain.lab.sim.atomic_actions.plans import (
     ActionPlan,
+    PlannerDiagnostics,
     TimedTrajectory,
     normalize_success_mask,
 )
@@ -66,6 +68,48 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class SlideJointTarget:
+    """Absolute prismatic coordinate, in metres, with a calibrated axis sign.
+
+    Args:
+        articulation_id: Canonical articulation identity in the scene snapshot.
+        joint_name: Exact observed prismatic joint name.
+        position: Requested absolute joint position in metres.
+        axis_sign: Maps increasing joint position to the affordance axis (+1/-1).
+        tolerance: Position tolerance for an already-satisfied planning row.
+    """
+
+    articulation_id: str
+    joint_name: str
+    position: float
+    axis_sign: int = field(kw_only=True)
+    tolerance: float = 1.0e-4
+
+    def __post_init__(self) -> None:
+        for name in ("articulation_id", "joint_name"):
+            value = getattr(self, name)
+            if type(value) is not str or not value or value != value.strip():
+                raise ValueError(f"{name} must be an exact non-empty identifier.")
+        for name in ("position", "tolerance"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, Real)
+                or not math.isfinite(value)
+            ):
+                raise ValueError(f"{name} must be a finite real number.")
+            object.__setattr__(self, name, float(value))
+        if (
+            self.tolerance <= 0
+            or type(self.axis_sign) is not int
+            or self.axis_sign not in (-1, 1)
+        ):
+            raise ValueError(
+                "Slide joint targets require positive tolerance and axis_sign +/-1."
+            )
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class SlideGoal(ObjectActionGoal):
     """Translating articulation link described by a slide affordance."""
@@ -73,9 +117,22 @@ class SlideGoal(ObjectActionGoal):
     target_pose: PoseGoalValue
     """Link pose snapshot or late-bound stable scene-entity reference."""
 
+    joint_target: SlideJointTarget | None = field(default=None, kw_only=True)
+    """Optional absolute joint intent; otherwise preserve fixed-distance Options.
+
+    Joint-target mode resolves fresh row-local distances and the pull/push
+    direction during planning. Active rows must share one direction; already
+    satisfied rows hold their observed pose. This does not verify physical effect.
+    """
+
     def __post_init__(self) -> None:
         ObjectActionGoal.__post_init__(self)
         validate_pose_goal(self.target_pose, "target_pose", allow_waypoints=False)
+        if (
+            self.joint_target is not None
+            and type(self.joint_target) is not SlideJointTarget
+        ):
+            raise TypeError("joint_target must be exactly SlideJointTarget or None.")
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -147,6 +204,48 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         affordance = self._require_slide_affordance(target.semantics)
         options = request.skill_options
         interpolation_dt = context.require_control_dt()
+        direction = options.direction
+        displacement = None
+        joint_valid = torch.ones(
+            context.batch_size, dtype=torch.bool, device=self.device
+        )
+        reached = torch.zeros_like(joint_valid)
+        diagnostics = {}
+        if target.joint_target is not None:
+            displacement, joint_valid, reached = self._joint_displacement(
+                target.joint_target, affordance, context
+            )
+            active = joint_valid & ~reached
+            diagnostics["diagnostics"] = PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                metadata={
+                    "joint_target": {
+                        "articulation_id": target.joint_target.articulation_id,
+                        "joint_name": target.joint_target.joint_name,
+                        "position": target.joint_target.position,
+                        "already_satisfied": reached.detach().cpu().tolist(),
+                    }
+                },
+            )
+            if not active.any():
+                return self.build_plan(
+                    request,
+                    context,
+                    success=reached,
+                    trajectory=TimedTrajectory.from_uniform_step(
+                        context.robot.qpos[:, None],
+                        env_ids=context.env_ids,
+                        step_dt=interpolation_dt,
+                    ),
+                    segment_lengths={"already_satisfied": 1},
+                    **diagnostics,
+                )
+            positive = displacement[active] > 0
+            if positive.any() and not positive.all():
+                raise ValueError(
+                    "One Slide invocation requires the same direction for active joint-target rows."
+                )
+            direction = "push" if positive.all() else "pull"
         binding = request.binding
         motion_target = binding.endpoint("primary", "motion").require_target(
             JointPositionTarget
@@ -197,6 +296,19 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             name="Slide grasp-pose success",
         )
         if not grasp_success.any():
+            if target.joint_target is not None and reached.any():
+                return self.build_plan(
+                    request,
+                    context,
+                    success=reached,
+                    trajectory=TimedTrajectory.from_uniform_step(
+                        context.robot.qpos[:, None],
+                        env_ids=context.env_ids,
+                        step_dt=interpolation_dt,
+                    ),
+                    segment_lengths={"already_satisfied": 1},
+                    **diagnostics,
+                )
             return self.failed_plan(
                 request,
                 context,
@@ -206,16 +318,21 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             grasp_xpos,
             -translation_axis_world * options.approach_distance,
         )
-        translation_sign = -1.0 if options.direction == "pull" else 1.0
+        translation_sign = -1.0 if direction == "pull" else 1.0
         translated_xpos = translate_pose_world(
             grasp_xpos,
-            translation_axis_world * (translation_sign * options.translation_distance),
+            translation_axis_world
+            * (
+                translation_sign * options.translation_distance
+                if displacement is None
+                else displacement[:, None]
+            ),
         )
 
         motion_lengths = self._motion_segment_lengths(
             request.motion_policy.sample_count,
             options.hand_interp_steps,
-            direction=options.direction,
+            direction=direction,
         )
         approach_success, approach_arm = self._plan_pose_segment(
             approach_xpos,
@@ -258,7 +375,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         success = grasp_success & approach_success & reach_success & translate_success
 
         return_arm: torch.Tensor | None = None
-        if options.direction == "push":
+        if direction == "push":
             return_keyframes = axis_translation_keyframes(
                 translated_xpos,
                 approach_xpos,
@@ -290,7 +407,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             ("approach", approach_arm),
             ("reach", reach_arm),
             ("close", hand_close),
-            (options.direction, translate_arm),
+            (direction, translate_arm),
             ("open", hand_open),
         ]
         if return_arm is not None:
@@ -330,6 +447,10 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             full[:, offset:, arm_joint_ids] = return_arm
             full[:, offset:, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
 
+        if target.joint_target is not None:
+            full[reached] = context.robot.qpos[reached, None]
+            success = (success & joint_valid) | reached
+
         return self.build_plan(
             request,
             context,
@@ -346,6 +467,57 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             scene_dependency_end_segment=(
                 "reach" if self._scene_dependencies(request) else None
             ),
+            **diagnostics,
+        )
+
+    @staticmethod
+    def _joint_displacement(
+        target: SlideJointTarget, affordance: SlideAffordance, context: PlanningContext
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if not math.isclose(
+            context.scene.timestamp, context.robot.timestamp, abs_tol=1e-9, rel_tol=0
+        ):
+            raise ValueError(
+                "Slide joint and robot observations must share a timestamp."
+            )
+        limits = affordance.joint_limits
+        if affordance.joint_name != target.joint_name or limits is None:
+            raise ValueError(
+                "Slide joint target requires matching named affordance limits."
+            )
+        if not limits[0] <= target.position <= limits[1]:
+            raise ValueError("Slide joint target is outside its declared limits.")
+        state = context.scene.articulation_joints.get(
+            (target.articulation_id, target.joint_name)
+        )
+        if state is None:
+            raise ValueError(
+                "The exact Slide articulation joint observation is absent."
+            )
+        position = state.position
+        if position.shape == (1,):
+            position = position.reshape(1, 1).expand(context.batch_size, 1)
+        if (
+            position.shape != (context.batch_size, 1)
+            or position.device != context.robot.qpos.device
+        ):
+            raise ValueError(
+                "Slide joint observations must have shape (B, 1) on the planning device."
+            )
+        position = position[:, 0]
+        valid = (
+            torch.isfinite(position)
+            & (position >= limits[0] - target.tolerance)
+            & (position <= limits[1] + target.tolerance)
+        )
+        if state.valid_mask is not None:
+            valid &= state.valid_mask
+        delta = (target.position - position) * target.axis_sign
+        reached = valid & (delta.abs() <= target.tolerance)
+        return (
+            torch.where(valid & ~reached, delta, torch.zeros_like(delta)),
+            valid,
+            reached,
         )
 
     @staticmethod
@@ -408,5 +580,6 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
 __all__ = [
     "Slide",
     "SlideGoal",
+    "SlideJointTarget",
     "SlideOptions",
 ]

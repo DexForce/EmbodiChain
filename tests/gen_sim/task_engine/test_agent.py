@@ -1138,9 +1138,7 @@ def test_semantic_planner_preserves_e5_direction_and_terminal_behavior(
     )
 
 
-@pytest.mark.parametrize(
-    ("task_type", "target_state"), [("E6", "open"), ("E6", "closed"), ("E7", "open")]
-)
+@pytest.mark.parametrize(("task_type", "target_state"), [("E7", "open")])
 def test_semantic_planner_keeps_articulation_execution_gated(
     task_type: str,
     target_state: str,
@@ -1158,7 +1156,7 @@ def test_semantic_planner_keeps_articulation_execution_gated(
     candidate = TaskAgent(interpreter=interpreter).generate(
         "drawer_task", _TEST_INSTRUCTION, candidate_count=1
     )["candidates"][0]
-    with pytest.raises(UnsupportedSemanticCapabilityError, match="only E1-E5"):
+    with pytest.raises(UnsupportedSemanticCapabilityError, match="only E1-E6"):
         SemanticTaskPlanner().plan(
             candidate,
             {
@@ -1198,7 +1196,7 @@ def test_semantic_planner_rejects_out_of_scope_calibrated_articulation_call(
     candidate = TaskAgent(interpreter=interpreter).generate(
         "control_task", _TEST_INSTRUCTION, candidate_count=1
     )["candidates"][0]
-    with pytest.raises(UnsupportedSemanticCapabilityError, match="only E1-E5"):
+    with pytest.raises(UnsupportedSemanticCapabilityError, match="only E1-E6"):
         SemanticTaskPlanner().plan(
             candidate,
             {

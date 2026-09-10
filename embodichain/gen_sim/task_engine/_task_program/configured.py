@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Task Engine-owned E1-E5 service decoding and deployment composition."""
+"""Task Engine-owned E1-E6 service decoding and deployment composition."""
 
 from __future__ import annotations
 
@@ -120,7 +120,7 @@ def _decode_goal_pose(
 
 
 def decode_task_lowerer(value: object, *, path: str) -> Any:
-    """Decode only the E1-E5 task-owned routes or established shared services."""
+    """Decode only the E1-E6 task-owned routes or established shared services."""
     if type(value) is not dict:
         raise TypeError(f"{path} must be a mapping.")
     kind = _identifier(value.get("kind"), path=f"{path}.kind")
@@ -332,10 +332,28 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                 )
             )
         return _RelativePlaceLowererFactory(routes=tuple(routes))
+    if kind in {"articulation_slide", "articulation_withdraw"}:
+        from .articulation_binding import PrismaticBinding
+        from .articulation_slide import (
+            ArticulationSlideFactory,
+            ArticulationWithdrawFactory,
+        )
+
+        config = _mapping(value, path=path, required=frozenset({"kind", "bindings"}))
+        bindings = tuple(
+            PrismaticBinding.decode(item)
+            for item in _sequence(config["bindings"], path=f"{path}.bindings")
+        )
+        factory = (
+            ArticulationSlideFactory
+            if kind == "articulation_slide"
+            else ArticulationWithdrawFactory
+        )
+        return factory(bindings)
     if kind in {"park", "pour", "axis_align"}:
         return _decode_shared_lowerer(value, path=path)
     raise ValueError(
-        f"{path}: unsupported Task Engine service {kind!r}; expected E1-E5 services."
+        f"{path}: unsupported Task Engine service {kind!r}; expected E1-E6 services."
     )
 
 
@@ -360,7 +378,7 @@ class TaskDeployment:
 def compose_deployment(
     *, task_program: object, skill_profile: object, base_dir: str | Path
 ) -> TaskDeployment:
-    """Reuse component contracts while owning E1-E5 service decoding locally."""
+    """Reuse component contracts while owning E1-E6 service decoding locally."""
     program_path, task, policy = _resolve_task_program_components(
         task_program,
         base_dir=Path(base_dir).expanduser(),

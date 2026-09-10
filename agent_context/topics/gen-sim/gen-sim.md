@@ -73,9 +73,27 @@ until execution integration.
 Persisted candidates must match the current intent and exactly derived scene
 request. Regenerate legacy E7 closing candidates and E6/E7 candidates with old
 capability declarations; do not silently relabel them. The serialized field
-layout is unchanged. E6-E9 execution is still rejected by Task Engine's
-`workflow.py`, `semantic_planner.py`, and `task_program_bundle.py`; corrected
-interpretation does not enable a runtime route or establish physical qualification.
+layout is unchanged. Execution admits E1-E6; E7-E9 remain rejected before graph
+generation and bundle publication. E6 uses the explicit registered
+Slide/withdraw/Park recipe in `_task_program/articulation_binding.py` and
+`articulation_slide.py`. Its first supported binding is one fixed-base,
+single-prismatic, self-contained metre-authored USD with uniform scale and an
+unambiguous handle mesh, in one simulation environment. Asset hashes, joint
+ownership, and declared limits are checked again at runtime. Public Slide owns
+planning; public Task Program and Gym own execution. Joint-target retention is
+checked after every recipe call; this is not in-flight contact qualification.
+
+`task_engine/scene/articulation_geometry.py` measures Z-up, metre-authored USD
+collision meshes in the native base-link frame, not the default prim's world
+frame that runtime reset replaces. Final inspection now measures articulated
+geometry. E6 rejects an unmeasured tabletop, more than 2 mm initial table
+penetration, or a buried handle before bundle publication and at runtime binding.
+An explicit proxy-fit repair returns a new configuration using uniform scale and
+a 1 mm placement clearance, levelling only bases within one degree while preserving
+yaw; normal loading never silently applies that repair.
+Publish repaired exports separately with asset provenance. GenSim assembly and
+E6 binding check fresh native joint limits and reapply the same values only when the
+public pre-scale cache is stale; it does not enlarge the physical travel range.
 
 ## Focused validation
 

@@ -4,7 +4,9 @@ This package owns GenSim declarations and provider assembly, not another
 Task Program executor. The shared compiler, semantic runtime, execution
 sessions, Gym bridge, and demo executor remain authoritative.
 
-The public implementation is exactly the `2620929c` baseline. E3, E5 and a
+The execution/compiler implementation follows the `2620929c` baseline. The
+limited public additions are optional `SlideGoal.joint_target` and strict decoding
+of the existing empty `MoveEndEffectorOptions`. E3, E5 and a
 single-object E2 have passed fresh physical regressions against it. The full
 can task and final multi-seed qualification remain separate gates. See
 `BASELINE_LIMITS.md` for the independent recovery gap and the registered-call
@@ -40,6 +42,17 @@ normal physical rollout succeeds; terminal acceptance is not in-flight safety.
 - `motion.py` supplies a planning policy for multi-waypoint EEF approaches.
   Cartesian samples are solved by the original motion generator; command
   timing, execution, cancellation and recovery remain owned by the core.
+- `articulation_binding.py` inspects and fingerprints a single-prismatic USD and
+  generates explicit Slide/withdraw/Park calls. `articulation_slide.py` binds
+  these to existing public skills and measures joint retention via post-policies.
+  It does not add a private executor or claim contact-qualified motion.
+  Initial table penetration over 2 mm or a buried handle fails before publication
+  and at runtime binding. Native joint limits must match the scaled declaration;
+  stale public limits are refreshed during assembly using the already-active
+  native values, before the first scene observation.
+  Scene geometry is measured in the base-link frame that runtime reset preserves.
+  Proxy-envelope fitting is an explicit scene-revision operation, never a hidden
+  loading fallback or a change to the source USD.
 - `constraints.json` is a closed, versioned, inert bundle artifact. The
   integration fingerprint includes its complete contents and the program.
   Unknown fields and old bundles without this artifact fail before execution.
@@ -112,8 +125,9 @@ have been restored to the baseline.
 
 The public language/compiler/validator stack has also been restored: GenSim
 upright and stability requirements now use the existing named post-policy port,
-not new public validator types. All shared Atomic Skill and compiler changes
-have been withdrawn. MoveHeldObject now binds one exact target; alternative
+not new public validator types. Earlier broad shared Atomic Skill and compiler
+changes were withdrawn; the optional Slide joint target is a separate extension.
+MoveHeldObject now binds one exact target; alternative
 declarations are rejected instead of being silently discarded. Public
 HandOver owns its original release sequence without an extra settle phase.
 Simulation-factory internals used during assembly are isolated compatibility
@@ -126,12 +140,17 @@ Version 3 adds the support object's stable window and a final failed-attempt
 camera fetch before reset. The v2 physical runs are retained as historical
 evidence, not qualification of this revised acceptance behavior.
 
-E1-E5 are the Task Engine execution scope. E6-E9 routing is rejected before
-semantic graph generation and bundle asset writing. Their task-generation,
-joint-target extraction and integration branches have been removed. Physical
-background articulations can still be loaded without exposing those task calls.
-This package does not claim that arbitrary scenes or robots have been physically
-qualified.
+E1-E6 are the Task Engine execution scope. E7-E9 routing is rejected before
+semantic graph generation and bundle asset writing. Initial E6 support requires
+one environment and a fixed-base, single-prismatic, self-contained metre-authored
+USD with uniform scale, a zero closed endpoint, and one identifiable collision
+handle. Opening and closing select absolute native joint endpoints, not a fixed
+movement independent of current state. A one-second window must stay within
+1 mm joint spread and the target tolerance (opening at most 3 cm, closing at most
+5 mm, both capped at one quarter of the joint span), after Slide, withdrawal, and
+Park. Withdrawal also requires measured hand-open posture. This proves neither
+contact-supported sliding nor geometric hand separation or in-flight safety.
+Arbitrary scenes and robots are not physically qualified by these checks.
 
 Physical acceptance requires the user's complete can-stacking and original
 tray-holding CLI runs, with measured stable end states and recorded failures.

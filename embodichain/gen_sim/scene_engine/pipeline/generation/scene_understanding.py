@@ -81,11 +81,15 @@ Rules:
    Structural direction words are allowed when they describe the object itself:
    "bottle with a black cap on top" is valid, while "bottle on the left of the
    table" is not.
-9. is_articulated is true only for articulated objects with functional movable
-   parts that matter in simulation. Typical true examples are a microwave with
-   a door, cabinet, button, or drawer. Treat every other object as false unless
-   its independently movable links or joints are clearly visible; in particular,
-   rigid objects such as bottles, mugs, bowls, books, utensils, and boxes are false.
+9. is_articulated is true for objects with functional independently movable
+   parts, even when they are small or not the target of a task. Include rocker
+   switches, push buttons, service-bell plungers, rotary knobs, cabinet doors,
+   drawers, sliding oven racks, and the turning layers of a Rubik's cube.
+   Keep a unified appliance as one asset, but describe ALL its movable parts
+   and their motion types, not just its most prominent door or knob.
+   Do not confuse a Rubik's cube with a rigid colored block. Plain open cups,
+   bowls, sealed cans and solid wooden blocks are rigid. Do not invent a hinge
+   for a loose removable lid or a joint for a featureless rigid object.
 
 Return JSON only: no Markdown, comments, or prose outside this exact schema:
 {
@@ -150,6 +154,10 @@ location.
 Extra candidate masks are normal and may be ignored. Never force a candidate
 onto an asset. If any listed asset has no correct candidate, return
 {"assignments": null}.
+Candidate number labels can cover the center of small objects. They are an
+annotation, not part of the object: use its visible contour and surrounding
+color to match it. Do not reject an otherwise matching object merely because
+its center is covered by its candidate number.
 
 Examples:
 - Two listed paper cups match candidate 1 and candidate 3:

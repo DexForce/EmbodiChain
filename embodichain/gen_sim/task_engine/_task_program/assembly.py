@@ -44,7 +44,11 @@ class _TaskFactory(SimulationTaskProgramFactory):
     """Select task-owned observation services, not a different executor."""
 
     def __init__(
-        self, *args: Any, constraints: dict[str, StabilityConstraint], **kwargs: Any
+        self,
+        *args: Any,
+        constraints: dict[str, StabilityConstraint],
+        articulation_bindings: tuple = (),
+        **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._task_post_port = TaskStabilityPort(
@@ -55,6 +59,23 @@ class _TaskFactory(SimulationTaskProgramFactory):
             constraints,
             step_dt=self.step_dt,
         )
+        if articulation_bindings:
+            from .articulation_slide import (
+                ArticulationStabilityPort,
+                synchronize_joint_limits,
+            )
+
+            for binding in articulation_bindings:
+                synchronize_joint_limits(
+                    binding, self._simulation.get_articulation(binding.object_id)
+                )
+            self._task_post_port = ArticulationStabilityPort(
+                self._task_post_port,
+                self._simulation,
+                self._robot,
+                articulation_bindings,
+                self.step_dt,
+            )
 
     def registration_owned_segment_policy_ports(self) -> tuple[Any, Any]:
         return self._task_post_port, self.segment_policy_port
@@ -69,6 +90,7 @@ class TaskAdapterFactory:
     constraints: tuple[tuple[str, StabilityConstraint], ...]
     grasp_factories: tuple[tuple[str, Any], ...]
     cartesian_approaches: bool = False
+    articulation_bindings: tuple = ()
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Return the exact shared adapter; no Session or Bridge is overridden."""
@@ -96,6 +118,7 @@ class TaskAdapterFactory:
                 {name: create() for name, create in self.grasp_factories},
             ),
             constraints=dict(self.constraints),
+            articulation_bindings=self.articulation_bindings,
         )
         return factory.create_adapter()
 
@@ -137,6 +160,41 @@ def load_deployment(
         raise ValueError("Task stability presets cannot replace core settling presets.")
     for name in constraints:
         settle_presets[name] = settle_presets["rigid_object"].snapshot()
+    from .articulation_slide import (
+        ArticulationSlideFactory,
+        ArticulationWithdrawFactory,
+        preset_id,
+    )
+
+    slides = [
+        f
+        for f in base.integration.registration.registered_semantic_lowerer_factories
+        if type(f) is ArticulationSlideFactory
+    ]
+    withdrawals = [
+        f
+        for f in base.integration.registration.registered_semantic_lowerer_factories
+        if type(f) is ArticulationWithdrawFactory
+    ]
+    articulation_bindings = ()
+    if slides or withdrawals:
+        if (
+            len(slides) != 1
+            or len(withdrawals) != 1
+            or slides[0].bindings != withdrawals[0].bindings
+        ):
+            raise ValueError(
+                "E6 Slide and withdrawal require identical declared bindings."
+            )
+        articulation_bindings = slides[0].bindings
+        for binding in articulation_bindings:
+            for state in ("open", "closed"):
+                name = preset_id(binding, state)
+                if name in settle_presets:
+                    raise ValueError(
+                        "Articulation policies cannot replace existing presets."
+                    )
+                settle_presets[name] = settle_presets["rigid_object"].snapshot()
     registration = replace(base.integration.registration, settle_presets=settle_presets)
     program = load_config(base.program_path)
     from .align_held import with_held_alignment
@@ -193,7 +251,8 @@ def load_deployment(
     )
     cartesian_approaches = any(
         item.get("steps", {}).get("call", {}).get("kind") == "hand_over"
-        or item.get("steps", {}).get("call", {}).get("call_id") == CLEAR_RELEASED_CALL
+        or item.get("steps", {}).get("call", {}).get("call_id")
+        in {CLEAR_RELEASED_CALL, "gen_sim.articulation_withdraw"}
         for item in program["program"]["items"]
     )
     fingerprint = canonical_hash(
@@ -216,6 +275,7 @@ def load_deployment(
         tuple(constraints.items()),
         grasp_factories,
         cartesian_approaches,
+        articulation_bindings,
     )
     integration = replace(
         base.integration,

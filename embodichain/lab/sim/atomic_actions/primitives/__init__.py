@@ -56,6 +56,7 @@ from .pour import Pour, PourGoal, PourOptions
 from .slide import (
     Slide,
     SlideGoal,
+    SlideJointTarget,
     SlideOptions,
 )
 from .twist import Twist, TwistGoal, TwistOptions
@@ -124,6 +125,7 @@ __all__ = [
     "PushObjectToolCalibration",
     "Slide",
     "SlideGoal",
+    "SlideJointTarget",
     "SlideOptions",
     "Twist",
     "TwistGoal",

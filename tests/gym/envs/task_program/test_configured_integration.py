@@ -71,6 +71,7 @@ from embodichain.lab.sim.atomic_actions import (
     HeldObjectState,
     HeldObjectPoseGoal,
     JointPositionGoal,
+    MoveEndEffectorOptions,
     MoveHeldObjectOptions,
     MoveJoints,
     MoveJointsOptions,
@@ -946,6 +947,15 @@ def test_coordinated_transport_config_decodes_closed_routes_and_options() -> Non
     assert options.release_steps == 6
     assert options.retreat_steps == 8
     assert options.grasp_seed == 17393
+
+
+def test_move_end_effector_options_decode_without_task_specific_fields() -> None:
+    options = _decode_action_options({"kind": "move_end_effector"}, path="options")
+    assert type(options) is MoveEndEffectorOptions
+    with pytest.raises(ValueError):
+        _decode_action_options(
+            {"kind": "move_end_effector", "withdraw_distance": 0.1}, path="options"
+        )
 
 
 def test_park_lowerer_and_config_keep_joint_values_in_the_profile() -> None:

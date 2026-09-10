@@ -70,6 +70,7 @@ from embodichain.lab.sim.atomic_actions import (
     ExecutionRunnerCfg,
     HandOverOptions,
     MotionPolicy,
+    MoveEndEffectorOptions,
     MoveHeldObjectOptions,
     MoveJointsOptions,
     PickUpOptions,
@@ -1013,6 +1014,9 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             required=frozenset({"kind"}),
         )
         return MoveJointsOptions()
+    if kind == "move_end_effector":
+        _mapping(value, path=path, required=frozenset({"kind"}))
+        return MoveEndEffectorOptions()
     if kind == "coordinated_pickment":
         config = _mapping(
             value,
@@ -1315,7 +1319,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
         return HandOverOptions(**kwargs)
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
-        "['coordinated_pickment', 'hand_over', 'move_held_object', "
+        "['coordinated_pickment', 'hand_over', 'move_end_effector', 'move_held_object', "
         "'move_joints', "
         "'pick_up', 'place', 'pour', 'push_object', 'slide']."
     )
