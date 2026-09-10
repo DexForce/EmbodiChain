@@ -47,11 +47,11 @@ class EnvCfg:
     """Simulation configuration for the environment."""
 
     seed: int | None = None
-    """The seed for the random number generator. Defaults to -1, in which case the seed is not set.
+    """The task-environment seed. Defaults to None, in which case the seed is not set.
 
     Note:
-      The seed is set at the beginning of the environment initialization. This ensures that the environment
-      creation is deterministic and behaves similarly across different runs.
+      The seed is set before scene initialization and controls process RNGs and
+      deterministic event-functor streams.
     """
 
     sim_steps_per_control: int = 4
@@ -135,7 +135,8 @@ class BaseEnv(gym.Env):
             self.sim_cfg.profiler = self.cfg.profiler
 
         if self.cfg.seed is not None:
-            self.cfg.seed = set_seed(self.cfg.seed)
+            effective_seed = self._set_seed(self.cfg.seed)
+            super().reset(seed=effective_seed)
         else:
             logger.log_info(f"No seed is set for the environment.")
 
@@ -613,7 +614,8 @@ class BaseEnv(gym.Env):
             A tuple containing the observations and infos.
         """
         if seed is not None:
-            torch.manual_seed(seed)
+            seed = self._set_seed(seed)
+        super().reset(seed=seed)
 
         if options is None:
             options = dict()
@@ -646,6 +648,23 @@ class BaseEnv(gym.Env):
                 info = self.get_info(**options)
 
         return obs, info
+
+    def _set_seed(self, seed: int) -> int:
+        """Set the effective environment seed and rewind seeded managers."""
+        cudnn_benchmark = torch.backends.cudnn.benchmark
+        cudnn_deterministic = torch.backends.cudnn.deterministic
+        try:
+            effective_seed = set_seed(seed)
+        finally:
+            # Seeding selects random streams; it must not silently change the
+            # caller's deterministic-kernel policy.
+            torch.backends.cudnn.benchmark = cudnn_benchmark
+            torch.backends.cudnn.deterministic = cudnn_deterministic
+        self.cfg.seed = effective_seed
+        event_manager = getattr(self, "event_manager", None)
+        if event_manager is not None:
+            event_manager.set_seed(effective_seed)
+        return effective_seed
 
     def step(
         self, action: EnvAction, **kwargs

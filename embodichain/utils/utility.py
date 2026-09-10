@@ -241,6 +241,7 @@ def read_all_folder_images(base_path: str) -> List[np.ndarray]:
         for file in files:
             if file.endswith((".png", ".jpg", ".jpeg")):
                 image_files.append(os.path.join(subdir, file))
+    image_files.sort()
 
     # Then process with progress bar
     for image_path in tqdm(image_files, desc="Loading images"):
