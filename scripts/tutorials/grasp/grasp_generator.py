@@ -35,7 +35,6 @@ from embodichain.lab.sim.motion.solvers import URSolverCfg
 from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
-from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
     RenderCfg,
