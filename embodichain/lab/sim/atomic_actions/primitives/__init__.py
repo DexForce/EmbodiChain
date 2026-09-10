@@ -55,6 +55,7 @@ from .push_object import (
 from .pour import Pour, PourGoal, PourOptions
 from .slide import (
     Slide,
+    SlideCandidateBatch,
     SlideGoal,
     SlideOptions,
 )
@@ -124,6 +125,7 @@ __all__ = [
     "PushObjectOptions",
     "PushObjectToolCalibration",
     "Slide",
+    "SlideCandidateBatch",
     "SlideGoal",
     "SlideOptions",
     "Twist",

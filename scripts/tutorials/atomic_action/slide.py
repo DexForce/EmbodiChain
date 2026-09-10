@@ -14,7 +14,20 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Demonstrate Slide on a translating drawer."""
+"""Demonstrate Slide with optional distinct handle-grasp trajectories per env.
+
+Run in ``embodichain2`` to simulate four independent drawer grasps::
+
+    python scripts/tutorials/atomic_action/slide.py --headless \
+        --n_affordance_multi_gen 4 --affordance_output /tmp/slide-affordances
+
+Pull candidates use different raw affordance grasps. Push preserves each
+selected grasp in the handle frame and re-evaluates it at that environment's
+observed post-pull pose. Both directions use the configured fixed travel
+distance; this is not an observed-joint-limit closing controller. Failed rows
+remain inactive; plans are not physical grasp-success certificates or expert
+episodes.
+"""
 
 from __future__ import annotations
 
@@ -76,7 +89,7 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the drawer pull/push tutorial."""
     parser = create_tutorial_argument_parser(
         "Pull a drawer open, then push it closed with Slide.",
-        features=("grasp_sampling", "visualize_axes"),
+        features=("grasp_sampling", "visualize_axes", "affordance_multi_gen"),
     )
     parser.add_argument("--translation_distance", type=float, default=0.18)
     parser.add_argument("--approach_distance", type=float, default=0.10)
@@ -141,6 +154,7 @@ def create_invocation(
     direction: Literal["pull", "push"],
     approach_distance: float,
     translation_distance: float,
+    candidate_planning: bool = False,
 ) -> ActionInvocation:
     """Create one pull or push invocation for the shared drawer target.
 
@@ -151,6 +165,7 @@ def create_invocation(
         direction: Whether this invocation pulls open or pushes closed.
         approach_distance: Pre-grasp offset opposite the approach axis.
         translation_distance: Drawer travel distance for this operation.
+        candidate_planning: Use the branch-preserving IK interpolation path.
 
     Returns:
         A grounded pull/push invocation for the tutorial UR5.
@@ -161,8 +176,12 @@ def create_invocation(
             semantics,
             target_pose,
         ),
+        invocation_id=f"slide_{direction}",
         control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
-        motion_policy=MotionPolicy(sample_count=TRAJECTORY_SAMPLE_COUNT),
+        motion_policy=MotionPolicy(
+            strategy="ik_interp" if candidate_planning else "motion_gen",
+            sample_count=TRAJECTORY_SAMPLE_COUNT,
+        ),
         skill_options=SlideOptions(
             direction=direction,
             hand_interp_steps=HAND_INTERP_STEPS,
@@ -188,7 +207,23 @@ def main() -> None:
     )
     drawer = create_drawer(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
+    multi_count = getattr(args, "n_affordance_multi_gen", None)
+    if multi_count is not None:
+        # Capture a genuinely open initial hand for the selected plan. The
+        # normal legacy tutorial keeps its existing initialization behavior.
+        for target in (False, True):
+            robot.set_qpos(
+                hand_open.unsqueeze(0).expand(robot.num_instances, -1),
+                name="hand",
+                target=target,
+            )
+        robot.clear_dynamics()
     motion_gen = create_toppra_motion_generator(robot)
+    grasp_generator = create_parallel_jaw_grasp_pose_generator(
+        n_sample=args.n_sample,
+        force_refresh=args.force_reannotate,
+        max_candidates=max(32, 4 * multi_count) if multi_count is not None else None,
+    )
     semantics = create_drawer_semantics(drawer)
     affordance = semantics.affordance
     assert isinstance(affordance, SlideAffordance)
@@ -207,18 +242,29 @@ def main() -> None:
                 grasp=hand_close,
             )
         },
-        grasp_pose_generators={
-            "hand": create_parallel_jaw_grasp_pose_generator(
-                n_sample=args.n_sample,
-                force_refresh=args.force_reannotate,
-            )
-        },
+        grasp_pose_generators={"hand": grasp_generator},
     )
     wait_for_user = prepare_tutorial_scene(
         sim,
         args,
         "Inspect the closed drawer, then press Enter to plan the pull...",
     )
+
+    if multi_count is not None:
+        try:
+            _run_affordance_slides(
+                sim,
+                robot,
+                drawer,
+                engine,
+                grasp_generator,
+                semantics,
+                args,
+                wait_for_user,
+            )
+        finally:
+            motion_gen.planner.close()
+        return
 
     for direction in ("pull", "push"):
         if direction == "push" and wait_for_user:
@@ -265,6 +311,95 @@ def main() -> None:
             look_at=look_at,
         )
 
+    if wait_for_user:
+        input("Press Enter to exit the simulation...")
+
+
+def _run_affordance_slides(
+    sim, robot, drawer, engine, grasp_generator, semantics, args, wait_for_user
+) -> None:
+    """Plan pull/push using stable grasp identities and observed per-env poses."""
+    from embodichain.lab.trajectory_generation.integrations.atomic_affordance import (
+        plan_affordance_batch,
+    )
+    from scripts.tutorials.atomic_action.affordance_utils import (
+        sample_affordance_grasps,
+        save_affordance_result,
+        selected_grasps_from_result,
+    )
+
+    initial_handle_poses = drawer.get_link_pose(
+        HANDLE_LINK_NAME, to_matrix=True
+    ).clone()
+    axis = semantics.affordance.translation_axis.to(
+        device=sim.device, dtype=initial_handle_poses.dtype
+    )
+    axis = axis / torch.linalg.vector_norm(axis)
+    approach = initial_handle_poses[:, :3, :3] @ axis
+    grasps = sample_affordance_grasps(
+        grasp_generator,
+        semantics.affordance,
+        object_poses=initial_handle_poses,
+        approach_direction=approach,
+        seed=args.affordance_seed,
+    )
+    pull_result = None
+    for direction in ("pull", "push"):
+        handle_poses = drawer.get_link_pose(HANDLE_LINK_NAME, to_matrix=True).clone()
+        active_mask = None
+        if direction == "push":
+            assert pull_result is not None
+            grasps = selected_grasps_from_result(
+                pull_result, initial_handle_poses, handle_poses
+            )
+            active_mask = pull_result.success_mask
+        invocation = create_invocation(
+            engine,
+            semantics,
+            handle_poses,
+            direction=direction,
+            approach_distance=args.approach_distance,
+            translation_distance=args.translation_distance,
+            candidate_planning=True,
+        )
+        result = plan_affordance_batch(
+            engine,
+            invocation,
+            engine.initial_context(control_dt=sim.sim_config.physics_dt),
+            grasps,
+            active_mask=active_mask,
+        )
+        save_affordance_result(
+            result,
+            output_dir=args.affordance_output,
+            name=f"slide_{direction}",
+            physical_envs=robot.num_instances,
+            metadata={
+                "seed": args.affordance_seed,
+                "direction": direction,
+                "parent_grasp_ids": (
+                    None if pull_result is None else pull_result.grasp_ids
+                ),
+                "observed_handle_poses": handle_poses.detach().cpu().tolist(),
+            },
+        )
+        if not bool(result.success_mask.any()):
+            logger.log_warning(
+                f"No feasible Slide {direction} trajectories; replay skipped."
+            )
+            break
+        if wait_for_user:
+            input(f"Press Enter to replay the affordance drawer {direction}...")
+        replay_trajectory(
+            sim,
+            robot,
+            result.trajectory,
+            args,
+            video_prefix=f"slide_{direction}_affordance_multi_gen",
+            hold_steps=POST_TRAJECTORY_STEPS,
+        )
+        if direction == "pull":
+            pull_result = result
     if wait_for_user:
         input("Press Enter to exit the simulation...")
 

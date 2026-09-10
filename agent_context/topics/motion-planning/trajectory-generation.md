@@ -135,3 +135,29 @@ The sampler uses tutorial target-local gripper geometry, not support-plane or
 full-world collision validation. Focused CPU contracts are in
 `test_atomic_candidates.py`, `test_replicas.py`, and
 `test_affordance_parallel.py`; the latter also provides an opt-in GPU smoke test.
+
+## Live-row affordance tutorials
+
+`integrations/atomic_affordance.py::plan_affordance_batch`, re-exported from
+`integrations/atomic.py`, selects distinct raw grasp IDs over caller-owned real
+rows. It accepts a single PickUp or Slide invocation using `ik_interp`, with
+bounded replacement from remaining candidates after row-local failure.
+`AtomicAffordanceBatch.trajectory` holds all physical rows on one control grid;
+`compact_positions` exports only successful rows as `(B_success,T,D_full)`.
+Failed rows hold their observed start and never count as generated trajectories.
+The zero-time sample preserves measured passive residuals; subsequent samples
+expand mimic geometry. This adapter does not own resets, replica certification,
+GenerationSession accounting or physics acceptance.
+
+`scripts/tutorials/atomic_action/pickup.py` and `slide.py` accept
+`--n_affordance_multi_gen N`, overriding `--num_envs` to create N actual rows.
+Without this flag their legacy winner path is unchanged. Shared
+`affordance_utils.py` samples one raw set, reprojects object-local poses per env,
+and optionally writes compact NPZ/JSON via `--affordance_output`. N counts raw
+grasps, not PickUp roll variants; shortage returns partial/empty without copies.
+Slide push preserves each pull row's selected raw grasp and rebases it against
+the observed post-pull handle pose, using a fresh observed robot context.
+Qpos replay is a demonstration, not collision/contact or expert certification.
+
+Focused tests: `tests/lab/trajectory_generation/test_atomic_affordance.py` and
+`tests/sim/atomic_actions/test_{slide_candidates,tutorial_affordance,affordance_tutorials}.py`.

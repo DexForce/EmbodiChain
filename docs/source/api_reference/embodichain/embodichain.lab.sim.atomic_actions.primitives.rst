@@ -40,6 +40,7 @@ full-robot timed trajectory and uncommitted expected effects.
       PressOptions
       Slide
       SlideOptions
+      SlideCandidateBatch
       OpenDoor
       OpenDoorOptions
       Twist

@@ -58,7 +58,11 @@ def _value_fingerprint(*values: object) -> str:
         if isinstance(value, torch.Tensor):
             cpu = value.detach().cpu().contiguous()
             digest.update(str((cpu.dtype, tuple(cpu.shape))).encode())
-            digest.update(cpu.reshape(-1).view(torch.uint8).numpy().tobytes())
+            # Singleton views can be contiguous while retaining a non-unit
+            # stride (e.g. a one-joint command sliced from a multi-joint row).
+            # The dtype-changing byte view needs an actual unit-stride copy.
+            packed = cpu.reshape(-1).clone(memory_format=torch.contiguous_format)
+            digest.update(packed.view(torch.uint8).numpy().tobytes())
         elif is_dataclass(value) and not isinstance(value, type):
             for item in fields(value):
                 if item.init:

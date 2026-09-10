@@ -32,12 +32,15 @@ from .atomic_candidates import (
     AtomicGenerationResult,
     AtomicTrajectoryGenerator,
 )
+from .atomic_affordance import AtomicAffordanceBatch, plan_affordance_batch
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
     from embodichain.lab.sim.objects import Robot
 
 __all__ = [
+    "AtomicAffordanceBatch",
+    "plan_affordance_batch",
     "AtomicCandidateGenerationCfg",
     "AtomicCandidateRejection",
     "AtomicGenerationResult",

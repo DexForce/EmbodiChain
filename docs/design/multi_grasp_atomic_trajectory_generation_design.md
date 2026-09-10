@@ -9,6 +9,8 @@
 | 多 grasp 输入 | `toolkits/graspkit/candidates.py::GraspCandidateBatch`，公共 `get_grasp_candidates()` 保留 pose/cost/width/mask/稳定 ID；Antipodal 支持局部 RNG，兼容旧 ragged 接口 |
 | Atomic 候选接口 | `atomic_actions/candidates.py`、`core.py`、`engine.py` 提供候选枚举/选择及带 `eligible_mask` 的编译；保留授权、场景绑定、证书失效检查 |
 | PickUp 分支 | `PickUpCandidateBatch` 保留 grasp/roll 和 pre/grasp/lift 关节锚点；selected `ik_interp` 生成 transit/approach/close（含 settle）/lift，逐点 IK/FK/限位/连续性过滤 |
+| Slide 分支 | `SlideCandidateBatch` 每个原始 grasp 对应一个候选；保留 pre/grasp/translated 锚点和把手局部轴，selected `ik_interp` 生成接近、抓取、滑动、松手及 push 返回路径 |
+| 教程 N 环境扩增 | `integrations/atomic_affordance.py::plan_affordance_batch` 在当前真实环境行上选择不同 raw grasp，失败有界补位；`pickup.py`、`slide.py` 支持 `--n_affordance_multi_gen N`，创建 N 个 env 并同步回放 |
 | 真实副本并行 | `trajectory_generation/replicas.py::SceneReplicaPool` 验证物理副本等价和 host epoch，将逻辑候选分轮映射到不同真实 env；单实例仍逐轮生成 |
 | 批量导出 | `integrations/atomic_candidates.py::AtomicTrajectoryGenerator` 支持可选同 arm MoveJoints/MoveEndEffector 前缀＋单个末尾 PickUp，返回紧凑 `(B_out,N_max,D_full)`、有效长度、padding mask、阶段、来源和有界失败审计 |
 | 有界会话 | proposal/输出数量/字节/waypoint/时间/audit 预算；无 validator 时为 planning-only。注入会话必须显式提供含 `path_collision` 的 validator，只进入 ready 队列，不更新 committed coverage |
@@ -20,6 +22,90 @@
 2026-09-10 真实示例验证（`conda activate embodichain`、`--trajectories 8 --seed 13`）：从 mesh 采样 32 个有效 grasp，4 个物理实例分两轮规划，8 个提出的 grasp/roll 分支全部通过，输出 `qpos.shape == (8, 260, 8)`，进程正常退出。8 条路径内容不同；NPZ 的时间、有效长度、mask 和身份已检查。这是规划链路验证，不是物理抓取或专家数据验收。联调中修复公共 PK 导入对资产非标准 `link.origin` 的处理，使 FK 与解析 IK/实际末端一致；未修改资产或放宽 1 mm FK 过滤阈值。
 
 环境更正后，已在 `embodichain2`（Python 3.10.20、Torch 2.7.0+cu128）复核：真实 GPU 烟测通过，仍输出 `(8, 260, 8)`；完整相关 CPU 组为 1261 passed、2 skipped、10 deselected、1 failed。唯一失败为原有 `test_runner.py` 无条件访问 Python 3.11 才支持的异常 `__notes__` 属性；本次未修改该测试及 runner 实现。API 文档覆盖与格式检查通过。
+
+## 教程扩展：N 个不同 grasp → N 个真实环境
+
+`scripts/tutorials/atomic_action/pickup.py` 与 `slide.py` 新增可选参数：
+
+```bash
+conda activate embodichain2
+python scripts/tutorials/atomic_action/pickup.py --headless \
+  --n_affordance_multi_gen 4 --affordance_output /tmp/pickup-affordances
+python scripts/tutorials/atomic_action/slide.py --headless \
+  --n_affordance_multi_gen 4 --affordance_output /tmp/slide-affordances
+```
+
+`--n-affordance-multi-gen` 是同义写法；N 必须为正整数，显式覆盖 `--num_envs`，
+不是在单环境中循环回放 N 条轨迹。未指定新参数时保留原有 winner 教程路径。
+可用 `--affordance_seed` 设置候选采样 seed（默认 13）。省略 `--affordance_output`
+仍会规划和回放，只是不写 NPZ/JSON；指定时不能覆盖同名已有输出。
+
+### 候选数量与失败处理
+
+N 统计不同的**原始 grasp ID**，而非同一 grasp 的两个 roll。公共入口仍为
+`get_grasp_candidates()`；旧 `get_grasp_poses`/best-pose 行为不被替换。
+`affordance_utils.py::sample_affordance_grasps` 对目标 mesh 采样一次，将冻结的
+object-local grasp 集变换到每个真实环境的物体位姿，保留相同的 raw 身份。
+教程提供至少 `max(32, 4*N)` 的候选容量，候选有效数量仍受几何筛选限制。
+
+`plan_affordance_batch` 调用 engine 的候选评估和编译接口，通过确定性的
+raw-grasp/环境匹配避免重复计数。每轮成功行锁定，失败行从同一观测初态尝试剩余
+grasp/roll；最多 32 轮，不自动重采样、不放宽 IK/FK/限位/连续性检查。
+没有足够可行 grasp 或整条路径时，返回 partial/empty，并记录原因和终止条件。
+失败物理行保持初始 qpos，不复制成功轨迹填满 N，也不将 hold 算作成功。
+
+### 当前环境适配器与固定场景 source 的区别
+
+`AtomicAffordanceBatch` 提供用于同步回放的完整 `(E=N, T, D_full)`
+`trajectory`，以及仅成功行的 `compact_positions: (B_success, T, D_full)`、
+`compact_valid_length`、`compact_env_ids`、完整 `success_mask` 和所选 raw grasp。
+全失败时 compact 输出为 `(0, 0, D_full)`。时间统一为控制周期；短行末端保持，
+导出 padding 的 dt 为 0。首样本严格保留完整实测关节状态，包括 passive mimic
+约束残差，后续样本展开 mimic 仿射几何；主动或被动起点真不匹配仍拒绝。
+
+此适配器处理调用者已有的 live-env 行，不创建副本、不重置场景、不管理
+GenerationSession，也不伪造 articulation 的固定场景快照。原有
+`AtomicTrajectoryGenerator` 仍负责固定场景、副本池、跨轮 compact 导出及有界会话；
+其 PickUp-only 序列支持范围没有被 Slide 教程隐式扩展。
+
+### 两个教程的技能序列与导出
+
+- PickUp：不同 raw grasp 经技能自身的 roll/姿态规范化，生成 transit → approach →
+  close/settle → lift；输出 `pickup.npz`、`pickup.json`。
+- Slide：先生成并回放不同 grasp 的 pull。回放后逐环境读取**实际**把手位姿和机器人
+  qpos，把该环境原选 grasp 的 handle-local 变换重定位，再规划 push；不重新选 winner，
+  不广播 env 0，不假设把手已移动指令距离。pull 规划失败行不能进入 push；push 仍可独立
+  过滤。分别输出 `slide_pull.npz/.json`、`slide_push.npz/.json`。
+
+Slide 两个方向仍沿用显式配置的固定 `translation_distance`，并非按实测抽屉关节
+行程逐环境闭环关到限位：实际 pull 不足时，等距离 push 目标可能超过闭合位置。
+此教程不保证抽屉关节范围内的物理路径验收，也不宣称已经“关好抽屉”。
+
+NPZ 包含 `qpos`（成功 batch）、`dt`、`valid_length`、`valid_mask`、`env_ids`、
+`success_mask`、grasp 身份与位姿、候选列号。JSON 记录请求数/成功数、失败原因、
+实际物理行及 Slide 的观测位姿/父 grasp 关系。
+
+这里的成功表示规划通过。教程直接回放 qpos，没有使用 Atomic Runtime 的接触验证、
+恢复或专家数据验收；不保证碰撞自由、实际抓取或滑动成功，报告显式标记
+`physical_validation=False`。Slide 的后续输入使用实测几何，不将 pull 规划成功当作
+物理效果证据。测试落在 `test_atomic_affordance.py`、`test_slide_candidates.py`、
+`test_tutorial_affordance.py` 和 `test_affordance_tutorials.py`。
+
+2026-09-10 教程实测（`embodichain2`，UR5，N=4，seed=13）：PickUp 输出
+`(4,260,8)`，Slide pull 输出 `(4,140,8)`，均为四个不同 raw grasp，完成四环境
+回放并正常退出。Slide 随后的 push 在完整轨迹关节限位检查中四行均被过滤，输出
+`(0,0,8)`，原因 `trajectory:JOINT_LIMIT`，跳过 push 回放；没有用 hold 伪装成功。
+这是生成、回放与失败处理的联调结果，不是完整 pull→push 物理成功证明。
+
+相关 CPU 回归为 1334 passed、1 skipped、15 deselected、1 failed；唯一失败仍为
+上述 Python 3.10 `__notes__` 兼容性测试。新增两项真实教程回归已通过
+（2 passed），覆盖 N 覆盖原 `--num_envs`、真实候选/IK/回放、compact 输出和失败处理。
+可串行运行：
+
+```bash
+pytest -q tests/sim/atomic_actions/test_affordance_tutorials.py \
+  --run-gpu -m gpu -k test_real_affordance_tutorial
+```
 
 ## 1. 目标与交付边界
 
@@ -220,7 +306,8 @@ cuRobo 适配需要修改其真实环境 batch 检查、root/world 获取和缓�
 | MoveHeldObject、Pour | 继承当前分支 HeldObjectState.object_to_eef | 同一分支内继续，不重复采 grasp |
 | Place | PlaceGoal.xpos 是 EEF release pose；相同物体放置目标需逐分支转换 | 验证后续目标受抓法影响；AssembleGoal 已有持物变换路径 |
 | AxisAlign | 已有显式 grasp_xpos，提取自己的轴约束、upright 和 symmetry 筛选 | 第二阶段，不能直接套 PickUp 变换顺序 |
-| Slide、OpenDoor | 目前直接 get_best_grasp_poses；新增技能自己的 selected grasp 入口 | 保留关节轴、handle、开度/位移语义及接触路径约束 |
+| Slide | `SlideCandidateBatch` 和 selected `ik_interp`；每 raw grasp 一个候选 | 已接入 N 环境教程，保留 handle 局部平移轴和 Cartesian 滑动路径；不等同物理效果验收 |
+| OpenDoor | 目前直接 get_best_grasp_poses；新增技能自己的 selected grasp 入口 | 后续工作，保留关节轴、handle、开度语义及接触路径约束 |
 | CoordinatedPickment | 一候选为兼容的左右 grasp pair | 有界配对/筛选，联合 IK、自碰撞和持物约束 |
 | CoordinatedPlacement | 继承 placing/support 资源各自的 held transforms | 联合规划两臂；不假定双臂共持同一物体或必须接在 CoordinatedPickment 后 |
 | HandOver | pickup grasp、receiving grasp、交接方向形成候选 | 接收抓取绑定预测交接物体姿态；现实现包含 pickup/transfer/place，要求开始时两臂空，不能默认接在外部 PickUp 后 |

@@ -352,6 +352,8 @@ PickUp Source and Contact Validation
    AtomicCandidateRejection
    AtomicGenerationResult
    AtomicTrajectoryGenerator
+   AtomicAffordanceBatch
+   plan_affordance_batch
 
 The export accepts exactly a successful ``MoveEndEffector`` → ``PickUp``
 compilation. It preserves the atomic phase boundaries, expands passive mimic
@@ -390,6 +392,34 @@ and a general ``GenerationRunner.run_source`` are not implemented.
 
 .. autoclass:: AtomicTrajectoryGenerator
    :members:
+
+``plan_affordance_batch`` serves live-environment tutorials independently of
+the fixed-scene source. It accepts one selected-candidate PickUp or Slide
+invocation and assigns distinct raw grasp IDs to real rows, with bounded
+replacement after failed plans. ``AtomicAffordanceBatch.trajectory`` retains
+all physical rows on a shared control grid; rejected rows hold their observed
+start and never count toward ``compact_positions``. A complete result has one
+different raw grasp per requested row; partial and empty results are normal.
+The zero-time sample preserves the complete measured qpos, including passive
+constraint residuals; later samples expand mimic geometry.
+
+This adapter neither steps physics nor resets or certifies replicas. Callers
+own observed per-row scene updates and replay. Slide tutorials rebase each
+selected handle-local grasp to its actual post-pull handle pose before push.
+No collision, physical task success, or expert-data qualification is implied.
+
+.. autoclass:: AtomicAffordanceBatch
+   :members:
+
+.. autofunction:: plan_affordance_batch
+
+.. currentmodule:: embodichain.lab.trajectory_generation.integrations.atomic_affordance
+
+.. autosummary::
+   :nosignatures:
+
+   AtomicAffordanceBatch
+   plan_affordance_batch
 
 .. currentmodule:: embodichain.lab.trajectory_generation.integrations.atomic_candidates
 

@@ -395,3 +395,15 @@ def test_binary_integer_backend_flags_remain_supported() -> None:
     engine.robot.compute_batch_ik.side_effect = numeric_flags
     batch = engine.enumerate_candidates(invocation, context, grasp_candidates=raw)
     assert batch.valid_mask.all()
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.int64])
+def test_candidate_fingerprint_accepts_strided_single_joint_commands(dtype) -> None:
+    from embodichain.lab.sim.atomic_actions.candidates import _value_fingerprint
+
+    command = torch.arange(8).to(dtype)[::2][1:2]
+    assert command.stride() == (2,)
+    assert command.is_contiguous()  # Singleton axes allow a non-unit stride.
+    packed = torch.tensor([2], dtype=dtype)
+    assert _value_fingerprint(command) == _value_fingerprint(packed)
+    assert _value_fingerprint(command) != _value_fingerprint(packed + 1)

@@ -14,7 +14,18 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Demonstrate PickUp on a cube with a configurable approach direction."""
+"""Demonstrate PickUp, optionally with one distinct affordance grasp per env.
+
+Run in ``embodichain2`` to plan and simulate four independent grasps::
+
+    python scripts/tutorials/atomic_action/pickup.py --headless \
+        --n_affordance_multi_gen 4 --affordance_output /tmp/pickup-affordances
+
+The requested count sets the physical environment count. Unsolvable candidates
+are filtered and replaced from the remaining sampled grasps when possible.
+Only successful plans are exported; unused physical rows hold their initial
+state. Simulation replay is a demonstration, not expert-data qualification.
+"""
 
 from __future__ import annotations
 
@@ -44,6 +55,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
     create_curobo_motion_generator,
+    create_toppra_motion_generator,
     create_parallel_jaw_grasp_pose_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
@@ -72,7 +84,7 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the PickUp tutorial."""
     parser = create_tutorial_argument_parser(
         "Demonstrate PickUp on a cube.",
-        features=("grasp_sampling", "visualize_axes"),
+        features=("grasp_sampling", "visualize_axes", "affordance_multi_gen"),
     )
     parser.add_argument(
         "--approach", choices=[*APPROACH_DIRECTIONS, "custom"], default="top"
@@ -129,7 +141,17 @@ def main() -> None:
     obj = create_pick_object(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
-    motion_gen = create_curobo_motion_generator(robot)
+    multi_count = getattr(args, "n_affordance_multi_gen", None)
+    motion_gen = (
+        create_toppra_motion_generator(robot)
+        if multi_count is not None
+        else create_curobo_motion_generator(robot)
+    )
+    grasp_generator = create_parallel_jaw_grasp_pose_generator(
+        n_sample=args.n_sample,
+        force_refresh=args.force_reannotate,
+        max_candidates=max(32, 4 * multi_count) if multi_count is not None else None,
+    )
 
     engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
@@ -140,12 +162,7 @@ def main() -> None:
                 grasp=hand_close,
             )
         },
-        grasp_pose_generators={
-            "hand": create_parallel_jaw_grasp_pose_generator(
-                n_sample=args.n_sample,
-                force_refresh=args.force_reannotate,
-            )
-        },
+        grasp_pose_generators={"hand": grasp_generator},
     )
     semantics = create_antipodal_semantics(
         obj,
@@ -156,6 +173,15 @@ def main() -> None:
     wait_for_user = prepare_tutorial_scene(
         sim, args, "Inspect the cube, then press Enter to plan PickUp..."
     )
+
+    if multi_count is not None:
+        try:
+            _run_affordance_pickup(
+                sim, robot, obj, engine, grasp_generator, semantics, args, wait_for_user
+            )
+        finally:
+            motion_gen.planner.close()
+        return
 
     compiled = engine.compile(
         (
@@ -192,6 +218,72 @@ def main() -> None:
         video_prefix="pickup_cube_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,
         on_trajectory_step=make_clear_dynamics_callback(obj, clear_after_step),
+    )
+    if wait_for_user:
+        input("Press Enter to exit the simulation...")
+
+
+def _run_affordance_pickup(
+    sim, robot, obj, engine, grasp_generator, semantics, args, wait_for_user
+) -> None:
+    """Select distinct raw grasps, export the compact batch and replay real rows."""
+    from embodichain.lab.trajectory_generation.integrations.atomic_affordance import (
+        plan_affordance_batch,
+    )
+    from scripts.tutorials.atomic_action.affordance_utils import (
+        sample_affordance_grasps,
+        save_affordance_result,
+    )
+
+    direction = resolve_approach_direction(args, sim.device)
+    grasps = sample_affordance_grasps(
+        grasp_generator,
+        semantics.affordance,
+        object_poses=obj.get_local_pose(to_matrix=True),
+        approach_direction=direction,
+        seed=args.affordance_seed,
+    )
+    invocation = engine.make_invocation(
+        "pick_up",
+        GraspGoal(semantics),
+        invocation_id="affordance_pickup",
+        control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
+        motion_policy=MotionPolicy(strategy="ik_interp", sample_count=240),
+        skill_options=PickUpOptions(
+            approach_direction=direction,
+            pre_grasp_distance=0.15,
+            lift_height=0.16,
+            hand_interp_steps=HAND_INTERP_STEPS,
+            grasp_settle_steps=20,
+        ),
+    )
+    result = plan_affordance_batch(
+        engine,
+        invocation,
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        grasps,
+    )
+    save_affordance_result(
+        result,
+        output_dir=args.affordance_output,
+        name="pickup",
+        physical_envs=robot.num_instances,
+        metadata={"seed": args.affordance_seed, "approach": args.approach},
+    )
+    if not bool(result.success_mask.any()):
+        logger.log_warning(
+            "No feasible affordance PickUp trajectories; replay skipped."
+        )
+        return
+    if wait_for_user:
+        input("Press Enter to replay the affordance PickUp trajectories...")
+    replay_trajectory(
+        sim,
+        robot,
+        result.trajectory,
+        args,
+        video_prefix="pickup_affordance_multi_gen",
+        hold_steps=POST_TRAJECTORY_STEPS,
     )
     if wait_for_user:
         input("Press Enter to exit the simulation...")
