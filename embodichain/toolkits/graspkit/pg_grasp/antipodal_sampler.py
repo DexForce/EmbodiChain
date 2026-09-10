@@ -78,7 +78,7 @@ class AntipodalSampler:
             faces.to("cpu").numpy(), dtype=o3c.int32
         )
         # Sample surface points and normals by raycasting Fibonacci-distributed
-        # rays from outside the mesh toward its centroid. Each contact point
+        # rays from outside the mesh toward its bounding-box center. Each contact
         # replaces the previous uniform surface sample and keeps its face normal.
         sample_points, sample_normals = self._sample_surface_by_fibonacci_raycast(
             vertices, self.cfg.n_sample
@@ -112,8 +112,8 @@ class AntipodalSampler:
 
         Instead of sampling points directly on the mesh surface, rays are
         distributed uniformly over the unit sphere using the Fibonacci spiral
-        and cast from a sphere enclosing the mesh toward its centroid. The
-        first contact point of each ray with the mesh is the sample, and the
+        and cast from a sphere enclosing the mesh toward its bounding-box center.
+        The first contact point of each ray with the mesh is the sample, and the
         face normal at the contact (oriented against the ray) is its normal.
 
         Args:
@@ -147,15 +147,15 @@ class AntipodalSampler:
             [rho * torch.cos(theta), rho * torch.sin(theta), z], dim=-1
         )
 
-        # Raycast from a sphere enclosing the mesh toward its centroid.
+        # Use the bounding-box center so local mesh refinement cannot bias the rays.
         vertices_np = vertices.detach().to("cpu").numpy()
-        centroid = vertices_np.mean(axis=0)
-        extent = np.linalg.norm(vertices_np - centroid, axis=1)
+        center = (vertices_np.min(axis=0) + vertices_np.max(axis=0)) / 2
+        extent = np.linalg.norm(vertices_np - center, axis=1)
         max_radius = float(extent.max()) if vertices_np.shape[0] > 0 else 0.0
         ray_distance = 2.0 * max_radius + 1.0  # safely outside the mesh
 
         directions_np = directions.detach().to("cpu").numpy().astype(np.float32)
-        ray_origins_np = (centroid[None, :] - ray_distance * directions_np).astype(
+        ray_origins_np = (center[None, :] - ray_distance * directions_np).astype(
             np.float32
         )
         rays_np = np.concatenate([ray_origins_np, directions_np], axis=-1)

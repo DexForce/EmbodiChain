@@ -2349,3 +2349,16 @@ def get_relative_rotation(
     cos_v = (relative_rotation.diagonal(dim1=-2, dim2=-1).sum(-1) - 1) / 2
     cos_v = torch.clamp(cos_v, -1.0, 1.0)
     return torch.abs(torch.arccos(cos_v))
+
+
+def get_pc_center_box(pc: torch.Tensor) -> torch.Tensor:
+    """Get the bounding box of the mesh vertices in world frame.
+    Args:
+        pc: (N, 3) point cloud in world frame.
+    Returns:
+        center: (3,) center of the bounding box.
+    """
+    min_xyz = pc.min(dim=0).values
+    max_xyz = pc.max(dim=0).values
+    center = (min_xyz + max_xyz) / 2
+    return center
