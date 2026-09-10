@@ -1638,8 +1638,6 @@ class TestConfigToCfgFromFile:
         ("field_name", "invalid_value"),
         [
             ("dlss_enabled", "false"),
-            ("offscreen_dlss_enabled", 0),
-            ("rayreconstruction_enabled", 1),
             ("upscale_enabled", None),
             ("upsample_ratio", "2.0"),
             ("exposure_compensation", "1.0"),
@@ -1745,8 +1743,6 @@ class TestConfigToCfgFromFile:
                 "tone_mapping_exposure": 1.25,
                 "dlss": {
                     "dlss_enabled": True,
-                    "offscreen_dlss_enabled": True,
-                    "rayreconstruction_enabled": False,
                     "upscale_enabled": True,
                     "dlss_quality": 1,
                 },
@@ -1821,8 +1817,6 @@ class TestConfigToCfgFromFile:
         world_config = dexsim.WorldConfig()
         cfg.sim_cfg.render_cfg.apply_to_dexsim_config(world_config)
         assert world_config.dlss_config.dlss_enabled is True
-        assert world_config.dlss_config.offscreen_dlss_enabled is True
-        assert world_config.dlss_config.rayreconstruction_enabled is False
         assert world_config.dlss_config.upscale_enabled is True
         assert world_config.dlss_config.dlss_quality == 1
         assert cfg.sim_cfg.visualization.backend == "viser"

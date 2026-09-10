@@ -137,7 +137,7 @@ Choosing Where to Start
   how stepping, rendering, and parallel arenas work.
 - Use :doc:`sim_assets` when adding physical entities, materials, lights, or USD
   assets. The asset pages underneath it cover each object family in detail.
-- Use :doc:`sim_sensor` when adding camera, stereo, or contact observations.
+- Use :doc:`sensors/index` when adding camera, stereo, or contact observations.
 - Use :doc:`viser_visualization` when inspecting a headless or remote scene in
   a browser.
 - Use :doc:`motion/index` for the shared robot motion package and its boundaries.
@@ -173,11 +173,8 @@ See Also
    :maxdepth: 1
 
    sim_manager.md
-   default_physics.md
-   newton_physics.md
-   physics_migration.md
    sim_assets.md
-   sim_sensor.md
+   sensors/index
    viser_visualization.md
    motion/index
    atomic_actions/index

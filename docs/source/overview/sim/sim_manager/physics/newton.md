@@ -27,25 +27,6 @@ calling `prepare()` so the selection sees the complete scene. An explicit
 `{"solver_type": "auto"}` or `{"class_type": "AutoSolverCfg"}` mapping has
 the same effect as leaving `solver_cfg` unset.
 
-:::{important}
-This integration requires a DexSim build that exports `AutoSolverCfg`.
-EmbodiChain does not fall back to a hard-coded concrete solver when that API is
-unavailable.
-:::
-
-This checkout declares `dexsim_engine==0.5.0`. The local qualification stack
-used for this guide was DexSim
-`0.5.0+0ca054dd21e30b49d0521bd1bcc558f7fc7d53db`, Newton `1.4.0`, and
-Warp `1.15.0`. Record the full local DexSim build identifier because patch
-builds can carry integration fixes beyond the base package version. After
-declaring the complete scene, inspect the resolved runtime contract directly:
-
-```python
-sim.prepare()
-print(sim.physics.solver_type)
-print(sim.physics.supports_contact_sensor)
-```
-
 ## Configuration reference
 
 Scene parameters belong to `NewtonPhysicsCfg`; per-object collision, material,
@@ -65,10 +46,8 @@ such as `gpu_memory`, `bounce_threshold`, and `enable_ccd` do not belong here.
 | `sync_to_renderer` | `None` | Per-step render sync policy: DexSim auto mode by default, always with `True`, never with `False`. Camera rendering still syncs on demand. |
 | `debug_mode` | `False` | Additional runtime diagnostics. |
 | `suppress_warp_kernel_logs` | `True` | Suppress Warp startup/kernel compilation messages; warnings and errors remain visible. |
-| `visualizer_enabled` | `False` | DexSim Newton diagnostic visualizer; separate from the ordinary camera renderer and Viser. |
-| `broad_phase` | `None` | Deprecated shortcut; use `collision_cfg.broad_phase`. |
 
-Use the minimal falling-cube loop in {doc}`default_physics` with this
+Use the minimal falling-cube loop in {doc}`default` with this
 `physics_cfg` to compare the same scene. Keep the asset, initial state, physics
 duration, and environment count fixed; tune solver-specific behavior separately.
 
@@ -160,7 +139,7 @@ may still lack an EmbodiChain deformable adapter or operation.
 
 Read physical nodes through `data.nodal_pos_w` and `data.nodal_vel_w` after
 preparation. Render vertices can have different topology and indexing. See
-{doc}`sim_soft_object` and {doc}`sim_cloth` for units, configuration, and runnable
+{doc}`../../sim_soft_object` and {doc}`../../sim_cloth` for units, configuration, and runnable
 tutorials.
 
 ## Collision pipelines and contact data
@@ -202,7 +181,7 @@ reports the query's capabilities at runtime:
 
 Check `sensor.contact_capabilities` before interpreting measurements. Zero
 impulse on a geometry-only solver does not mean absence of a contact candidate.
-See {doc}`sim_sensor` for frames, filtering, arena batching, and capacity limits.
+See {doc}`../../sensors/contact_sensor` for frames, filtering, arena batching, and capacity limits.
 
 ## Differentiable simulation and CUDA Graphs
 
@@ -243,5 +222,5 @@ record the resolved solver, substeps, graph status, device, and rendering load.
 The [Newton solver guide](https://newton-physics.github.io/newton/stable/solvers/index.html)
 provides native solver feature tables. DexSim's AutoSolver and coupled solver
 configuration names describe this integration and should not be confused with
-native Newton Python class names. See {doc}`physics_migration` for the reference
+native Newton Python class names. See {doc}`migration` for the reference
 versions and a practical migration workflow.

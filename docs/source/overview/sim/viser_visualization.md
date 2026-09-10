@@ -316,7 +316,7 @@ Viser port behind an authenticated gateway.
 
 - {doc}`sim_manager`
 - {doc}`sim_assets`
-- {doc}`sim_sensor`
+- {doc}`sensors/index`
 - {doc}`/features/interaction/gizmo`
 - {doc}`/guides/preview_asset`
 - {doc}`/tutorial/create_scene`

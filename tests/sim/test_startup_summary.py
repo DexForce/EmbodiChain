@@ -81,7 +81,7 @@ def test_cpu_physics_does_not_imply_rendering_disabled(monkeypatch):
     rows = summary.simulation_rows(_sim())
     text = summary.format_summary("Simulation initialized", rows, color=False)
     assert "Default" in text
-    assert "TGS" in text
+    assert "Constraint Dynamics" in text
     assert "auto -> hybrid" in text
     assert "CLOSED" in text
     assert "cpu" in text

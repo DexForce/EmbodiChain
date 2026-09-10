@@ -10,7 +10,7 @@ topics:
   title: Simulation System
   aliases: [simulation system, simulation manager, Newton physics backend, motion module, sim motion, camera attachment, 运动能力模块, 仿真系统, 仿真管理器]
   keywords: [SimulationManager, SimulationManagerCfg, RenderCfg, DLSSCfg, DLSS, frame_time_delta_ms,
-    offscreen_dlss_enabled, explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
+    explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
     DefaultPhysicsCfg, NewtonPhysicsCfg, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity, quaternion, xyzw]
   paths: [topics/simulation-system/simulation-system.md]

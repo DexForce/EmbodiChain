@@ -6,7 +6,7 @@
 The Default backend provides CPU and Direct GPU simulation through DexSim.
 Its established constraint-solver default is TGS (Temporal Gauss-Seidel).
 Select it with {class}`~cfg.DefaultPhysicsCfg`, or `physics: default` in a
-Gym configuration. See {doc}`sim_manager` for the shared capability matrix,
+Gym configuration. See {doc}`index` for the shared capability matrix,
 device selection, and time-step definitions.
 
 ## Minimal simulation
@@ -53,7 +53,7 @@ finally:
 ```
 
 To run this same scene with Newton, import `NewtonPhysicsCfg` and replace the
-`physics_cfg` value with the configuration in {doc}`newton_physics`. Asset
+`physics_cfg` value with the configuration in {doc}`newton`. Asset
 declaration, preparation, and explicit stepping retain the same structure.
 
 ## Scene parameters
@@ -91,7 +91,7 @@ Articulation root properties are configured separately with
 `min_velocity_iters` must be specified together; these and `sleep_threshold`
 are Default-only. Root iteration settings apply before GPU buffer preparation.
 They are distinct from per-link `DefaultRigidBodyPropertiesCfg` settings.
-See {doc}`sim_articulation` for source preservation and joint drives.
+See {doc}`../../sim_articulation` for source preservation and joint drives.
 
 ## GPU memory capacities
 
@@ -117,9 +117,9 @@ capacity values cannot be transferred directly between backends.
 
 `ContactSensor` works on Default CPU and Direct GPU. The two paths differ in
 impulse and static-actor identity reporting; use the public query metadata and
-`contact_capabilities` described in {doc}`sim_sensor`. Do not treat GPU and CPU
+`contact_capabilities` described in {doc}`../../sensors/contact_sensor`. Do not treat GPU and CPU
 contact rows as an identical manifold representation.
 
 For a new task, check settling, impact response, joint tracking, and contact
 sensor output before increasing the environment count. Use
-{doc}`physics_migration` for symptom-based tuning and backend comparisons.
+{doc}`migration` for symptom-based tuning and backend comparisons.

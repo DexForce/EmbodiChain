@@ -49,7 +49,8 @@ def _selection(requested: str, resolved: str | None) -> str:
 
 def _solver(sim: SimulationManager) -> str:
     if sim.physics.name == "default":
-        return str(sim.physics.solver_type)
+        solver = str(sim.physics.solver_type)
+        return "Constraint Dynamics" if solver == "TGS" else solver
     return _selection(sim._requested_solver, sim.physics.solver_type)
 
 

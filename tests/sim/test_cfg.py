@@ -857,14 +857,16 @@ def test_newton_physics_can_disable_the_external_collision_pipeline() -> None:
     assert not hasattr(cfg, "collision_pipeline_update_interval")
 
 
-def test_newton_physics_rejects_broad_phase_without_a_collision_pipeline() -> None:
-    with pytest.raises(ValueError, match="broad_phase requires collision_cfg"):
-        NewtonPhysicsCfg(collision_cfg=None, broad_phase="sap")
-
-    cfg = NewtonPhysicsCfg(collision_cfg=None)
-    cfg.broad_phase = "sap"
-    with pytest.raises(ValueError, match="broad_phase requires collision_cfg"):
-        cfg.to_dexsim_cfg(gpu_id=0)
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [("broad_phase", "sap"), ("visualizer_enabled", True)],
+)
+def test_newton_physics_rejects_removed_top_level_fields(
+    field_name: str,
+    value: str | bool,
+) -> None:
+    with pytest.raises(TypeError, match=field_name):
+        NewtonPhysicsCfg(**{field_name: value})
 
 
 def test_default_physics_accepts_the_same_gravity_input_shape() -> None:
@@ -958,29 +960,25 @@ def test_render_cfg_rejects_invalid_image_processing_settings(
         RenderCfg(**{field_name: invalid_value})
 
 
-def test_dlss_defaults_enable_offscreen_and_preserve_quality_resolution() -> None:
-    """Offscreen DLSS defaults on while quality and resolution retain native defaults."""
+def test_dlss_defaults_preserve_native_quality_resolution() -> None:
+    """Quality and resolution retain native defaults."""
     native = dexsim.DLSSConfig()
     converted = DLSSCfg().to_dexsim_cfg(1920, 1080)
 
     for name in DLSSCfg().to_dict():
-        if name not in ("upsample_ratio", "offscreen_dlss_enabled"):
+        if name != "upsample_ratio":
             assert getattr(converted, name) == getattr(native, name), name
     assert converted.render_width == converted.render_height == 0
     assert converted.dlss_quality == 2
-    assert converted.offscreen_dlss_enabled is True
 
 
-@pytest.mark.parametrize("rr_enabled", [False, True])
 @pytest.mark.parametrize("sr_enabled", [False, True])
-def test_dlss_features_are_independent(rr_enabled: bool, sr_enabled: bool) -> None:
-    """RR and SR selections survive conversion independently."""
+def test_dlss_upscale_switch_survives_conversion(sr_enabled: bool) -> None:
+    """The SR switch survives native conversion."""
     converted = DLSSCfg(
-        rayreconstruction_enabled=rr_enabled,
         upscale_enabled=sr_enabled,
     ).to_dexsim_cfg(1920, 1080)
 
-    assert converted.rayreconstruction_enabled is rr_enabled
     assert converted.upscale_enabled is sr_enabled
 
 
@@ -1074,8 +1072,6 @@ def test_dlss_rejects_invalid_settings(field_name: str, invalid_value: object) -
     "field_name",
     [
         "dlss_enabled",
-        "offscreen_dlss_enabled",
-        "rayreconstruction_enabled",
         "upscale_enabled",
     ],
 )
@@ -1106,8 +1102,6 @@ def test_dlss_accepts_integer_and_float_numeric_settings(value: int | float) -> 
         ("upsample_ratio", "2.0"),
         ("exposure_compensation", "1.0"),
         ("dlss_enabled", "false"),
-        ("offscreen_dlss_enabled", 0),
-        ("rayreconstruction_enabled", 1),
         ("upscale_enabled", None),
     ],
 )

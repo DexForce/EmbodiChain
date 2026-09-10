@@ -68,14 +68,11 @@ pytestmark = pytest.mark.no_sim
 
 @pytest.mark.parametrize("renderer", ["hybrid", "fast-rt", "rt", "auto"])
 @pytest.mark.parametrize("headless", [False, True])
-@pytest.mark.parametrize(
-    "dlss_enabled,offscreen_enabled", [(False, True), (True, False), (True, True)]
-)
+@pytest.mark.parametrize("dlss_enabled", [False, True])
 def test_convert_sim_config_applies_dlss_for_all_renderers_and_camera_modes(
     renderer: str,
     headless: bool,
     dlss_enabled: bool,
-    offscreen_enabled: bool,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -93,7 +90,6 @@ def test_convert_sim_config_applies_dlss_for_all_renderers_and_camera_modes(
             renderer=renderer,
             dlss=DLSSCfg(
                 dlss_enabled=dlss_enabled,
-                offscreen_dlss_enabled=offscreen_enabled,
                 dlss_quality=3,
                 target_width=1920,
                 target_height=1080,
@@ -108,7 +104,6 @@ def test_convert_sim_config_applies_dlss_for_all_renderers_and_camera_modes(
     world = SimulationManager._convert_sim_config(manager, config)
 
     assert world.dlss_config.dlss_enabled is dlss_enabled
-    assert world.dlss_config.offscreen_dlss_enabled is offscreen_enabled
     assert world.dlss_config.dlss_quality == 3
     assert world.dlss_config.render_width == world.dlss_config.render_height == 0
     assert (world.win_config.width, world.win_config.height) == (640, 480)

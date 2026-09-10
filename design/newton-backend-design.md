@@ -32,7 +32,7 @@ Backend selection is inferred from `SimulationManagerCfg.physics_cfg`:
 `NewtonPhysicsCfg` owns Newton settings: `physics_dt`, `device`, `num_substeps`,
 `requires_grad`, `use_cuda_graph`, `debug_mode`, `solver_cfg` (mapping or
 `NewtonSolverCfg` selecting `mujoco_warp` / `xpbd` / `semi_implicit` /
-`featherstone` / `vbd`), `broad_phase`, and `visualizer_enabled`.
+`featherstone` / `vbd`), and `collision_cfg`.
 `NewtonPhysicsCfg.to_dexsim_cfg(...)` builds a DexSim `NewtonCfg`, disables
 CUDA graph when gradient mode is enabled, and requires
 `solver_type="semi_implicit"` for gradient mode.

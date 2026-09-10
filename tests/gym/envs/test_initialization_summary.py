@@ -185,7 +185,7 @@ def test_summary_includes_shared_runtime_scene_and_task_metadata() -> None:
         assert label in rendered
     for value in (
         "Default",
-        "TGS",
+        "Constraint Dynamics",
         "_SummaryCfg",
         "cpu",
         "_RobotStub",

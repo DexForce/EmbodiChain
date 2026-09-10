@@ -543,8 +543,8 @@ blindly.
 `RenderCfg.apply_to_dexsim_config()` owns renderer, sampling, tone mapping,
 and `DLSSCfg` conversion into `WorldConfig`. DLSS settings apply to `hybrid`,
 `fast-rt`, and `rt`, after automatic renderer resolution. Defaults enable
-window and offscreen DLSS, with independent RR/SR switches,
-Balanced quality, and zero render dimensions for engine-derived scaling.
+the DLSS master switch and SR, with Balanced quality and zero render dimensions
+for engine-derived scaling. Offscreen DLSS and RR retain DexSim native defaults.
 Always forward the master switch, including `False`. Headless initialization
 must retain DLSS settings because offscreen cameras or a later window can use
 them. The actual window/camera owns output size; compatibility target fields

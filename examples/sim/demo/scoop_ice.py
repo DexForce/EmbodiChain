@@ -23,13 +23,18 @@ from __future__ import annotations
 
 import argparse
 import time
-from embodichain.cli.sim import add_sim_args_to_parser
+from embodichain.cli.sim import (
+    add_sim_args_to_parser,
+    add_seed_arg_to_parser,
+    resolve_seed,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Build CLI options without initializing simulation resources."""
     parser = argparse.ArgumentParser(description="Scoop ice task simulation")
     add_sim_args_to_parser(parser)
+    add_seed_arg_to_parser(parser, default=0, scope="ice placement")
     return parser
 
 
@@ -40,7 +45,6 @@ if __name__ == "__main__":
 
 import numpy as np
 import torch
-from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -57,7 +61,6 @@ from embodichain.lab.sim.cfg import (
     LightCfg,
 )
 from embodichain.lab.sim.material import VisualMaterialCfg
-from embodichain.compute.trajectory import interpolate_with_distance
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
@@ -91,34 +94,36 @@ def initialize_simulation(args):
     return sim
 
 
-def randomize_ice_positions(sim, ice_cubes):
-    """
-    Randomly drop ice cubes into the container within a specified range.
+def randomize_ice_positions(
+    sim: SimulationManager, ice_cubes: RigidObjectGroup, *, seed: int = 0
+) -> None:
+    """Place separated ice cubes inside the bin before advancing physics.
+
+    The meshes fit inside 29 mm boxes. A 32 mm lattice with at most 0.5 mm
+    jitter leaves clearance for the collision contact offsets as well.
 
     Args:
-        sim (SimulationManager): The simulation manager instance.
-        ice_cubes (RigidObjectGroup): Group of ice cube objects to be randomized.
+        sim: Prepared simulation containing the ice container.
+        ice_cubes: Ice group to reset before settling.
+        seed: Local random seed for the small position perturbations.
     """
-    num_objs = ice_cubes.num_objects
-    position_low = np.array([0.65, -0.45, 0.5])
-    position_high = np.array([0.55, -0.35, 0.5])
-    position_random = np.random.uniform(
-        low=position_low, high=position_high, size=(num_objs, 3)
+    indices = np.arange(ice_cubes.num_objects)
+    positions = np.column_stack(
+        [
+            0.144 - ((indices // 5) % 10) * 0.032,
+            -0.20 + (indices % 5) * 0.032,
+            -0.16 + (indices // 50) * 0.032,
+        ]
     )
-    random_drop_pose_np = np.eye(4)[None, :, :].repeat(num_objs, axis=0)
-    random_drop_pose_np[:, :3, 3] = position_random
-
-    # Assign random positions to each ice cube
-    for i in tqdm(range(num_objs), desc="Dropping ice cubes"):
-        ice_cubes.set_local_pose(
-            pose=torch.tensor(
-                random_drop_pose_np[i][None, None, :, :],
-                dtype=torch.float32,
-                device=sim.device,
-            ),
-            obj_ids=[i],
-        )
-        sim.update(step=10)
+    positions += np.random.default_rng(seed).uniform(-0.0005, 0.0005, positions.shape)
+    poses = torch.eye(4, device=sim.device).repeat(sim.num_envs, len(indices), 1, 1)
+    poses[:, :, :3, 3] = torch.as_tensor(
+        positions, dtype=torch.float32, device=sim.device
+    )
+    container_pose = sim.get_articulation("container").get_local_pose(to_matrix=True)
+    ice_cubes.set_local_pose(container_pose[:, None] @ poses)
+    ice_cubes.clear_dynamics()
+    sim.update(step=300)
 
 
 def create_robot(sim):
@@ -194,7 +199,7 @@ def create_robot(sim):
 
 
 def create_scoop(sim: SimulationManager):
-    """Create a scoop rigid object in the simulation."""
+    """Create a lightweight (150 g) scoop for the hand's friction grasp."""
     scoop_cfg = RigidObjectCfg(
         uid="scoop",
         shape=MeshCfg(
@@ -206,7 +211,7 @@ def create_scoop(sim: SimulationManager):
         ),
         attrs=RigidBodyPhysicsCfg.from_dict(
             {
-                "mass_props": {"mass": 0.5},
+                "mass_props": {"mass": 0.15},
                 "rigid_props": {"min_position_iters": 32, "min_velocity_iters": 8},
                 "material_props": {
                     "static_friction": 0.95,
@@ -426,13 +431,9 @@ def scoop_grasp(
     grasp_scoop_pose = torch.bmm(scoop_pose, grasp_scoop_pose_relative)
     pregrasp_scoop_pose = grasp_scoop_pose.clone()
     pregrasp_scoop_pose[:, 2, 3] += 0.1
-    is_success, pre_grasp_scoop_qpos = robot.compute_ik(
-        pregrasp_scoop_pose, joint_seed=arm_rest_qpos, name="arm"
-    )
+    pre_grasp_scoop_qpos = _solve_arm_ik(robot, pregrasp_scoop_pose, arm_rest_qpos)
 
-    is_success, grasp_scoop_qpos = robot.compute_ik(
-        grasp_scoop_pose, joint_seed=arm_rest_qpos, name="arm"
-    )
+    grasp_scoop_qpos = _solve_arm_ik(robot, grasp_scoop_pose, pre_grasp_scoop_qpos)
     robot.set_qpos(pre_grasp_scoop_qpos, joint_ids=arm_ids)
     sim.update(step=100)
     robot.set_qpos(grasp_scoop_qpos, joint_ids=arm_ids)
@@ -456,110 +457,65 @@ def scoop_grasp(
     heave_ice.set_local_pose(remove_heave_ice_pose[None, :, :])
 
 
-def scoop_ice(sim: SimulationManager, robot: Robot, scoop: RigidObject):
-    """
-    Control the robot to perform the scoop ice task, including lifting, scooping,
-    and placing the ice.
+def _solve_arm_ik(
+    robot: Robot, pose: torch.Tensor, joint_seed: torch.Tensor
+) -> torch.Tensor:
+    """Reject unreachable targets before sending them to the arm."""
+    success, qpos = robot.compute_ik(pose, joint_seed=joint_seed, name="arm")
+    if not bool(torch.all(success)) or not bool(torch.isfinite(qpos).all()):
+        raise RuntimeError("Scoop trajectory contains an unreachable arm pose.")
+    return qpos
+
+
+def scoop_ice(sim: SimulationManager, robot: Robot, scoop: RigidObject) -> None:
+    """Scoop below the ice surface, curl the bowl upward, then lift it out.
+
+    Targets describe the scoop, using the measured grasp transform to account
+    for the tool's settled orientation in the fingers. Bin-local positions
+    keep the insertion depth and wall clearance tied to the container.
 
     Args:
-        sim (SimulationManager): The simulation manager instance.
-        robot (Robot): The robot instance to be controlled.
-        scoop (RigidObject): The scoop object used for scooping ice.
+        sim: Prepared simulation containing the ice container.
+        robot: Robot holding the scoop with its hand closed.
+        scoop: Grasped scoop whose current pose defines the tool transform.
     """
-    start_qpos = robot.get_qpos()
     arm_ids = robot.get_joint_ids("arm")
-    hand_ids = robot.get_joint_ids("hand")
-    hand_open_qpos = torch.tensor([0.0, 1.5, 0.4, 0.4, 0.4, 0.4])
-    hand_close_qpos = torch.tensor([0.4, 1.5, 1.0, 1.1, 1.1, 0.9])
-    arm_start_qpos = start_qpos[:, arm_ids]
+    qpos = robot.get_qpos()[:, arm_ids]
+    tcp_pose = robot.compute_fk(qpos, name="arm", to_matrix=True)
+    scoop_pose = scoop.get_local_pose(to_matrix=True)
+    scoop_to_tcp = torch.linalg.inv(scoop_pose) @ tcp_pose
+    container_pose = sim.get_articulation("container").get_local_pose(to_matrix=True)
 
-    # lift
-    arm_start_xpos = robot.compute_fk(arm_start_qpos, name="arm", to_matrix=True)
-    arm_lift_xpos = arm_start_xpos.clone()
-    arm_lift_xpos[:, 2, 3] += 0.45
-    is_success, arm_lift_qpos = robot.compute_ik(
-        arm_lift_xpos, joint_seed=arm_start_qpos, name="arm"
-    )
+    lift_pose = scoop_pose.clone()
+    lift_pose[:, 2, 3] += 0.35
+    targets = [lift_pose]
+    # Container local -X points toward the approach side; local -Y crosses the bin.
+    # The bowl extends along scoop -Y, 19 cm beyond the grasp origin.
+    for position, pitch in [
+        ((-0.24, -0.15, 0.19), 0.0),
+        ((-0.16, -0.15, 0.09), 30.0),
+        ((-0.10, -0.15, -0.06), 30.0),
+        ((-0.03, -0.15, -0.11), -10.0),
+        ((-0.03, -0.15, 0.19), -10.0),
+    ]:
+        relative = torch.eye(4, dtype=torch.float32, device=sim.device)
+        relative[:3, :3] = torch.as_tensor(
+            R.from_euler("z", 90, degrees=True).as_matrix()
+            @ R.from_euler("x", pitch, degrees=True).as_matrix(),
+            dtype=torch.float32,
+            device=sim.device,
+        )
+        relative[:3, 3] = torch.as_tensor(position, device=sim.device)
+        targets.append(container_pose @ relative)
 
-    # apply 45 degree wrist rotation
-    wrist_rotation = R.from_euler("X", 45, degrees=True).as_matrix()
-    arm_lift_rotation = arm_lift_xpos[0, :3, :3].to("cpu").numpy()
-    new_rotation = wrist_rotation @ arm_lift_rotation
-    arm_lift_xpos_rotated = arm_lift_xpos.clone()
-    arm_lift_xpos_rotated[:, :3, :3] = torch.tensor(
-        new_rotation, dtype=torch.float32, device=sim.device
-    )
-    arm_lift_xpos_rotated[:, :3, 3] = torch.tensor(
-        [0.5, -0.2, 0.55], dtype=torch.float32, device=sim.device
-    )
-    is_success, arm_lift_qpos_rotated = robot.compute_ik(
-        arm_lift_xpos_rotated, joint_seed=arm_lift_qpos, name="arm"
-    )
-
-    # into container
-    scoop_dis = 0.252
-    scoop_offset = scoop_dis * torch.tensor(
-        [0.0, -0.58123819, -0.81373347], dtype=torch.float32, device=sim.device
-    )
-    arm_into_container_xpos = arm_lift_xpos_rotated.clone()
-    arm_into_container_xpos[:, :3, 3] = arm_into_container_xpos[:, :3, 3] + scoop_offset
-    is_success, arm_into_container_qpos = robot.compute_ik(
-        arm_into_container_xpos, joint_seed=arm_lift_qpos_rotated, name="arm"
-    )
-
-    # apply -60 degree wrist rotation
-    arm_into_container_rotation = arm_into_container_xpos[0, :3, :3].to("cpu").numpy()
-    wrist_rotation = R.from_euler("X", -60, degrees=True).as_matrix()
-    new_rotation = wrist_rotation @ arm_into_container_rotation
-    arm_scoop_xpos = arm_into_container_xpos.clone()
-    arm_scoop_xpos[:, :3, :3] = torch.tensor(
-        new_rotation, dtype=torch.float32, device=sim.device
-    )
-    is_success, arm_scoop_qpos = robot.compute_ik(
-        arm_scoop_xpos, joint_seed=arm_into_container_qpos, name="arm"
-    )
-
-    # minor lift
-    arm_scoop_xpos[:, 2, 3] += 0.15
-    is_success, arm_scoop_lift_qpos = robot.compute_ik(
-        arm_scoop_xpos, joint_seed=arm_scoop_qpos, name="arm"
-    )
-
-    # pack arm and hand trajectory
-    arm_trajectory = torch.concatenate(
-        [
-            arm_start_qpos,
-            arm_lift_qpos,
-            arm_lift_qpos_rotated,
-            arm_into_container_qpos,
-            arm_scoop_qpos,
-            arm_scoop_lift_qpos,
-        ]
-    )
-
-    hand_trajectory = torch.vstack(
-        [
-            hand_close_qpos,
-            hand_close_qpos,
-            hand_close_qpos,
-            hand_close_qpos,
-            hand_close_qpos,
-            hand_close_qpos,
-        ]
-    )
-
-    all_trajectory = torch.hstack([arm_trajectory, hand_trajectory])
-    interp_trajectory = interpolate_with_distance(
-        trajectory=all_trajectory[None, :, :], interp_num=200, device=sim.device
-    )
-    interp_trajectory = interp_trajectory[0]
-    # run trajectory
-    arm_ids = robot.get_joint_ids("arm")
-    hand_ids = robot.get_joint_ids("hand")
-    combine_ids = np.concatenate([arm_ids, hand_ids])
-    for qpos in interp_trajectory:
-        robot.set_qpos(qpos.unsqueeze(0), joint_ids=combine_ids)
-        sim.update(step=10)
+    for target in targets:
+        end_qpos = _solve_arm_ik(robot, target @ scoop_to_tcp, qpos)
+        # Small target increments avoid impulsive loads on the friction grasp.
+        for alpha in torch.linspace(0.0, 1.0, 100, device=sim.device):
+            robot.set_qpos(qpos + alpha * (end_qpos - qpos), joint_ids=arm_ids)
+            sim.update(step=4)
+        qpos = robot.get_qpos()[:, arm_ids]
+    sim.update(step=100)
 
 
 def main(args: argparse.Namespace | None = None) -> None:
@@ -588,7 +544,9 @@ def main(args: argparse.Namespace | None = None) -> None:
         sim.open_window()
 
     # Randomize ice positions
-    randomize_ice_positions(sim, ice_cubes)
+    seed = resolve_seed(args.seed)
+    logger.log_info(f"Ice placement seed: {seed}")
+    randomize_ice_positions(sim, ice_cubes, seed=seed)
 
     # Perform tasks
     scoop_grasp(sim, robot, scoop, heave_ice, padding_box)

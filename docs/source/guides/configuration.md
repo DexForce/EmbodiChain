@@ -268,7 +268,7 @@ The following are **physics fragments**, not complete runnable task files.
 Apply each fragment to a separate copy of the same inline deployment, retaining
 its required `id`, `env`, robot/embodiment, and scene declarations. Retune any
 backend-specific asset fields as described in
-{doc}`/overview/sim/physics_migration`.
+{doc}`/overview/sim/sim_manager/physics/migration`.
 
 Default fragment:
 

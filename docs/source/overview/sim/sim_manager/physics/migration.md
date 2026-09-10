@@ -127,5 +127,5 @@ dependency versions with performance results. This checkout declares
 used Newton `1.4.0` and Warp `1.15.0`. Patch-level DexSim builds can include
 additional fixes, so retain their full build identifier in bug reports.
 
-See {doc}`default_physics` and {doc}`newton_physics` for backend-specific
+See {doc}`default` and {doc}`newton` for backend-specific
 configuration and solver details.

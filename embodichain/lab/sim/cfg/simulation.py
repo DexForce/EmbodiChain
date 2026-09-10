@@ -41,10 +41,9 @@ if TYPE_CHECKING:
 class DLSSCfg:
     """DexSim DLSS configuration for window and offscreen rendering.
 
-    Ray Reconstruction (RR) and Super Resolution (SR) are independently
-    configurable on the ``"hybrid"``, ``"fast-rt"``, and ``"rt"`` renderers.
-    DLSS is enabled by default for both windows and offscreen cameras.
-    Offscreen DLSS also requires the master switch to remain enabled.
+    DLSS controls apply to the ``"hybrid"``, ``"fast-rt"``, and ``"rt"``
+    renderers. Offscreen rendering and Ray Reconstruction (RR) retain
+    DexSim's native defaults.
 
     .. attention::
         DLSS requires a Vulkan render device, a compatible NVIDIA GPU/driver,
@@ -57,14 +56,8 @@ class DLSSCfg:
     dlss_enabled: bool = True
     """Master switch for DLSS. False retains the standard rendering path."""
 
-    offscreen_dlss_enabled: bool = True
-    """Enable DLSS for offscreen cameras, including in headless simulations."""
-
-    rayreconstruction_enabled: bool = True
-    """Enable RR denoising. Can be used without SR at the target resolution."""
-
     upscale_enabled: bool = True
-    """Enable SR upscaling. Can be used independently of RR."""
+    """Enable standalone Super Resolution (SR) when RR is disabled."""
 
     dlss_quality: int = 2
     """Quality mode and derived internal scale: ``-1`` auto (58%), ``0`` Ultra
@@ -106,8 +99,6 @@ class DLSSCfg:
         """Validate scalar types and the ranges of numeric settings."""
         for name in (
             "dlss_enabled",
-            "offscreen_dlss_enabled",
-            "rayreconstruction_enabled",
             "upscale_enabled",
         ):
             if not isinstance(getattr(self, name), bool):
@@ -154,8 +145,6 @@ class DLSSCfg:
         self.__post_init__()
         dlss = dexsim.DLSSConfig()
         dlss.dlss_enabled = self.dlss_enabled
-        dlss.offscreen_dlss_enabled = self.offscreen_dlss_enabled
-        dlss.rayreconstruction_enabled = self.rayreconstruction_enabled
         dlss.upscale_enabled = self.upscale_enabled
         dlss.dlss_quality = self.dlss_quality
         dlss.render_width = self.render_width
@@ -555,35 +544,16 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     one-way SDF boundaries.
     """
 
-    broad_phase: Literal["nxn", "sap", "explicit"] | None = None
-    """Deprecated shortcut for ``collision_cfg.broad_phase``.
-
-    If both are set, ``collision_cfg.broad_phase`` wins.
-    """
-
-    visualizer_enabled: bool = False
-    """Whether to enable DexSim Newton's optional diagnostic visualizer."""
-
     def __post_init__(self) -> None:
         """Normalize dictionary collision settings at the config boundary."""
         if isinstance(self.collision_cfg, Mapping):
             self.collision_cfg = NewtonCollisionPipelineCfg(**self.collision_cfg)
-        self._validate_collision_pipeline_configuration()
-
-    def _validate_collision_pipeline_configuration(self) -> None:
-        """Keep the deprecated broad-phase shortcut meaningful."""
-        if self.collision_cfg is None and self.broad_phase is not None:
-            logger.log_error(
-                "NewtonPhysicsCfg.broad_phase requires collision_cfg to be configured.",
-                ValueError,
-            )
 
     def to_dexsim_cfg(
         self,
         gpu_id: int,
     ) -> NewtonCfg:
         """Convert this config to ``dexsim.engine.newton_physics.NewtonCfg``."""
-        self._validate_collision_pipeline_configuration()
         from dexsim.engine.newton_physics import (
             AutoSolverCfg,
             DexUniSolverCfg,
@@ -634,8 +604,6 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
                 item.name: getattr(self.collision_cfg, item.name)
                 for item in fields(self.collision_cfg)
             }
-            if collision_values["broad_phase"] is None:
-                collision_values["broad_phase"] = self.broad_phase
             collision_values["requires_grad"] = self.requires_grad
             collision_pipeline_cfg = DexsimNewtonCollisionPipelineCfg(
                 **collision_values
@@ -659,7 +627,6 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             **newton_cfg_args,
         )
         cfg.use_cuda_graph = self.use_cuda_graph and not self.requires_grad
-        cfg._visualizer_enabled = self.visualizer_enabled
         return cfg
 
 
