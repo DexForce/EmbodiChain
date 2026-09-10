@@ -128,9 +128,15 @@ class ContainerAffordance(Affordance):
     Args:
         minimum_confidence: Minimum confidence accepted while resolving the
             late-bound target pose.
+        release_clearance: Non-negative distance in metres added along the
+            target frame's local positive z-axis while releasing the object.
+            The registered pose remains the final semantic object target; this
+            clearance keeps the end effector outside the container boundary
+            before the released object settles into that target.
     """
 
     minimum_confidence: float = 0.0
+    release_clearance: float = 0.0
 
     def __post_init__(self) -> None:
         if isinstance(self.minimum_confidence, bool) or not isinstance(
@@ -141,6 +147,14 @@ class ContainerAffordance(Affordance):
         self.minimum_confidence = float(self.minimum_confidence)
         if not 0.0 <= self.minimum_confidence <= 1.0:
             raise ValueError("minimum_confidence must be in [0, 1].")
+        if isinstance(self.release_clearance, bool) or not isinstance(
+            self.release_clearance,
+            (int, float),
+        ):
+            raise TypeError("release_clearance must be a number.")
+        self.release_clearance = float(self.release_clearance)
+        if not math.isfinite(self.release_clearance) or self.release_clearance < 0.0:
+            raise ValueError("release_clearance must be finite and non-negative.")
 
 
 def _validate_identifier(value: str, name: str) -> None:

@@ -207,6 +207,12 @@ affect FastRT/OfflineRT windows; hybrid and offscreen cameras derive internal
 size from their own output and quality. DexSim initializes DLSS lazily on a
 rendered frame, so config tests do not qualify GPU/NGX support.
 
+On legacy engines without `dexsim.DLSSConfig` (including 0.4.3), render
+configuration validates the DLSS settings but warns and skips their native
+conversion. Renderer selection, sampling, OptiX denoising and tone mapping
+still apply. This fallback does not enable DLSS on the legacy engine or change
+the direct `DLSSCfg.to_dexsim_cfg()` API's native-support requirement.
+
 `gym/utils/gym_utils.py:config_to_cfg()` decodes task `render_cfg.dlss`
 mappings into `DLSSCfg` before constructing `RenderCfg`. DLSS switches require
 booleans; ratio/exposure settings require real numbers, excluding booleans.

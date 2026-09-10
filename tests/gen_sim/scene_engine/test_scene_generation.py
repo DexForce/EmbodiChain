@@ -49,6 +49,11 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils impo
     layout_object_to_transform_matrix,
     transform_matrix_to_layout_object,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
+    rotate_scene_z_up_world,
+    scene_object_y_up_layout,
+    y_up_to_z_up_matrix,
+)
 
 
 def _z_up_rotation_from_y_up_layout(layout: dict[str, object]) -> np.ndarray:
@@ -221,6 +226,75 @@ def test_visual_yaws_replace_coarse_rotations_but_preserve_positions() -> None:
     expected_z_up_yaw = Rotation.from_euler("z", 45.0, degrees=True).as_matrix()
     assert np.allclose(_z_up_rotation_from_y_up_layout(yawed_layout), expected_z_up_yaw)
     assert np.allclose(yawed_layout["pos"], [0.1, 0.2, 0.3])
+
+
+def test_rotate_scene_z_up_world_rotates_complete_scene_and_support_metadata() -> None:
+    scene = Scene(
+        objects=[
+            SceneObject(
+                id="table",
+                kind="table",
+                category="table",
+                name="table",
+                description="table",
+                rot=[0.0, 0.0, 0.0],
+                pos=[0.0, 0.0, 0.0],
+                scale=[1.0, 1.0, 1.0],
+                center_xy=[1.0, 2.0],
+                support_contour_xy=[[1.0, 2.0], [-1.0, 2.0]],
+                support_optimization_rect_xy=[[1.0, 1.0], [-1.0, 1.0]],
+            ),
+            SceneObject(
+                id="book_001",
+                kind="asset",
+                category="book",
+                name="book",
+                description="book",
+                rot=[10.0, 20.0, 30.0],
+                pos=[1.0, 2.0, 3.0],
+                scale=[1.0, 2.0, 3.0],
+                center_xy=[3.0, 4.0],
+            ),
+        ]
+    )
+    basis = y_up_to_z_up_matrix()
+    inverse_basis = np.linalg.inv(basis)
+    original_z_up_transforms = {
+        scene_object.id: (
+            basis
+            @ layout_object_to_transform_matrix(scene_object_y_up_layout(scene_object))
+            @ inverse_basis
+        )
+        for scene_object in scene.objects
+    }
+    expected_world_rotation = np.eye(4)
+    expected_world_rotation[:3, :3] = Rotation.from_euler(
+        "z", 180.0, degrees=True
+    ).as_matrix()
+
+    rotate_scene_z_up_world(scene=scene, rotation_degrees=180.0)
+
+    for scene_object in scene.objects:
+        actual_z_up_transform = (
+            basis
+            @ layout_object_to_transform_matrix(scene_object_y_up_layout(scene_object))
+            @ inverse_basis
+        )
+        assert np.allclose(
+            actual_z_up_transform,
+            expected_world_rotation @ original_z_up_transforms[scene_object.id],
+        )
+    assert np.allclose(scene.table.center_xy, [-1.0, -2.0])
+    assert np.allclose(scene.table.support_contour_xy, [[-1.0, -2.0], [1.0, -2.0]])
+    assert np.allclose(
+        scene.table.support_optimization_rect_xy,
+        [[-1.0, -1.0], [1.0, -1.0]],
+    )
+
+
+def test_rotate_scene_z_up_world_rejects_non_finite_angle() -> None:
+    with pytest.raises(ValueError, match="rotation_degrees must be finite"):
+        rotate_scene_z_up_world(scene=Scene(), rotation_degrees=float("nan"))
 
 
 def test_articulated_usdcs_use_visible_rgba_in_scene_order(

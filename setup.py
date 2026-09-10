@@ -134,6 +134,7 @@ def main():
         package_data={
             "embodichain": ["VERSION"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
+            "embodichain.gen_sim.task_engine": ["*.yaml"],
             "embodichain_tasks.configs": ["**/*.json", "**/*.yaml", "**/*.yml"],
         },
         cmdclass=cmdclass,

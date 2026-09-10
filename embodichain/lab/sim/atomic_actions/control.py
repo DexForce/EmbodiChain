@@ -31,6 +31,9 @@ OPEN_COMMAND = "open"
 GRASP_COMMAND = "grasp"
 """Conventional semantic command for an object-holding end effector."""
 
+PARK_COMMAND = "park"
+"""Conventional semantic command for an embodiment-defined parked posture."""
+
 
 class ControlCommand(ABC):
     """Immutable-by-ownership command associated with one control part.
@@ -282,4 +285,5 @@ __all__ = [
     "GRASP_COMMAND",
     "JointPositionCommand",
     "OPEN_COMMAND",
+    "PARK_COMMAND",
 ]

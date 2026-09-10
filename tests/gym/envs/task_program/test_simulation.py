@@ -248,6 +248,7 @@ def _scene_binding() -> SimulationSceneBinding:
                     1.0,
                 ),
                 minimum_confidence=0.8,
+                release_clearance=0.12,
                 is_default=True,
             ),
         ),
@@ -341,6 +342,7 @@ def test_scene_binding_builds_existing_registry_contracts() -> None:
     container = registry.lookup(container_ref).affordance
     assert type(container) is ContainerAffordance
     assert container.minimum_confidence == pytest.approx(0.8)
+    assert container.release_clearance == pytest.approx(0.12)
     assert torch.allclose(
         snapshot.entities[container_ref.entity_id].pose[:, 0, 3],
         torch.tensor((0.4, 0.5)),
