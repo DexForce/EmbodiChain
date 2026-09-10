@@ -130,7 +130,11 @@ simulation thread. Both robot paths use Newton IK by default or, with
 joint motion; TCP overrides adapt targets without changing the shared solver.
 
 Viser click picking runs on the visualization worker via the existing GUI
-event queue. A manifest invalidates cached pick poses until its matching frame
+event queue. The worker registers the global scene pointer callback only while
+**Enable click-to-pick Gizmo** is checked, and removes it when unchecked. Viser
+captures camera drags while that callback is registered, so inactive picking
+must leave the callback unregistered to preserve orbit and pan controls.
+A manifest invalidates cached pick poses until its matching frame
 arrives; stale clicks are dropped. The manager validates `PickCommand` run and
 revision before attaching a gizmo and tracks picker ownership independently
 from explicitly created gizmos. Clearing selection releases only the picker

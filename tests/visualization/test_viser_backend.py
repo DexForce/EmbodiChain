@@ -229,6 +229,7 @@ class _Scene:
         self.frame_handles: list[_Handle] = []
         self.grid_handles: list[_Handle] = []
         self.transform_controls: list[_TransformControls] = []
+        self.pointer_callbacks: list[tuple[str, object]] = []
 
     def reset(self) -> None:
         pass
@@ -286,12 +287,13 @@ class _Scene:
         """Register a pointer callback like viser's scene API (test-only)."""
 
         def decorator(callback: object) -> object:
-            if not hasattr(self, "pointer_callbacks"):
-                self.pointer_callbacks = []
-            self.pointer_callbacks.append((event_type, callback))
+            self.pointer_callbacks[:] = [(event_type, callback)]
             return callback
 
         return decorator
+
+    def remove_pointer_callback(self) -> None:
+        self.pointer_callbacks.clear()
 
 
 class _Server:
@@ -975,16 +977,8 @@ def test_viser_backend_pick_enqueues_command_when_enabled() -> None:
     backend.publish_manifest(manifest)
     assert backend.publish_frame(frame)
 
-    # The click handler is registered but inactive until the checkbox is on.
-    click_callback = server.scene.pointer_callbacks[0][1]
-    click_callback(
-        SimpleNamespace(
-            client_id="client-a",
-            ray_origin=np.array([0.0, 0.0, 5.0], dtype=np.float32),
-            ray_direction=np.array([0.0, 0.0, -1.0], dtype=np.float32),
-        )
-    )
-    backend.poll()
+    # Inactive picking must not capture pointer drags from camera controls.
+    assert server.scene.pointer_callbacks == []
     assert pick_commands == []
 
     server.gui.checkboxes["Enable click-to-pick Gizmo"].callback(
@@ -992,6 +986,7 @@ def test_viser_backend_pick_enqueues_command_when_enabled() -> None:
     )
     backend.poll()
 
+    click_callback = server.scene.pointer_callbacks[0][1]
     click_callback(
         SimpleNamespace(
             client_id="client-a",
@@ -1045,7 +1040,10 @@ def test_picker_waits_for_matching_frame_after_topology_change(node_count: int) 
     try:
         backend.publish_manifest(manifest)
         assert backend.publish_frame(frame)
-        backend._pick_enabled = True
+        server.gui.checkboxes["Enable click-to-pick Gizmo"].callback(
+            SimpleNamespace(target=SimpleNamespace(value=True))
+        )
+        backend.poll()
         event = SimpleNamespace(
             client_id="client-a",
             ray_origin=np.array([0.0, 0.0, 5.0]),
@@ -1100,11 +1098,57 @@ def test_viser_backend_disabling_pick_clears_picker_gizmo() -> None:
     backend.poll()
 
     assert backend._pick_enabled is False
+    assert server.scene.pointer_callbacks == []
     # Disabling emits an empty pick so the simulation releases the gizmo.
     backend.poll()
     assert len(pick_commands) == 1
     assert pick_commands[0].node_id is None
     backend.stop()
+
+
+@pytest.mark.parametrize("allow_commands", [False, True])
+def test_viser_backend_start_does_not_capture_camera_drags(
+    allow_commands: bool,
+) -> None:
+    server = _Server()
+    backend = ViserBackend(
+        ViserServerCfg(port=8765),
+        server_factory=lambda **_: server,
+        allow_commands=allow_commands,
+    )
+    backend.start()
+    try:
+        assert server.scene.pointer_callbacks == []
+    finally:
+        backend.stop()
+
+
+def test_viser_backend_pick_can_be_reenabled_without_duplicate_callbacks() -> None:
+    backend, server, commands = _make_pick_backend()
+    manifest, frame = _make_pickable_scene()
+    backend.start()
+    try:
+        backend.publish_manifest(manifest)
+        backend.publish_frame(frame)
+        for enabled in (True, True, False, False, True):
+            server.gui.checkboxes["Enable click-to-pick Gizmo"].callback(
+                SimpleNamespace(target=SimpleNamespace(value=enabled))
+            )
+            backend.poll()
+            assert len(server.scene.pointer_callbacks) == int(enabled)
+        commands.clear()
+        server.scene.pointer_callbacks[0][1](
+            SimpleNamespace(
+                client_id="client-a",
+                ray_origin=np.array([0.0, 0.0, 5.0]),
+                ray_direction=np.array([0.0, 0.0, -1.0]),
+            )
+        )
+        backend.poll()
+        assert len(commands) == 1
+        assert commands[0].node_id == "env:0/rigid:cube"
+    finally:
+        backend.stop()
 
 
 def test_viser_backend_keeps_gizmos_read_only_without_command_permission() -> None:
