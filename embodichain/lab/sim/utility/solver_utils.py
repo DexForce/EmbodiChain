@@ -14,8 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import numpy as np
+import xml.etree.ElementTree as ET
 from embodichain.lab.sim.utility.io_utils import suppress_stdout_stderr
 
 from typing import Union, Tuple, Optional, Any, List, TYPE_CHECKING
@@ -33,53 +36,83 @@ from embodichain.lab.sim.utility.import_utils import (
     lazy_import_pytorch_kinematics,
 )
 
+__all__ = [
+    "create_pk_chain",
+    "create_pk_serial_chain",
+    "build_reduced_pinocchio_robot",
+    "validate_iteration_params",
+    "compute_pinocchio_fk",
+]
+
+
+def _standard_urdf_for_pk(urdf: bytes) -> bytes:
+    """Ignore nonstandard direct link origins without changing source assets.
+
+    URDF link frames are located by their parent joints. Some imported assets
+    contain a direct ``robot/link/origin`` element that pytorch-kinematics treats
+    as an extra frame offset, while the physical URDF loader ignores it. Keep
+    every standard joint, visual, collision and inertial origin intact.
+    """
+    root = ET.fromstring(urdf)
+    changed = False
+    for link in root.findall("link"):
+        for origin in link.findall("origin"):
+            link.remove(origin)
+            changed = True
+    return ET.tostring(root, encoding="utf-8") if changed else urdf
+
 
 def create_pk_chain(
     urdf_path: str,
     device: torch.device,
-    **kwargs,
-) -> "pk.SerialChain":
-    """
-    Factory method to create a pk.SerialChain object from a URDF file.
+    **kwargs: Any,
+) -> pk.Chain:
+    """Build a PK chain using the same link frames as standard URDF.
+
+    Direct ``link/origin`` extensions are ignored in memory; standard origins
+    on joints, visuals, collisions and inertials are preserved. The asset and
+    its disk cache are never rewritten.
 
     Args:
-        urdf_path (str): Path to the URDF file.
-        end_link_name (str): Name of the end-effector link.
-    root_link_name (str | None): Name of the root link. If None, the chain starts from the base.
-        device (torch.device): The device to which the chain will be moved.
-        is_serial (bool): Whether the chain is serial or not.
+        urdf_path: Path to the robot URDF file.
+        device: Device to which the chain is moved.
+        **kwargs: Reserved compatibility arguments.
 
     Returns:
-        pk.SerialChain: The created serial chain object.
+        Complete PK chain from the URDF joint topology.
     """
     pk = lazy_import_pytorch_kinematics()
     with open(urdf_path, "rb") as f:
-        urdf_str = f.read()
+        urdf_str = _standard_urdf_for_pk(f.read())
 
     with suppress_stdout_stderr():
         return pk.build_chain_from_urdf(urdf_str).to(device=device)
 
 
 def create_pk_serial_chain(
-    urdf_path: str = None,
-    device: torch.device = None,
-    end_link_name: str = None,
+    urdf_path: str | None = None,
+    device: torch.device | None = None,
+    end_link_name: str | None = None,
     root_link_name: str | None = None,
-    chain: Optional["pk.SerialChain"] = None,
-    **kwargs,
-) -> "pk.SerialChain":
-    """
-    Factory method to create a pk.SerialChain object from a URDF file.
+    chain: pk.Chain | None = None,
+    **kwargs: Any,
+) -> pk.SerialChain:
+    """Build a serial chain while preserving standard URDF joint frames.
+
+    File inputs ignore only nonstandard direct ``link/origin`` extensions, in
+    memory, without modifying the asset or standard nested origins. Supplied
+    chains retain the caller's frame definitions and are independently copied.
 
     Args:
-        urdf_path (str): Path to the URDF file.
-        end_link_name (str): Name of the end-effector link.
-    root_link_name (str | None): Name of the root link. If None, the chain starts from the base.
-        device (torch.device): The device to which the chain will be moved.
-        is_serial (bool): Whether the chain is serial or not.
+        urdf_path: Robot URDF path, mutually exclusive with ``chain``.
+        device: Device to which the chain is moved.
+        end_link_name: Terminal link of the serial chain.
+        root_link_name: Optional chain root; omitted uses the URDF root.
+        chain: Existing caller-owned PK chain instead of a file.
+        **kwargs: Reserved compatibility arguments.
 
     Returns:
-        pk.SerialChain: The created serial chain object.
+        Independent PK serial chain.
     """
     if urdf_path is None and chain is None:
         raise ValueError("Either `urdf_path` or `chain` must be provided.")
@@ -91,7 +124,7 @@ def create_pk_serial_chain(
     if chain is None:
         try:
             with open(urdf_path, "rb") as f:
-                urdf_str = f.read()
+                urdf_str = _standard_urdf_for_pk(f.read())
         except FileNotFoundError:
             raise ValueError(f"URDF file not found at path: {urdf_path}")
         except IOError as e:

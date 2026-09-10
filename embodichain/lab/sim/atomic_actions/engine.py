@@ -24,6 +24,7 @@ from typing import Callable, Iterable, Mapping, TYPE_CHECKING
 import torch
 
 from .bindings import ActionBinding
+from .candidates import AtomicCandidateBatch, AtomicCandidateSelection, _active_rows
 from .core import AtomicAction, SkillDescriptor
 from .control import ActionControlOverrides, ControlPartCommandProfile
 from .invocation import ActionInvocation, GoalT, OptionsT, ResolvedActionRequest
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
     from embodichain.toolkits.graspkit import GraspPoseGenerator
+    from embodichain.toolkits.graspkit.candidates import GraspCandidateBatch
 
     from .execution import ExecutionSession
 
@@ -407,6 +409,60 @@ class AtomicActionEngine:
         request = self._resolve(invocation)
         return self._plan_request(request, current)
 
+    def enumerate_candidates(
+        self,
+        invocation: ActionInvocation,
+        context: PlanningContext | None = None,
+        *,
+        grasp_candidates: GraspCandidateBatch | None = None,
+        active_mask: torch.Tensor | None = None,
+    ) -> AtomicCandidateBatch:
+        """Evaluate all skill candidates at the current invocation start.
+
+        Args:
+            invocation: Grounded skill request.
+            context: Current observed or projected input for this invocation.
+            grasp_candidates: Geometric candidates bound to the real robot rows.
+            active_mask: Optional eligible physical rows.
+
+        Returns:
+            Evaluated choices; the candidate dimension does not change robot batch.
+        """
+        current = self.initial_context() if context is None else context
+        self._validate_context(current)
+        request = self._resolve(invocation)
+        return self._actions[request.skill_id].enumerate_candidates(
+            request, current, grasp_candidates=grasp_candidates, active_mask=active_mask
+        )
+
+    def plan_candidate(
+        self,
+        invocation: ActionInvocation,
+        selection: AtomicCandidateSelection,
+        context: PlanningContext | None = None,
+        *,
+        active_mask: torch.Tensor | None = None,
+    ) -> ActionPlan:
+        """Plan one selected candidate per physical row without reselecting.
+
+        Args:
+            invocation: Grounded skill request used during evaluation.
+            selection: Selected evaluated candidates.
+            context: Exact current invocation input used during evaluation.
+            active_mask: Optional eligible physical rows.
+
+        Returns:
+            Ordinary authorized and validated atomic action plan.
+        """
+        current = self.initial_context() if context is None else context
+        self._validate_context(current)
+        request = self._resolve(invocation)
+        plan = self._actions[request.skill_id].plan_candidate(
+            request, selection, current, active_mask=active_mask
+        )
+        self._validate_plan(plan, current, request)
+        return plan
+
     def initial_context(
         self,
         *,
@@ -462,6 +518,19 @@ class AtomicActionEngine:
         self,
         invocations: Iterable[ActionInvocation],
         context: PlanningContext | None = None,
+        *,
+        candidate_selections: (
+            Mapping[
+                str,
+                AtomicCandidateSelection
+                | Callable[
+                    [ResolvedActionRequest, PlanningContext, torch.Tensor],
+                    AtomicCandidateSelection,
+                ],
+            ]
+            | None
+        ) = None,
+        eligible_mask: torch.Tensor | None = None,
     ) -> CompiledTrajectory:
         """Compile a static sequence of grounded invocations.
 
@@ -473,6 +542,10 @@ class AtomicActionEngine:
         Args:
             invocations: Grounded action requests in execution order.
             context: Optional initial planning context captured by the caller.
+            candidate_selections: Optional choices keyed by invocation ID. A
+                callback evaluates choices at that invocation's projected start.
+            eligible_mask: Initial physical-row eligibility; idle rows never
+                receive projected effects or count as compilation successes.
 
         Returns:
             Concatenated timed trajectory, individual plans, and projected state.
@@ -485,16 +558,31 @@ class AtomicActionEngine:
             context = self.initial_context()
         self._validate_context(context)
 
-        alive = torch.ones(context.batch_size, dtype=torch.bool, device=self.device)
+        alive = _active_rows(eligible_mask, context.env_ids)
+        invocation_values = tuple(invocations)
+        selections = {} if candidate_selections is None else dict(candidate_selections)
+        invocation_ids = tuple(item.invocation_id for item in invocation_values)
+        if any(key not in invocation_ids for key in selections):
+            raise ValueError("candidate_selections contains an unknown invocation ID.")
+        if selections and len(set(invocation_ids)) != len(invocation_ids):
+            raise ValueError("Candidate compilation requires unique invocation IDs.")
         plans: list[ActionPlan] = []
         trajectories: list[TimedTrajectory] = []
         projected = context
 
-        for invocation in invocations:
+        for invocation in invocation_values:
             if not alive.any():
                 break
             previous_qpos = projected.robot.qpos
-            plan = self.plan(invocation, projected)
+            choice = selections.get(invocation.invocation_id)
+            if choice is None:
+                plan = self.plan(invocation, projected)
+            else:
+                if callable(choice):
+                    choice = choice(self._resolve(invocation), projected, alive.clone())
+                plan = self.plan_candidate(
+                    invocation, choice, projected, active_mask=alive
+                )
             step_success = alive & plan.plan_success.to(self.device)
             if plan.joint_trajectory is None:
                 raise ValueError(

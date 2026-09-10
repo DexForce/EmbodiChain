@@ -37,6 +37,14 @@ All solvers use a `pytorch_kinematics` serial chain (`pk_serial_chain`)
 for FK and Jacobian computation. `torch.compile` is applied to the FK
 path for performance.
 
+`solver_utils.create_pk_chain` and `create_pk_serial_chain` normalize file
+inputs in memory to standard URDF link-frame semantics: only direct
+`robot/link/origin` extensions are ignored. Joint, visual, collision and
+inertial origins remain intact, source assets are not rewritten, and supplied
+`chain=` objects retain their caller-defined frames. This prevents the extra
+1 cm terminal-link offset in the UR5 asset from making PK FK disagree with
+analytic IK and the physical loader.
+
 ---
 ## Available Solvers
 

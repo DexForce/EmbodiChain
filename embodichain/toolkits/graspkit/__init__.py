@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from .candidates import GraspCandidateBatch
 from .pose_generator import (
     GraspPoseGenerator,
     ParallelJawGraspPoseGenerator,
@@ -26,6 +27,7 @@ from .pose_generator import (
 )
 
 __all__ = [
+    "GraspCandidateBatch",
     "GraspPoseGenerator",
     "ParallelJawGraspPoseGenerator",
     "ParallelJawGripperModelCfg",

@@ -29,6 +29,7 @@ import torch
 
 from .affordance import Affordance
 from .bindings import EndpointBinding, JointPositionTarget
+from .candidates import AtomicCandidateBatch, AtomicCandidateSelection, _active_rows
 from .effects import StateDelta
 from .goals import collect_scene_dependencies
 from .invocation import (
@@ -65,6 +66,7 @@ from .tracking import (
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
+    from embodichain.toolkits.graspkit.candidates import GraspCandidateBatch
 
     from .runtime import ActionPlanningServices
     from .state import PlanningContext
@@ -204,7 +206,10 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Reject skill classes that bypass framework-owned scene binding."""
         super().__init_subclass__(**kwargs)
-        if "plan" in cls.__dict__:
+        if any(
+            name in cls.__dict__
+            for name in ("plan", "enumerate_candidates", "plan_candidate")
+        ):
             raise TypeError(
                 "AtomicAction subclasses must implement _plan(); the public "
                 "plan() method is framework-owned."
@@ -426,6 +431,104 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             plan,
             commands=self._authorize_command_targets(prepared, plan.commands),
         )
+
+    def enumerate_candidates(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+        *,
+        grasp_candidates: GraspCandidateBatch | None = None,
+        active_mask: torch.Tensor | None = None,
+    ) -> AtomicCandidateBatch:
+        """Evaluate candidates through the normal request and scene boundary.
+
+        Args:
+            request: Resolved invocation at this sequence position.
+            context: Current projected planning input, not the sequence start.
+            grasp_candidates: Optional geometric candidates already bound to rows.
+            active_mask: Eligible physical rows.
+
+        Returns:
+            Skill-owned evaluated choices, retaining failed and idle masks.
+        """
+        self.require_goal(request)
+        prepared = self._prepare_request(request, context)
+        active = _active_rows(active_mask, context.env_ids)
+        result = self._enumerate_candidates(
+            prepared,
+            context,
+            grasp_candidates=grasp_candidates,
+            active_mask=active,
+        )
+        if not isinstance(result, AtomicCandidateBatch):
+            raise TypeError("Candidate hook must return AtomicCandidateBatch.")
+        if result.skill_id != self.skill_id or not torch.equal(
+            result.env_ids, context.env_ids
+        ):
+            raise ValueError("Candidate skill and ordered physical rows must match.")
+        if result.valid_mask[~active].any():
+            raise ValueError("An inactive physical row cannot expose valid candidates.")
+        return result
+
+    def plan_candidate(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        selection: AtomicCandidateSelection,
+        context: PlanningContext,
+        *,
+        active_mask: torch.Tensor | None = None,
+    ) -> ActionPlan:
+        """Materialize selected candidates with ordinary endpoint authorization.
+
+        Args:
+            request: Resolved invocation.
+            selection: One choice per physical row.
+            context: Exact context used by candidate evaluation.
+            active_mask: Additional row eligibility, intersected with selection.
+
+        Returns:
+            Ordinary scene-bound action plan.
+        """
+        if not isinstance(selection, AtomicCandidateSelection):
+            raise TypeError("selection must be AtomicCandidateSelection.")
+        selection = replace(selection)
+        if selection.candidates.skill_id != self.skill_id or not torch.equal(
+            selection.candidates.env_ids, context.env_ids
+        ):
+            raise ValueError("Selected candidate skill/physical rows do not match.")
+        active = _active_rows(active_mask, context.env_ids) & selection.active_mask
+        plan = self._plan_with_provider(
+            request,
+            context,
+            lambda prepared, current: self._plan_candidate(
+                prepared, selection, current, active_mask=active
+            ),
+        )
+        if (plan.plan_success & ~active).any():
+            raise ValueError("A candidate plan cannot activate an ineligible row.")
+        return plan
+
+    def _enumerate_candidates(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+        *,
+        grasp_candidates: GraspCandidateBatch | None,
+        active_mask: torch.Tensor,
+    ) -> AtomicCandidateBatch:
+        """Optional skill hook; unsupported skills keep ordinary planning only."""
+        raise NotImplementedError(f"{self.skill_id!r} does not enumerate candidates.")
+
+    def _plan_candidate(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        selection: AtomicCandidateSelection,
+        context: PlanningContext,
+        *,
+        active_mask: torch.Tensor,
+    ) -> ActionPlan:
+        """Optional selected-candidate materialization hook."""
+        raise NotImplementedError(f"{self.skill_id!r} does not plan candidates.")
 
     def _prepare_request(
         self,

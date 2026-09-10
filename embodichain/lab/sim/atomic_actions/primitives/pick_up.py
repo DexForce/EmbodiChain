@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
-from typing import ClassVar
+from typing import ClassVar, TYPE_CHECKING
 
 import torch
 
@@ -39,6 +39,12 @@ from embodichain.lab.sim.atomic_actions.primitives._helpers import (
 )
 from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.candidates import (
+    AtomicCandidateBatch,
+    AtomicCandidateSelection,
+    _input_fingerprint,
+    _value_fingerprint,
+)
 from embodichain.lab.sim.atomic_actions.control import (
     GRASP_COMMAND,
     OPEN_COMMAND,
@@ -60,6 +66,7 @@ from embodichain.lab.sim.atomic_actions.invocation import (
 )
 from embodichain.lab.sim.atomic_actions.plans import (
     ActionPlan,
+    PlannerDiagnostics,
     TimedTrajectory,
     normalize_success_mask,
 )
@@ -81,6 +88,100 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
+
+if TYPE_CHECKING:
+    from embodichain.toolkits.graspkit.candidates import GraspCandidateBatch
+
+
+_CANDIDATE_POSITION_TOLERANCE = 1.0e-3
+_CANDIDATE_ROTATION_TOLERANCE = 1.0e-2
+_CANDIDATE_MAX_JOINT_STEP = 0.5
+
+
+@dataclass(frozen=True, slots=True, eq=False, kw_only=True)
+class PickUpCandidateBatch(AtomicCandidateBatch):
+    """All evaluated grasp/roll choices and their certified joint anchors.
+
+    Pose fields have shape ``(E,K,4,4)`` and ``qpos_anchors`` has shape
+    ``(E,K,3,arm_dof)`` in pre-grasp, grasp, lift order. Certificates apply only
+    to the current invocation input, not another environment or reset.
+    """
+
+    grasp_ids: tuple[tuple[str, ...], ...]
+    variant_ids: torch.Tensor
+    object_to_eef: torch.Tensor
+    pre_grasp_poses: torch.Tensor
+    grasp_poses: torch.Tensor
+    lift_poses: torch.Tensor
+    qpos_anchors: torch.Tensor
+    downstream_qpos: tuple[torch.Tensor, ...] = ()
+    evaluation_fingerprint: str = ""
+
+    def __post_init__(self) -> None:
+        AtomicCandidateBatch.__post_init__(self)
+        shape = self.valid_mask.shape
+        if self.skill_id != "pick_up":
+            raise ValueError("PickUp candidates must have skill_id='pick_up'.")
+        if self.variant_ids.shape != shape or self.variant_ids.dtype != torch.long:
+            raise ValueError("variant_ids must be int64 with shape (E,K).")
+        if len(self.grasp_ids) != shape[0] or any(
+            len(row) != shape[1] for row in self.grasp_ids
+        ):
+            raise ValueError("grasp_ids must have E rows and K columns.")
+        object.__setattr__(
+            self, "grasp_ids", tuple(tuple(row) for row in self.grasp_ids)
+        )
+        for name in ("object_to_eef", "pre_grasp_poses", "grasp_poses", "lift_poses"):
+            value = getattr(self, name)
+            if value.shape != (*shape, 4, 4) or not torch.isfinite(value).all():
+                raise ValueError(f"{name} must contain finite (E,K,4,4) poses.")
+        if (
+            self.qpos_anchors.ndim != 4
+            or self.qpos_anchors.shape[:3] != (*shape, 3)
+            or not torch.isfinite(self.qpos_anchors).all()
+        ):
+            raise ValueError("qpos_anchors must be finite with shape (E,K,3,A).")
+        for name in (
+            "variant_ids",
+            "object_to_eef",
+            "pre_grasp_poses",
+            "grasp_poses",
+            "lift_poses",
+            "qpos_anchors",
+        ):
+            value = getattr(self, name)
+            if value.device != self.env_ids.device:
+                raise ValueError("PickUp candidate tensors must share a device.")
+            object.__setattr__(self, name, value.detach().clone())
+        downstream = tuple(value.detach().clone() for value in self.downstream_qpos)
+        if any(
+            value.shape != (*shape, self.qpos_anchors.shape[-1])
+            or value.device != self.env_ids.device
+            or not torch.isfinite(value).all()
+            for value in downstream
+        ):
+            raise ValueError("downstream_qpos must contain finite (E,K,A) tensors.")
+        object.__setattr__(self, "downstream_qpos", downstream)
+        fingerprint = _value_fingerprint(
+            self.env_ids,
+            self.valid_mask,
+            self.costs,
+            self.candidate_ids,
+            self.grasp_ids,
+            self.variant_ids,
+            self.object_to_eef,
+            self.pre_grasp_poses,
+            self.grasp_poses,
+            self.lift_poses,
+            self.qpos_anchors,
+            self.downstream_qpos,
+            self.input_fingerprint,
+        )
+        if self.evaluation_fingerprint and self.evaluation_fingerprint != fingerprint:
+            raise ValueError(
+                "Evaluated candidate payload was modified; enumerate again."
+            )
+        object.__setattr__(self, "evaluation_fingerprint", fingerprint)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -278,6 +379,573 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             )
         )
         return tuple(sorted(dependencies))
+
+    def _checked_candidate_ik(
+        self,
+        poses: torch.Tensor,
+        seed: torch.Tensor,
+        manipulator: JointPositionTarget,
+        context: PlanningContext,
+        active: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, tuple[tuple[str | None, ...], ...]]:
+        """Check solver flags, finite values, limits, and measured FK per choice."""
+        if (
+            seed.ndim != 3
+            or seed.shape[:2] != active.shape
+            or seed.shape[-1] != len(manipulator.joint_ids)
+            or poses.shape != (*active.shape, 4, 4)
+            or active.dtype != torch.bool
+        ):
+            raise ValueError("Candidate IK inputs have incompatible batch dimensions.")
+        for name, value in (("seed", seed), ("poses", poses)):
+            if (
+                value.device != context.robot.qpos.device
+                or value.dtype != context.robot.qpos.dtype
+            ):
+                raise ValueError(
+                    f"Candidate IK {name} must match the context device/dtype."
+                )
+            if not torch.isfinite(value).all():
+                raise ValueError(f"Candidate IK {name} must contain finite values.")
+        if active.device != seed.device:
+            raise ValueError("Candidate IK active mask must share the seed device.")
+        success = torch.zeros_like(active)
+        reasons: list[list[str | None]] = [[None] * active.shape[1] for _ in active]
+        if not active.any():
+            return success, seed.clone(), tuple(tuple(row) for row in reasons)
+        env_ids = context.env_ids.tolist()
+        limits = self.robot.get_qpos_limits(
+            joint_ids=list(manipulator.joint_ids), env_ids=env_ids
+        )
+        if not isinstance(limits, torch.Tensor) or limits.shape != (
+            seed.shape[0],
+            seed.shape[-1],
+            2,
+        ):
+            raise ValueError("Candidate planning requires per-row joint limits.")
+        if limits.device != seed.device or limits.dtype != seed.dtype:
+            raise ValueError("Candidate joint limits must match the seed device/dtype.")
+        if torch.isnan(limits).any() or (limits[..., 0] > limits[..., 1]).any():
+            raise ValueError("Candidate joint limits must be ordered and non-NaN.")
+        if ((seed < limits[:, None, :, 0]) | (seed > limits[:, None, :, 1])).any():
+            raise ValueError("Candidate IK safe seed is outside joint limits.")
+        safe_poses = self.robot.compute_batch_fk(
+            qpos=seed, name=manipulator.control_part, env_ids=env_ids, to_matrix=True
+        )
+        if (
+            not isinstance(safe_poses, torch.Tensor)
+            or safe_poses.shape != poses.shape
+            or safe_poses.device != seed.device
+            or safe_poses.dtype != seed.dtype
+            or not torch.isfinite(safe_poses).all()
+        ):
+            raise ValueError(
+                "Candidate safe FK must return finite poses with the requested shape/device/dtype."
+            )
+        solver_poses = torch.where(active[..., None, None], poses, safe_poses)
+        result = self.robot.compute_batch_ik(
+            pose=solver_poses,
+            name=manipulator.control_part,
+            joint_seed=seed,
+            env_ids=env_ids,
+        )
+        if not isinstance(result, tuple) or len(result) != 2:
+            raise ValueError("Candidate IK must return (success, qpos).")
+        flags, raw_qpos = result
+        if (
+            not isinstance(flags, torch.Tensor)
+            or flags.shape != active.shape
+            or not isinstance(raw_qpos, torch.Tensor)
+            or raw_qpos.shape != seed.shape
+        ):
+            raise ValueError("Candidate IK returned incompatible batch dimensions.")
+        if flags.device != seed.device or raw_qpos.device != seed.device:
+            raise ValueError("Candidate IK outputs must share the seed device.")
+        if not raw_qpos.is_floating_point() or raw_qpos.dtype != seed.dtype:
+            raise ValueError("Candidate IK qpos must use the seed floating dtype.")
+        if (
+            flags.is_complex()
+            or not torch.isfinite(flags).all()
+            or not ((flags == 0) | (flags == 1)).all()
+        ):
+            raise ValueError(
+                "Candidate IK success flags must be bool or finite numeric 0/1 values."
+            )
+        flags = flags.to(dtype=torch.bool)
+        finite = torch.isfinite(raw_qpos).all(dim=-1)
+        success = active & flags & finite
+        qpos = torch.where(success[..., None], raw_qpos, seed)
+        within_limits = (
+            (qpos >= limits[:, None, :, 0]) & (qpos <= limits[:, None, :, 1])
+        ).all(dim=-1)
+        success &= within_limits
+        qpos = torch.where(success[..., None], qpos, seed)
+        actual = self.robot.compute_batch_fk(
+            qpos=qpos, name=manipulator.control_part, env_ids=env_ids, to_matrix=True
+        )
+        if not isinstance(actual, torch.Tensor) or actual.shape != poses.shape:
+            raise ValueError("Candidate FK returned incompatible batch dimensions.")
+        if actual.device != seed.device or actual.dtype != seed.dtype:
+            raise ValueError("Candidate FK outputs must match the seed device/dtype.")
+        position_error = torch.linalg.vector_norm(
+            actual[..., :3, 3] - poses[..., :3, 3], dim=-1
+        )
+        relative_rotation = actual[..., :3, :3].transpose(-2, -1) @ poses[..., :3, :3]
+        cosine = (relative_rotation.diagonal(dim1=-2, dim2=-1).sum(-1) - 1.0) / 2.0
+        rotation_error = torch.acos(cosine.clamp(-1.0, 1.0))
+        fk_valid = (
+            torch.isfinite(actual).all(dim=(-2, -1))
+            & (position_error <= _CANDIDATE_POSITION_TOLERANCE)
+            & (rotation_error <= _CANDIDATE_ROTATION_TOLERANCE)
+        )
+        success &= fk_valid
+        for row, column in torch.nonzero(active & ~success).tolist():
+            reasons[row][column] = (
+                "IK_NOT_FOUND"
+                if not flags[row, column]
+                else (
+                    "IK_INVALID_RESULT"
+                    if not finite[row, column]
+                    else (
+                        "JOINT_LIMIT"
+                        if not within_limits[row, column]
+                        else "FK_MISMATCH"
+                    )
+                )
+            )
+        return (
+            success,
+            torch.where(success[..., None], qpos, seed),
+            tuple(tuple(row) for row in reasons),
+        )
+
+    def _candidate_pose_variants(
+        self,
+        grasp_poses: torch.Tensor,
+        object_pose: torch.Tensor,
+        options: PickUpOptions,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Apply the shared canonical roll, upright and EEF calibration once."""
+        mirrored = grasp_poses.clone()
+        mirrored[..., :3, :2] *= -1
+        selection_variants = torch.stack((grasp_poses, mirrored), dim=2)
+        variants = self._upright_adjusted_grasp_poses(
+            selection_variants, object_pose, options
+        )
+        calibration = options.grasp_frame_to_eef.to(
+            device=self.device, dtype=variants.dtype
+        )
+        return selection_variants, variants @ calibration
+
+    def _enumerate_candidates(
+        self,
+        request: ResolvedActionRequest[GraspGoal, PickUpOptions],
+        context: PlanningContext,
+        *,
+        grasp_candidates: GraspCandidateBatch | None,
+        active_mask: torch.Tensor,
+    ) -> PickUpCandidateBatch:
+        """Retain every geometrically valid grasp and feasible symmetric roll."""
+        from embodichain.toolkits.graspkit.candidates import GraspCandidateBatch
+
+        goal = self.require_goal(request)
+        options = request.skill_options
+        if goal.grasp_xpos is not None or options.fixed_object_to_eef is not None:
+            raise ValueError(
+                "Candidate enumeration requires a sampled-grasp goal, without fixed/explicit grasp overrides."
+            )
+        manipulator = request.binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        grasp_target = request.binding.endpoint("primary", "grasp").require_target(
+            JointPositionTarget
+        )
+        object_pose = _resolve_object_pose(
+            goal.semantics, context, name="pickup_object_pose"
+        )
+        direction = options.approach_direction.to(
+            device=self.device, dtype=context.robot.qpos.dtype
+        )
+        direction = direction / torch.linalg.vector_norm(direction)
+        if grasp_candidates is None:
+            affordance = goal.semantics.affordance
+            if not isinstance(affordance, AntipodalAffordance):
+                raise ValueError("Candidate sampling requires an AntipodalAffordance.")
+            empty = (object_pose.new_empty((0, 4, 4)), object_pose.new_empty((0,)))
+            ragged = [empty for _ in range(context.batch_size)]
+            active_rows = torch.nonzero(active_mask).flatten()
+            if active_rows.numel():
+                generator = self.planning_services.grasp_pose_generator(
+                    grasp_target.target_id
+                )
+                sampled = generator.get_valid_grasp_poses(
+                    mesh_vertices=affordance.mesh_vertices,
+                    mesh_triangles=affordance.mesh_triangles,
+                    obj_poses=object_pose[active_rows],
+                    approach_direction=direction,
+                    obj_longest_axis=(
+                        None
+                        if options.pick_object_part == "center"
+                        else direction.new_tensor((0.0, 0.0, 1.0))
+                    ),
+                    is_positive_part=options.pick_object_part != "bottom",
+                )
+                if len(sampled) != active_rows.numel():
+                    raise ValueError(
+                        "Grasp sampler must return one result per input row."
+                    )
+                for index, row in enumerate(active_rows.tolist()):
+                    ragged[row] = sampled[index]
+            grasp_candidates = GraspCandidateBatch.from_ragged(
+                ragged, object_poses=object_pose
+            )
+        if not isinstance(grasp_candidates, GraspCandidateBatch):
+            raise TypeError("grasp_candidates must be GraspCandidateBatch.")
+        grasp_candidates = replace(grasp_candidates)
+        if (
+            grasp_candidates.poses.shape[0] != context.batch_size
+            or grasp_candidates.poses.device != self.device
+        ):
+            raise ValueError(
+                "Grasp candidates must be bound to the real E rows/device."
+            )
+        if grasp_candidates.frame != "local_arena":
+            raise ValueError("Atomic grasp candidates must use the local_arena frame.")
+        raw = grasp_candidates.poses.to(dtype=context.robot.qpos.dtype)
+        _, variants = self._candidate_pose_variants(raw, object_pose, options)
+        rows, grasps = raw.shape[:2]
+        columns = grasps * 2
+        grasp_poses = variants.reshape(rows, columns, 4, 4)
+        pre_grasp = grasp_poses.clone()
+        pre_grasp[..., :3, 3] -= direction * options.pre_grasp_distance
+        lift = grasp_poses.clone()
+        lift[..., 2, 3] += options.lift_height
+        valid = (
+            grasp_candidates.valid_mask[..., None].expand(-1, -1, 2)
+            & active_mask[:, None, None]
+        ).reshape(rows, columns)
+        alignment = self._approach_alignment_mask(variants, options, direction).reshape(
+            rows, columns
+        )
+        reasons: list[list[str | None]] = [[None] * columns for _ in range(rows)]
+        for row in range(rows):
+            for col in range(columns):
+                if not active_mask[row]:
+                    reasons[row][col] = "INACTIVE"
+                elif not valid[row, col]:
+                    reasons[row][col] = "grasp:INVALID_GEOMETRY"
+                elif not alignment[row, col]:
+                    reasons[row][col] = "grasp:APPROACH_ALIGNMENT"
+        valid &= alignment
+        start = context.robot.qpos[:, list(manipulator.joint_ids)]
+        seed = start[:, None].expand(-1, columns, -1).clone()
+        anchors: list[torch.Tensor] = []
+        downstream: list[torch.Tensor] = []
+        object_to_eef = pose_inv(object_pose)[:, None] @ grasp_poses
+        targets = [("pre_grasp", pre_grasp), ("grasp", grasp_poses), ("lift", lift)]
+        for index, target in enumerate(options.downstream_object_target_poses):
+            pose = resolve_pose_target(
+                resolve_pose_goal(target, context, name=f"downstream[{index}]"),
+                num_envs=rows,
+                device=self.device,
+            )
+            targets.append((f"downstream_{index}", pose[:, None] @ object_to_eef))
+        for stage_index, (stage, poses) in enumerate(targets):
+            stage_valid, seed, stage_reasons = self._checked_candidate_ik(
+                poses, seed, manipulator, context, valid
+            )
+            for row, col in torch.nonzero(valid & ~stage_valid).tolist():
+                reasons[row][col] = f"{stage}:{stage_reasons[row][col]}"
+            valid &= stage_valid
+            (anchors if stage_index < 3 else downstream).append(seed.clone())
+        variant_ids = (
+            torch.arange(2, device=self.device).repeat(grasps).expand(rows, -1)
+        )
+        grasp_ids = tuple(
+            tuple(value for value in row for _ in range(2))
+            for row in grasp_candidates.grasp_ids
+        )
+        candidate_ids = tuple(
+            tuple(f"{value}/roll-{index % 2}" for index, value in enumerate(row))
+            for row in grasp_ids
+        )
+        costs = (
+            grasp_candidates.costs[..., None].expand(-1, -1, 2).reshape(rows, columns)
+        )
+        return PickUpCandidateBatch(
+            skill_id=self.skill_id,
+            env_ids=context.env_ids,
+            valid_mask=valid,
+            costs=torch.where(valid, costs, torch.inf),
+            candidate_ids=candidate_ids,
+            failure_stages=tuple(tuple(row) for row in reasons),
+            input_fingerprint=_input_fingerprint(request, context),
+            grasp_ids=grasp_ids,
+            variant_ids=variant_ids,
+            object_to_eef=object_to_eef,
+            pre_grasp_poses=pre_grasp,
+            grasp_poses=grasp_poses,
+            lift_poses=lift,
+            qpos_anchors=torch.stack(anchors, dim=2),
+            downstream_qpos=tuple(downstream),
+        )
+
+    def _plan_candidate(
+        self,
+        request: ResolvedActionRequest[GraspGoal, PickUpOptions],
+        selection: AtomicCandidateSelection,
+        context: PlanningContext,
+        *,
+        active_mask: torch.Tensor,
+    ) -> ActionPlan:
+        """Build a Cartesian pickup around the selected, certified IK anchors."""
+        candidates = selection.candidates
+        if not isinstance(candidates, PickUpCandidateBatch):
+            raise TypeError("PickUp requires PickUpCandidateBatch selections.")
+        if candidates.input_fingerprint != _input_fingerprint(request, context):
+            raise ValueError(
+                "Candidate evaluation is stale for this invocation/context; enumerate again at its current projected start."
+            )
+        if request.motion_policy.strategy != "ik_interp":
+            raise NotImplementedError(
+                "Selected PickUp candidates currently require ik_interp for solved-branch preservation."
+            )
+        options = request.skill_options
+        binding = request.binding
+        motion = binding.endpoint("primary", "motion")
+        grasp = binding.endpoint("primary", "grasp")
+        manipulator = motion.require_target(JointPositionTarget)
+        hand = grasp.require_target(JointPositionTarget)
+        task_key = require_shared_task_state_key(
+            motion, grasp, participant="PickUp primary participant"
+        )
+        rows = torch.arange(context.batch_size, device=self.device)
+        indices = selection.indices.clamp_min(0)
+        capacity = candidates.valid_mask.shape[1]
+        selected_ids = tuple(
+            (
+                candidates.candidate_ids[row][int(indices[row])]
+                if active_mask[row] and capacity
+                else None
+            )
+            for row in range(context.batch_size)
+        )
+        reasons: list[str | None] = [None] * context.batch_size
+        success = active_mask.clone()
+        if capacity:
+            success &= candidates.valid_mask[rows, indices]
+            for row in range(context.batch_size):
+                if not active_mask[row]:
+                    reasons[row] = "INACTIVE"
+                elif not success[row]:
+                    col = int(indices[row])
+                    reason = candidates.failure_reasons[row][col] or "IK_NOT_FOUND"
+                    stage = candidates.failure_stages[row][col] or "grasp"
+                    reasons[row] = f"{stage}:{reason}"
+        else:
+            success[:] = False
+            reasons = [
+                "grasp:NO_CANDIDATES" if active_mask[row] else "INACTIVE"
+                for row in range(context.batch_size)
+            ]
+        if not success.any():
+            return self.build_plan(
+                request,
+                context,
+                success=success,
+                trajectory=TimedTrajectory.from_uniform_step(
+                    context.robot.qpos[:, None],
+                    env_ids=context.env_ids,
+                    step_dt=context.require_control_dt(),
+                ),
+                diagnostics=PlannerDiagnostics(
+                    backend="selected_pickup_ik",
+                    metadata={
+                        "candidate_ids": selected_ids,
+                        "candidate_failure_reasons": tuple(reasons),
+                    },
+                ),
+            )
+        arm_ids = list(manipulator.joint_ids)
+        hand_ids = list(hand.joint_ids)
+        anchors = candidates.qpos_anchors[rows, indices]
+        pre_pose = candidates.pre_grasp_poses[rows, indices]
+        grasp_pose = candidates.grasp_poses[rows, indices]
+        lift_pose = candidates.lift_poses[rows, indices]
+        n_approach, n_close, n_lift = split_three_segments(
+            request.motion_policy.sample_count,
+            options.hand_interp_steps,
+            first_segment_name="approach",
+            third_segment_name="lift",
+        )
+        n_transit = max(2, n_approach // 2)
+        n_reach = n_approach - n_transit
+        if n_reach < 2 or n_lift < 2:
+            raise ValueError(
+                "Selected pickup sample_count must provide two transit, approach and lift samples each."
+            )
+        start = context.robot.qpos[:, arm_ids]
+        weights = torch.linspace(
+            0.0, 1.0, n_transit, device=self.device, dtype=start.dtype
+        )
+        transit = torch.lerp(
+            start[:, None], anchors[:, 0, None], weights[None, :, None]
+        )
+
+        def cartesian_segment(
+            name: str,
+            begin_pose: torch.Tensor,
+            end_pose: torch.Tensor,
+            begin_qpos: torch.Tensor,
+            end_qpos: torch.Tensor,
+            count: int,
+        ) -> torch.Tensor:
+            nonlocal success
+            values = [begin_qpos]
+            for waypoint in range(1, count):
+                pose = begin_pose.clone()
+                pose[:, :3, 3] = torch.lerp(
+                    begin_pose[:, :3, 3], end_pose[:, :3, 3], waypoint / (count - 1)
+                )
+                previous = values[-1]
+                if waypoint == count - 1:
+                    # The terminal qpos is the selected branch's owned anchor,
+                    # not a freshly selected IK solution at the same pose.
+                    qpos = end_qpos.clone()
+                    stage_valid = success.clone()
+                    stage_reasons = tuple((None,) for _ in range(context.batch_size))
+                else:
+                    stage_valid, qpos_values, stage_reasons = (
+                        self._checked_candidate_ik(
+                            pose[:, None],
+                            previous[:, None],
+                            manipulator,
+                            context,
+                            success[:, None],
+                        )
+                    )
+                    stage_valid = stage_valid[:, 0]
+                    qpos = qpos_values[:, 0]
+                continuity = (
+                    torch.amax(torch.abs(qpos - previous), dim=-1)
+                    <= _CANDIDATE_MAX_JOINT_STEP
+                )
+                for row in (
+                    torch.nonzero(success & ~(stage_valid & continuity))
+                    .flatten()
+                    .tolist()
+                ):
+                    code = stage_reasons[row][0] or "BRANCH_DISCONTINUITY"
+                    reasons[row] = f"{name}:{code}"
+                success &= stage_valid & continuity
+                values.append(torch.where(success[:, None], qpos, previous))
+            return torch.stack(values, dim=1)
+
+        reach = cartesian_segment(
+            "approach", pre_pose, grasp_pose, anchors[:, 0], anchors[:, 1], n_reach
+        )
+        lift = cartesian_segment(
+            "lift", grasp_pose, lift_pose, anchors[:, 1], anchors[:, 2], n_lift
+        )
+        open_qpos = grasp.joint_positions(
+            OPEN_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        closed_qpos = grasp.joint_positions(
+            GRASP_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        close_weights = torch.linspace(
+            0.0, 1.0, n_close, device=self.device, dtype=start.dtype
+        )
+        close = torch.lerp(
+            open_qpos[:, None], closed_qpos[:, None], close_weights[None, :, None]
+        )
+        settle = options.grasp_settle_steps
+        total = n_transit + n_reach + n_close + settle + n_lift
+        full = context.robot.qpos[:, None].expand(-1, total, -1).clone()
+        approach_end = n_transit + n_reach
+        close_end = approach_end + n_close
+        lift_start = close_end + settle
+        full[:, :n_transit, arm_ids] = transit
+        full[:, :n_transit, hand_ids] = torch.lerp(
+            context.robot.qpos[:, None, hand_ids],
+            open_qpos[:, None],
+            weights[None, :, None],
+        )
+        full[:, n_transit:approach_end, arm_ids] = reach
+        full[:, n_transit:approach_end, hand_ids] = open_qpos[:, None]
+        full[:, approach_end:lift_start, arm_ids] = anchors[:, 1, None]
+        full[:, approach_end:close_end, hand_ids] = close
+        full[:, close_end:lift_start, hand_ids] = closed_qpos[:, None]
+        full[:, lift_start:, arm_ids] = lift
+        full[:, lift_start:, hand_ids] = closed_qpos[:, None]
+        limits = self.robot.get_qpos_limits(env_ids=context.env_ids.tolist()).to(
+            self.device
+        )
+        if limits.shape != (context.batch_size, self.robot_dof, 2):
+            raise ValueError("Selected trajectory requires full-robot joint limits.")
+        within_limits = (
+            (full >= limits[:, None, :, 0]) & (full <= limits[:, None, :, 1])
+        ).all(dim=(1, 2))
+        continuous = (
+            torch.abs(full[:, 1:, arm_ids] - full[:, :-1, arm_ids])
+            <= _CANDIDATE_MAX_JOINT_STEP
+        ).all(dim=(1, 2))
+        for row in (
+            torch.nonzero(success & ~(within_limits & continuous)).flatten().tolist()
+        ):
+            reasons[row] = (
+                "trajectory:JOINT_LIMIT"
+                if not within_limits[row]
+                else "trajectory:BRANCH_DISCONTINUITY"
+            )
+        success &= within_limits & continuous
+        held = HeldObjectState(
+            semantics=request.goal.semantics,
+            object_to_eef=candidates.object_to_eef[rows, indices],
+            grasp_xpos=grasp_pose,
+        )
+        return self.build_plan(
+            request,
+            context,
+            success=success,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full, env_ids=context.env_ids, step_dt=context.require_control_dt()
+            ),
+            expected_effects=StateDelta(
+                held_object_updates={task_key: held},
+                coordinated_held_object_updates={
+                    key: None
+                    for key in context.task.coordinated_held_objects
+                    if task_key in key
+                },
+            ),
+            segment_lengths={
+                "transit": n_transit,
+                "approach": n_reach,
+                "close": n_close + settle,
+                "lift": n_lift,
+            },
+            scene_dependency_monitor_until=(
+                {}
+                if request.goal.semantics.entity_id is None
+                else {request.goal.semantics.entity_id: approach_end}
+            ),
+            diagnostics=PlannerDiagnostics(
+                backend="selected_pickup_ik",
+                metadata={
+                    "candidate_ids": selected_ids,
+                    "candidate_failure_reasons": tuple(reasons),
+                    "selected_joint_branch_preserved": True,
+                    "max_joint_step": _CANDIDATE_MAX_JOINT_STEP,
+                },
+            ),
+        )
 
     def _get_full_pickup_trajectory(
         self,
@@ -668,21 +1336,13 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Choose a TCP-roll variant with a feasible pickup and transport path."""
         num_envs, n_pose = grasp_xpos.shape[:2]
-        mirrored_grasp_xpos = grasp_xpos.clone()
-        mirrored_grasp_xpos[..., :3, 0] = -mirrored_grasp_xpos[..., :3, 0]
-        mirrored_grasp_xpos[..., :3, 1] = -mirrored_grasp_xpos[..., :3, 1]
-        selection_variants = torch.stack([grasp_xpos, mirrored_grasp_xpos], dim=2)
-        grasp_variants = self._upright_adjusted_grasp_poses(
-            selection_variants,
-            object_poses,
-            options,
+        selection_variants, grasp_variants = self._candidate_pose_variants(
+            grasp_xpos, object_poses, options
         )
         grasp_frame_to_eef = options.grasp_frame_to_eef.to(
             device=self.device,
             dtype=grasp_variants.dtype,
         )
-        grasp_variants = torch.matmul(grasp_variants, grasp_frame_to_eef)
-
         pre_grasp_variants = grasp_variants.clone()
         pre_grasp_variants[..., :3, 3] -= (
             approach_direction * options.pre_grasp_distance
@@ -865,4 +1525,4 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         return adjusted_grasp_xpos
 
 
-__all__ = ["GraspGoal", "PickUp", "PickUpOptions"]
+__all__ = ["GraspGoal", "PickUp", "PickUpCandidateBatch", "PickUpOptions"]

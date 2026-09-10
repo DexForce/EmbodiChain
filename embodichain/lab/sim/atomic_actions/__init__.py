@@ -60,6 +60,7 @@ from .control import (
     OPEN_COMMAND,
 )
 from .core import AtomicAction, ObjectSemantics, SkillDescriptor
+from .candidates import AtomicCandidateBatch, AtomicCandidateSelection
 from .effects import StateDelta
 from .engine import AtomicActionEngine
 from .execution import (
@@ -191,6 +192,7 @@ from .primitives import (
     OpenDoorGoal,
     OpenDoorOptions,
     PickUp,
+    PickUpCandidateBatch,
     PickUpOptions,
     Place,
     PlaceGoal,
@@ -251,6 +253,9 @@ from .state import (
 )
 
 __all__ = [
+    "AtomicCandidateBatch",
+    "AtomicCandidateSelection",
+    "PickUpCandidateBatch",
     "ActionBinding",
     "ActionControlOverrides",
     "ActionInvocation",

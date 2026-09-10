@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Explicit export of an offline MoveEndEffector → PickUp compilation."""
+"""Offline atomic candidate generation and legacy PickUp template export."""
 
 from __future__ import annotations
 
@@ -26,12 +26,24 @@ from embodichain.lab.sim.motion.expansion import (
     TrajectoryPhase,
     TrajectoryTemplate,
 )
+from .atomic_candidates import (
+    AtomicCandidateGenerationCfg,
+    AtomicCandidateRejection,
+    AtomicGenerationResult,
+    AtomicTrajectoryGenerator,
+)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
     from embodichain.lab.sim.objects import Robot
 
-__all__ = ["export_pickup_templates"]
+__all__ = [
+    "AtomicCandidateGenerationCfg",
+    "AtomicCandidateRejection",
+    "AtomicGenerationResult",
+    "AtomicTrajectoryGenerator",
+    "export_pickup_templates",
+]
 
 
 def export_pickup_templates(

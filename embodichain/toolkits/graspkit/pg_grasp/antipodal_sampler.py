@@ -59,12 +59,20 @@ class AntipodalSampler:
         self.mesh: o3d.t.geometry.TriangleMesh | None = None
         self.cfg = cfg
 
-    def sample(self, vertices: torch.Tensor, faces: torch.Tensor) -> torch.Tensor:
+    def sample(
+        self,
+        vertices: torch.Tensor,
+        faces: torch.Tensor,
+        *,
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor:
         """Get sample Antipodal point pair
 
         Args:
             vertices: [V, 3] vertex positions of the mesh
             faces: [F, 3] triangle indices of the mesh
+            generator: Optional local RNG. Current Fibonacci surface rays are
+                deterministic and do not consume this stream.
 
         Returns:
             hit_point_pairs: [N, 2, 3] tensor of N antipodal point pairs. Each pair consists of a hit point and its corresponding surface point.
@@ -245,6 +253,8 @@ class AntipodalSampler:
         max_angle: float,
         degrees: bool = False,
         eps: float = 1e-8,
+        *,
+        generator: torch.Generator | None = None,
     ) -> torch.Tensor:
         """
         Apply random small rotations to a batch of unit vectors [N, 3].
@@ -254,6 +264,7 @@ class AntipodalSampler:
             max_angle: Maximum rotation angle
             degrees: If True, `max_angle` is given in degrees
             eps: Numerical stability constant
+            generator: Optional local random stream on the vectors' device.
 
         Returns:
             rotated: [N, 3], rotated unit vectors
@@ -271,14 +282,19 @@ class AntipodalSampler:
 
         # 1) Generate a random direction for each vector
         #   then project it onto the plane perpendicular to v to get the rotation axis k
-        rand_dir = torch.randn_like(v) + eps
+        rand_dir = (
+            torch.randn(v.shape, device=v.device, dtype=v.dtype, generator=generator)
+            + eps
+        )
         proj = (rand_dir * v).sum(dim=-1, keepdim=True) * v
         k = rand_dir - proj
         k = F.normalize(k, dim=-1)
 
         # 2) Sample rotation angles in the range [eps, max_angle]
         theta = (
-            torch.rand(n, 1, device=v.device, dtype=v.dtype) * (max_angle - eps) + eps
+            torch.rand(n, 1, device=v.device, dtype=v.dtype, generator=generator)
+            * (max_angle - eps)
+            + eps
         )
 
         # 3) Rodrigues' rotation formula
