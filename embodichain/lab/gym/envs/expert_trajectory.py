@@ -17,9 +17,8 @@
 """Expert action encoding at the Gym and dataset boundary.
 
 Trajectory timing remains owned by :class:`PlanResult` and the shared compute
-trajectory helpers.  The legacy ``ExpertJointTrajectory`` wrapper is accepted
-by the preparation adapter for compatibility, but new callers should pass a
-``PlanResult`` directly.
+trajectory helpers. The preparation adapter requires a ``PlanResult`` with
+positions and explicit timing.
 """
 
 from __future__ import annotations
@@ -161,9 +160,9 @@ def prepare_expert_joint_trajectory(
 ) -> PlanResult:
     """Prepare a planner result for a destination's fixed command clock.
 
-    Timed trajectories are retimed to ``control_dt`` and their velocities are
-    recomputed. Untimed position-velocity trajectories must provide velocity
-    samples explicitly.
+    Trajectories require explicit timing and are retimed to ``control_dt``.
+    Velocities are recomputed for position-velocity mode and omitted for
+    position-only mode.
 
     Args:
         trajectory: Planner result with positions and explicit timing.

@@ -95,24 +95,37 @@ def test_plan_result_is_the_canonical_expert_trajectory_input() -> None:
     )
 
 
-def test_untimed_position_velocity_trajectory_requires_velocity() -> None:
+def test_timed_position_velocity_trajectory_derives_missing_velocity() -> None:
     source = PlanResult(
-        success=torch.ones(1, dtype=torch.bool), positions=torch.zeros(1, 2, 1)
+        success=torch.ones(1, dtype=torch.bool),
+        positions=torch.tensor([[[0.0], [1.0], [2.0]]]),
+        dt=torch.tensor([[0.0, 0.5, 0.5]]),
     )
 
-    with pytest.raises(ValueError, match="velocities"):
-        prepare_expert_joint_trajectory(
-            source,
-            control_dt=0.1,
-            joint_command_mode="position_velocity",
-        )
+    prepared = prepare_expert_joint_trajectory(
+        source,
+        control_dt=0.5,
+        joint_command_mode="position_velocity",
+    )
+
+    torch.testing.assert_close(prepared.positions, source.positions)
+    torch.testing.assert_close(prepared.dt, source.dt)
+    # One radian per half second, with zero velocity at the start and end.
+    torch.testing.assert_close(
+        prepared.velocities, torch.tensor([[[0.0], [2.0], [0.0]]])
+    )
+    assert source.velocities is None
 
 
-def test_position_mode_preserves_untimed_positions_without_velocity() -> None:
+def test_position_mode_preserves_control_grid_positions_without_velocity() -> None:
     positions = torch.tensor([[[0.0], [1.0]]])
 
     prepared = prepare_expert_joint_trajectory(
-        PlanResult(success=torch.ones(1, dtype=torch.bool), positions=positions),
+        PlanResult(
+            success=torch.ones(1, dtype=torch.bool),
+            positions=positions,
+            dt=torch.tensor([[0.0, 0.1]]),
+        ),
         control_dt=0.1,
         joint_command_mode="position",
     )
