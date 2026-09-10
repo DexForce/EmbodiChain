@@ -26,6 +26,7 @@ import pytest
 
 from embodichain.gen_sim.agent_lab import session
 from embodichain.gen_sim.agent_lab.session import _process, _prompt
+from embodichain.gen_sim.agent_lab._workspace import _FEEDBACK_GUIDE
 
 
 @pytest.mark.parametrize(
@@ -177,6 +178,7 @@ def test_prompt_opens_methods_but_does_not_claim_physical_success(
     assert "There is no action DSL" in prompt
     assert "real contact-driven object motion" in prompt
     assert "not authoritative task success" in prompt
+    assert _FEEDBACK_GUIDE in prompt
 
 
 def test_prompt_limits_mode_c_to_explicit_asset_approval(tmp_path: Path) -> None:

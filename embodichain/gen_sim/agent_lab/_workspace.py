@@ -24,7 +24,29 @@ from pathlib import Path
 
 from .catalog import write_json
 
-_GUIDE = """# 实验工作区
+_FEEDBACK_GUIDE = """## 反馈驱动与能力选择
+
+把快速反馈判断和控制放在本轮本地 Python 中；Codex 负责较慢的诊断和代码迭代，
+不要每个物理步都请求模型。记录数据不等于闭环：实测偏差应参与后续动作的判断。
+涉及抓取时，可在接近后复查目标与相对位姿，在夹持后用小范围试提、物体运动、
+夹爪状态或接触等证据判断是否稳定。目标位姿改变或夹持不稳时，先基于最新状态
+决定继续、修正或停止，不机械执行原计划。单次接触或目标关节值不证明稳定抓取。
+这些是诊断思路，不是固定动作阶段；阈值、控制频率和恢复策略由你按任务设计。
+在已有 notes.md 中简记所选接口/方法、待验证假设、测量依据与实际采取的调整，
+并用对应代码、录像和状态支撑；不把工具调用次数当作任务成功。
+
+以下路径相对项目根目录，按需定位相关方法和示例，不要求全部通读：
+- 关节与 IK/FK：`embodichain/lab/sim/objects/robot.py`，注意实际 qpos 与 target 的区别。
+- 物体/连杆位姿：`embodichain/lab/sim/objects/rigid_object.py` 和 `embodichain/lab/sim/objects/articulation.py`。
+- 运动生成：`embodichain/lab/sim/motion/motion_generator.py` 及其 planners；仅在方法需要时使用。
+- 接触观测：`embodichain/lab/sim/sensors/contact_sensor.py`；示例 `examples/sim/sensors/create_contact_sensor.py`。
+先确认坐标系、单位、数据时效与当前环境兼容性。不强制采用任何规划器或传感器，
+也不把入口存在当作已验证可用；局部适配留在实验工作区，共享库缺陷单独处理。
+
+"""
+
+_GUIDE = (
+    """# 实验工作区
 
 你从这个目录独立开始，不需要其他对话提供命令或解法。
 
@@ -84,6 +106,12 @@ isolated 禁止读取其他实验输出及同题旧答案，但项目内通用�
 每段脚本及同目录依赖会冻结到 attempts/episode_*/chunks/，同一会话视频连续记录。
 session 仅是进程与代码生命周期，不接受动作 DSL，也不限制使用任意项目 API。
 
+exec 的 result 是本段脚本提供的反馈，成功或异常都会尝试返回，不代表宿主验收。
+诊断数据应注明测量时刻、坐标系与单位；它可能早于回复里的最终 state。
+没有赋值时 result 为 null，不沿用前段结果；需要跨段留存的数据自行存入 state。
+无法序列化时 result 为 null 并给出 result_serialization_error，已有执行错误不被覆盖。
+普通异常不撤销已经发生的物理动作；恢复前检查返回的实际 state 和 image。
+
 运行器在宿主执行 GPU 请求；不要在 Codex 的受限 shell 中直接启动 CUDA worker。
 若没有正在运行的宿主，工具会立即说明应如何启动，不会无限等待。
 你可以选 Atomic Skills、Task Program、IK、现有规划器、自写控制器或其组合。
@@ -91,6 +119,9 @@ session 仅是进程与代码生命周期，不接受动作 DSL，也不限制�
 默认 lab.json 是可替换的装配预设，不代表机器人布局天然适合当前资产。
 实际坐标系、末端、关节组和控制接口应从项目代码及加载后状态确认，不猜命名。
 
+"""
+    + _FEEDBACK_GUIDE
+    + """
 ## 实验闭环
 
 先检查参考图、资产和实际加载画面，记录 scene_review.json：观察到什么、
@@ -147,6 +178,7 @@ Codex 耗时包含工具与仿真等待，不是纯思考时间；耗时子项�
 解释主要开销与限制。不要编辑 usage.json 或自行覆盖最终报告中的宿主计量。
 你读到的是阶段快照，结束后宿主会补齐最终累计值；不将这些计数称为实际账单金额。
 """
+)
 
 _BRIDGE = '''"""Local entry point; environment selection belongs to the workspace."""
 from pathlib import Path

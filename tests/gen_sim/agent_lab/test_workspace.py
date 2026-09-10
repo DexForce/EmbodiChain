@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 from pathlib import Path
 import signal
@@ -29,7 +30,7 @@ import psutil
 import pytest
 
 from embodichain.gen_sim.agent_lab import _launch, session
-from embodichain.gen_sim.agent_lab._workspace import _write_workspace
+from embodichain.gen_sim.agent_lab._workspace import _FEEDBACK_GUIDE, _write_workspace
 from embodichain.gen_sim.agent_lab.catalog import Task
 
 
@@ -70,6 +71,21 @@ def test_bootstrap_leaves_robot_method_design_to_the_agent(tmp_path: Path) -> No
     assert "run --script experiment.py --timeout" in guide
     assert not (tmp_path / "workspace/controller.py").exists()
     assert not (tmp_path / "workspace/planner.py").exists()
+
+
+def test_feedback_guide_uses_existing_project_entries_without_task_policy(tmp_path):
+    (tmp_path / "workspace").mkdir()
+    _write_workspace(tmp_path, {"repo": "/repo", "python": sys.executable, "task": {}})
+    guide = (tmp_path / "workspace/START.md").read_text()
+    assert _FEEDBACK_GUIDE in guide
+    assert "快速反馈判断和控制放在本轮本地 Python" in guide
+    assert "实测偏差应参与后续动作" in guide
+    assert "不强制采用任何规划器或传感器" in guide
+    assert "result_serialization_error" in guide
+    paths = re.findall(r"`((?:embodichain|examples)/[^`]+\.py)`", _FEEDBACK_GUIDE)
+    assert len(paths) == 6
+    repo = Path(__file__).resolve().parents[3]
+    assert all((repo / path).is_file() for path in paths)
 
 
 def test_prepare_accepts_non_task100_identity_and_explicit_robot(

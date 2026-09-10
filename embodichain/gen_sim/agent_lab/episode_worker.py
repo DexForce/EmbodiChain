@@ -87,13 +87,14 @@ def serve_episode(lab: Any, commands: Path) -> dict:
             "started_at": time.time(),
             "simulation_start_seconds": lab.snapshot().get("time"),
         }
+        if job["operation"] == "exec":
+            namespace.pop("result", None)
         try:
             if job["operation"] == "close":
                 _reply(request.with_suffix(".reply.json"), {**result, "ok": True})
                 return {"chunks": chunks, "task_completed": None}
             if job["operation"] == "exec":
                 path = Path(job["script"])
-                namespace.pop("result", None)
                 namespace["__file__"] = str(path)
                 original_path = list(sys.path)
                 sys.path.insert(0, str(path.parent))
@@ -105,12 +106,6 @@ def serve_episode(lab: Any, commands: Path) -> dict:
                             raise
                 finally:
                     sys.path[:] = original_path
-                # Validate the response before publishing it, without discarding state.
-                result["result"] = json.loads(
-                    json.dumps(
-                        namespace.get("result"), default=_serializable, allow_nan=False
-                    )
-                )
             elif job["operation"] != "observe":
                 raise ValueError(f"Unknown session operation: {job['operation']}")
             result["ok"] = True
@@ -118,6 +113,21 @@ def serve_episode(lab: Any, commands: Path) -> dict:
             result.update(
                 error=f"{type(exc).__name__}: {exc}", traceback=traceback.format_exc()
             )
+        if job["operation"] == "exec":
+            # Failed experiments still own useful measurements; keep their original error.
+            try:
+                result["result"] = json.loads(
+                    json.dumps(
+                        namespace.get("result"), default=_serializable, allow_nan=False
+                    )
+                )
+            except Exception as exc:
+                message = f"{type(exc).__name__}: {exc}"
+                result.update(result=None, result_serialization_error=message)
+                if result["ok"]:
+                    result.update(
+                        ok=False, error=message, traceback=traceback.format_exc()
+                    )
         result["wall_seconds"] = time.perf_counter() - started
         result["state"] = lab.snapshot()
         result["simulation_end_seconds"] = result["state"].get("time")

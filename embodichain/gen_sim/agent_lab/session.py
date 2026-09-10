@@ -461,6 +461,8 @@ def _serve_requests(root: Path, deadline: float, episode_host=None) -> None:
 
 
 def _prompt(root: Path, manifest: dict, deadline: float) -> str:
+    from ._workspace import _FEEDBACK_GUIDE
+
     task = manifest["task"]
     mode = manifest.get("mode", "B")
     approved_changes = json.dumps(
@@ -501,6 +503,8 @@ controller tuning, or your own Python code. Do not wait to implement a general
 framework. Do not stop after proposing a plan. Run experiments, examine images
 and telemetry, change your hypothesis, and try again. Failed IK candidates are
 normal. You may change robot placement before execution. There is no action DSL.
+
+{_FEEDBACK_GUIDE}
 
 Inspect the reference and actual scene before choosing a method. Record observed
 scene suitability and blockers in scene_review.json. Derive goals from the task

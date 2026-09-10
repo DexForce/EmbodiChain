@@ -292,6 +292,10 @@ python3 lab.py session close
 `chunk.py` 是顶层 Python，自动提供 `lab`、持久 `state` 字典及前序定义。
 用 `result = ...` 返回可序列化数据或张量，不需要原子任务、固定动作语法或 `solve`。
 每段执行冻结源代码；Python 异常返回 traceback 并保留场景，普通观察不推进物理。
+`exec` 在成功和异常时均尝试返回本段 `result`；没有赋值时为 null，不沿用前段值。
+若数据不能序列化，返回 null 和 `result_serialization_error`，不会覆盖原执行错误。
+`ok=false` 仍表示本段失败；`result` 只是脚本反馈，不会被当作宿主任务验收。
+异常不撤销已发生的动作，测量数据也可能早于最终快照，恢复前须检查实际状态。
 已导入模块遵循 Python 缓存语义，修改后需要显式 reload。
 原生错误可能结束整个进程；超时、宿主退出会清理 worker，不自动重放任何动作。
 独立脚本与持久场景不并行占用同一宿主，切换前先 close。
@@ -301,6 +305,16 @@ python3 lab.py session close
 用独立 `solution.py` 连续重跑；不得拼接视频或跳过前缀。重跑时间属于本轮预算。
 
 ## 项目能力与复用
+
+工作区 START.md 和旧求解入口共享一段“反馈驱动与能力选择”规范：快速反馈循环
+由 Codex 编写的本地 Python 执行，模型负责较慢的诊断和修改，而非逐物理步决策。
+例如目标偏移、夹持不稳时，实测信息应参与下一步动作选择，不只是事后写日志。
+夹爪目标值或单次接触都不自动证明稳定抓取；具体阈值和恢复方法按任务决定。
+在已有 notes.md 中记录方法选择、假设、反馈和调整，用实际代码、状态及录像验证。
+这些是实验要求，不是固定抓取流程，也不要求采用某个规划器。
+
+导航只指向现有 `objects/robot.py`、刚体/关节对象、`motion/motion_generator.py`
+和 `sensors/contact_sensor.py` 等源代码与示例，不增加新的机器人调用层。
 
 机器人、运动规划、IK/FK、接触传感器等能力由 EmbodiChain 原有模块提供。
 从 `agent_context/MAP.yaml` 查到对应代码和示例，再由 Codex 在实验工作区组合、
