@@ -177,7 +177,7 @@ class ExampleCfg(EmbodiedEnvCfg):
             shape=MeshCfg(
                 fpath=get_data_path("TableWare/tableware/fork/standard_fork_scale.ply"),
             ),
-            body_scale=(0.75, 0.75, 1.0),
+            body_scale=(0.75, 0.75, 0.75),
             init_pos=(0.8, 0, 1.0),
         ),
     ]
