@@ -297,3 +297,31 @@ class Drawer(EmbodiChainDataset):
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+
+
+class Cow(EmbodiChainDataset):
+    """get_data_path("COW/cow.obj")"""
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "Cow.zip"),
+            "f93d371574187fdb74b26e9270ca52ff",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
+class BakeTextureObj(EmbodiChainDataset):
+    """get_data_path("BakeTextureObj/hdr_color_mesh.ply")"""
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "BakeTextureObj.zip"),
+            "4f10d5ce1f4cd051a2dfb1c19445d5a9",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)

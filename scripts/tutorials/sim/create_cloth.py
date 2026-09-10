@@ -27,7 +27,6 @@ import tempfile
 import time
 import torch
 import open3d as o3d
-from dexsim.utility.path import get_resources_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.visualization import visualization_cfg_from_args
