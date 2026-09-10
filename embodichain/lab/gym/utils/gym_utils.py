@@ -1043,66 +1043,25 @@ def add_env_launcher_args_to_parser(
     Args:
         parser: The parser to which arguments will be added.
         require_gym_config: Whether ``--gym_config`` is required. Environment
-            runners should enable this; standalone simulation scripts can
-            leave it disabled.
+            runners should enable this to preserve omitted config overrides.
+            Standalone simulation scripts should instead use
+            :func:`embodichain.cli.sim.add_sim_args_to_parser`.
     """
-    parser.add_argument(
-        "--num_envs",
-        help="The number of environments to run in parallel. "
-        "If not given, falls back to the gym config's `num_envs` (default 1).",
-        default=1,
-        type=int,
-    )
-    parser.add_argument(
-        "--seed",
-        help="Task-environment seed. Overrides the gym config when provided.",
-        default=None,
-        type=int,
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default=None,
-        help="Device used by environment tensors and the selected physics "
-        "backend, e.g. 'cpu' or 'cuda:0'. When omitted, the selected backend "
-        "default is preserved unless this option is set.",
-    )
-    parser.add_argument(
-        "--headless",
-        help="Whether to perform the simulation in headless mode.",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
-        "--renderer",
-        type=str,
-        choices=["auto", "hybrid", "fast-rt", "rt"],
-        default=None if require_gym_config else "auto",
-        help="Renderer backend to use for the simulation. When loading a gym "
-        "config, the configured render_cfg.renderer is used unless this option "
-        "is provided.",
-    )
-    parser.add_argument(
-        "--physics",
-        type=str,
-        choices=["default", "newton"],
-        default=None if require_gym_config else "default",
-        help="Physics backend to use for standalone simulation. Gym configs "
-        "declare their backend in the file; this option may only confirm the "
-        "same value.",
-    )
-    parser.add_argument(
-        "--arena_space",
-        help="The size of the arena space.",
-        default=5.0,
-        type=float,
-    )
-    parser.add_argument(
-        "--gpu_id",
-        help="The GPU ID to use for the simulation.",
-        default=0,
-        type=int,
-    )
+    from embodichain.cli.sim import add_sim_args_to_parser, add_seed_arg_to_parser
+
+    add_sim_args_to_parser(parser)
+    add_seed_arg_to_parser(parser, default=None, scope="task environment")
+    if require_gym_config:
+        parser.set_defaults(
+            num_envs=None,
+            device=None,
+            headless=None,
+            renderer=None,
+            physics=None,
+            arena_space=None,
+            gpu_id=None,
+        )
+
     parser.add_argument(
         "--gym_config",
         type=str,
@@ -1170,10 +1129,6 @@ def add_env_launcher_args_to_parser(
         type=str,
     )
 
-    from embodichain.lab.visualization.cli import add_viser_args_to_parser
-
-    add_viser_args_to_parser(parser)
-
 
 def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> dict:
     """Merge command-line arguments with gym configuration.
@@ -1197,7 +1152,8 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     if args.device is not None:
         merged_config["device"] = args.device
     viser_enabled = bool(getattr(args, "viser", False))
-    merged_config["headless"] = args.headless or viser_enabled
+    if args.headless is not None or viser_enabled:
+        merged_config["headless"] = bool(args.headless or viser_enabled)
     if args.renderer is not None:
         merged_config["renderer"] = args.renderer
     requested_physics = getattr(args, "physics", None)
@@ -1207,8 +1163,10 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
             f"--physics={requested_physics!r} cannot override a file-owned "
             "backend. Select a Gym config for the requested backend."
         )
-    merged_config["gpu_id"] = args.gpu_id
-    merged_config["arena_space"] = args.arena_space
+    if args.gpu_id is not None:
+        merged_config["gpu_id"] = args.gpu_id
+    if args.arena_space is not None:
+        merged_config["arena_space"] = args.arena_space
     if args.max_episodes is not None:
         merged_config["max_episodes"] = args.max_episodes
     if viser_enabled:

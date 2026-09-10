@@ -81,7 +81,7 @@ def _build_engine(args: argparse.Namespace) -> OnlineDataEngine:
     gym_config = load_config(config_path)
 
     gym_config["headless"] = True
-    gym_config.setdefault("renderer", True)
+    gym_config.setdefault("renderer", "hybrid")
     gym_config["gpu_id"] = 0
     gym_config["device"] = args.device
     cfg = OnlineDataEngineCfg(
@@ -232,7 +232,7 @@ def main() -> None:
         _demo_uniform_dynamic(engine, num_batches=5)
         _demo_gmm_dynamic(engine, num_batches=5)
     finally:
-        # engine.stop()
+        engine.stop()
         log_info("[Demo] Engine stopped.", color="green")
 
 

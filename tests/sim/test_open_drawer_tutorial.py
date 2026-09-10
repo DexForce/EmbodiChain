@@ -111,10 +111,16 @@ def test_tutorial_newton_physics_cfg_enables_multiccd_with_auto_sized_buffers() 
     }
 
 
-def test_main_opens_native_window_after_spawn_prepare(monkeypatch) -> None:
+@pytest.mark.parametrize("prepare_fails", [False, True])
+def test_main_opens_native_window_after_spawn_prepare(
+    monkeypatch, prepare_fails
+) -> None:
     tutorial = _load_tutorial_module()
     events: list[str] = []
     captured_cfg: dict[str, object] = {}
+    monkeypatch.setattr(
+        tutorial.torch, "manual_seed", lambda seed: captured_cfg.update(seed=seed)
+    )
     args = SimpleNamespace(
         num_envs=1,
         hold_steps=0,
@@ -123,6 +129,7 @@ def test_main_opens_native_window_after_spawn_prepare(monkeypatch) -> None:
         headless=False,
         viser=False,
         auto_start=True,
+        seed=17,
         physics="default",
         device="cpu",
         arena_space=2.0,
@@ -134,6 +141,8 @@ def test_main_opens_native_window_after_spawn_prepare(monkeypatch) -> None:
 
         def prepare(self) -> None:
             events.append("prepare")
+            if prepare_fails:
+                raise RuntimeError("prepare failed")
 
         def open_window(self) -> None:
             events.append("open_window")
@@ -147,8 +156,9 @@ def test_main_opens_native_window_after_spawn_prepare(monkeypatch) -> None:
         def wait_window_record_saves(self) -> None:
             pass
 
-        def destroy(self) -> None:
-            pass
+        def destroy(self, *, exit_process: bool) -> None:
+            assert exit_process is False
+            events.append("destroy")
 
     monkeypatch.setattr(
         tutorial.argparse.ArgumentParser,
@@ -171,7 +181,12 @@ def test_main_opens_native_window_after_spawn_prepare(monkeypatch) -> None:
     monkeypatch.setattr(tutorial, "open_drawer", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(tutorial, "visualization_cfg_from_args", lambda _args: None)
 
-    tutorial.main()
-
+    if prepare_fails:
+        with pytest.raises(RuntimeError, match="prepare failed"):
+            tutorial.main()
+        assert events == ["create_scene", "prepare", "destroy"]
+    else:
+        tutorial.main()
+        assert events == ["create_scene", "prepare", "open_window", "destroy"]
     assert captured_cfg["headless"] is True
-    assert events == ["create_scene", "prepare", "open_window"]
+    assert captured_cfg["seed"] == 17

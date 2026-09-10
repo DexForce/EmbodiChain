@@ -26,31 +26,14 @@ from __future__ import annotations
 
 import argparse
 import time
-
-import numpy as np
-import torch
-
-from embodichain.data.assets.planner_assets import download_neural_planner_checkpoint
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.sim.cfg import MarkerCfg, RenderCfg, physics_cfg_for_backend
-from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
-from embodichain.lab.sim.motion.motion_generator import (
-    MotionGenCfg,
-    MotionGenOptions,
-    MotionGenerator,
-)
-from embodichain.lab.sim.motion.planners import MoveType, NeuralPlannerCfg, PlanState
-from embodichain.lab.sim.motion.planners.neural_planner import NeuralPlanOptions
+from embodichain.cli.sim import add_sim_args_to_parser
 
 
-def parse_args() -> argparse.Namespace:
-    default_device = "cuda" if torch.cuda.is_available() else "cpu"
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
     parser = argparse.ArgumentParser(description="NeuralPlanner waypoint example")
-    add_env_launcher_args_to_parser(parser)
-    parser.set_defaults(device=default_device, arena_space=2.0)
+    add_sim_args_to_parser(parser)
+    parser.set_defaults(arena_space=2.0)
     parser.add_argument(
         "--num-waypoints",
         type=int,
@@ -74,7 +57,35 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Drop into IPython after playback.",
     )
-    return parser.parse_args()
+    return parser
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = build_parser()
+    return parser.parse_args() if argv is None else parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = parse_args()
+
+
+import numpy as np
+import torch
+
+from embodichain.data.assets.planner_assets import download_neural_planner_checkpoint
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
+from embodichain.lab.sim.cfg import MarkerCfg, RenderCfg, physics_cfg_for_backend
+from embodichain.lab.sim.objects import Robot
+from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
+from embodichain.lab.sim.motion.motion_generator import (
+    MotionGenCfg,
+    MotionGenOptions,
+    MotionGenerator,
+)
+from embodichain.lab.sim.motion.planners import MoveType, NeuralPlannerCfg, PlanState
+from embodichain.lab.sim.motion.planners.neural_planner import NeuralPlanOptions
 
 
 def _resolve_device(device: str, gpu_id: int) -> str:
@@ -184,8 +195,8 @@ def play_trajectory(
             time.sleep(delay)
 
 
-def main() -> None:
-    args = parse_args()
+def main(args: argparse.Namespace | None = None) -> None:
+    args = parse_args() if args is None else args
     if args.num_envs < 1:
         raise ValueError("--num_envs must be at least 1.")
     if args.num_waypoints < 1:
@@ -196,7 +207,10 @@ def main() -> None:
         raise ValueError("--hold-steps must be non-negative.")
     checkpoint_path = download_neural_planner_checkpoint()
 
-    sim_device = _resolve_device(args.device, args.gpu_id)
+    device = args.device or (
+        "cuda" if args.physics == "newton" or torch.cuda.is_available() else "cpu"
+    )
+    sim_device = _resolve_device(device, args.gpu_id)
     resolved_device = torch.device(sim_device)
     effective_gpu_id = (
         resolved_device.index if resolved_device.type == "cuda" else int(args.gpu_id)
@@ -297,4 +311,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

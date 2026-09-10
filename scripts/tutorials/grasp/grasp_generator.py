@@ -22,8 +22,36 @@ in a simulated environment using the SimulationManager and grasp planning utilit
 from __future__ import annotations
 
 import argparse
-import numpy as np
 import time
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create and simulate a robot in SimulationManager"
+    )
+    add_sim_args_to_parser(parser)
+    return parser
+
+
+def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
+    """
+    Parse command-line arguments to configure the simulation.
+
+    Returns:
+        argparse.Namespace: Parsed arguments including number of environments and rendering options.
+    """
+    parser = build_parser()
+    return parser.parse_args() if argv is None else parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = parse_arguments()
+
+
+import numpy as np
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -33,7 +61,6 @@ from embodichain.compute.trajectory import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.lab.sim.motion.solvers import URSolverCfg
 from embodichain.data import get_data_path
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 from dexsim.utility.path import get_resources_data_path
 from embodichain.utils import logger
@@ -53,20 +80,6 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     GraspAnnotationCfg,
     ParallelJawGraspCollisionCfg,
 )
-
-
-def parse_arguments():
-    """
-    Parse command-line arguments to configure the simulation.
-
-    Returns:
-        argparse.Namespace: Parsed arguments including number of environments and rendering options.
-    """
-    parser = argparse.ArgumentParser(
-        description="Create and simulate a robot in SimulationManager"
-    )
-    add_env_launcher_args_to_parser(parser)
-    return parser.parse_args()
 
 
 def initialize_simulation(args) -> SimulationManager:
@@ -225,7 +238,7 @@ def get_grasp_traj(sim: SimulationManager, robot: Robot, grasp_xpos: torch.Tenso
 if __name__ == "__main__":
     import time
 
-    args = parse_arguments()
+    args = _cli_args
     sim = initialize_simulation(args)
     robot = create_robot(sim, position=[0.0, 0.0, 0.0])
     obj = create_obj(sim)

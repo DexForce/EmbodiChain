@@ -715,6 +715,9 @@ def _require_curobo(log_level: str = "error") -> "Any":
     _configure_curobo_logging(log_level)
     # cuRobo 0.8 references ``wp.torch.*``, which Warp >= 1.13 relocated.
     _ensure_warp_torch_compat()
+    matmul_precision = torch.get_float32_matmul_precision()
+    matmul_allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+    cudnn_allow_tf32 = torch.backends.cudnn.allow_tf32
     try:
         planner_mod = importlib.import_module("curobo.motion_planner")
         batch_mod = importlib.import_module("curobo.batch_motion_planner")
@@ -729,6 +732,13 @@ def _require_curobo(log_level: str = "error") -> "Any":
             "or replace `cu12` with `cu13` for CUDA 13.x. "
             f"See {_CUROBO_INSTALL_URL} for details."
         ) from exc
+    finally:
+        # cuRobo imports enable TF32 process-wide. Preserve the caller's
+        # numerical policy so unrelated FK/IK retains its requested precision.
+        torch.backends.cuda.matmul.allow_tf32 = matmul_allow_tf32
+        torch.backends.cudnn.allow_tf32 = cudnn_allow_tf32
+        # Restore this last: writing allow_tf32 also changes "medium" to "high".
+        torch.set_float32_matmul_precision(matmul_precision)
     return SimpleNamespace(
         MotionPlanner=planner_mod.MotionPlanner,
         MotionPlannerCfg=planner_mod.MotionPlannerCfg,

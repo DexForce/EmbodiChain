@@ -110,9 +110,9 @@ def _restore_torch_precision_settings():
 
     yield
 
-    torch.set_float32_matmul_precision(matmul_precision)
     torch.backends.cuda.matmul.allow_tf32 = matmul_allow_tf32
     torch.backends.cudnn.allow_tf32 = cudnn_allow_tf32
+    torch.set_float32_matmul_precision(matmul_precision)
 
 
 def _raise_module_not_found(*args, **kwargs):
@@ -149,6 +149,69 @@ def test_missing_curobo_is_actionable(monkeypatch):
     monkeypatch.setattr(importlib, "import_module", _raise_module_not_found)
     with pytest.raises(ImportError, match=r"cu12.*cu13"):
         _require_curobo()
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("precision", ["highest", "high", "medium"])
+@pytest.mark.parametrize(
+    "failure_module",
+    [
+        None,
+        "curobo.motion_planner",
+        "curobo.batch_motion_planner",
+        "curobo.collision_checking",
+        "curobo.types",
+    ],
+)
+def test_curobo_import_preserves_caller_precision(
+    monkeypatch: pytest.MonkeyPatch, precision: str, failure_module: str | None
+) -> None:
+    original_precision = torch.get_float32_matmul_precision()
+    original_matmul = torch.backends.cuda.matmul.allow_tf32
+    original_cudnn = torch.backends.cudnn.allow_tf32
+    facade = SimpleNamespace(
+        **{
+            name: object()
+            for name in (
+                "MotionPlanner",
+                "MotionPlannerCfg",
+                "BatchMotionPlanner",
+                "RobotCollisionChecker",
+                "RobotCollisionCheckerCfg",
+                "JointState",
+                "Pose",
+                "GoalToolPose",
+                "DeviceCfg",
+            )
+        }
+    )
+
+    def import_backend(name: str):
+        torch.set_float32_matmul_precision(
+            "high" if precision == "highest" else "highest"
+        )
+        torch.backends.cudnn.allow_tf32 = True
+        if name == failure_module:
+            raise ModuleNotFoundError("cuRobo dependency unavailable")
+        return facade
+
+    try:
+        torch.set_float32_matmul_precision(precision)
+        torch.backends.cudnn.allow_tf32 = False
+        expected_matmul = torch.backends.cuda.matmul.allow_tf32
+        monkeypatch.setattr(importlib, "import_module", import_backend)
+        if failure_module is None:
+            assert _require_curobo().MotionPlanner is facade.MotionPlanner
+        else:
+            with pytest.raises(ImportError, match="cuRobo V2"):
+                _require_curobo()
+        assert torch.get_float32_matmul_precision() == precision
+        assert torch.backends.cuda.matmul.allow_tf32 == expected_matmul
+        assert torch.backends.cudnn.allow_tf32 is False
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = original_matmul
+        torch.backends.cudnn.allow_tf32 = original_cudnn
+        torch.set_float32_matmul_precision(original_precision)
 
 
 def test_unknown_dynamic_obstacle_is_rejected():

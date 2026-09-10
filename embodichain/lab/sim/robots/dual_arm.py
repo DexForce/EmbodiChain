@@ -42,6 +42,7 @@ Example:
 
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
 from dataclasses import field
 from typing import TYPE_CHECKING, Dict, List, Union
 
@@ -538,10 +539,10 @@ class DualArmRobotCfg(RobotCfg):
     ) -> Dict[str, "pk.SerialChain"]:
         """Build the per-arm pytorch-kinematics serial chains.
 
-        Each chain is built from the single-arm URDF with the (arm-local) root
-        and end link names taken from the left-arm solver, mirroring the
-        :class:`CobotMagicCfg` pattern. Both arms share one URDF; the chains are
-        keyed ``"left_arm"`` / ``"right_arm"`` for API symmetry.
+        Each chain uses its own solver root and end frames. Assembled frame
+        names are mapped back to the single-arm URDF names using the component
+        prefix and link case policy; already arm-local names are preserved.
+        Joint names and transforms remain local to the arm URDF.
 
         Args:
             device: The device to move the chains to. Defaults to CPU.
@@ -555,21 +556,30 @@ class DualArmRobotCfg(RobotCfg):
         )
 
         urdf_path = self._pk_urdf_path
-        solver = self.solver_cfg["left_arm"]
-        return {
-            "left_arm": create_pk_serial_chain(
+        link_names = [
+            link.attrib["name"] for link in ET.parse(urdf_path).findall("link")
+        ]
+        chains = {}
+        for side, _component, prefix in _SIDES:
+            part = f"{side}_{self.arm_part}"
+            solver = self.solver_cfg[part]
+            local_names = {
+                _prefixed_name(name, prefix, "link", self.urdf_cfg.name_case): name
+                for name in link_names
+            }
+            # Keep actual local names intact, including any authored side prefix.
+            local_names.update({name: name for name in link_names})
+            chains[part] = create_pk_serial_chain(
                 urdf_path=urdf_path,
                 device=device,
-                end_link_name=solver.end_link_name,
-                root_link_name=solver.root_link_name,
-            ),
-            "right_arm": create_pk_serial_chain(
-                urdf_path=urdf_path,
-                device=device,
-                end_link_name=solver.end_link_name,
-                root_link_name=solver.root_link_name,
-            ),
-        }
+                end_link_name=local_names.get(
+                    solver.end_link_name, solver.end_link_name
+                ),
+                root_link_name=local_names.get(
+                    solver.root_link_name, solver.root_link_name
+                ),
+            )
+        return chains
 
 
 if __name__ == "__main__":

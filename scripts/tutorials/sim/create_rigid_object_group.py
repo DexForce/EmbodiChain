@@ -22,9 +22,24 @@ from __future__ import annotations
 
 import argparse
 import time
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create a simulation scene with SimulationManager"
+    )
+    add_sim_args_to_parser(parser)
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
     RenderCfg,
@@ -39,15 +54,13 @@ from embodichain.lab.sim.objects import (
 )
 
 
-def main():
+def main(args: argparse.Namespace | None = None) -> None:
     """Main function to create and run the simulation scene."""
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="Create a simulation scene with SimulationManager"
-    )
-    add_env_launcher_args_to_parser(parser)
-    args = parser.parse_args()
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
 
     # Configure the simulation
     sim_cfg = SimulationManagerCfg(
@@ -158,4 +171,4 @@ def run_simulation(sim: SimulationManager):
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

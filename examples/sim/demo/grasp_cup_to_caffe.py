@@ -22,6 +22,39 @@ and performs a grasp cup to coffee machine task in a simulated environment.
 from __future__ import annotations
 
 import argparse
+from embodichain.cli.sim import (
+    add_sim_args_to_parser,
+    add_seed_arg_to_parser,
+    resolve_seed,
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create and simulate a robot in SimulationManager"
+    )
+    add_sim_args_to_parser(parser)
+    add_seed_arg_to_parser(parser, scope="scene XY perturbations")
+    return parser
+
+
+def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
+    """
+    Parse command-line arguments to configure the simulation.
+
+    Returns:
+        argparse.Namespace: Parsed arguments including number of environments and rendering options.
+    """
+    parser = build_parser()
+    return parser.parse_args() if argv is None else parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = parse_arguments()
+
+
 import numpy as np
 import torch
 from tqdm import tqdm
@@ -44,28 +77,7 @@ from embodichain.compute.trajectory import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.robots.dexforce_w1.cfg import DexforceW1Cfg
-
-
-def parse_arguments():
-    """
-    Parse command-line arguments to configure the simulation.
-
-    Returns:
-        argparse.Namespace: Parsed arguments including number of environments and rendering options.
-    """
-    parser = argparse.ArgumentParser(
-        description="Create and simulate a robot in SimulationManager"
-    )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=0,
-        help="Seed for scene XY perturbations; use a negative value for random runs.",
-    )
-    return parser.parse_args()
 
 
 def initialize_simulation(args) -> SimulationManager:
@@ -420,7 +432,10 @@ def run_simulation(
 
 
 def apply_random_xy_perturbation(
-    item: Union[RigidObject, Robot], max_perturbation: float = 0.02
+    item: Union[RigidObject, Robot],
+    max_perturbation: float = 0.02,
+    *,
+    rng: np.random.Generator | None = None,
 ):
     """
     Apply random perturbation to the object's XY position.
@@ -428,10 +443,12 @@ def apply_random_xy_perturbation(
     Args:
         item (Union[RigidObject, Robot]): The object to perturb.
         max_perturbation (float): Maximum perturbation magnitude.
+        rng: Local scene generator; omission creates an independent random stream.
     """
     item_pose = item.get_local_pose(to_matrix=True)
     item_xy = item_pose[:, :2, 3].to("cpu").numpy()
-    perturbation = np.random.uniform(
+    rng = np.random.default_rng() if rng is None else rng
+    perturbation = rng.uniform(
         low=-max_perturbation, high=max_perturbation, size=item_xy.shape
     )
     new_xy = item_xy + perturbation
@@ -441,13 +458,13 @@ def apply_random_xy_perturbation(
     item.set_local_pose(item_pose)
 
 
-def main():
+def main(args: argparse.Namespace | None = None) -> None:
     """
     Main function to demonstrate robot simulation.
 
     Initializes the simulation, creates the robot and objects, and performs the grasp and place task.
     """
-    args = parse_arguments()
+    args = parse_arguments() if args is None else args
     sim = initialize_simulation(args)
 
     robot = create_robot(sim)
@@ -458,12 +475,12 @@ def main():
     sim.prepare()
 
     # Apply initialization-time poses before Newton captures its CUDA graph.
-    # Seed here so backend initialization cannot consume a different random
-    # prefix and make Default/Newton comparisons use different scenes.
-    if args.seed >= 0:
-        np.random.seed(args.seed)
-    apply_random_xy_perturbation(cup, max_perturbation=0.05)
-    apply_random_xy_perturbation(caffe, max_perturbation=0.05)
+    # A local generator isolates scene placement from backend RNG consumption.
+    seed = resolve_seed(args.seed)
+    print(f"[INFO]: Scene seed: {seed}", flush=True)
+    rng = np.random.default_rng(seed)
+    apply_random_xy_perturbation(cup, max_perturbation=0.05, rng=rng)
+    apply_random_xy_perturbation(caffe, max_perturbation=0.05, rng=rng)
     sim.update(step=1)
 
     if not args.headless:
@@ -485,4 +502,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

@@ -17,6 +17,8 @@ topics:
   source_of_truth:
   - embodichain/lab/sim/motion/__init__.py
   - embodichain/lab/sim/sim_manager.py
+  - embodichain/cli/sim.py
+  - embodichain/cli/_visualization.py
   - embodichain/lab/sim/__init__.py
   - embodichain/lab/sim/cfg/
   - embodichain/lab/sim/physics/

@@ -121,7 +121,9 @@ def test_neural_planner_generate_with_fake_checkpoint(tmp_path, monkeypatch):
     checkpoint_path = _create_fake_checkpoint(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
 
     motion_generator = MotionGenerator(
@@ -157,7 +159,9 @@ def test_neural_planner_uses_plan_opts_start_qpos(tmp_path, monkeypatch):
     checkpoint_path = _create_fake_checkpoint(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
 
     motion_generator = MotionGenerator(
@@ -190,7 +194,9 @@ def test_neural_planner_rejects_short_start_qpos(tmp_path, monkeypatch):
     checkpoint_path = _create_fake_checkpoint(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
 
     motion_generator = MotionGenerator(
@@ -221,7 +227,9 @@ def test_neural_planner_returns_velocities_and_accelerations(tmp_path, monkeypat
     checkpoint_path = _create_fake_checkpoint(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
 
     motion_generator = MotionGenerator(
@@ -287,7 +295,9 @@ def test_motion_generator_neural_propagates_motion_gen_options(tmp_path, monkeyp
     checkpoint_path = _create_fake_checkpoint(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
 
     motion_generator = MotionGenerator(
@@ -317,7 +327,9 @@ def test_motion_generator_neural_preserves_native_eef_targets(tmp_path, monkeypa
     checkpoint_path = _create_fake_checkpoint(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
 
     motion_generator = MotionGenerator(

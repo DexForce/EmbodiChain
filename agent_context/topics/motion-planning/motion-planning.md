@@ -26,13 +26,22 @@ Actions consume these motion capabilities from `sim/atomic_actions/`.
 Focused tests and examples live under `tests/sim/motion/` and
 `examples/sim/motion/`.
 
+The cuRobo adapter imports its optional backend through `_require_curobo()`.
+That boundary preserves the caller's Torch matmul precision and CUDA/cuDNN
+TF32 flags on success or failure; cuRobo import side effects must not change
+the numerical policy of other planners or FK/IK solvers.
+
 The planning stack has two layers:
 1. **BasePlanner** — low-level trajectory planner that takes a list of `PlanState` waypoints and produces a `PlanResult` with joint trajectories.
 2. **MotionGenerator** — the single stateful planning facade that composes a
    planner with strategy selection, interpolation, IK resolution, result
    normalization, and multi-part coordination.
 
-All planners resolve their robot at init via `SimulationManager.get_instance().get_robot(cfg.robot_uid)`.
+All planners resolve their robot at init via `SimulationManager.get_instance(cfg.sim_instance_id).get_robot(cfg.robot_uid)`.
+`BasePlannerCfg.sim_instance_id` defaults to `0`. Environment-owned planner
+factories supply their manager's ID, copying supplied configurations before
+overriding it. A missing manager or robot is an error; lookup does not fall
+back to another manager with the same robot UID.
 
 The entire stack is **env-batched** (`B = num_envs`). `PlanState` / `PlanResult` tensors carry a leading `B` dimension; `BasePlanner.plan()` and `MotionGenerator.generate()` operate on `B` environments in one call.
 
@@ -131,7 +140,7 @@ total duration and emits new explicit arrival intervals.
 ## Common Failure Modes
 
 - **`robot_uid` is MISSING** — `BasePlannerCfg.robot_uid` defaults to `MISSING`. Forgetting to set it raises `ValueError` at planner init.
-- **Robot not found** — planner init calls `SimulationManager.get_instance().get_robot(uid)`. If the robot hasn't been added to the sim yet, this returns `None` and raises `ValueError`.
+- **Robot not found** — planner init calls `SimulationManager.get_instance(cfg.sim_instance_id).get_robot(uid)`. If the robot hasn't been added to the sim yet, this returns `None` and raises `ValueError`.
 - **toppra not installed** — `ToppraPlanner` import fails with `ImportError` at module load time if `toppra==0.6.3` is not installed.
 - **Batch dim mismatch** — `@validate_plan_options` raises `ValueError` if `PlanState` entries have inconsistent `B` or if `B` does not equal `robot.num_instances`.
 - **Single-env caller shape mismatch** — legacy callers passing `(DOF,)` qpos or `(4,4)` xpos must wrap with `PlanState.single(...)` or call `from_qpos`/`from_xpos` with a leading `B=1` dim.

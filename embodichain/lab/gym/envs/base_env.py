@@ -166,69 +166,89 @@ class BaseEnv(gym.Env):
 
         self._configure_timing()
 
-        # Phase 1 only declares scene topology. Spawn-backed assets intentionally
-        # remain metadata-light until the single prepare boundary below.
-        self._setup_scene(**kwargs)
+        try:
+            # Phase 1 only declares scene topology. Spawn-backed assets intentionally
+            # remain metadata-light until the single prepare boundary below.
+            self._setup_scene(**kwargs)
 
-        # Keep the established env._profiler API while sharing the single
-        # profiler instance owned by SimulationManager.
-        self._profiler = self.sim.profiler
+            # Keep the established env._profiler API while sharing the single
+            # profiler instance owned by SimulationManager.
+            self._profiler = self.sim.profiler
 
-        # Materialize every physical declaration in one transaction. DexSim's
-        # articulation adapter parses each source while finalizing, then the
-        # resulting handles bind the existing EmbodiChain facades in place.
-        self.sim.prepare()
+            # Materialize every physical declaration in one transaction. DexSim's
+            # articulation adapter parses each source while finalizing, then the
+            # resulting handles bind the existing EmbodiChain facades in place.
+            self.sim.prepare()
 
-        # Phase 2 may now consume link/joint metadata, construct action spaces,
-        # and create render-only resources such as CameraGroup instances.
-        configured_robot = self._setup_robot(**kwargs)
-        if configured_robot is not None:
-            self.robot = configured_robot
+            # Phase 2 may now consume link/joint metadata, construct action spaces,
+            # and create render-only resources such as CameraGroup instances.
+            configured_robot = self._setup_robot(**kwargs)
+            if configured_robot is not None:
+                self.robot = configured_robot
 
-        if self.robot is None:
-            logger.log_error(
-                f"The robot instance must be initialized in :meth:`_setup_robot` function."
+            if self.robot is None:
+                logger.log_error(
+                    f"The robot instance must be initialized in :meth:`_setup_robot` function."
+                )
+            if len(self.active_joint_ids) == 0:
+                self.active_joint_ids = self.robot.active_joint_ids
+            if self.single_action_space is None:
+                logger.log_error(
+                    f":attr:`single_action_space` must be defined in the :meth:`_setup_robot` function."
+                )
+
+            self.sensors = self._setup_sensors(**kwargs)
+            self._camera_group_ids = [
+                sensor.group_id
+                for sensor in self.sensors.values()
+                if isinstance(sensor, Camera)
+            ]
+
+            if not self.sim_cfg.headless:
+                self.sim.open_window()
+
+            self._elapsed_steps = torch.zeros(
+                self._num_envs, dtype=torch.int32, device=self.sim_cfg.device
             )
-        if len(self.active_joint_ids) == 0:
-            self.active_joint_ids = self.robot.active_joint_ids
-        if self.single_action_space is None:
-            logger.log_error(
-                f":attr:`single_action_space` must be defined in the :meth:`_setup_robot` function."
+
+            # -1 means no limit on episode length, and the episode will only end when the task is successfully completed or failed.
+            self.max_episode_steps = (
+                self.cfg.max_episode_steps
+                if self.cfg.max_episode_steps > 0
+                else 2**31 - 1
             )
 
-        self.sensors = self._setup_sensors(**kwargs)
-        self._camera_group_ids = [
-            sensor.group_id
-            for sensor in self.sensors.values()
-            if isinstance(sensor, Camera)
-        ]
+            self._task_success = torch.zeros(
+                self._num_envs, dtype=torch.bool, device=self.device
+            )
+            # The UIDs of objects that are detached from automatic reset.
+            self._detached_uids_for_reset: List[str] = []
 
-        if not self.sim_cfg.headless:
-            self.sim.open_window()
+            self._init_sim_state(**kwargs)
 
-        self._elapsed_steps = torch.zeros(
-            self._num_envs, dtype=torch.int32, device=self.sim_cfg.device
-        )
+            self.sim.capture_visualization_safely(force=True)
 
-        # -1 means no limit on episode length, and the episode will only end when the task is successfully completed or failed.
-        self.max_episode_steps = (
-            self.cfg.max_episode_steps if self.cfg.max_episode_steps > 0 else 2**31 - 1
-        )
+            self._init_raw_obs: Dict = self.get_obs(**kwargs)
 
-        self._task_success = torch.zeros(
-            self._num_envs, dtype=torch.bool, device=self.device
-        )
-        # The UIDs of objects that are detached from automatic reset.
-        self._detached_uids_for_reset: List[str] = []
+            if not self._defer_initialization_summary:
+                self._log_initialization_summary()
+        except Exception:
+            self._cleanup_failed_initialization()
+            raise
 
-        self._init_sim_state(**kwargs)
-
-        self.sim.capture_visualization_safely(force=True)
-
-        self._init_raw_obs: Dict = self.get_obs(**kwargs)
-
-        if not self._defer_initialization_summary:
-            self._log_initialization_summary()
+    def _cleanup_failed_initialization(self) -> None:
+        """Queue owned simulator teardown without masking the constructor error."""
+        # A constructor failure gives the caller no environment to close.
+        if self.sim is None:
+            return
+        try:
+            # The traceback can retain unregistered native resources. Let the
+            # caller drain the queue after unwinding, as with ordinary destroy.
+            self.sim.destroy(exit_process=False)
+        except Exception as cleanup_error:
+            logger.log_warning(
+                f"Failed to clean up after environment initialization: {cleanup_error!r}"
+            )
 
     def _log_initialization_summary(self) -> None:
         """Log the complete startup table once after the environment is ready."""

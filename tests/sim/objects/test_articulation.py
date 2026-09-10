@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -46,6 +48,15 @@ NUM_ARENAS = 10
 NEWTON_EFFORT_TARGET_MODE = 4
 DRIVE_TEST_STIFFNESS = 12.0
 DRIVE_TEST_DAMPING = 4.0
+
+
+def _assert_newton_collision_groups(entity: Any, env_index: int) -> None:
+    """Inspect all link shapes until Scene exposes an articulation filter query."""
+    binding = entity._physics_binding
+    shape_ids = [shape_id for link in binding.links for shape_id in link.shape_ids]
+    assert shape_ids
+    groups = binding._runtime.model.shape_collision_group.numpy()
+    assert {int(groups[shape_id]) for shape_id in shape_ids} == {env_index + 1}
 
 
 def _teardown_newton_physics() -> None:
@@ -403,23 +414,11 @@ class BaseArticulationTest:
         )
 
     def test_replicated_link_shapes_are_isolated_by_environment(self):
-        """Every articulation link shape should use its environment group."""
+        """Every link shape must retain its replicated environment isolation."""
         for env_index, entity in enumerate(self.art._entities):
             if self.physics == "newton":
-                shape_ids = [
-                    shape_id
-                    for link in entity.physics_articulation.links
-                    for shape_id in link.shape_ids
-                ]
-                assert shape_ids
-                groups = (
-                    entity.physics_articulation.runtime.model.shape_collision_group.numpy()
-                )
-                assert {int(groups[shape_id]) for shape_id in shape_ids} == {
-                    env_index + 1
-                }
+                _assert_newton_collision_groups(entity, env_index)
                 continue
-
             expected = np.asarray([env_index, 1, 0, 0], dtype=np.uint32)
             physical_links = [
                 link
@@ -549,6 +548,12 @@ class BaseArticulationTest:
         self.art.set_qpos(qpos=qpos_zero, env_ids=None, target=False)
         self.art.clear_dynamics()
 
+        # Disable position/velocity servos so the force test measures effort motion.
+        self.art.set_joint_drive(
+            stiffness=qpos_zero,
+            damping=qpos_zero,
+            drive_type="force",
+        )
         # Test setting joint forces
         qf = torch.ones(
             (NUM_ARENAS, self.art.dof), dtype=torch.float32, device=self.sim.device

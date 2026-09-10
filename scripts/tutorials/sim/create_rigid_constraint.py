@@ -23,10 +23,25 @@ from __future__ import annotations
 
 import argparse
 import sys
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Attach and detach two cubes via a fixed rigid constraint"
+    )
+    add_sim_args_to_parser(parser)
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
     RigidConstraintCfg,
@@ -44,15 +59,13 @@ PRINT_EVERY = 20
 PHASE_STEPS = 120
 
 
-def main():
+def main(args: argparse.Namespace | None = None) -> None:
     """Main function to create and run the constraint tutorial scene."""
 
     # Parse command line arguments (adds --headless, --num_envs, --device, ...).
-    parser = argparse.ArgumentParser(
-        description="Attach and detach two cubes via a fixed rigid constraint"
-    )
-    add_env_launcher_args_to_parser(parser)
-    args = parser.parse_args()
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
 
     # The simulation teardown (``SimulationManager.destroy``) calls ``os._exit``,
     # which skips flushing Python's stdout buffer. Line-buffer stdout so every
@@ -186,4 +199,4 @@ def _run_phase(sim, cube_a, cube_b, attached: bool) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

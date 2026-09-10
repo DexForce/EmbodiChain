@@ -308,11 +308,16 @@ def _run_sim_worker(
         config_to_cfg,
         get_manager_modules,
     )
+    from embodichain.lab.gym.utils.registration import discover_task_packages
     from embodichain.lab.gym.envs.demo import execute_demo_episode
     from embodichain.utils.logger import log_info, log_warning
 
     gym_config: dict = cfg.gym_config
     action_config: dict = cfg.action_config
+
+    # Forkserver workers start with a fresh Gym registry. Import official task
+    # packages here so the configured environment is registered before make().
+    discover_task_packages()
 
     # Build env config from the gym configuration dictionary.
     env_cfg = config_to_cfg(gym_config, manager_modules=get_manager_modules())

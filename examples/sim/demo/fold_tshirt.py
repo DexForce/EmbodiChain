@@ -22,42 +22,14 @@ import argparse
 import math
 import time
 from pathlib import Path
-
-import numpy as np
-
-from embodichain.data import get_data_path
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import (
-    SurfaceElementPropertiesCfg,
-    ArticulationRootPropertiesCfg,
-    SurfaceDeformableObjectCfg,
-    SurfaceDeformablePhysicsCfg,
-    JointDrivePropertiesCfg,
-    NewtonCollisionPropertiesCfg,
-    NewtonPhysicsCfg,
-    NewtonRigidBodyMaterialCfg,
-    RigidBodyPhysicsCfg,
-    RigidObjectCfg,
-    RobotCfg,
-    RenderCfg,
-)
-from embodichain.lab.sim.material import VisualMaterialCfg
-from embodichain.lab.sim.objects import SurfaceDeformableObject, RigidObject, Robot
-from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
-from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.utils import logger
+from embodichain.cli.sim import add_sim_args_to_parser
 
 DEFAULT_DT = 1.0 / 60.0
-DEFAULT_TRAJECTORY_TIME_SCALE = 4.0
-NUM_SUBSTEPS = 9
-SOLVER_ITERATIONS = 20
-FPS_LOG_INTERVAL = 120
 
-ASSET_DATASET = "DeformableDemoData"
+DEFAULT_TRAJECTORY_TIME_SCALE = 4.0
+
 ANNIVERSARY_MATERIAL = "anniversary"
-ANNIVERSARY_VISUAL_OBJ = "shirt_with_front_anniversary_decal_fold_atlas.obj"
-ANNIVERSARY_TEXTURE = "shirt_with_front_anniversary_decal_fold_atlas.png"
+
 TEXTURE_FILE_MAP = {
     "mianbu": "mianbu.png",
     "shabu": "shabu.png",
@@ -68,23 +40,11 @@ TEXTURE_FILE_MAP = {
     "wenli": "wenli.png",
 }
 
-TABLE_POSITION = (0.55, 0.0, 1.15)
-TABLE_SIZE = (0.52, 1.24, 0.05)
-GROUND_POSITION = (0.0, 0.0, -0.01)
-GROUND_SIZE = (8.0, 8.0, 0.02)
-SHIRT_POSITION = (0.55, 0.0, 1.189)
-SHIRT_SCALE = 0.0080 * 0.8
-CONTACT_SCRIPT_TRANSITIONS = np.asarray(
-    [4.21, 16.8, 19.0, 22.18, 27.4, 31.4],
-    dtype=np.float32,
-)
-CONTACT_SCRIPT_TO_SIMULATION_OFFSET = 1.2
 
-
-def parse_arguments() -> argparse.Namespace:
-    """Parse and validate command-line arguments."""
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
     parser = argparse.ArgumentParser(description=__doc__)
-    add_env_launcher_args_to_parser(parser)
+    add_sim_args_to_parser(parser)
     parser.add_argument(
         "--steps",
         type=int,
@@ -145,7 +105,13 @@ def parse_arguments() -> argparse.Namespace:
         help="Optional cached W1 trajectory override.",
     )
     parser.set_defaults(device="cuda", physics="newton", renderer="rt")
-    args = parser.parse_args()
+    return parser
+
+
+def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse and validate command-line arguments."""
+    parser = build_parser()
+    args = parser.parse_args() if argv is None else parser.parse_args(argv)
 
     if args.physics != "newton":
         parser.error("T-shirt folding requires --physics newton.")
@@ -163,6 +129,56 @@ def parse_arguments() -> argparse.Namespace:
     if args.steps is not None and args.steps < 0:
         parser.error("--steps must be non-negative.")
     return args
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = parse_arguments()
+
+
+import numpy as np
+
+from embodichain.data import get_data_path
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import (
+    SurfaceElementPropertiesCfg,
+    ArticulationRootPropertiesCfg,
+    SurfaceDeformableObjectCfg,
+    SurfaceDeformablePhysicsCfg,
+    JointDrivePropertiesCfg,
+    NewtonCollisionPropertiesCfg,
+    NewtonPhysicsCfg,
+    NewtonRigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
+    RigidObjectCfg,
+    RobotCfg,
+    RenderCfg,
+)
+from embodichain.lab.sim.material import VisualMaterialCfg
+from embodichain.lab.sim.objects import SurfaceDeformableObject, RigidObject, Robot
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
+from embodichain.utils import logger
+
+NUM_SUBSTEPS = 9
+SOLVER_ITERATIONS = 20
+FPS_LOG_INTERVAL = 120
+
+ASSET_DATASET = "DeformableDemoData"
+ANNIVERSARY_VISUAL_OBJ = "shirt_with_front_anniversary_decal_fold_atlas.obj"
+ANNIVERSARY_TEXTURE = "shirt_with_front_anniversary_decal_fold_atlas.png"
+
+TABLE_POSITION = (0.55, 0.0, 1.15)
+TABLE_SIZE = (0.52, 1.24, 0.05)
+GROUND_POSITION = (0.0, 0.0, -0.01)
+GROUND_SIZE = (8.0, 8.0, 0.02)
+SHIRT_POSITION = (0.55, 0.0, 1.189)
+SHIRT_SCALE = 0.0080 * 0.8
+CONTACT_SCRIPT_TRANSITIONS = np.asarray(
+    [4.21, 16.8, 19.0, 22.18, 27.4, 31.4],
+    dtype=np.float32,
+)
+CONTACT_SCRIPT_TO_SIMULATION_OFFSET = 1.2
 
 
 def resolve_assets(
@@ -578,9 +594,9 @@ def configure_window_camera(sim: SimulationManager) -> None:
         )
 
 
-def main() -> None:
+def main(args: argparse.Namespace | None = None) -> None:
     """Build the EmbodiChain scene and play the complete folding trajectory."""
-    args = parse_arguments()
+    args = parse_arguments() if args is None else args
     (
         urdf_path,
         trajectory_path,
@@ -679,4 +695,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

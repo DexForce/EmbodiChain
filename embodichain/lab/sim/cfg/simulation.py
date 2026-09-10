@@ -650,7 +650,7 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             "requires_grad": self.requires_grad,
             "suppress_warp_kernel_logs": self.suppress_warp_kernel_logs,
             "collision_pipeline_cfg": collision_pipeline_cfg,
-            "sync_to_renderer": self.sync_to_renderer,
+            "sync_to_dexsim": self.sync_to_renderer,
         }
         if solver_cfg is not None:
             newton_cfg_args["solver_cfg"] = solver_cfg

@@ -218,6 +218,8 @@ def test_asset_reset_restores_selected_environment_material(asset_type):
         asset.clear_dynamics = MagicMock()
     elif asset_type is Articulation:
         asset._data = MagicMock(is_newton_backend=True)
+        asset._newton_mimic_compliance_configured = False
+        asset._mimic_info = SimpleNamespace(mimic_id=torch.empty(0, dtype=torch.long))
         asset._restore_default_physical_properties = MagicMock()
         asset.set_qpos = MagicMock()
         asset.clear_dynamics = MagicMock()

@@ -19,13 +19,66 @@
 from __future__ import annotations
 
 import argparse
-import math
 from pathlib import Path
+from embodichain.cli.sim import add_sim_args_to_parser
+
+TEXTURE_FILE_MAP = {
+    "mianbu": "mianbu.png",
+    "shabu": "shabu.png",
+    "mabu": "mabu.png",
+    "pige": "pige.png",
+    "jinduan": "jinduan.png",
+    "niuzai": "niuzai.png",
+}
+
+DEFAULT_FRAMES = 1000
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_sim_args_to_parser(parser)
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=DEFAULT_FRAMES,
+        help="Number of 60 Hz simulation frames.",
+    )
+    parser.add_argument(
+        "--cloth-material",
+        choices=tuple(TEXTURE_FILE_MAP),
+        default="jinduan",
+        help="Texture preset packaged with the DexSim reference demo.",
+    )
+    parser.set_defaults(device="cuda", physics="newton")
+    return parser
+
+
+def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for the cloth-twist demo."""
+    parser = build_parser()
+    args = parser.parse_args() if argv is None else parser.parse_args(argv)
+    if args.physics != "newton":
+        parser.error("Cloth requires --physics newton.")
+    if not str(args.device).startswith("cuda"):
+        parser.error("EmbodiChain cloth currently requires a CUDA device.")
+    if args.num_envs != 1:
+        parser.error("This cloth demo currently supports --num_envs 1.")
+    if args.iterations <= 0:
+        parser.error("--iterations must be positive.")
+    return args
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = parse_arguments()
+
+
+import math
 
 import numpy as np
 
 from embodichain.data import get_data_path
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     SurfaceElementPropertiesCfg,
@@ -41,53 +94,15 @@ from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.utils import logger
 
 ASSET_DATASET = "DeformableDemoData"
-TEXTURE_FILE_MAP = {
-    "mianbu": "mianbu.png",
-    "shabu": "shabu.png",
-    "mabu": "mabu.png",
-    "pige": "pige.png",
-    "jinduan": "jinduan.png",
-    "niuzai": "niuzai.png",
-}
 
 FPS = 60
 NUM_SUBSTEPS = 10
 SOLVER_ITERATIONS = 4
-DEFAULT_FRAMES = 1000
 ROTATION_ANGULAR_VELOCITY = math.pi / 3.0
 ROTATION_END_TIME = 30.0
 MESH_SCALE = 0.01
 GRID_SIZE = 50
 CLOTH_POSITION = (0.0, 0.0, 0.75)
-
-
-def parse_arguments() -> argparse.Namespace:
-    """Parse command-line arguments for the cloth-twist demo."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--iterations",
-        type=int,
-        default=DEFAULT_FRAMES,
-        help="Number of 60 Hz simulation frames.",
-    )
-    parser.add_argument(
-        "--cloth-material",
-        choices=tuple(TEXTURE_FILE_MAP),
-        default="jinduan",
-        help="Texture preset packaged with the DexSim reference demo.",
-    )
-    parser.set_defaults(device="cuda", physics="newton")
-    args = parser.parse_args()
-    if args.physics != "newton":
-        parser.error("Cloth requires --physics newton.")
-    if not str(args.device).startswith("cuda"):
-        parser.error("EmbodiChain cloth currently requires a CUDA device.")
-    if args.num_envs != 1:
-        parser.error("This cloth demo currently supports --num_envs 1.")
-    if args.iterations <= 0:
-        parser.error("--iterations must be positive.")
-    return args
 
 
 def prepare_cloth_asset(
@@ -327,9 +342,9 @@ def configure_window_camera(sim: SimulationManager) -> None:
         )
 
 
-def main() -> None:
+def main(args: argparse.Namespace | None = None) -> None:
     """Create the scene and execute the finite cloth-twist trajectory."""
-    args = parse_arguments()
+    args = parse_arguments() if args is None else args
     texture_path, vertices, triangles, uv_coords = prepare_cloth_asset(
         args.cloth_material
     )
@@ -378,4 +393,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

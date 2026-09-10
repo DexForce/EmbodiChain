@@ -23,30 +23,15 @@ from __future__ import annotations
 
 import argparse
 import time
-
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import (
-    MassPropertiesCfg,
-    RenderCfg,
-    RigidBodyMaterialCfg,
-    RigidBodyPhysicsCfg,
-    physics_cfg_for_backend,
-)
-from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
-from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.data import get_data_path
+from embodichain.cli.sim import add_sim_args_to_parser
 
 
-def main() -> None:
-    """Main function to create and run the simulation scene."""
-
-    # Parse command line arguments
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
     parser = argparse.ArgumentParser(
         description="Create a simulation scene with SimulationManager"
     )
-    add_env_launcher_args_to_parser(parser)
+    add_sim_args_to_parser(parser)
     parser.add_argument(
         "--max_steps",
         type=int,
@@ -67,7 +52,35 @@ def main() -> None:
         default=None,
         help="Optional mp4 output path for headless recording.",
     )
-    args = parser.parse_args()
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import (
+    MassPropertiesCfg,
+    RenderCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
+    physics_cfg_for_backend,
+)
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
+from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
+from embodichain.data import get_data_path
+
+
+def main(args: argparse.Namespace | None = None) -> None:
+    """Main function to create and run the simulation scene."""
+
+    # Parse command line arguments
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
     # Configure the simulation
     sim_cfg = SimulationManagerCfg(
         width=1920,
@@ -210,4 +223,4 @@ def run_simulation(
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

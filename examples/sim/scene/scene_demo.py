@@ -23,6 +23,30 @@ from __future__ import annotations
 import argparse
 import time
 from pathlib import Path
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create a simulation scene with SimulationManager"
+    )
+    parser.add_argument(
+        "--scene",
+        type=str,
+        default="kitchen",
+        choices=["kitchen", "factory", "office", "local"],
+        help="Choose which scene to load",
+    )
+    add_sim_args_to_parser(parser)
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
 import math
 import embodichain.utils.logger as logger
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -39,7 +63,6 @@ from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot
 from embodichain.data.assets.scene_assets import SceneData
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 
 
 def resolve_asset_path(scene_name: str) -> str:
@@ -88,19 +111,10 @@ def run_simulation(sim: SimulationManager):
         logger.log_info("Simulation terminated successfully.")
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Create a simulation scene with SimulationManager"
-    )
-    parser.add_argument(
-        "--scene",
-        type=str,
-        default="kitchen",
-        choices=["kitchen", "factory", "office", "local"],
-        help="Choose which scene to load",
-    )
-    add_env_launcher_args_to_parser(parser)
-    args = parser.parse_args()
+def main(args: argparse.Namespace | None = None) -> None:
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
 
     logger.log_info(f"Initializing scene '{args.scene}'")
 
@@ -195,4 +209,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

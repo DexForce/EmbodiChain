@@ -19,6 +19,14 @@ from __future__ import annotations
 from dataclasses import field
 
 from embodichain.utils import configclass
+from embodichain.cli._visualization import (
+    _DEFAULT_HOST,
+    _DEFAULT_PORT,
+    _DEFAULT_SCENE_FPS,
+    _DEFAULT_IMAGE_FPS,
+    _DEFAULT_SOFT_BODY_FPS,
+    _DEFAULT_ENV_IDS,
+)
 
 __all__ = ["VisualizationCfg", "ViserServerCfg"]
 
@@ -35,8 +43,8 @@ class ViserServerCfg:
         verbose: Whether Viser should print server diagnostics.
     """
 
-    host: str = "127.0.0.1"
-    port: int = 8080
+    host: str = _DEFAULT_HOST
+    port: int = _DEFAULT_PORT
     label: str = "EmbodiChain"
     verbose: bool = False
 
@@ -75,12 +83,12 @@ class VisualizationCfg:
     """
 
     backend: str = "none"
-    scene_fps: float = 15.0
-    env_ids: list[int] | None = [0]
+    scene_fps: float = _DEFAULT_SCENE_FPS
+    env_ids: list[int] | None = list(_DEFAULT_ENV_IDS)
     max_visible_envs: int | None = None
     point_cloud_max_points: int = 100_000
-    sensor_image_fps: float | None = 2.0
-    soft_body_fps: float = 5.0
+    sensor_image_fps: float | None = _DEFAULT_IMAGE_FPS
+    soft_body_fps: float = _DEFAULT_SOFT_BODY_FPS
     allow_commands: bool = False
     viser_server: ViserServerCfg = field(default_factory=ViserServerCfg)
 

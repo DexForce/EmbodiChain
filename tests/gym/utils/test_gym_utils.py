@@ -587,7 +587,7 @@ def test_launcher_seed_overrides_gym_config() -> None:
     add_env_launcher_args_to_parser(parser, require_gym_config=True)
 
     args = parser.parse_args(["--gym_config", "gym_config.yaml", "--seed", "1234"])
-    merged_config = merge_args_with_gym_config(args, {"seed": 99})
+    merged_config = merge_args_with_gym_config(args, {"physics": "default", "seed": 99})
 
     assert merged_config["seed"] == 1234
 
@@ -598,7 +598,7 @@ def test_launcher_preserves_config_seed_without_override() -> None:
     add_env_launcher_args_to_parser(parser, require_gym_config=True)
 
     args = parser.parse_args(["--gym_config", "gym_config.yaml"])
-    merged_config = merge_args_with_gym_config(args, {"seed": 99})
+    merged_config = merge_args_with_gym_config(args, {"physics": "default", "seed": 99})
 
     assert merged_config["seed"] == 99
 
@@ -1680,6 +1680,7 @@ class TestConfigToCfgFromFile:
         """Task deployments default to native interaction and can opt out."""
         config = {
             "id": "EmbodiedEnv-v1",
+            "physics": "default",
             "env": {},
             "robot": {"uid": "TestRobot"},
         }
@@ -1707,6 +1708,7 @@ class TestConfigToCfgFromFile:
             path,
             {
                 "id": "EmbodiedEnv-v1",
+                "physics": "default",
                 "env": {},
                 "robot": {"uid": "robot"},
                 "robot_ik_gizmo": settings,
@@ -2110,3 +2112,54 @@ def test_load_trajectory_rejects_misaligned_state_action_steps():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_launcher_omissions_preserve_runtime_configuration() -> None:
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    args = parser.parse_args(["--gym_config", "task.yaml"])
+    config = dict(
+        physics="newton",
+        num_envs=8,
+        arena_space=2.5,
+        gpu_id=1,
+        device="cuda:1",
+        headless=True,
+        seed=123,
+    )
+    assert merge_args_with_gym_config(args, config) == config
+
+
+def test_launcher_explicit_runtime_overrides_win() -> None:
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    args = parser.parse_args(
+        [
+            "--gym_config",
+            "task.yaml",
+            "--num_envs",
+            "2",
+            "--arena_space",
+            "3",
+            "--gpu_id",
+            "0",
+            "--seed",
+            "0",
+        ]
+    )
+    config = dict(physics="newton", num_envs=8, arena_space=2.5, gpu_id=1, seed=123)
+    merged = merge_args_with_gym_config(args, config)
+    assert (
+        merged["num_envs"],
+        merged["arena_space"],
+        merged["gpu_id"],
+        merged["seed"],
+    ) == (2, 3.0, 0, 0)
+
+
+def test_launcher_can_explicitly_disable_configured_headless() -> None:
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    args = parser.parse_args(["--gym_config", "task.yaml", "--no-headless"])
+    merged = merge_args_with_gym_config(args, {"physics": "default", "headless": True})
+    assert merged["headless"] is False

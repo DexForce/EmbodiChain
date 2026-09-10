@@ -46,6 +46,9 @@ class BasePlannerCfg:
 
     planner_type: str = "base"
 
+    sim_instance_id: int = 0
+    """ID of the SimulationManager that owns ``robot_uid``. Defaults to 0."""
+
 
 @configclass
 class PlanOptions:
@@ -210,7 +213,9 @@ class BasePlanner(ABC):
         if cfg.robot_uid is MISSING:
             logger.log_error("robot_uid is required in planner config", ValueError)
 
-        self.robot = SimulationManager.get_instance().get_robot(cfg.robot_uid)
+        self.robot = SimulationManager.get_instance(cfg.sim_instance_id).get_robot(
+            cfg.robot_uid
+        )
         if self.robot is None:
             logger.log_error(f"Robot {cfg.robot_uid} not found", ValueError)
 

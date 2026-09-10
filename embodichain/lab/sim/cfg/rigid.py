@@ -149,7 +149,7 @@ class CollisionPropertiesCfg:
     """Collision-shape properties with identical intent across both backends.
 
     The framework default contact envelope is ``contact_offset=0.002`` and
-    ``rest_offset=0.001``. The contact envelope is expressed once with
+    ``rest_offset=0.0``. The contact envelope is expressed once with
     Default-backend terminology and is compiled to Newton's ``margin``/``gap``
     representation at the Spawn boundary. Pass ``None`` explicitly for a
     sparse source-asset overlay. Mesh approximation and SDF cooking belong to

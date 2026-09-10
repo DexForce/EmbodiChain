@@ -43,74 +43,34 @@ import sys
 import time
 from pathlib import Path
 
-import torch
-
-# Prefer the in-repo source over any installed (possibly stale) embodichain
-# package, so this example exercises the current code. The demo relies on the
-# cuRobo adapter's URDF-based robot-YAML auto-generation, which lives in the
-# source tree and may not be present in an older installed copy.
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.visualization import (
-    VisualizationCfg,
-    visualization_cfg_from_args,
+from embodichain.cli.sim import (
+    add_sim_args_to_parser,
+    add_seed_arg_to_parser,
+    resolve_seed,
 )
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
-    AtomicActionEngine,
-    EndEffectorPoseGoal,
-    MotionPolicy,
-)
-from embodichain.data import get_data_path
-from embodichain.lab.sim.cfg import (
-    RenderCfg,
-    RigidBodyPhysicsCfg,
-    physics_cfg_for_backend,
-)
-from embodichain.lab.sim.objects import RigidObjectCfg, Robot, RigidObject
-from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
-from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
-    CuroboPlanOptions,
-    CuroboPlannerCfg,
-    CuroboWorldCfg,
-)
-import numpy as np
-from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg, DexforceW1Cfg
-from embodichain.lab.sim.shapes import CubeCfg
-
-__all__ = ["main"]
-
 
 DEFAULT_RECORD_FPS = 20
-DEFAULT_RECORD_MAX_MEMORY = 2048
+
 DEFAULT_MAX_ATTEMPTS = 2
+
 DEFAULT_OBSTACLE_XY_PERTURBATION = 0.02
+
 DEFAULT_OBSTACLE_YAW_PERTURBATION_DEG = 5.0
+
 DEFAULT_RANDOM_SEED = 0
-DEFAULT_RECORD_LOOK_AT = (
-    (1.8, -1.8, 1.35),
-    (0.35, 0.10, 0.40),
-    (0.0, 0.0, 1.0),
-)
-CUROBO_INSTALL_URL = (
-    "https://nvlabs.github.io/curobo/latest/getting-started/installation.html"
-)
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse the interactive/headless playback and recording controls."""
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
     parser = argparse.ArgumentParser(
         description="Run cuRobo V2 through EmbodiChain AtomicActionEngine."
     )
-    add_env_launcher_args_to_parser(parser)
-    # This standalone example does not merge a gym config after parsing, so
-    # override the launcher's ``None`` sentinels with concrete defaults. cuRobo
-    # itself requires CUDA; keeping that default explicit avoids passing the
-    # shared parser's omission sentinel into ``torch.device``.
+    add_sim_args_to_parser(parser)
+    # cuRobo requires CUDA independently of the selected physics backend.
     parser.set_defaults(device="cuda", arena_space=2.0, num_envs=1)
     # Backward-compatible aliases used by older versions of this example.
     parser.add_argument(
@@ -175,11 +135,10 @@ def parse_args() -> argparse.Namespace:
             "num_envs > 1."
         ),
     )
-    parser.add_argument(
-        "--seed",
-        type=int,
+    add_seed_arg_to_parser(
+        parser,
         default=DEFAULT_RANDOM_SEED,
-        help="Random seed used for per-environment obstacle perturbations.",
+        scope="multi-environment obstacle perturbations (not cuRobo solver sampling)",
     )
     parser.add_argument(
         "--cuda-graph",
@@ -191,7 +150,67 @@ def parse_args() -> argparse.Namespace:
             "--no-cuda-graph to disable)."
         ),
     )
-    return parser.parse_args()
+    return parser
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse the interactive/headless playback and recording controls."""
+    parser = build_parser()
+    return parser.parse_args() if argv is None else parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = parse_args()
+
+
+import torch
+
+# Prefer the in-repo source over any installed (possibly stale) embodichain
+# package, so this example exercises the current code. The demo relies on the
+# cuRobo adapter's URDF-based robot-YAML auto-generation, which lives in the
+# source tree and may not be present in an older installed copy.
+
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import (
+    VisualizationCfg,
+    visualization_cfg_from_args,
+)
+from embodichain.lab.sim.atomic_actions import (
+    ActionInvocation,
+    AtomicActionEngine,
+    EndEffectorPoseGoal,
+    MotionPolicy,
+)
+from embodichain.data import get_data_path
+from embodichain.lab.sim.cfg import (
+    RenderCfg,
+    RigidBodyPhysicsCfg,
+    physics_cfg_for_backend,
+)
+from embodichain.lab.sim.objects import RigidObjectCfg, Robot, RigidObject
+from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
+from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
+    CuroboPlanOptions,
+    CuroboPlannerCfg,
+    CuroboWorldCfg,
+)
+import numpy as np
+from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg, DexforceW1Cfg
+from embodichain.lab.sim.shapes import CubeCfg
+
+__all__ = ["main"]
+
+
+DEFAULT_RECORD_MAX_MEMORY = 2048
+DEFAULT_RECORD_LOOK_AT = (
+    (1.8, -1.8, 1.35),
+    (0.35, 0.10, 0.40),
+    (0.0, 0.0, 1.0),
+)
+CUROBO_INSTALL_URL = (
+    "https://nvlabs.github.io/curobo/latest/getting-started/installation.html"
+)
 
 
 def _resolve_device(device: str, gpu_id: int) -> str:
@@ -674,9 +693,11 @@ def _final_tcp_errors(
     )
 
 
-def main() -> None:
+def main(args: argparse.Namespace | None = None) -> None:
     """Plan and replay one batched collision-aware end-effector action."""
-    args = parse_args()
+    args = parse_args() if args is None else args
+    args.seed = resolve_seed(args.seed)
+    print(f"[INFO]: Obstacle seed: {args.seed}", flush=True)
     if args.step_repeat < 1:
         raise ValueError("--step-repeat must be at least 1.")
     if args.hold_steps < 0:
@@ -856,9 +877,11 @@ def main() -> None:
             if sim.is_window_recording():
                 sim.stop_window_record()
                 sim.wait_window_record_saves()
-            sim.destroy()
-            SimulationManager.flush_cleanup_queue()
+            sim.destroy(exit_process=False)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main(_cli_args)
+    finally:
+        SimulationManager.flush_cleanup_queue()

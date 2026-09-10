@@ -220,6 +220,10 @@ def _capture_dexsim_source_physics(
             com_position=com_position if source_inertia_valid else None,
             com_quaternion=com_quaternion if source_inertia_valid else None,
         )
+        if link.rigid_body is not None:
+            collision_filter = link.rigid_body.collision_filter_data
+            if collision_filter is not None:
+                body.collision_filter_data = collision_filter.copy()
         link.rigid_body = body
         link.replace_inertial = False
         link._inertia_from_source = source_inertia_valid

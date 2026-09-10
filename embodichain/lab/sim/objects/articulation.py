@@ -911,6 +911,11 @@ class Articulation(BatchEntity):
                 # Spawn already authored the root pose and zero joint/dynamics
                 # state during model construction. Its Batch mutation APIs are
                 # intentionally fenced once the model requires gradients.
+            elif self._data.is_newton_backend:
+                # The finalized model starts with clean dynamics. Clearing one
+                # facade here would select only part of a multi-articulation
+                # world, which Newton's MuJoCo solver explicitly rejects.
+                self.reset(clear_dynamics=False)
             else:
                 self.reset()
         except Exception:
@@ -2198,13 +2203,13 @@ class Articulation(BatchEntity):
             entity = self._entities[env_idx]
             for j, name in enumerate(names):
                 value = np.asarray(values[i, j], dtype=np.float32)
-                if self.is_spawn_bound and self._data.is_newton_backend:
-                    entity.set_newton_link_properties(
-                        name,
-                        rigid_body=dexsim.spawn.RigidBodyPhysicsDesc.dynamic(
-                            inertia=value
-                        ),
-                    )
+                if self.is_spawn_bound:
+                    status = entity.set_link_inertia(name, value)
+                    if status < 0:
+                        raise RuntimeError(
+                            f"set_link_inertia failed for env {env_idx}, "
+                            f"link {name!r}, with status {status}."
+                        )
                 elif not self._data.is_newton_backend:
                     entity.get_physical_body(name).set_mass_space_inertia_tensor(value)
                 else:
@@ -2256,14 +2261,13 @@ class Articulation(BatchEntity):
                     convert_quat(values[i, j, 3:7], to="wxyz"),
                     dtype=np.float32,
                 )
-                if self.is_spawn_bound and self._data.is_newton_backend:
-                    entity.set_newton_link_properties(
-                        name,
-                        rigid_body=dexsim.spawn.RigidBodyPhysicsDesc.dynamic(
-                            com_position=position,
-                            com_quaternion=quaternion,
-                        ),
-                    )
+                if self.is_spawn_bound:
+                    status = entity.set_link_com_pose(name, position, quaternion)
+                    if status < 0:
+                        raise RuntimeError(
+                            f"set_link_com_pose failed for env {env_idx}, "
+                            f"link {name!r}, with status {status}."
+                        )
                 elif not self._data.is_newton_backend:
                     entity.get_physical_body(name).set_cmass_local_pose(
                         position,

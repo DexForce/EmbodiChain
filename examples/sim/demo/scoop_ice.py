@@ -22,8 +22,23 @@ and performs a scoop ice task in a simulated environment.
 from __future__ import annotations
 
 import argparse
-import numpy as np
 import time
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(description="Scoop ice task simulation")
+    add_sim_args_to_parser(parser)
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
+import numpy as np
 import torch
 from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
@@ -46,7 +61,6 @@ from embodichain.compute.trajectory import interpolate_with_distance
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.robots import URRobotCfg
 
 
@@ -548,10 +562,10 @@ def scoop_ice(sim: SimulationManager, robot: Robot, scoop: RigidObject):
         sim.update(step=10)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Scoop ice task simulation")
-    add_env_launcher_args_to_parser(parser)
-    args = parser.parse_args()
+def main(args: argparse.Namespace | None = None) -> None:
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
 
     """
     Main function to demonstrate robot simulation.
@@ -590,4 +604,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

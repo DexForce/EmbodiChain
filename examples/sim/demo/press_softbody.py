@@ -19,12 +19,37 @@
 from __future__ import annotations
 
 import argparse
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_sim_args_to_parser(parser)
+    parser.set_defaults(device="cuda", physics="newton")
+    return parser
+
+
+def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for the demo."""
+    parser = build_parser()
+    args = parser.parse_args() if argv is None else parser.parse_args(argv)
+    if args.physics != "newton":
+        parser.error("Soft bodies require --physics newton.")
+    if not str(args.device).startswith("cuda"):
+        parser.error("EmbodiChain soft bodies currently require a CUDA device.")
+    return args
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = parse_arguments()
+
 
 import numpy as np
 import torch
 from dexsim.utility.path import get_resources_data_path
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     NewtonPhysicsCfg,
@@ -53,19 +78,6 @@ SOFT_CONTACT_MU = 1.0
 COW_POSITION = (0.45, -0.1, 0.12)
 PRESS_POSITION = (0.5, -0.1, 0.04)
 APPROACH_HEIGHT = 0.015
-
-
-def parse_arguments() -> argparse.Namespace:
-    """Parse command-line arguments for the demo."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    add_env_launcher_args_to_parser(parser)
-    parser.set_defaults(device="cuda", physics="newton")
-    args = parser.parse_args()
-    if args.physics != "newton":
-        parser.error("Soft bodies require --physics newton.")
-    if not str(args.device).startswith("cuda"):
-        parser.error("EmbodiChain soft bodies currently require a CUDA device.")
-    return args
 
 
 def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
@@ -251,9 +263,9 @@ def register_press_trajectory(
     sim.register_kinematic_joint_trajectory("UR10", playback)
 
 
-def main() -> None:
+def main(args: argparse.Namespace | None = None) -> None:
     """Create the scene, settle the cow, and execute the pressing motion."""
-    args = parse_arguments()
+    args = parse_arguments() if args is None else args
     sim = initialize_simulation(args)
 
     try:
@@ -281,4 +293,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

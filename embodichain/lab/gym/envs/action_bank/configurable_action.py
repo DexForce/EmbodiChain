@@ -1330,7 +1330,11 @@ class GeneralActionBank(ActionBank):
 
         else:
             mo_gen = MotionGenerator(
-                cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=env.robot.uid))
+                cfg=MotionGenCfg(
+                    planner_cfg=ToppraPlannerCfg(
+                        robot_uid=env.robot.uid, sim_instance_id=env.sim.instance_id
+                    )
+                )
             )
 
             if len(ref_poses) == 0:

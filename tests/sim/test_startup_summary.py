@@ -46,6 +46,7 @@ def _sim(physics_cfg=None):
                 else "TGS"
             ),
             cuda_graph_status="pending",
+            sync_render_state=lambda result: None,
         ),
         _requested_renderer="auto",
         _requested_solver="auto",

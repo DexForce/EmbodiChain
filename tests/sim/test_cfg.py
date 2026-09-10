@@ -331,7 +331,7 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "is_solid",
         "collision_group",
         "collision_filter_parent",
-        "has_particle_collision",
+        "condim",  # Solver-specific contact dimensionality stays in DexSim.
         "is_visible",
         "is_site",
     }
@@ -481,7 +481,7 @@ def test_portable_collision_envelope_uses_the_shared_default_profile() -> None:
     common = CollisionPropertiesCfg()
 
     assert common.contact_offset == pytest.approx(0.002)
-    assert common.rest_offset == pytest.approx(0.001)
+    assert common.rest_offset == pytest.approx(0.0)
     assert DefaultCollisionPropertiesCfg().contact_offset is None
     assert DefaultCollisionPropertiesCfg().rest_offset is None
     assert NewtonCollisionPropertiesCfg().contact_offset is None

@@ -514,11 +514,14 @@ class SimulationManager:
         defer_startup_summary: bool = False,
     ):
         """Create or return the instance based on instance_id."""
-        n_instance = len(list(cls._instances.keys()))
+        n_instance = 0
+        while n_instance in cls._instances:
+            n_instance += 1
         instance = super(SimulationManager, cls).__new__(cls)
         # Store sim_config in the instance for use in __init__ or elsewhere
         instance.sim_config = sim_config
         instance._is_constructed = False
+        instance.instance_id = n_instance
         cls._instances[n_instance] = instance
         return instance
 
@@ -538,10 +541,7 @@ class SimulationManager:
             if isinstance(solver_cfg, Mapping)
             else getattr(solver_cfg, "solver_type", "auto")
         )
-        instance_id = SimulationManager.get_instance_num() - 1
-
-        # Mark as initialized
-        self.instance_id = instance_id
+        instance_id = self.instance_id
 
         # Cache paths
         self._sim_cache_dir = SIM_CACHE_DIR
@@ -2616,9 +2616,9 @@ class SimulationManager:
                 actor_a = rigid_object_a._entities[env_id]
                 actor_b = rigid_object_b._entities[env_id]
                 if getattr(rigid_object_a, "is_spawn_bound", False) is True:
-                    actor_a = actor_a.native
+                    actor_a = actor_a.native()
                 if getattr(rigid_object_b, "is_spawn_bound", False) is True:
-                    actor_b = actor_b.native
+                    actor_b = actor_b.native()
                 if actor_a is None or actor_b is None:
                     logger.log_error(
                         f"Constraint '{cfg.name}' references a released Spawn actor "
@@ -4683,8 +4683,10 @@ class SimulationManager:
         # After the queue is emptied, perform a top-level full GC to thoroughly reclaim dead objects that haven't released their RefPtrs yet
         gc.collect()
 
-        # At this point, wait for the C++ Scene to return to zero, since the stack is at the top level, there will definitely be no deadlock
-        SimulationManager.wait_scene_destruction()
+        # Other live managers still own native worlds; their world count must
+        # not be mistaken for an incomplete teardown of the drained tasks.
+        if not SimulationManager._instances:
+            SimulationManager.wait_scene_destruction()
 
 
 def get_physics_scene(instance_id: int = 0):

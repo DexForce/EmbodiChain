@@ -27,6 +27,16 @@ component ownership, path resolution, config-owned IDs, and task listing.
 Read [execution](execution.md) for hooks, bridge acceptance, reset ordering,
 wrappers, and replay. Read [profiling](profiling.md) only for instrumentation.
 
+## Launcher argument ownership
+
+`add_env_launcher_args_to_parser()` composes the lightweight simulation options
+from `embodichain.cli.sim` with Gym config, seed and recording options. When
+`require_gym_config=True`, omitted runtime overrides stay `None`: `num_envs`,
+`device`, `headless`, `renderer`, `physics`, `arena_space`, and `gpu_id` preserve
+file-owned values. Explicit values override runtime settings (`--headless` / `--no-headless`
+select either mode); `--physics` can only confirm the file-owned backend. An omitted seed preserves the config seed.
+Standalone examples use `add_sim_args_to_parser()` and opt into seed separately.
+
 ## Timing contract
 
 `BaseEnv._configure_timing()` resolves `EnvCfg` before constructing the scene:
@@ -97,3 +107,14 @@ configuration detail page as the owner of physical/semantic composition rules.
 - Controller width/device errors: inspect `_prepare_controller_action()` and the
   active/full joint mapping before changing an action term.
 - Early or stale success: preserve bridge completion and reset ordering.
+
+## Initialization failure cleanup
+
+`BaseEnv` queues teardown of its owned simulation when scene declaration, preparation or
+later base initialization fails. `EmbodiedEnv` applies the same boundary to
+post-base manager/buffer initialization, finalizing an initialized dataset
+manager first. Cleanup disables process exit and retains the original error
+if resource cleanup also fails. The caller drains `SimulationManager.flush_cleanup_queue()`
+after the failed constructor has unwound and its traceback is released, as for
+ordinary deferred destruction. Draining inside the exception handler is unsafe:
+the traceback can retain native resources not yet registered with the manager.

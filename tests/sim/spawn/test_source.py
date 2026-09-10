@@ -28,6 +28,7 @@ from embodichain.lab.sim.spawn.source import (
     _apply_dexsim_source_overlay,
     _capture_dexsim_source_physics,
     _clear_invalid_source_com,
+    _retain_dexsim_source_descriptor,
 )
 
 pytestmark = pytest.mark.no_sim
@@ -206,4 +207,51 @@ def _physical_body(*, inertia, com_position):
         mass=1.0,
         inertia=inertia,
         com_position=com_position,
+    )
+
+
+def test_source_capture_preserves_instance_collision_filter(tmp_path) -> None:
+    urdf = tmp_path / "robot.urdf"
+    urdf.write_text('<robot name="robot"><link name="base"/></robot>')
+    link = _link("base")
+    link.rigid_body = _physical_body(inertia=None, com_position=None)
+    expected = np.asarray([3, 1, 0, 0], dtype=np.uint32)
+    link.rigid_body.collision_filter_data = expected.copy()
+    desc = ArticulationDesc(name="robot", links=[link], urdf_path=str(urdf))
+    handle = SimpleNamespace(
+        get_physical_attr=lambda _name: _physical_attr(1.0, (1.0, 1.0, 1.0))
+    )
+
+    _capture_dexsim_source_physics(handle, desc)
+
+    np.testing.assert_array_equal(link.rigid_body.collision_filter_data, expected)
+
+
+def test_source_retention_keeps_each_replica_collision_filter() -> None:
+    source_link = _link("base")
+    source_link.rigid_body = _physical_body(inertia=None, com_position=None)
+    source_link.rigid_body.collision_filter_data = np.asarray(
+        [0, 1, 0, 0], dtype=np.uint32
+    )
+    source = ArticulationDesc(name="robot", links=[source_link])
+    for env_id in (0, 2):
+        replica_link = _link("base")
+        replica_link.rigid_body = _physical_body(inertia=None, com_position=None)
+        expected = np.asarray([env_id, 1, 0, 0], dtype=np.uint32)
+        replica_link.rigid_body.collision_filter_data = expected.copy()
+        handle = SimpleNamespace(
+            _physics_binding=object(),
+            articulation_desc=ArticulationDesc(name="robot", links=[replica_link]),
+            _desc_shared=True,
+        )
+
+        retained = _retain_dexsim_source_descriptor(handle, source)
+
+        np.testing.assert_array_equal(
+            retained.links[0].rigid_body.collision_filter_data, expected
+        )
+        assert retained is handle.articulation_desc
+        assert not handle._desc_shared
+    np.testing.assert_array_equal(
+        source_link.rigid_body.collision_filter_data, [0, 1, 0, 0]
     )

@@ -59,7 +59,7 @@ import os
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.cli.sim import add_sim_args_to_parser
 from embodichain.utils.logger import log_info, log_warning, log_error
 
 if TYPE_CHECKING:
@@ -364,7 +364,12 @@ def _create_parser() -> argparse.ArgumentParser:
         prog="embodichain preview-asset",
         description="Preview a USD or mesh asset in the EmbodiChain simulation.",
     )
-    add_env_launcher_args_to_parser(parser)
+    add_sim_args_to_parser(parser)
+    parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="Open an interactive Python preview session after loading assets.",
+    )
 
     parser.add_argument(
         "--asset_path",

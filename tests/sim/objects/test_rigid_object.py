@@ -15,6 +15,8 @@
 # ----------------------------------------------------------------------------
 from __future__ import annotations
 
+from typing import Any
+
 import os
 
 import numpy as np
@@ -66,6 +68,15 @@ def _teardown_newton_physics() -> None:
     from dexsim.engine.newton_physics import teardown_newton_physics
 
     teardown_newton_physics()
+
+
+def _assert_newton_collision_groups(entity: Any, env_index: int) -> None:
+    """Inspect every runtime shape, including static shapes without body IDs."""
+    # The public batch fetches one filter row; this regression checks all shapes.
+    binding = entity._physics_binding
+    assert binding.shape_ids
+    groups = binding._runtime.model.shape_collision_group.numpy()
+    assert {int(groups[shape_id]) for shape_id in binding.shape_ids} == {env_index + 1}
 
 
 class BaseRigidObjectTest:
@@ -132,19 +143,12 @@ class BaseRigidObjectTest:
             for rigid_object in (self.duck, self.table, self.chair):
                 entity = rigid_object._entities[env_index]
                 if self.physics == "newton":
-                    shape_ids = entity.physics_body.shape_ids
-                    assert shape_ids
-                    groups = (
-                        entity.physics_body.runtime.model.shape_collision_group.numpy()
-                    )
-                    assert {int(groups[shape_id]) for shape_id in shape_ids} == {
-                        env_index + 1
-                    }
-                else:
-                    np.testing.assert_array_equal(
-                        entity.object_desc.physics.collision_filter_data,
-                        np.asarray([env_index, 1, 0, 0], dtype=np.uint32),
-                    )
+                    _assert_newton_collision_groups(entity, env_index)
+                    continue
+                np.testing.assert_array_equal(
+                    entity.object_desc.physics.collision_filter_data,
+                    np.asarray([env_index, 1, 0, 0], dtype=np.uint32),
+                )
 
     def test_spawn_clones_distinct_entities(self):
         """Multi-env rigid objects are spawned via prototype + clone_actor_to."""

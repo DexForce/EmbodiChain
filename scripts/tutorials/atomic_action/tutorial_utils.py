@@ -29,7 +29,7 @@ import numpy as np
 import torch
 
 from embodichain.data import get_data_path
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.cli.sim import add_sim_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.atomic_actions import (
@@ -159,7 +159,7 @@ def create_tutorial_argument_parser(
 ) -> argparse.ArgumentParser:
     """Create a launcher parser with the shared atomic-tutorial switches."""
     parser = argparse.ArgumentParser(description=description)
-    add_env_launcher_args_to_parser(parser)
+    add_sim_args_to_parser(parser)
     defaults = {}
     if default_device is not None:
         defaults["device"] = default_device

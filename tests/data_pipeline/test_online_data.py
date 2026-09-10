@@ -33,6 +33,7 @@ import os
 import sys
 import threading
 import unittest
+from types import SimpleNamespace
 from queue import Empty
 from unittest.mock import MagicMock
 
@@ -287,6 +288,78 @@ class TestOnlineDataEngine:
         forwarded = self.engine._receive_worker_error()
         assert isinstance(forwarded, ValueError)
         assert str(forwarded) == "planner failed"
+
+    def test_worker_registers_tasks_before_creating_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A forkserver worker registers task environments before gym.make."""
+        import gymnasium as gym
+
+        from embodichain.lab.gym.utils import gym_utils, registration
+
+        task_packages_registered = False
+
+        def discover_task_packages() -> list[str]:
+            nonlocal task_packages_registered
+            task_packages_registered = True
+            return ["embodichain_tasks"]
+
+        env = MagicMock()
+        env_cfg = SimpleNamespace(
+            filter_dataset_saving=False,
+            init_rollout_buffer=True,
+            max_episode_steps=None,
+            sim_cfg=SimpleNamespace(
+                headless=False,
+                render_cfg=SimpleNamespace(renderer=None),
+                gpu_id=None,
+                device=None,
+            ),
+            num_envs=1,
+        )
+
+        def make_environment(*, id: str, cfg: object) -> MagicMock:
+            assert id == "SimpleTask-v1"
+            assert cfg is env_cfg
+            assert task_packages_registered
+            return env
+
+        monkeypatch.setattr(
+            registration, "discover_task_packages", discover_task_packages
+        )
+        monkeypatch.setattr(
+            gym_utils, "config_to_cfg", lambda *_args, **_kwargs: env_cfg
+        )
+        monkeypatch.setattr(gym_utils, "get_manager_modules", lambda: [])
+        monkeypatch.setattr(gym, "make", make_environment)
+
+        context = mp.get_context("forkserver")
+        fill_signal = context.Event()
+        close_signal = context.Event()
+        fill_signal.set()
+        close_signal.set()
+        error_buffer = context.Array("B", engine_module._ERROR_BUFFER_SIZE)
+        error_length = context.Value("i", 0)
+
+        engine_module._run_sim_worker(
+            OnlineDataEngineCfg(
+                gym_config={"id": "SimpleTask-v1", "num_envs": 1},
+            ),
+            TensorDict({}, batch_size=[1, 1]),
+            context.Array("i", [0, 1]),
+            fill_signal,
+            context.Event(),
+            close_signal,
+            error_buffer,
+            error_length,
+            context.Event(),
+            context.Value(
+                "i", engine_module._STATE_TO_CODE[OnlineDataEngineState.STARTING]
+            ),
+            [False],
+        )
+
+        env.close.assert_called_once_with()
 
     def test_start_transitions_through_starting_to_ready(self) -> None:
         """A successful initial fill publishes the explicit lifecycle states."""

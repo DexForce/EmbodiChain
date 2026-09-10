@@ -22,8 +22,31 @@ It shows how to load a robot from URDF, set up control parts, and run basic simu
 from __future__ import annotations
 
 import argparse
-import numpy as np
 import time
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create and simulate a robot in SimulationManager"
+    )
+    add_sim_args_to_parser(parser)
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="Stop after this many physics steps (default: run until interrupted).",
+    )
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
+import numpy as np
 import torch
 
 torch.set_printoptions(precision=4, sci_mode=False)
@@ -41,27 +64,18 @@ from embodichain.lab.sim.cfg import (
     URDFCfg,
 )
 from embodichain.data import get_data_path
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 
 ACTION_SWITCH_INTERVAL = 100
 ACTION_CYCLE_STEPS = 4 * ACTION_SWITCH_INTERVAL
 
 
-def main():
+def main(args: argparse.Namespace | None = None) -> None:
     """Main function to demonstrate robot simulation."""
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="Create and simulate a robot in SimulationManager"
-    )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--max-steps",
-        type=int,
-        default=None,
-        help="Stop after this many physics steps (default: run until interrupted).",
-    )
-    args = parser.parse_args()
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
     if args.max_steps is not None and args.max_steps < 1:
         parser.error("--max-steps must be at least 1")
 
@@ -79,19 +93,23 @@ def main():
     )
     sim = SimulationManager(config)
 
-    # Create robot configuration
-    robot = create_robot(sim)
+    try:
+        # Create robot configuration
+        robot = create_robot(sim)
 
-    # Materialize the declared scene before accessing robot metadata.
-    sim.prepare()
-    print(f"Robot created successfully with {robot.dof} joints")
+        # Materialize the declared scene before accessing robot metadata.
+        sim.prepare()
+        print(f"Robot created successfully with {robot.dof} joints")
 
-    # Open visualization window if not headless
-    if not args.headless:
-        sim.open_window()
+        # Open visualization window if not headless
+        if not args.headless:
+            sim.open_window()
 
-    # Run simulation loop
-    run_simulation(sim, robot, max_steps=args.max_steps)
+        # Run simulation loop
+        run_simulation(sim, robot, max_steps=args.max_steps)
+    finally:
+        print("Cleaning up...", flush=True)
+        sim.destroy(exit_process=False)
 
 
 def create_robot(sim):
@@ -252,10 +270,10 @@ def run_simulation(
 
     except KeyboardInterrupt:
         print("Stopping simulation...")
-    finally:
-        print("Cleaning up...")
-        sim.destroy()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main(_cli_args)
+    finally:
+        SimulationManager.flush_cleanup_queue()

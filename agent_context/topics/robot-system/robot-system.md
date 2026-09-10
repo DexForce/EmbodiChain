@@ -155,6 +155,12 @@ W1 robot and hand releases use separate types and registries:
     `RobotCfg.from_dict` itself call `_build_defaults` → `merge_robot_cfg` would
     infinite-recurse.
 
+`DualArmRobotCfg.build_pk_serial_chain()` resolves each arm's own solver
+root/end frames against that arm's source URDF. Assembled prefix/case names
+are translated back to source link names; chain joints and transforms remain
+arm-local, without baking in the mounting transform. Unknown or opposite-arm
+frames are rejected.
+
 ## Control Parts
 
 `control_parts` maps a human-readable part name to a list of joint names:

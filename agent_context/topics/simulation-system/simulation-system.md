@@ -19,6 +19,25 @@ types, `BatchEntity`, and the simulation profiler. Import a specialized
 object, sensor, or atomic-action API from its own subpackage. Solver, planner,
 workspace, and trajectory-augmentation APIs live under `embodichain.lab.sim.motion`.
 
+## Standalone command-line entry points
+
+`embodichain.cli.sim.add_sim_args_to_parser()` owns simulation and Viser
+options without importing Torch, DexSim, Gym or planning libraries. Standalone
+examples expose `build_parser()` before runtime imports and parse CLI arguments
+before importing optional dependencies, so `--help` needs only the standard
+library and the source package. Gym runners use their composing launcher in
+`gym_utils.py`; examples do not register Gym configuration or recording flags.
+`--arena-space`, `--num-envs`, and `--gpu-id` alias the existing underscore
+spellings through the same argument action, not separate registrations.
+
+Seed registration is opt-in through `add_seed_arg_to_parser()`. Omission uses
+the example's concrete default; `-1` resolves to a logged random 32-bit seed.
+`resolve_seed()` does not mutate global random state or deterministic-kernel
+settings. cuRobo uses a local CPU Torch generator for multi-environment obstacle
+perturbations; this seed does not control planner sampling. The grasp-cup demo
+uses a local NumPy generator; open-drawer applies its seed to Torch IK sampling.
+Python-defined Gym tutorials pass their resolved seed into the environment cfg.
+
 ## Ownership
 
 `SimulationManager` owns one DexSim `World`, a `SpawnScene`, and the Python
@@ -229,7 +248,8 @@ rebound. `init_gpu_physics()` and `finalize_newton_physics()` remain
 compatibility aliases, but new code should call `prepare()`.
 
 `NewtonPhysicsCfg.sync_to_renderer` defaults to `None`, preserving DexSim's
-consumer-aware per-step policy instead of forcing scene-transform publication
+consumer-aware per-step policy (mapped to DexSim's `sync_to_dexsim` config
+and backend entry point) instead of forcing scene-transform publication
 for state-only headless training. `SimulationManager.render_camera_group()` and
 the environment reset-observation path explicitly publish render state on
 demand, so camera correctness does not depend on enabling every-step sync.
@@ -925,3 +945,15 @@ initialize PyTorch CUDA for diagnostics.
 
 Summary colors are enabled only on terminals without `NO_COLOR`; the default
 console handler also strips ANSI escapes from redirected ordinary logs.
+
+## Instance and source-state retention
+
+`SimulationManager` allocates an unused instance ID once during construction;
+removing an earlier instance does not overwrite a surviving manager. Cleanup
+waits for the global native-world count to reach zero only when no managers
+remain registered.
+
+Default source-physics capture preserves each link's replication collision
+filter while filling mass/COM properties. Spawn articulation mass-property
+writes use the live handle's `set_link_inertia` and `set_link_com_pose`; native
+COM quaternions are converted from EmbodiChain `xyzw` to DexSim `wxyz`.

@@ -2167,3 +2167,26 @@ embodichain_tasks.utils.importer
 .. autosummary::
 
    import_packages
+
+Standalone simulation command-line options
+-----------------------------------------
+
+``embodichain.cli.sim`` builds simulation arguments without importing the
+simulation runtime. Gym launchers compose these options with configuration
+and recording flags. Seed options are opt-in: ``resolve_seed`` resolves ``-1``
+to an effective 32-bit seed without changing random streams or deterministic
+kernel policy; callers log and apply that seed to their own generators.
+
+.. currentmodule:: embodichain.cli.sim
+
+.. autosummary::
+
+   add_sim_args_to_parser
+   add_seed_arg_to_parser
+   resolve_seed
+
+.. autofunction:: add_sim_args_to_parser
+
+.. autofunction:: add_seed_arg_to_parser
+
+.. autofunction:: resolve_seed

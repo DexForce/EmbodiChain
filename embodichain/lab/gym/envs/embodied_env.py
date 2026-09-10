@@ -366,108 +366,120 @@ class EmbodiedEnv(BaseEnv):
 
         super().__init__(cfg, **kwargs)
 
-        if task_program_adapter_factory is not None:
-            from embodichain.lab.task_program.integrations import (
-                TaskProgramEnvironmentAdapter,
-            )
-
-            adapter = task_program_adapter_factory.create_adapter(self)
-            if type(adapter) is not TaskProgramEnvironmentAdapter:
-                raise TypeError(
-                    "TaskProgramAdapterFactory.create_adapter() must return "
-                    "exactly TaskProgramEnvironmentAdapter."
+        try:
+            if task_program_adapter_factory is not None:
+                from embodichain.lab.task_program.integrations import (
+                    TaskProgramEnvironmentAdapter,
                 )
-            self._task_program_adapter = adapter
 
-        dataset_terms = getattr(self.cfg.dataset, "__dict__", self.cfg.dataset)
-        if dataset_terms and not self.cfg.filter_dataset_saving:
-            self.dataset_manager = DatasetManager(self.cfg.dataset, self)
-            self.cfg.init_rollout_buffer = True
+                adapter = task_program_adapter_factory.create_adapter(self)
+                if type(adapter) is not TaskProgramEnvironmentAdapter:
+                    raise TypeError(
+                        "TaskProgramAdapterFactory.create_adapter() must return "
+                        "exactly TaskProgramEnvironmentAdapter."
+                    )
+                self._task_program_adapter = adapter
 
-        # Rollout buffer for episode data collection.
-        # The shape of the buffer is (num_envs, max_episode_steps, *data_shape) for each key.
-        # The default key in the buffer are:
-        # - obs: the observation returned by the environment.
-        # - action: the action applied to the environment.
-        # - reward: the reward returned by the environment.
-        # TODO: we may add more keys and make the buffer extensible in the future.
-        # This buffer should also be support initialized from outside of the environment.
-        # For example, a shared rollout buffer initialized in model training process and passed to the environment for data collection.
-        self.rollout_buffer: TensorDict | None = None
-        self._max_rollout_steps = 0
-        self._rollout_buffer_mode: str | None = None
-        if self.cfg.init_rollout_buffer:
-            self.rollout_buffer = init_rollout_buffer_from_gym_space(
-                obs_space=self.observation_space,
-                action_space=self.action_space,
-                max_episode_steps=self.max_episode_steps,
-                num_envs=self.num_envs,
-                device=self.device,
-            )
-            self._max_rollout_steps = self.rollout_buffer.shape[1]
-            self._rollout_buffer_mode = "expert"
+            dataset_terms = getattr(self.cfg.dataset, "__dict__", self.cfg.dataset)
+            if dataset_terms and not self.cfg.filter_dataset_saving:
+                self.dataset_manager = DatasetManager(self.cfg.dataset, self)
+                self.cfg.init_rollout_buffer = True
 
-        # Dedicated per-env trajectory buffer (states + actions). Decoupled from
-        # rollout_buffer so async parallel envs and ActionManager are supported.
-        self._traj_buffer: TensorDict | None = None
-        self._traj_steps: torch.Tensor | None = None
-        self._traj_raw_action: EnvAction | None = None
-        self._traj_save_count = 0
-        self._traj_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        if self.cfg.record_trajectory:
-            self._traj_buffer = build_trajectory_buffer(
-                env=self,
-                max_steps=self.max_episode_steps,
-                num_envs=self.num_envs,
-                device=self.device,
-                uids=self.cfg.trajectory_uids,
-                action_space=self.action_space,
-            )
-            self._traj_steps = torch.zeros(
+            # Rollout buffer for episode data collection.
+            # The shape of the buffer is (num_envs, max_episode_steps, *data_shape) for each key.
+            # The default key in the buffer are:
+            # - obs: the observation returned by the environment.
+            # - action: the action applied to the environment.
+            # - reward: the reward returned by the environment.
+            # TODO: we may add more keys and make the buffer extensible in the future.
+            # This buffer should also be support initialized from outside of the environment.
+            # For example, a shared rollout buffer initialized in model training process and passed to the environment for data collection.
+            self.rollout_buffer: TensorDict | None = None
+            self._max_rollout_steps = 0
+            self._rollout_buffer_mode: str | None = None
+            if self.cfg.init_rollout_buffer:
+                self.rollout_buffer = init_rollout_buffer_from_gym_space(
+                    obs_space=self.observation_space,
+                    action_space=self.action_space,
+                    max_episode_steps=self.max_episode_steps,
+                    num_envs=self.num_envs,
+                    device=self.device,
+                )
+                self._max_rollout_steps = self.rollout_buffer.shape[1]
+                self._rollout_buffer_mode = "expert"
+
+            # Dedicated per-env trajectory buffer (states + actions). Decoupled from
+            # rollout_buffer so async parallel envs and ActionManager are supported.
+            self._traj_buffer: TensorDict | None = None
+            self._traj_steps: torch.Tensor | None = None
+            self._traj_raw_action: EnvAction | None = None
+            self._traj_save_count = 0
+            self._traj_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+            if self.cfg.record_trajectory:
+                self._traj_buffer = build_trajectory_buffer(
+                    env=self,
+                    max_steps=self.max_episode_steps,
+                    num_envs=self.num_envs,
+                    device=self.device,
+                    uids=self.cfg.trajectory_uids,
+                    action_space=self.action_space,
+                )
+                self._traj_steps = torch.zeros(
+                    self.num_envs, dtype=torch.long, device=self.device
+                )
+
+            self.rollout_steps = torch.zeros(
                 self.num_envs, dtype=torch.long, device=self.device
             )
+            self._demo_steps = torch.zeros(
+                self.num_envs, dtype=torch.long, device=self.device
+            )
+            self.current_rollout_step = 0
 
-        self.rollout_steps = torch.zeros(
-            self.num_envs, dtype=torch.long, device=self.device
-        )
-        self._demo_steps = torch.zeros(
-            self.num_envs, dtype=torch.long, device=self.device
-        )
-        self.current_rollout_step = 0
+            # Segment recording is intentionally separate from task planning. The
+            # common demo executor updates this context while the regular rollout
+            # writer turns it into per-frame annotations.
+            self._demo_episode_index = 0
+            self._demo_execution_cfg = DemoExecutionCfg()
+            self._demo_attempt_id = 0
+            self._demo_continuity_id = 0
+            self._demo_program_run_id = "0:0"
+            self._demo_active_segment_id = 0
+            self._demo_active_segment_ids = torch.zeros(
+                self.num_envs, dtype=torch.long, device=self.device
+            )
+            self._demo_active_mask = torch.ones(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            self._demo_segment_participants = self._demo_active_mask.clone()
+            self._demo_active_segment_start_steps = self._demo_steps.clone()
+            self._demo_active_rollout_start_steps = self.rollout_steps.clone()
+            self._demo_episode_metadata: list[dict[str, Any]] = [
+                self._new_demo_episode_metadata(env_id)
+                for env_id in range(self.num_envs)
+            ]
 
-        # Segment recording is intentionally separate from task planning. The
-        # common demo executor updates this context while the regular rollout
-        # writer turns it into per-frame annotations.
-        self._demo_episode_index = 0
-        self._demo_execution_cfg = DemoExecutionCfg()
-        self._demo_attempt_id = 0
-        self._demo_continuity_id = 0
-        self._demo_program_run_id = "0:0"
-        self._demo_active_segment_id = 0
-        self._demo_active_segment_ids = torch.zeros(
-            self.num_envs, dtype=torch.long, device=self.device
-        )
-        self._demo_active_mask = torch.ones(
-            self.num_envs, dtype=torch.bool, device=self.device
-        )
-        self._demo_segment_participants = self._demo_active_mask.clone()
-        self._demo_active_segment_start_steps = self._demo_steps.clone()
-        self._demo_active_rollout_start_steps = self.rollout_steps.clone()
-        self._demo_episode_metadata: list[dict[str, Any]] = [
-            self._new_demo_episode_metadata(env_id) for env_id in range(self.num_envs)
-        ]
+            self.episode_success_status: torch.Tensor = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            self._closed = False
+            self._close_error: BaseException | None = None
+            self._close_lock = threading.RLock()
 
-        self.episode_success_status: torch.Tensor = torch.zeros(
-            self.num_envs, dtype=torch.bool, device=self.device
-        )
-        self._closed = False
-        self._close_error: BaseException | None = None
-        self._close_lock = threading.RLock()
+            all_env_ids = torch.arange(self.num_envs, device=self.device)
+            self._seed_recording_state(self._init_raw_obs, all_env_ids)
 
-        all_env_ids = torch.arange(self.num_envs, device=self.device)
-        self._seed_recording_state(self._init_raw_obs, all_env_ids)
-
-        self._log_initialization_summary()
+            self._log_initialization_summary()
+        except Exception:
+            if self.dataset_manager is not None:
+                try:
+                    self.dataset_manager.finalize()
+                except Exception as cleanup_error:
+                    logger.log_warning(
+                        f"Failed to finalize dataset after initialization error: {cleanup_error!r}"
+                    )
+            self._cleanup_failed_initialization()
+            raise
 
     def _initialization_summary_lines(self) -> list[str]:
         """Append a separate functor table after the environment summary."""

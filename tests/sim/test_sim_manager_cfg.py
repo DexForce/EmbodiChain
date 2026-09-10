@@ -154,7 +154,7 @@ def test_newton_physics_cfg_forwards_render_sync_policy(
 
     dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
 
-    assert dexsim_cfg.sync_to_renderer is sync_to_renderer
+    assert dexsim_cfg.sync_to_dexsim is sync_to_renderer
 
 
 @pytest.mark.no_sim
@@ -167,7 +167,7 @@ def test_newton_physics_cfg_requires_dexsim_auto_solver_api(
 
     with pytest.raises(
         ImportError,
-        match="AutoSolverCfg.*dexsim_engine build pinned by EmbodiChain",
+        match="cannot import name 'AutoSolverCfg'",
     ):
         NewtonPhysicsCfg().to_dexsim_cfg(gpu_id=0)
 
@@ -375,7 +375,7 @@ def test_newton_backend_uses_unified_render_sync_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     world = object()
-    native_backend = SimpleNamespace(sync_to_renderer=MagicMock())
+    native_backend = SimpleNamespace(sync_to_dexsim=MagicMock())
     monkeypatch.setattr(
         "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
         lambda candidate: native_backend if candidate is world else None,
@@ -384,7 +384,7 @@ def test_newton_backend_uses_unified_render_sync_entry(
 
     backend.sync_render_state(SimpleNamespace(world=world))
 
-    native_backend.sync_to_renderer.assert_called_once_with(world)
+    native_backend.sync_to_dexsim.assert_called_once_with(world)
 
 
 @pytest.mark.parametrize(

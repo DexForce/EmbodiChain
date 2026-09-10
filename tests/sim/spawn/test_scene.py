@@ -432,6 +432,7 @@ class _RetryableArticulation(Articulation):
         self._spawn_result = None
         self._world = None
         self._declared_num_instances: int | None = None
+        self._data = SimpleNamespace(is_newton_backend=False)
 
     def _initialize_spawn_declaration(self, num_instances: int) -> None:
         self._declared_num_instances = num_instances
@@ -473,3 +474,21 @@ def test_articulation_binding_is_atomic_and_retryable() -> None:
     assert facade.is_spawn_bound
     assert facade._entities == handles
     assert _RetryableArticulation.reset_attempts == 1
+
+
+@pytest.mark.parametrize("is_newton", [False, True])
+def test_articulation_binding_does_not_clear_partial_newton_world(
+    is_newton: bool,
+) -> None:
+    facade = _RetryableArticulation(SimpleNamespace(uid="robot"))
+    facade._initialize_spawn_declaration(1)
+    facade._data = SimpleNamespace(is_newton_backend=is_newton)
+    facade._apply_spawn_config = lambda: None
+    facade.reset = MagicMock()
+
+    facade.bind_spawn(object())
+
+    if is_newton:
+        facade.reset.assert_called_once_with(clear_dynamics=False)
+    else:
+        facade.reset.assert_called_once_with()

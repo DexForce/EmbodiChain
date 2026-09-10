@@ -19,13 +19,34 @@
 from __future__ import annotations
 
 import argparse
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Load an articulation with its default passive joint drive"
+    )
+    add_sim_args_to_parser(parser)
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="Optional number of simulation steps before exiting.",
+    )
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
 
 import torch
 
 from dexsim.types import DriveType
 
 from embodichain.data import get_data_path
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -187,19 +208,11 @@ def run_simulation(
         articulation.set_qf(torch.zeros_like(articulation.get_qpos()))
 
 
-def main() -> None:
+def main(args: argparse.Namespace | None = None) -> None:
     """Load and simulate a passive drawer articulation."""
-    parser = argparse.ArgumentParser(
-        description="Load an articulation with its default passive joint drive"
-    )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--max-steps",
-        type=int,
-        default=None,
-        help="Optional number of simulation steps before exiting.",
-    )
-    args = parser.parse_args()
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
     if args.max_steps is not None and args.max_steps < 1:
         parser.error("--max-steps must be at least 1")
 
@@ -234,6 +247,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     try:
-        main()
+        main(_cli_args)
     finally:
         SimulationManager.flush_cleanup_queue()

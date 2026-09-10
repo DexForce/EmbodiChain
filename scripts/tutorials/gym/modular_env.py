@@ -16,6 +16,27 @@
 
 from __future__ import annotations
 
+import argparse
+from embodichain.cli.sim import (
+    add_sim_args_to_parser,
+    add_seed_arg_to_parser,
+    resolve_seed,
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser()
+    add_sim_args_to_parser(parser)
+    add_seed_arg_to_parser(parser, scope="task environment")
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
 import torch
 
 from typing import List, Dict, Any
@@ -190,14 +211,20 @@ if __name__ == "__main__":
     import argparse
 
     from embodichain.lab.sim import SimulationManagerCfg
-    from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+    from embodichain.cli.sim import (
+        add_sim_args_to_parser,
+        add_seed_arg_to_parser,
+        resolve_seed,
+    )
     from embodichain.lab.visualization import visualization_cfg_from_args
 
-    parser = argparse.ArgumentParser()
-    add_env_launcher_args_to_parser(parser)
-    args = parser.parse_args()
+    parser = build_parser()
+    args = _cli_args
+    seed = resolve_seed(args.seed)
+    print(f"[INFO]: Environment seed: {seed}", flush=True)
 
     env_cfg = ExampleCfg(
+        seed=seed,
         sim_cfg=SimulationManagerCfg(
             render_cfg=RenderCfg(renderer=args.renderer),
             headless=args.headless,

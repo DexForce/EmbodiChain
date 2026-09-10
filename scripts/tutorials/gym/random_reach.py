@@ -16,6 +16,29 @@
 
 from __future__ import annotations
 
+import argparse
+from embodichain.cli.sim import (
+    add_sim_args_to_parser,
+    add_seed_arg_to_parser,
+    resolve_seed,
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Demo for running a random reach environment."
+    )
+    add_sim_args_to_parser(parser)
+    add_seed_arg_to_parser(parser, scope="task environment")
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
 import torch
 import numpy as np
 import gymnasium as gym
@@ -51,10 +74,12 @@ class RandomReachEnv(BaseEnv):
         device: str | torch.device | None = None,
         renderer="hybrid",
         physics_cfg="default",
+        seed: int | None = None,
         visualization: VisualizationCfg | None = None,
         **kwargs,
     ) -> None:
         env_cfg = EnvCfg(
+            seed=seed,
             sim_cfg=SimulationManagerCfg(
                 headless=headless,
                 arena_space=2.0,
@@ -135,17 +160,21 @@ if __name__ == "__main__":
     import argparse
     import time
 
-    from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+    from embodichain.cli.sim import (
+        add_sim_args_to_parser,
+        add_seed_arg_to_parser,
+        resolve_seed,
+    )
     from embodichain.lab.visualization import visualization_cfg_from_args
 
-    parser = argparse.ArgumentParser(
-        description="Demo for running a random reach environment."
-    )
-    add_env_launcher_args_to_parser(parser)
-    args = parser.parse_args()
+    parser = build_parser()
+    args = _cli_args
+    seed = resolve_seed(args.seed)
+    print(f"[INFO]: Environment seed: {seed}", flush=True)
 
     env = gym.make(
         "RandomReach-v1",
+        seed=seed,
         num_envs=args.num_envs,
         headless=args.headless,
         device=args.device,

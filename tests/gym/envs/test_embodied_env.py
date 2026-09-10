@@ -108,7 +108,7 @@ METADATA = {
                 },
             },
             "attrs": {"mass_props": {"mass": 10.0}},
-            "body_scale": (2, 1.6, 1),
+            "body_scale": (2.0, 2.0, 2.0),
         }
     ],
     "rigid_object": [
@@ -118,7 +118,7 @@ METADATA = {
                 "shape_type": "Mesh",
                 "fpath": "ToyDuck/toy_duck.glb",
             },
-            "body_scale": (0.75, 0.75, 1.0),
+            "body_scale": (0.75, 0.75, 0.75),
             "init_pos": (0.0, 0.0, 1.0),
         }
     ],

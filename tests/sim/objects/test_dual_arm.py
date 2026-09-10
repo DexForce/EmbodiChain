@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -130,14 +131,13 @@ def test_build_dual_arm_ur_control_parts():
     )
 
 
-def test_build_dual_arm_ur_solver_is_per_arm_and_arm_local():
+def test_build_dual_arm_ur_solver_uses_per_arm_assembled_frames():
     cfg = _ur5_dual()
     for side in ("left_arm", "right_arm"):
         solver = cfg.solver_cfg[side]
         assert isinstance(solver, URSolverCfg)
         assert solver.ur_type == "ur5"
-        # URSolverCfg pins urdf_path to the single-arm URDF in __post_init__, so
-        # the engine keeps link names UNPREFIXED to match that URDF (arm-local).
+        # Runtime solvers use the assembled robot frame names.
         if side == "left_arm":
             assert solver.root_link_name == "left_base_link"
             assert solver.end_link_name == "left_ee_link"
@@ -250,14 +250,57 @@ def test_dual_arm_pk_dof_matches_control_parts():
     cfg = DualArmRobotCfg.from_dict(
         {"base_robot": "ur5", "mount": {"preset": "side_by_side", "separation": 0.6}}
     )
-    try:
-        chains = cfg.build_pk_serial_chain()
-    except Exception as exc:
-        pytest.skip(f"PK URDF asset unavailable: {exc}")
+    if not Path(cfg._pk_urdf_path).is_file():
+        pytest.skip(f"PK URDF asset unavailable: {cfg._pk_urdf_path}")
+    chains = cfg.build_pk_serial_chain()
     for arm in ("left_arm", "right_arm"):
         assert _dof_of_pk_chain(chains[arm]) == len(
             cfg.control_parts[arm]
         ), f"{arm}: PK chain DOF drifted from control_parts"
+        side = arm.removesuffix("_arm")
+        assert [
+            f"{side}_{joint}" for joint in chains[arm].get_joint_parameter_names()
+        ] == cfg.control_parts[arm]
+
+
+@pytest.mark.parametrize("name_case", ["original", "upper"])
+@pytest.mark.parametrize("arm_local", [False, True])
+def test_dual_arm_pk_uses_each_solver_frames(name_case: str, arm_local: bool):
+    pytest.importorskip("pytorch_kinematics")
+    cfg = _ur5_dual()
+    if not Path(cfg._pk_urdf_path).is_file():
+        pytest.skip(f"PK URDF asset unavailable: {cfg._pk_urdf_path}")
+    cfg.urdf_cfg.name_case = {"link": name_case}
+    # A shorter right chain proves its root/end overrides are respected.
+    for side, root, end in (
+        ("left", "base_link", "ee_link"),
+        ("right", "shoulder_link", "wrist_2_link"),
+    ):
+        solver = cfg.solver_cfg[f"{side}_arm"]
+        solver.root_link_name = root if arm_local else f"{side}_{root}"
+        solver.end_link_name = end if arm_local else f"{side}_{end}"
+        if name_case == "upper" and not arm_local:
+            solver.root_link_name = solver.root_link_name.upper()
+            solver.end_link_name = solver.end_link_name.upper()
+    cfg.solver_cfg = dict(reversed(list(cfg.solver_cfg.items())))
+    chains = cfg.build_pk_serial_chain()
+    assert chains["left_arm"].get_joint_parameter_names() == [
+        f"joint{i}" for i in range(1, 7)
+    ]
+    assert chains["right_arm"].get_joint_parameter_names() == [
+        f"joint{i}" for i in range(2, 6)
+    ]
+
+
+@pytest.mark.parametrize("root", ["missing_link", "left_base_link"])
+def test_dual_arm_pk_rejects_invalid_right_root(root: str):
+    pytest.importorskip("pytorch_kinematics")
+    cfg = _ur5_dual()
+    if not Path(cfg._pk_urdf_path).is_file():
+        pytest.skip(f"PK URDF asset unavailable: {cfg._pk_urdf_path}")
+    cfg.solver_cfg["right_arm"].root_link_name = root
+    with pytest.raises(ValueError, match="Invalid root frame"):
+        cfg.build_pk_serial_chain()
 
 
 # --------------------------------------------------------------------------- #

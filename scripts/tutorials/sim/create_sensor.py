@@ -22,6 +22,34 @@ It shows how to configure a camera sensor, attach it to the robot's end-effector
 from __future__ import annotations
 
 import argparse
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create and simulate a robot in SimulationManager"
+    )
+    add_sim_args_to_parser(parser)
+    parser.add_argument(
+        "--attach_sensor",
+        action="store_true",
+        help="Attach sensor to robot end-effector",
+    )
+    parser.add_argument(
+        "--steps",
+        type=int,
+        default=0,
+        help="Stop after this many simulation steps; zero runs until Ctrl+C.",
+    )
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
 import numpy as np
 import torch
 import cv2
@@ -31,7 +59,6 @@ torch.set_printoptions(precision=4, sci_mode=False)
 from scipy.spatial.transform import Rotation as R
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.sensors import Camera, CameraCfg
 from embodichain.lab.sim.objects import Robot
@@ -75,26 +102,13 @@ def mask_to_color_map(mask, user_ids, fix_seed=True):
     return color_map
 
 
-def main() -> None:
+def main(args: argparse.Namespace | None = None) -> None:
     """Main function to demonstrate robot sensor simulation."""
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="Create and simulate a robot in SimulationManager"
-    )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--attach_sensor",
-        action="store_true",
-        help="Attach sensor to robot end-effector",
-    )
-    parser.add_argument(
-        "--steps",
-        type=int,
-        default=0,
-        help="Stop after this many simulation steps; zero runs until Ctrl+C.",
-    )
-    args = parser.parse_args()
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
     # Initialize simulation
     print("Creating simulation...")
     config = SimulationManagerCfg(
@@ -359,4 +373,4 @@ def run_simulation(
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

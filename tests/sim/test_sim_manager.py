@@ -422,6 +422,17 @@ def test_flush_cleanup_queue_waits_after_running_pending_destroy(
     wait_scene_destruction.assert_called_once_with()
 
 
+def test_flush_cleanup_queue_preserves_other_live_managers(monkeypatch):
+    cleanup_queue = queue.Queue()
+    cleanup_queue.put(MagicMock())
+    wait = MagicMock()
+    monkeypatch.setattr(SimulationManager, "_cleanup_queue", cleanup_queue)
+    monkeypatch.setattr(SimulationManager, "_instances", {1: object()})
+    monkeypatch.setattr(SimulationManager, "wait_scene_destruction", wait)
+    SimulationManager.flush_cleanup_queue()
+    wait.assert_not_called()
+
+
 def test_deferred_destroy_prepares_backend_before_releasing_world(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1200,6 +1211,7 @@ def test_constructor_starts_visualization_after_default_scene(
     )
 
     sim = object.__new__(SimulationManager)
+    sim.instance_id = 0
     SimulationManager.__init__(
         sim,
         SimulationManagerCfg(

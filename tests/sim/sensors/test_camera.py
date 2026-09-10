@@ -334,11 +334,16 @@ def test_camera_parent_config_does_not_imply_attachment(
     monkeypatch.setattr(
         BaseSensor,
         "__init__",
-        lambda self, config, device: setattr(self, "cfg", config),
+        lambda self, config, device, *, num_instances: setattr(self, "cfg", config),
     )
     cfg_type = StereoCameraCfg if stereo else CameraCfg
     camera_type = StereoCamera if stereo else Camera
-    camera = camera_type(cfg_type(extrinsics=CameraCfg.ExtrinsicsCfg(parent="wrist")))
+    monkeypatch.setattr(Camera, "reset", lambda self: None)
+    owner = MagicMock(num_envs=1)
+    camera = camera_type(
+        cfg_type(extrinsics=CameraCfg.ExtrinsicsCfg(parent="wrist")), owner=owner
+    )
+    owner.get_env.assert_called_once_with(0)
     assert not camera.is_attached
 
 

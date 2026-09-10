@@ -21,10 +21,37 @@ This script demonstrates how to export a simulation scene to a usd file using th
 from __future__ import annotations
 
 import argparse
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create and simulate a robot in SimulationManager"
+    )
+    add_sim_args_to_parser(parser)
+    return parser
+
+
+def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
+    """
+    Parse command-line arguments to configure the simulation.
+
+    Returns:
+        argparse.Namespace: Parsed arguments including number of environments and rendering options.
+    """
+    parser = build_parser()
+    return parser.parse_args() if argv is None else parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = parse_arguments()
+
+
 import numpy as np
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.cfg import (
     RenderCfg,
@@ -40,20 +67,6 @@ from embodichain.data import get_data_path
 from embodichain.utils import logger
 
 from embodichain.lab.sim.robots.dexforce_w1.cfg import DexforceW1Cfg
-
-
-def parse_arguments():
-    """
-    Parse command-line arguments to configure the simulation.
-
-    Returns:
-        argparse.Namespace: Parsed arguments including number of environments and rendering options.
-    """
-    parser = argparse.ArgumentParser(
-        description="Create and simulate a robot in SimulationManager"
-    )
-    add_env_launcher_args_to_parser(parser)
-    return parser.parse_args()
 
 
 def initialize_simulation(args) -> SimulationManager:
@@ -246,13 +259,13 @@ def create_cup(sim: SimulationManager) -> RigidObject:
     return scoop
 
 
-def main():
+def main(args: argparse.Namespace | None = None) -> None:
     """
     Main function to create simulation scene.
 
     Initializes the simulation and creates the robot and objects in the scene.
     """
-    args = parse_arguments()
+    args = parse_arguments() if args is None else args
     sim = initialize_simulation(args)
 
     robot = create_robot(sim)
@@ -277,4 +290,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

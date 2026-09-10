@@ -109,7 +109,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
             raise RuntimeError(
                 "Newton backend is unavailable for render-state synchronization."
             )
-        backend.sync_to_renderer(result.world)
+        backend.sync_to_dexsim(result.world)
 
     def prepare_for_teardown(self) -> None:
         """Release Newton render views while Spawn still owns their parents."""

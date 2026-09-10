@@ -19,10 +19,49 @@
 from __future__ import annotations
 
 import argparse
+from embodichain.cli.sim import add_sim_args_to_parser
+
+DEFAULT_ITERATIONS = 500
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_sim_args_to_parser(parser)
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=DEFAULT_ITERATIONS,
+        help="Number of outer 60 Hz simulation frames.",
+    )
+    parser.set_defaults(device="cuda", physics="newton")
+    return parser
+
+
+def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for the coupled deformable demo.
+
+    Returns:
+        The validated command-line arguments.
+    """
+    parser = build_parser()
+    args = parser.parse_args() if argv is None else parser.parse_args(argv)
+    if args.physics != "newton":
+        parser.error("Soft bodies and cloth require --physics newton.")
+    if not str(args.device).startswith("cuda"):
+        parser.error("EmbodiChain deformables currently require a CUDA device.")
+    if args.iterations <= 0:
+        parser.error("--iterations must be positive.")
+    return args
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = parse_arguments()
+
 
 import numpy as np
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     SurfaceElementPropertiesCfg,
@@ -56,38 +95,12 @@ __all__ = [
 FPS = 60
 NUM_SUBSTEPS = 3
 SOLVER_ITERATIONS = 6
-DEFAULT_ITERATIONS = 500
 
 CLOTH_SIZE = 2.0
 CLOTH_GRID_CELLS = 28
 CLOTH_POSITION = (-1.0, -1.0, 1.0)
 SOFT_BODY_SIZE = (0.6, 0.6, 0.3)
 SOFT_BODY_POSITION = (0.0, 0.0, 2.0)
-
-
-def parse_arguments() -> argparse.Namespace:
-    """Parse command-line arguments for the coupled deformable demo.
-
-    Returns:
-        The validated command-line arguments.
-    """
-    parser = argparse.ArgumentParser(description=__doc__)
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--iterations",
-        type=int,
-        default=DEFAULT_ITERATIONS,
-        help="Number of outer 60 Hz simulation frames.",
-    )
-    parser.set_defaults(device="cuda", physics="newton")
-    args = parser.parse_args()
-    if args.physics != "newton":
-        parser.error("Soft bodies and cloth require --physics newton.")
-    if not str(args.device).startswith("cuda"):
-        parser.error("EmbodiChain deformables currently require a CUDA device.")
-    if args.iterations <= 0:
-        parser.error("--iterations must be positive.")
-    return args
 
 
 def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
@@ -400,9 +413,9 @@ def run_simulation(
     logger.log_info("Soft body to cloth simulation complete.")
 
 
-def main() -> None:
+def main(args: argparse.Namespace | None = None) -> None:
     """Build and run the coupled soft-body/cloth scene."""
-    args = parse_arguments()
+    args = parse_arguments() if args is None else args
     sim = initialize_simulation(args)
 
     try:
@@ -420,4 +433,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

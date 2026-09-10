@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -37,6 +38,18 @@ def _load_demo_module() -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_parse_arguments_reuses_launcher_seed_with_demo_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The demo starts with its deterministic scene-perturbation seed."""
+    demo = _load_demo_module()
+    monkeypatch.setattr(sys, "argv", [str(_DEMO_PATH)])
+
+    args = demo.parse_arguments()
+
+    assert args.seed == 0
 
 
 def test_scene_perturbations_precede_first_physics_step(monkeypatch) -> None:
@@ -83,8 +96,8 @@ def test_scene_perturbations_precede_first_physics_step(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         demo.np.random,
-        "seed",
-        lambda seed: events.append(f"seed:{seed}"),
+        "default_rng",
+        lambda seed: events.append(f"seed:{seed}") or object(),
     )
 
     demo.main()

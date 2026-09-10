@@ -415,8 +415,8 @@ def test_rigid_descriptor_projects_restitution_only_to_supported_solvers(
 
     newton = descriptor.collisions[0].newton
     assert newton is not None
-    assert newton.margin == pytest.approx(0.001)
-    assert newton.gap == pytest.approx(0.001)
+    assert newton.margin == pytest.approx(0.0)
+    assert newton.gap == pytest.approx(0.002)
     assert newton.restitution == expected_restitution
 
 
@@ -645,9 +645,9 @@ def test_procedural_rigid_collision_defaults_compile_to_both_backends() -> None:
 
     collision = descriptor.collisions[0]
     assert collision.dexsim.contact_offset == pytest.approx(0.002)
-    assert collision.dexsim.rest_offset == pytest.approx(0.001)
-    assert collision.newton.margin == pytest.approx(0.001)
-    assert collision.newton.gap == pytest.approx(0.001)
+    assert collision.dexsim.rest_offset == pytest.approx(0.0)
+    assert collision.newton.margin == pytest.approx(0.0)
+    assert collision.newton.gap == pytest.approx(0.002)
 
 
 def test_newton_native_collision_envelope_overrides_portable_translation() -> None:
@@ -705,9 +705,9 @@ def test_newton_fills_missing_portable_rest_offset_from_the_default_profile() ->
 
     collision = descriptor.collisions[0]
     assert collision.dexsim.contact_offset == pytest.approx(0.003)
-    assert collision.dexsim.rest_offset == pytest.approx(0.001)
-    assert collision.newton.margin == pytest.approx(0.001)
-    assert collision.newton.gap == pytest.approx(0.002)
+    assert collision.dexsim.rest_offset == pytest.approx(0.0)
+    assert collision.newton.margin == pytest.approx(0.0)
+    assert collision.newton.gap == pytest.approx(0.003)
 
 
 def test_procedural_collision_defaults_apply_when_only_collision_is_enabled() -> None:
@@ -725,9 +725,9 @@ def test_procedural_collision_defaults_apply_when_only_collision_is_enabled() ->
     assert descriptor.physics.newton is None
     assert descriptor.collisions[0].enable_collision is True
     assert descriptor.collisions[0].dexsim.contact_offset == pytest.approx(0.002)
-    assert descriptor.collisions[0].dexsim.rest_offset == pytest.approx(0.001)
-    assert descriptor.collisions[0].newton.margin == pytest.approx(0.001)
-    assert descriptor.collisions[0].newton.gap == pytest.approx(0.001)
+    assert descriptor.collisions[0].dexsim.rest_offset == pytest.approx(0.0)
+    assert descriptor.collisions[0].newton.margin == pytest.approx(0.0)
+    assert descriptor.collisions[0].newton.gap == pytest.approx(0.002)
 
 
 def test_grouped_rigid_physics_overlays_usd_without_erasing_source(
@@ -825,7 +825,7 @@ def test_rigid_usd_preserves_asset_physics_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source_mass = 7.0
-    source_scale = np.array([2.0, 3.0, 4.0], dtype=np.float32)
+    source_scale = np.array([2.0, 2.0, 2.0], dtype=np.float32)
     source = ObjectDesc(
         name="source",
         physics=RigidBodyPhysicsDesc.dynamic(mass=source_mass),

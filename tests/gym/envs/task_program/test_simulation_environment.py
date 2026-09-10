@@ -1811,3 +1811,27 @@ def test_pick_place_effects_require_physical_constraint_and_live_pose() -> None:
         result = assembly.runtime.step()
     assert result.status is SemanticExecutionStatus.COMPLETED
     assert assembly.command_sink.accepted_action_count >= 4
+
+
+@pytest.mark.parametrize("explicit_config", [False, True])
+def test_factory_planner_config_uses_owner_without_mutating_input(
+    monkeypatch: pytest.MonkeyPatch, explicit_config: bool
+) -> None:
+    factory, robot = _factory()
+    factory._simulation.instance_id = 3
+    factory._motion_generator_factory = None
+    supplied = simulation_environment_module.ToppraPlannerCfg(robot_uid=robot.uid)
+    factory._planner_cfg = supplied if explicit_config else None
+    captured = []
+
+    def initialize(generator, cfg):
+        captured.append(cfg.planner_cfg)
+        generator.robot = robot
+
+    monkeypatch.setattr(MotionGenerator, "__init__", initialize)
+    generator = factory._create_motion_generator()
+    assert generator.robot is robot
+    assert captured[0].sim_instance_id == factory._simulation.instance_id
+    assert captured[0].robot_uid == robot.uid
+    assert captured[0] is not supplied
+    assert supplied.sim_instance_id == 0

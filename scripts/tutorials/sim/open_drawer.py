@@ -19,13 +19,57 @@
 from __future__ import annotations
 
 import argparse
+from embodichain.cli.sim import (
+    add_sim_args_to_parser,
+    add_seed_arg_to_parser,
+    resolve_seed,
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Use a Franka Panda and MotionGenerator to open a drawer."
+    )
+    add_sim_args_to_parser(parser)
+    add_seed_arg_to_parser(parser, scope="PyTorch IK seed sampling")
+    parser.add_argument(
+        "--hold-steps",
+        type=int,
+        default=100,
+        help="Physics steps to hold the final open-drawer pose before exiting.",
+    )
+    parser.add_argument(
+        "--auto-start",
+        action="store_true",
+        help="Execute trajectories without waiting for Enter.",
+    )
+    parser.add_argument(
+        "--record-save-path",
+        type=str,
+        default=None,
+        help="Optional MP4 path for recording from a fixed headless camera.",
+    )
+    parser.add_argument(
+        "--record-fps",
+        type=int,
+        default=30,
+        help="Frames per second for headless recording.",
+    )
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
 from collections.abc import Sequence
 from typing import Literal
 
 import torch
 
 from embodichain.data import get_data_path
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -381,11 +425,10 @@ def open_drawer(
     hand_limits = robot.get_qpos_limits(name=HAND_NAME)
     hand_open_qpos = hand_limits[..., 1]
     hand_closed_qpos = hand_limits[..., 0]
+    # Newton must clear every articulation in a world together. Establish the
+    # initial scene state before opening the fingers for the approach.
+    sim.reset_objects_state()
     move_gripper(sim, robot, hand_open_qpos, num_steps=20)
-
-    # Finish tool initialization before establishing the task's initial state.
-    # This also clears any startup contact impulse from opening the fingers.
-    drawer.reset()
     sim.update(step=5)
 
     # Roll the asset's handle frame 90 degrees around TCP Z. Its approach axis
@@ -480,7 +523,7 @@ def _tutorial_physics_cfg(
         # Use a finer step and multi-point contacts for the Newton grasp. Leave
         # per-world capacities auto-sized to avoid oversized CUDA Graph buffers
         # when the scene is replicated across many environments.
-        physics_cfg.num_substeps = 10
+        physics_cfg.num_substeps = 20
         physics_cfg.solver_cfg = {
             "solver_type": "mujoco_warp",
             "cone": "elliptic",
@@ -489,36 +532,11 @@ def _tutorial_physics_cfg(
     return physics_cfg
 
 
-def main() -> None:
+def main(args: argparse.Namespace | None = None) -> None:
     """Run the Franka drawer-manipulation tutorial."""
-    parser = argparse.ArgumentParser(
-        description="Use a Franka Panda and MotionGenerator to open a drawer."
-    )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--hold-steps",
-        type=int,
-        default=100,
-        help="Physics steps to hold the final open-drawer pose before exiting.",
-    )
-    parser.add_argument(
-        "--auto-start",
-        action="store_true",
-        help="Execute trajectories without waiting for Enter.",
-    )
-    parser.add_argument(
-        "--record-save-path",
-        type=str,
-        default=None,
-        help="Optional MP4 path for recording from a fixed headless camera.",
-    )
-    parser.add_argument(
-        "--record-fps",
-        type=int,
-        default=30,
-        help="Frames per second for headless recording.",
-    )
-    args = parser.parse_args()
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
     if args.num_envs < 1:
         parser.error("--num_envs must be at least 1")
     if args.hold_steps < 0:
@@ -532,7 +550,9 @@ def main() -> None:
 
     # PytorchSolver samples multiple IK seeds; make the tutorial trajectory
     # reproducible across repeated runs of the same backend.
-    torch.manual_seed(0)
+    seed = resolve_seed(args.seed)
+    print(f"[INFO]: IK sampling seed: {seed}", flush=True)
+    torch.manual_seed(seed)
 
     # Construct the World without a window so Spawn can finish first.
     sim = SimulationManager(
@@ -596,8 +616,11 @@ def main() -> None:
         if sim.is_window_recording():
             sim.stop_window_record()
         sim.wait_window_record_saves()
-        sim.destroy()
+        sim.destroy(exit_process=False)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main(_cli_args)
+    finally:
+        SimulationManager.flush_cleanup_queue()
