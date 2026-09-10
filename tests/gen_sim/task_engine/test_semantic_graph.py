@@ -47,6 +47,7 @@ from embodichain.gen_sim.task_engine.task_program_bundle import (
     _refine_upright_targets,
     _scene_payload,
     _support_target_pose,
+    _task_settle_rigid_objects,
 )
 from embodichain.utils.utility import load_config, save_config
 from embodichain.gen_sim.task_engine.orchestration.source_scene import PreparedScene
@@ -362,6 +363,26 @@ def test_dual_franka_mount_is_bound_to_the_scene_table() -> None:
     _bind_embodiment_to_scene(embodiment, table_top_z=1.054499)
 
     assert embodiment["simulation"]["init_pos"] == pytest.approx([-0.7, 0.0, 0.704499])
+
+
+def test_reset_settles_only_task_referenced_rigid_objects() -> None:
+    scene = SimpleNamespace(
+        rigid_objects=(
+            {"uid": "cube"},
+            {"uid": "wood_cube"},
+            {"uid": "smiley_ball"},
+        )
+    )
+    graph = _graph()
+    graph["nodes"][1]["call"] = {
+        "kind": "place",
+        "object": "cube",
+        "reference": "wood_cube",
+    }
+
+    selected = _task_settle_rigid_objects(graph, scene)
+
+    assert [item["uid"] for item in selected] == ["cube", "wood_cube"]
 
 
 def test_horizontal_relation_distance_keeps_gripper_clearance(
@@ -951,6 +972,15 @@ def test_explicit_orientation_bundle_uses_shared_preflight_and_terminal_post(
         graph, scene, tmp_path / "bundle", robot_profile="dual_franka"
     )
     _verify_program_projection(paths.program, generated)
+    policy = load_config(paths.execution_policy)
+    assert policy["tracking"]["terminal_max_abs_error"] == pytest.approx(0.25)
+    integration = load_config(paths.integration)
+    if terminal == "place":
+        place_params = integration["profile"]["effect_monitors"][
+            "simulation.place_relative"
+        ]["params"]
+        assert place_params["attached_translation_threshold"] == pytest.approx(0.04)
+        assert place_params["detached_translation_threshold"] == pytest.approx(0.06)
     program = load_config(paths.program)
     post = program["program"]["items"][-1]["post"][-1]
     constraints = load_config(paths.program.parent / "constraints.json")["presets"]
