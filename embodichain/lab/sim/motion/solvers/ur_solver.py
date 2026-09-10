@@ -137,7 +137,7 @@ class URSolver(BaseSolver):
     def get_ik(
         self,
         target_xpos: torch.Tensor,
-        qpos_seed: torch.Tensor,
+        qpos_seed: torch.Tensor | None = None,
         return_all_solutions: bool = False,
         **kwargs,
     ):
@@ -163,6 +163,16 @@ class URSolver(BaseSolver):
         tcp_inv = torch.tensor(self._tcp_inv, dtype=torch.float32, device=self.device)
         target_xpos_batch = target_xpos_batch @ tcp_inv[None, :, :]
         n_sample = target_xpos_batch.shape[0]
+
+        if qpos_seed is None:
+            # A missing seed previously crashed at the nearest-solution step;
+            # default to the feasibility-safe joint-range midpoint.
+            qpos_seed = (
+                self.get_default_qpos_seed()
+                .to(dtype=torch.float32)
+                .unsqueeze(0)
+                .repeat(n_sample, 1)
+            )
 
         device = self.device
         wp_device = standardize_device_string(self.device)

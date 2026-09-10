@@ -278,6 +278,31 @@ class BaseSolver(metaclass=ABCMeta):
         """
         return self.ik_nearest_weight
 
+    def get_default_qpos_seed(self) -> torch.Tensor:
+        """Get the feasibility-safe default IK seed: the joint-range midpoint.
+
+        A zero configuration violates the joint limits of some robots (for
+        example Franka FR3, whose joints 4 and 6 exclude zero), which wastes a
+        multi-start slot, biases nearest-solution selection toward the limits,
+        and can start iterative solvers from an infeasible configuration. The
+        midpoint is inside the limits by construction and maximises the
+        distance to both bounds.
+
+        Returns:
+            torch.Tensor: Default joint seed with shape (dof,) on the solver
+            device.
+
+        Raises:
+            ValueError: If the solver joint limits are not initialized.
+        """
+        if self.lower_qpos_limits is None or self.upper_qpos_limits is None:
+            logger.log_error(
+                "Cannot derive a default qpos seed: solver joint limits are "
+                "not initialized.",
+                ValueError,
+            )
+        return (self.lower_qpos_limits + self.upper_qpos_limits) / 2
+
     def _init_qpos_limits(self):
         self.lower_qpos_limits = None
         self.upper_qpos_limits = None

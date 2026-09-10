@@ -232,7 +232,10 @@ class DifferentialSolver(BaseSolver):
                 - target_joints (torch.Tensor): Computed target joint positions, shape (num_envs, num_joints).
         """
         if qpos_seed is None:
-            qpos_seed = torch.zeros(self.dof, device=self.device)
+            # Match the target batch so FK/Jacobian shapes line up (a plain
+            # (dof,) seed only worked for single targets).
+            batch_size = target_xpos.shape[0] if target_xpos.dim() == 3 else 1
+            qpos_seed = self.get_default_qpos_seed().unsqueeze(0).repeat(batch_size, 1)
 
         if jacobian is None:
             jacobian = self.get_jacobian(qpos_seed)

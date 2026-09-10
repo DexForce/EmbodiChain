@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import argparse
 import time
-from dexsim.utility.path import get_resources_data_path
+from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.visualization import visualization_cfg_from_args
@@ -73,7 +73,7 @@ def main():
         cfg=SoftObjectCfg(
             uid="cow",
             shape=MeshCfg(
-                fpath=get_resources_data_path("Model", "cow", "cow.obj"),
+                fpath=get_data_path("Cow/cow.obj"),
             ),
             init_pos=[0.0, 0.0, 3.0],
             voxel_attr=SoftbodyVoxelAttributesCfg(

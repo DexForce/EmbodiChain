@@ -93,6 +93,16 @@ and available CUDA backends in seeded and full redundancy-search modes.
 
 ## Seed Sampling and Null-Space Tasks
 
+### Default seed (`BaseSolver.get_default_qpos_seed`)
+
+When `get_ik` receives no seed, every solver falls back to the joint-range
+midpoint from `BaseSolver.get_default_qpos_seed()` — never a zero
+configuration, which violates the limits of some robots (Franka FR3 joints 4
+and 6) and biases nearest-solution selection toward the bounds. Pinocchio
+resets its internal `init_qpos` to this default on seedless calls instead of
+reusing the previous call's seed; UR accepts a missing seed instead of
+crashing. Pink keeps its own limit-projected neutral configuration.
+
 ### `QposSeedSampler` (`qpos_seed_sampler.py`)
 
 Used by iterative solvers (e.g., `PytorchSolver`) to generate joint-seed
@@ -102,6 +112,23 @@ batches for IK multi-start:
 - `sample(qpos_seed, lower_limits, upper_limits, batch_size) → Tensor[batch*num_samples, dof]`
   - First sample = provided seed; remaining are uniform-random within limits.
 - `repeat_target_xpos(target_xpos, num_samples)` — repeats target poses to match expanded seed batch.
+
+### `QposSeedSelSampler` (`qpos_seed_sel_sampler.py`)
+
+Database-driven drop-in extension of `QposSeedSampler` (SELIK-style retrieval).
+Slots after the caller seed come from a lazily built Sobol FK database: pose-space
+kNN (position + Frobenius rotation, `rot_scale` metres/radian) re-ranked by the
+predicted joint step `||J⁺·Δpose||` when a Jacobian provider is configured.
+
+- Opt-in through `PytorchSolverCfg.enable_seed_selection` with `seed_db_size`
+  and `seed_rot_scale`; default off preserves shipped behaviour exactly.
+- The database stores flange poses (no TCP), so runtime `set_tcp()` never
+  invalidates it; `get_ik` queries with its TCP-stripped target.
+- Joint-limit changes trigger an automatic rebuild; `sample()` without a
+  `target_xpos` falls back to the parent's uniform-random behaviour.
+- Cost: build ~11 ms / 6 MB at 20k entries on GPU (one-time, lazy); query
+  adds <1 ms per `get_ik` call (~0.2% of a solve).
+- Analytic solvers (SRS/OPW/UR) do not consume seeds and are unaffected.
 
 ### `NullSpacePostureTask` (`null_space_posture_task.py`)
 

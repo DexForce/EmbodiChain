@@ -329,8 +329,11 @@ class OPWSolver(BaseSolver):
                 )
             qpos_seed_wp = wp.from_torch(qpos_seed_)
         else:
-            qpos_seed = torch.zeros(
-                (n_sample, DOF), dtype=torch.float32, device=kernel_device
+            qpos_seed = (
+                self.get_default_qpos_seed()
+                .to(dtype=torch.float32, device=kernel_device)
+                .unsqueeze(0)
+                .repeat(n_sample, 1)
             )
             qpos_seed_wp = wp.from_torch(qpos_seed)
         all_qpos_wp = all_qpos_wp.reshape((n_sample, N_SOL, DOF))
