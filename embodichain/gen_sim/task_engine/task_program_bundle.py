@@ -202,10 +202,6 @@ def generate_task_program_bundle(
     _bind_embodiment_to_scene(embodiment_payload, table_top_z=scene.table_top_z)
     save_config(paths.embodiment, embodiment_payload)
     policy_payload = load_config(policy_source)
-    # Centimetre-scale object goals need a settled arm before the core captures
-    # the next measured grasp transform. Grasp endpoints use effect evidence,
-    # not this arm-only terminal tracking metric.
-    policy_payload["tracking"]["terminal_max_abs_error"] = 0.05
     policy_payload["tracking"]["consecutive_acceptances"] = 5
     policy_payload["tracking"]["terminal_settle_timeout"] = 3.0
     if any(node["call"]["kind"] == "hand_over" for node in selected_graph["nodes"]):
@@ -267,7 +263,10 @@ def generate_task_program_bundle(
                         "params": {
                             "entity_cfgs": [
                                 {"uid": str(item["uid"])}
-                                for item in scene.rigid_objects
+                                for item in _task_settle_rigid_objects(
+                                    selected_graph,
+                                    scene,
+                                )
                             ],
                             "min_steps": 10,
                             # Tall generated objects may need several seconds
@@ -1073,9 +1072,13 @@ def _integration_payload(
                         # orientations.  Translation and the gripper/contact
                         # clause remain strict physical checks; orientation
                         # is intentionally relaxed for this calibrated scene.
-                        "attached_translation_threshold": 0.06,
+                        "attached_translation_threshold": (
+                            0.04 if semantic_id == _PLACE_RELATIVE_CALL_ID else 0.06
+                        ),
                         "attached_rotation_threshold": 3.0,
-                        "detached_translation_threshold": 0.08,
+                        "detached_translation_threshold": (
+                            0.06 if semantic_id == _PLACE_RELATIVE_CALL_ID else 0.08
+                        ),
                         "detached_rotation_threshold": 3.141592653589793,
                     },
                 }
@@ -1207,6 +1210,37 @@ def _scene_payload(scene: Any, *, program_id: str) -> dict[str, Any]:
             "articulation": articulations,
         },
     }
+
+
+def _task_settle_rigid_objects(
+    graph: SemanticTaskGraph,
+    scene: Any,
+) -> tuple[dict[str, Any], ...]:
+    """Return task-referenced rigid objects for reset stabilization."""
+    rigid_objects = tuple(scene.rigid_objects)
+    scene_uids = {str(item["uid"]) for item in rigid_objects}
+    referenced_uids: set[str] = set()
+
+    def collect(value: Any) -> None:
+        if isinstance(value, str):
+            if value in scene_uids:
+                referenced_uids.add(value)
+            return
+        if isinstance(value, dict):
+            for child in value.values():
+                collect(child)
+            return
+        if isinstance(value, (list, tuple)):
+            for child in value:
+                collect(child)
+
+    for node in graph["nodes"]:
+        collect(node["call"])
+
+    selected = tuple(
+        item for item in rigid_objects if str(item["uid"]) in referenced_uids
+    )
+    return selected or rigid_objects
 
 
 def _bind_embodiment_to_scene(
