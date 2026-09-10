@@ -888,37 +888,32 @@ class TestOnlineDataset:
             self.CHUNK_SIZE,
         ], "Batch mode should yield a batch of chunks"
 
-    def test_transform_applied(self) -> None:
-        """Transform callable is invoked and its result is returned."""
-        sentinel = {"called": False}
-
-        def my_transform(td: TensorDict) -> TensorDict:
-            sentinel["called"] = True
-            return td
-
-        dataset = OnlineDataset(
-            self.engine, chunk_size=self.CHUNK_SIZE, transform=my_transform
+    @pytest.mark.parametrize("batch_size", [None, 4], ids=["item", "batch"])
+    def test_transform_result_is_returned_once(self, batch_size: int | None) -> None:
+        """Each yielded item or batch uses the transform's independent result."""
+        expected_shape = (
+            [self.CHUNK_SIZE] if batch_size is None else [batch_size, self.CHUNK_SIZE]
         )
-        next(iter(dataset))
-        assert sentinel["called"], "transform should have been called"
-
-    def test_transform_modifies_output(self) -> None:
-        """Transform result is what the caller receives, not the raw sample."""
-        SCALE = 99.0
-
-        def scale_rewards(td: TensorDict) -> TensorDict:
-            td["rewards"] = td["rewards"] * SCALE
-            return td
-
-        dataset = OnlineDataset(
-            self.engine, chunk_size=self.CHUNK_SIZE, transform=scale_rewards
+        transformed = TensorDict(
+            {"transformed_rewards": torch.ones(expected_shape)},
+            batch_size=expected_shape,
         )
+        transform = MagicMock(return_value=transformed)
+        dataset = OnlineDataset(
+            self.engine,
+            chunk_size=self.CHUNK_SIZE,
+            batch_size=batch_size,
+            transform=transform,
+        )
+
         sample = next(iter(dataset))
-        # Rewards should now be on the order of SCALE * original values.
-        # Original rewards are standard-normal, so max abs should be >> 1 unless scaled.
-        assert (
-            sample["rewards"].abs().max().item() > 1.0
-        ), "scaled rewards should have large absolute values"
+
+        transform.assert_called_once()
+        raw_sample = transform.call_args.args[0]
+        assert list(raw_sample.batch_size) == expected_shape
+        assert "rewards" in raw_sample
+        assert raw_sample is not transformed
+        assert sample is transformed
 
     def test_sampling_mode_is_forwarded_to_engine(self) -> None:
         """OnlineDataset exposes segment-aware engine sampling."""

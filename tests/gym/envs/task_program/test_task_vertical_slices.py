@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
-import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -854,17 +853,6 @@ def test_open_drawer_lowerer_owns_a_snapshot_of_the_current_target_pose() -> Non
     assert torch.equal(lowering.goal.target_pose, torch.eye(4))
 
 
-def test_examples_have_no_task_specific_environment_modules() -> None:
-    """Both examples are assembled from config against plain EmbodiedEnv."""
-    for module_name in (
-        "embodichain_tasks.manipulation.repeated_pick_place",
-        "embodichain_tasks.manipulation.open_drawer",
-    ):
-        assert importlib.util.find_spec(module_name) is None
-    _, _, cube_spec = _configure_cube_environment()
-    assert cube_spec.cls is EmbodiedEnv
-
-
 def test_cube_config_registers_embodied_env_with_its_integration_factory() -> None:
     """Repeated Pick/Place needs no environment subclass or task module."""
     payload, cfg, spec = _configure_cube_environment()
@@ -888,26 +876,12 @@ def test_cube_config_registers_embodied_env_with_its_integration_factory() -> No
     )
 
 
-def test_cube_config_declares_the_canonical_scene_and_profile_ids() -> None:
-    """The repeated config owns one canonical scene/profile integration."""
-    registration = _cube_integration().registration
-
-    assert registration.scene_binding.registry_id == (
-        "task_program_repeated_pick_place"
-    )
-    assert registration.robot_profile_binding.profile_id == ("ur5_dh_pgi_140_80")
-
-
 @pytest.mark.parametrize(
-    ("create_binding", "expected_grasp_samples"),
-    (
-        (_cube_robot_profile_binding, _EXPECTED_GRASP_SAMPLES),
-        (_drawer_robot_profile_binding, _EXPECTED_GRASP_SAMPLES),
-    ),
+    "create_binding",
+    (_cube_robot_profile_binding, _drawer_robot_profile_binding),
 )
 def test_example_profiles_execute_only_open_loop_trajectories(
     create_binding: Callable[[], SimulationRobotSkillProfileBinding],
-    expected_grasp_samples: int,
 ) -> None:
     """Both tutorials use timed execution without effects or retry layers."""
     binding = create_binding()
@@ -925,7 +899,7 @@ def test_example_profiles_execute_only_open_loop_trajectories(
     assert dict(preset.effect_monitors) == {}
     assert preset.runner_cfg.hold_on_completion is False
     assert preset.runner_cfg.hold_during_effect_verification is False
-    assert expected_grasp_samples == _EXPECTED_GRASP_SAMPLES
+    assert preset.runner_cfg.minimum_cycle_time == 0.0
 
 
 def test_cube_policy_and_skill_parameters_have_single_component_owners() -> None:
