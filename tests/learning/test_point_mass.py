@@ -31,6 +31,7 @@ from embodichain.learning.rl.env import (
     build_learning_env,
 )
 from embodichain.learning.rl.models import ActorCritic
+from embodichain.learning.rl.train import _build_learning_policy
 from embodichain.learning.rl.train import train_from_config
 from embodichain.learning.rl.utils import OptimizerCfg
 from embodichain.learning.rl.utils.trainer import Trainer
@@ -144,6 +145,9 @@ def test_unified_train_entry_runs_apg_and_ppo(
         "max_grad_norm": 1.0,
     }
     if policy_name == "actor_critic":
+        policy["actor_obs_normalization"] = True
+        policy["critic_obs_normalization"] = True
+        policy["initial_log_std"] = -2.0
         policy["critic"] = {
             "type": "mlp",
             "network_cfg": {"hidden_sizes": [8], "activation": "tanh"},
@@ -178,11 +182,30 @@ def test_unified_train_entry_runs_apg_and_ppo(
     }
     config_path = tmp_path / f"{algorithm_name}.json"
     config_path.write_text(json.dumps(config), encoding="utf-8")
+    if algorithm_name == "ppo":
+        initial = _build_learning_policy(
+            policy, PointMassEnv(num_envs=2), torch.device("cpu")
+        )
+        torch.testing.assert_close(
+            initial.log_std,
+            torch.full_like(initial.log_std, -2.0),
+        )
 
     summary = train_from_config(str(config_path))
 
     assert summary["global_step"] == 8
     assert summary["latest_checkpoint_path"] is not None
+    if algorithm_name == "ppo":
+        checkpoint = torch.load(summary["latest_checkpoint_path"], weights_only=True)
+        restored = _build_learning_policy(
+            policy, PointMassEnv(num_envs=2), torch.device("cpu")
+        )
+        restored.load_state_dict(checkpoint["policy"], strict=True)
+        assert int(restored.actor_obs_normalizer.count) > 0
+        assert int(restored.critic_obs_normalizer.count) > 0
+        assert "log_std" in checkpoint["policy"]
+        assert "std" not in checkpoint["policy"]
+        assert checkpoint["num_updates"] == 1
 
 
 def test_sync_collector_accepts_tensor_point_mass_observations() -> None:
@@ -250,3 +273,44 @@ def test_trainer_saves_best_checkpoint_from_eval(tmp_path: Path) -> None:
     assert "eval/avg_reward" in summary["last_eval_metrics"]
     assert summary["best_checkpoint_path"] is not None
     assert Path(summary["best_checkpoint_path"]).is_file()
+
+
+def test_trainer_saves_checkpoint_by_update_count(tmp_path: Path) -> None:
+    env = PointMassEnv(num_envs=2, max_episode_steps=4)
+    policy = ActorCritic(
+        14,
+        2,
+        env.device,
+        actor=nn.Linear(14, 2),
+        critic=nn.Linear(14, 1),
+    )
+    algorithm = PPO(
+        PPOCfg(
+            device="cpu",
+            optimizer=OptimizerCfg(learning_rate=1e-3),
+            n_epochs=1,
+            batch_size=8,
+        ),
+        policy,
+    )
+    trainer = Trainer(
+        policy=policy,
+        env=env,
+        algorithm=algorithm,
+        buffer_size=4,
+        batch_size=8,
+        writer=None,
+        eval_freq=0,
+        save_freq=0,
+        save_frequency_updates=2,
+        checkpoint_dir=str(tmp_path),
+        exp_name="point_mass_updates",
+        use_wandb=False,
+    )
+    saved_steps: list[int] = []
+    trainer.save_checkpoint = lambda path=None: saved_steps.append(trainer.global_step)
+
+    summary = trainer.train(total_timesteps=24)
+
+    assert saved_steps == [16]
+    assert summary["num_updates"] == 3

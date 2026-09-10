@@ -17,8 +17,24 @@ Evaluation uses an independent environment and
 terminal metrics, temporarily switches the policy to evaluation mode, and
 restores its prior mode.
 
+PPO supports adaptive learning rates from Gaussian KL, clipped value loss,
+configurable minibatch counts, and optional action-mean bounds. Adaptive KL
+scheduling cannot be combined with `algorithm.cfg.lr_scheduler`. The actor and
+critic can maintain independent observation statistics in
+`models/normalizer.py`; collection updates these buffers and evaluation keeps
+them frozen. A restored policy must use the original normalization settings.
+Time-limit truncations bootstrap rewards with the value stored for the
+transition before GAE masks the episode boundary.
+See the [PPO configuration options](../../../docs/source/overview/rl/config.md)
+for the public configuration fields.
+
+`Trainer` increments `num_updates` after each algorithm update.
+`trainer.save_frequency_updates` enables saving at update intervals. An
+explicit positive `save_freq` additionally enables saving by environment steps.
+
 Checkpoints include policy parameters, trainer counters, best-evaluation
-state, and optimizer or LR-scheduler state when present.
+state, observation-normalizer state when enabled, and optimizer or LR-scheduler
+state when present.
 
 On the simulator path, distributed mode initializes NCCL, assigns one CUDA
 device per local rank, wraps the policy in

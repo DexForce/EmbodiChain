@@ -128,3 +128,33 @@ def test_trainer_rewinds_external_eval_event_manager() -> None:
         call(123),
         call(123),
     ]
+
+
+def test_evaluation_preserves_separate_actor_and_critic_inputs() -> None:
+    """Evaluation uses the observation groups configured on the policy."""
+
+    class GroupedEnv(_AsyncAutoResetEnv):
+        def reset(self, *, seed=None, options=None):
+            observation, info = super().reset(seed=seed, options=options)
+            return {"policy": observation, "critic": observation + 10.0}, info
+
+    class GroupedPolicy(_DeterministicPolicy):
+        actor_obs_groups = ("policy",)
+        critic_obs_groups = ("critic",)
+        uses_separate_critic_obs = True
+
+        def get_action(self, tensordict, deterministic: bool = False):
+            torch.testing.assert_close(tensordict["obs"], torch.zeros(3, 1))
+            torch.testing.assert_close(
+                tensordict["critic_obs"], torch.full((3, 1), 10.0)
+            )
+            return super().get_action(tensordict, deterministic=deterministic)
+
+    result = evaluate_episodes(
+        policy=GroupedPolicy(),
+        env=GroupedEnv(),
+        num_episodes=1,
+        device="cpu",
+    )
+
+    assert result["eval/avg_length"] == 1.0

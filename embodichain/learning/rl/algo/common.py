@@ -37,9 +37,14 @@ def compute_gae(
     Returns:
         Tuple of `(advantages, returns)`, both shaped `[num_envs, time]`.
     """
+    values = rollout["value"].float()
     rewards = rollout["reward"][:, :-1].float()
     dones = rollout["done"][:, :-1].bool()
-    values = rollout["value"].float()
+    truncated = rollout["truncated"][:, :-1].bool()
+
+    # Bootstrap time-limit truncations with the value stored for the
+    # transition before the done mask cuts GAE recursion.
+    rewards = rewards + gamma * values[:, :-1] * truncated
 
     if rewards.ndim != 2:
         raise ValueError(

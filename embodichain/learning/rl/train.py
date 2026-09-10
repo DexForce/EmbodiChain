@@ -21,16 +21,21 @@ import os
 import random
 import time
 from collections.abc import Sequence
+from copy import deepcopy
 from pathlib import Path
 
+from gymnasium import spaces
 import numpy as np
 import torch
 import wandb
 from torch.utils.tensorboard import SummaryWriter
-from copy import deepcopy
 
-from embodichain.learning.rl.models import build_policy, get_registered_policy_names
-from embodichain.learning.rl.models import build_mlp_from_cfg
+from embodichain.learning.rl.models import (
+    build_mlp_from_cfg,
+    build_policy,
+    get_registered_policy_names,
+    resolve_policy_obs_groups,
+)
 from embodichain.learning.rl.algo import (
     RolloutKind,
     build_algo,
@@ -42,7 +47,10 @@ from embodichain.learning.rl.differentiable_trainer import (
 )
 from embodichain.learning.rl.env import build_learning_env
 from embodichain.learning.rl.routing import get_trainer_class
-from embodichain.learning.rl.utils import dict_to_tensordict, flatten_dict_observation
+from embodichain.learning.rl.utils import (
+    dict_to_tensordict,
+    flatten_observation_groups,
+)
 from embodichain.learning.rl.utils.trainer import Trainer
 from embodichain.utils import logger
 from embodichain.lab.gym.utils.registration import (
@@ -124,35 +132,82 @@ def _resolve_profile_output(
     return str(output.with_name(f"{output.stem}_rank{rank}{output.suffix}"))
 
 
+def _set_initial_log_std(policy: torch.nn.Module, policy_block: dict) -> None:
+    """Apply an explicit initial Gaussian log standard deviation."""
+    if "initial_log_std" not in policy_block or not hasattr(policy, "log_std"):
+        return
+    with torch.no_grad():
+        policy.log_std.fill_(float(policy_block["initial_log_std"]))
+
+
+def _observation_space_dim(
+    observation_space: spaces.Space,
+    groups: tuple[str, ...] | None,
+) -> int:
+    """Return the flattened size of selected observation groups."""
+    if groups is None:
+        return int(spaces.utils.flatdim(observation_space))
+
+    total = 0
+    for group in groups:
+        selected_space = observation_space
+        for key in group.split("."):
+            if not isinstance(selected_space, spaces.Dict):
+                raise TypeError(
+                    f"Observation group '{group}' requires a Dict space at '{key}'."
+                )
+            if key not in selected_space.spaces:
+                raise KeyError(
+                    f"Observation group '{group}' was not found in the environment space."
+                )
+            selected_space = selected_space.spaces[key]
+        total += int(spaces.utils.flatdim(selected_space))
+    return total
+
+
 def _build_learning_policy(
     policy_block: dict,
     env,
     device: torch.device,
 ):
-    obs_dim = int(env.single_observation_space.shape[-1])
+    actor_obs_groups, critic_obs_groups = resolve_policy_obs_groups(policy_block)
+    actor_obs_dim = _observation_space_dim(
+        env.single_observation_space, actor_obs_groups
+    )
+    uses_separate_critic_obs = actor_obs_groups != critic_obs_groups
+    critic_obs_dim = (
+        _observation_space_dim(env.single_observation_space, critic_obs_groups)
+        if uses_separate_critic_obs
+        else actor_obs_dim
+    )
     action_dim = int(env.single_action_space.shape[-1])
     policy_name = policy_block["name"].lower()
     actor_cfg = policy_block.get("actor")
     critic_cfg = policy_block.get("critic")
     actor = (
-        build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
+        build_mlp_from_cfg(actor_cfg, actor_obs_dim, action_dim)
         if actor_cfg is not None
         else None
     )
     critic = (
-        build_mlp_from_cfg(critic_cfg, obs_dim, 1) if critic_cfg is not None else None
+        build_mlp_from_cfg(critic_cfg, critic_obs_dim, 1)
+        if critic_cfg is not None
+        else None
     )
     policy = build_policy(
         policy_block,
-        env.single_observation_space,
+        (
+            actor_obs_dim
+            if policy_name in {"actor_critic", "actor_only"}
+            else env.single_observation_space
+        ),
         env.single_action_space,
         device,
         actor=actor,
         critic=critic,
+        critic_obs_space=critic_obs_dim if uses_separate_critic_obs else None,
     )
-    if "initial_log_std" in policy_block and hasattr(policy, "log_std"):
-        with torch.no_grad():
-            policy.log_std.fill_(float(policy_block["initial_log_std"]))
+    _set_initial_log_std(policy, policy_block)
     return policy
 
 
@@ -296,6 +351,9 @@ def _train_learning_env(
                 eval_seed=eval_seed,
                 best_eval_metric=trainer_cfg.get("best_eval_metric", "eval/avg_reward"),
                 best_eval_mode=trainer_cfg.get("best_eval_mode", "max"),
+                save_frequency_updates=int(
+                    trainer_cfg.get("save_frequency_updates", 0)
+                ),
             )
             default_steps = iterations * buffer_size * num_envs
         total_timesteps = int(trainer_cfg.get("total_timesteps", default_steps))
@@ -381,7 +439,11 @@ def train_from_config(
     )
     enable_eval = bool(trainer_cfg.get("enable_eval", False))
     eval_freq = int(trainer_cfg.get("eval_freq", 10000))
-    save_freq = int(trainer_cfg.get("save_freq", 50000))
+    save_freq = int(
+        trainer_cfg.get(
+            "save_freq", 0 if "save_frequency_updates" in trainer_cfg else 50000
+        )
+    )
     num_eval_episodes = int(trainer_cfg.get("num_eval_episodes", 5))
     eval_seed = int(trainer_cfg.get("eval_seed", seed + 10_000))
     headless = bool(trainer_cfg.get("headless", True))
@@ -491,8 +553,17 @@ def train_from_config(
     env = build_env(gym_config_data["id"], base_env_cfg=gym_env_cfg)
     sample_obs, _ = env.reset(seed=effective_seed)
     sample_obs_td = dict_to_tensordict(sample_obs, device)
-    obs_dim = flatten_dict_observation(sample_obs_td).shape[-1]
-    flat_obs_space = env.flattened_observation_space
+    actor_obs_groups, critic_obs_groups = resolve_policy_obs_groups(policy_block)
+    actor_obs_dim = flatten_observation_groups(
+        sample_obs_td,
+        actor_obs_groups,
+    ).shape[-1]
+    uses_separate_critic_obs = actor_obs_groups != critic_obs_groups
+    critic_obs_dim = (
+        flatten_observation_groups(sample_obs_td, critic_obs_groups).shape[-1]
+        if uses_separate_critic_obs
+        else actor_obs_dim
+    )
 
     # Create evaluation environment only if enabled
     eval_env = None
@@ -534,16 +605,17 @@ def train_from_config(
                 "ActorCritic requires 'actor' and 'critic' definitions in JSON (policy.actor / policy.critic)."
             )
 
-        actor = build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
-        critic = build_mlp_from_cfg(critic_cfg, obs_dim, 1)
+        actor = build_mlp_from_cfg(actor_cfg, actor_obs_dim, action_dim)
+        critic = build_mlp_from_cfg(critic_cfg, critic_obs_dim, 1)
 
         policy = build_policy(
             policy_block,
-            flat_obs_space,
+            actor_obs_dim,
             env.action_space,
             device,
             actor=actor,
             critic=critic,
+            critic_obs_space=(critic_obs_dim if uses_separate_critic_obs else None),
         )
     elif policy_name.lower() == "actor_only":
         actor_cfg = policy_block.get("actor")
@@ -552,11 +624,11 @@ def train_from_config(
                 "ActorOnly requires 'actor' definition in JSON (policy.actor)."
             )
 
-        actor = build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
+        actor = build_mlp_from_cfg(actor_cfg, actor_obs_dim, action_dim)
 
         policy = build_policy(
             policy_block,
-            flat_obs_space,
+            actor_obs_dim,
             env.action_space,
             device,
             actor=actor,
@@ -565,6 +637,8 @@ def train_from_config(
         policy = build_policy(
             policy_block, env.observation_space, env.action_space, device
         )
+
+    _set_initial_log_std(policy, policy_block)
 
     # Build Algorithm via factory
     algo_name = algo_block["name"].lower()
@@ -633,6 +707,7 @@ def train_from_config(
         writer=writer,
         eval_freq=eval_freq if enable_eval else 0,  # Disable eval if not enabled
         save_freq=save_freq,
+        save_frequency_updates=int(trainer_cfg.get("save_frequency_updates", 0)),
         checkpoint_dir=checkpoint_dir,
         exp_name=exp_name,
         use_wandb=use_wandb,

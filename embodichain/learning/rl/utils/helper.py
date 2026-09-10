@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import torch
@@ -25,6 +25,7 @@ from tensordict import TensorDict
 __all__ = [
     "dict_to_tensordict",
     "flatten_dict_observation",
+    "flatten_observation_groups",
 ]
 
 
@@ -53,6 +54,56 @@ def flatten_dict_observation(obs: TensorDict) -> torch.Tensor:
         raise ValueError("No tensors found in observation TensorDict.")
 
     return torch.cat(obs_list, dim=-1)
+
+
+def flatten_observation_groups(
+    obs: TensorDict,
+    groups: Sequence[str] | None,
+) -> torch.Tensor:
+    """Flatten selected observation groups in the configured order.
+
+    A group name selects one top-level TensorDict key. Dot-separated names may
+    select nested keys, for example ``"robot.qpos"``. When ``groups`` is
+    ``None``, every tensor is flattened using
+    :func:`flatten_dict_observation` for compatibility with existing tasks.
+
+    Args:
+        obs: Observation TensorDict with batch dimension ``[num_envs]``.
+        groups: Observation group names consumed by one model.
+
+    Returns:
+        Concatenated observation tensor with shape ``[num_envs, obs_dim]``.
+
+    Raises:
+        ValueError: If ``groups`` is empty or a selected group has no tensors.
+        KeyError: If a configured group is absent from ``obs``.
+    """
+    if groups is None:
+        return flatten_dict_observation(obs)
+    if len(groups) == 0:
+        raise ValueError("Observation groups cannot be empty.")
+
+    flattened: list[torch.Tensor] = []
+    for group in groups:
+        value: TensorDict | torch.Tensor = obs
+        for key in group.split("."):
+            if not isinstance(value, TensorDict) or key not in value.keys():
+                raise KeyError(
+                    f"Observation group '{group}' was not found. "
+                    f"Available top-level groups: {list(obs.keys())}."
+                )
+            value = value[key]
+        if isinstance(value, TensorDict):
+            flattened.append(flatten_dict_observation(value))
+        elif isinstance(value, torch.Tensor):
+            flattened.append(value.flatten(start_dim=1))
+        else:
+            raise TypeError(
+                f"Observation group '{group}' must contain tensors, got "
+                f"{type(value)!r}."
+            )
+
+    return torch.cat(flattened, dim=-1)
 
 
 def dict_to_tensordict(

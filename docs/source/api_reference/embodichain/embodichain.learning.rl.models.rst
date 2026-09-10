@@ -21,6 +21,7 @@ through :func:`register_policy` / :func:`get_policy_class`.
       ActorCritic
       ActorOnly
       MLP
+      EmpiricalNormalizer
 
    .. rubric:: Functions
 
@@ -31,9 +32,24 @@ through :func:`register_policy` / :func:`get_policy_class`.
       get_policy_class
       get_registered_policy_names
       register_policy
+      resolve_policy_obs_groups
 
 .. automodule:: embodichain.learning.rl.models
    :members:
    :undoc-members:
    :show-inheritance:
-   
+
+Observation normalization
+-------------------------
+
+``ActorCritic`` can maintain independent actor and critic observation moments.
+The statistics are stored in policy buffers and restored with its checkpoint.
+
+.. currentmodule:: embodichain.learning.rl.models.normalizer
+
+.. autosummary::
+
+   EmpiricalNormalizer
+
+.. autoclass:: EmpiricalNormalizer
+   :no-index:
