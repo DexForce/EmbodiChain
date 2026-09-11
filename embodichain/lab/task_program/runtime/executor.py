@@ -66,6 +66,7 @@ from embodichain.lab.task_program.semantics.calls import (
     HandOver,
     Pick,
     Place,
+    RegisteredSemanticCall,
     SemanticCallSpec,
 )
 from embodichain.lab.task_program.semantics.effects import (
@@ -1246,12 +1247,13 @@ class SemanticCallExecutor:
             Correlated row-local loss decision, or ``None`` when this named
             action segment has no held-object invariant.
         """
-        if context.robot.timestamp > request.deadline:
-            return None
         grounded = self._require_grounded()
         guards = grounded.effect_guards
+        guard_only = grounded.effect_spec is None
+        if context.robot.timestamp > request.deadline and not guard_only:
+            return None
         session = self._require_runner().session
-        if grounded.effect_spec is None:
+        if guard_only or type(grounded.analyzed.call) is RegisteredSemanticCall:
             segment_names = {segment.name for segment in session.active_plan.segments}
             for guard in guards:
                 missing = set(guard.active_segments) - segment_names
@@ -1297,6 +1299,10 @@ class SemanticCallExecutor:
                 covered.zero_()
         observed_mask = request.env_mask & covered
         failure_mask = request.env_mask & ~covered
+        pending_mask = torch.zeros_like(request.env_mask)
+        if guard_only and context.robot.timestamp >= request.deadline:
+            failure_mask = request.env_mask.clone()
+            observed_mask.zero_()
         if observed_mask.any():
             assert isinstance(candidate, HeldObjectState)
             verification_id = self._next_guard_verification_id
@@ -1326,6 +1332,10 @@ class SemanticCallExecutor:
                 segment_name=request.segment_name,
             )
             failure_mask |= decision.failure_mask
+            if guard_only:
+                pending_mask = observed_mask & ~(
+                    decision.success_mask | decision.failure_mask
+                )
         invalidation = self._held_object_invalidation(
             guard.invalidation_task_state_keys,
             failure_mask,
@@ -1345,6 +1355,7 @@ class SemanticCallExecutor:
             failure_mask=failure_mask,
             state_invalidation=invalidation,
             retry_mask=retry_mask,
+            pending_mask=pending_mask,
             message=(
                 f"Held-object invariant {guard.guard_id!r} failed during "
                 f"segment {request.segment_name!r}."

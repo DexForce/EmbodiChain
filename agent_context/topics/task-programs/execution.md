@@ -74,8 +74,12 @@ on attachment and guards subsequent held phases; release guards the input hold
 and gates retreat on detachment. Release gates omit terminal geometric separation,
 which can only be observed after retreat. Retention guards verified task state
 without adding a terminal effect or changing symbolic-state ownership. Guard-only
-calls validate their declared segment names against each active plan before
-dispatch. Projected presets do not install measured protections.
+and registered calls validate their declared segment names against each active
+plan before dispatch. Guard-only retention requires affirmative current evidence:
+unavailable or not-yet-stable evidence holds the command cursor while the existing
+consecutive-sample policy accumulates fresh observations. Reaching the action
+deadline fails the call and removes the stale held relation. Projected presets
+do not install measured protections.
 
 GenSim registered Pick and relative Place use these phase declarations. Its
 configured held-move service opts in with

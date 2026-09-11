@@ -591,6 +591,8 @@ class HeldObjectGuardResult:
     ``state_invalidation`` may only remove single-resource or coordinated
     held-object relations. It is applied to ``failure_mask`` before recovery
     planning, so a retry always observes reconciled symbolic state.
+    ``pending_mask`` pauses the shared command cursor while evidence is
+    unresolved. Omission preserves the historical loss-only guard contract.
     """
 
     verification_id: int
@@ -602,6 +604,7 @@ class HeldObjectGuardResult:
     state_invalidation: StateDelta
     retry_mask: torch.Tensor
     message: str = ""
+    pending_mask: torch.Tensor | None = None
 
     def __post_init__(self) -> None:
         if type(self.verification_id) is not int or self.verification_id < 0:
@@ -628,6 +631,19 @@ class HeldObjectGuardResult:
             raise ValueError("failure_mask and retry_mask must use the same device.")
         if (self.retry_mask & ~self.failure_mask).any():
             raise ValueError("retry_mask must be a subset of failure_mask.")
+        pending = self.pending_mask
+        if pending is None:
+            pending = torch.zeros_like(self.failure_mask)
+        if not isinstance(pending, torch.Tensor) or pending.dtype != torch.bool:
+            raise TypeError("pending_mask must be a bool tensor or None.")
+        if (
+            pending.shape != self.failure_mask.shape
+            or pending.device != self.failure_mask.device
+        ):
+            raise ValueError("pending_mask must match failure_mask shape and device.")
+        if (pending & self.failure_mask).any():
+            raise ValueError("pending_mask and failure_mask must not overlap.")
+        object.__setattr__(self, "pending_mask", pending.clone())
         if not isinstance(self.state_invalidation, StateDelta):
             raise TypeError("state_invalidation must be a StateDelta.")
         if any(

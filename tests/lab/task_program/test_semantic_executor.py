@@ -1665,8 +1665,10 @@ def test_terminal_failure_policy_only_retains_strongly_proven_source_attachment(
 
 
 @pytest.mark.parametrize("segment_declared", (True, False))
+@pytest.mark.parametrize("terminal_effect", (True, False))
 def test_in_flight_guard_collects_live_evidence_and_builds_loss_reconciliation(
     segment_declared: bool,
+    terminal_effect: bool,
 ) -> None:
     system = _system(
         (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
@@ -1760,9 +1762,11 @@ def test_in_flight_guard_collects_live_evidence_and_builds_loss_reconciliation(
     assert retained is not None
     assert retained.env_mask.tolist() == [True, True]
     system.runtime._grounded = SimpleNamespace(
-        analyzed=SimpleNamespace(effect_monitor_ref=None),
+        analyzed=SimpleNamespace(
+            effect_monitor_ref=None, call=_call("registered_release")
+        ),
         effect_guards=(guard,),
-        effect_spec=None,
+        effect_spec=spec if terminal_effect else None,
     )
     system.runtime._runner = SimpleNamespace(
         session=SimpleNamespace(
@@ -1807,6 +1811,211 @@ def test_in_flight_guard_collects_live_evidence_and_builds_loss_reconciliation(
     assert trace.guard_id == "source_attached"
     assert trace.segment_name == "carry"
     assert torch.equal(system.collector.calls[0][2], torch.tensor([0, 1]))
+
+
+@pytest.mark.parametrize(
+    "evidence_mode", ("unavailable", "recovered", "lost_after_send")
+)
+def test_guard_only_motion_waits_for_fresh_evidence_and_invalidates_on_timeout(
+    monkeypatch: pytest.MonkeyPatch, evidence_mode: str
+) -> None:
+    """Real command frames cannot complete through an unresolved held guard."""
+    from embodichain.lab.sim.atomic_actions import (
+        EndpointCommand,
+        JointPositionPayload,
+        RuntimeCommandFrame,
+        SkillEndpointRequirement,
+        SkillResourceSlot,
+    )
+    from embodichain.lab.task_program.semantics.effects import (
+        BinaryEffectEvidenceBatch,
+        CompositeEffectMonitor,
+        CompositeEffectMonitorCfg,
+    )
+
+    monkeypatch.setattr(
+        _EffectlessAction,
+        "binding_contract",
+        SkillBindingContract(
+            slots=(
+                SkillResourceSlot(
+                    slot_id="primary",
+                    endpoints=(SkillEndpointRequirement(endpoint_id="motion"),),
+                ),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        _EffectlessAction, "_scene_dependencies", lambda self, request: ()
+    )
+
+    def plan(
+        self: _EffectlessAction,
+        request: ResolvedActionRequest,
+        context: PlanningContext,
+    ) -> ActionPlan:
+        target = request.binding.endpoint("primary", "motion").target
+        frame = RuntimeCommandFrame(
+            commands=(
+                EndpointCommand(
+                    target, JointPositionPayload(torch.ones(BATCH_SIZE, 1))
+                ),
+            ),
+            active_mask=_mask(True, True),
+            env_ids=context.env_ids,
+            hold_duration=torch.zeros(BATCH_SIZE),
+        )
+        return self.build_command_plan(
+            request,
+            context,
+            success=True,
+            commands=TimedCommandSequence((frame, frame, frame), context.env_ids),
+            segment_lengths={"carry": 3},
+            replannable=False,
+        )
+
+    monkeypatch.setattr(_EffectlessAction, "_plan", plan)
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        effectless_action=True,
+        install_effect_monitor=False,
+        effect_assurance=EffectAssurance.VERIFIED,
+    )
+    binding = ActionBinding(
+        owner_id=system.engine.binding_owner_id,
+        endpoints=(
+            EndpointBinding(
+                slot_id="primary",
+                endpoint_id="motion",
+                resource_id="arm",
+                adapter_id="test",
+                target=JointPositionTarget("virtual", (0,)),
+                task_state_key="arm",
+                joint_ids=(0,),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        system.engine, "bind_control_parts", lambda *args, **kwargs: binding
+    )
+    original_ground = system.compiler.ground
+
+    def ground(*args: object, **kwargs: object) -> _Grounded:
+        grounded = original_ground(*args, **kwargs)
+        invocation = replace(
+            grounded.invocation,
+            recovery_policy=RecoveryPolicy(
+                max_action_retries=0,
+                max_replans=0,
+                action_timeout=8.0,
+            ),
+        )
+        spec = SemanticEffectSpec(
+            semantic_id=grounded.analyzed.call.semantic_id,
+            effect_kind=SemanticEffectKind.ATTACH,
+            skill_id=invocation.skill_id,
+            invocation_id=invocation.invocation_id,
+            invocation_revision=0,
+            env_ids=torch.arange(BATCH_SIZE),
+            state_expectations=(
+                HeldObjectStateExpectation(
+                    expectation_id="source",
+                    relation=HeldObjectRelation.ATTACHED,
+                    object_id="cube",
+                    slot_id="primary",
+                    resource_id="arm",
+                    task_state_key="arm",
+                ),
+            ),
+            clauses=(
+                BinaryEffectClause(
+                    clause_id="source.constraint",
+                    expectation_id="source",
+                    source=EffectEvidenceSourceRef(
+                        "test.provider",
+                        "1",
+                        ControlPartEvidenceAddress("virtual", "constraint"),
+                    ),
+                    evidence_kind=BinaryEvidenceKind.CONSTRAINT,
+                    expected=True,
+                ),
+            ),
+        )
+        guard = GroundedHeldObjectGuard(
+            guard_id="source_attached",
+            active_segments=("carry",),
+            baseline=HeldObjectGuardBaseline.VERIFIED_TASK_STATE,
+            effect_spec=spec,
+            effect_monitor=CompositeEffectMonitor(
+                spec, CompositeEffectMonitorCfg(consecutive_samples=2)
+            ),
+            invalidation_task_state_keys=("arm",),
+            retry_action=False,
+        )
+        return replace(grounded, invocation=invocation, effect_guards=(guard,))
+
+    monkeypatch.setattr(system.compiler, "ground", ground)
+    observations: list[tuple[bool, int]] = []
+
+    def collect(
+        spec: SemanticEffectSpec,
+        *,
+        timestamp: float,
+        observation_revision: int,
+        env_ids: torch.Tensor,
+    ) -> dict[str, EffectEvidenceBatch]:
+        valid = evidence_mode == "recovered" and bool(observations)
+        if evidence_mode == "lost_after_send":
+            valid = system.sink.sent == 0
+        observations.append((valid, system.sink.sent))
+        return {
+            "source.constraint": BinaryEffectEvidenceBatch(
+                evidence_id="source.constraint",
+                evidence_kind=BinaryEvidenceKind.CONSTRAINT,
+                values=torch.ones(BATCH_SIZE, dtype=torch.bool),
+                valid=torch.full((BATCH_SIZE,), valid),
+                acquisition_errors=(
+                    (None, None) if valid else ("unavailable", "unavailable")
+                ),
+                timestamp=timestamp,
+                env_ids=env_ids,
+                observation_revision=observation_revision,
+            )
+        }
+
+    monkeypatch.setattr(system.collector, "collect", collect)
+    poses = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+    held = HeldObjectState(
+        semantics=ObjectSemantics(
+            affordance=Affordance(), geometry={}, entity_id="cube"
+        ),
+        object_to_eef=poses,
+        grasp_xpos=poses,
+        env_mask=_mask(True, True),
+    )
+    system.runtime.adopt_verified_task_state(
+        TaskState(
+            batch_size=BATCH_SIZE,
+            device="cpu",
+            held_objects={"arm": held},
+        )
+    )
+    result = system.runtime.run(_call("guard_only_motion"))
+    if evidence_mode == "recovered":
+        assert result.status is SemanticExecutionStatus.COMPLETED
+        assert system.sink.sent == 3
+        assert observations[:3] == [(False, 0), (True, 0), (True, 0)]
+        assert result.task_state.get_held_object("arm").env_mask.tolist() == [
+            True,
+            True,
+        ]
+    else:
+        assert result.status is SemanticExecutionStatus.FAILED
+        assert system.sink.sent == (1 if evidence_mode == "lost_after_send" else 0)
+        assert system.sink.cancelled == 1
+        remaining = result.task_state.get_held_object("arm")
+        assert remaining is None or not remaining.env_mask.any()
+    assert system.sink.held > 0
 
 
 def test_phase_effect_gate_uses_independent_monitor_and_records_boundary_trace() -> (

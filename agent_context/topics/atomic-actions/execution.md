@@ -87,6 +87,12 @@ Held-object guards and phase-effect gates are observational:
 - gates can hold a named plan segment until evidence proves a transition; and
 - neither mechanism creates constraints, freezes objects, or overwrites poses.
 
+`HeldObjectGuardResult.pending_mask` can hold the shared command cursor while
+an invariant remains unresolved. Pending rows cannot overlap failed rows and
+must belong to the active request. The runner issues an observed hold and polls
+fresh evidence; unresolved results past the request deadline are rejected.
+Omitting the mask preserves the historical loss-only guard contract.
+
 Pick gates attachment before lift. Place gates detachment before retract.
 HandOver owns independent source/destination transfer boundaries.
 

@@ -1141,6 +1141,42 @@ def test_stale_phase_effect_gate_result_is_rejected_after_unresolved_poll() -> N
         )
 
 
+def test_unresolved_held_guard_holds_command_cursor_until_verified() -> None:
+    engine, _ = _engine()
+    initial = _with_held_object(_context(0.0, 0.0, 0.2, 0))
+    session = engine.start((_invocation(engine),), initial)
+    request = session.held_object_guard_request
+    assert request is not None
+    unresolved = HeldObjectGuardResult(
+        verification_id=request.verification_id,
+        object_id="object",
+        attempt_generation=request.attempt_generation,
+        invocation_index=request.invocation_index,
+        next_waypoint_index=request.next_waypoint_index,
+        failure_mask=torch.tensor([False]),
+        retry_mask=torch.tensor([False]),
+        state_invalidation=StateDelta(),
+        pending_mask=torch.tensor([True]),
+    )
+    tick = session.tick(initial, held_object_guard_result=unresolved)
+    assert tick.command is None
+    assert tick.hold_targets
+    next_request = session.held_object_guard_request
+    assert next_request is not None
+    assert next_request.next_waypoint_index == 0
+    assert next_request.verification_id != request.verification_id
+    resumed = session.tick(
+        _with_held_object(_context(0.1, 0.0, 0.2, 0)),
+        held_object_guard_result=replace(
+            unresolved,
+            verification_id=next_request.verification_id,
+            pending_mask=torch.tensor([False]),
+        ),
+    )
+    assert resumed.command is not None
+    assert session.held_object_guard_request.next_waypoint_index == 1
+
+
 def test_held_object_loss_retries_only_failed_row_with_reconciled_state() -> None:
     engine, _ = _engine(batch_size=2)
     initial = _with_held_object(
