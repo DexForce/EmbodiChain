@@ -268,6 +268,18 @@ def _case_name(config: Mapping[str, object]) -> str:
     return name
 
 
+def _atomic_case_id(
+    track_id: str,
+    skill_id: str,
+    name: str,
+    *,
+    batch_size: int,
+    seed: int,
+) -> str:
+    """Return an Atomic Task identity that distinguishes simulator batches."""
+    return f"{track_id}:{skill_id}:{name}:b{batch_size}:s{seed}"
+
+
 def _difficulty(config: Mapping[str, object]) -> str:
     """Resolve the explicit, frozen Atomic Task difficulty label."""
     difficulty = str(config.get("task_difficulty", "simple"))
@@ -1022,7 +1034,13 @@ class _MoveEndEffectorCases(AtomicSkillCaseProvider):
             suite_version=suite.suite_version,
             track=track.id,
             scenario_id=self.skill_id,
-            case_id=f"{track.id}:{self.skill_id}:{name}:s{seed}",
+            case_id=_atomic_case_id(
+                track.id,
+                self.skill_id,
+                name,
+                batch_size=batch_size,
+                seed=seed,
+            ),
             seed=seed,
             batch_size=batch_size,
             num_waypoints=len(base_offsets),
@@ -1209,7 +1227,13 @@ class _PickUpCases(AtomicSkillCaseProvider):
             suite_version=suite.suite_version,
             track=track.id,
             scenario_id=self.skill_id,
-            case_id=f"{track.id}:{self.skill_id}:{name}:s{seed}",
+            case_id=_atomic_case_id(
+                track.id,
+                self.skill_id,
+                name,
+                batch_size=batch_size,
+                seed=seed,
+            ),
             seed=seed,
             batch_size=batch_size,
             num_waypoints=3,
@@ -1395,7 +1419,13 @@ class _MoveJointsCases(AtomicSkillCaseProvider):
             suite_version=suite.suite_version,
             track=track.id,
             scenario_id=self.skill_id,
-            case_id=f"{track.id}:{self.skill_id}:{name}:s{seed}",
+            case_id=_atomic_case_id(
+                track.id,
+                self.skill_id,
+                name,
+                batch_size=batch_size,
+                seed=seed,
+            ),
             seed=seed,
             batch_size=batch_size,
             num_waypoints=len(base_offsets),
@@ -1699,7 +1729,13 @@ class _MoveHeldObjectCases(_HeldObjectCases):
             suite_version=suite.suite_version,
             track=track.id,
             scenario_id=self.skill_id,
-            case_id=f"{track.id}:{self.skill_id}:{name}:s{seed}",
+            case_id=_atomic_case_id(
+                track.id,
+                self.skill_id,
+                name,
+                batch_size=batch_size,
+                seed=seed,
+            ),
             seed=seed,
             batch_size=batch_size,
             num_waypoints=1,
@@ -1853,7 +1889,13 @@ class _PlaceCases(_HeldObjectCases):
             suite_version=suite.suite_version,
             track=track.id,
             scenario_id=self.skill_id,
-            case_id=f"{track.id}:{self.skill_id}:{name}:s{seed}",
+            case_id=_atomic_case_id(
+                track.id,
+                self.skill_id,
+                name,
+                batch_size=batch_size,
+                seed=seed,
+            ),
             seed=seed,
             batch_size=batch_size,
             num_waypoints=3,
@@ -2030,7 +2072,13 @@ class _PressCases(AtomicSkillCaseProvider):
             suite_version=suite.suite_version,
             track=track.id,
             scenario_id=self.skill_id,
-            case_id=f"{track.id}:{self.skill_id}:{name}:s{seed}",
+            case_id=_atomic_case_id(
+                track.id,
+                self.skill_id,
+                name,
+                batch_size=batch_size,
+                seed=seed,
+            ),
             seed=seed,
             batch_size=batch_size,
             num_waypoints=4,
@@ -2260,7 +2308,13 @@ class _SlideCases(AtomicSkillCaseProvider):
             suite_version=suite.suite_version,
             track=track.id,
             scenario_id=self.skill_id,
-            case_id=f"{track.id}:{self.skill_id}:{name}:s{seed}",
+            case_id=_atomic_case_id(
+                track.id,
+                self.skill_id,
+                name,
+                batch_size=batch_size,
+                seed=seed,
+            ),
             seed=seed,
             batch_size=batch_size,
             num_waypoints=targets.shape[1],
@@ -2507,7 +2561,13 @@ class _TwistCases(AtomicSkillCaseProvider):
             suite_version=suite.suite_version,
             track=track.id,
             scenario_id=self.skill_id,
-            case_id=f"{track.id}:{self.skill_id}:{name}:s{seed}",
+            case_id=_atomic_case_id(
+                track.id,
+                self.skill_id,
+                name,
+                batch_size=batch_size,
+                seed=seed,
+            ),
             seed=seed,
             batch_size=batch_size,
             num_waypoints=targets.shape[1],

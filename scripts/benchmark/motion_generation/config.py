@@ -483,9 +483,8 @@ def resolve_atomic_batch_sizes(track: TrackCfg) -> list[int]:
     if len(values) != len(set(values)):
         raise ValueError("atomic-task batch_sizes must not contain duplicates.")
     if randomization.enabled and values != [randomization.pose_batch_size]:
-        # Atomic case ids intentionally identify the skill/case/seed, not the
-        # simulator batch.  Running the same matrix at multiple batch sizes
-        # would therefore merge distinct trajectories during aggregation.
+        # One randomized pose is assigned to each environment row, so its
+        # declared pose batch and simulator batch must remain identical.
         raise ValueError(
             "atomic-task randomization requires batch_sizes to contain exactly "
             f"[{randomization.pose_batch_size}] (one pose batch per case)."

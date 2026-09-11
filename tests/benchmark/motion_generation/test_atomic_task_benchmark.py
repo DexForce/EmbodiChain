@@ -50,6 +50,7 @@ from scripts.benchmark.motion_generation.scenarios.atomic_objects import (
 from scripts.benchmark.motion_generation.scenarios.atomic_task import (
     AtomicTaskScenario,
     _ExecutionObservation,
+    _atomic_case_id,
     _articulation_effect_success,
     _canonical_case_qpos,
     _case_generation_seed,
@@ -125,6 +126,15 @@ def _atomic_outcome() -> CaseOutcome:
         articulation_joint_delta=0.001,
         articulation_joint_peak_signed_delta=0.006,
     )
+
+
+def test_atomic_case_identity_includes_simulator_batch_size() -> None:
+    case_b1 = _atomic_case_id("atomic-task", "pick_up", "cube", batch_size=1, seed=11)
+    case_b8 = _atomic_case_id("atomic-task", "pick_up", "cube", batch_size=8, seed=11)
+
+    assert case_b1 == "atomic-task:pick_up:cube:b1:s11"
+    assert case_b8 == "atomic-task:pick_up:cube:b8:s11"
+    assert case_b1 != case_b8
 
 
 def _fake_articulation_geometry(*, joint_type: str) -> dict[str, torch.Tensor]:
@@ -531,6 +541,7 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
     )
 
     assert case.skill_id == skill_id
+    assert case.case_id == f"atomic-task:{skill_id}:{config['name']}:b8:s11"
     assert case.num_waypoints == expected_waypoints
     assert case.target_waypoints.shape == (batch_size, expected_waypoints, 4, 4)
     assert case.reference_qpos.shape == (batch_size, expected_waypoints, 7)
