@@ -155,8 +155,9 @@ def generate_task_program_bundle(
         task_binding = binding_for_graph(task_template, selected_graph)
     if "task_spec" in selected_graph:
         raise ValueError(
-            "TaskSpec bundle export requires final task evaluation before data "
-            "submission; that runtime integration is not yet available."
+            "TaskSpec v2 bundle export requires final task evaluation bound to "
+            "qualified measured instance/witness evidence; that v2 "
+            "qualification is not yet available."
         )
     unsupported = sorted(
         {node["task_type"] for node in selected_graph["nodes"]}

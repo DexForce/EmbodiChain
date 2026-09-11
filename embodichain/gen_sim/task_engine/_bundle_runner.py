@@ -82,8 +82,9 @@ def execute_bundle(
     graph = validate_semantic_task_graph(_read_json(graph_path))
     if "task_spec" in graph:
         raise ValueError(
-            "TaskSpec execution requires final task evaluation before data "
-            "submission; that runtime integration is not yet available."
+            "TaskSpec v2 execution requires final task evaluation bound to "
+            "qualified measured instance/witness evidence; that v2 "
+            "qualification is not yet available."
         )
     output.mkdir(parents=True, exist_ok=True)
     fingerprint = _read_json(fingerprint_path)
