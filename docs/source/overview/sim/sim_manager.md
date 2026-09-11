@@ -52,8 +52,7 @@ sim_config = SimulationManagerCfg(
 Physics backend selection, capability comparisons, shared device settings, and
 time stepping are covered in {doc}`sim_manager/physics/index`. See
 {doc}`sim_manager/physics/default` and {doc}`sim_manager/physics/newton` for
-backend-specific settings, and {doc}`sim_manager/physics/migration` when moving
-an existing task between backends.
+backend-specific settings.
 
 ### Rendering
 

@@ -3,7 +3,7 @@
 ```{currentmodule} embodichain.lab.sim
 ```
 
-The Default backend provides CPU and Direct GPU simulation through DexSim.
+The Default backend provides CPU and GPU simulation through DexSim.
 Its default solver is displayed as Constraint Dynamics.
 Select it with {class}`~cfg.DefaultPhysicsCfg`, or `physics: default` in a
 Gym configuration. See {doc}`index` for the shared capability matrix,
@@ -12,7 +12,7 @@ device selection, and time-step definitions.
 ## Minimal simulation
 
 This example declares one falling cube, prepares the scene, and advances
-100 physics steps. Set `device="cuda:0"` to use the Direct GPU path on a
+100 physics steps. Set `device="cuda:0"` to use the GPU path on a
 compatible installation. CPU physics still uses the normal DexSim runtime;
 rendering requirements are described in {doc}`/quick_start/install`.
 
@@ -61,7 +61,7 @@ declaration, preparation, and explicit stepping retain the same structure.
 | Parameter | Default | Meaning and tuning guidance |
 | :--- | :--- | :--- |
 | `physics_dt` | `0.01` | Physics-step duration in seconds; coordinate changes with the control period. |
-| `device` | `"cpu"` | CPU execution; `"cuda:0"` selects Direct GPU execution. |
+| `device` | `"cpu"` | CPU execution; `"cuda:0"` selects GPU execution. |
 | `gravity` | `[0.0, 0.0, -9.81]` | World-frame acceleration in m/s². |
 | `bounce_threshold` | `2.0` | Relative normal-speed threshold in m/s below which contacts do not bounce. |
 | `enable_ccd` | `False` | Scene-level continuous collision detection; participating rigid bodies must also enable CCD. |
@@ -115,11 +115,10 @@ capacity values cannot be transferred directly between backends.
 
 ## Contacts and validation
 
-`ContactSensor` works on Default CPU and Direct GPU. The two paths differ in
+`ContactSensor` works on Default CPU and GPU. The two paths differ in
 impulse and static-actor identity reporting; use the public query metadata and
 `contact_capabilities` described in {doc}`../../sensors/contact_sensor`. Do not treat GPU and CPU
 contact rows as an identical manifold representation.
 
 For a new task, check settling, impact response, joint tracking, and contact
-sensor output before increasing the environment count. Use
-{doc}`migration` for symptom-based tuning and backend comparisons.
+sensor output before increasing the environment count.

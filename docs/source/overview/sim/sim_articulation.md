@@ -109,7 +109,6 @@ gain. Non-MuJoCo Newton position mode assumes a zero velocity target.
 Newton support for effort/velocity limits, passive friction, and armature is
 solver-dependent; storing a value is not proof that the solver enforces it.
 Inspect the resolved properties and test the response after changing solvers.
-See {doc}`sim_manager/physics/migration` for portability and drive-calibration guidance.
 
 ### Joint Position Limits
 

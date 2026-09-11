@@ -9,8 +9,8 @@ EmbodiChain exposes two physics backends, selected by the configuration type:
 
 | Backend | Python configuration | Execution and solver model | Start here |
 | :--- | :--- | :--- | :--- |
-| `default` | `DefaultPhysicsCfg` | CPU or Direct GPU execution; Constraint Dynamics is the default solver. | {doc}`default` |
-| `newton` | `NewtonPhysicsCfg` | Newton through DexSim; scene-aware automatic selection or an explicit solver. | {doc}`newton` |
+| `default` | `DefaultPhysicsCfg` | CPU or GPU execution; Constraint Dynamics is the default solver. | {doc}`default` |
+| `newton` | `NewtonPhysicsCfg` | Newton through DexSim; DexUni is the coupled articulation/deformable path. | {doc}`newton` |
 
 Both are integrated through DexSim's runtime and Spawn SDK. `default` and
 `newton` are the only public backend identifiers. The renderer is selected
@@ -26,33 +26,27 @@ upstream solver does not imply that every asset or operation exposes it here.
 
 | Capability | Default | Newton |
 | :--- | :--- | :--- |
-| Rigid objects, rigid-object groups, articulations, robots | Supported | Supported; joint features depend on the solver. |
-| Volume and surface deformables | Unsupported | Supported on CUDA with a particle-capable solver; see {doc}`newton`. |
-| Native rigid constraints through the manager | Supported | Unsupported; this is distinct from solver-internal articulation constraints. |
-| Camera and stereo camera | Supported | Supported through the shared rendering integration. |
-| `ContactSensor` | Supported on CPU and Direct GPU | Supported; geometry and impulse availability depend on solver/device. See {doc}`../../sensors/contact_sensor`. |
-| Differentiable simulation | Unsupported | Explicit `semi_implicit` solver only; see {doc}`newton`. |
+| Rigid objects and articulations | Supported | Supported |
+| Cloth and soft bodies | Unsupported | Supported on GPU |
+| Manager rigid constraints | Supported | Unsupported |
+| Camera and stereo camera | Supported | Supported |
+| `ContactSensor` | Supported on CPU and GPU | Solver/device dependent |
+| Differentiable simulation | Unsupported | `semi_implicit` only |
 
 Use Default for workflows needing its native rigid constraints or established
-Constraint Dynamics behavior. Use Newton for particle-based cloth/soft bodies, solver-specific
-experiments, or the supported differentiable path. For rigid robot tasks that
-can run on either backend, validate the target task with each configuration;
-shared APIs do not guarantee identical trajectories or contact responses.
+Constraint Dynamics behavior. Use Newton for DexUni robot/deformable coupling,
+particle-based cloth or soft bodies, solver-specific experiments, or the
+supported differentiable path. For rigid robot tasks that can run on either
+backend, validate the target task with each configuration; shared APIs do not
+guarantee identical trajectories or contact responses.
 
-Newton runtime qualification is more specific than the backend name:
+See {doc}`newton/dexuni` for mixed articulation/deformable scenes and
+{doc}`newton/runtime_qualification` for the detailed Newton support matrix.
 
-| Solver/device path | Rigid/articulation stepping | Deformables | `ContactSensor` | Status boundary |
-| :--- | :--- | :--- | :--- | :--- |
-| MuJoCo-Warp, CUDA | Supported | No | Geometry + impulse | Primary articulated-rigid path. |
-| MuJoCo-Warp, CPU | Supported | No | Unsupported | CPU contact buffers are not exposed to the sensor. |
-| XPBD, CUDA | Supported | Scene-dependent | Geometry-only where available | Validate the exact task. |
-| VBD, CUDA | Limited by scene | Volume/surface | Geometry-only where available | Deformable-focused path. |
-| DexUni, CUDA | Coupled articulation/deformable stepping | Volume/surface | Unsupported | No rigid-rigid or rigid-ground contact publication/current solve path. |
-| Semi-implicit, CUDA, gradients | Not stepped by `DifferentiableEnv` | Unsupported | Unsupported | Kinematics bridge only. |
-
-AutoSolver chooses from finalized scene contents, so query
-`sim.physics.solver_type` and runtime capabilities after `prepare()` rather
-than treating `physics: newton` as a complete support claim.
+`physics: newton` identifies the backend, not a fully qualified runtime. The
+resolved solver, device, scene contents, and requested operation determine the
+actual support boundary. See {doc}`newton/runtime_qualification` for the
+solver/device matrix and the checks to perform after `prepare()`.
 
 ## Common configuration and devices
 
@@ -76,7 +70,7 @@ Python chooses a backend through `physics_cfg`. Gym files declare `physics`
 and a matching `physics_config`; an environment component owns both fields and
 its deployment cannot override either. `--physics` can confirm the file's
 backend but cannot switch it. See {doc}`/guides/configuration` for paired
-configuration examples and {doc}`migration` for migration checks.
+configuration examples.
 
 ## Physics, control, and solver time
 
@@ -97,5 +91,4 @@ publication have their own cadence and do not define the control frequency.
 
 default
 newton
-migration
 ```

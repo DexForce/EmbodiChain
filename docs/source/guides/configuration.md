@@ -267,8 +267,8 @@ environment tensors and the selected physics backend. In particular,
 The following are **physics fragments**, not complete runnable task files.
 Apply each fragment to a separate copy of the same inline deployment, retaining
 its required `id`, `env`, robot/embodiment, and scene declarations. Retune any
-backend-specific asset fields as described in
-{doc}`/overview/sim/sim_manager/physics/migration`.
+backend-specific asset fields and validate the final configuration on its
+selected backend.
 
 Default fragment:
 
