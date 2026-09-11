@@ -630,7 +630,6 @@ class ExecutionRunner:
         if (
             held_object_guard_verifier is not None
             and held_object_guard_request is not None
-            and context.robot.timestamp <= held_object_guard_request.deadline
         ):
             try:
                 held_object_guard_result = held_object_guard_verifier(

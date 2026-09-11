@@ -66,6 +66,26 @@ its call ID, revision, and target Atomic Skill descriptor. Use this extension
 to expose shared Atomic Skills; do not place task-local motion generators in a
 lowerer.
 
+Registered lowerers can declare a typed `RegisteredPhaseProtectionKind` and
+return a matching `RegisteredPhaseProtection` from `SemanticLowering`.
+The compiler checks effect ownership and binds the declared endpoint/object
+through the preset's existing measured-effect monitor. Acquisition gates motion
+on attachment and guards subsequent held phases; release guards the input hold
+and gates retreat on detachment. Release gates omit terminal geometric separation,
+which can only be observed after retreat. Retention guards verified task state
+without adding a terminal effect or changing symbolic-state ownership. Guard-only
+and registered calls validate their declared segment names against each active
+plan before dispatch. Guard-only retention requires affirmative current evidence:
+unavailable or not-yet-stable evidence holds the command cursor while the existing
+consecutive-sample policy accumulates fresh observations. Reaching the action
+deadline fails the call and removes the stale held relation. Projected presets
+do not install measured protections.
+
+GenSim registered Pick and relative Place use these phase declarations. Its
+configured held-move service opts in with
+`phase_protection: held_object_v1` and a matching monitor mapping; omitted
+configuration keeps legacy exported bundles on their existing behavior.
+
 ## MLLM boundary
 
 `embodichain.agents.mllm.task_program` accepts untrusted JSON, reuses the

@@ -28,6 +28,22 @@ Edit: import export → validate graph/typed edit plan → generate additions
 Read [pipeline details](pipeline-details.md) for stage contracts, parser resume
 behavior, Gradio artifact ownership and focused failure diagnosis.
 
+Task Engine lives in `task_engine/`: TaskAgent produces legacy candidates,
+SemanticTaskPlanner expands E1–E5 recipes into candidate graphs, and
+`task_program_bundle.py` composes the Task Program deployment. Explicit
+TaskSpec template/instance inputs to the planner produce graph/v2 provenance;
+the existing no-TaskSpec path remains graph/v1. v2 bundle export/execution stays
+gated on measured instance/witness qualification. CLI `--task-template` provides
+a bounded E2 observed-goal acceptance route using a strict sidecar with
+fingerprint/v3, a legacy executable graph and a pre-metadata Gym final hook.
+It does not claim full certification. CLI defaults to dual_franka and rejects
+other executable profiles before generation. Preparation invokes the existing
+FeasibilityBroker on a static manifest; unknown/runtime-probe results skip the
+static feasibility stage instead of claiming successful physical validation.
+Follow
+[TaskSpec](../task-spec/task-spec.md) for semantic identity, evidence and the
+current qualification boundary.
+
 ## Durable scene boundary
 
 The `scene_export/` directory contains `scene.json`, `scene_config.json`,

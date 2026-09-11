@@ -520,6 +520,46 @@ def test_bound_prepare_publishes_semantic_task_program_bundle(
     assert not (result.output_dir / "seed_task_graph.json").exists()
 
 
+def test_prepare_invokes_broker_and_stops_contradicted_scene_before_planning(
+    tmp_path, monkeypatch
+):
+    from dataclasses import replace
+    from embodichain.gen_sim.task_engine.scene.feasibility import FeasibilityBroker
+
+    adaptation = replace(_adaptation(tmp_path), static_scene_manifest={"present": True})
+    calls = []
+    report = {"status": "contradicted", "remediation_class": "scene_remediable"}
+
+    def assess(self, candidate, binding, manifest):
+        calls.append((candidate, binding, manifest))
+        return report
+
+    def forbidden_plan(*args, **kwargs):
+        raise AssertionError("Contradicted scene must not reach planner/preflight.")
+
+    monkeypatch.setattr(FeasibilityBroker, "assess", assess)
+    coordinator = TaskEngineCoordinator(
+        task_agent=SimpleNamespace(generate=lambda *args, **kwargs: _candidate_set()),
+        scene_adapter=SimpleNamespace(
+            robot_profile="dual_franka", adapt=lambda *args, **kwargs: adaptation
+        ),
+        semantic_planner=SimpleNamespace(plan=forbidden_plan),
+    )
+    result = coordinator.prepare(
+        "upright_can",
+        _UPRIGHT_CAN_INSTRUCTION,
+        tmp_path / "scene_config.json",
+        tmp_path / "bundle",
+    )
+    assert result.status == "infeasible"
+    assert len(calls) == 1
+    assert result.feasibility_report == report
+    assert (
+        json.loads((result.output_dir / "feasibility_report.json").read_text())
+        == report
+    )
+
+
 def test_prepare_publishes_semantic_planning_failure_context(
     tmp_path: Path,
 ) -> None:

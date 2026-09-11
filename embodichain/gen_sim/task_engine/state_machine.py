@@ -91,7 +91,9 @@ _DEPENDENCIES: dict[WorkflowStage, frozenset[WorkflowStage]] = {
     WorkflowStage.EXECUTION: frozenset({WorkflowStage.GROUNDED_ACTION}),
 }
 
-_SKIPPABLE_STAGES = frozenset({WorkflowStage.SCENE_EDIT})
+_SKIPPABLE_STAGES = frozenset(
+    {WorkflowStage.SCENE_EDIT, WorkflowStage.STATIC_FEASIBILITY}
+)
 
 
 @dataclass(frozen=True)
@@ -211,7 +213,9 @@ def fail_stage(
 def skip_stage(state: TaskEngineState, stage: WorkflowStage) -> TaskEngineState:
     """Skip one optional pending stage."""
     if stage not in _SKIPPABLE_STAGES:
-        raise ValueError("Only the optional scene_edit stage can be skipped.")
+        raise ValueError(
+            "Only scene_edit or unproven static_feasibility can be skipped."
+        )
     if state.stages[stage] != StageStatus.PENDING:
         raise ValueError(f"Stage {stage.value!r} is not pending.")
     return _transition(state, stage, StageStatus.SKIPPED)

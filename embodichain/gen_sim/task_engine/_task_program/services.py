@@ -55,6 +55,8 @@ from embodichain.lab.task_program.semantics import (
 )
 from embodichain.lab.task_program.compiler.lowering import (
     RegisteredHeldObjectEffect,
+    RegisteredPhaseProtection,
+    RegisteredPhaseProtectionKind,
     RegisteredSemanticLowerer,
     RegisteredSemanticEffect,
     SemanticLowering,
@@ -237,6 +239,9 @@ class _PickLowerer(RegisteredSemanticLowerer):
     call_id: ClassVar[str] = _PICK_CALL_ID
     target_descriptor: ClassVar[SkillDescriptor] = PickUp.descriptor()
     effect_contract_kind: ClassVar[SemanticEffectKind] = SemanticEffectKind.ATTACH
+    phase_protection_kind: ClassVar[RegisteredPhaseProtectionKind] = (
+        RegisteredPhaseProtectionKind.ACQUIRE
+    )
 
     def __init__(
         self,
@@ -310,6 +315,17 @@ class _PickLowerer(RegisteredSemanticLowerer):
             )
         return SemanticLowering(
             goal=GraspGoal(semantics=semantics),
+            phase_protection=RegisteredPhaseProtection(
+                kind=RegisteredPhaseProtectionKind.ACQUIRE,
+                held_object=RegisteredHeldObjectEffect(
+                    expectation_id="primary",
+                    relation=HeldObjectRelation.ATTACHED,
+                    object_id=route.object_id,
+                    slot_id="primary",
+                ),
+                active_segments=("lift",),
+                gate_segment="lift",
+            ),
             registered_effect=RegisteredSemanticEffect(
                 effect_kind=SemanticEffectKind.ATTACH,
                 held_objects=(
@@ -470,7 +486,21 @@ class _MoveHeldObjectLowerer(RegisteredSemanticLowerer):
             )
         route = self._route(call)
         return SemanticLowering(
-            goal=HeldObjectPoseGoal(_configured_goal_pose(route.pose))
+            goal=HeldObjectPoseGoal(_configured_goal_pose(route.pose)),
+            phase_protection=(
+                RegisteredPhaseProtection(
+                    kind=RegisteredPhaseProtectionKind.RETAIN,
+                    held_object=RegisteredHeldObjectEffect(
+                        expectation_id="primary",
+                        relation=HeldObjectRelation.ATTACHED,
+                        object_id=route.object_id,
+                        slot_id="primary",
+                    ),
+                    active_segments=("transport",),
+                )
+                if self.phase_protection_kind is not None
+                else None
+            ),
         )
 
     def pick_lookahead_targets(
@@ -497,6 +527,14 @@ class _MoveHeldObjectLowerer(RegisteredSemanticLowerer):
         )
 
 
+class _ProtectedMoveHeldObjectLowerer(_MoveHeldObjectLowerer):
+    """Opt-in transport with a compiler-bound measured held-object guard."""
+
+    phase_protection_kind: ClassVar[RegisteredPhaseProtectionKind] = (
+        RegisteredPhaseProtectionKind.RETAIN
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _MoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
     """Validate canonical references for configured transport goals."""
@@ -505,8 +543,14 @@ class _MoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
     revision: ClassVar[str] = "2"
     target_descriptor: ClassVar[SkillDescriptor] = MoveHeldObject.descriptor()
     routes: tuple[_MoveHeldObjectRoute, ...]
+    phase_protection: str | None = None
 
     def __post_init__(self) -> None:
+        if self.phase_protection is not None and (
+            type(self.phase_protection) is not str
+            or self.phase_protection != "held_object_v1"
+        ):
+            raise ValueError("phase_protection must be 'held_object_v1' or omitted.")
         if (
             type(self.routes) is not tuple
             or not self.routes
@@ -534,7 +578,12 @@ class _MoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
             scene_registry.resolve(route.object_id, expected_type=SceneObjectRef)
             if type(route.pose) is _SceneEntityTarget:
                 scene_registry.lookup(route.pose.entity_id)
-        return _MoveHeldObjectLowerer(self.routes)
+        lowerer_type = (
+            _ProtectedMoveHeldObjectLowerer
+            if self.phase_protection is not None
+            else _MoveHeldObjectLowerer
+        )
+        return lowerer_type(self.routes)
 
 
 @dataclass(frozen=True, slots=True)

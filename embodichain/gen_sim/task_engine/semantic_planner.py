@@ -80,6 +80,8 @@ class SemanticTaskPlanner:
         *,
         planner_route: str = "offline",
         integration_fingerprint: str = "0" * 64,
+        task_template: Mapping[str, Any] | None = None,
+        scene_instance: Mapping[str, Any] | None = None,
     ) -> SemanticTaskGraph:
         """Build one semantic graph without importing or materializing actions.
 
@@ -90,9 +92,14 @@ class SemanticTaskPlanner:
             planner_route: Candidate route provenance.
             integration_fingerprint: Exact integration fingerprint, or the
                 all-zero placeholder used before bundle preflight.
+            task_template: Optional explicit normative TaskSpec. The recipe
+                remains a candidate solution; this does not prove its goal.
+            scene_instance: Observed, content-addressed instance for the template.
+                Both TaskSpec inputs must be provided together.
 
         Returns:
-            A validated ``semantic_task_graph/v1`` value.
+            A validated v1 graph, or a v2 candidate with TaskSpec references.
+            TaskSpec candidate graphs cannot yet be exported for execution.
         """
         selected: TaskCandidate = validate_task_candidate(candidate)
         bindings: RoleBindings = validate_role_bindings(role_bindings)
@@ -106,6 +113,13 @@ class SemanticTaskPlanner:
             for item in scene_objects
             if str(item.get("runtime_uid", item.get("uid", ""))).strip()
         }
+        task_spec = self._task_spec_provenance(
+            selected,
+            bindings,
+            objects,
+            task_template,
+            scene_instance,
+        )
         steps = selected["draft"]["steps"]
         steps_by_id = {str(step["id"]): step for step in steps}
         result_objects: dict[str, str] = {}
@@ -595,7 +609,10 @@ class SemanticTaskPlanner:
 
         return validate_semantic_task_graph(
             {
-                "schema_version": "semantic_task_graph/v1",
+                "schema_version": (
+                    "semantic_task_graph/v2" if task_spec else "semantic_task_graph/v1"
+                ),
+                **({"task_spec": task_spec} if task_spec else {}),
                 "task_id": selected["draft"]["task_id"],
                 "instruction": selected["draft"]["instruction"],
                 "planner_route": str(planner_route),
@@ -609,6 +626,49 @@ class SemanticTaskPlanner:
                 },
             }
         )
+
+    @staticmethod
+    def _task_spec_provenance(
+        candidate: TaskCandidate,
+        bindings: RoleBindings,
+        objects: Mapping[str, Any],
+        template: Mapping[str, Any] | None,
+        instance: Mapping[str, Any] | None,
+    ) -> dict[str, str] | None:
+        if template is None and instance is None:
+            return None
+        if template is None or instance is None:
+            raise ValueError(
+                "task_template and scene_instance must be supplied together."
+            )
+        from embodichain.task_spec import (
+            canonical_template,
+            validate_scene_instance,
+            validate_task_template,
+        )
+
+        task = validate_task_template(template)
+        scene = validate_scene_instance(instance, template=task)
+        canonical_roles = canonical_template(task)["roles"]
+        bound_entities = {
+            uid for uids in bindings["reference_bindings"].values() for uid in uids
+        }
+        for role, grounding in scene["roles"].items():
+            if canonical_roles[role]["kind"] not in {"object", "container", "support"}:
+                raise UnsupportedSemanticCapabilityError(
+                    "TaskSpec planning currently binds physical object roles only."
+                )
+            uid = grounding["entity_id"]
+            if uid not in objects or uid not in bound_entities:
+                raise ValueError(
+                    f"TaskSpec role {role!r} disagrees with scene binding."
+                )
+        return {
+            "template_hash": task["semantic_hash"],
+            "instance_hash": scene["content_hash"],
+            "legacy_plan_hash": candidate["semantic_hash"],
+            "status": "candidate",
+        }
 
     def _resolve_step_entity(
         self,

@@ -66,6 +66,7 @@ from .state_machine import (
     fail_stage,
     initial_state,
     start_stage,
+    skip_stage,
 )
 from .workflow_contracts import TaskRunRequest, validate_task_run_request
 
@@ -307,6 +308,7 @@ class TaskEngineWorkflow:
         created_at: datetime | None = None,
         overwrite: bool = False,
         execute: bool = True,
+        task_template: dict[str, Any] | None = None,
     ) -> TaskEngineRunResult:
         """Run all stages and publish success only after simulator acceptance.
 
@@ -326,11 +328,16 @@ class TaskEngineWorkflow:
             created_at: Optional timezone-aware run creation timestamp.
             overwrite: Whether to atomically replace an existing run directory.
             execute: Whether to execute the prepared bundle in the simulator.
+            task_template: Optional explicit bounded E2 task definition.
 
         Returns:
             Published run status, manifest, state audit, and final bundle path.
         """
         normalized = validate_task_run_request(request)
+        if task_template is not None:
+            from embodichain.lab.task_evaluation import UprightTaskEvaluator
+
+            UprightTaskEvaluator(task_template)
         if not isinstance(dataset_saving, bool):
             raise TypeError("dataset_saving must be a boolean.")
         if not isinstance(open_window, bool):
@@ -685,6 +692,11 @@ class TaskEngineWorkflow:
                         force_most_likely=True,
                         final_inspection=final_inspection,
                         unbound_action_plan=unbound_plan,
+                        **(
+                            {"task_template": task_template}
+                            if task_template is not None
+                            else {}
+                        ),
                     )
                 except Exception as exc:
                     preparation_error = exc
@@ -829,6 +841,12 @@ class TaskEngineWorkflow:
                 WorkflowStage.STATIC_FEASIBILITY,
                 WorkflowStage.GROUNDED_ACTION,
             ):
+                if stage == WorkflowStage.STATIC_FEASIBILITY and (
+                    preparation.feasibility_report is None
+                    or preparation.feasibility_report.get("status") != "proven"
+                ):
+                    state = skip_stage(state, stage)
+                    continue
                 state = start_stage(state, stage)
                 state = complete_stage(state, stage)
             if not execute:

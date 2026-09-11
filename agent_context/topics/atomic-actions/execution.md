@@ -87,6 +87,12 @@ Held-object guards and phase-effect gates are observational:
 - gates can hold a named plan segment until evidence proves a transition; and
 - neither mechanism creates constraints, freezes objects, or overwrites poses.
 
+`HeldObjectGuardResult.pending_mask` can hold the shared command cursor while
+an invariant remains unresolved. Pending rows cannot overlap failed rows and
+must belong to the active request. The runner issues an observed hold and polls
+fresh evidence; unresolved results past the request deadline are rejected.
+Omitting the mask preserves the historical loss-only guard contract.
+
 Pick gates attachment before lift. Place gates detachment before retract.
 HandOver owns independent source/destination transfer boundaries.
 
@@ -104,6 +110,11 @@ also refreshes cached verification requests.
 Scene-relative goals declare the exact entity poses they consume. The session
 compares dependency revisions against fresh snapshots and replans only within
 the selected `RecoveryPolicy`.
+
+A failed initial empty plan owns no command targets or feedback routes; its
+first successful retry may establish both. Once established, runtime target
+addresses and tracking source/projector ownership remain fixed across recovery.
+An intervening empty failed replan does not erase that ownership.
 
 `PlanningContext.control_dt` is the authoritative control grid. Every emitted
 trajectory or endpoint command must align to it; integrations must not silently

@@ -124,6 +124,7 @@ def generate_task_program_bundle(
     robot_profile: str,
     max_episodes: int | None = None,
     max_episode_steps: int | None = None,
+    task_template: dict[str, Any] | None = None,
 ) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
     """Write, compose, and provider-free preflight one semantic deployment.
 
@@ -136,6 +137,8 @@ def generate_task_program_bundle(
             only the canonical dual-Franka embodiment.
         max_episodes: Optional Gym episode limit.
         max_episode_steps: Optional Gym step limit.
+        task_template: Explicit bounded upright template for independent E2
+            acceptance. Legacy graphs keep their original step-hash semantics.
 
     Returns:
         Final fingerprint-bound graph and all generated paths.
@@ -145,6 +148,17 @@ def generate_task_program_bundle(
             integration cannot be composed and preflighted.
     """
     selected_graph = validate_semantic_task_graph(graph)
+    task_binding = None
+    if task_template is not None:
+        from ._task_spec import binding_for_graph
+
+        task_binding = binding_for_graph(task_template, selected_graph)
+    if "task_spec" in selected_graph:
+        raise ValueError(
+            "TaskSpec v2 bundle export requires final task evaluation bound to "
+            "qualified measured instance/witness evidence; that v2 "
+            "qualification is not yet available."
+        )
     unsupported = sorted(
         {node["task_type"] for node in selected_graph["nodes"]}
         - {"E1", "E2", "E3", "E4", "E5"}
@@ -217,6 +231,20 @@ def generate_task_program_bundle(
     program_id = _program_identifier(selected_graph["task_id"])
     scene_contract = f"{program_id}_scene_v1"
     stability = _task_stability_payload(selected_graph, scene, embodiment_payload)
+    if task_binding is not None:
+        from embodichain.lab.task_evaluation import UprightTaskEvaluator
+
+        minimum_alignment = math.cos(UprightTaskEvaluator(task_template).max_tilt)
+        for preset in stability["presets"].values():
+            if (
+                preset.get("entity") == task_binding["entity_id"]
+                and "local_axis" in preset
+            ):
+                if list(preset["local_axis"]) != [0.0, 0.0, 1.0]:
+                    raise ValueError(
+                        "TaskSpec upright requires the asset local +Z axis."
+                    )
+                preset["minimum_alignment"] = minimum_alignment
     save_config(
         paths.program,
         _program_payload(
@@ -318,6 +346,15 @@ def generate_task_program_bundle(
         validation_context=deployment.integration.registration.catalog,
     )
     deployment.integration.registration.catalog.preflight(program)
+    if task_binding is not None:
+        from ._task_spec import binding_for_graph, write_evidence
+
+        binding = binding_for_graph(task_template, selected_graph)
+        reference = write_evidence(root / "task_spec_binding.json", binding)
+        fingerprint_payload = json.loads(paths.integration_fingerprint.read_text())
+        fingerprint_payload["schema_version"] = "semantic_integration_fingerprint/v3"
+        fingerprint_payload["task_spec_binding"] = reference
+        _write_json(paths.integration_fingerprint, fingerprint_payload)
     return selected_graph, paths
 
 
@@ -1086,6 +1123,7 @@ def _integration_payload(
                     "simulation.coordinated_transport",
                     _COORDINATED_HOLD_CALL_ID,
                     _AXIS_ALIGN_CALL_ID,
+                    _MOVE_HELD_OBJECT_CALL_ID,
                     *pick_routes,
                     _PLACE_RELATIVE_CALL_ID,
                 )
@@ -1128,7 +1166,13 @@ def _integration_payload(
                     else []
                 ),
                 *(
-                    [{"kind": "move_held_object", "routes": move_held_routes}]
+                    [
+                        {
+                            "kind": "move_held_object",
+                            "routes": move_held_routes,
+                            "phase_protection": "held_object_v1",
+                        }
+                    ]
                     if move_held_routes
                     else []
                 ),

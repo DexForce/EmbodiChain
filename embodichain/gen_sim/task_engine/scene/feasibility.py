@@ -53,10 +53,12 @@ class FeasibilityBroker:
         role_bindings: Mapping[str, Any],
         scene_manifest: Mapping[str, Any],
         *,
-        capability_catalog: Mapping[str, Mapping[str, Any]],
-        task_actions: Mapping[str, Sequence[str]],
+        capability_catalog: Mapping[str, Mapping[str, Any]] | None = None,
+        task_actions: Mapping[str, Sequence[str]] | None = None,
     ) -> FeasibilityReport:
         """Assess one grounded candidate against static and runtime capabilities."""
+        if (capability_catalog is None) != (task_actions is None):
+            raise ValueError("Capability catalog and action recipes must be paired.")
         manifest = validate_static_scene_manifest(scene_manifest)
         draft = _mapping(candidate.get("draft"), "candidate.draft")
         scene_request = _mapping(
@@ -73,6 +75,19 @@ class FeasibilityBroker:
 
         for step_id, step in steps.items():
             task_type = str(step.get("task_type", ""))
+            if task_actions is None:
+                checks.append(
+                    _check(
+                        "atomic_capability",
+                        step_id,
+                        "unknown",
+                        "Runtime capability assessment was not run; semantic "
+                        "preflight and physical execution are separate checks.",
+                        evidence={"status": "not_run"},
+                    )
+                )
+                continue
+            assert capability_catalog is not None
             actions = task_actions.get(task_type)
             if not actions:
                 checks.append(

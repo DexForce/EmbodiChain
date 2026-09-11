@@ -826,6 +826,14 @@ class ExecutionSession:
             if self._status is not ExecutionStatus.RUNNING:
                 return self._tick_result(command=None, events=events)
             assert self._plan is not None
+            if (held_object_guard_result.pending_mask & self._pending).any():
+                return self._tick_result(
+                    command=None,
+                    events=events,
+                    hold_targets=tuple(
+                        target.snapshot() for target in self._active_targets.values()
+                    ),
+                )
         if not self._pending.any():
             return self._finish_action_tick(self._pending, None, events)
 
@@ -1351,6 +1359,9 @@ class ExecutionSession:
             return
         previous_routes = self._active_tracking_routes
         replacement_routes = self._tracking_routes(plan)
+        if not previous_routes and not self._active_targets:
+            # Failed initial planning has not established feedback ownership.
+            return
         if (
             event_kind is ExecutionEventKind.REPLANNED
             and not plan.commands.targets
@@ -2252,7 +2263,17 @@ class ExecutionSession:
             result.retry_mask,
             "held_object_guard_result.retry_mask",
         )
+        pending_mask = self._normalize_mask(
+            result.pending_mask,
+            "held_object_guard_result.pending_mask",
+        )
         request_mask = request.env_mask.to(self._eligible.device)
+        if (pending_mask & ~request_mask).any():
+            raise ValueError(
+                "Held-object guard pending_mask must be a subset of request env_mask."
+            )
+        if pending_mask.any() and self._context.robot.timestamp >= request.deadline:
+            raise ValueError("Held-object guard remains unresolved after its deadline.")
         if (failure_mask & ~request_mask).any():
             raise ValueError(
                 "Held-object guard failure_mask must be a subset of the active "

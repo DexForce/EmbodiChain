@@ -504,6 +504,71 @@ class RegisteredSemanticEffect:
         object.__setattr__(self, "held_objects", held_objects)
 
 
+class RegisteredPhaseProtectionKind(str, Enum):
+    """Controlled held-object phase contracts for registered lowerers."""
+
+    ACQUIRE = "acquire"
+    RELEASE = "release"
+    RETAIN = "retain"
+
+
+@dataclass(frozen=True, slots=True)
+class RegisteredPhaseProtection:
+    """Declare held phases and a blocking boundary without binding evidence.
+
+    Acquisition observes the declared attachment before ``gate_segment`` and
+    guards it during ``active_segments``. Release guards the verified input
+    hold and observes detachment before its gate. Retention only guards the
+    verified input hold, without introducing a terminal symbolic effect.
+
+    Args:
+        kind: Compiler-controlled acquisition, release, or retention contract.
+        held_object: Endpoint slot and object relation to protect.
+        active_segments: Unique plan segments requiring the object to be held.
+        gate_segment: Segment blocked until acquisition or release is measured;
+            omitted for retention.
+    """
+
+    kind: RegisteredPhaseProtectionKind
+    held_object: RegisteredHeldObjectEffect
+    active_segments: tuple[str, ...]
+    gate_segment: str | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.kind) is not RegisteredPhaseProtectionKind:
+            raise TypeError("kind must be a RegisteredPhaseProtectionKind.")
+        if type(self.held_object) is not RegisteredHeldObjectEffect:
+            raise TypeError("held_object must be a RegisteredHeldObjectEffect.")
+        if type(self.active_segments) is not tuple or not self.active_segments:
+            raise TypeError("active_segments must be a non-empty exact tuple.")
+        for segment in self.active_segments:
+            _validate_identifier(segment, field_name="active segment")
+        if len(set(self.active_segments)) != len(self.active_segments):
+            raise ValueError("active_segments must be unique.")
+        expected_relation = (
+            HeldObjectRelation.DETACHED
+            if self.kind is RegisteredPhaseProtectionKind.RELEASE
+            else HeldObjectRelation.ATTACHED
+        )
+        if self.held_object.relation is not expected_relation:
+            raise ValueError("Protection kind and held-object relation disagree.")
+        if self.held_object.allow_missing_detached_baseline:
+            raise ValueError("Phase protection requires a verified release baseline.")
+        if self.kind is RegisteredPhaseProtectionKind.RETAIN:
+            if self.gate_segment is not None:
+                raise ValueError("Retention protection cannot declare an effect gate.")
+        else:
+            _validate_identifier(self.gate_segment, field_name="gate_segment")
+            if self.kind is RegisteredPhaseProtectionKind.ACQUIRE and (
+                self.gate_segment not in self.active_segments
+            ):
+                raise ValueError("Acquisition gate must begin a guarded segment.")
+            if self.kind is RegisteredPhaseProtectionKind.RELEASE and (
+                self.gate_segment in self.active_segments
+            ):
+                raise ValueError("Release gate cannot begin a held-object segment.")
+
+
 @dataclass(frozen=True, slots=True)
 class SemanticLowering:
     """Registered-lowerer output wrapped by compiler-owned invocation policy."""
@@ -514,6 +579,7 @@ class SemanticLowering:
         default_factory=ActionControlOverrides
     )
     registered_effect: RegisteredSemanticEffect | None = None
+    phase_protection: RegisteredPhaseProtection | None = None
 
     def __post_init__(self) -> None:
         if self.skill_options is not None and not isinstance(
@@ -529,6 +595,10 @@ class SemanticLowering:
             raise TypeError(
                 "registered_effect must be a RegisteredSemanticEffect or None."
             )
+        if self.phase_protection is not None and (
+            type(self.phase_protection) is not RegisteredPhaseProtection
+        ):
+            raise TypeError("phase_protection must be a RegisteredPhaseProtection.")
 
 
 class RegisteredSemanticLowerer(ABC):
@@ -537,6 +607,7 @@ class RegisteredSemanticLowerer(ABC):
     call_id: ClassVar[str]
     target_descriptor: ClassVar[SkillDescriptor]
     effect_contract_kind: ClassVar[SemanticEffectKind | None] = None
+    phase_protection_kind: ClassVar[RegisteredPhaseProtectionKind | None] = None
     preserves_symbolic_state: ClassVar[bool] = False
     """Whether the call leaves compiler-owned symbolic ``TaskState`` unchanged.
 
@@ -835,8 +906,11 @@ class GroundedSemanticCall:
         guard_ids = [value.guard_id for value in guards]
         if len(set(guard_ids)) != len(guard_ids):
             raise ValueError("Grounded held-object guard IDs must be unique.")
-        if guards and self.effect_spec is None:
-            raise ValueError("Held-object guards require a terminal effect spec.")
+        if self.effect_spec is None and any(
+            guard.baseline is not HeldObjectGuardBaseline.VERIFIED_TASK_STATE
+            for guard in guards
+        ):
+            raise ValueError("Guard-only calls require verified task-state baselines.")
         object.__setattr__(self, "effect_guards", guards)
         gates = tuple(self.effect_gates)
         if not all(type(value) is GroundedPhaseEffectGate for value in gates):
@@ -947,6 +1021,22 @@ class SemanticCallCompiler:
                     f"Lowerer {call_id!r} cannot both preserve symbolic state and "
                     "declare an effect contract."
                 )
+            protection_kind = lowerer.phase_protection_kind
+            if protection_kind is not None:
+                if type(protection_kind) is not RegisteredPhaseProtectionKind:
+                    raise TypeError("phase_protection_kind must be typed.")
+                required_effect = {
+                    RegisteredPhaseProtectionKind.ACQUIRE: SemanticEffectKind.ATTACH,
+                    RegisteredPhaseProtectionKind.RELEASE: SemanticEffectKind.RELEASE,
+                    RegisteredPhaseProtectionKind.RETAIN: None,
+                }[protection_kind]
+                if lowerer.effect_contract_kind is not required_effect or (
+                    protection_kind is RegisteredPhaseProtectionKind.RETAIN
+                    and not preserves_symbolic_state
+                ):
+                    raise ValueError(
+                        "Phase protection disagrees with effect ownership."
+                    )
             lowerers[call_id] = lowerer
         if isinstance(relation_grounders, (str, bytes)):
             raise TypeError("relation_grounders must be an iterable of grounders.")
@@ -1465,6 +1555,16 @@ class SemanticCallCompiler:
             effect_spec,
             path=(*path, call_index, "effect_gates"),
         )
+        if lowering.phase_protection is not None:
+            effect_guards, effect_gates = self._ground_registered_phase_protection(
+                analyzed,
+                invocation,
+                lowering.phase_protection,
+                effect_spec,
+                context,
+                eligible,
+                path=(*path, call_index, "phase_protection"),
+            )
         if effect_gates:
             invocation = replace(
                 invocation,
@@ -1634,7 +1734,10 @@ class SemanticCallCompiler:
                 )
             if type(bound.linked.call) is RegisteredSemanticCall:
                 lowerer = self._registered_lowerers.get(bound.linked.call.call_id)
-                if lowerer is not None and lowerer.effect_contract_kind is not None:
+                if lowerer is not None and (
+                    lowerer.effect_contract_kind is not None
+                    or lowerer.phase_protection_kind is not None
+                ):
                     raise _diagnostic(
                         "missing_effect_monitor",
                         path,
@@ -1644,7 +1747,10 @@ class SemanticCallCompiler:
             return None
         if type(bound.linked.call) is RegisteredSemanticCall:
             lowerer = self._registered_lowerers.get(bound.linked.call.call_id)
-            if lowerer is None or lowerer.effect_contract_kind is None:
+            if lowerer is None or (
+                lowerer.effect_contract_kind is None
+                and lowerer.phase_protection_kind is None
+            ):
                 raise _diagnostic(
                     "registered_effect_contract_not_installed",
                     path,
@@ -1979,6 +2085,17 @@ class SemanticCallCompiler:
             raise TypeError(
                 f"Lowerer {call.call_id!r} produced an incompatible effect kind."
             )
+        protection = lowering.phase_protection
+        actual_kind = None if protection is None else protection.kind
+        if actual_kind is not lowerer.phase_protection_kind:
+            raise TypeError("Lowered phase protection does not match its declaration.")
+        if protection is not None and actual_kind is not (
+            RegisteredPhaseProtectionKind.RETAIN
+        ):
+            if actual_effect is None or protection.held_object not in (
+                actual_effect.held_objects
+            ):
+                raise ValueError("Phase protection must reference a declared effect.")
         return replace(lowering, skill_options=deepcopy(option_template))
 
     @staticmethod
@@ -2085,6 +2202,11 @@ class SemanticCallCompiler:
         elif type(call) is RegisteredSemanticCall:
             contract = lowering.registered_effect
             if contract is None:
+                if lowering.phase_protection is not None and (
+                    lowering.phase_protection.kind
+                    is RegisteredPhaseProtectionKind.RETAIN
+                ):
+                    return None
                 raise _diagnostic(
                     "registered_effect_contract_not_grounded",
                     path,
@@ -2147,6 +2269,105 @@ class SemanticCallCompiler:
                 object_id=item.object_id,
                 path=(*path, "registered_effect", item.expectation_id),
             )
+
+    def _ground_registered_phase_protection(
+        self,
+        analyzed: AnalyzedSemanticCall,
+        invocation: ActionInvocation,
+        protection: RegisteredPhaseProtection,
+        terminal_spec: SemanticEffectSpec | None,
+        context: PlanningContext,
+        eligible: torch.Tensor,
+        *,
+        path: tuple[PathPart, ...],
+    ) -> tuple[
+        tuple[GroundedHeldObjectGuard, ...], tuple[GroundedPhaseEffectGate, ...]
+    ]:
+        """Bind registered declarations through the canonical evidence policy."""
+        monitor_ref = analyzed.effect_monitor_ref
+        if monitor_ref is None:
+            return (), ()
+        item = protection.held_object
+        acquired = protection.kind is RegisteredPhaseProtectionKind.ACQUIRE
+        if not acquired:
+            self._require_held_object(
+                analyzed,
+                context,
+                eligible,
+                slot_id=item.slot_id,
+                object_id=item.object_id,
+                path=path,
+            )
+        if protection.kind is RegisteredPhaseProtectionKind.RETAIN:
+            expectation, clauses = self._ground_held_effect(
+                analyzed,
+                expectation_id=item.expectation_id,
+                relation=HeldObjectRelation.ATTACHED,
+                slot_id=item.slot_id,
+                object_id=item.object_id,
+                context=context,
+                path=path,
+            )
+            guard_spec = SemanticEffectSpec(
+                semantic_id=analyzed.call.semantic_id,
+                effect_kind=SemanticEffectKind.ATTACH,
+                skill_id=invocation.skill_id,
+                invocation_id=invocation.invocation_id,
+                invocation_revision=invocation.revision,
+                env_ids=context.env_ids,
+                state_expectations=(expectation,),
+                clauses=clauses,
+            )
+        else:
+            assert terminal_spec is not None
+            guard_spec = self._attached_guard_effect_spec(
+                terminal_spec, expectation_id=item.expectation_id
+            )
+        expectation = self._held_expectation(guard_spec, item.expectation_id)
+        if not acquired:
+            self._validate_guard_verified_baseline(expectation, context)
+        try:
+            guard = GroundedHeldObjectGuard(
+                guard_id=f"{item.expectation_id}_attached",
+                active_segments=protection.active_segments,
+                baseline=(
+                    HeldObjectGuardBaseline.PLANNED_EFFECT
+                    if acquired
+                    else HeldObjectGuardBaseline.VERIFIED_TASK_STATE
+                ),
+                effect_spec=guard_spec,
+                effect_monitor=self._effect_monitor_registry.create(
+                    guard_spec, monitor_ref
+                ),
+                invalidation_task_state_keys=(expectation.task_state_key,),
+                retry_action=acquired,
+            )
+            gates = ()
+            if protection.gate_segment is not None:
+                assert terminal_spec is not None
+                gate_spec = self._single_held_expectation_effect_spec(
+                    terminal_spec,
+                    expectation_id=item.expectation_id,
+                    relation=item.relation,
+                )
+                gates = (
+                    GroundedPhaseEffectGate(
+                        gate_id=f"{item.expectation_id}_{protection.kind.value}",
+                        segment_name=protection.gate_segment,
+                        effect_spec=gate_spec,
+                        effect_monitor=self._effect_monitor_registry.create(
+                            gate_spec, monitor_ref
+                        ),
+                        retry_action=acquired,
+                    ),
+                )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise _diagnostic(
+                "phase_protection_monitor_creation_failed",
+                path,
+                f"Could not bind registered phase protection: {exc}",
+            ) from exc
+        return (guard,), gates
 
     def _ground_phase_effect_gates(
         self,

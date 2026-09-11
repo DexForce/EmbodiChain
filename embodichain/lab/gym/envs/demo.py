@@ -678,6 +678,7 @@ def execute_demo_episode(
     attempt_id: int = 0,
     should_stop: StopPredicate | None = None,
     progress: ProgressWrapper | None = None,
+    final_acceptance: Callable[[DemoEpisodeResult], tuple[bool, ...]] | None = None,
     **plan_kwargs: Any,
 ) -> DemoEpisodeResult:
     """Plan and execute every segment in one environment episode.
@@ -695,6 +696,10 @@ def execute_demo_episode(
         attempt_id: Zero-based identifier for this collection attempt.
         should_stop: Optional callback checked before every action.
         progress: Optional wrapper such as ``tqdm`` for action iterables.
+        final_acceptance: Optional host evaluation after all segments and cleanup,
+            before episode metadata is finalized. Returns exact per-row booleans;
+            it can reject program successes but cannot promote failed execution.
+            The callback must not step, reset, or commit the environment.
         **plan_kwargs: Arguments forwarded to the task's planning method.
 
     Returns:
@@ -1162,6 +1167,40 @@ def execute_demo_episode(
             execution_mode=execution_cfg.mode,
             attempt_id=attempt_id,
         )
+        if final_acceptance is not None:
+            accepted = final_acceptance(result)
+            if (
+                type(accepted) is not tuple
+                or len(accepted) != num_envs
+                or any(type(value) is not bool for value in accepted)
+            ):
+                raise ValueError("final_acceptance must return one boolean per row.")
+            final_success = tuple(
+                original and allowed
+                for original, allowed in zip(result.success, accepted, strict=True)
+            )
+            reasons = tuple(
+                "final_acceptance_failed" if original and not allowed else reason
+                for original, allowed, reason in zip(
+                    result.success, accepted, result.terminal_reasons, strict=True
+                )
+            )
+            result = replace(
+                result,
+                success=final_success,
+                completed=result.completed and all(final_success),
+                completed_by_env=tuple(
+                    done and allowed
+                    for done, allowed in zip(
+                        result.completed_by_env, accepted, strict=True
+                    )
+                ),
+                terminal_reasons=reasons,
+                terminal_reason=next(
+                    (reason for reason in reasons if reason != "success"),
+                    result.terminal_reason,
+                ),
+            )
         if end_episode is not None:
             end_episode(result=result)
         return result

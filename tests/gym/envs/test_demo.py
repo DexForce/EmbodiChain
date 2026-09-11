@@ -142,6 +142,40 @@ def test_demo_execution_cfg_rejects_failed_fragment_policy_in_continuous_mode() 
         DemoExecutionCfg(save_failed_fragments=True)
 
 
+def test_final_acceptance_rejects_one_row_before_recording_metadata() -> None:
+    env = _StaggeredVectorEnv()
+    recorded = []
+    env._end_demo_episode_recording = lambda result: recorded.append(result)
+
+    def final_acceptance(result):
+        assert result.success == (True, True)
+        assert not recorded
+        assert env._demo_no_auto_reset
+        return (True, False)
+
+    result = execute_demo_episode(env, final_acceptance=final_acceptance)
+    assert result.success == (True, False)
+    assert result.terminal_reasons == ("success", "final_acceptance_failed")
+    assert not result.completed
+    assert recorded == [result]
+
+
+def test_final_acceptance_cannot_promote_failed_program_execution() -> None:
+    env = _SegmentedEnv()
+    env.is_task_success = lambda: torch.tensor([False])
+    result = execute_demo_episode(env, final_acceptance=lambda program: (True,))
+    assert result.success == (False,)
+    assert not result.completed
+
+
+@pytest.mark.parametrize("mask", [(True,), (True, 1), (True, True, True)])
+def test_final_acceptance_rejects_malformed_masks(mask) -> None:
+    env = _StaggeredVectorEnv()
+    with pytest.raises(ValueError, match="final_acceptance"):
+        execute_demo_episode(env, final_acceptance=lambda result: mask)
+    assert not env._demo_no_auto_reset
+
+
 def _controller_action_env() -> EmbodiedEnv:
     env = object.__new__(EmbodiedEnv)
     env._num_envs = 2

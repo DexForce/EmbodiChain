@@ -2176,3 +2176,11 @@ embodichain_tasks.utils.importer
 .. autosummary::
 
    import_packages
+.. toctree::
+   :hidden:
+
+   task_spec
+.. toctree::
+   :hidden:
+
+   task_evaluation

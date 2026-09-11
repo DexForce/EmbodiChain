@@ -65,6 +65,7 @@ def test_map_registers_the_supported_context_domains() -> None:
         "randomization",
         "atomic-actions",
         "task-programs",
+        "task-spec",
         "gen-sim",
         "data-assets",
         "data-pipeline",
@@ -77,6 +78,7 @@ def test_map_registers_the_supported_context_domains() -> None:
 def test_new_topics_cover_their_owning_packages() -> None:
     topics = _topics_by_id()
     expected_source_prefixes = {
+        "task-spec": "embodichain/task_spec/",
         "gen-sim": "embodichain/gen_sim/",
         "data-assets": "embodichain/data/",
         "data-pipeline": "embodichain/data_pipeline/",
@@ -99,6 +101,8 @@ def test_representative_queries_route_against_the_repository_map() -> None:
     helper = _load_helper()
     data = helper.load_map(_REPOSITORY_ROOT)
     expected_routes = {
+        "TaskSpec 任务语义协议在哪里？": ["task-spec"],
+        "SceneInstance 的内容身份如何验证？": ["task-spec"],
         "参考 env-framework 上下文，查 target_control_frequency 的配置优先级": [
             "env-framework"
         ],

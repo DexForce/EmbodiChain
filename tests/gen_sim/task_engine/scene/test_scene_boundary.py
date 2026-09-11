@@ -239,6 +239,22 @@ def test_e2_feasibility_requires_runtime_probe_for_geometry(tmp_path: Path) -> N
 
     assert report["status"] == "runtime_probe"
     assert report["remediation_class"] == "none"
+
+
+def test_static_assessment_without_runtime_catalog_is_not_proven(
+    tmp_path: Path,
+) -> None:
+    manifest = SceneEngineV1Adapter().adapt_prepared_scene(
+        _prepared_scene(tmp_path), source_format="test", robot_profile="dual_franka"
+    )
+    report = FeasibilityBroker().assess(
+        _candidate("E2", ["graspable", "orientable"]),
+        {"step_01.object": ["red_can"]},
+        manifest,
+    )
+    assert report["status"] != "proven"
+    assert any(item["kind"] == "structure" for item in report["checks"])
+    assert any(item["evidence"].get("status") == "not_run" for item in report["checks"])
     assert report["blockers"] == []
     assert report["summary"]["proven"] > 0
     assert report["summary"]["runtime_probe"] > 0

@@ -241,6 +241,25 @@ topics:
     tests/lab/task_program/, tests/lab/task_program/semantics/]
   related_topics: [atomic-actions, env-framework, simulation-system, motion-planning, sensor-system, data-pipeline]
   status: active
+- id: task-spec
+  title: TaskSpec Semantic Protocol
+  aliases: [TaskSpec, TaskTemplate, 任务语义协议, 任务模板身份]
+  keywords: [SceneInstance, ActionWitness, ExpansionManifest, ValidationCertificate, legacy_plan_hash,
+    certificate_passed, canonical_template, scene_instance_hash]
+  paths: [topics/task-spec/task-spec.md]
+  source_of_truth:
+  - embodichain/task_spec/contracts.py
+  - embodichain/task_spec/validation.py
+  - embodichain/task_spec/expressions.py
+  - embodichain/task_spec/canonicalization.py
+  - embodichain/task_spec/registry.py
+  - embodichain/lab/task_evaluation.py
+  - embodichain/compute/task_predicates.py
+  - embodichain/gen_sim/task_engine/_task_spec.py
+  watch_paths: [embodichain/task_spec/, tests/task_spec/, embodichain/lab/task_evaluation.py,
+    embodichain/compute/task_predicates.py, tests/lab/test_task_evaluation.py]
+  related_topics: [gen-sim, task-programs]
+  status: active
 - id: gen-sim
   title: Gen Sim
   aliases: [gen sim, Scene Engine, SimReady, scene generation, scene editing, 场景生成, 场景编辑, 生成式仿真]
@@ -256,8 +275,11 @@ topics:
   - embodichain/gen_sim/simready_pipeline/pipeline/ingest.py
   - embodichain/gen_sim/gradio_ui/app_processes.py
   - embodichain/gen_sim/gradio_ui/app_env.py
+  - embodichain/gen_sim/task_engine/semantic_planner.py
+  - embodichain/gen_sim/task_engine/semantic_graph.py
+  - embodichain/gen_sim/task_engine/task_program_bundle.py
   watch_paths: [embodichain/gen_sim/, embodichain/cli/main.py, tests/gen_sim/]
-  related_topics: [simulation-system, data-assets, env-framework]
+  related_topics: [simulation-system, data-assets, env-framework, task-spec]
   status: active
 - id: data-assets
   title: Data Assets
