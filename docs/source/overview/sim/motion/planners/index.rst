@@ -27,8 +27,8 @@ The `embodichain` project provides a unified interface for robot trajectory plan
 
 These tools can be used to generate smooth and dynamically feasible robot trajectories. Install NVIDIA's CUDA-matched cuRobo source package separately when collision-aware planning against an explicit cuRobo world is required.
 
-Use NeuralPlanner (experimental) when you have a trained APG checkpoint and need
-learned EEF waypoint rollout on Franka Panda.
+Use NeuralPlanner (experimental) when you have a standalone NMG ONNX policy and
+need learned EEF waypoint rollout on Franka Panda.
 
 See also
 --------

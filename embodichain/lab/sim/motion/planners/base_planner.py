@@ -224,6 +224,9 @@ class BasePlanner(ABC):
     waypoints for a joint-only backend.
     """
 
+    supports_heterogeneous_waypoints: bool = False
+    """Whether one plan may contain an ordered mixture of movement types."""
+
     preserve_plan_samples: bool = False
     """Whether callers must retain this planner's returned sample points exactly.
 

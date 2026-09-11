@@ -14,21 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Built-in planner adapters and their registry side effects."""
+"""Built-in robot providers for motion-generation benchmarks."""
 
 from __future__ import annotations
 
-from .base import PlannerAdapter, PlannerContext
-from .curobo import CuroboAdapter
-from .ik_interpolate import IkInterpolateAdapter
-from .nmg_onnx import NmgOnnxAdapter
-from .toppra import ToppraAdapter
+from .base import RobotProvider
+from .franka import FrankaPandaProvider, FrankaPgiProvider
 
-__all__ = [
-    "CuroboAdapter",
-    "IkInterpolateAdapter",
-    "NmgOnnxAdapter",
-    "PlannerAdapter",
-    "PlannerContext",
-    "ToppraAdapter",
-]
+__all__ = ["FrankaPandaProvider", "FrankaPgiProvider", "RobotProvider"]

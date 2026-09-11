@@ -69,7 +69,12 @@ class PlannerMetadata:
 
 @dataclass(frozen=True)
 class BenchmarkCase:
-    """One env-batched free-space planning input frozen before execution."""
+    """One env-batched planner input frozen before execution.
+
+    The first fields retain the free-space case contract.  The trailing fields
+    describe execution/task tracks without forcing planner adapters to know
+    about a particular robot, atomic skill, or object implementation.
+    """
 
     suite_version: str
     track: str
@@ -83,6 +88,13 @@ class BenchmarkCase:
     start_qpos: torch.Tensor
     target_waypoints: torch.Tensor
     reference_qpos: torch.Tensor
+    robot_id: str = "franka_panda"
+    skill_id: str = "N/A"
+    object_id: str | None = None
+    task_difficulty: str | None = None
+    primary_success: str = "motion_valid"
+    full_start_qpos: torch.Tensor | None = None
+    case_parameters: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -110,6 +122,25 @@ class CaseOutcome:
     path_efficiency: float | None
     failure_code: str | None = None
     planner_failure_code: str | None = None
+    execution_success: bool | None = None
+    task_success: bool | None = None
+    task_completion_time_s: float | None = None
+    joint_tracking_rmse_rad: float | None = None
+    object_lift_delta_m: float | None = None
+    articulation_joint_initial: float | None = None
+    articulation_joint_final: float | None = None
+    articulation_joint_delta: float | None = None
+    articulation_joint_peak_signed_delta: float | None = None
+    replan_count: int | None = None
+    min_translation_err_mm: float | None = None
+    min_rotation_err_deg: float | None = None
+    trajectory_moved: bool | None = None
+    waypoint_min_translation_err_mm: tuple[float, ...] = ()
+    waypoint_min_rotation_err_deg: tuple[float, ...] = ()
+    waypoint_min_rotation_err_deg_at_position: tuple[float | None, ...] = ()
+    waypoint_min_translation_err_mm_at_orientation: tuple[float | None, ...] = ()
+    executed_final_translation_err_mm: float | None = None
+    executed_final_rotation_err_deg: float | None = None
 
 
 @dataclass(frozen=True)
@@ -138,6 +169,15 @@ class TrialRecord:
     cpu_delta_mb: float | None = None
     gpu_delta_mb: float | None = None
     peak_gpu_mb: float | None = None
+    robot_id: str = "franka_panda"
+    skill_id: str = "N/A"
+    object_id: str | None = None
+    task_difficulty: str | None = None
+    primary_success: str = "motion_valid"
+    execution_time_ms: float | None = None
+    end_to_end_time_ms: float | None = None
+    trajectory_duration_s: float | None = None
+    trajectory_waypoints: int | None = None
     metadata: dict[str, object] = field(default_factory=dict)
     outcomes: tuple[CaseOutcome, ...] = ()
 

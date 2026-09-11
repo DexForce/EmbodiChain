@@ -1,0 +1,280 @@
+schema_version: 1
+name: atomic_skill_franka_pgi_curobo
+suite_version: atomic_franka_pgi_curobo_smoke_v3
+profile: smoke
+
+robot:
+  id: franka_pgi
+  provider: franka_pgi
+  config:
+    attrs:
+      static_friction: 1.0
+      dynamic_friction: 1.0
+    solver_cfg:
+      arm:
+        tcp:
+          - [1.0, 0.0, 0.0, 0.0]
+          - [0.0, 1.0, 0.0, 0.0]
+          - [0.0, 0.0, 1.0, 0.15]
+          - [0.0, 0.0, 0.0, 1.0]
+
+planners:
+  - id: nmg
+    adapter: nmg_onnx
+    role: candidate
+    enabled: false
+    config:
+      onnx_model_path: null
+      num_waypoints: 3
+      max_steps: 240
+      action_scale: 0.2
+      use_relative_obs: true
+      intermediate_orientation: true
+      pos_eps: 0.01
+      rot_eps: 0.1
+      joint_eps: 0.02
+      policy_frame_from_world:
+        - [-1.0, 0.0, 0.0, 0.0]
+        - [0.0, -1.0, 0.0, 0.0]
+        - [0.0, 0.0, 1.0, 0.0]
+        - [0.0, 0.0, 0.0, 1.0]
+      runtime_tcp_from_policy_tcp:
+        - [0.70710678, 0.70710678, 0.0, 0.0]
+        - [-0.70710678, 0.70710678, 0.0, 0.0]
+        - [0.0, 0.0, 1.0, -0.0466]
+        - [0.0, 0.0, 0.0, 1.0]
+  - id: curobo
+    adapter: curobo
+    role: primary_baseline
+    enabled: true
+    config:
+      max_attempts: 5
+      max_planning_time: null
+      interpolation_dt: 0.025
+      collision_activation_distance: 0.01
+      use_cuda_graph: true
+      cuda_graph_fallback: true
+      warmup_iterations: 1
+      preserve_plan_samples: false
+      world:
+        obstacle_representation: sphere
+        multi_env: false
+      auto_gen:
+        fit_type: voxel
+        sphere_density: 0.1
+        collision_sphere_buffer: 0.0
+
+protocol:
+  warmup_trials: 1
+  measured_trials: 1
+  sample_interval: 80
+  validation_samples: 128
+  position_threshold_m: 0.01
+  rotation_threshold_rad: 0.1
+  joint_limit_tolerance_rad: 0.00001
+
+tracks:
+  - id: atomic-task
+    scenario: atomic_task
+    enabled: true
+    config:
+      batch_sizes: [1]
+      seeds: [11]
+      physics:
+        steps_per_waypoint: 4
+        hold_steps: 80
+        hold_sim_steps: 2
+        joint_tracking_tolerance_rad: 0.05
+      gripper:
+        control_part: hand
+        open_qpos: [0.0]
+        grasp_qpos: [0.040]
+      articulations:
+        - id: microwave
+          asset_path: MicrowaveOven/microwave_oven_with_inertials.urdf
+          position: [-1.0, -0.30, 0.4]
+          rotation_deg: [0.0, 0.0, 90.0]
+          init_qpos: [0.0, 0.0, 0.0, 0.0]
+          drive:
+            stiffness: 0.001
+            damping: 100.0
+            max_effort: 0.01
+          fix_base: true
+          settle_steps: 10
+        - id: drawer
+          asset_path: Drawer/model_split_links_with_inertials.urdf
+          position: [-1.1, 0.0, 0.0]
+          rotation_deg: [0.0, 0.0, 90.0]
+          init_qpos: [0.0]
+          drive:
+            drive_type: none
+          attrs:
+            static_friction: 1.0
+            dynamic_friction: 1.0
+          fix_base: true
+          settle_steps: 10
+          reset_settle_steps: 0
+      objects:
+        - id: cube_50mm
+          kind: cube
+          size: [0.05, 0.05, 0.05]
+          position: [-0.42, -0.08, 0.05]
+          mass: 0.05
+          dynamic_friction: 0.97
+          static_friction: 0.99
+          contact_offset: 0.003
+          rest_offset: 0.001
+          enable_ccd: true
+          settle_steps: 10
+      skills:
+        - id: move_end_effector
+          sample_count: 80
+          cases:
+            - name: relative_two_waypoint
+              task_difficulty: simple
+              target_offsets_m:
+                - [-0.08, -0.08, 0.08]
+                - [0.04, 0.12, 0.04]
+              difficulty_factors:
+                waypoint_count: 2
+                maximum_translation_m: 0.13
+                obstacles: 0
+        - id: move_joints
+          sample_count: 80
+          joint_limit_margin_rad: 0.05
+          joint_threshold_rad: 0.02
+          cases:
+            - name: relative_multi_joint
+              task_difficulty: simple
+              target_offsets_rad:
+                - [0.12, -0.08, 0.10, 0.12, -0.08, 0.10, -0.10]
+              difficulty_factors:
+                waypoint_count: 1
+                active_joints: 7
+        - id: pick_up
+          sample_count: 120
+          grasp_source: antipodal
+          grasp_sample_count: 10000
+          grasp_max_candidates: 128
+          grasp_alignment_max_angle_deg: 10.0
+          hand_interp_steps: 12
+          pre_grasp_distance_m: 0.15
+          lift_height_m: 0.16
+          minimum_object_lift_m: 0.04
+          approach_direction: [0.0, 0.0, -1.0]
+          pre_pick_height_m: 0.36
+          cases:
+            - name: cube_top_center
+              object: cube_50mm
+              task_difficulty: simple
+              grasp_offset_m: [0.0, 0.0, 0.0]
+              difficulty_factors:
+                approach: top
+                pre_grasp_clearance_m: 0.15
+                required_lift_m: 0.04
+        - id: move_held_object
+          sample_count: 120
+          pick_sample_count: 120
+          grasp_source: antipodal
+          grasp_sample_count: 10000
+          grasp_max_candidates: 128
+          grasp_alignment_max_angle_deg: 10.0
+          held_object_offset_m: [0.0, 0.0, 0.18]
+          target_object_offset_m: [0.08, 0.08, 0.04]
+          approach_direction: [0.0, 0.0, -1.0]
+          pre_grasp_distance_m: 0.15
+          lift_height_m: 0.16
+          hand_interp_steps: 12
+          pre_action_settle_steps: 50
+          object_position_threshold_m: 0.04
+          cases:
+            - name: cube_transport
+              object: cube_50mm
+              task_difficulty: simple
+              difficulty_factors:
+                translation_m: 0.12
+                pre_pick_required: true
+        - id: place
+          sample_count: 120
+          pick_sample_count: 120
+          grasp_source: antipodal
+          grasp_sample_count: 10000
+          grasp_max_candidates: 128
+          grasp_alignment_max_angle_deg: 10.0
+          held_object_offset_m: [0.0, 0.0, 0.18]
+          target_object_offset_m: [0.10, 0.10, 0.0]
+          retract_height_m: 0.10
+          approach_direction: [0.0, 0.0, -1.0]
+          pre_grasp_distance_m: 0.15
+          lift_height_m: 0.16
+          hand_interp_steps: 12
+          pre_action_settle_steps: 50
+          object_position_threshold_m: 0.05
+          cases:
+            - name: cube_table_place
+              object: cube_50mm
+              task_difficulty: simple
+              difficulty_factors:
+                translation_m: 0.14
+                object_preheld: true
+        - id: press
+          sample_count: 140
+          hand_interp_steps: 12
+          approach_distance_m: 0.12
+          press_distance_m: 0.03
+          articulation: microwave
+          target_link: button_cap
+          target_joint: start_button_press
+          effect_joint_sign: 1.0
+          minimum_joint_delta_m: 0.004
+          geometry_seed: 11
+          cases:
+            - name: microwave_start_button
+              task_difficulty: simple
+              difficulty_factors:
+                articulated_target: microwave_start_button
+                approach_distance_m: 0.12
+                press_depth_m: 0.03
+        - id: slide
+          sample_count: 140
+          grasp_source: antipodal
+          grasp_sample_count: 10000
+          grasp_max_candidates: 128
+          grasp_alignment_max_angle_deg: 10.0
+          hand_interp_steps: 12
+          approach_distance_m: 0.10
+          translation_distance_m: 0.18
+          direction: pull
+          articulation: drawer
+          target_link: large_handle_bar
+          target_joint: cabinet_to_drawer
+          effect_joint_sign: 1.0
+          minimum_joint_delta_m: 0.12
+          geometry_seed: 11
+          cases:
+            - name: drawer_pull
+              task_difficulty: simple
+              difficulty_factors:
+                articulated_target: drawer_large_handle
+                approach_distance_m: 0.10
+                translation_distance_m: 0.18
+                direction: pull
+        - id: twist
+          sample_count: 140
+          hand_interp_steps: 12
+          twist_waypoint_count: 8
+          pre_grasp_distance_m: 0.12
+          twist_angle_rad: -0.7853981634
+          articulation: microwave
+          target_link: cap_1
+          target_joint: power_knob_rotation
+          effect_joint_sign: 1.0
+          minimum_joint_delta_rad: 0.5
+          geometry_seed: 11
+          cases:
+            - name: microwave_power_knob
+              task_difficulty: simple
+              difficulty_factors:
+                articulated_target: microwave_power_knob
+                pre_grasp_distance_m: 0.12
+                twist_angle_rad: -0.7853981634

@@ -62,13 +62,13 @@ not advance physics; multiple environments require identical timing rows.
 
 ### NeuralPlanner (experimental)
 
-Learning-based EEF waypoint planner. Franka Panda only.
+Closed-loop waypoint planner using a standalone NMG ONNX policy.
 
-- Checkpoint: `download_neural_planner_checkpoint()` from HuggingFace (gated, needs `HF_TOKEN`)
+- Model: `NeuralPlannerCfg.onnx_model_path`; requires the `nmg` optional dependency.
 - Use via `MotionGenerator` with `planner_type="neural"` and `plan_opts=NeuralPlanOptions(...)`
-- Input: `EEF_MOVE` `PlanState` list with batched `xpos:(B, 4, 4)`
-- Key cfg: `checkpoint_path` (from download), `control_part`
-- Natively batched: transformer forward, reach checks, and convergence holds all operate on `(B, ...)`.
+- Input: batched `EEF_MOVE` and `JOINT_MOVE` states, including mixed waypoint lists.
+- Native rollout samples are preserved even when not all waypoints converge;
+  the success mask still reports those failures.
 
 ### MotionGenerator
 
@@ -79,8 +79,8 @@ Unified interface for trajectory planning with optional pre-interpolation.
 - `MotionGenCfg.planner_cfg` is **MISSING** — must be provided.
 - `generate()` and `interpolate_trajectory()` are env-batched (`B, N, DOF`).
 - `generate()` always returns a normalized `PlanResult`; failed rows hold the
-  supplied `start_qpos`, and every returned trajectory has explicit `dt` and
-  a `duration` derived from it.
+  supplied `start_qpos` unless the backend opts into `preserve_failed_plan_positions`.
+  Every returned trajectory has explicit `dt` and a `duration` derived from it.
 
 Grasp-pose generation is a sibling planning service, not a
 `MotionGenerator` feature. `embodichain.toolkits.graspkit` owns its standalone
