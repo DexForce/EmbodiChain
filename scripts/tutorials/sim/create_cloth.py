@@ -46,7 +46,6 @@ import tempfile
 
 import open3d as o3d
 import torch
-
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (

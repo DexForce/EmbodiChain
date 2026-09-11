@@ -11,6 +11,7 @@
 * Flexible configuration via `OPWSolverCfg`
 * Strict enforcement of joint limits
 * Forward kinematics (FK) and multiple IK solution branches
+* Continuous whole-path IK through the existing batch-IK boundary
 
 ## Configuration
 
@@ -103,6 +104,12 @@ solver = OPWSolver(cfg, device="cuda")
   # Convergence info: tensor([[-3.141593, 0.793811, 0.0, 0.0, 2.522188, 1.570792]], device='cuda:0')
 
 ```
+
+Continuous selection is requested at the robot boundary with
+`Robot.compute_batch_ik(..., continuous=True)`. The robot performs arena/root
+frame conversion and calls `get_ik(..., return_all_solutions=True)` once for the
+flattened pose batch. OPW then applies its internal sequential selector and
+returns validity `(B, N)` plus continuous joint positions `(B, N, 6)`.
 
 ## References
 

@@ -13,15 +13,27 @@ matrices do not need a quaternion-order convention until that boundary.
 `CuroboWorldCfg.rigid_objects` accepts either a mapping or a sequence. Use
 `Mapping[registry_id, RigidObject]` for a registry-backed integration. The
 mapping key is the authoritative logical/source obstacle ID used by the
-content-cache key, `collision_world_entity_ids`, and registry validation. For
-`cuboid` and `mesh`, it is also the physical YAML obstacle name and dynamic
-update key. For `sphere`, one static source expands to physical YAML names such
-as `registry_id_0`; dynamic sphere configuration is rejected, while cache and
-full-world identity remain keyed by `registry_id`. A registry mapping whose
-source lacks mesh geometry required by the selected representation fails fast
-instead of silently dropping the source. The sequence form is an advanced
-direct-core path that derives names from each object's `uid` or an
+content-cache key, `collision_world_entity_ids`, generated obstacle-name prefix,
+dynamic update key, and registry validation. Scene generation reads physical
+collision descriptors through `RigidObject.get_collision_shapes()` and emits a
+mixed tensor-backed cuRobo scene. A compound source expands to physical names
+such as `registry_id__shape_0`; cache and full-world identity remain keyed by
+the unexpanded `registry_id`, and dynamic updates fan out through the physical
+shapes' local poses. A registry mapping whose source lacks physical collision
+shapes fails fast instead of silently dropping the source. The sequence form is
+an advanced direct-core path that derives names from each object's `uid` or an
 `obstacle_<index>` fallback.
+
+Analytic box, plane, sphere, and capsule shapes retain their native cuRobo
+representations. Mesh-backed `MESH`, `CONVEX`, and `SDF` shapes never become
+direct cuRobo `Mesh` entries: scene generation computes one Open3D convex hull,
+then samples its signed distance into a dense ESDF `VoxelGrid`. The global or
+per-object `"voxel"` policy can apply the same conversion to an analytic shape;
+the direct `"mesh"` policy is unsupported. `max_voxel_count` guards every ESDF
+allocation and fails fast with an actionable error. `mesh_triangle_threshold`
+remains accepted only for configuration compatibility and no longer changes
+representation selection. The world cache format is versioned so caches that
+may contain direct mesh entries are not reused.
 
 `CuroboWorldCfg.multi_env` controls collision-world batching, not whether robot
 states or goals are batched:
@@ -34,10 +46,13 @@ states or goals are batched:
   different poses relative to their local robot bases, such as per-env pose
   randomization.
 
-The multi-env scene is cloned from the YAML generated using env 0; enabling the
-flag does not load distinct initial simulator poses for other rows. Per-env
-differences require `"cuboid"` or `"mesh"` representation, registration in
-`dynamic_obstacle_names`, and current `(B, 4, 4)` world poses in
+The multi-env scene is cloned from the cached tensor-backed scene dictionary
+generated using env 0; enabling the flag does not load distinct initial
+simulator poses for other rows. Each clone remains a dictionary until cuRobo
+0.8 constructs its own `SceneCfg`, because its multi-env list parser expects a
+dictionary per environment rather than pre-built `SceneCfg` instances. Per-env
+differences require registration in `dynamic_obstacle_names` and current
+`(B, 4, 4)` world poses in
 `CuroboPlanOptions.dynamic_obstacle_poses`. Independent worlds replicate scene
 data and collision caches, so retain the shared default for identical rebased
 layouts.
@@ -59,8 +74,9 @@ contract. It requires unique canonical IDs and requires the dynamic subset to
 belong to the complete world. `MotionGenerator.collision_world_info` forwards
 that contract and retains derived ID/mode properties for callers. For cuRobo,
 the complete set is every mapping key (or inferred sequence name), while the
-dynamic set is exactly `CuroboWorldCfg.dynamic_obstacle_names`. Sphere-expanded
-physical YAML names are not part of either logical ID declaration.
+dynamic set is exactly `CuroboWorldCfg.dynamic_obstacle_names`.
+Compound-expanded physical shape names are not part of either logical ID
+declaration.
 `CuroboWorldCfg` rejects duplicate obstacle names and requires every
 `dynamic_obstacle_name` to match an object registered in `rigid_objects`, so a
 planner-local mismatch fails before backend construction.

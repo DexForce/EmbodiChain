@@ -49,7 +49,6 @@ if __name__ == "__main__":
 import numpy as np
 import torch
 from dexsim.utility.path import get_resources_data_path
-
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     NewtonPhysicsCfg,
@@ -175,7 +174,7 @@ def create_soft_cow(sim: SimulationManager) -> VolumeDeformableObject:
         cfg=VolumeDeformableObjectCfg(
             uid="cow",
             shape=MeshCfg(
-                fpath=get_resources_data_path("Model", "cow", "cow2.obj"),
+                fpath=get_data_path("Cow/cow2.obj"),
             ),
             init_rot=[0.0, 90.0, 0.0],
             init_pos=COW_POSITION,

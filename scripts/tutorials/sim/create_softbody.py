@@ -41,7 +41,7 @@ if __name__ == "__main__":
     _cli_args = build_parser().parse_args()
 
 
-from dexsim.utility.path import get_resources_data_path
+from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
@@ -112,7 +112,7 @@ def main(args: argparse.Namespace | None = None) -> None:
         cfg=VolumeDeformableObjectCfg(
             uid="cow",
             shape=MeshCfg(
-                fpath=get_resources_data_path("Model", "cow", "cow.obj"),
+                fpath=get_data_path("Cow/cow.obj"),
             ),
             init_pos=[0.0, 5.0, 3.0],
             particle_radius=0.01,

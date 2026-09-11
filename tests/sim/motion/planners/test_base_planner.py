@@ -30,6 +30,36 @@ from embodichain.lab.sim.motion.planners.base_planner import (
 )
 
 pytestmark = pytest.mark.no_sim
+from embodichain.lab.sim.motion.planners.base_planner import PlanOptions
+from embodichain.lab.sim.motion.planners.curobo.curobo_planner import CuroboPlanner
+from embodichain.lab.sim.motion.planners.utils import PlanResult, PlanState
+
+
+class _PlannerWithoutCollisionAvoidance(BasePlanner):
+    def plan(
+        self,
+        target_states: list[PlanState],
+        options: PlanOptions = PlanOptions(),
+    ) -> PlanResult:
+        raise NotImplementedError
+
+
+def test_collision_model_visualization_is_unsupported_by_default():
+    planner = _PlannerWithoutCollisionAvoidance.__new__(
+        _PlannerWithoutCollisionAvoidance
+    )
+
+    with pytest.raises(
+        NotImplementedError, match="does not support collision avoidance"
+    ):
+        planner.visualize_robot_collision_models("arm")
+
+
+def test_curobo_overrides_robot_collision_model_visualization():
+    assert (
+        CuroboPlanner.visualize_robot_collision_models
+        is not BasePlanner.visualize_robot_collision_models
+    )
 
 
 def test_collision_world_info_represents_one_contract() -> None:

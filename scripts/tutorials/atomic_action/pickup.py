@@ -136,7 +136,6 @@ def main() -> None:
         robot,
         use_cuda_graph=args.physics != "newton",
     )
-
     engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
         scene_entities=(obj,),

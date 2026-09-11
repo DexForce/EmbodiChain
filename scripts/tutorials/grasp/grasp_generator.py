@@ -62,7 +62,6 @@ from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.lab.sim.motion.solvers import URSolverCfg
 from embodichain.data import get_data_path
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
-from dexsim.utility.path import get_resources_data_path
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
     RenderCfg,
@@ -168,7 +167,7 @@ def create_obj(sim: SimulationManager):
     mug_cfg = RigidObjectCfg(
         uid="table",
         shape=MeshCfg(
-            fpath=get_resources_data_path("Model", "BakeTexture", "hdr_color_mesh.ply"),
+            fpath=get_data_path("BakeTextureObj/hdr_color_mesh.ply"),
             collision=MeshCollisionCfg(
                 approximation="convex_decomposition",
                 max_hulls=16,

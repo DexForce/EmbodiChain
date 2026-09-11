@@ -46,6 +46,13 @@ import open3d as o3d
 import torch
 from scipy.spatial.transform import Rotation
 
+from dexsim.utility.path import get_resources_data_path
+
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
+from embodichain.lab.sim.objects import Robot, SoftObject
+from embodichain.compute.trajectory import interpolate_with_distance
+from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (

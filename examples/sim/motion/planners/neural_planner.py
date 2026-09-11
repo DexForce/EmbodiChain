@@ -14,12 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Run the env-batched NeuralPlanner waypoint example.
+"""Run the ONNX NeuralPlanner waypoint example.
 
 From the repository root::
 
-    python examples/sim/motion/planners/neural_planner.py --headless
-    python examples/sim/motion/planners/neural_planner.py --headless --device cuda:1
+    python examples/sim/motion/planners/neural_planner.py --headless \
+        --onnx-model-path /path/to/policy.onnx
+    python examples/sim/motion/planners/neural_planner.py --headless \
+        --device cuda:1 --onnx-model-path /path/to/policy.onnx
 """
 
 from __future__ import annotations
@@ -34,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="NeuralPlanner waypoint example")
     add_sim_args_to_parser(parser)
     parser.set_defaults(arena_space=2.0)
+    parser.add_argument(
+        "--onnx-model-path",
+        required=True,
+        help="Path to a standalone NMG ONNX policy.",
+    )
     parser.add_argument(
         "--num-waypoints",
         type=int,
@@ -73,7 +80,6 @@ if __name__ == "__main__":
 import numpy as np
 import torch
 
-from embodichain.data.assets.planner_assets import download_neural_planner_checkpoint
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import MarkerCfg, RenderCfg, physics_cfg_for_backend
@@ -197,15 +203,15 @@ def play_trajectory(
 
 def main(args: argparse.Namespace | None = None) -> None:
     args = parse_args() if args is None else args
-    if args.num_envs < 1:
-        raise ValueError("--num_envs must be at least 1.")
+    if args.num_envs != 1:
+        raise ValueError("The current exported NMG ONNX policy requires --num_envs 1.")
     if args.num_waypoints < 1:
         raise ValueError("--num-waypoints must be at least 1.")
     if args.step_repeat < 1:
         raise ValueError("--step-repeat must be at least 1.")
     if args.hold_steps < 0:
         raise ValueError("--hold-steps must be non-negative.")
-    checkpoint_path = download_neural_planner_checkpoint()
+    onnx_model_path = args.onnx_model_path
 
     device = args.device or (
         "cuda" if args.physics == "newton" or torch.cuda.is_available() else "cpu"
@@ -258,7 +264,7 @@ def main(args: argparse.Namespace | None = None) -> None:
             cfg=MotionGenCfg(
                 planner_cfg=NeuralPlannerCfg(
                     robot_uid=robot.uid,
-                    checkpoint_path=checkpoint_path,
+                    onnx_model_path=onnx_model_path,
                     control_part=arm_name,
                 )
             )

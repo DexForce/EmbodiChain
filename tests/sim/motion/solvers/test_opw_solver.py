@@ -188,6 +188,31 @@ class BaseSolverTest:
         assert res[0] == False
         assert ik_qpos.shape == (1, dof)
 
+    @pytest.mark.parametrize("arm_name", ["left_arm", "right_arm"])
+    def test_continuous_batch_ik_reconstructs_fk_path(self, arm_name: str):
+        """Continuous batch IK preserves a branch across an OPW pose path."""
+        qpos_limits = self.robot.get_qpos_limits(name=arm_name)
+        qpos = grid_sample_qpos_from_limits(
+            qpos_limits, steps_per_joint=2, device=self.robot.device, max_samples=1
+        )
+        qpos_path = qpos[None].expand(1, 3, -1).contiguous()
+        target_path = self.robot.compute_batch_fk(
+            qpos=qpos_path, name=arm_name, to_matrix=True
+        )
+
+        success, solved_path = self.robot.compute_batch_ik(
+            pose=target_path,
+            joint_seed=qpos,
+            name=arm_name,
+            continuous=True,
+        )
+
+        assert success.all()
+        reconstructed = self.robot.compute_batch_fk(
+            qpos=solved_path, name=arm_name, to_matrix=True
+        )
+        assert torch.allclose(target_path, reconstructed, atol=5e-3, rtol=5e-3)
+
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()

@@ -491,9 +491,18 @@ class AtomicActionEngine:
                     f"Skill {plan.skill_id!r} emits non-joint runtime commands and "
                     "cannot be used with offline joint-trajectory compilation."
                 )
-            trajectory = plan.joint_trajectory.hold_rows(
-                step_success,
-                previous_qpos,
+            preserve_failed_positions = (
+                getattr(
+                    self.motion_generator.planner,
+                    "preserve_failed_plan_positions",
+                    False,
+                )
+                is True
+            )
+            trajectory = (
+                plan.joint_trajectory
+                if preserve_failed_positions
+                else plan.joint_trajectory.hold_rows(step_success, previous_qpos)
             )
             plans.append(plan)
             trajectories.append(trajectory)
