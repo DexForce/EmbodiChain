@@ -134,6 +134,31 @@ def test_trapezoidal_generator_prepends_start_for_single_joint_target() -> None:
     torch.testing.assert_close(result.positions[:, -1], goal)
 
 
+def test_trapezoidal_generator_holds_stationary_single_joint_target() -> None:
+    generator = _trapezoidal_generator()
+    start = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
+
+    result = generator.generate(
+        [PlanState.from_qpos(start)],
+        MotionGenOptions(
+            start_qpos=start,
+            plan_opts=TrapezoidalPlanOptions(sample_interval=2, backend="torch"),
+        ),
+    )
+
+    assert bool(result.success.all())
+    assert result.positions.shape[1] == 2
+    torch.testing.assert_close(
+        result.positions, start.unsqueeze(1).expand_as(result.positions)
+    )
+    assert result.velocities is not None
+    assert result.accelerations is not None
+    torch.testing.assert_close(result.velocities, torch.zeros_like(result.velocities))
+    torch.testing.assert_close(
+        result.accelerations, torch.zeros_like(result.accelerations)
+    )
+
+
 def test_trapezoidal_generator_preserves_native_derivatives() -> None:
     generator = _trapezoidal_generator()
     start = torch.tensor([[0.0, 0.0]], dtype=torch.float64)

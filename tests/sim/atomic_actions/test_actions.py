@@ -5012,6 +5012,41 @@ def test_move_joints_supports_sparse_trapezoidal_planning() -> None:
     assert torch.count_nonzero(trajectory.velocities[:, -1]) == 0
 
 
+def test_move_joints_holds_stationary_trapezoidal_goal() -> None:
+    generator = _motion_generator()
+    planner = object.__new__(TrapezoidalPlanner)
+    planner.cfg = SimpleNamespace(planner_type="trapezoidal")
+    planner.device = torch.device("cpu")
+    generator.planner = planner
+    action = _bind_action(generator, MoveJoints())
+    target = torch.zeros(NUM_ENVS, ARM_DOF)
+    invocation = replace(
+        _invocation(action, JointPositionGoal(target), sample_count=5),
+        motion_policy=MotionPolicy(
+            strategy="motion_gen",
+            sample_count=5,
+            plan_opts=TrapezoidalPlanOptions(
+                sample_interval=2,
+                backend="torch",
+            ),
+        ),
+    )
+
+    trajectory = _joint_trajectory(_plan_action(action, invocation, _context()))
+
+    torch.testing.assert_close(trajectory.positions[:, :, :ARM_DOF], target[:, None])
+    assert trajectory.velocities is not None
+    assert trajectory.accelerations is not None
+    torch.testing.assert_close(
+        trajectory.velocities[:, :, :ARM_DOF],
+        torch.zeros_like(trajectory.velocities[:, :, :ARM_DOF]),
+    )
+    torch.testing.assert_close(
+        trajectory.accelerations[:, :, :ARM_DOF],
+        torch.zeros_like(trajectory.accelerations[:, :, :ARM_DOF]),
+    )
+
+
 def test_move_held_object_retimes_arm_derivatives() -> None:
     generator = _motion_generator()
     q = torch.tensor([0.0, 0.1, 0.3]).view(1, 3, 1).expand(NUM_ENVS, -1, ARM_DOF)

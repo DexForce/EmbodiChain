@@ -617,11 +617,14 @@ class MotionGenerator:
                         "start_qpos and joint target shapes must match; received "
                         f"{tuple(start_qpos.shape)} and {tuple(reference_qpos.shape)}."
                     )
-                if not torch.equal(start_qpos, reference_qpos):
-                    target_plan_states = [
-                        PlanState(move_type=MoveType.JOINT_MOVE, qpos=start_qpos),
-                        *target_states,
-                    ]
+                # Keep the observed start as an explicit waypoint even when it
+                # equals the first target.  Sparse planners require at least
+                # two waypoints, and repeated waypoints represent a valid
+                # zero-duration hold for stationary requests.
+                target_plan_states = [
+                    PlanState(move_type=MoveType.JOINT_MOVE, qpos=start_qpos),
+                    *target_states,
+                ]
 
         unsupported_move_types = {
             candidate
