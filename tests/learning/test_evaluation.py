@@ -21,7 +21,10 @@ from unittest.mock import MagicMock, call
 import gymnasium as gym
 import torch
 
-from embodichain.learning.rl.evaluation import evaluate_episodes
+from embodichain.learning.rl.evaluation import (
+    convert_policy_action_for_env,
+    evaluate_episodes,
+)
 from embodichain.learning.rl.utils.trainer import Trainer
 
 
@@ -79,6 +82,23 @@ class _AsyncAutoResetEnv:
         )
 
 
+class _DeviceCheckingActionManager:
+    def __init__(self, device: torch.device) -> None:
+        self.device = device
+        self.received_device: torch.device | None = None
+
+    def convert_policy_action_to_env_action(self, action: torch.Tensor) -> torch.Tensor:
+        self.received_device = action.device
+        simulation_state = torch.zeros_like(action, device=self.device)
+        return simulation_state + action
+
+
+class _MixedDeviceEnv:
+    def __init__(self) -> None:
+        self.device = torch.device("meta")
+        self.action_manager = _DeviceCheckingActionManager(self.device)
+
+
 def test_evaluate_episodes_counts_actual_completions_and_restores_mode() -> None:
     policy = _DeterministicPolicy()
     policy.train()
@@ -99,6 +119,16 @@ def test_evaluate_episodes_counts_actual_completions_and_restores_mode() -> None
     assert result["eval/success_rate"] == 1.0
     assert result["eval/metrics/terminal_step"] == 1.25
     assert "eval/metrics/final_position" not in result
+
+
+def test_policy_action_moves_to_environment_device_before_preprocessing() -> None:
+    """Mixed inference/simulation devices meet at the action-manager boundary."""
+    env = _MixedDeviceEnv()
+
+    converted = convert_policy_action_for_env(env, torch.ones(1, 2))
+
+    assert env.action_manager.received_device == env.device
+    assert converted.device == env.device
 
 
 def test_trainer_rewinds_external_eval_event_manager() -> None:

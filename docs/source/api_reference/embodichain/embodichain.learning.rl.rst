@@ -18,6 +18,7 @@ collection logic, policy/model builders, and training entry points.
       buffer
       collector
       models
+      policy_evaluation
       train
       utils
 
@@ -98,6 +99,14 @@ Policy Models
    :undoc-members:
    :show-inheritance:
    :no-index:
+
+Runtime Reconstruction
+----------------------
+
+.. automodule:: embodichain.learning.rl.runtime
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 Training
 --------
