@@ -24,7 +24,7 @@ from tensordict import TensorDict
 from embodichain.learning.rl.buffer import transition_view
 from embodichain.learning.rl.utils import AlgorithmCfg, coerce_lr_scheduler_cfg
 from embodichain.utils import configclass
-from .common import compute_gae
+from .common import _update_observation_normalization, compute_gae
 from .base import BaseAlgorithm
 
 __all__ = ["PPO", "PPOCfg"]
@@ -152,6 +152,7 @@ class PPO(BaseAlgorithm[TensorDict]):
                 total_steps += bs
 
         self._step_scheduler()
+        _update_observation_normalization(self.policy, rollout)
         return {
             "actor_loss": total_actor_loss / max(1, total_steps),
             "value_loss": total_value_loss / max(1, total_steps),

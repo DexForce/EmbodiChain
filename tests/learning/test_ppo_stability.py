@@ -125,7 +125,7 @@ def test_empirical_normalizer_tracks_and_restores_moments() -> None:
     assert int(restored.count) == 2
 
 
-def test_collector_updates_normalizers_and_records_old_distribution() -> None:
+def test_ppo_updates_normalizers_after_using_the_rollout_distribution() -> None:
     env = _NormalizationEnv()
     policy = _policy(normalize=True)
     buffer = RolloutBuffer(
@@ -141,12 +141,28 @@ def test_collector_updates_normalizers_and_records_old_distribution() -> None:
 
     rollout = collector.collect(2, rollout=buffer.start_rollout())
 
-    assert int(policy.actor_obs_normalizer.count) == 4
-    assert int(policy.critic_obs_normalizer.count) == 4
+    evaluated = policy.evaluate_actions(rollout[:, :-1].reshape(-1))
+    probability_ratio = (
+        evaluated["sample_log_prob"] - rollout["sample_log_prob"][:, :-1].reshape(-1)
+    ).exp()
+
+    torch.testing.assert_close(probability_ratio, torch.ones_like(probability_ratio))
+    assert int(policy.actor_obs_normalizer.count) == 0
+    assert int(policy.critic_obs_normalizer.count) == 0
     assert rollout["critic_obs"].shape == (2, 3, 3)
     assert torch.isfinite(rollout["action_mean"][:, :-1]).all()
     assert torch.isfinite(rollout["action_std"][:, :-1]).all()
     losses = _algorithm(policy).update(rollout)
+    assert int(policy.actor_obs_normalizer.count) == 4
+    assert int(policy.critic_obs_normalizer.count) == 4
+    torch.testing.assert_close(
+        policy.actor_obs_normalizer.mean,
+        torch.full((1, 2), 0.5),
+    )
+    torch.testing.assert_close(
+        policy.critic_obs_normalizer.mean,
+        torch.full((1, 3), 2.5),
+    )
     assert all(torch.isfinite(torch.tensor(value)) for value in losses.values())
 
 

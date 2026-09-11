@@ -119,7 +119,6 @@ class SyncCollector(BaseCollector):
             rollout["obs"][:, step_idx + 1] = actor_obs
             if critic_obs is not None:
                 rollout["critic_obs"][:, step_idx + 1] = critic_obs
-            self._update_policy_normalization(actor_obs, critic_obs)
 
             if on_step_callback is not None:
                 on_step_callback(rollout[:, step_idx], env_info)
@@ -169,27 +168,6 @@ class SyncCollector(BaseCollector):
             return action
         else:
             return am.convert_policy_action_to_env_action(action)
-
-    def _update_policy_normalization(
-        self,
-        actor_obs: torch.Tensor,
-        critic_obs: torch.Tensor | None,
-    ) -> None:
-        """Update optional policy observation normalizers from the next state."""
-        policy_module = getattr(self.policy, "module", self.policy)
-        update = getattr(policy_module, "update_normalization", None)
-        if update is None:
-            return
-        fields = {"obs": actor_obs}
-        if critic_obs is not None:
-            fields["critic_obs"] = critic_obs
-        update(
-            TensorDict(
-                fields,
-                batch_size=[actor_obs.shape[0]],
-                device=self.device,
-            )
-        )
 
     def _write_step(
         self,
