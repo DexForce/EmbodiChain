@@ -192,7 +192,12 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
             )
         return make_pick_factory(tuple(routes), call_id)
     if kind == "move_held_object":
-        config = _mapping(value, path=path, required=frozenset({"kind", "routes"}))
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind", "routes"}),
+            optional=frozenset({"phase_protection"}),
+        )
         routes: list[_MoveHeldObjectRoute] = []
         for index, raw in enumerate(_sequence(config["routes"], path=f"{path}.routes")):
             route_path = f"{path}.routes[{index}]"
@@ -212,7 +217,14 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                     pose=_decode_goal_pose(route["pose"], path=f"{route_path}.pose"),
                 )
             )
-        return _MoveHeldObjectLowererFactory(tuple(routes))
+        return _MoveHeldObjectLowererFactory(
+            tuple(routes),
+            phase_protection=(
+                _identifier(config["phase_protection"], path=f"{path}.phase_protection")
+                if "phase_protection" in config
+                else None
+            ),
+        )
     if kind in {"coordinated_transport", "coordinated_hold"}:
         config = _mapping(
             value,

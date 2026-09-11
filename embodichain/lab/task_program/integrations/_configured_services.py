@@ -92,6 +92,8 @@ from embodichain.lab.task_program.semantics import (
 )
 from embodichain.lab.task_program.compiler.lowering import (
     RegisteredHeldObjectEffect,
+    RegisteredPhaseProtection,
+    RegisteredPhaseProtectionKind,
     RegisteredSemanticLowerer,
     RegisteredSemanticEffect,
     SemanticLowering,
@@ -764,6 +766,9 @@ class _RelativePlaceLowerer(RegisteredSemanticLowerer):
     call_id: ClassVar[str] = _PLACE_RELATIVE_CALL_ID
     target_descriptor: ClassVar[SkillDescriptor] = Place.descriptor()
     effect_contract_kind: ClassVar[SemanticEffectKind] = SemanticEffectKind.RELEASE
+    phase_protection_kind: ClassVar[RegisteredPhaseProtectionKind] = (
+        RegisteredPhaseProtectionKind.RELEASE
+    )
 
     def __init__(self, routes: tuple[_RelativePlaceRoute, ...]) -> None:
         if type(routes) is not tuple or not routes:
@@ -848,6 +853,17 @@ class _RelativePlaceLowerer(RegisteredSemanticLowerer):
                         slot_id="primary",
                     ),
                 ),
+            ),
+            phase_protection=RegisteredPhaseProtection(
+                kind=RegisteredPhaseProtectionKind.RELEASE,
+                held_object=RegisteredHeldObjectEffect(
+                    expectation_id="primary",
+                    relation=HeldObjectRelation.DETACHED,
+                    object_id=route.object_id,
+                    slot_id="primary",
+                ),
+                active_segments=("approach",),
+                gate_segment="retract",
             ),
         )
 

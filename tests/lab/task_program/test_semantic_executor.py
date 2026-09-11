@@ -1664,10 +1664,16 @@ def test_terminal_failure_policy_only_retains_strongly_proven_source_attachment(
     assert torch.equal(retry, expected_retry)
 
 
-def test_in_flight_guard_collects_live_evidence_and_builds_loss_reconciliation() -> (
-    None
-):
-    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+@pytest.mark.parametrize("segment_declared", (True, False))
+def test_in_flight_guard_collects_live_evidence_and_builds_loss_reconciliation(
+    segment_declared: bool,
+) -> None:
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        effectless_action=True,
+        install_effect_monitor=False,
+        effect_assurance=EffectAssurance.VERIFIED,
+    )
     semantics = ObjectSemantics(
         affordance=Affordance(),
         geometry={},
@@ -1740,12 +1746,33 @@ def test_in_flight_guard_collects_live_evidence_and_builds_loss_reconciliation()
         invalidation_task_state_keys=("arm",),
         retry_action=False,
     )
+    original_ground = system.compiler.ground
+
+    def ground_with_guard(*args: object, **kwargs: object) -> _Grounded:
+        grounded = original_ground(*args, **kwargs)
+        return replace(grounded, effect_guards=(guard,))
+
+    system.compiler.ground = ground_with_guard
+    system.runtime.adopt_verified_task_state(task_state)
+    completed = system.runtime.run(_call("guard_only"))
+    assert completed.status is SemanticExecutionStatus.COMPLETED
+    retained = completed.task_state.get_held_object("arm")
+    assert retained is not None
+    assert retained.env_mask.tolist() == [True, True]
     system.runtime._grounded = SimpleNamespace(
         analyzed=SimpleNamespace(effect_monitor_ref=None),
         effect_guards=(guard,),
+        effect_spec=None,
     )
     system.runtime._runner = SimpleNamespace(
-        session=SimpleNamespace(task_state=task_state)
+        session=SimpleNamespace(
+            task_state=task_state,
+            active_plan=SimpleNamespace(
+                segments=(
+                    SimpleNamespace(name="carry" if segment_declared else "different"),
+                )
+            ),
+        )
     )
     system.runtime._current_call_index = 0
     context = system.observation.observe(task_state)
@@ -1764,6 +1791,10 @@ def test_in_flight_guard_collects_live_evidence_and_builds_loss_reconciliation()
         deadline=10.0,
     )
 
+    if not segment_declared:
+        with pytest.raises(ValueError, match="missing plan segment"):
+            system.runtime._held_object_guard_verifier(context, request)
+        return
     result = system.runtime._held_object_guard_verifier(context, request)
 
     assert result is not None

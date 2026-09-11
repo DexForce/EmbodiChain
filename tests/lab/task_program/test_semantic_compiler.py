@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from types import MethodType
+from dataclasses import replace
 from typing import ClassVar
 from unittest.mock import Mock
 
@@ -35,6 +36,7 @@ from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     DynamicCollisionMode,
     EntityState,
+    EffectVerificationRequest,
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
     GraspGoal,
@@ -52,6 +54,7 @@ from embodichain.lab.sim.atomic_actions import (
     SceneEntityPose,
     SkillDescriptor,
     TaskState,
+    StateDelta,
 )
 from embodichain.lab.sim.atomic_actions.tracking import (
     JointPositionTrackingMetric,
@@ -73,6 +76,8 @@ from embodichain.lab.task_program.compiler.lowering import (
     HandOverPoseTargets,
     HeldObjectGuardBaseline,
     RegisteredHeldObjectEffect,
+    RegisteredPhaseProtection,
+    RegisteredPhaseProtectionKind,
     RegisteredSemanticLowerer,
     RegisteredSemanticEffect,
     RelationTargetGrounder,
@@ -85,6 +90,7 @@ from embodichain.lab.task_program.compiler.lowering import (
 )
 from embodichain.lab.task_program.semantics.effects import (
     BinaryEffectClause,
+    BinaryEffectEvidenceBatch,
     BinaryEvidenceKind,
     COMPOSITE_EFFECT_MONITOR_ID,
     COMPOSITE_EFFECT_MONITOR_REVISION,
@@ -96,6 +102,7 @@ from embodichain.lab.task_program.semantics.effects import (
     HeldObjectRelation,
     HeldObjectStateExpectation,
     PoseRelationClause,
+    PoseRelationEvidenceBatch,
     PoseRelationExpectation,
     SemanticEffectKind,
     SemanticEffectSpec,
@@ -1351,6 +1358,246 @@ def test_registered_effect_contract_is_grounded_by_compiler() -> None:
     assert expectation.slot_id == "primary"
     assert expectation.object_id == "cube"
     assert grounded.effect_monitor is not None
+
+
+@pytest.mark.parametrize("mode", ("acquire", "release", "retain"))
+def test_registered_phase_protection_binds_gate_and_held_guard(mode: str) -> None:
+    """Registered declarations bind independent, phase-scoped monitors."""
+
+    class ProtectedLowerer(_EffectfulInspectLowerer):
+        phase_protection_kind = RegisteredPhaseProtectionKind(mode)
+        effect_contract_kind = {
+            "acquire": SemanticEffectKind.ATTACH,
+            "release": SemanticEffectKind.RELEASE,
+            "retain": None,
+        }[mode]
+        preserves_symbolic_state = mode == "retain"
+
+        def lower(self, *args: object, **kwargs: object) -> SemanticLowering:
+            lowering = super().lower(*args, **kwargs)
+            item = replace(
+                lowering.registered_effect.held_objects[0],
+                relation=(
+                    HeldObjectRelation.DETACHED
+                    if mode == "release"
+                    else HeldObjectRelation.ATTACHED
+                ),
+            )
+            return replace(
+                lowering,
+                registered_effect=(
+                    None
+                    if mode == "retain"
+                    else RegisteredSemanticEffect(
+                        effect_kind=self.effect_contract_kind, held_objects=(item,)
+                    )
+                ),
+                phase_protection=RegisteredPhaseProtection(
+                    kind=self.phase_protection_kind,
+                    held_object=item,
+                    active_segments=(
+                        {
+                            "acquire": ("lift",),
+                            "release": ("approach",),
+                            "retain": ("transport",),
+                        }[mode]
+                    ),
+                    gate_segment={
+                        "acquire": "lift",
+                        "release": "retract",
+                        "retain": None,
+                    }[mode],
+                ),
+            )
+
+    registry, _ = _scene_registry()
+    profile = _profile(
+        preset=_preset(
+            "safe",
+            registered=True,
+            effect_monitors={
+                "vendor.inspect": EffectMonitorRef(
+                    COMPOSITE_EFFECT_MONITOR_ID,
+                    COMPOSITE_EFFECT_MONITOR_REVISION,
+                )
+            },
+        )
+    )
+    compiler, _ = _compiler(
+        registry,
+        registered=True,
+        registered_lowerers=(ProtectedLowerer(),),
+        profile=profile,
+    )
+    workflow = compiler.analyze((RegisteredSemanticCall(call_id="vendor.inspect"),))
+    context = _context(registry)
+    if mode != "acquire":
+        semantics = ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, entity_id="cube"
+        )
+        context = _held_context(registry, semantics, torch.eye(4).repeat(2, 1, 1))
+    grounded = compiler.ground(workflow, 0, context)
+    assert len(grounded.effect_gates) == (0 if mode == "retain" else 1)
+    assert (
+        grounded.effect_guards[0].active_segments
+        == {"acquire": ("lift",), "release": ("approach",), "retain": ("transport",)}[
+            mode
+        ]
+    )
+    assert grounded.effect_guards[0].baseline is (
+        HeldObjectGuardBaseline.PLANNED_EFFECT
+        if mode == "acquire"
+        else HeldObjectGuardBaseline.VERIFIED_TASK_STATE
+    )
+    if mode == "retain":
+        assert grounded.effect_spec is None
+        assert grounded.effect_monitor is None
+    else:
+        assert (
+            grounded.effect_gates[0].segment_name
+            == {"acquire": "lift", "release": "retract"}[mode]
+        )
+        assert grounded.invocation.phase_effect_gates == (
+            grounded.effect_gates[0].requirement,
+        )
+        if mode == "release":
+            assert not any(
+                isinstance(clause, PoseRelationClause)
+                for clause in grounded.effect_gates[0].effect_spec.clauses
+            )
+
+    # Inject missing acquisition, loss during held transport, or a gripper
+    # still holding at the release-before-retreat boundary. These are CPU
+    # evidence tests, not physical task qualification.
+    protection = (
+        grounded.effect_guards[0] if mode == "retain" else grounded.effect_gates[0]
+    )
+    held = HeldObjectState(
+        semantics=ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, entity_id="cube"
+        ),
+        object_to_eef=torch.eye(4).repeat(2, 1, 1),
+        grasp_xpos=torch.eye(4).repeat(2, 1, 1),
+        env_mask=torch.ones(2, dtype=torch.bool),
+    )
+    request = EffectVerificationRequest(
+        verification_id=0,
+        skill_id=grounded.invocation.skill_id,
+        invocation_id=grounded.invocation.invocation_id,
+        invocation_revision=0,
+        invocation_index=0,
+        attempt_generation=0,
+        terminal_segment=(
+            protection.active_segments[0]
+            if mode == "retain"
+            else protection.segment_name
+        ),
+        requested_at=0.0,
+        deadline=10.0,
+        env_mask=torch.ones(2, dtype=torch.bool),
+        expected_effects=StateDelta(
+            held_object_updates={"manipulator": None if mode == "release" else held}
+        ),
+    )
+    evidence = {}
+    for clause in protection.effect_spec.clauses:
+        common = dict(
+            evidence_id=clause.clause_id,
+            valid=torch.ones(2, dtype=torch.bool),
+            acquisition_errors=(None, None),
+            timestamp=0.0,
+            env_ids=context.env_ids,
+            observation_revision=0,
+        )
+        evidence[clause.clause_id] = (
+            PoseRelationEvidenceBatch(
+                object_to_endpoint=torch.eye(4).repeat(2, 1, 1), **common
+            )
+            if isinstance(clause, PoseRelationClause)
+            else BinaryEffectEvidenceBatch(
+                evidence_kind=clause.evidence_kind,
+                values=torch.full((2,), mode == "release", dtype=torch.bool),
+                **common,
+            )
+        )
+    decision = protection.effect_monitor.observe(request, evidence)
+    assert not decision.failure_mask.any()
+    decision = protection.effect_monitor.observe(
+        replace(request, verification_id=1, requested_at=0.1),
+        {
+            key: replace(value, timestamp=0.1, observation_revision=1)
+            for key, value in evidence.items()
+        },
+    )
+    assert decision.failure_mask.tolist() == [True, True]
+    assert decision.success_mask.tolist() == [False, False]
+
+
+@pytest.mark.parametrize(
+    "invalid", ("untyped", "empty_segments", "wrong_relation", "gate_overlap")
+)
+def test_registered_phase_protection_rejects_invalid_declarations(invalid: str) -> None:
+    item = RegisteredHeldObjectEffect(
+        expectation_id="primary",
+        relation=HeldObjectRelation.DETACHED,
+        object_id="cube",
+        slot_id="primary",
+    )
+    kwargs = dict(
+        kind=RegisteredPhaseProtectionKind.RELEASE,
+        held_object=item,
+        active_segments=("approach",),
+        gate_segment="retract",
+    )
+    if invalid == "untyped":
+        kwargs["kind"] = "release"
+    elif invalid == "empty_segments":
+        kwargs["active_segments"] = ()
+    elif invalid == "wrong_relation":
+        kwargs["held_object"] = replace(item, relation=HeldObjectRelation.ATTACHED)
+    else:
+        kwargs["gate_segment"] = "approach"
+    with pytest.raises((TypeError, ValueError)):
+        RegisteredPhaseProtection(**kwargs)
+
+
+def test_registered_retention_requires_a_monitor_during_analysis() -> None:
+    class RetainingLowerer(_StatePreservingInspectLowerer):
+        phase_protection_kind = RegisteredPhaseProtectionKind.RETAIN
+
+    registry, _ = _scene_registry()
+    compiler, _ = _compiler(
+        registry, registered=True, registered_lowerers=(RetainingLowerer(),)
+    )
+    with pytest.raises(SemanticValidationError) as error:
+        compiler.analyze((RegisteredSemanticCall(call_id="vendor.inspect"),))
+    assert error.value.diagnostic.code == "missing_effect_monitor"
+
+
+def test_registered_lowerer_cannot_omit_declared_phase_protection() -> None:
+    class IncompleteLowerer(_EffectfulInspectLowerer):
+        phase_protection_kind = RegisteredPhaseProtectionKind.ACQUIRE
+
+    registry, _ = _scene_registry()
+    compiler, _ = _compiler(
+        registry,
+        registered=True,
+        registered_lowerers=(IncompleteLowerer(),),
+        profile=_profile(
+            preset=_preset(
+                "safe",
+                registered=True,
+                effect_monitors={
+                    "vendor.inspect": EffectMonitorRef(
+                        COMPOSITE_EFFECT_MONITOR_ID, COMPOSITE_EFFECT_MONITOR_REVISION
+                    )
+                },
+            )
+        ),
+    )
+    workflow = compiler.analyze((RegisteredSemanticCall(call_id="vendor.inspect"),))
+    with pytest.raises(TypeError, match="does not match its declaration"):
+        compiler.ground(workflow, 0, _context(registry))
 
 
 def test_registered_release_requires_object_held_in_every_eligible_row() -> None:

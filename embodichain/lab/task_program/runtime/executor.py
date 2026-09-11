@@ -961,8 +961,11 @@ class SemanticCallExecutor:
                 "Grounded effect_guards must contain exact "
                 "GroundedHeldObjectGuard values."
             )
-        if effect_guards and effect_spec is None:
-            raise ValueError("Grounded held-object guards require an effect spec.")
+        if effect_spec is None and any(
+            guard.baseline is not HeldObjectGuardBaseline.VERIFIED_TASK_STATE
+            for guard in effect_guards
+        ):
+            raise ValueError("Guard-only calls require verified task-state baselines.")
         if not all(type(value) is GroundedPhaseEffectGate for value in effect_gates):
             raise TypeError(
                 "Grounded effect_gates must contain exact "
@@ -1247,6 +1250,16 @@ class SemanticCallExecutor:
             return None
         grounded = self._require_grounded()
         guards = grounded.effect_guards
+        session = self._require_runner().session
+        if grounded.effect_spec is None:
+            segment_names = {segment.name for segment in session.active_plan.segments}
+            for guard in guards:
+                missing = set(guard.active_segments) - segment_names
+                if missing:
+                    raise ValueError(
+                        f"Held-object guard {guard.guard_id!r} references missing "
+                        f"plan segment names: {sorted(missing)}."
+                    )
         active = tuple(
             guard for guard in guards if request.segment_name in guard.active_segments
         )
@@ -1259,7 +1272,6 @@ class SemanticCallExecutor:
                 f"{[guard.guard_id for guard in active]}."
             )
         guard = active[0]
-        session = self._require_runner().session
         if guard.baseline is HeldObjectGuardBaseline.VERIFIED_TASK_STATE:
             candidate = session.task_state.get_held_object(guard.task_state_key)
         else:

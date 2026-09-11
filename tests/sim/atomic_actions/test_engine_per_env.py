@@ -1860,6 +1860,31 @@ def test_recovery_replan_rejects_runtime_destination_change() -> None:
     assert action.plan_count == 2
 
 
+def test_initial_empty_plan_can_establish_tracking_on_retry() -> None:
+    engine, action = _destination_engine((None, "first"))
+    initial = _context(0.0, 0.0, 0.1, 0)
+    session = engine.start((_destination_invocation(engine),), initial)
+
+    first = session.tick(initial)
+    assert first.command is None
+    resumed = session.tick(_context(0.1, 0.0, 0.1, 0))
+    assert resumed.command is not None
+    assert resumed.command.commands[0].target.target_id == "arm_a"
+    assert action.plan_count == 2
+
+
+def test_repeated_initial_empty_plans_fail_without_commands() -> None:
+    engine, action = _destination_engine((None, None, None, None))
+    initial = _context(0.0, 0.0, 0.1, 0)
+    session = engine.start((_destination_invocation(engine),), initial)
+    for index in range(6):
+        tick = session.tick(_context(index * 0.1, 0.0, 0.1, 0))
+        assert tick.command is None
+        if tick.status is ExecutionStatus.FAILED:
+            break
+    assert tick.status is ExecutionStatus.FAILED
+
+
 def test_empty_failed_replan_preserves_destination_for_same_target_retry() -> None:
     engine, action = _destination_engine(("first", None, "first"))
     invocation = _destination_invocation(engine)

@@ -308,6 +308,53 @@ def test_configured_pick_keeps_baseline_goal_and_preset_ownership() -> None:
     assert options.pick_object_part == "bottom"
     assert options.downstream_object_target_poses == ()
     assert lowering.registered_effect.effect_kind is SemanticEffectKind.ATTACH
+    assert lowering.phase_protection.gate_segment == "lift"
+    assert lowering.phase_protection.active_segments == ("lift",)
+
+
+@pytest.mark.parametrize("protected", (False, True))
+def test_held_move_phase_protection_is_an_explicit_service_opt_in(
+    protected: bool,
+) -> None:
+    config = {
+        "kind": "move_held_object",
+        "routes": [
+            {
+                "object_id": "part",
+                "target_id": "inspection",
+                "pose": {
+                    "kind": "pose",
+                    "position": [0.0, 0.0, 1.0],
+                    "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                },
+            }
+        ],
+    }
+    if protected:
+        config["phase_protection"] = "held_object_v1"
+    factory = decode_task_lowerer(config, path="runtime_services")
+    robot = object()
+    registry = SimpleNamespace(resolve=lambda *args, **kwargs: SceneObjectRef("part"))
+    lowerer = factory.create(
+        simulation=None,
+        robot=robot,
+        scene_registry=registry,
+        engine=SimpleNamespace(robot=robot),
+    )
+    lowered = lowerer.lower(
+        RegisteredSemanticCall(
+            call_id="simulation.move_held_object",
+            arguments={"object": "part", "target": "inspection"},
+        ),
+        context=None,
+        bound=None,
+        option_template=MoveHeldObjectOptions(),
+    )
+    assert (lowered.phase_protection is not None) is protected
+    if protected:
+        assert lowered.phase_protection.active_segments == ("transport",)
+        assert lowered.phase_protection.gate_segment is None
+    assert lowered.registered_effect is None
 
 
 def test_pick_decoder_rejects_removed_runtime_option_declarations() -> None:

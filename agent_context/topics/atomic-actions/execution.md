@@ -105,6 +105,11 @@ Scene-relative goals declare the exact entity poses they consume. The session
 compares dependency revisions against fresh snapshots and replans only within
 the selected `RecoveryPolicy`.
 
+A failed initial empty plan owns no command targets or feedback routes; its
+first successful retry may establish both. Once established, runtime target
+addresses and tracking source/projector ownership remain fixed across recovery.
+An intervening empty failed replan does not erase that ownership.
+
 `PlanningContext.control_dt` is the authoritative control grid. Every emitted
 trajectory or endpoint command must align to it; integrations must not silently
 resample fractional durations.

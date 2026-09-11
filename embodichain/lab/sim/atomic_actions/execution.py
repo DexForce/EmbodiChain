@@ -1351,6 +1351,9 @@ class ExecutionSession:
             return
         previous_routes = self._active_tracking_routes
         replacement_routes = self._tracking_routes(plan)
+        if not previous_routes and not self._active_targets:
+            # Failed initial planning has not established feedback ownership.
+            return
         if (
             event_kind is ExecutionEventKind.REPLANNED
             and not plan.commands.targets
