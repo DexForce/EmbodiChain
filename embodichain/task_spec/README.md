@@ -152,12 +152,48 @@ Callers are responsible for supplying the actual observed instance.
 
 Without those inputs, the existing candidate and graph/v1 behavior is unchanged.
 v2 is a provenance-carrying plan candidate: it does not claim recipe satisfaction
-of the template. The bundle builder and runner refuse v2 before creating output,
-because final task evaluation is not yet wired before dataset submission/reset.
+of the template. The bundle builder and runner still refuse v2, because a full
+measured SceneInstance / witness evidence qualification is not implemented.
+
+### Opt-in bounded E2 acceptance
+
+`task-engine prepare` and `run-all` accept `--task-template template.json`.
+The template must contain one object/container role, one `upright` goal with
+`0 < max_tilt < pi/2` radians, no capabilities/process constraints, and either
+empty init or the exact negation of the goal as init. The selected E2 recipe
+must bind one object whose upright axis is local +Z. Unsupported templates are
+rejected before generation. Unsupported asset-axis bindings fail preparation.
+The CLI defaults to dual_franka and rejects other profiles before generation.
+
+The existing graph/v1 remains the executable recipe. A new strict
+`gen_sim.taskspec_e2/v1` sidecar owns the explicit template and binding, bound to
+the graph and referenced by exact bytes from fingerprint schema v3. Legacy
+bundles without TaskSpec remain fingerprint v2. Segment upright thresholds
+are derived from the template; their extra settling time remains execution
+policy. No second normative success specification is authored.
+
+After reset/settling the runner records actual poses, evaluates init, and
+rejects already-satisfied goals as a **demo acceptance policy**, not task
+semantics. This first host aborts the entire batch if any initial row is
+invalid/unavailable/trivial, preserving per-row initial evidence; no row is
+executed or saved in that case. Final goal checks are independent per-row.
+Gym's `final_acceptance` hook freezes goal evidence after all segments/cleanup
+and before episode metadata finalization. A successful program cannot override
+a failed goal. A failed final batch is not committed as successful training data.
+
+`initial_state.json`, `task_goal_state.json`, `initial_evaluation.json`,
+`program_execution.json` and `task_evaluation.json` separate observed state,
+program completion and task acceptance. Evidence references hash exact bytes.
+The report deliberately records `certificate_status=unavailable`: asset-content,
+full-process, actual SceneInstance identity and robustness qualification remain
+unimplemented. It is not a successful certified ActionWitness. Invalid pose
+rows remain unavailable, including under negation. No physical rollout or
+robustness claim follows from CPU tests.
 
 Next work belongs in the existing owners: TaskAgent seed migration and
 template-derived SceneRequest, scene adapter observation/grounding evidence,
-shared predicate measurements, final/step evaluation, and Workflow certificate
-assembly. Public registered phase protection/recovery (P0), full P2/P3 execution,
-and motion expansion integration remain separate changes. No runtime or physical
-task certification is claimed by this package.
+additional shared predicate measurements, step monitoring, and Workflow
+certificate assembly. Full P2/P3 instance/witness qualification, E1/E4/E5
+template execution, Gradio migration, decoder extension consolidation and motion
+expansion hosting remain subsequent increments. Public registered protection
+and empty-plan recovery are implemented in their existing execution owners.

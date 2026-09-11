@@ -17,6 +17,104 @@
 from __future__ import annotations
 
 from copy import deepcopy
+
+
+def test_failed_task_spec_attempt_freezes_unavailable_evidence_and_rejects_reuse(
+    tmp_path,
+):
+    from types import SimpleNamespace
+    import json
+    from embodichain.gen_sim.task_engine._task_spec import (
+        binding_for_graph,
+        record_failure,
+        require_fresh_evidence_output,
+    )
+
+    candidate, bindings, objects, template, _ = planning_inputs()
+    binding = binding_for_graph(
+        template, SemanticTaskPlanner().plan(candidate, bindings, objects)
+    )
+    failure = {"type": "RuntimeError", "message": "planner failed after safe-stop"}
+    env = SimpleNamespace(sim=SimpleNamespace(get_rigid_object=lambda uid: None))
+    require_fresh_evidence_output(tmp_path)
+    record_failure(env, binding, None, tmp_path, failure, num_envs=2)
+    evidence = json.loads((tmp_path / "task_evaluation.json").read_text())
+    assert evidence["accepted"] == [False, False]
+    assert evidence["final"]["status"] == ["unavailable", "unavailable"]
+    assert evidence["execution_failure"] == failure
+    with pytest.raises(ValueError, match="fresh evidence"):
+        require_fresh_evidence_output(tmp_path)
+
+
+def test_task_spec_observes_live_final_state_and_records_failure_before_acceptance(
+    tmp_path,
+):
+    from types import SimpleNamespace
+    import json
+    import torch
+    from embodichain.gen_sim.task_engine._task_spec import (
+        binding_for_graph,
+        observe,
+        final_acceptance,
+    )
+
+    candidate, bindings, objects, template, instance = planning_inputs()
+    graph = SemanticTaskPlanner().plan(candidate, bindings, objects)
+    binding = binding_for_graph(template, graph)
+    poses = torch.eye(4).repeat(2, 1, 1)
+    fallen = torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
+    poses[:, :3, :3] = fallen
+    obj = SimpleNamespace(get_local_pose=lambda **kwargs: poses)
+    env = SimpleNamespace(
+        num_envs=2, sim=SimpleNamespace(get_rigid_object=lambda uid: obj)
+    )
+    initial = observe(env, binding, scope="initial", output=tmp_path)
+    assert initial["goal_satisfied"] == [False, False]
+    # Both program rows succeeded, but the second object's final goal did not.
+    poses[0] = torch.eye(4)
+    result = SimpleNamespace(
+        success=(True, True), to_metadata=lambda: {"success": [True, True]}
+    )
+    accepted = final_acceptance(env, binding, initial, result, tmp_path)
+    assert accepted == (True, False)
+    report = json.loads((tmp_path / "task_evaluation.json").read_text())
+    assert report["task_success"] == [True, False]
+    assert report["program_success"] == [True, True]
+    assert report["certificate_status"] == "unavailable"
+    assert report["initial"]["goal_satisfied"] == [False, False]
+
+
+def test_task_spec_binding_rejects_drift_and_orphaned_sidecars(tmp_path):
+    from embodichain.gen_sim.task_engine._task_spec import (
+        binding_for_graph,
+        read_binding,
+        write_evidence,
+    )
+
+    candidate, bindings, objects, template, _ = planning_inputs()
+    graph = SemanticTaskPlanner().plan(candidate, bindings, objects)
+    binding = binding_for_graph(template, graph)
+    path = tmp_path / "task_spec_binding.json"
+    ref = write_evidence(path, binding)
+    fingerprint = {
+        "schema_version": "semantic_integration_fingerprint/v3",
+        "task_spec_binding": ref,
+    }
+    assert read_binding(tmp_path, graph, fingerprint) == binding
+    with pytest.raises(ValueError, match="schema v3"):
+        read_binding(
+            tmp_path, graph, {"schema_version": "semantic_integration_fingerprint/v2"}
+        )
+    changed = deepcopy(binding)
+    changed["entity_id"] = "another_can"
+    write_evidence(path, changed)
+    with pytest.raises(ValueError, match="drifted"):
+        read_binding(tmp_path, graph, fingerprint)
+    path.unlink()
+    with pytest.raises(FileNotFoundError):
+        read_binding(tmp_path, graph, fingerprint)
+
+
 import pytest
 
 from embodichain.task_spec import semantic_hash, scene_instance_hash

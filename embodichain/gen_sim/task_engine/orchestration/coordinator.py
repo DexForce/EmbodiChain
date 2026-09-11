@@ -53,6 +53,7 @@ from .artifacts import (
 )
 from .scene_adapter import SceneAdaptation, SceneAdapter
 from .scene_source import SceneSourceRef
+from ..scene.feasibility import FeasibilityBroker
 
 __all__ = ["PreparationResult", "TaskEngineCoordinator"]
 
@@ -122,6 +123,7 @@ class TaskEngineCoordinator:
         force_most_likely: bool = False,
         final_inspection: Mapping[str, Any] | None = None,
         unbound_action_plan: Mapping[str, Any] | None = None,
+        task_template: dict[str, Any] | None = None,
     ) -> PreparationResult:
         """Publish a graph and configured Task Program as one transaction.
 
@@ -138,6 +140,10 @@ class TaskEngineCoordinator:
             randomize_scene,
             randomize_table_material,
         )
+        if task_template is not None:
+            from embodichain.lab.task_evaluation import UprightTaskEvaluator
+
+            UprightTaskEvaluator(task_template)
         normalized_source = self._coerce_source(source)
         validate_scene_output_separation(normalized_source.path, output_dir)
         with ArtifactTransaction(output_dir, overwrite=overwrite) as transaction:
@@ -196,6 +202,38 @@ class TaskEngineCoordinator:
                 "planner_route": str(planning_mode),
                 "status": "running",
             }
+            feasibility_report = None
+            if adaptation.static_scene_manifest is not None:
+                feasibility_report = FeasibilityBroker().assess(
+                    selected,
+                    role_bindings,
+                    adaptation.static_scene_manifest,
+                )
+                _write_json(staging / "feasibility_report.json", feasibility_report)
+                if feasibility_report["status"] == "contradicted":
+                    published = transaction.commit()
+                    return PreparationResult(
+                        status="infeasible",
+                        output_dir=published,
+                        candidate_set=deepcopy(normalized_candidates),
+                        adaptation=adaptation,
+                        artifacts=task_engine_artifact_paths(published),
+                        feasibility_report=feasibility_report,
+                    )
+            _write_json(
+                staging / "validation_status.json",
+                {
+                    "schema_version": "gen_sim.preparation_validation/v1",
+                    "static_assessment": (
+                        "not_run"
+                        if feasibility_report is None
+                        else feasibility_report["status"]
+                    ),
+                    "physical_execution": "not_run",
+                    "ik": "not_run",
+                    "collision_path": "not_run",
+                },
+            )
             try:
                 graph = self.semantic_planner.plan(
                     selected,
@@ -210,6 +248,11 @@ class TaskEngineCoordinator:
                     robot_profile=str(adaptation.scene_manifest["robot_profile"]),
                     max_episodes=max_episodes,
                     max_episode_steps=max_episode_steps,
+                    **(
+                        {"task_template": task_template}
+                        if task_template is not None
+                        else {}
+                    ),
                 )
             except (TypeError, ValueError, UnsupportedSemanticCapabilityError) as exc:
                 planning_attempt["status"] = "failed"
@@ -232,6 +275,7 @@ class TaskEngineCoordinator:
                     adaptation=adaptation,
                     artifacts=task_engine_artifact_paths(published),
                     planning_attempts=(deepcopy(planning_attempt),),
+                    feasibility_report=feasibility_report,
                 )
 
             planning_attempt.update(
@@ -252,6 +296,7 @@ class TaskEngineCoordinator:
                 adaptation=adaptation,
                 artifacts=task_engine_artifact_paths(published),
                 semantic_task_graph=deepcopy(graph),
+                feasibility_report=feasibility_report,
                 generated_paths=_published_paths(generated, published),
                 planning_attempts=(deepcopy(planning_attempt),),
                 unbound_action_plan=(

@@ -2180,3 +2180,7 @@ embodichain_tasks.utils.importer
    :hidden:
 
    task_spec
+.. toctree::
+   :hidden:
+
+   task_evaluation

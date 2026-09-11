@@ -43,12 +43,26 @@ and legacy_plan_hash. The existing recipe remains a proposed solution and
 does not redefine or prove the normative goal.
 
 Without TaskSpec inputs, TaskCandidate and graph/v1 behavior is unchanged.
-`task_program_bundle.py` and `_bundle_runner.py` refuse v2 export/execution before writing artifacts until
-final evaluation before data submission/reset exists. This is a planning
-provenance entry, not the complete template-driven generation/runtime route.
-TaskAgent migration, template-derived scene requests, actual-state capture,
-shared evaluator, Workflow certificates and expansion hosting remain future
-work in their current owners. See [GenSim](../gen-sim/gen-sim.md).
+`task_program_bundle.py` and `_bundle_runner.py` refuse v2 export/execution
+until measured instance/witness evidence qualification exists.
+
+An independent opt-in E2 acceptance route passes an explicit template through
+CLI `--task-template`, Workflow and bundle generation. It keeps graph/v1 as the
+executable recipe and writes a strict template/binding sidecar referenced by
+fingerprint/v3. `lab/task_evaluation.py` accepts only one local-+Z upright goal
+and optional initially-not-upright constraint; other requirements fail early.
+`compute/task_predicates.py` owns shared angle measurement. GenSim stability
+policies derive their upright threshold from the explicit template.
+
+The runner captures actual reset/settled poses and refuses invalid, unavailable
+or trivial initial batches. Its final hook evaluates simultaneous final poses
+after cleanup and before Gym metadata/commit/reset. Program and task results
+are separate. The host owns evidence files, not the evaluator. The result is
+observed-goal-only with certificate_status=unavailable: it does not construct
+a qualified SceneInstance/ActionWitness or assert asset/whole-process/robustness
+certification. TaskAgent migration, template-derived scene generation, other
+predicate checkers, Workflow certificates and expansion hosting remain future
+work. See [GenSim](../gen-sim/gen-sim.md).
 
 ## Focused validation
 

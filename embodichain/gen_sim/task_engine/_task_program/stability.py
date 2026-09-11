@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from embodichain.compute.task_predicates import axis_tilt
+
 from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, fields
@@ -283,8 +285,9 @@ class TaskStabilityPort:
             valid = torch.isfinite(pose).all(dim=-1).all(dim=-1)
             measurements: dict[str, Any] = {}
             if cfg.local_axis is not None:
-                alignment = (pose[:, :3, :3] @ pose.new_tensor(cfg.local_axis))[:, 2]
-                valid &= alignment >= cfg.minimum_alignment
+                tilt = axis_tilt(pose, pose.new_tensor(cfg.local_axis))
+                alignment = torch.cos(tilt)
+                valid &= tilt <= math.acos(cfg.minimum_alignment)
                 measurements["alignment"] = alignment.tolist()
             reference = self._pose(cfg.reference) if cfg.reference is not None else None
             target = None
@@ -302,9 +305,9 @@ class TaskStabilityPort:
                     and reference_anchor is not None
                     and cfg.reference_axis is not None
                 )
-                alignment = (
-                    reference[:, :3, :3] @ pose.new_tensor(cfg.reference_axis)
-                )[:, 2]
+                reference_tilt = axis_tilt(
+                    reference, pose.new_tensor(cfg.reference_axis)
+                )
                 gap = (
                     pose[:, 2, 3]
                     + cfg.object_bottom
@@ -312,7 +315,7 @@ class TaskStabilityPort:
                     - cfg.reference_top
                 )
                 delta = pose[:, :2, 3] - reference[:, :2, 3]
-                valid &= (alignment >= cfg.minimum_alignment) & (
+                valid &= (reference_tilt <= math.acos(cfg.minimum_alignment)) & (
                     gap.abs() <= cfg.support_tolerance
                 )
                 valid &= (
@@ -326,7 +329,7 @@ class TaskStabilityPort:
                 )
                 measurements.update(
                     support_gap=gap.tolist(),
-                    reference_alignment=alignment.tolist(),
+                    reference_alignment=torch.cos(reference_tilt).tolist(),
                     reference_translation_drift=reference_translation.tolist(),
                     reference_rotation_drift=reference_rotation.tolist(),
                 )

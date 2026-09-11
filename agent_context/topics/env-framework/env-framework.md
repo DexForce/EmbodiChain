@@ -72,6 +72,12 @@ dataset persistence are separate contracts; see
 [Task Programs](../task-programs/task-programs.md) and
 [data pipeline](../data-pipeline/data-pipeline.md).
 
+`execute_demo_episode(final_acceptance=...)` optionally lets the host freeze
+whole-task evidence after segments/cleanup and before episode metadata is
+finalized. It requires an exact per-row boolean tuple and only rejects existing
+program success; the callback must not step, reset or persist dataset samples.
+The caller still owns the eventual save/reset transaction.
+
 ## Change sites and focused validation
 
 | Change | Validation surface |

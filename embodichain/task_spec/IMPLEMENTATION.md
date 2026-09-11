@@ -56,3 +56,24 @@ from provider-free preflight and physical execution. Do not unconditionally mark
 unperformed static checks complete. Run focused tests, Black, API docs/context gates,
 and available physical smoke only with verified prerequisites. Review full branch,
 fix findings, commit/push own branch, and create PR targeting #531 head branch.
+
+## First-PR delivery boundary
+
+The first PR delivers P0, pure P1, explicit planning provenance, truthful
+preparation reporting and a bounded **observed-goal acceptance** increment.
+Task 2's full instance/witness/certificate exit condition remains open.
+
+Implementation inspection found that E2's longest-axis recipe is not generally
+equivalent to TaskSpec's local-+Z upright predicate. Therefore the opt-in runtime
+acceptance path is restricted to matching +Z assets and a single explicit upright
+template. It uses the existing graph/v1 plus a versioned TaskSpec sidecar and
+fingerprint/v3. Provenance graph/v2 remains gated, rather than pretending that
+the prepared scene is already an observed SceneInstance. Full asset content
+closure, measured instance identity, automatic seed migration, template-derived
+scene generation and successful witness/certificate assembly are deferred to the
+next dependent increment. Reports explicitly say certificate unavailable.
+
+CPU acceptance tests establish initial/final observation, per-row final goals,
+metadata/save/reset order and failure evidence. They do not establish a physical
+success witness. Public phase protection uses measured evidence; missing or
+pending required evidence cannot become successful protected execution.

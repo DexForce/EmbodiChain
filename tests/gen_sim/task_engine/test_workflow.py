@@ -190,11 +190,18 @@ def test_unbound_action_can_run_while_user_scene_edit_is_running(
         start_stage(state, WorkflowStage.SCENE_FINALIZATION)
 
 
-def test_only_scene_edit_can_be_skipped(tmp_path: Path) -> None:
+def test_only_optional_edit_or_unproven_static_check_can_be_skipped(
+    tmp_path: Path,
+) -> None:
     state = initial_state(_request(tmp_path, image=True, edit=True))
 
-    with pytest.raises(ValueError, match="Only the optional scene_edit stage"):
+    with pytest.raises(
+        ValueError, match="Only scene_edit or unproven static_feasibility"
+    ):
         skip_stage(state, WorkflowStage.FINAL_BINDING)
+    state = skip_stage(state, WorkflowStage.STATIC_FEASIBILITY)
+    assert state.stages[WorkflowStage.STATIC_FEASIBILITY] == StageStatus.SKIPPED
+    assert replay_events(state.request, state.events).stages == state.stages
 
 
 def test_state_events_replay_to_the_same_snapshot(tmp_path: Path) -> None:

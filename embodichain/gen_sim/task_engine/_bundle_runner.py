@@ -87,6 +87,13 @@ def execute_bundle(
         )
     output.mkdir(parents=True, exist_ok=True)
     fingerprint = _read_json(fingerprint_path)
+    from ._task_spec import read_binding
+
+    task_binding = read_binding(root, graph, fingerprint)
+    if task_binding is not None:
+        from ._task_spec import require_fresh_evidence_output
+
+        require_fresh_evidence_output(output)
     deployment = _verify_integration_fingerprint(
         root, deployment_path, graph, fingerprint
     )
@@ -106,6 +113,7 @@ def execute_bundle(
     terminal_reasons = ["runtime_not_started"] * int(args.num_envs)
     failure: dict[str, Any] | None = None
     env: Any = None
+    initial: dict[str, Any] | None = None
     try:
         import gymnasium
 
@@ -144,7 +152,28 @@ def execute_bundle(
         deployment.integration.registration.catalog.preflight(env_cfg.task_program)
         env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
         env.reset(seed=args.seed, options={"save_data": False})
-        result = execute_demo_episode(env, episode_index=0, attempt_id=0)
+        acceptance = None
+        if task_binding is not None:
+            from ._task_spec import final_acceptance, observe, write_evidence
+
+            initial = observe(env, task_binding, scope="initial", output=output)
+            write_evidence(output / "initial_evaluation.json", initial)
+            if any(status != "pass" for status in initial["status"]) or any(
+                initial["goal_satisfied"]
+            ):
+                raise ValueError(
+                    "TaskSpec initial state is unavailable, invalid, or already satisfies the goal."
+                )
+
+            def acceptance(program_result: Any) -> tuple[bool, ...]:
+                return final_acceptance(
+                    env, task_binding, initial, program_result, output
+                )
+
+        episode_kwargs = {} if acceptance is None else {"final_acceptance": acceptance}
+        result = execute_demo_episode(
+            env, episode_index=0, attempt_id=0, **episode_kwargs
+        )
         result_metadata = result.to_metadata()
         row_success = [bool(value) for value in result.success]
         terminal_reasons = list(result.terminal_reasons) or [
@@ -162,6 +191,20 @@ def execute_bundle(
     except Exception as exc:
         failure = _exception_metadata(exc)
         if env is not None:
+            if task_binding is not None:
+                from ._task_spec import record_failure
+
+                try:
+                    record_failure(
+                        env,
+                        task_binding,
+                        initial,
+                        output,
+                        failure,
+                        num_envs=int(args.num_envs),
+                    )
+                except Exception as evidence_error:
+                    failure["task_evidence_error"] = _exception_metadata(evidence_error)
             try:
                 _preserve_failed_execution_recording(
                     env,
@@ -347,7 +390,11 @@ def _verify_integration_fingerprint(
     from ._task_program.assembly import ADAPTER_CONTRACT, load_deployment
 
     if (
-        fingerprint.get("schema_version") != "semantic_integration_fingerprint/v2"
+        fingerprint.get("schema_version")
+        not in {
+            "semantic_integration_fingerprint/v2",
+            "semantic_integration_fingerprint/v3",
+        }
         or fingerprint.get("adapter_contract") != ADAPTER_CONTRACT
     ):
         raise ValueError(

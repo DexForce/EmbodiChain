@@ -253,7 +253,11 @@ topics:
   - embodichain/task_spec/expressions.py
   - embodichain/task_spec/canonicalization.py
   - embodichain/task_spec/registry.py
-  watch_paths: [embodichain/task_spec/, tests/task_spec/]
+  - embodichain/lab/task_evaluation.py
+  - embodichain/compute/task_predicates.py
+  - embodichain/gen_sim/task_engine/_task_spec.py
+  watch_paths: [embodichain/task_spec/, tests/task_spec/, embodichain/lab/task_evaluation.py,
+    embodichain/compute/task_predicates.py, tests/lab/test_task_evaluation.py]
   related_topics: [gen-sim, task-programs]
   status: active
 - id: gen-sim

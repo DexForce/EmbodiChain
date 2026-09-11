@@ -90,6 +90,11 @@ def _add_workflow_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--config", default=None)
     parser.add_argument("--model", default=None)
+    parser.add_argument(
+        "--task-template",
+        default=None,
+        help="Explicit bounded E2 TaskSpec JSON; enables measured initial/final checks.",
+    )
     parser.add_argument("--base-seed", type=int, default=0)
     parser.add_argument(
         "--dataset_saving",
@@ -99,7 +104,7 @@ def _add_workflow_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--robot-profile",
         choices=_ROBOT_PROFILES,
-        default="franka",
+        default="dual_franka",
     )
     _add_failure_policy_argument(parser)
 
@@ -159,6 +164,16 @@ def _run_workflow(
     if scene is not None:
         validate_scene_history_root(scene, args.output_root)
     instruction = _instruction(args)
+    if args.robot_profile != "dual_franka":
+        parser.error(
+            "Executable Task Engine bundles currently support only dual_franka."
+        )
+    task_template = None
+    if args.task_template is not None:
+        from embodichain.lab.task_evaluation import UprightTaskEvaluator
+
+        task_template = json.loads(Path(args.task_template).read_text())
+        UprightTaskEvaluator(task_template)
     adapter = SceneAdapter(model=args.model, robot_profile=args.robot_profile)
     workflow = TaskEngineWorkflow(scene_adapter=adapter)
     workflow_cfg, planning_cfg, execution_cfg = load_task_engine_config(args.config)
@@ -187,6 +202,7 @@ def _run_workflow(
             run_id=allocation.run_id,
             created_at=allocation.created_at,
             execute=execute,
+            **({"task_template": task_template} if task_template is not None else {}),
         )
     _print_json(
         {

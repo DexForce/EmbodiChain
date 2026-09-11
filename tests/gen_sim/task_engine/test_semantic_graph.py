@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import math
 from pathlib import Path
 
 import numpy as np
@@ -1058,8 +1059,10 @@ def test_coordinated_bundle_composes_against_unmodified_public_options(
     )
 
 
+@pytest.mark.parametrize("with_task_spec", [False, True])
 def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
     tmp_path: Path,
+    with_task_spec: bool,
 ) -> None:
     """The merged E2 route passes real configured composition and preflight."""
     scene = _prepared_axis_scene(tmp_path)
@@ -1134,12 +1137,45 @@ def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
         }
     ]
 
+    template = {
+        "schema_version": "taskspec/template/v0.1",
+        "semantic_version": "0.1",
+        "roles": {"item": {"kind": "object"}},
+        "init": [],
+        "invariants": [],
+        "requirements": [],
+        "goal": [
+            {
+                "predicate": "upright",
+                "object": "item",
+                "max_tilt": {"value": "0.1", "unit": "rad"},
+            }
+        ],
+    }
+    from embodichain.task_spec import semantic_hash
+
+    template["semantic_hash"] = semantic_hash(template)
     generated, paths = generate_task_program_bundle(
         graph,
         scene,
         tmp_path / "bundle",
         robot_profile="dual_franka",
+        **({"task_template": template} if with_task_spec else {}),
     )
+
+    if with_task_spec:
+        from embodichain.gen_sim.task_engine._task_spec import read_binding
+
+        fingerprint = load_config(paths.integration_fingerprint)
+        binding = read_binding(paths.root, generated, fingerprint)
+        assert binding["template_hash"] == template["semantic_hash"]
+        assert binding["entity_id"] == "bottle"
+        constraints = load_config(paths.root / "task_program/constraints.json")
+        assert all(
+            value["minimum_alignment"] == pytest.approx(math.cos(0.1))
+            for value in constraints["presets"].values()
+            if value.get("local_axis")
+        )
 
     _verify_program_projection(paths.program, generated)
     integration = load_config(paths.integration)
