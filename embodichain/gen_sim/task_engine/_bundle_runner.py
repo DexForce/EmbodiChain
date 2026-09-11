@@ -71,7 +71,6 @@ def execute_bundle(
         if execution_output is None
         else Path(execution_output).expanduser().resolve()
     )
-    output.mkdir(parents=True, exist_ok=True)
     deployment_path = root / "task_program_deployment.yaml"
     program_path = root / "task_program/program.yaml"
     graph_path = root / "semantic_task_graph.json"
@@ -81,6 +80,12 @@ def execute_bundle(
             raise FileNotFoundError(f"Bundle is missing required artifact: {path}")
     _verify_source(root)
     graph = validate_semantic_task_graph(_read_json(graph_path))
+    if "task_spec" in graph:
+        raise ValueError(
+            "TaskSpec execution requires final task evaluation before data "
+            "submission; that runtime integration is not yet available."
+        )
+    output.mkdir(parents=True, exist_ok=True)
     fingerprint = _read_json(fingerprint_path)
     deployment = _verify_integration_fingerprint(
         root, deployment_path, graph, fingerprint

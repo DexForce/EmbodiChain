@@ -145,6 +145,11 @@ def generate_task_program_bundle(
             integration cannot be composed and preflighted.
     """
     selected_graph = validate_semantic_task_graph(graph)
+    if "task_spec" in selected_graph:
+        raise ValueError(
+            "TaskSpec bundle export requires final task evaluation before data "
+            "submission; that runtime integration is not yet available."
+        )
     unsupported = sorted(
         {node["task_type"] for node in selected_graph["nodes"]}
         - {"E1", "E2", "E3", "E4", "E5"}

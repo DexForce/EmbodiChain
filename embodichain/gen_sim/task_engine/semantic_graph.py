@@ -30,12 +30,14 @@ from .contracts import canonical_hash
 
 __all__ = [
     "SEMANTIC_TASK_GRAPH_SCHEMA",
+    "TASK_SPEC_GRAPH_SCHEMA",
     "SemanticTaskGraph",
     "semantic_task_graph_hash",
     "validate_semantic_task_graph",
 ]
 
 SEMANTIC_TASK_GRAPH_SCHEMA: Final = "semantic_task_graph/v1"
+TASK_SPEC_GRAPH_SCHEMA: Final = "semantic_task_graph/v2"
 SemanticTaskGraph: TypeAlias = dict[str, Any]
 
 _GRAPH_KEYS = frozenset(
@@ -108,12 +110,35 @@ def validate_semantic_task_graph(value: Mapping[str, Any]) -> SemanticTaskGraph:
         ValueError: If topology, schema, or a Semantic Call is invalid.
     """
     graph = _json_snapshot(value)
-    _exact_keys(graph, _GRAPH_KEYS, "SemanticTaskGraph")
-    if graph["schema_version"] != SEMANTIC_TASK_GRAPH_SCHEMA:
+    is_task_spec = graph.get("schema_version") == TASK_SPEC_GRAPH_SCHEMA
+    _exact_keys(
+        graph,
+        _GRAPH_KEYS | ({"task_spec"} if is_task_spec else set()),
+        "SemanticTaskGraph",
+    )
+    if graph["schema_version"] not in {
+        SEMANTIC_TASK_GRAPH_SCHEMA,
+        TASK_SPEC_GRAPH_SCHEMA,
+    }:
         raise ValueError(
             "SemanticTaskGraph.schema_version must be "
             f"{SEMANTIC_TASK_GRAPH_SCHEMA!r}."
         )
+    if is_task_spec:
+        provenance = graph["task_spec"]
+        if type(provenance) is not dict:
+            raise ValueError("SemanticTaskGraph.task_spec must be an object.")
+        _exact_keys(
+            provenance,
+            {"template_hash", "instance_hash", "legacy_plan_hash", "status"},
+            "task_spec",
+        )
+        for key in ("template_hash", "instance_hash", "legacy_plan_hash"):
+            digest = _nonempty(provenance[key], f"task_spec.{key}")
+            if _FINGERPRINT.fullmatch(digest) is None:
+                raise ValueError(f"task_spec.{key} must be a lowercase SHA-256 digest.")
+        if provenance["status"] != "candidate":
+            raise ValueError("TaskSpec graph is a candidate, not an executed witness.")
     for field in ("task_id", "instruction", "planner_route"):
         graph[field] = _nonempty(graph[field], f"SemanticTaskGraph.{field}")
     fingerprint = _nonempty(

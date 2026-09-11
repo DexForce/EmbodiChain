@@ -28,6 +28,15 @@ Edit: import export → validate graph/typed edit plan → generate additions
 Read [pipeline details](pipeline-details.md) for stage contracts, parser resume
 behavior, Gradio artifact ownership and focused failure diagnosis.
 
+Task Engine lives in `task_engine/`: TaskAgent produces legacy candidates,
+SemanticTaskPlanner expands E1–E5 recipes into candidate graphs, and
+`task_program_bundle.py` composes the Task Program deployment. Explicit
+TaskSpec template/instance inputs to the planner produce graph/v2 provenance;
+the existing no-TaskSpec path remains graph/v1. v2 bundle export/execution is gated until
+final task evaluation is integrated before data submission and reset. Follow
+[TaskSpec](../task-spec/task-spec.md) for semantic identity, evidence and the
+current planning-only boundary.
+
 ## Durable scene boundary
 
 The `scene_export/` directory contains `scene.json`, `scene_config.json`,
