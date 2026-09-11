@@ -808,7 +808,10 @@ def _integration_payload(
                         "pose": {
                             "kind": "scene_entity",
                             "entity_id": reference,
-                            "relative_pose": _translation_pose(0.05, -0.10, 0.125),
+                            # Keep the pour target close to the receiving
+                            # vessel so grasp screening uses a reachable
+                            # above-rim pose.
+                            "relative_pose": _translation_pose(0.0, -0.05, 0.10),
                         },
                     }
                 )

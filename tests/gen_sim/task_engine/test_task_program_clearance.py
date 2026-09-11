@@ -25,6 +25,7 @@ import pytest
 import torch
 
 from embodichain.gen_sim.task_engine._task_program.release_clearance import (
+    _DEFAULT_RETREAT_DISTANCE,
     _ClearReleasedFactory,
     _ClearReleasedLowerer,
     _clearance_poses,
@@ -138,3 +139,8 @@ def test_clearance_factory_requires_the_same_robot() -> None:
             scene_registry=Mock(),
             engine=SimpleNamespace(robot=object()),
         )
+
+
+def test_clearance_default_retreat_preserves_release_separation_margin() -> None:
+    factory = _ClearReleasedFactory((("can", "safe", 1.2),))
+    assert factory.retreat_distance == pytest.approx(_DEFAULT_RETREAT_DISTANCE)
