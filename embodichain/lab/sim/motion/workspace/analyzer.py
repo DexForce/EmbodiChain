@@ -2098,16 +2098,25 @@ class WorkspaceAnalyzer:
             return
         scores, conditions = self._compute_manipulability_values()
         if scores is None:
-            # Enabled but not computable here (e.g. no solver): keep any
-            # cached scores — they were derived from the same joint
-            # configurations and remain valid.
+            # Enabled but not computable here (e.g. no solver): cached scores
+            # remain valid — they are pure kinematics of the same joint
+            # configurations. Per-point condition numbers are not cached, so
+            # condition statistics are unavailable on this path.
             cached = results.get("manipulability_scores")
-            self.manipulability_scores = (
-                torch.as_tensor(cached) if cached is not None else None
-            )
-            return
+            if cached is None:
+                self.manipulability_scores = None
+                metrics = results.get("metrics")
+                if isinstance(metrics, dict):
+                    metrics.pop("manipulability", None)
+                return
+            scores = torch.as_tensor(cached).to(self.device)
+            conditions = None
         self.manipulability_scores = scores
         results["manipulability_scores"] = scores
+        # Aggregates are always recomputed under the CURRENT metric
+        # configuration: cached aggregates may reflect a different
+        # jacobian_threshold or isotropy setting, since metric settings are
+        # not part of the cache key.
         metric = ManipulabilityMetric(self.config.metric.manipulability)
         metrics = results.setdefault("metrics", {})
         metrics["manipulability"] = metric.compute(

@@ -210,6 +210,66 @@ class TestAnalyzerManipulability:
         assert "manipulability_scores" not in second
         assert "manipulability" not in second.get("metrics", {})
 
+    def test_no_solver_hit_recomputes_aggregates_under_current_config(self):
+        """Cached scores stay valid without a solver, but aggregates must be
+        recomputed under the CURRENT metric configuration, and condition
+        statistics must not leak through when they cannot be derived."""
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        from embodichain.lab.sim.motion.workspace.configs.metric_config import (
+            ManipulabilityConfig,
+        )
+
+        robot = Mock()
+        robot.device = torch.device("cpu")
+        robot.num_envs = 1
+        robot.control_parts = {"arm": ["j0", "j1", "j2"]}
+        robot.get_joint_ids.return_value = [0, 1, 2]
+        robot.body_data = SimpleNamespace(qpos_limits=torch.tensor([[[-1.0, 1.0]] * 3]))
+        robot.get_qpos.return_value = torch.zeros(1, 3)
+        robot.cfg = SimpleNamespace(uid="t", fpath=None, solver_cfg={})
+        robot._solvers = {}
+        robot.get_solver.return_value = None
+
+        cfg = WorkspaceAnalyzerConfig(
+            mode=AnalysisMode.JOINT_SPACE,
+            sampling=SamplingConfig(num_samples=10),
+            control_part_name="arm",
+            metric=MetricConfig(
+                manipulability=ManipulabilityConfig(
+                    jacobian_threshold=0.3, compute_isotropy=True
+                )
+            ),
+        )
+        analyzer = WorkspaceAnalyzer(robot, cfg)
+        analyzer.joint_configurations = torch.zeros(4, 3)
+        analyzer.workspace_points = torch.zeros(4, 3)
+
+        cached_scores = torch.tensor([0.1, 0.2, 0.4, 0.6])
+        results = {
+            "manipulability_scores": cached_scores.clone(),
+            "metrics": {
+                "manipulability": {
+                    # Producer aggregates under a DIFFERENT configuration.
+                    "mean_manipulability": 999.0,
+                    "num_valid_points": 4,
+                    "mean_condition": 123.0,
+                }
+            },
+        }
+        analyzer._apply_manipulability(results)
+
+        manip = results["metrics"]["manipulability"]
+        # Current jacobian_threshold=0.3 filters 0.1 and 0.2.
+        assert manip["num_valid_points"] == 2
+        assert abs(manip["mean_manipulability"] - 0.5) < 1e-6
+        # Isotropy is enabled but conditions cannot be derived without a
+        # solver: the stale producer value must not leak through.
+        assert "mean_condition" not in manip
+        # The kinematic scores themselves are kept unchanged.
+        assert torch.allclose(results["manipulability_scores"], cached_scores)
+
     def test_scores_survive_cache_serialization(self):
         results, _ = self._analyze()
         arrays, meta = serialize_results(results)
