@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Literal, TypeVar
 from unittest.mock import Mock
 
@@ -104,6 +105,10 @@ from embodichain.lab.sim.atomic_actions import (
     TwistOptions,
 )
 from embodichain.lab.sim.atomic_actions.goals import collect_scene_dependencies
+from embodichain.lab.sim.motion.planners import (
+    TrapezoidalPlanOptions,
+    TrapezoidalPlanner,
+)
 from embodichain.toolkits.graspkit import (
     ParallelJawGraspPoseGenerator,
     ParallelJawGripperModelCfg,
@@ -4976,6 +4981,35 @@ def test_position_only_motion_policy_emits_explicit_zero_velocity() -> None:
     for frame in plan.commands.frames:
         for endpoint in frame.commands:
             assert torch.count_nonzero(endpoint.payload.velocities) == 0
+
+
+def test_move_joints_supports_sparse_trapezoidal_planning() -> None:
+    generator = _motion_generator()
+    planner = object.__new__(TrapezoidalPlanner)
+    planner.cfg = SimpleNamespace(planner_type="trapezoidal")
+    planner.device = torch.device("cpu")
+    generator.planner = planner
+    action = _bind_action(generator, MoveJoints())
+    target = torch.full((NUM_ENVS, ARM_DOF), 0.1)
+    invocation = replace(
+        _invocation(action, JointPositionGoal(target), sample_count=5),
+        motion_policy=MotionPolicy(
+            strategy="motion_gen",
+            sample_count=5,
+            plan_opts=TrapezoidalPlanOptions(
+                sample_interval=2,
+                backend="torch",
+            ),
+        ),
+    )
+
+    plan = _plan_action(action, invocation, _context())
+
+    trajectory = _joint_trajectory(plan)
+    torch.testing.assert_close(trajectory.positions[:, -1, :ARM_DOF], target)
+    assert trajectory.velocities is not None
+    assert torch.count_nonzero(trajectory.velocities[:, 1:-1, :ARM_DOF]) > 0
+    assert torch.count_nonzero(trajectory.velocities[:, -1]) == 0
 
 
 def test_move_held_object_retimes_arm_derivatives() -> None:

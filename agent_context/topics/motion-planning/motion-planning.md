@@ -128,6 +128,12 @@ preserves each row's duration, and recomputes velocities; acceleration samples
 are invalidated. Unchanged planner samples retain native derivatives. cuRobo
 maps native velocities/accelerations into simulator joint order and zero-pads
 short/failed rows, deriving only missing velocity segments.
+Planners that own sparse joint-waypoint timing declare
+`uses_sparse_joint_waypoints=True`; `MotionGenerator` then prepends
+`start_qpos` without generic pre-interpolation. Backends that also declare
+`preserve_plan_samples=True` retain their native sample grid, velocity, and
+acceleration outputs through normalization. `TrapezoidalPlanner` declares both
+capabilities so direct calls and Atomic Skills share its native time profile.
 `MotionGenerator.generate()` preserves the backend `constraint_report` for
 unchanged trajectories, including backends that preserve samples. Resampling
 or replacing failed rows with a start-pose hold invalidates the entire report

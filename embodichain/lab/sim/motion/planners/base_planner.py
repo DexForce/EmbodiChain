@@ -227,6 +227,14 @@ class BasePlanner(ABC):
     supports_heterogeneous_waypoints: bool = False
     """Whether one plan may contain an ordered mixture of movement types."""
 
+    uses_sparse_joint_waypoints: bool = False
+    """Whether joint targets are sparse waypoints owned by the planner.
+
+    When ``True``, :class:`MotionGenerator` bypasses its generic joint-space
+    interpolation and prepends ``start_qpos`` as the first waypoint. This lets
+    the planner own both path timing and derivative generation.
+    """
+
     preserve_plan_samples: bool = False
     """Whether callers must retain this planner's returned sample points exactly.
 

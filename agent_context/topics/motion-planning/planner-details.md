@@ -81,6 +81,10 @@ Unified interface for trajectory planning with optional pre-interpolation.
 - `generate()` always returns a normalized `PlanResult`; failed rows hold the
   supplied `start_qpos` unless the backend opts into `preserve_failed_plan_positions`.
   Every returned trajectory has explicit `dt` and a `duration` derived from it.
+- A joint planner can declare `uses_sparse_joint_waypoints=True` to receive
+  `start_qpos` plus the requested joint waypoints without generic interpolation.
+  Pair it with `preserve_plan_samples=True` when its native samples and
+  derivatives must survive result normalization.
 
 Grasp-pose generation is a sibling planning service, not a
 `MotionGenerator` feature. `embodichain.toolkits.graspkit` owns its standalone
