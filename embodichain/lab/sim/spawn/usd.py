@@ -33,6 +33,7 @@ from dexsim.types import ActorType
 
 from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg
 from embodichain.lab.sim.spawn.descriptors import (
+    _apply_newton_gap_default,
     _compile_default_collision,
     _compile_newton_collision,
     _compile_rigid_physics,
@@ -129,6 +130,7 @@ def rigid_desc_from_usd(
             ActorType.STATIC: "static",
         }[desc.physics.actor_type]
         cfg.body_scale = tuple(float(value) for value in desc.body_scale)
+        _apply_newton_gap_default(desc.collisions, newton_solver_type)
         return desc, materials
 
     physics = _resolve_rigid_physics(
@@ -155,6 +157,7 @@ def rigid_desc_from_usd(
             ),
         )
 
+    _apply_newton_gap_default(desc.collisions, newton_solver_type)
     material_ref, material_entry = _compile_visual_material(
         uid,
         cfg.shape.visual_material,

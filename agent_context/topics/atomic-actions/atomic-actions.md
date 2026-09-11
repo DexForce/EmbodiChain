@@ -76,6 +76,10 @@ Newton contact stiffness and damping on the cube and gripper collision links
 before `SimulationManager.prepare()`. MuJoCo-Warp's default response is too
 compliant for this force-closure replay and otherwise lets the cube slip near
 its pickup pose instead of reaching the place target.
+Shared tutorial helpers also author `condim=4` on gripper/contact links and
+grasped objects before preparation. Other surfaces keep their source contact
+dimension. Replay does not rewrite MuJoCo model arrays after CUDA Graph
+capture; contact storage is allocated for the authored dimensions.
 
 ## Semantic integration boundary
 

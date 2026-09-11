@@ -17,6 +17,9 @@
 from __future__ import annotations
 
 import argparse
+import random
+from copy import deepcopy
+
 from embodichain.cli.sim import (
     add_sim_args_to_parser,
     add_seed_arg_to_parser,
@@ -66,13 +69,44 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.data import get_data_path
 from embodichain.utils import configclass
+from embodichain.utils.file import get_all_files_in_directory
+from embodichain.lab.gym.envs.managers.event_manager import _derive_functor_seed
+
+
+class _ReplacePreselectedFork(events.replace_assets_from_group):
+    """Consume the first reset draw without replacing an already selected fork."""
+
+    def __call__(
+        self,
+        env: EmbodiedEnv,
+        env_ids: torch.Tensor | None,
+        entity_cfg: SceneEntityCfg,
+        folder_path: str,
+    ) -> None:
+        initial_path = env._initial_fork_path
+        env._initial_fork_path = None
+        if initial_path is not None:
+            # Preview the actual event stream: reset(seed=...) may have changed
+            # it since construction. Leave fallback sampling to the base term.
+            preview = random.Random()
+            preview.setstate(random.getstate())
+            if (
+                preview.choice(self._asset_group_path) == initial_path
+                and self.asset_cfg.shape.fpath == initial_path
+            ):
+                random.choice(self._asset_group_path)
+                # As with a real replacement, keep the template separate from
+                # the live object modified by later mass randomization terms.
+                self.asset_cfg = deepcopy(self.asset_cfg)
+                return
+        super().__call__(env, env_ids, entity_cfg, folder_path)
 
 
 @configclass
 class ExampleEventCfg:
 
     replace_obj: EventCfg = EventCfg(
-        func=events.replace_assets_from_group,
+        func=_ReplacePreselectedFork,
         mode="reset",
         params={
             "entity_cfg": SceneEntityCfg(
@@ -195,6 +229,38 @@ class ExampleCfg(EmbodiedEnvCfg):
     observations = ObsCfg()
 
 
+def _preselect_initial_fork(
+    cfg: EmbodiedEnvCfg,
+) -> tuple[EmbodiedEnvCfg, str | None]:
+    """Prepare this tutorial's first reset asset before scene materialization.
+
+    Use the same named event stream and sorted asset list as EventManager.
+    Keep unseeded runs and customized replacement terms on their normal path.
+    """
+    term = getattr(cfg.events, "replace_obj", None)
+    if (
+        cfg.seed is None
+        or cfg.seed < 0
+        or term is None
+        or term.func is not _ReplacePreselectedFork
+        or term.mode != "reset"
+    ):
+        return cfg, None
+    folder_path = term.params["folder_path"]
+    if not folder_path.endswith("/"):
+        return cfg, None
+    paths = sorted(get_all_files_in_directory(get_data_path(folder_path)))
+    if not paths:
+        raise ValueError(f"No fork assets found in {folder_path!r}.")
+    stream_seed = _derive_functor_seed(cfg.seed, "call", "reset", "replace_obj", 0)
+    path = random.Random(stream_seed).choice(paths)
+    prepared = deepcopy(cfg)
+    uid = term.params["entity_cfg"].uid
+    asset_cfg = next(asset for asset in prepared.rigid_object if asset.uid == uid)
+    asset_cfg.shape.fpath = path
+    return prepared, path
+
+
 @register_env("ModularEnv-v1", max_episode_steps=100, override=True)
 class ModularEnv(EmbodiedEnv):
     """
@@ -203,6 +269,7 @@ class ModularEnv(EmbodiedEnv):
     """
 
     def __init__(self, cfg: EmbodiedEnvCfg, **kwargs):
+        cfg, self._initial_fork_path = _preselect_initial_fork(cfg)
         super().__init__(cfg, **kwargs)
 
 

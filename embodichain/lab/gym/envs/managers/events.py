@@ -148,11 +148,11 @@ class replace_assets_from_group(Functor):
         folder_path: str,
     ) -> None:
 
-        env.sim.remove_asset(entity_cfg.uid)
         asset_path = random.choice(self._asset_group_path)
-        self.asset_cfg.shape.fpath = asset_path
+        replacement_cfg = deepcopy(self.asset_cfg)
+        replacement_cfg.shape.fpath = asset_path
         if self.asset_type == RigidObject:
-            new_asset = env.sim.add_rigid_object(cfg=self.asset_cfg)
+            env.sim.replace_rigid_object(cfg=replacement_cfg)
         else:
             logger.log_error("Only RigidObject assets are supported for replacement.")
 

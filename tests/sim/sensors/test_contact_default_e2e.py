@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Default-PhysX contact-point multiplicity regression contract."""
+"""Default backend contact-point multiplicity regression contract."""
 
 from __future__ import annotations
 
@@ -37,16 +37,16 @@ pytestmark = pytest.mark.requires_sim
     ("device", "expected_contacts_per_env"),
     [
         pytest.param("cpu", 4, id="cpu"),
-        pytest.param("cuda:0", 4, marks=pytest.mark.gpu, id="direct-gpu"),
+        pytest.param("cuda:0", 4, marks=pytest.mark.gpu, id="cuda"),
     ],
 )
-def test_default_contact_sensor_preserves_physx_contact_multiplicity(
+def test_default_contact_sensor_preserves_contact_multiplicity(
     device: str,
     expected_contacts_per_env: int,
 ) -> None:
     wp.init()
     if device.startswith("cuda") and not wp.is_cuda_available():
-        pytest.skip("CUDA is required for the Direct-GPU contact E2E contract.")
+        pytest.skip("CUDA is required for the GPU contact E2E contract.")
 
     sim = SimulationManager(
         SimulationManagerCfg(

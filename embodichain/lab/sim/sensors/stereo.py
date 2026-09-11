@@ -140,6 +140,13 @@ class StereoCamera(Camera):
     Sensors should inherit from this class and implement the `update` and `get_data` methods.
     """
 
+    def _detach_from_parent_nodes(self) -> None:
+        """Detach both native views before their shared parent is rebuilt."""
+        for entity in self._entities:
+            entity._left_view.get_node().detach_parent()
+            entity._right_view.get_node().detach_parent()
+        self._is_attached = False
+
     SUPPORTED_DATA_TYPES = [
         "color",
         "depth",

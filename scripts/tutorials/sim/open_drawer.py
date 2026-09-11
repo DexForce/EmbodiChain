@@ -77,6 +77,7 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     LinkPhysicsOverrideCfg,
     NewtonPhysicsCfg,
+    NewtonCollisionPropertiesCfg,
     NewtonRigidBodyMaterialCfg,
     PhysicsBackendCfg,
     RenderCfg,
@@ -140,10 +141,11 @@ def _newton_grasp_contact_override(
     return LinkPhysicsOverrideCfg(
         link_names_expr=[link_names_expr],
         attrs=RigidBodyPhysicsCfg(
+            collision_props=NewtonCollisionPropertiesCfg(condim=4),
             material_props=NewtonRigidBodyMaterialCfg(
                 ke=NEWTON_GRASP_CONTACT_STIFFNESS,
                 kd=NEWTON_GRASP_CONTACT_DAMPING,
-            )
+            ),
         ),
     )
 

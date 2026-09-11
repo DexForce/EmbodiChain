@@ -278,6 +278,12 @@ class Camera(BaseSensor):
                 self._frame_buffer.get_position_gpu_buffer().to(self.device)[..., :3]
             )
 
+    def _detach_from_parent_nodes(self) -> None:
+        """Retain camera views while their Spawn-owned parents are rebuilt."""
+        for entity in self._entities:
+            entity.get_node().detach_parent()
+        self._is_attached = False
+
     def attach_to_parent_nodes(self, parent_nodes: Sequence[object]) -> None:
         """Attach camera views to one resolved parent node per environment.
 

@@ -221,6 +221,15 @@ class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
     <https://newton-physics.github.io/newton/latest/concepts/collisions.html#shape-configuration>`_.
     """
 
+    condim: int | None = None
+    """MuJoCo contact dimension: 1, 3, 4, or 6.
+
+    ``None`` preserves the source/backend value (normally 3). Use 4 on
+    gripping surfaces to include torsional friction, or 6 when rolling
+    friction is also required. Author before scene preparation so MuJoCo
+    can allocate the corresponding constraint storage.
+    """
+
     has_particle_collision: bool | None = None
     """Whether Newton particles collide with this shape.
 

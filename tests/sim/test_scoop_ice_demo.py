@@ -152,3 +152,48 @@ def test_default_scoops_and_retains_ice(seed: int) -> None:
     finally:
         sim.destroy(exit_process=False)
         demo.SimulationManager.flush_cleanup_queue()
+
+
+def test_ice_spawn_configs_are_separated_before_prepare(tmp_path, monkeypatch) -> None:
+    """Newton evaluates initial contacts before runtime randomization can run."""
+    (tmp_path / "ice.obj").touch()
+    monkeypatch.setattr(demo, "get_data_path", lambda name: str(tmp_path))
+    declared = []
+
+    def add_group(*, cfg):
+        declared.extend(cfg.rigid_objects.values())
+        return SimpleNamespace(set_visual_material=lambda **kwargs: None)
+
+    def prepare():
+        positions = np.array(
+            [
+                (
+                    cfg.init_local_pose[:3, 3]
+                    if cfg.init_local_pose is not None
+                    else cfg.init_pos
+                )
+                for cfg in declared
+            ]
+        )
+        separations = np.abs(positions[:, None] - positions[None, :]).max(axis=-1)
+        np.fill_diagonal(separations, np.inf)
+        assert separations.min() >= 0.030
+
+    sim = SimpleNamespace(
+        add_rigid_object_group=add_group,
+        create_visual_material=lambda **kwargs: object(),
+        prepare=prepare,
+    )
+    demo.create_ice_cubes(sim)
+
+
+def test_newton_uses_cg_for_the_large_free_body_pile(monkeypatch) -> None:
+    configs = []
+
+    def manager(cfg):
+        configs.append(cfg)
+        return SimpleNamespace(add_light=lambda **kwargs: None)
+
+    monkeypatch.setattr(demo, "SimulationManager", manager)
+    demo.initialize_simulation(demo.build_parser().parse_args(["--physics", "newton"]))
+    assert configs[0].physics_cfg.solver_cfg["solver"] == "cg"

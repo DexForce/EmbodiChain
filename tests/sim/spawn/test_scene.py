@@ -492,3 +492,22 @@ def test_articulation_binding_does_not_clear_partial_newton_world(
         facade.reset.assert_called_once_with(clear_dynamics=False)
     else:
         facade.reset.assert_called_once_with()
+
+
+def test_replacement_declaration_does_not_attach_uncommitted_old_handle() -> None:
+    old_handle, new_handle = object(), object()
+    scene = _make_scene({"box": old_handle})
+    scene.builder.backend = "newton"
+    scene.builder.has_pending_changes = True
+    scene.builder.add_object = lambda desc: desc
+    facade = _RetryableFacade()
+
+    scene.declare(
+        "rigid_object", "box", SimpleNamespace(name="box", per_env=False), facade=facade
+    )
+
+    assert not facade._entities
+    scene.builder.result.handles["box"] = new_handle
+    scene.builder.has_pending_changes = False
+    scene.bind()
+    assert facade._entities == [new_handle]

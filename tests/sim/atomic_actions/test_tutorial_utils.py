@@ -275,8 +275,6 @@ def test_atomic_action_tutorial_uses_native_mujoco_contact_settings() -> None:
         "integrator": "implicitfast",
         "iterations": 20,
         "ls_iterations": 100,
-        "nconmax": 1_000,
-        "njmax": 2_000,
         "cone": "elliptic",
         "impratio": 1_000.0,
         "use_mujoco_contacts": True,
@@ -289,86 +287,13 @@ def test_atomic_action_tutorial_uses_native_mujoco_contact_settings() -> None:
     assert dexsim_cfg.solver_cfg.integrator == "implicitfast"
     assert dexsim_cfg.solver_cfg.iterations == 20
     assert dexsim_cfg.solver_cfg.ls_iterations == 100
-    assert dexsim_cfg.solver_cfg.nconmax == 1_000
-    assert dexsim_cfg.solver_cfg.njmax == 2_000
+    assert dexsim_cfg.solver_cfg.nconmax is None
+    assert dexsim_cfg.solver_cfg.njmax is None
     assert dexsim_cfg.solver_cfg.cone == "elliptic"
     assert dexsim_cfg.solver_cfg.impratio == pytest.approx(1_000.0)
     assert dexsim_cfg.solver_cfg.use_mujoco_contacts is True
     assert dexsim_cfg.solver_cfg.enable_multiccd is True
     assert dexsim_cfg.collision_pipeline_cfg is None
-
-
-class _WarpArray:
-    """Small in-memory stand-in for a writable Warp array."""
-
-    def __init__(self, values: list[int]) -> None:
-        self.values = np.asarray(values, dtype=np.int32)
-
-    def numpy(self) -> np.ndarray:
-        return self.values
-
-    def assign(self, values: np.ndarray) -> None:
-        self.values = np.asarray(values, dtype=np.int32).copy()
-
-
-def test_atomic_action_tutorial_enables_native_mujoco_torsional_friction() -> None:
-    module = importlib.import_module("scripts.tutorials.atomic_action.tutorial_utils")
-    mjc_geom_condim = np.asarray([3, 3, 3], dtype=np.int32)
-    mjw_geom_condim = _WarpArray([3, 3, 3])
-    backend = SimpleNamespace(
-        solver_type="mujoco_warp",
-        cfg=SimpleNamespace(
-            requires_grad=False,
-            solver_cfg=SimpleNamespace(use_mujoco_contacts=True),
-        ),
-        model=SimpleNamespace(requires_grad=False),
-        solver=SimpleNamespace(
-            mj_model=SimpleNamespace(geom_condim=mjc_geom_condim),
-            mjw_model=SimpleNamespace(geom_condim=mjw_geom_condim),
-        ),
-    )
-    sim = SimpleNamespace(is_newton_backend=True, _world=object())
-
-    with patch(
-        "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
-        return_value=backend,
-    ):
-        configured = module._configure_newton_native_contact_dimension(sim)
-
-    expected = np.full(3, NEWTON_NATIVE_CONTACT_DIMENSION, dtype=np.int32)
-    assert configured is True
-    assert np.array_equal(mjc_geom_condim, expected)
-    assert np.array_equal(mjw_geom_condim.numpy(), expected)
-
-
-def test_atomic_action_tutorial_leaves_external_newton_contacts_unchanged() -> None:
-    module = importlib.import_module("scripts.tutorials.atomic_action.tutorial_utils")
-    mjc_geom_condim = np.asarray([3, 3], dtype=np.int32)
-    mjw_geom_condim = _WarpArray([3, 3])
-    backend = SimpleNamespace(
-        solver_type="mujoco_warp",
-        cfg=SimpleNamespace(
-            requires_grad=False,
-            solver_cfg=SimpleNamespace(use_mujoco_contacts=False),
-        ),
-        model=SimpleNamespace(requires_grad=False),
-        solver=SimpleNamespace(
-            mj_model=SimpleNamespace(geom_condim=mjc_geom_condim),
-            mjw_model=SimpleNamespace(geom_condim=mjw_geom_condim),
-        ),
-    )
-    sim = SimpleNamespace(is_newton_backend=True, _world=object())
-
-    with patch(
-        "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
-        return_value=backend,
-    ):
-        configured = module._configure_newton_native_contact_dimension(sim)
-
-    expected = np.full(2, 3, dtype=np.int32)
-    assert configured is False
-    assert np.array_equal(mjc_geom_condim, expected)
-    assert np.array_equal(mjw_geom_condim.numpy(), expected)
 
 
 @pytest.mark.parametrize(
@@ -883,6 +808,8 @@ def test_tutorial_rigid_body_physics_adds_only_newton_contact_response() -> None
     assert newton_physics.material_props.kd == pytest.approx(
         NEWTON_GRASP_CONTACT_DAMPING
     )
+    assert newton_physics.collision_props.condim == NEWTON_NATIVE_CONTACT_DIMENSION
+    assert default_physics.collision_props is None
 
 
 def test_run_tutorial_uses_deferred_simulation_cleanup() -> None:
@@ -1052,6 +979,7 @@ def test_shared_tutorial_gripper_uses_newton_contact_material(
     assert material.ke == pytest.approx(NEWTON_GRASP_CONTACT_STIFFNESS)
     assert material.kd == pytest.approx(NEWTON_GRASP_CONTACT_DAMPING)
     assert override.attrs.mass_props.recompute_inertia is True
+    assert override.attrs.collision_props.condim == NEWTON_NATIVE_CONTACT_DIMENSION
     assert re.fullmatch(override.link_names_expr[0], link_name)
 
 

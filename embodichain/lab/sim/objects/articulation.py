@@ -953,10 +953,10 @@ class Articulation(BatchEntity):
                     render_body.set_projective_uv()
 
     def _prepare_spawn_runtime_config(self, result: Scene | None) -> None:
-        """Apply Default root properties before Direct GPU initialization.
+        """Apply Default root properties before GPU runtime initialization.
 
-        PhysX snapshots articulation solver iteration counts when the Direct
-        GPU runtime is initialized. Applying these values only during facade
+        The Default backend snapshots articulation solver iteration counts when
+        its GPU runtime is initialized. Applying these values only during facade
         binding is too late because ``World.init_gpu_physics()`` has already
         performed its warm-up steps. CPU simulation accepts the late write,
         which otherwise makes identical hand mimic constraints substantially

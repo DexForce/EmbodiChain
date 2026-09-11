@@ -384,3 +384,22 @@ if __name__ == "__main__":
     test = TestCameraHybridCUDA()
     test.setup_method()
     test.test_attach_to_parent()
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("stereo", [False, True])
+def test_camera_detaches_all_views_before_parent_removal(stereo: bool) -> None:
+    camera = object.__new__(StereoCamera if stereo else Camera)
+    camera._is_attached = True
+    views = [MagicMock() for _ in range(4 if stereo else 2)]
+    camera._entities = (
+        [PairCameraView(*views[i : i + 2], np.eye(4)) for i in (0, 2)]
+        if stereo
+        else views
+    )
+
+    camera._detach_from_parent_nodes()
+
+    assert not camera.is_attached
+    for view in views:
+        view.get_node.return_value.detach_parent.assert_called_once_with()

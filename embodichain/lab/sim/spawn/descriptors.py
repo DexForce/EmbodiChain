@@ -18,9 +18,9 @@
 This module translates one EmbodiChain configuration into a canonical
 descriptor carrying both the common physics values and the optional backend
 extension blocks. The selected :mod:`dexsim.spawn` adapter remains the only
-component that chooses between the Default and Newton backends. When supplied, the active
-Newton solver type only prevents common contact values from being authored to
-a solver that cannot consume them.
+component that chooses between the Default and Newton backends. When supplied,
+the active Newton solver type gates imported contact defaults and prevents
+common contact values from being authored to a solver that cannot consume them.
 
 Articulation source names come from the handles produced by normal backend
 materialization. EmbodiChain owns regex/group selection, applies exact-name
@@ -31,7 +31,7 @@ properties must be committed to its immutable model.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import MISSING, dataclass, field, fields
+from dataclasses import MISSING, dataclass, field, fields, replace
 import math
 import numbers
 import os
@@ -749,6 +749,7 @@ def configure_articulation_desc(
                 UserWarning,
                 stacklevel=2,
             )
+        _apply_articulation_newton_gap_default(desc, newton_solver_type)
         return desc
     default_physics = _resolve_rigid_physics(
         cfg.attrs,
@@ -878,7 +879,48 @@ def configure_articulation_desc(
             newton=newton_desc,
             newton_target_mode=joint_target_modes.get(joint_name),
         )
+    _apply_articulation_newton_gap_default(desc, newton_solver_type)
     return desc
+
+
+def _apply_newton_gap_default(
+    collisions: Sequence[CollisionDesc],
+    newton_solver_type: str | None,
+) -> None:
+    """Fill missing imported-shape gaps with EmbodiChain's 1 mm default.
+
+    Run after source properties and user overlays are merged. Author only the
+    missing gap so source contact parameters, including an explicit zero gap,
+    remain intact. The Default backend does not receive this Newton policy.
+    """
+    if newton_solver_type is None:
+        return
+    for collision in collisions:
+        if collision.newton is None:
+            values = {item.name: None for item in fields(NewtonCollisionDesc)}
+            values["gap"] = 0.001
+            collision.newton = NewtonCollisionDesc(**values)
+        elif collision.newton.gap is None:
+            collision.newton = replace(collision.newton, gap=0.001)
+
+
+def _apply_articulation_newton_gap_default(
+    desc: ArticulationDesc,
+    newton_solver_type: str | None,
+) -> None:
+    """Carry imported contact defaults through the public Spawn descriptor."""
+    if newton_solver_type is None:
+        return
+    for link in desc.links:
+        if (
+            not link.collisions
+            and desc.urdf_path is not None
+            and getattr(link, "_embodichain_has_collision_geometry", None) is not False
+        ):
+            # URDF geometry stays in the native importer. This descriptor only
+            # overlays attributes onto its shapes; it creates no geometry.
+            link.collisions.append(CollisionDesc())
+        _apply_newton_gap_default(link.collisions, newton_solver_type)
 
 
 def _has_articulation_link_physics_overlay(

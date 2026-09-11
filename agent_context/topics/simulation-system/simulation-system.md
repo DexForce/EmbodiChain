@@ -60,7 +60,7 @@ boundary.
 Backend-neutral contact access follows the same ownership boundary.
 `ContactSensor` resolves configured logical UIDs through `SpawnScene.handles()`
 after `prepare()`, then creates a DexSim `Scene.create_contact_query(...)`.
-PhysX user IDs and Newton shape/body IDs are backend-binding details; neither
+Default user IDs and Newton shape/body IDs are backend-binding details; neither
 the sensor nor `SimulationManager` reads them directly.
 
 The registries cover:
@@ -78,6 +78,20 @@ into robots, sensors, lights, backgrounds, articulations, and interactive
 objects added through the manager.
 
 ## Lifecycle
+
+Runtime `add_rigid_object()` and `remove_asset()` prepare immediately. Use
+`replace_rigid_object(cfg)` when replacing a rigid object under the same UID:
+it translates the new configuration before removal, declares the replacement,
+and prepares once. Replacement applies to every instance and initializes new
+physical defaults; callers must discard the previous object's handle. Other
+objects retain their runtime state. Native preparation failures propagate and
+do not roll back the scene. The reset `replace_assets_from_group` event uses
+this path. Newton requires DexSim's same-name pending replacement support.
+For multiple rigid objects, `replace_rigid_objects(cfgs)` validates distinct
+existing UIDs and translates all configurations before mutation, declares the
+whole batch and prepares once. Returned objects follow input order. Run
+randomization events requiring the new bound objects after this call; an empty
+batch does not prepare. Native preparation failures still do not roll back.
 
 The environment-owned lifecycle is:
 
@@ -333,7 +347,7 @@ explicit gravity overlays and runtime calls raise `NotImplementedError`.
 Upstream MuJoCo's per-body `mujoco:gravcomp` is a solver-specific capability,
 not an implemented cross-solver EmbodiChain contract. The manager passes a
 Newton solver type to descriptor compilation only when Newton is active;
-Default's TGS/PGS names are not Newton solver selections.
+Default does not expose a solver selection.
 
 Newton deformable demos use the current polymorphic rigid-property slots:
 `attrs.collision_props=NewtonCollisionPropertiesCfg(...)` and
@@ -342,6 +356,13 @@ Newton deformable demos use the current polymorphic rigid-property slots:
 participation, including the W1 debugging toggle; arena isolation stays
 scene-owned. The `auto` solver route accepts deformable declarations before
 Spawn selects its concrete solver at finalization.
+
+`NewtonCollisionPropertiesCfg.condim` declares MuJoCo contact dimensions
+before scene preparation. `None` preserves the source/backend value; 1, 3,
+4 and 6 select normal-only, sliding, torsional, and rolling constraints.
+Use link overrides for gripper pads instead of modifying finalized solver
+arrays. Friction coefficients remain in `NewtonRigidBodyMaterialCfg`.
+The DexSim descriptor merge must preserve this field through source overlays.
 
 ## Module Boundaries
 
@@ -482,6 +503,14 @@ Newton gap; an active Newton configuration rejects an ambiguous standalone
 `contact_offset` unless a native margin or gap completes the intent. Explicit
 `NewtonCollisionPropertiesCfg.margin/gap` values take precedence over this
 translation.
+
+For imported URDF/USD shapes, the Spawn descriptor compiler fills a missing
+Newton gap with `0.001 m` after source properties and configured overlays are
+resolved, including in `asset_physics_mode="preserve"`. Existing gap values
+(including zero), margins, and material properties remain source-owned.
+URDF links whose geometry stays in the native importer receive attribute-only
+collision descriptors. This application default is skipped for the Default
+backend and does not change DexSim's or Newton's `ModelBuilder` defaults.
 
 ### Gizmo ownership
 
@@ -687,7 +716,7 @@ consumes its portable fixed-base and self-collision intent through common
 articulation descriptor fields. Its `sleep_threshold`, `min_position_iters`,
 and `min_velocity_iters` fields are Default-only: EmbodiChain applies them to
 the materialized native articulation before Direct GPU initialization and the
-first reset, while Newton ignores them. PhysX Direct GPU runtime setup captures
+first reset, while Newton ignores them. Default GPU runtime setup captures
 the articulation solver iteration counts; applying them only during facade
 binding leaves the active GPU solver at its source/default values and can make
 mimic constraints much softer than CPU. The preparation is idempotent per
@@ -757,7 +786,7 @@ graph captured from transient poses.
 
 MuJoCo-Warp lowers URDF mimic joints to native joint equality constraints, but
 its default equality solver reference is underdamped compared with Default's
-PhysX mimic. During
+Default mimic. During
 `Articulation._apply_spawn_config()`,
 `_configure_newton_mimic_compliance()` in `objects/backends/newton.py` resolves
 only that articulation's constraint rows and approximates Default's natural
@@ -933,8 +962,11 @@ Render and compute devices, native-window state and browser visualization are
 separate fields. Closed windows do not imply disabled offscreen rendering.
 Environment collision isolation appears as `Physics / Collision policy`;
 the compact table does not include an `External collisions` row.
-The Default display is `Default` with `TGS` or `PGS`, read from the native
-`enable_tgs` setting. Newton displays requested versus resolved solver and
+The Default display is `Default` with `Constraint Dynamics` in compact and full
+mode. It uses the native default solver without exposing a solver selection or
+querying native solver configuration; its inherited `solver_type` is `None`.
+GPU runtime switches stay inside the Default backend adapter.
+Newton displays requested versus resolved solver and
 reads `NewtonBackend.cuda_graph_status` through the physics adapter; pending
 capture is never labelled captured. Scene counts are per environment and
 exclude the separately identified global ground. Full mode adds rendering,

@@ -4,7 +4,7 @@
 ```
 
 The Default backend provides CPU and Direct GPU simulation through DexSim.
-Its established constraint-solver default is TGS (Temporal Gauss-Seidel).
+Its default solver is displayed as Constraint Dynamics.
 Select it with {class}`~cfg.DefaultPhysicsCfg`, or `physics: default` in a
 Gym configuration. See {doc}`index` for the shared capability matrix,
 device selection, and time-step definitions.
@@ -72,10 +72,10 @@ declaration, preparation, and explicit stepping retain the same structure.
 Set the tolerance scales before constructing the manager. These represent the
 scene's scale; increasing them is not a general accuracy or performance control.
 
-The current integration retains PCM and TGS defaults, disables enhanced
+The current integration uses Constraint Dynamics with PCM, disables enhanced
 determinism, and evaluates friction on every solver iteration. These choices
 are not selectable fields of `DefaultPhysicsCfg`. The startup summary reports
-the runtime's selected solver, such as TGS or PGS. Do not copy an upstream
+the runtime's selected solver as Constraint Dynamics or PGS. Do not copy an upstream
 framework's `solver_type` setting into this configuration.
 
 ### CCD and articulation properties

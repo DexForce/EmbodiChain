@@ -118,7 +118,14 @@ class SpawnScene:
             declaration.descriptor = getattr(self.builder, add_name)(descriptor)
         self._assets[uid] = declaration
         self._configure_materialized_source(uid)
-        handles = self.handles(uid)
+        # A Newton replacement retains the old same-path handles until commit.
+        # Bind the new facade only after those handles have been replaced.
+        pending_newton = (
+            getattr(self.builder, "backend", None) == "newton"
+            and self.builder.is_finalized
+            and self.builder.has_pending_changes
+        )
+        handles = () if pending_newton else self.handles(uid)
         if facade is not None and handles:
             facade.attach_spawn_handles(handles)
 

@@ -36,11 +36,6 @@ class DefaultPhysicsBackend(PhysicsBackend):
 
     name = "default"
 
-    @property
-    def solver_type(self) -> str:
-        """Return the native PhysX constraint solver selected for the scene."""
-        return "TGS" if dexsim.get_physics_config().enable_tgs else "PGS"
-
     # -- construction / world-config activation ------------------------- #
     def configure_world(self, world_config, sim_config: "SimulationManagerCfg") -> None:
         cfg = sim_config.physics_cfg
@@ -58,7 +53,7 @@ class DefaultPhysicsBackend(PhysicsBackend):
         dexsim.set_physics_gpu_memory_config(**cfg.gpu_memory.to_dict())
 
     def prepare_spawn_runtime(self, result: "dexsim.scene.Scene") -> None:
-        """Initialize Direct GPU buffers for a committed CUDA topology."""
+        """Initialize device buffers for a committed CUDA topology."""
         del result
         if self._manager.device.type == "cuda":
             self._manager._world.init_gpu_physics()

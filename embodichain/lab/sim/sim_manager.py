@@ -1556,6 +1556,15 @@ class SimulationManager:
             or result.needs_rebuild
             or scene.builder.has_pending_changes
         ):
+            if result is not None:
+                # These native cameras are owned outside Spawn. Detach them
+                # before a rebuild removes their articulation render parents.
+                for sensor in self._sensors.values():
+                    if (
+                        isinstance(sensor, Camera)
+                        and sensor.cfg.extrinsics.parent is not None
+                    ):
+                        sensor._detach_from_parent_nodes()
             result = scene.commit()
             self._env = result.get_arena("default")
             self._arenas = [result.get_arena(name) for name in scene.arena_names]
@@ -2316,47 +2325,109 @@ class SimulationManager:
         Returns:
             RigidObject: The added rigid object instance handle.
         """
-        uid = cfg.uid
-        if uid is None:
-            raise ValueError("Rigid object uid must be specified.")
-        if uid in self._rigid_objects:
-            raise ValueError(f"Rigid object {uid!r} already exists.")
-        source_path = getattr(cfg.shape, "fpath", None)
-        if _is_usd_path(source_path):
-            descriptor, materials = rigid_desc_from_usd(
-                cfg,
-                per_env=True,
-                newton_solver_type=self._active_newton_solver_type,
-            )
-        else:
-            descriptor, materials = rigid_desc_from_cfg(
-                cfg,
-                per_env=True,
-                newton_solver_type=self._active_newton_solver_type,
-            )
-        self._spawn_scene.builder.materials.update(materials)
+        return self._declare_rigid_object(cfg, replace=False)
 
-        rigid_obj = RigidObject(
-            cfg=cfg,
-            device=self.device,
-        )
+    def replace_rigid_object(self, cfg: RigidObjectCfg) -> RigidObject:
+        """Replace a rigid object with the same UID in one preparation.
+
+        The replacement uses its configured initial state and physical
+        properties. Previously returned handles for this object must not be
+        reused. Other scene objects retain their runtime state.
+
+        Args:
+            cfg: New configuration whose UID identifies an existing rigid object.
+
+        Returns:
+            The replacement object, ready for state access if the scene was
+            already materialized.
+
+        Raises:
+            KeyError: If the UID does not identify an existing rigid object.
+
+        Note:
+            Replacement applies to all instances of the logical object. A
+            backend preparation failure is propagated; this operation does
+            not provide rollback of native resources.
+        """
+        return self._declare_rigid_object(cfg, replace=True)
+
+    def replace_rigid_objects(
+        self, cfgs: Sequence[RigidObjectCfg]
+    ) -> list[RigidObject]:
+        """Replace multiple existing rigid objects in one preparation.
+
+        All UIDs and descriptors are checked before scene mutation. Returned
+        facades follow input order and are ready after the single preparation
+        when the scene was materialized. Run events needing the new objects
+        after this call. Old replaced handles must be discarded; other objects
+        retain their state. Native preparation failures do not roll back.
+
+        Args:
+            cfgs: Replacement configurations with distinct, existing UIDs.
+
+        Returns:
+            Replacement objects in input order, or an empty list for no input.
+
+        Raises:
+            ValueError: A UID is missing or duplicated, or translation fails.
+            KeyError: A UID does not identify an existing rigid object.
+        """
+        return self._declare_rigid_objects(cfgs, replace=True)
+
+    def _declare_rigid_object(
+        self, cfg: RigidObjectCfg, *, replace: bool
+    ) -> RigidObject:
+        return self._declare_rigid_objects([cfg], replace=replace)[0]
+
+    def _declare_rigid_objects(
+        self, cfgs: Sequence[RigidObjectCfg], *, replace: bool
+    ) -> list[RigidObject]:
+        """Translate the complete batch before changing the scene."""
+        cfgs = list(cfgs)
+        if not cfgs:
+            return []
+        seen: set[str] = set()
+        for cfg in cfgs:
+            uid = cfg.uid
+            if uid is None:
+                raise ValueError("Rigid object uid must be specified.")
+            if uid in seen:
+                raise ValueError(f"Duplicate rigid object uid {uid!r}.")
+            seen.add(uid)
+            if replace and uid not in self._rigid_objects:
+                raise KeyError(f"Rigid object {uid!r} does not exist.")
+            if not replace and uid in self._rigid_objects:
+                raise ValueError(f"Rigid object {uid!r} already exists.")
+
+        declarations = []
+        for cfg in cfgs:
+            source_path = getattr(cfg.shape, "fpath", None)
+            if _is_usd_path(source_path):
+                descriptor, materials = rigid_desc_from_usd(
+                    cfg,
+                    per_env=True,
+                    newton_solver_type=self._active_newton_solver_type,
+                )
+            else:
+                descriptor, materials = rigid_desc_from_cfg(
+                    cfg,
+                    per_env=True,
+                    newton_solver_type=self._active_newton_solver_type,
+                )
+            rigid_obj = RigidObject(cfg=cfg, device=self.device)
+            declarations.append((cfg.uid, descriptor, materials, rigid_obj))
 
         was_materialized = self.spawn_result is not None
-        self._spawn_scene.declare(
-            "rigid_object",
-            uid,
-            descriptor,
-            facade=rigid_obj,
-        )
-        self._rigid_objects[uid] = rigid_obj
+        for uid, descriptor, materials, rigid_obj in declarations:
+            self._spawn_scene.builder.materials.update(materials)
+            if replace:
+                self._spawn_scene.remove(uid)
+            self._spawn_scene.declare("rigid_object", uid, descriptor, facade=rigid_obj)
+            self._rigid_objects[uid] = rigid_obj
         self.notify_visualization_topology_changed()
-
-        # Preserve the legacy immediate-availability behavior for runtime
-        # additions. Initial environment construction still batches all
-        # declarations into one finalize at BaseEnv's prepare boundary.
         if was_materialized:
             self.prepare()
-        return rigid_obj
+        return [item[3] for item in declarations]
 
     def add_deformable_object(self, cfg: DeformableObjectCfg) -> DeformableObject:
         """Declare a volume or surface deformable in the scene.

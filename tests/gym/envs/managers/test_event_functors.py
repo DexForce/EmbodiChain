@@ -1824,3 +1824,25 @@ class TestRandomizeLight:
         assert light._last_set_intensity is None
         assert light._last_set_local_pose is None
         assert light._last_set_direction is None
+
+
+def test_asset_replacement_failure_preserves_original_config() -> None:
+    from embodichain.lab.gym.envs.managers.events import replace_assets_from_group
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.objects import RigidObject
+    from embodichain.lab.sim.shapes import MeshCfg
+
+    term = object.__new__(replace_assets_from_group)
+    term.asset_cfg = RigidObjectCfg(uid="fork", shape=MeshCfg(fpath="old.ply"))
+    term.asset_type = RigidObject
+    term._asset_group_path = ["new.ply"]
+    env = Mock()
+    env.sim.replace_rigid_object.side_effect = ValueError("invalid mesh")
+
+    with pytest.raises(ValueError, match="invalid mesh"):
+        term(env, None, Mock(uid="fork"), "unused/")
+
+    assert term.asset_cfg.shape.fpath == "old.ply"
+    replacement = env.sim.replace_rigid_object.call_args.kwargs["cfg"]
+    assert replacement.shape.fpath == "new.ply"
+    env.sim.remove_asset.assert_not_called()

@@ -2171,3 +2171,149 @@ def test_newton_non_mujoco_reset_allows_excluding_an_articulation() -> None:
     articulation.reset.assert_called_once_with([0], clear_dynamics=False)
     spawn_result.create_articulation_batch.assert_called_once_with(["arm_0"])
     native_batch.clear_dynamics.assert_called_once_with()
+
+
+@pytest.mark.parametrize("rebuild", [False, True])
+def test_prepare_detaches_camera_before_rebuilding_parent(rebuild: bool) -> None:
+    from embodichain.lab.sim.sensors import Camera, CameraCfg
+
+    camera = object.__new__(Camera)
+    camera.cfg = CameraCfg(extrinsics=CameraCfg.ExtrinsicsCfg(parent="wrist"))
+    camera._is_attached = True
+    view = MagicMock()
+    camera._entities = [view]
+    result = MagicMock(needs_rebuild=rebuild, topology_revision=1)
+    scene = MagicMock()
+    scene.builder.is_finalized = True
+    scene.builder.result = result
+    scene.builder.has_pending_changes = False
+
+    def commit():
+        assert not camera.is_attached
+        view.get_node.return_value.detach_parent.assert_called_once_with()
+        return result
+
+    scene.commit.side_effect = commit
+    sim = object.__new__(SimulationManager)
+    sim._spawn_scene = scene
+    sim._sensors = {"camera": camera}
+    sim._default_plane = object()
+    sim.physics = MagicMock()
+    sim._attach_parented_cameras = MagicMock()
+
+    sim.prepare()
+
+    assert scene.commit.call_count == int(rebuild)
+    assert camera.is_attached == (not rebuild)
+    if not rebuild:
+        view.get_node.assert_not_called()
+
+
+def test_replace_rigid_object_commits_only_after_new_declaration() -> None:
+    from embodichain.lab.sim.spawn.scene import SpawnScene
+    from embodichain.lab.sim.shapes import CubeCfg
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+
+    sim = object.__new__(SimulationManager)
+    sim.device = torch.device("cpu")
+    sim._rigid_objects = {"box": object()}
+    sim._spawn_scene = MagicMock(spec=SpawnScene)
+    sim._spawn_scene.builder = MagicMock()
+    sim._spawn_scene.builder.result = object()
+    sim.notify_visualization_topology_changed = MagicMock()
+    operations = []
+    sim._spawn_scene.remove.side_effect = lambda uid: operations.append("remove")
+    sim._spawn_scene.declare.side_effect = lambda *a, **kw: operations.append("add")
+    sim.prepare = lambda: operations.append("prepare")
+    sim.physics = MagicMock()
+
+    cfg = RigidObjectCfg(uid="box", shape=CubeCfg())
+    replacement = sim.replace_rigid_object(cfg)
+
+    assert operations == ["remove", "add", "prepare"]
+    assert sim._rigid_objects["box"] is replacement
+
+
+def test_replace_missing_rigid_object_does_not_mutate_scene() -> None:
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+
+    sim = object.__new__(SimulationManager)
+    sim._rigid_objects = {}
+    sim._spawn_scene = MagicMock()
+    with pytest.raises(KeyError, match="missing"):
+        sim.replace_rigid_object(RigidObjectCfg(uid="missing"))
+    sim._spawn_scene.remove.assert_not_called()
+
+
+def test_replace_invalid_shape_preserves_existing_object(monkeypatch) -> None:
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    import embodichain.lab.sim.sim_manager as manager_module
+
+    sim = object.__new__(SimulationManager)
+    old = object()
+    sim._rigid_objects = {"box": old}
+    sim._spawn_scene = MagicMock()
+    sim.physics = MagicMock()
+
+    def reject(*args, **kwargs):
+        raise ValueError("invalid geometry")
+
+    monkeypatch.setattr(manager_module, "rigid_desc_from_cfg", reject)
+    with pytest.raises(ValueError, match="invalid geometry"):
+        sim.replace_rigid_object(RigidObjectCfg(uid="box"))
+    assert sim._rigid_objects["box"] is old
+    sim._spawn_scene.remove.assert_not_called()
+
+
+@pytest.mark.parametrize("invalid", [None, "duplicate", "missing", "geometry"])
+def test_replace_rigid_objects_prevalidates_and_prepares_once(monkeypatch, invalid):
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.shapes import CubeCfg
+    import embodichain.lab.sim.sim_manager as manager_module
+
+    sim = object.__new__(SimulationManager)
+    sim.device = torch.device("cpu")
+    old = {"a": object(), "b": object()}
+    sim._rigid_objects = old.copy()
+    sim._spawn_scene = MagicMock()
+    sim._spawn_scene.builder.result = object()
+    sim.physics = MagicMock()
+    sim.notify_visualization_topology_changed = MagicMock()
+    operations = []
+    sim._spawn_scene.remove.side_effect = lambda uid: operations.append(("remove", uid))
+    sim._spawn_scene.declare.side_effect = (
+        lambda kind, uid, *a, **kw: operations.append(("add", uid))
+    )
+    sim.prepare = lambda: operations.append(("prepare",))
+    configs = [RigidObjectCfg(uid=uid, shape=CubeCfg()) for uid in ("a", "b")]
+    if invalid == "duplicate":
+        configs[1].uid = "a"
+    elif invalid == "missing":
+        configs[1].uid = "missing"
+    elif invalid == "geometry":
+        original = manager_module.rigid_desc_from_cfg
+
+        def translate(cfg, **kwargs):
+            if cfg.uid == "b":
+                raise ValueError("invalid geometry")
+            return original(cfg, **kwargs)
+
+        monkeypatch.setattr(manager_module, "rigid_desc_from_cfg", translate)
+    if invalid:
+        with pytest.raises((ValueError, KeyError)):
+            sim.replace_rigid_objects(configs)
+        assert operations == []
+        assert sim._rigid_objects == old
+    else:
+        replacements = sim.replace_rigid_objects(configs)
+        assert operations == [
+            ("remove", "a"),
+            ("add", "a"),
+            ("remove", "b"),
+            ("add", "b"),
+            ("prepare",),
+        ]
+        assert replacements == [sim._rigid_objects["a"], sim._rigid_objects["b"]]
+        operations.clear()
+        assert sim.replace_rigid_objects([]) == []
+        assert operations == []

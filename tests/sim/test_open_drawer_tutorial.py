@@ -87,6 +87,11 @@ def test_create_scene_configures_newton_grasp_material_only_for_newton(
         )
         assert robot_material.kd == pytest.approx(tutorial.NEWTON_GRASP_CONTACT_DAMPING)
         assert drawer_override.link_names_expr == [tutorial.DRAWER_CONTACT_LINK_NAME]
+        assert drawer_override.attrs.collision_props.condim == 4
+        assert (
+            robot_cfg.link_attrs["newton_gripper_contacts"].attrs.collision_props.condim
+            == 4
+        )
         assert drawer_material.ke == pytest.approx(
             tutorial.NEWTON_GRASP_CONTACT_STIFFNESS
         )

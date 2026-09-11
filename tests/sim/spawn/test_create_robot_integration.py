@@ -23,6 +23,9 @@ import pytest
 
 import dexsim
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
+from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
     configure_articulation_desc,
@@ -43,6 +46,44 @@ ARM_MAX_EFFORT = 1.0e4
 class _ConfigCapture:
     def add_robot(self, cfg):
         return cfg
+
+
+class TestImportedRobotNewtonGap:
+    """Verify the application default reaches source-owned URDF shapes."""
+
+    def setup_method(self) -> None:
+        self.sim = SimulationManager(
+            SimulationManagerCfg(
+                headless=True,
+                enable_entity_gizmo=False,
+                physics_cfg=NewtonPhysicsCfg(),
+            )
+        )
+
+    def teardown_method(self) -> None:
+        self.sim.destroy()
+        SimulationManager.flush_cleanup_queue()
+
+    def test_preserved_source_shapes_receive_application_gap(self) -> None:
+        import newton
+
+        cfg = FrankaPandaCfg.from_dict({"asset_physics_mode": "preserve"})
+        cfg.joint_drive_props = None
+        self.sim.add_robot(cfg)
+        self.sim.prepare()
+
+        backend = get_newton_backend(self.sim.get_world())
+        # The application authors descriptors without changing Newton's
+        # builder default for standalone DexSim users.
+        assert backend.builder.rigid_gap == newton.ModelBuilder().rigid_gap
+        robot_shapes = backend.model.shape_body.numpy() >= 0
+        assert np.any(robot_shapes)
+        np.testing.assert_allclose(
+            backend.model.shape_gap.numpy()[robot_shapes],
+            0.001,  # EmbodiChain's 1 mm imported-shape default.
+        )
+        self.sim.update(step=1)
+        assert np.isfinite(backend.state_0.body_q.numpy()).all()
 
 
 def _make_world(*, backend: str) -> dexsim.World:

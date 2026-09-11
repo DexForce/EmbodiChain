@@ -41,9 +41,7 @@ def _sim(physics_cfg=None):
                 "newton" if isinstance(cfg.physics_cfg, NewtonPhysicsCfg) else "default"
             ),
             solver_type=(
-                "mujoco_warp"
-                if isinstance(cfg.physics_cfg, NewtonPhysicsCfg)
-                else "TGS"
+                "mujoco_warp" if isinstance(cfg.physics_cfg, NewtonPhysicsCfg) else None
             ),
             cuda_graph_status="pending",
             sync_render_state=lambda result: None,
@@ -162,16 +160,29 @@ def test_startup_emission_is_once_and_off_is_quiet(monkeypatch):
     assert len(calls) == 1
 
 
-def test_default_solver_reads_native_tgs_switch(monkeypatch):
+def test_default_solver_does_not_query_native_configuration(monkeypatch):
     import dexsim
     from embodichain.lab.sim.physics.default import DefaultPhysicsBackend
 
-    cfg = SimpleNamespace(enable_tgs=True)
-    monkeypatch.setattr(dexsim, "get_physics_config", lambda: cfg)
+    def unexpected_query():
+        pytest.fail("Default solver diagnostics must not query native configuration")
+
+    monkeypatch.setattr(dexsim, "get_physics_config", unexpected_query)
     backend = DefaultPhysicsBackend(_sim())
-    assert backend.solver_type == "TGS"
-    cfg.enable_tgs = False
-    assert backend.solver_type == "PGS"
+    assert backend.solver_type is None
+
+
+@pytest.mark.parametrize("mode", ["compact", "full"])
+def test_default_summary_does_not_require_solver_selection(mode):
+    summary = importlib.import_module("embodichain.lab.sim._startup_summary")
+    sim = _sim()
+    sim.sim_config.startup_summary = mode
+    del sim.physics.solver_type
+    del sim._requested_solver
+    text = summary.format_summary(
+        "Simulation initialized", summary.simulation_rows(sim), color=False
+    )
+    assert "Constraint Dynamics" in text
 
 
 def test_scene_emission_waits_for_readiness_and_is_once(monkeypatch):

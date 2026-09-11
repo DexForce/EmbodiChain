@@ -9,7 +9,7 @@ EmbodiChain exposes two physics backends, selected by the configuration type:
 
 | Backend | Python configuration | Execution and solver model | Start here |
 | :--- | :--- | :--- | :--- |
-| `default` | `DefaultPhysicsCfg` | CPU or Direct GPU execution; TGS is the established constraint-solver default. | {doc}`default` |
+| `default` | `DefaultPhysicsCfg` | CPU or Direct GPU execution; Constraint Dynamics is the default solver. | {doc}`default` |
 | `newton` | `NewtonPhysicsCfg` | Newton through DexSim; scene-aware automatic selection or an explicit solver. | {doc}`newton` |
 
 Both are integrated through DexSim's runtime and Spawn SDK. `default` and
@@ -34,7 +34,7 @@ upstream solver does not imply that every asset or operation exposes it here.
 | Differentiable simulation | Unsupported | Explicit `semi_implicit` solver only; see {doc}`newton`. |
 
 Use Default for workflows needing its native rigid constraints or established
-TGS behavior. Use Newton for particle-based cloth/soft bodies, solver-specific
+Constraint Dynamics behavior. Use Newton for particle-based cloth/soft bodies, solver-specific
 experiments, or the supported differentiable path. For rigid robot tasks that
 can run on either backend, validate the target task with each configuration;
 shared APIs do not guarantee identical trajectories or contact responses.

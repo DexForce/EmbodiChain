@@ -77,11 +77,16 @@ def initialize_simulation(args):
     Returns:
         SimulationManager: Configured simulation manager instance.
     """
+    physics_cfg = physics_cfg_for_backend(args.physics)
+    if args.physics == "newton":
+        # Hundreds of free bodies make dense Newton Hessian factorization
+        # expensive. CG avoids that factorization while retaining contacts.
+        physics_cfg.solver_cfg = {"solver_type": "mujoco_warp", "solver": "cg"}
     config = SimulationManagerCfg(
         headless=True,
         device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
-        physics_cfg=physics_cfg_for_backend(args.physics),
+        physics_cfg=physics_cfg,
         physics_dt=1.0 / 100.0,
         visualization=visualization_cfg_from_args(args),
     )
@@ -337,6 +342,12 @@ def create_ice_cubes(sim: SimulationManager):
     }
 
     ice_cubes_cfg = RigidObjectGroupCfg.from_dict(cfg_dict)
+    # Newton evaluates initial contacts during prepare(), before runtime poses
+    # can be written. Park the 29 mm meshes apart to avoid an all-pairs pileup.
+    for index, ice_cfg in enumerate(ice_cubes_cfg.rigid_objects.values()):
+        ice_cfg.init_pos = [20.0 + 0.04 * (index % 20), 0.04 * (index // 20), 1.0]
+        # from_dict caches a matrix which otherwise overrides the new init_pos.
+        ice_cfg.init_local_pose = None
     ice_cubes: RigidObjectGroup = sim.add_rigid_object_group(cfg=ice_cubes_cfg)
 
     # Set visual material for ice cubes.

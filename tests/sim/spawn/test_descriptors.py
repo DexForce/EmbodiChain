@@ -632,6 +632,18 @@ def test_portable_collision_envelope_compiles_to_both_backends() -> None:
     assert collision.newton.gap == pytest.approx(0.01)
 
 
+@pytest.mark.parametrize("condim", [1, 3, 4, 6])
+def test_newton_contact_dimension_survives_config_and_descriptor(condim: int) -> None:
+    cfg = RigidObjectCfg(
+        uid="cube",
+        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+        attrs=RigidBodyPhysicsCfg.from_dict({"collision_props": {"condim": condim}}),
+    )
+    assert isinstance(cfg.attrs.collision_props, NewtonCollisionPropertiesCfg)
+    descriptor, _ = rigid_desc_from_cfg(cfg, newton_solver_type="mujoco_warp")
+    assert descriptor.collisions[0].newton.condim == condim
+
+
 def test_procedural_rigid_collision_defaults_compile_to_both_backends() -> None:
     cfg = RigidObjectCfg(
         uid="cube",
@@ -1086,7 +1098,78 @@ def test_articulation_constructor_defers_newton_properties_until_configure() -> 
         cfg,
         newton_solver_type="mujoco_warp",
     )
-    assert descriptor.links[0].collisions[0].newton is None
+    contact = descriptor.links[0].collisions[0].newton
+    assert contact.gap == 0.001
+    assert contact.restitution is None
+    assert contact.ke is None
+
+
+@pytest.mark.parametrize("solver_type", [None, "auto", "mujoco_warp"])
+@pytest.mark.parametrize("mode", ["preserve", "overlay"])
+@pytest.mark.parametrize("source_gap", [None, 0.0, 0.025])
+def test_imported_articulation_gap_default_is_owned_by_embodichain(
+    solver_type, mode, source_gap
+) -> None:
+    desc = _resolved_articulation_desc()
+    collision = desc.links[0].collisions[0]
+    collision.newton = NewtonCollisionDesc(gap=source_gap, margin=0.012)
+    cfg = ArticulationCfg(uid="robot", fpath="robot.urdf", asset_physics_mode=mode)
+
+    configure_articulation_desc(desc, cfg, newton_solver_type=solver_type)
+
+    expected = 0.001 if solver_type is not None and source_gap is None else source_gap
+    assert collision.newton.gap == expected
+    assert collision.newton.margin == 0.012
+
+
+@pytest.mark.parametrize("solver_type", [None, "auto", "mujoco_warp"])
+@pytest.mark.parametrize("has_geometry", [True, False, None])
+def test_urdf_native_shapes_receive_gap_without_synthetic_geometry(
+    solver_type: str | None, has_geometry: bool | None
+) -> None:
+    desc = _resolved_articulation_desc()
+    desc.urdf_path = "robot.urdf"
+    link = desc.links[0]
+    link.collisions = []
+    setattr(link, "_embodichain_has_collision_geometry", has_geometry)
+    cfg = ArticulationCfg(
+        uid="robot", fpath="robot.urdf", asset_physics_mode="preserve"
+    )
+
+    configure_articulation_desc(desc, cfg, newton_solver_type=solver_type)
+
+    if solver_type is None or has_geometry is False:
+        assert link.collisions == []
+        return
+    assert len(link.collisions) == 1
+    assert link.collisions[0].geometry_type is None
+    assert link.collisions[0].newton.gap == 0.001
+    assert link.collisions[0].newton.ke is None
+
+
+@pytest.mark.parametrize("solver_type", [None, "auto", "mujoco_warp"])
+@pytest.mark.parametrize("mode", ["preserve", "overlay"])
+@pytest.mark.parametrize("source_gap", [None, 0.0, 0.025])
+def test_imported_rigid_gap_default_is_owned_by_embodichain(
+    monkeypatch, solver_type, mode, source_gap
+) -> None:
+    collision = CollisionDesc(newton=NewtonCollisionDesc(gap=source_gap, margin=0.012))
+    source = ObjectDesc(
+        name="source", physics=RigidBodyPhysicsDesc.dynamic(), collisions=[collision]
+    )
+    monkeypatch.setattr(
+        "embodichain.lab.sim.spawn.usd._parse_singleton",
+        lambda *_args: (SimpleNamespace(materials={}), source),
+    )
+    cfg = RigidObjectCfg(
+        uid="cube", shape=MeshCfg(fpath="cube.usd"), asset_physics_mode=mode
+    )
+
+    desc, _ = rigid_desc_from_usd(cfg, newton_solver_type=solver_type)
+
+    expected = 0.001 if solver_type is not None and source_gap is None else source_gap
+    assert desc.collisions[0].newton.gap == expected
+    assert desc.collisions[0].newton.margin == 0.012
 
 
 def test_flat_articulation_physics_is_rejected_at_config_boundary() -> None:

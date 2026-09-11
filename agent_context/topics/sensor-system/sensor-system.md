@@ -97,6 +97,13 @@ owns semantic parent resolution and deferred attachment; cameras only attach
 to concrete per-environment render nodes and report attachment after that
 operation succeeds.
 
+Before committing a topology rebuild, `SimulationManager.prepare()` detaches
+parented camera views from their old render nodes. Cameras are owned outside
+Spawn, so Spawn's own camera retention cannot protect them when Newton removes
+and recreates robot skeletons. Stereo cameras detach both eyes. After binding
+the rebuilt scene, the manager resolves the new parents and reapplies camera
+extrinsics; preparation without a topology change leaves attachments intact.
+
 ### CameraCfg
 
 | Field | Type | Default | Notes |

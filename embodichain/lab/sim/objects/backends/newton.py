@@ -83,7 +83,7 @@ def _default_mujoco_mimic_solref(physics_dt: float, num_substeps: int) -> np.nda
     """Approximate Default's mimic compliance with MuJoCo solref.
 
     Positive MuJoCo solref uses (timeconst, dampratio) and therefore retains
-    the effective-mass scaling of PhysX articulation mimic joints. MuJoCo's
+    the effective-mass scaling of Default articulation mimic joints. MuJoCo's
     reference-safety rule clamps timeconst to twice the solver timestep, so
     apply the same bound explicitly.
     """

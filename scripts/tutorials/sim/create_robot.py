@@ -160,6 +160,10 @@ def create_robot(sim):
             stiffness={"joint[1-6]": 1e4, "LEFT_.*": 1e3},
             damping={"joint[1-6]": 1.5e3, "LEFT_.*": 1e2},
             max_effort={"joint[1-6]": 1e4, "LEFT_.*": 1e4},
+            # Demo stabilization, not calibrated motor inertia: the hand's
+            # small link inertias make high-gain, coupled PIP motion unstable.
+            # Include mimic joints and use the same armature on both backends.
+            armature={"LEFT_.*": 0.01},
         ),
     )
 

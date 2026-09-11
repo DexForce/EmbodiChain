@@ -45,6 +45,7 @@ from embodichain.lab.sim.cfg import (
     LinkPhysicsOverrideCfg,
     MassPropertiesCfg,
     MarkerCfg,
+    NewtonCollisionPropertiesCfg,
     NewtonPhysicsCfg,
     NewtonRigidBodyMaterialCfg,
     PhysicsBackendCfg,
@@ -221,9 +222,9 @@ def _tutorial_physics_cfg(
     """
     physics_cfg = physics_cfg_for_backend(backend)
     if isinstance(physics_cfg, NewtonPhysicsCfg):
-        # Keep 1 ms internal solver steps for stable robot contacts. Match the
-        # official Newton cube-stacking solver profile: nconmax and njmax
-        # size MuJoCo Warp's native per-world contact and constraint buffers.
+        # Keep 1 ms internal solver steps for stable robot contacts. DexSim
+        # sizes contact/constraint buffers from the finalized scene, including
+        # the contact dimensions authored on gripper and object surfaces.
         # MultiCCD retains up to four contacts per gripper-mesh/object pair,
         # which prevents a marginal two-finger grasp from sliding away.
         physics_cfg.num_substeps = 10
@@ -234,8 +235,6 @@ def _tutorial_physics_cfg(
             "integrator": "implicitfast",
             "iterations": 20,
             "ls_iterations": 100,
-            "nconmax": 1_000,
-            "njmax": 2_000,
             "cone": "elliptic",
             "impratio": 1_000.0,
             "use_mujoco_contacts": True,
@@ -448,11 +447,19 @@ def create_tutorial_rigid_body_physics(
             else None
         ),
         collision_props=(
-            CollisionPropertiesCfg(
-                contact_offset=contact_offset,
-                rest_offset=rest_offset,
+            (
+                NewtonCollisionPropertiesCfg(
+                    contact_offset=contact_offset,
+                    rest_offset=rest_offset,
+                    condim=NEWTON_NATIVE_CONTACT_DIMENSION,
+                )
+                if newton_contact
+                else CollisionPropertiesCfg(
+                    contact_offset=contact_offset,
+                    rest_offset=rest_offset,
+                )
             )
-            if any(value is not None for value in collision_values)
+            if newton_contact or any(value is not None for value in collision_values)
             else None
         ),
         material_props=(
@@ -493,10 +500,13 @@ def configure_newton_link_contacts(
         group_name: LinkPhysicsOverrideCfg(
             link_names_expr=link_names_expr,
             attrs=RigidBodyPhysicsCfg(
+                collision_props=NewtonCollisionPropertiesCfg(
+                    condim=NEWTON_NATIVE_CONTACT_DIMENSION,
+                ),
                 material_props=NewtonRigidBodyMaterialCfg(
                     ke=NEWTON_GRASP_CONTACT_STIFFNESS,
                     kd=NEWTON_GRASP_CONTACT_DAMPING,
-                )
+                ),
             ),
         ),
     }
@@ -862,7 +872,6 @@ def replay_trajectory(
     if positions.shape[1] == 0:
         raise ValueError("trajectory must contain at least one waypoint.")
 
-    _configure_newton_native_contact_dimension(sim)
     native_contact_settle_steps = _newton_native_contact_settle_steps(
         sim,
         robot,
@@ -928,55 +937,6 @@ def replay_trajectory(
             time.sleep(1e-2)
     finally:
         stop_auto_play_recording(sim, recording_started)
-
-
-def _configure_newton_native_contact_dimension(
-    sim: SimulationManager,
-) -> bool:
-    """Enable torsional friction for the native MuJoCo tutorial contact model.
-
-    Newton's cube-stacking native-contact example configures ``condim=4`` on
-    the gripper and grasped cubes. Atomic-action tutorials share one native
-    contact profile, so this applies the same dimension to the finalized
-    MuJoCo scene immediately before replay. It is intentionally limited to
-    MuJoCo Warp's internally generated contacts; external Newton collision
-    pipelines and other solvers retain their authored settings.
-    """
-    if getattr(sim, "is_newton_backend", False) is not True:
-        return False
-    world = getattr(sim, "_world", None)
-    if world is None:
-        return False
-
-    from dexsim.engine.newton_physics.backend_registry import get_newton_backend
-
-    backend = get_newton_backend(world)
-    if backend is None or backend.solver_type != "mujoco_warp":
-        return False
-    solver_cfg = getattr(getattr(backend, "cfg", None), "solver_cfg", None)
-    if solver_cfg is None or not getattr(solver_cfg, "use_mujoco_contacts", False):
-        return False
-    if getattr(getattr(backend, "cfg", None), "requires_grad", False):
-        return False
-    if getattr(getattr(backend, "model", None), "requires_grad", False):
-        return False
-
-    solver = getattr(backend, "solver", None)
-    mjc_model = getattr(solver, "mj_model", None)
-    mjw_model = getattr(solver, "mjw_model", None)
-    mjw_geom_condim = getattr(mjw_model, "geom_condim", None)
-    mjc_geom_condim = getattr(mjc_model, "geom_condim", None)
-    if mjw_geom_condim is None or mjc_geom_condim is None:
-        return False
-
-    current = np.asarray(mjw_geom_condim.numpy())
-    if current.size == 0:
-        return False
-    mjw_geom_condim.assign(
-        np.full_like(current, NEWTON_NATIVE_CONTACT_DIMENSION),
-    )
-    mjc_geom_condim[...] = NEWTON_NATIVE_CONTACT_DIMENSION
-    return True
 
 
 def _newton_native_contact_settle_steps(
