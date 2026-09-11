@@ -45,6 +45,16 @@ numerical (``Pinocchio``, ``Pink`` with null-space posture tasks,
 Base Solver
 -----------
 
+``Robot.compute_batch_ik(..., continuous=True)`` checks
+``BaseSolver.supports_continuous_batch_ik`` before generating any candidates.
+The capability defaults to ``False``; OPW opts in and implements the protected
+``_select_continuous_ik_path`` hook. Supporting solvers accept
+``get_ik(return_all_solutions=True)`` and return validity ``(M, K)`` and joint
+candidates ``(M, K, DOF)``. Selection consumes ``(B, N, K, DOF)`` candidates,
+``(B, N, K)`` validity, and an initial ``(B, DOF)`` seed, then returns
+``(B, N)`` validity and ``(B, N, DOF)`` joint positions. Other solvers retain
+ordinary batch IK and reject continuous requests before solving.
+
 .. autoclass:: SolverCfg
     :members:
     :exclude-members: __init__, copy, replace, to_dict, validate

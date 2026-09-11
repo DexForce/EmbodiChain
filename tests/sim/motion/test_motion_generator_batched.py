@@ -30,6 +30,10 @@ from embodichain.lab.sim.motion.motion_generator import (
     MotionGenerator,
     MotionGenOptions,
 )
+from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
+    TrapezoidalPlanner,
+    TrapezoidalPlanOptions,
+)
 from embodichain.lab.sim.motion.planners.utils import PlanState, PlanResult, MoveType
 
 BATCH_SIZE = 2
@@ -69,6 +73,99 @@ def _timed_result(
         positions=positions,
         dt=dt,
     )
+
+
+@pytest.mark.parametrize("sample_count", [None, 101])
+def test_generate_preserves_trapezoidal_constraint_report(
+    sample_count: int | None,
+) -> None:
+    planner = object.__new__(TrapezoidalPlanner)
+    planner.device = torch.device("cpu")
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+    generator.device = torch.device("cpu")
+    targets = [
+        PlanState.from_qpos(torch.tensor([qpos], dtype=torch.float64))
+        for qpos in ([0.0, 0.0], [1.0, 0.0], [1.0, 1.0])
+    ]
+    options = TrapezoidalPlanOptions(
+        profile="double_s",
+        stop_at_waypoints=False,
+        blend_tolerance=0.1,
+        sample_interval=101,
+    )
+    raw = planner.plan(targets, options)
+    result = generator.generate(
+        targets, MotionGenOptions(plan_opts=options, sample_count=sample_count)
+    )
+    assert result.constraint_report is not None
+    assert torch.equal(result.positions, raw.positions)
+    assert torch.equal(result.dt, raw.dt)
+    for name, value in raw.constraint_report.items():
+        assert torch.equal(result.constraint_report[name], value)
+
+
+@pytest.mark.parametrize("change", ["resample", "hold_failed_rows", "preserve"])
+def test_generate_invalidates_report_only_when_trajectory_changes(change: str) -> None:
+    raw = _timed_result(
+        torch.ones(BATCH_SIZE, 5, CONTROLLED_DOF),
+        success=torch.tensor([True, change != "hold_failed_rows"]),
+    )
+    report = {"within_limits": torch.ones(BATCH_SIZE, dtype=torch.bool)}
+    raw.constraint_report = report
+    generator = _mock_generator(result=raw, preserve_plan_samples=change == "preserve")
+    result = generator.generate(
+        [PlanState.from_xpos(torch.eye(4).repeat(BATCH_SIZE, 1, 1))],
+        MotionGenOptions(
+            sample_count=8 if change != "hold_failed_rows" else 5,
+            start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+        ),
+    )
+    assert raw.constraint_report is report
+    if change == "preserve":
+        assert result.constraint_report is report
+    else:
+        assert result.constraint_report is None
+    if change == "resample":
+        assert result.positions.shape[1] == 8
+    if change == "hold_failed_rows":
+        assert torch.count_nonzero(result.positions[1]) == 0
+        assert torch.all(raw.positions[1] == 1.0)
+
+
+@pytest.mark.parametrize(
+    ("sample_count", "preserve_samples"), [(5, False), (8, False), (8, True)]
+)
+def test_preserving_failed_trajectories_keeps_report_unless_resampled(
+    sample_count: int, preserve_samples: bool
+) -> None:
+    raw = _timed_result(
+        torch.ones(BATCH_SIZE, 5, CONTROLLED_DOF),
+        success=torch.tensor([True, False]),
+    )
+    report = {"within_limits": torch.tensor([True, False])}
+    raw.constraint_report = report
+    generator = _mock_generator(result=raw, preserve_plan_samples=preserve_samples)
+    generator.planner.preserve_failed_plan_positions = True
+
+    result = generator.generate(
+        [PlanState.from_xpos(torch.eye(4).repeat(BATCH_SIZE, 1, 1))],
+        MotionGenOptions(
+            sample_count=sample_count,
+            start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+        ),
+    )
+
+    assert torch.equal(result.success, raw.success)
+    assert torch.all(result.positions[1] == 1.0)
+    assert raw.constraint_report is report
+    torch.testing.assert_close(result.duration, raw.duration)
+    resampled = sample_count != 5 and not preserve_samples
+    assert result.positions.shape[1] == (sample_count if resampled else 5)
+    if resampled:
+        assert result.constraint_report is None
+    else:
+        assert result.constraint_report is report
 
 
 @pytest.fixture(autouse=True)
@@ -421,6 +518,24 @@ def _mock_planner(b=3, n=15, dofs=6):
         lambda options, *, start_qpos, control_part: options
     )
     return planner
+
+
+def test_resolve_trapezoidal_limits_without_sample_count() -> None:
+    planner = Mock()
+    planner.cfg.planner_type = "trapezoidal"
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+
+    options = generator.resolve_plan_options(
+        plan_opts=None,
+        sample_count=None,
+        velocity_limit=0.01,
+        acceleration_limit=0.02,
+    )
+
+    assert isinstance(options, TrapezoidalPlanOptions)
+    assert options.constraints["velocity"] == 0.01
+    assert options.constraints["acceleration"] == 0.02
 
 
 def _mock_generator(

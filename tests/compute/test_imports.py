@@ -41,6 +41,10 @@ import warp as wp
             "embodichain.compute.trajectory",
             ["embodichain.lab", "embodichain.utils.warp", "dexsim", "open3d", "cv2"],
         ),
+        (
+            "embodichain.compute.kinematics._warp.trapezoidal",
+            ["embodichain.lab", "embodichain.utils.warp", "dexsim"],
+        ),
         ("embodichain.utils.warp", ["embodichain.lab", "dexsim"]),
     ],
 )
@@ -73,6 +77,7 @@ importlib.import_module({module!r})
         ("kinematics.opw_solver", "kinematics._warp.opw"),
         ("kinematics.srs_solver", "kinematics._warp.srs"),
         ("kinematics.ur_solver", "kinematics._warp.ur"),
+        ("kinematics.trapezoidal_warp", "kinematics._warp.trapezoidal"),
         ("kinematics.interpolate", "trajectory._warp.resampling"),
         ("kinematics.warp_trajectory", "trajectory._warp.warping"),
         ("collision.convex_query", "geometry._warp.convex_query"),
@@ -92,8 +97,8 @@ def test_legacy_exports_share_kernel_and_struct_identity(
         assert getattr(old, name) is getattr(new, target)
 
 
-@pytest.mark.parametrize("algorithm", ["opw", "srs", "ur"])
-def test_analytical_kinematics_kernels_compile_on_cpu(algorithm: str) -> None:
+@pytest.mark.parametrize("algorithm", ["opw", "srs", "ur", "trapezoidal"])
+def test_kinematics_kernels_compile_on_cpu(algorithm: str) -> None:
     module = importlib.import_module(
         "embodichain.compute.kinematics._warp." + algorithm
     )

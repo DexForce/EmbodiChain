@@ -7,6 +7,12 @@
 | Planner registry | `embodichain/lab/sim/motion/planners/__init__.py` |
 | Base planner class & config | `embodichain/lab/sim/motion/planners/base_planner.py` → `BasePlanner`, `BasePlannerCfg`, `CollisionWorldInfo`, `PlanOptions`, `validate_plan_options` |
 | TOPPRA planner | `embodichain/lab/sim/motion/planners/toppra_planner.py` → `ToppraPlanner`, `ToppraPlannerCfg`, `ToppraPlanOptions` |
+| Trapezoidal planner | `embodichain/lab/sim/motion/planners/trapezoidal_planner.py` → `TrapezoidalPlanner`, `TrapezoidalPlannerCfg`, `TrapezoidalPlanOptions` |
+| Bézier path geometry | `embodichain/lab/sim/motion/planners/bezier.py` → `BezierPath` and internal quintic waypoint blending helpers |
+| Cartesian SE(3) line | `embodichain/lab/sim/motion/planners/se3.py` → `plan_se3_line`, `SE3LineResult` |
+| Shared scalar timing | `embodichain/lab/sim/motion/planners/_scalar_time_law.py` → `ScalarTimeLaw`, `ScalarState` |
+| Continuous blend constraints | `embodichain/lab/sim/motion/planners/_blend_constraints.py` → Bernstein derivative bounds and phase interval bounds |
+| Trapezoidal Warp kernels | `embodichain/compute/kinematics/_warp/trapezoidal.py` → batched profile construction and sampling kernels |
 | Neural planner | `embodichain/lab/sim/motion/planners/neural_planner.py` → `NeuralPlanner`, `NeuralPlannerCfg`, `NeuralPlanOptions` |
 | cuRobo planner | `embodichain/lab/sim/motion/planners/curobo/curobo_planner.py` → `CuroboPlanner`, `CuroboPlannerCfg`, `CuroboWorldCfg`, `CuroboPlanOptions` |
 | Motion generator | `embodichain/lab/sim/motion/motion_generator.py` → `MotionGenerator`, `MotionGenCfg`, `MotionGenOptions` |
@@ -109,6 +115,7 @@ Convenience constructors:
 | `velocities` | `torch.Tensor \| None` | Joint velocities `(B, N, DOF)` |
 | `accelerations` | `torch.Tensor \| None` | Joint accelerations `(B, N, DOF)` |
 | `dt` | `torch.Tensor \| None` | Per-step arrival intervals `(B, N)`; required whenever `positions` is present |
+| `constraint_report` | `dict[str, torch.Tensor] \| None` | Optional derivative peaks, utilization, and limit status |
 | `duration` | `torch.Tensor \| None` | Read-only total trajectory time `(B,)`, derived as `dt.sum(dim=1)` |
 
 Helper: `PlanResult.is_all_success() -> bool` returns `True` only when every env succeeded.
@@ -116,6 +123,12 @@ Helper: `PlanResult.is_all_success() -> bool` returns `True` only when every env
 A failed result may omit the trajectory entirely by leaving `positions=None`.
 When `MotionGenerator` resamples a fully timed result, it preserves each row's
 total duration and emits new explicit arrival intervals.
+`MotionGenerator.generate()` preserves the backend `constraint_report` for
+unchanged trajectories, including backends that preserve samples. Resampling
+or replacing failed rows with a start-pose hold invalidates the entire report
+to `None`; planner-specific diagnostics cannot be generically recomputed.
+Backends such as NeuralPlanner may opt into `preserve_failed_plan_positions`;
+failed rows and their reports remain intact unless resampling changes them.
 
 ### MoveType enum
 
@@ -166,6 +179,11 @@ total duration and emits new explicit arrival intervals.
   `SceneRegistry` before starting execution.
 
 ## Shared trajectory computations
+
+Trapezoidal and Double-S Warp profile construction and sampling live in
+`compute/kinematics/_warp/trapezoidal.py`. The scalar timing layer imports this
+compute implementation directly. `utils/warp/kinematics/trapezoidal_warp.py`
+retains compatibility aliases; compute does not import simulation modules.
 
 `embodichain.compute.trajectory` owns pure interpolation, path resampling,
 and keyframe-based warping. `interpolate_with_distance` retains keyframes;

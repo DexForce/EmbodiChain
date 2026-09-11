@@ -85,6 +85,14 @@ Dict factory: `SolverCfg.from_dict(dict) → SolverCfg` resolves `class_type` dy
 | `set_qpos_limits` / `get_qpos_limits` | limits as list/Tensor | Set/get per-joint limits |
 | `update_with_robot_limit` | `(robot_qpos_limits: Tensor[DOF,2])` | Clamp solver limits to robot limits |
 | `set_ik_nearest_weight` / `get_ik_nearest_weight` | per-joint weights | Controls nearest-solution ranking |
+| `supports_continuous_batch_ik` | `bool` property | Defaults to false; opt-in requires all-candidate IK and continuous selection |
+| `_select_continuous_ik_path` | `(candidates, validity, seed) → (validity, path)` | Protected typed hook; default raises `NotImplementedError` |
+
+The continuous capability uses candidates `(B, N, K, DOF)`, validity
+`(B, N, K)`, and initial seeds `(B, DOF)`, returning validity `(B, N)` and
+positions `(B, N, DOF)`. `K` belongs to the solver. Robot checks support before
+pose-frame conversion or `get_ik(return_all_solutions=True)` and raises
+`ValueError` for unsupported continuous requests. Ordinary batch IK is unchanged.
 
 ---
 
