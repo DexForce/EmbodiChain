@@ -224,6 +224,9 @@ class BasePlanner(ABC):
     waypoints for a joint-only backend.
     """
 
+    supports_heterogeneous_waypoints: bool = False
+    """Whether one plan may contain an ordered mixture of movement types."""
+
     preserve_plan_samples: bool = False
     """Whether callers must retain this planner's returned sample points exactly.
 
@@ -255,6 +258,29 @@ class BasePlanner(ABC):
             :class:`MotionGenerator` preprocessing.
         """
         return move_type in self.supported_move_types
+
+    def visualize_robot_collision_models(
+        self,
+        control_part: str,
+        env_id: int = 0,
+    ) -> None:
+        """Visualize the robot collision models used by this planner.
+
+        Planners that support collision avoidance should override this method
+        with their backend-specific visualization.
+
+        Args:
+            control_part: Robot control part whose collision models are visualized.
+            env_id: Simulator environment instance to visualize.
+
+        Raises:
+            NotImplementedError: If the planner does not support collision avoidance.
+        """
+        logger.log_error(
+            f"{type(self).__name__} does not support collision avoidance or robot "
+            "collision model visualization.",
+            NotImplementedError,
+        )
 
     def default_plan_options(self) -> PlanOptions:
         """Return backend-default planning options."""

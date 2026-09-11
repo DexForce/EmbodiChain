@@ -21,13 +21,13 @@ from __future__ import annotations
 from .base import PlannerAdapter, PlannerContext
 from .curobo import CuroboAdapter
 from .ik_interpolate import IkInterpolateAdapter
-from .neural import NeuralAdapterStub
+from .nmg_onnx import NmgOnnxAdapter
 from .toppra import ToppraAdapter
 
 __all__ = [
     "CuroboAdapter",
     "IkInterpolateAdapter",
-    "NeuralAdapterStub",
+    "NmgOnnxAdapter",
     "PlannerAdapter",
     "PlannerContext",
     "ToppraAdapter",

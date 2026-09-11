@@ -51,7 +51,7 @@ def _run_rl_cli(_: argparse.Namespace) -> None:
 
 
 def _run_motion_generation_cli(args: argparse.Namespace) -> None:
-    """Run the free-space motion-generation benchmark."""
+    """Run the shared planner and Atomic Task benchmark."""
     from scripts.benchmark.motion_generation.run_benchmark import run_from_args
 
     run_from_args(args)
@@ -118,7 +118,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     motion_generation_parser = subparsers.add_parser(
         "motion-generation",
-        help="Benchmark free-space motion generation with cuRobo as baseline.",
+        help="Benchmark planners on fixed motion and Atomic Task cases.",
     )
     add_parser_arguments(motion_generation_parser)
     motion_generation_parser.set_defaults(func=_run_motion_generation_cli)

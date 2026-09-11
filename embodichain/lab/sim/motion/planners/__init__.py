@@ -26,6 +26,9 @@ from __future__ import annotations
 from .utils import *
 from .base_planner import *
 from .toppra_planner import *
+from .trapezoidal_planner import *
+from .bezier import *
+from .se3 import *
 from .neural_planner import *
 from .curobo.curobo_yaml import *
 from .curobo.curobo_planner import *

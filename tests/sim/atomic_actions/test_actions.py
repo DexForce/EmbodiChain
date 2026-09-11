@@ -1710,6 +1710,51 @@ def test_pick_explicit_grasp_bypasses_sampling_and_records_grasp() -> None:
     }
 
 
+def test_pick_explicit_batched_object_pose_is_scene_independent() -> None:
+    """PickUp accepts one object pose per environment without a scene entity."""
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label="synthetic-object",
+        # The identifier is retained for object identity, but no matching
+        # entity is present in the explicit-pose planning snapshot.
+        entity_id="synthetic-object",
+    )
+    object_poses = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    object_poses[:, 0, 3] = torch.tensor((0.15, 0.35))
+    grasp_poses = object_poses.clone()
+    context = _context(scene=SceneSnapshot.empty())
+
+    plan = _plan_action(
+        action,
+        _invocation(
+            action,
+            GraspGoal(
+                semantics=semantics,
+                object_pose=object_poses,
+                grasp_xpos=grasp_poses,
+            ),
+            sample_count=20,
+        ),
+        context,
+    )
+
+    assert plan.plan_success.all()
+    assert plan.scene_dependencies == ()
+    assert plan.scene_dependency_monitor_until == {}
+    projected = plan.expected_effects.apply(context.task, plan.plan_success)
+    held = projected.get_held_object("arm")
+    assert held is not None
+    # The explicit grasp equals each explicit object pose, so the projected
+    # attachment transform must be identity in every environment row.
+    assert torch.allclose(
+        held.object_to_eef,
+        torch.eye(4).repeat(NUM_ENVS, 1, 1),
+    )
+
+
 def test_pick_fixed_object_to_eef_bypasses_sampling_and_adjustments() -> None:
     """A calibrated object-relative grasp is used directly and owned safely."""
     generator = _motion_generator()

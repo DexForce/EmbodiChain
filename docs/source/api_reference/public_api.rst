@@ -882,6 +882,7 @@ embodichain.lab.sim.objects.rigid_object
 
 .. autosummary::
 
+   CollisionShapeDesc
    RigidBodyData
    RigidObject
    RigidObjectCfg
@@ -952,7 +953,10 @@ embodichain.lab.sim.motion.planners.curobo.curobo_yaml
 .. autosummary::
 
    generate_curobo_robot_yaml
-   generate_curobo_world_yaml
+   generate_curobo_world_scene
+   visualize_curobo_collision_models
+   visualize_curobo_robot_collision_model
+   visualize_curobo_world_collision_model
 
 embodichain.lab.sim.motion.planners.neural_planner
 --------------------------------------------------
@@ -965,6 +969,29 @@ embodichain.lab.sim.motion.planners.neural_planner
    NeuralPlannerCfg
    NeuralPlanOptions
 
+embodichain.lab.sim.motion.planners.bezier
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.planners.bezier
+
+Differentiable quadratic and quintic Bézier geometry, including
+HolisticMotion-compatible waypoint blending and path-constraint projection.
+Use ``BezierPath.parameter_at_arc_length(distance)`` to convert a scalar
+time law's geometric distances to polynomial parameters. Reuse those parameters
+for ``evaluate``, ``arc_tangent``, and ``arc_curvature``; normalized arc length
+is generally different from the Bézier parameter. Lookup accuracy is controlled
+by ``table_count`` independently of the output sample count.
+
+.. autosummary::
+
+   BezierPath
+   bezier_arc_length
+   bezier_derivative
+   bezier_evaluate
+   sample_bezier_path
+
+.. automethod:: BezierPath.parameter_at_arc_length
+
 embodichain.lab.sim.motion.planners.toppra_planner
 --------------------------------------------------
 
@@ -975,6 +1002,44 @@ embodichain.lab.sim.motion.planners.toppra_planner
    ToppraPlanner
    ToppraPlannerCfg
    ToppraPlanOptions
+
+embodichain.lab.sim.motion.planners.se3
+---------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.planners.se3
+
+SE(3) screw interpolation and constrained Cartesian line trajectories with
+explicit twist, acceleration, jerk, and timing outputs.
+
+.. autosummary::
+
+   SE3LineResult
+   plan_se3_line
+
+embodichain.lab.sim.motion.planners.trapezoidal_planner
+-------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.planners.trapezoidal_planner
+
+.. autosummary::
+
+   TrapezoidalPlanOptions
+   TrapezoidalPlanner
+   TrapezoidalPlannerCfg
+
+embodichain.utils.warp.kinematics.trapezoidal_warp
+--------------------------------------------------
+
+.. currentmodule:: embodichain.utils.warp.kinematics.trapezoidal_warp
+
+Warp-accelerated helpers construct scalar trapezoidal or Double-S motion
+profiles and compose their sampled path derivatives into batched joint-space
+trajectories.
+
+.. autosummary::
+
+   build_profile_warp
+   compose_profile_samples_warp
 
 embodichain.lab.sim.motion.planners.utils
 -----------------------------------------
@@ -1219,6 +1284,21 @@ embodichain.lab.task_program.semantics.scene
    :members:
    :no-index:
 
+embodichain.lab.sim.motion.solvers.base_solver
+----------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.solvers.base_solver
+
+Shared solver configuration and runtime contracts for IK, FK, joint limits,
+and optional continuous batch IK. Continuous selection defaults to unsupported;
+implementations opt in through ``supports_continuous_batch_ik`` and implement
+the protected ``_select_continuous_ik_path`` hook for batched candidates.
+
+.. autosummary::
+
+   BaseSolver
+   SolverCfg
+
 embodichain.lab.sim.motion.solvers.neural_ik_solver
 ---------------------------------------------------
 
@@ -1237,6 +1317,19 @@ embodichain.lab.sim.motion.solvers.null_space_posture_task
 .. autosummary::
 
    NullSpacePostureTask
+
+embodichain.lab.sim.motion.solvers.opw_solver
+---------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.solvers.opw_solver
+
+Configuration and runtime solver for analytic OPW forward and inverse
+kinematics of compatible six-axis manipulators.
+
+.. autosummary::
+
+   OPWSolver
+   OPWSolverCfg
 
 embodichain.lab.sim.motion.solvers.pink_solver
 ----------------------------------------------

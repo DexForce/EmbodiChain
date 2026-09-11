@@ -155,6 +155,10 @@ topics:
   - embodichain/lab/sim/motion/execution.py
   - embodichain/lab/sim/motion/planners/utils.py
   - embodichain/lab/sim/motion/planners/toppra_planner.py
+  - embodichain/lab/sim/motion/planners/trapezoidal_planner.py
+  - embodichain/lab/sim/motion/planners/bezier.py
+  - embodichain/lab/sim/motion/planners/se3.py
+  - embodichain/compute/kinematics/_warp/trapezoidal.py
   - embodichain/lab/sim/motion/planners/curobo/curobo_planner.py
   - embodichain/lab/sim/motion/planners/curobo/curobo_yaml.py
   - embodichain/lab/task_program/semantics/scene.py
