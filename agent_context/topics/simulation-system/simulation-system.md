@@ -196,7 +196,7 @@ than changing a default in the manager blindly.
 
 `RenderCfg.apply_to_dexsim_config()` owns renderer, sampling, tone mapping,
 and `DLSSCfg` conversion into `WorldConfig`. DLSS settings apply to `hybrid`,
-`fast-rt`, and `rt`, after automatic renderer resolution. Defaults enable
+`fast-rt`, and `offline-rt`, after automatic renderer resolution. Defaults enable
 window and offscreen DLSS, with independent RR/SR switches,
 Balanced quality, and zero render dimensions for engine-derived scaling.
 Always forward the master switch, including `False`. Headless initialization
