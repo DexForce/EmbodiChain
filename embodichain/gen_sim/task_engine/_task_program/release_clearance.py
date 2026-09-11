@@ -43,6 +43,7 @@ from embodichain.lab.task_program.semantics import (
 __all__: list[str] = []
 
 CLEAR_RELEASED_CALL = "gen_sim.clear_released"
+_DEFAULT_RETREAT_DISTANCE = 0.15
 
 
 def _clearance_poses(
@@ -127,7 +128,7 @@ class _ClearReleasedFactory:
     revision: ClassVar[str] = "1"
     target_descriptor = MoveEndEffector.descriptor()
     routes: tuple[tuple[str, str, float], ...]
-    retreat_distance: float = 0.10
+    retreat_distance: float = _DEFAULT_RETREAT_DISTANCE
 
     def create(
         self, *, simulation: Any, robot: Any, scene_registry: Any, engine: Any
@@ -170,7 +171,12 @@ def with_release_clearance(registration: Any, *, program: dict[str, Any]) -> Any
         )
     if not routes:
         return registration
-    factory = _ClearReleasedFactory(tuple(routes.values()))
+    # Generated E2 objects can remain within the effect monitor's separation
+    # envelope after a short retreat. Keep the retreat explicit and conservative
+    # so release evidence is acquired before the final park command.
+    factory = _ClearReleasedFactory(
+        tuple(routes.values()), retreat_distance=_DEFAULT_RETREAT_DISTANCE
+    )
     catalog = registration.call_catalog.with_descriptor(
         SemanticCallDescriptor(
             call_id=CLEAR_RELEASED_CALL,
