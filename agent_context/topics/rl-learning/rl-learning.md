@@ -127,6 +127,7 @@ how many environment steps contribute to one optimizer update.
 | Standard rollout storage and views | `buffer/` |
 | Standard and differentiable collection | `collector/` |
 | Policy interface, actor-critic, actor-only, MLP builder | `models/` |
+| Actor and critic observation statistics | `models/normalizer.py` |
 | Standard collect/update loop | `utils/trainer.py` |
 | Differentiable TBPTT/update loop | `differentiable_trainer.py` |
 | Shared completed-episode evaluation | `evaluation.py` |
@@ -137,6 +138,12 @@ Rollout payloads on the standard path are `TensorDict` objects. Policies
 consume observations and write action, log-probability, entropy, and value
 fields needed by their algorithm. Differentiable policies must expose
 graph-preserving action sampling.
+
+For actor-critic policies, `policy.obs_groups.actor` and `.critic` select ordered
+observation groups. The collector and standard buffer preserve separate
+`critic_obs` when configured; evaluation applies the same selection. The PPO
+collector also records the old Gaussian mean and standard deviation for KL
+measurement. These rollout fields have explicit dimensions in the buffer.
 
 Read [training and extension](training.md) for evaluation, checkpoints,
 distributed ownership, official examples and adding algorithms/policies/envs.

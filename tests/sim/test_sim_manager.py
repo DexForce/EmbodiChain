@@ -56,7 +56,7 @@ DEFAULT_LOOK_AT = (
 pytestmark = pytest.mark.no_sim
 
 
-@pytest.mark.parametrize("renderer", ["hybrid", "fast-rt", "rt", "auto"])
+@pytest.mark.parametrize("renderer", ["hybrid", "fast-rt", "offline-rt", "auto"])
 @pytest.mark.parametrize("headless", [False, True])
 @pytest.mark.parametrize(
     "dlss_enabled,offscreen_enabled", [(False, True), (True, False), (True, True)]
