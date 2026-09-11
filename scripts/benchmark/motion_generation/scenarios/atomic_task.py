@@ -488,6 +488,64 @@ def _articulation_effect_success(
     )
 
 
+def _object_lift_success(
+    case: BenchmarkCase,
+    observation: _ExecutionObservation,
+    motion_outcomes: tuple[CaseOutcome, ...],
+) -> torch.Tensor:
+    """Gate PickUp success on the object's measured post-replay lift."""
+    lift = observation.object_lift_delta_m
+    if lift is None:
+        return torch.zeros_like(observation.execution_success)
+    threshold = float(case.case_parameters["minimum_object_lift_m"])
+    return (
+        observation.execution_success
+        & _motion_valid_mask(motion_outcomes, device=lift.device)
+        & torch.isfinite(lift)
+        & (lift >= threshold)
+    )
+
+
+def _object_pose_success(
+    scenario: "AtomicTaskScenario",
+    case: BenchmarkCase,
+    observation: _ExecutionObservation,
+    motion_outcomes: tuple[CaseOutcome, ...],
+) -> torch.Tensor:
+    """Gate object transport/place success on measured position and tilt."""
+    if scenario.suite is None:
+        raise RuntimeError("Atomic Task suite is not configured.")
+    final_pose = observation.final_object_pose
+    if final_pose is None:
+        return torch.zeros_like(observation.execution_success)
+    target = _case_pose(
+        case,
+        "target_object_pose",
+        device=final_pose.device,
+    ).to(dtype=final_pose.dtype)
+    translation = torch.linalg.vector_norm(
+        final_pose[:, :3, 3] - target[:, :3, 3], dim=-1
+    )
+    target_up = target[:, :3, 2]
+    final_up = final_pose[:, :3, 2]
+    tilt = torch.arccos(torch.clamp((target_up * final_up).sum(dim=-1), -1.0, 1.0))
+    position_threshold = float(case.case_parameters["object_position_threshold_m"])
+    tilt_threshold = float(
+        case.case_parameters.get(
+            "object_tilt_threshold_rad",
+            scenario.suite.protocol.rotation_threshold_rad,
+        )
+    )
+    return (
+        observation.execution_success
+        & _motion_valid_mask(motion_outcomes, device=translation.device)
+        & torch.isfinite(translation)
+        & torch.isfinite(tilt)
+        & (translation <= position_threshold)
+        & (tilt <= tilt_threshold)
+    )
+
+
 def _executed_final_pose_success(
     scenario: "AtomicTaskScenario",
     case: BenchmarkCase,
@@ -1252,11 +1310,11 @@ class _PickUpCases(AtomicSkillCaseProvider):
         observation: _ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
-        del scenario, case, compiled
-        success = observation.execution_success & _motion_valid_mask(
-            motion_outcomes, device=observation.execution_success.device
+        del scenario, compiled
+        return (
+            _object_lift_success(case, observation, motion_outcomes),
+            "object_not_lifted",
         )
-        return success, "motion_invalid"
 
 
 class _MoveJointsCases(AtomicSkillCaseProvider):
@@ -1672,6 +1730,12 @@ class _MoveHeldObjectCases(_HeldObjectCases):
                 "object_position_threshold_m": float(
                     config.get("object_position_threshold_m", 0.04)
                 ),
+                "object_tilt_threshold_rad": float(
+                    config.get(
+                        "object_tilt_threshold_rad",
+                        suite.protocol.rotation_threshold_rad,
+                    )
+                ),
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -1709,11 +1773,11 @@ class _MoveHeldObjectCases(_HeldObjectCases):
         observation: _ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
-        del scenario, case, compiled
-        success = observation.execution_success & _motion_valid_mask(
-            motion_outcomes, device=observation.execution_success.device
+        del compiled
+        return (
+            _object_pose_success(scenario, case, observation, motion_outcomes),
+            "object_goal_miss",
         )
-        return success, "motion_invalid"
 
 
 class _PlaceCases(_HeldObjectCases):
@@ -1825,6 +1889,12 @@ class _PlaceCases(_HeldObjectCases):
                 "object_position_threshold_m": float(
                     config.get("object_position_threshold_m", 0.05)
                 ),
+                "object_tilt_threshold_rad": float(
+                    config.get(
+                        "object_tilt_threshold_rad",
+                        suite.protocol.rotation_threshold_rad,
+                    )
+                ),
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -1863,11 +1933,11 @@ class _PlaceCases(_HeldObjectCases):
         observation: _ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
-        del scenario, case, compiled
-        success = observation.execution_success & _motion_valid_mask(
-            motion_outcomes, device=observation.execution_success.device
+        del compiled
+        return (
+            _object_pose_success(scenario, case, observation, motion_outcomes),
+            "object_not_placed",
         )
-        return success, "motion_invalid"
 
 
 class _PressCases(AtomicSkillCaseProvider):
@@ -2007,7 +2077,7 @@ class _PressCases(AtomicSkillCaseProvider):
                     config.get("minimum_joint_delta_m", 0.004)
                 ),
                 "waypoint_rotation_symmetry": "half_turn_about_z",
-                "task_success_scope": "motion_execution_surrogate",
+                "task_success_scope": "physical_articulation_peak_displacement",
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -2076,13 +2146,10 @@ class _PressCases(AtomicSkillCaseProvider):
         observation: _ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
-        del scenario, case, compiled
+        del scenario, compiled
         return (
-            observation.execution_success
-            & _motion_valid_mask(
-                motion_outcomes, device=observation.execution_success.device
-            ),
-            "motion_invalid",
+            _articulation_effect_success(case, observation, motion_outcomes),
+            "articulation_effect_miss",
         )
 
 
@@ -2248,7 +2315,7 @@ class _SlideCases(AtomicSkillCaseProvider):
                 "minimum_articulation_joint_delta": float(
                     config.get("minimum_joint_delta_m", 0.12)
                 ),
-                "task_success_scope": "motion_execution_surrogate",
+                "task_success_scope": "physical_articulation_peak_displacement",
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -2330,13 +2397,10 @@ class _SlideCases(AtomicSkillCaseProvider):
         observation: _ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
-        del scenario, case, compiled
+        del scenario, compiled
         return (
-            observation.execution_success
-            & _motion_valid_mask(
-                motion_outcomes, device=observation.execution_success.device
-            ),
-            "motion_invalid",
+            _articulation_effect_success(case, observation, motion_outcomes),
+            "articulation_effect_miss",
         )
 
 
@@ -2493,7 +2557,7 @@ class _TwistCases(AtomicSkillCaseProvider):
                     config.get("minimum_joint_delta_rad", 0.5)
                 ),
                 "waypoint_rotation_symmetry": "half_turn_about_z",
-                "task_success_scope": "motion_execution_surrogate",
+                "task_success_scope": "physical_articulation_peak_displacement",
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
             },
@@ -2564,13 +2628,10 @@ class _TwistCases(AtomicSkillCaseProvider):
         observation: _ExecutionObservation,
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
-        del scenario, case, compiled
+        del scenario, compiled
         return (
-            observation.execution_success
-            & _motion_valid_mask(
-                motion_outcomes, device=observation.execution_success.device
-            ),
-            "motion_invalid",
+            _articulation_effect_success(case, observation, motion_outcomes),
+            "articulation_effect_miss",
         )
 
 
@@ -3379,11 +3440,12 @@ class AtomicTaskScenario(ScenarioProvider):
     def _is_replayable(compiled: CompiledTrajectory) -> bool:
         """Return whether a compiled trajectory can be physically replayed."""
         trajectory = compiled.trajectory.positions
-        return (
-            trajectory.shape[1] > 0
-            and bool(compiled.plan_success.any().item())
-            and bool(torch.isfinite(trajectory).all().item())
+        plan_success = compiled.plan_success.to(
+            device=trajectory.device, dtype=torch.bool
         )
+        if trajectory.shape[1] == 0 or not bool(plan_success.any().item()):
+            return False
+        return bool(torch.isfinite(trajectory[plan_success]).all().item())
 
     @staticmethod
     def _is_recordable(compiled: CompiledTrajectory) -> bool:
@@ -3403,6 +3465,32 @@ class AtomicTaskScenario(ScenarioProvider):
         if self.simulation is None or self.robot is None:
             raise RuntimeError("Atomic Task runtime is not configured.")
         trajectory = compiled.trajectory.positions
+        plan_success = compiled.plan_success.to(
+            device=trajectory.device, dtype=torch.bool
+        )
+        if plan_success.shape != (trajectory.shape[0],):
+            raise ValueError(
+                "Compiled plan_success must contain one value per trajectory row."
+            )
+        if bool((~plan_success).any().item()):
+            if case.full_start_qpos is None:
+                raise ValueError(
+                    "Atomic replay requires full_start_qpos to hold failed rows."
+                )
+            hold_qpos = case.full_start_qpos.to(
+                device=trajectory.device, dtype=trajectory.dtype
+            )
+            expected_hold_shape = (trajectory.shape[0], trajectory.shape[2])
+            if hold_qpos.shape != expected_hold_shape:
+                raise ValueError(
+                    "Atomic full_start_qpos must match trajectory batch and joint "
+                    "dimensions."
+                )
+            trajectory = torch.where(
+                plan_success[:, None, None],
+                trajectory,
+                hold_qpos[:, None, :],
+            )
         object_handle = self._objects.get(case.object_id or "")
         articulation_handle = self._articulations.get(case.object_id or "")
         settings = self._physics_settings()

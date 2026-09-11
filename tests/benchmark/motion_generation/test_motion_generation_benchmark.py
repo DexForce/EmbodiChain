@@ -493,6 +493,16 @@ def test_seed_override_applies_to_atomic_tracks():
     assert suite.enabled_tracks()[0].config["seeds"] == [104]
 
 
+def test_seed_override_adds_missing_atomic_track_seeds():
+    suite = load_suite("atomic_franka_pgi_curobo_randomized")
+    atomic_track = suite.enabled_tracks()[0]
+    atomic_track.config.pop("seeds", None)
+
+    _apply_overrides(suite, seeds=[104])
+
+    assert atomic_track.config["seeds"] == [104]
+
+
 def test_atomic_task_antipodal_grasp_uses_standalone_generator(monkeypatch):
     from scripts.tutorials.atomic_action import tutorial_utils
 

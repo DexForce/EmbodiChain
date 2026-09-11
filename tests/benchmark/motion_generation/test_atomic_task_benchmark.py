@@ -514,7 +514,11 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
     scenario.solve_reference_qpos.side_effect = lambda start, targets: torch.zeros(
         start.shape[0], targets.shape[1], start.shape[1]
     )
-    suite = Mock(suite_version="test_v1", robot=Mock(id="franka_pgi"))
+    suite = Mock(
+        suite_version="test_v1",
+        robot=Mock(id="franka_pgi"),
+        protocol=Mock(rotation_threshold_rad=0.1),
+    )
     track = Mock(id="atomic-task")
 
     case = create_atomic_skill_provider(skill_id).generate_case(
@@ -585,7 +589,11 @@ def test_fixed_held_object_case_keeps_pickup_and_transport_at_table_pose() -> No
     scenario.solve_reference_qpos.side_effect = lambda start, targets: torch.zeros(
         targets.shape[0], targets.shape[1], start.shape[-1]
     )
-    suite = Mock(suite_version="test_v1", robot=Mock(id="franka_pgi"))
+    suite = Mock(
+        suite_version="test_v1",
+        robot=Mock(id="franka_pgi"),
+        protocol=Mock(rotation_threshold_rad=0.1),
+    )
     track = Mock(id="atomic-task")
     config = {
         "name": "fixed_table_pick",
@@ -628,10 +636,13 @@ def test_held_object_composites_clear_dynamics_at_pickup_lift() -> None:
     compiled.segment.assert_called_with(0, "lift")
 
 
-def _compiled_replay_batch(plan_success: list[bool]) -> CompiledTrajectory:
+def _compiled_replay_batch(
+    plan_success: list[bool], positions: torch.Tensor | None = None
+) -> CompiledTrajectory:
     """Build a small finite compiled batch for replay-mask tests."""
     batch_size = len(plan_success)
-    positions = torch.zeros(batch_size, 2, 7)
+    if positions is None:
+        positions = torch.zeros(batch_size, 2, 7)
     trajectory = TimedTrajectory.from_uniform_step(
         positions,
         env_ids=torch.arange(batch_size, dtype=torch.long),
@@ -649,6 +660,44 @@ def test_partial_compiled_batch_is_replayable() -> None:
     """One successful row should not be blocked by another failed row."""
     assert AtomicTaskScenario._is_replayable(_compiled_replay_batch([True, False]))
     assert not AtomicTaskScenario._is_replayable(_compiled_replay_batch([False, False]))
+
+
+def test_replay_holds_failed_rows_at_their_frozen_start() -> None:
+    """A failed planner row must never send its rollout samples to the robot."""
+    positions = torch.tensor(
+        [
+            [[1.0] * 7, [2.0] * 7],
+            [[8.0] * 7, [9.0] * 7],
+        ]
+    )
+    compiled = _compiled_replay_batch([True, False], positions)
+    start_qpos = torch.tensor([[0.0] * 7, [0.25] * 7])
+    case = replace(
+        _atomic_case(),
+        batch_size=2,
+        full_start_qpos=start_qpos,
+    )
+    scenario = AtomicTaskScenario()
+    scenario.simulation = Mock()
+    scenario.robot = Mock()
+    scenario.track = Mock(
+        config={
+            "physics": {
+                "steps_per_waypoint": 1,
+                "hold_steps": 0,
+                "hold_sim_steps": 1,
+            }
+        }
+    )
+
+    scenario._replay_physics(compiled, case, None, collect_metrics=False)
+
+    commands = [item.args[0] for item in scenario.robot.set_qpos.call_args_list]
+    assert len(commands) == 2
+    assert torch.equal(commands[0][0], positions[0, 0])
+    assert torch.equal(commands[1][0], positions[0, 1])
+    assert torch.equal(commands[0][1], start_qpos[1])
+    assert torch.equal(commands[1][1], start_qpos[1])
 
 
 def test_execute_masks_failed_plan_rows_from_execution_success() -> None:
@@ -720,6 +769,108 @@ def test_articulation_effect_uses_peak_displacement_when_joint_rebounds():
         observation.articulation_joint_initial.item()
     )
     assert success.tolist() == [True]
+
+
+def test_pick_up_requires_measured_object_lift() -> None:
+    provider = create_atomic_skill_provider("pick_up")
+    case = replace(
+        _atomic_case(),
+        batch_size=2,
+        skill_id="pick_up",
+        case_parameters={"minimum_object_lift_m": 0.04},
+    )
+    observation = _ExecutionObservation(
+        execution_success=torch.ones(2, dtype=torch.bool),
+        final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
+        joint_tracking_rmse_rad=torch.zeros(2),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.1,
+        object_lift_delta_m=torch.tensor([0.05, 0.01]),
+    )
+    outcomes = tuple(replace(_atomic_outcome(), env_index=index) for index in range(2))
+
+    success, failure_code = provider.task_result(
+        Mock(), case, Mock(), observation, outcomes
+    )
+
+    assert success.tolist() == [True, False]
+    assert failure_code == "object_not_lifted"
+
+
+@pytest.mark.parametrize(
+    ("skill_id", "failure_code"),
+    [
+        ("move_held_object", "object_goal_miss"),
+        ("place", "object_not_placed"),
+    ],
+)
+def test_object_motion_requires_measured_target_pose(
+    skill_id: str, failure_code: str
+) -> None:
+    provider = create_atomic_skill_provider(skill_id)
+    target_pose = torch.eye(4).repeat(3, 1, 1)
+    final_pose = target_pose.clone()
+    final_pose[1, 0, 3] = 0.20
+    angle = torch.tensor(0.20)
+    final_pose[2, 1, 1] = torch.cos(angle)
+    final_pose[2, 1, 2] = -torch.sin(angle)
+    final_pose[2, 2, 1] = torch.sin(angle)
+    final_pose[2, 2, 2] = torch.cos(angle)
+    case = replace(
+        _atomic_case(),
+        batch_size=3,
+        skill_id=skill_id,
+        case_parameters={
+            "target_object_pose": target_pose.tolist(),
+            "object_position_threshold_m": 0.05,
+            "object_tilt_threshold_rad": 0.10,
+        },
+    )
+    observation = _ExecutionObservation(
+        execution_success=torch.ones(3, dtype=torch.bool),
+        final_tcp_pose=torch.eye(4).repeat(3, 1, 1),
+        joint_tracking_rmse_rad=torch.zeros(3),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.1,
+        final_object_pose=final_pose,
+    )
+    scenario = AtomicTaskScenario()
+    scenario.suite = Mock(protocol=Mock(rotation_threshold_rad=0.10))
+    outcomes = tuple(replace(_atomic_outcome(), env_index=index) for index in range(3))
+
+    success, actual_failure_code = provider.task_result(
+        scenario, case, Mock(), observation, outcomes
+    )
+
+    assert success.tolist() == [True, False, False]
+    assert actual_failure_code == failure_code
+
+
+@pytest.mark.parametrize("skill_id", ["press", "slide", "twist"])
+def test_articulation_tasks_require_measured_joint_displacement(skill_id: str) -> None:
+    provider = create_atomic_skill_provider(skill_id)
+    case = replace(
+        _atomic_case(),
+        batch_size=2,
+        skill_id=skill_id,
+        case_parameters={"minimum_articulation_joint_delta": 0.004},
+    )
+    observation = _ExecutionObservation(
+        execution_success=torch.ones(2, dtype=torch.bool),
+        final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
+        joint_tracking_rmse_rad=torch.zeros(2),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.1,
+        articulation_joint_peak_signed_delta=torch.tensor([0.005, 0.003]),
+    )
+    outcomes = tuple(replace(_atomic_outcome(), env_index=index) for index in range(2))
+
+    success, failure_code = provider.task_result(
+        Mock(), case, Mock(), observation, outcomes
+    )
+
+    assert success.tolist() == [True, False]
+    assert failure_code == "articulation_effect_miss"
 
 
 def test_case_outcome_records_articulation_joint_measurements():

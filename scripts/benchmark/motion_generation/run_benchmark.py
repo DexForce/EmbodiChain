@@ -205,7 +205,7 @@ def _apply_overrides(
     if seeds is not None:
         suite.free_space.seeds = seeds
         for track in suite.tracks:
-            if track.scenario != "free_space" and "seeds" in track.config:
+            if track.scenario == "atomic_task":
                 track.config["seeds"] = list(seeds)
     if num_trials is not None:
         suite.protocol.measured_trials = num_trials
