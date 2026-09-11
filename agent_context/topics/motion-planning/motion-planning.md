@@ -9,7 +9,6 @@
 | TOPPRA planner | `embodichain/lab/sim/motion/planners/toppra_planner.py` → `ToppraPlanner`, `ToppraPlannerCfg`, `ToppraPlanOptions` |
 | Neural planner | `embodichain/lab/sim/motion/planners/neural_planner.py` → `NeuralPlanner`, `NeuralPlannerCfg`, `NeuralPlanOptions` |
 | cuRobo planner | `embodichain/lab/sim/motion/planners/curobo/curobo_planner.py` → `CuroboPlanner`, `CuroboPlannerCfg`, `CuroboWorldCfg`, `CuroboPlanOptions` |
-| Planner assets | `embodichain/data/assets/planner_assets.py` → `download_neural_planner_checkpoint()` |
 | Motion generator | `embodichain/lab/sim/motion/motion_generator.py` → `MotionGenerator`, `MotionGenCfg`, `MotionGenOptions` |
 | Planner utilities & data types | `embodichain/lab/sim/motion/planners/utils.py` → `PlanState`, `PlanResult`, `MoveType`, `MovePart`, `TrajectorySampleMethod`, `interpolate_xpos_batched` |
 | Trajectory augmentation | `embodichain/lab/sim/motion/expansion/` → contracts, configs, operators, coverage, `GenerationSession` |
@@ -67,6 +66,16 @@ Focused augmentation tests live under `tests/sim/motion/expansion/`.
 - `MotionGenerator` composes motion commands and trajectory helpers; `NeuralPlanner` is experimental.
 - [Planner details](planner-details.md) cover process/memory behavior, registration and validation.
 - [Collision worlds](collision-worlds.md) cover snapshots, pose updates, provenance and cache boundaries.
+
+### NeuralPlanner / NMG
+
+`NeuralPlanner` rolls out a standalone NMG ONNX policy whose graph includes
+raw-observation normalization. Install the `nmg` optional dependency, set
+`NeuralPlannerCfg.onnx_model_path`, and invoke it through `MotionGenerator`
+with `NeuralPlanOptions`. `EEF_MOVE` inputs use batched `(B, 4, 4)` poses;
+dynamic-batch exports roll out all environments together. When the runtime
+robot base or TCP differs from training, configure
+`policy_frame_from_world` and `runtime_tcp_from_policy_tcp` explicitly.
 
 ## Planner Interface
 

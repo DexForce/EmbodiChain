@@ -410,9 +410,9 @@ bound motion target.
 | Contract | Value |
 |---|---|
 | Skill ID | `pick_up` |
-| Goal | `GraspGoal(semantics=..., grasp_xpos=None)` |
+| Goal | `GraspGoal(semantics=..., grasp_xpos=None, object_pose=None)` |
 | Binding contract | `primary.motion` plus disjoint `primary.grasp` |
-| Precondition | `ObjectSemantics.entity_id` resolves in the planning snapshot; the deprecated live `entity` fallback remains temporarily; an `AntipodalAffordance` is required when neither an explicit grasp pose nor `fixed_object_to_eef` is supplied |
+| Precondition | When `object_pose` is omitted, `ObjectSemantics.entity_id` must resolve in the planning snapshot (the deprecated live `entity` fallback remains temporarily); an explicit `SceneEntityPose` must reference a snapshot entity; an `AntipodalAffordance` is required when neither an explicit grasp pose nor `fixed_object_to_eef` is supplied |
 | Effect | write `HeldObjectState` for the bound motion target |
 | Verification | the attachment effect must be verified during closed-loop execution |
 
@@ -429,6 +429,15 @@ bypasses affordance sampling, `rotate_upright`, and `grasp_frame_to_eef`. Withou
 the fixed calibration, the action samples valid affordance grasps and evaluates
 reachability. Both paths store the selected `object_to_eef` transform in the
 expected held-object state so later object-centric skills can reuse it.
+
+`GraspGoal.object_pose` optionally supplies the object pose used by the same
+planning pass. It accepts `(4, 4)` (broadcast to every environment) or
+`(B, 4, 4)` (one pose per environment row), and may be a `SceneEntityPose` when
+the pose should be resolved from another entity. With an explicit tensor, the
+pose is scene-independent; this is the intended interface for batched
+benchmark trials with small per-row translation perturbations. The tensor is a
+planning input only and does not teleport or otherwise mutate the simulator
+object.
 
 Set `ObjectSemantics.entity_id` to the same stable ID used by the scene
 snapshot. `PickUp` resolves that object pose once per planning attempt, uses the

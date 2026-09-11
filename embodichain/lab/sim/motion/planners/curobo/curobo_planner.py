@@ -1980,7 +1980,14 @@ class CuroboPlanner(BasePlanner):
                 )
                 with capture_mode, torch.cuda.device(self._curobo_device):
                     v2_result = backend.planner.plan_pose(
-                        goal, current_state, max_attempts=max_attempts
+                        goal,
+                        current_state,
+                        max_attempts=max_attempts,
+                        # Match MotionPlanner's scalar default. BatchMotionPlanner
+                        # otherwise starts with PRM at attempt zero and can feed
+                        # zero-filled seeds to individual rows whose graph query
+                        # failed. Try the native direct seed first, then PRM.
+                        enable_graph_attempt=1,
                     )
                 logger.log_info(
                     f"cuRobo plan_pose segment {seg_idx} cost time: "
@@ -2002,8 +2009,20 @@ class CuroboPlanner(BasePlanner):
                     else nullcontext()
                 )
                 with capture_mode, torch.cuda.device(self._curobo_device):
+                    # cuRobo 0.8's BatchMotionPlanner zero-fills PRM seeds for
+                    # individual batch rows whose graph query fails.  If any
+                    # sibling row found a graph path, that partially invalid
+                    # seed tensor is still forwarded to TrajOpt and can turn a
+                    # trivial direct c-space move into a false per-row failure.
+                    # The native c-space solver already constructs direct
+                    # start-to-goal seeds.  Match MotionPlanner's direct-first
+                    # policy for both scalar and batched solves, then allow PRM
+                    # seeds to help on later attempts.
                     v2_result = backend.planner.plan_cspace(
-                        goal_state, current_state, max_attempts=max_attempts
+                        goal_state,
+                        current_state,
+                        max_attempts=max_attempts,
+                        enable_graph_attempt=1,
                     )
                 logger.log_info(
                     f"cuRobo plan_cspace segment {seg_idx} cost time: "
@@ -2105,14 +2124,23 @@ class CuroboPlanner(BasePlanner):
             last_tstep = last_tstep.squeeze(-1)
 
         B, T, D = position.shape
+        # Despite its name, cuRobo 0.8's ``interpolated_last_tstep`` is the
+        # exclusive slice end (the number of valid samples), not the final
+        # zero-based index.  Its own ``get_interpolated_plan`` passes the value
+        # directly to ``trajectory[..., :end]``.  Adding one here used to pull
+        # the first padding element into every segment; that padding can be NaN
+        # for otherwise successful batch rows and made MotionGenerator reject
+        # the complete batch as non-finite.
+        #
         # Compute the per-env valid length once. This scalar extraction is the
         # only synchronization needed before rectangular trajectory assembly.
-        max_len = max(int((last_tstep + 1).max().item()), 1)
-        cap = min(max_len, T)
-        lengths = (last_tstep + 1).clamp(min=1, max=cap).long().to(self._curobo_device)
+        lengths = last_tstep.to(device=self._curobo_device, dtype=torch.long).clamp(
+            min=1, max=T
+        )
+        max_len = int(lengths.max().item())
         # A single gather both trims to each env's length and pads by repeating
         # the last valid sample: src[b, t] = t if t < length[b] else length[b] - 1.
-        # cap <= T guarantees src < T, so the gather never indexes out of bounds.
+        # max_len <= T guarantees src < T, so gather stays in bounds.
         position = position.float().to(self._curobo_device)
         arange = torch.arange(max_len, device=self._curobo_device)
         src = torch.where(

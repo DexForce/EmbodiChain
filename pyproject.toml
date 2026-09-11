@@ -52,6 +52,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+nmg = [
+  "onnxruntime>=1.20",
+]
 gensim = [
   "bpy",
   "gradio>=6.17.3,<6.18",

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import math
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -36,7 +37,7 @@ import yaml
 from dexsim.types import RigidBodyShape
 
 from embodichain.lab.sim.objects import CollisionShapeDesc
-from embodichain.lab.sim.motion.planners import CuroboPlannerCfg
+from embodichain.lab.sim.motion.planners import CuroboPlannerCfg, PlanState
 from embodichain.lab.sim.motion.planners.curobo import curobo_yaml
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     CuroboPlanOptions,
@@ -194,6 +195,166 @@ def test_curobo_planner_cfg_defaults():
     assert cfg.sim_base_to_curobo_base is None
     assert not hasattr(cfg, "robot_profiles")
     assert not hasattr(cfg.world, "world_config_path")
+
+
+@pytest.mark.parametrize(
+    ("batch_size", "max_attempts"),
+    [(1, None), (8, 3)],
+)
+def test_cspace_planning_uses_direct_seed_before_graph_seed(
+    monkeypatch, batch_size, max_attempts
+):
+    """Use the same direct-first c-space policy for scalar and batched plans."""
+    calls = []
+
+    class _FakeV2Planner:
+        def plan_cspace(self, goal, current, **kwargs):
+            del goal, current
+            calls.append(kwargs)
+            return None
+
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = SimpleNamespace(
+        max_attempts=5,
+        max_planning_time=None,
+        cuda_graph_capture_error_mode="thread_local",
+    )
+    planner.device = torch.device("cpu")
+    planner._curobo_device = torch.device("cpu")
+    monkeypatch.setattr(torch.cuda, "device", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(
+        planner,
+        "_to_curobo_joint_state",
+        lambda _qpos, _backend: object(),
+    )
+    monkeypatch.setattr(
+        planner,
+        "_to_curobo_joint_goal",
+        lambda _qpos, _backend: object(),
+    )
+    backend = SimpleNamespace(
+        planner=_FakeV2Planner(),
+        use_cuda_graph=False,
+    )
+    start = torch.zeros(batch_size, 7)
+    target = PlanState.from_qpos(
+        torch.full((batch_size, 7), 0.1),
+        move_type=MoveType.JOINT_MOVE,
+    )
+
+    result = planner._plan_segments(
+        [target],
+        start,
+        {MoveType.JOINT_MOVE: backend},
+        CuroboPlanOptions(max_attempts=max_attempts),
+    )
+
+    assert result.success.tolist() == [False] * batch_size
+    assert calls == [
+        {
+            "max_attempts": 5 if max_attempts is None else max_attempts,
+            "enable_graph_attempt": 1,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("batch_size", "max_attempts"),
+    [(1, None), (8, 3)],
+)
+def test_pose_planning_uses_direct_seed_before_graph_seed(
+    monkeypatch, batch_size, max_attempts
+):
+    """Keep scalar and batched pose planning on the same seed schedule."""
+    calls = []
+
+    class _FakeV2Planner:
+        def plan_pose(self, goal, current, **kwargs):
+            del goal, current
+            calls.append(kwargs)
+            return None
+
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = SimpleNamespace(
+        max_attempts=5,
+        max_planning_time=None,
+        cuda_graph_capture_error_mode="thread_local",
+    )
+    planner.device = torch.device("cpu")
+    planner._curobo_device = torch.device("cpu")
+    monkeypatch.setattr(torch.cuda, "device", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(
+        planner,
+        "_to_curobo_joint_state",
+        lambda _qpos, _backend: object(),
+    )
+    monkeypatch.setattr(
+        planner,
+        "_to_curobo_pose_goal",
+        lambda _xpos, _backend, _base_inv: object(),
+    )
+    backend = SimpleNamespace(
+        planner=_FakeV2Planner(),
+        use_cuda_graph=False,
+    )
+    start = torch.zeros(batch_size, 7)
+    target = PlanState.from_xpos(
+        torch.eye(4).unsqueeze(0).expand(batch_size, -1, -1).clone(),
+        move_type=MoveType.EEF_MOVE,
+    )
+
+    result = planner._plan_segments(
+        [target],
+        start,
+        {MoveType.EEF_MOVE: backend},
+        CuroboPlanOptions(max_attempts=max_attempts),
+    )
+
+    assert result.success.tolist() == [False] * batch_size
+    assert calls == [
+        {
+            "max_attempts": 5 if max_attempts is None else max_attempts,
+            "enable_graph_attempt": 1,
+        }
+    ]
+
+
+def test_extract_segment_uses_curobo_exclusive_last_tstep(monkeypatch):
+    """Do not admit cuRobo padding beyond each trajectory's slice end."""
+    planner = object.__new__(CuroboPlanner)
+    planner._curobo_device = torch.device("cpu")
+    planner.cfg = SimpleNamespace(interpolation_dt=0.025)
+    monkeypatch.setattr(
+        planner,
+        "_map_curobo_to_sim",
+        lambda positions, _joint_names, _backend: positions,
+    )
+
+    positions = torch.tensor(
+        [
+            [[0.0], [1.0], [2.0], [math.nan], [math.nan], [math.nan]],
+            [[10.0], [11.0], [12.0], [13.0], [14.0], [math.nan]],
+        ]
+    )
+    result = SimpleNamespace(
+        success=torch.tensor([[True], [True]]),
+        interpolated_last_tstep=torch.tensor([[3], [5]]),
+        interpolated_trajectory=SimpleNamespace(
+            position=positions,
+            dt=torch.tensor([[0.1], [0.2]]),
+            joint_names=["joint"],
+        ),
+    )
+
+    success, extracted, dt = planner._extract_segment(result, SimpleNamespace())
+
+    assert success.tolist() == [True, True]
+    assert extracted.shape == (2, 5, 1)
+    assert torch.isfinite(extracted).all()
+    assert extracted[0, :, 0].tolist() == [0.0, 1.0, 2.0, 2.0, 2.0]
+    assert extracted[1, :, 0].tolist() == [10.0, 11.0, 12.0, 13.0, 14.0]
+    assert dt[0].tolist() == pytest.approx([0.0, 0.1, 0.1, 0.0, 0.0])
+    assert dt[1].tolist() == pytest.approx([0.0, 0.2, 0.2, 0.2, 0.2])
 
 
 @pytest.mark.parametrize(

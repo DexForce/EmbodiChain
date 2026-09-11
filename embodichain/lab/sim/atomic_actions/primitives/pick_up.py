@@ -49,6 +49,7 @@ from embodichain.lab.sim.atomic_actions.effects import StateDelta
 from embodichain.lab.sim.atomic_actions.goals import (
     ObjectActionGoal,
     PoseGoalValue,
+    SceneEntityPose,
     _resolve_object_pose,
     collect_scene_dependencies,
     resolve_pose_goal,
@@ -98,8 +99,26 @@ class GraspGoal(ObjectActionGoal):
     closed-loop execution recovery.
     """
 
+    object_pose: PoseGoalValue | None = None
+    """Optional explicit object pose used for grasp planning.
+
+    When omitted, :class:`PickUp` resolves the object's pose from the scene
+    snapshot identified by :attr:`ObjectSemantics.entity_id`.  Supplying a
+    tensor is useful for vectorized benchmark runs: use one ``(4, 4)`` pose
+    for every environment or a ``(num_envs, 4, 4)`` tensor with one pose per
+    environment.  No extra candidate dimension is introduced here; the
+    environment batch itself represents the independent pose trials.
+
+    A :class:`~embodichain.lab.sim.atomic_actions.goals.SceneEntityPose` can
+    also be supplied when the pose should be resolved from another scene
+    entity.  The explicit pose is only a planning input; it does not mutate
+    the simulator object.
+    """
+
     def __post_init__(self) -> None:
         ObjectActionGoal.__post_init__(self)
+        if self.object_pose is not None:
+            validate_pose_goal(self.object_pose, "object_pose", allow_waypoints=False)
         if self.grasp_xpos is not None:
             validate_pose_goal(self.grasp_xpos, "grasp_xpos", allow_waypoints=False)
 
@@ -270,7 +289,15 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         """Include the semantic object when it has a stable scene identity."""
         dependencies = set(super()._scene_dependencies(request))
         entity_id = request.goal.semantics.entity_id
-        if entity_id is not None:
+        # An explicit object pose is a scene-independent planning input.  Do
+        # not retain the semantic entity as a dynamic dependency in that
+        # mode: callers may intentionally plan a synthetic/frozen object pose
+        # (for example, a vectorized benchmark pose batch).  The semantic
+        # object ID remains required for the held-object identity contract;
+        # only its live pose is bypassed.  The legacy path
+        # still tracks the semantic entity because its pose is read from the
+        # live scene snapshot.
+        if entity_id is not None and request.goal.object_pose is None:
             dependencies.add(entity_id)
         dependencies.update(
             collect_scene_dependencies(
@@ -427,11 +454,22 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         )
         state = context
         sem = target.semantics
-        object_pose = _resolve_object_pose(
-            sem,
-            context,
-            name="pickup_object_pose",
-        )
+        if target.object_pose is None:
+            object_pose = _resolve_object_pose(
+                sem,
+                context,
+                name="pickup_object_pose",
+            )
+        else:
+            object_pose = resolve_pose_target(
+                resolve_pose_goal(
+                    target.object_pose,
+                    context,
+                    name="object_pose",
+                ),
+                num_envs=self.num_envs,
+                device=self.device,
+            )
         if (
             target.grasp_xpos is None
             and options.fixed_object_to_eef is None
@@ -519,6 +557,12 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         coordinated_updates = {
             key: None for key in state.coordinated_held_objects if task_state_key in key
         }
+        if target.object_pose is None:
+            monitored_object_id = sem.entity_id
+        elif isinstance(target.object_pose, SceneEntityPose):
+            monitored_object_id = target.object_pose.entity_id
+        else:
+            monitored_object_id = None
         return self.build_plan(
             request,
             context,
@@ -538,8 +582,8 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             # an external dynamic-goal update.
             scene_dependency_monitor_until=(
                 {}
-                if sem.entity_id is None
-                else {sem.entity_id: segment_lengths["approach"]}
+                if monitored_object_id is None
+                else {monitored_object_id: segment_lengths["approach"]}
             ),
         )
 
