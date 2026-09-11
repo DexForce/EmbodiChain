@@ -143,15 +143,19 @@ def _bind(
             table_top,
         )
         synchronize_joint_limits(binding, art)
-        vertices, faces = handle_mesh(binding, art.cfg.fpath)
+        # Reuse the geometry owned by the live articulation.  Parsing the
+        # source asset again can disagree with the simulator's applied scale,
+        # variant selection, or link-local transforms, which are precisely the
+        # inputs used by Slide's grasp-pose generator.
+        vertices, faces = art.get_link_vert_face(binding.link)
         semantics = ObjectSemantics(
             entity_id=binding.link_id,
             geometry={},
             affordance=SlideAffordance(
-                mesh_vertices=torch.tensor(
+                mesh_vertices=torch.as_tensor(
                     vertices, dtype=torch.float32, device=engine.device
                 ),
-                mesh_triangles=torch.tensor(
+                mesh_triangles=torch.as_tensor(
                     faces, dtype=torch.long, device=engine.device
                 ),
                 translation_axis=torch.tensor(binding.axis, device=engine.device)
