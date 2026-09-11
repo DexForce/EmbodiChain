@@ -5034,7 +5034,10 @@ def test_move_joints_holds_stationary_trapezoidal_goal() -> None:
 
     trajectory = _joint_trajectory(_plan_action(action, invocation, _context()))
 
-    torch.testing.assert_close(trajectory.positions[:, :, :ARM_DOF], target[:, None])
+    arm_positions = trajectory.positions[:, :, :ARM_DOF]
+    torch.testing.assert_close(
+        arm_positions, target[:, None, :].expand_as(arm_positions)
+    )
     assert trajectory.velocities is not None
     assert trajectory.accelerations is not None
     torch.testing.assert_close(
