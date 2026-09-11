@@ -23,6 +23,8 @@ Read this when the request needs these details. [Topic overview](env-framework.m
 - Adds declarative config fields: `robot`, `sensor`, `light`, `background`,
   `rigid_object`, `rigid_object_group`, `articulation`, manager configs
   (`events`, `observations`, `rewards`, `actions`, `dataset`), `extensions`.
+- Owns `expert_trajectory.joint_command_mode`: position-only by default or
+  position-plus-velocity for expert execution and persistence.
 - Creates managers in `_init_sim_state()` from config.
 - Overrides `_extend_obs()` to run `ObservationManager.compute()`.
 - Overrides `_extend_reward()` to run `RewardManager.compute()` and add to
@@ -48,6 +50,9 @@ Read this when the request needs these details. [Topic overview](env-framework.m
   holds, and abort-safe holds retain the normal Gym lifecycle.
 - A structured controller `TensorDict` may carry auxiliary fields such as
   `ik_success`, but it must contain at least one supported control key.
+- Position-velocity expert actions are canonicalized only after validation and
+  demo row masking, so recorded targets match the commands actually sent to the
+  controller. A missing qvel is an error before physics advances.
 
 ### Task Program completion (`embodied_env.py`, `task_program/bridge.py`)
 
@@ -205,7 +210,8 @@ from the event config before the event manager is created.
 
 - **Recording**: set `cfg.record_trajectory = True`. A dedicated per-env
   `self._traj_buffer` (TensorDict: `states` = robot root_pose+qpos, articulations,
-  rigid objects; `actions` = the **pre-process** action) is written each step via
+  rigid objects; `actions` = the **pre-process** action in position mode, or
+  effective flat `[qpos, qvel]` targets in position-velocity expert mode) is written each step via
   `_write_trajectory_step` (called from `_hook_after_sim_step`). A per-env
   `self._traj_steps` counter means **async parallel envs** (different reset times)
   don't corrupt each other. `cfg.trajectory_uids` restricts which non-robot objects
@@ -224,6 +230,8 @@ from the event config before the event manager is created.
 - **Decoupled from `rollout_buffer`**: the trajectory buffer is separate from the
   shared `rollout_buffer` (obs/actions/rewards) used by LeRobot/RL.
   `current_rollout_step`, LeRobot recorder, and RL mode are untouched.
+- **Expert action space**: expert rollout/trajectory buffers use a private
+  stored-action layout, leaving the policy-facing Gym `action_space` unchanged.
 - **CLI**: `run-env --replay --replay_trajectory <path> --replay_mode {kinematic,dynamic,control}`.
 
 ---

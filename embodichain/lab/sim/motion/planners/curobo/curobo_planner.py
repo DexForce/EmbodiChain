@@ -42,6 +42,8 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import torch
+
+from embodichain.compute.trajectory import differentiate_positions
 import yaml
 
 from embodichain.utils import configclass, logger
@@ -1954,6 +1956,8 @@ class CuroboPlanner(BasePlanner):
         )
         per_env_samples: list[list[torch.Tensor]] = [[] for _ in range(B)]
         per_env_dt: list[list[torch.Tensor]] = [[] for _ in range(B)]
+        per_env_velocities: list[list[torch.Tensor | None]] = [[] for _ in range(B)]
+        per_env_accelerations: list[list[torch.Tensor | None]] = [[] for _ in range(B)]
         alive = torch.ones(B, dtype=torch.bool, device=self._curobo_device)
         current = start.clone()
 
@@ -2042,13 +2046,18 @@ class CuroboPlanner(BasePlanner):
                     B, dtype=torch.bool, device=self._curobo_device
                 )
                 seg_positions = current.unsqueeze(1)
+                seg_velocities = seg_accelerations = None
                 seg_dt = torch.zeros(
                     B, 1, dtype=torch.float32, device=self._curobo_device
                 )
             else:
-                seg_success, seg_positions, seg_dt = self._extract_segment(
-                    v2_result, backend
-                )
+                (
+                    seg_success,
+                    seg_positions,
+                    seg_dt,
+                    seg_velocities,
+                    seg_accelerations,
+                ) = self._extract_segment(v2_result, backend)
             seg_success = seg_success.to(self._curobo_device) & alive
             if v2_result is not None and self.cfg.max_planning_time is not None:
                 total_time = self._extract_total_time(v2_result, B)
@@ -2067,11 +2076,33 @@ class CuroboPlanner(BasePlanner):
                 else:
                     per_env_samples[b].append(seg_positions[b, -1:])
                     per_env_dt[b].append(seg_dt[b, -1:])
+                selected = (
+                    slice(None)
+                    if seg_idx == 0
+                    else (slice(1, None) if alive[b] else slice(-1, None))
+                )
+                per_env_velocities[b].append(
+                    None if seg_velocities is None else seg_velocities[b, selected]
+                )
+                per_env_accelerations[b].append(
+                    None
+                    if seg_accelerations is None
+                    else seg_accelerations[b, selected]
+                )
                 if seg_success[b]:
                     current[b] = seg_positions[b, -1]
             alive = seg_success
 
-        return self._assemble_result(per_env_samples, per_env_dt, start, alive, B, D)
+        return self._assemble_result(
+            per_env_samples,
+            per_env_dt,
+            start,
+            alive,
+            B,
+            D,
+            per_env_velocities=per_env_velocities,
+            per_env_accelerations=per_env_accelerations,
+        )
 
     def _validate_segment_batch(
         self, target: PlanState, start_batch_size: int, segment_index: int
@@ -2100,10 +2131,14 @@ class CuroboPlanner(BasePlanner):
                 ValueError,
             )
 
-    def _extract_segment(
-        self, v2_result: "Any", backend: "_CuroboBackend"
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Extract ``(success, positions, dt)`` for one V2 planning result.
+    def _extract_segment(self, v2_result: "Any", backend: "_CuroboBackend") -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor | None,
+        torch.Tensor | None,
+    ]:
+        """Extract ``(success, positions, dt, velocities, accelerations)`` for one V2 planning result.
 
         ``positions`` is ``(B, T, controlled_dof)`` in simulator control-part
         order, trimmed to each env's last valid timestep and padded to a
@@ -2152,7 +2187,33 @@ class CuroboPlanner(BasePlanner):
 
         seg_positions = self._map_curobo_to_sim(full, traj.joint_names, backend)
         seg_dt = self._extract_dt(traj, lengths, max_len, B)
-        return success, seg_positions, seg_dt
+
+        def extract_derivative(name: str) -> torch.Tensor | None:
+            value = getattr(traj, name, None)
+            if value is None:
+                return None
+            value = torch.as_tensor(
+                value, device=self._curobo_device, dtype=torch.float32
+            )
+            if value.dim() == 4:
+                value = value[:, 0]
+            if value.shape != position.shape:
+                raise ValueError(f"cuRobo {name} must match position shape.")
+            value = value.gather(1, src.unsqueeze(-1).expand(-1, -1, D))
+            mapped = self._map_curobo_to_sim(value, traj.joint_names, backend)
+            valid = (arange[None, :] < lengths[:, None]) & success[:, None]
+            mapped = mapped.masked_fill(~valid.unsqueeze(-1), 0.0)
+            if not torch.isfinite(mapped).all():
+                raise ValueError(f"cuRobo {name} must be finite on successful samples.")
+            return mapped
+
+        return (
+            success,
+            seg_positions,
+            seg_dt,
+            extract_derivative("velocity"),
+            extract_derivative("acceleration"),
+        )
 
     def _map_curobo_to_sim(
         self,
@@ -2264,6 +2325,9 @@ class CuroboPlanner(BasePlanner):
         alive: torch.Tensor,
         B: int,
         D: int,
+        *,
+        per_env_velocities: list[list[torch.Tensor | None]] | None = None,
+        per_env_accelerations: list[list[torch.Tensor | None]] | None = None,
     ) -> PlanResult:
         """Concatenate per-env segment samples into a rectangular PlanResult."""
         # One D2H sync for the whole batch (was B per-env `if alive[b]:` syncs,
@@ -2293,9 +2357,42 @@ class CuroboPlanner(BasePlanner):
             else:
                 positions[b, :1] = start[b]
                 positions[b, 1:] = start[b]
+
+        def assemble_derivative(
+            parts: list[list[torch.Tensor | None]] | None,
+            fallback: torch.Tensor | None = None,
+        ) -> torch.Tensor | None:
+            if parts is None:
+                return fallback
+            value = (
+                torch.zeros_like(positions) if fallback is None else fallback.clone()
+            )
+            for b in range(B):
+                if not alive_list[b]:
+                    continue
+                offset = 0
+                for samples, derivative in zip(per_env_samples[b], parts[b]):
+                    length = samples.shape[0]
+                    if derivative is None:
+                        if fallback is None:
+                            return None
+                    else:
+                        value[b, offset : offset + length] = derivative
+                    offset += length
+            return value
+
+        velocities = assemble_derivative(
+            per_env_velocities, differentiate_positions(positions, dt)
+        )
+        assert velocities is not None
+        accelerations = assemble_derivative(per_env_accelerations)
         return PlanResult(
             success=alive.to(self.device),
             positions=positions.to(self.device),
+            velocities=velocities.to(self.device),
+            accelerations=(
+                None if accelerations is None else accelerations.to(self.device)
+            ),
             dt=dt.to(self.device),
         )
 

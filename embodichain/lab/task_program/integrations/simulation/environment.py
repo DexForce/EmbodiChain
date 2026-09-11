@@ -40,6 +40,7 @@ from typing import Protocol, TYPE_CHECKING
 
 import torch
 
+from embodichain.lab.gym.envs.expert_trajectory import JointCommandMode
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     EntityState,
@@ -411,6 +412,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         robot: Exact robot selected for planning and evidence acquisition.
         registration: Frozen scene, profile, and extension declarations.
         step_dt: Authoritative Gym control cadence.
+        joint_command_mode: Environment-owned expert joint command mode.
         planner_cfg: Explicit planner configuration.  ``None`` selects TOPPRA
             for ``robot.uid``.
         motion_generator_factory: Optional fresh-generator factory.  It is
@@ -433,6 +435,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         registration: SimulationTaskProgramRegistration,
         *,
         step_dt: float,
+        joint_command_mode: JointCommandMode = "position",
         planner_cfg: BasePlannerCfg | None = None,
         motion_generator_factory: MotionGeneratorFactory | None = None,
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
@@ -462,6 +465,10 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             grasp_pose_generators, Mapping
         ):
             raise TypeError("grasp_pose_generators must be a mapping or None.")
+        if joint_command_mode not in ("position", "position_velocity"):
+            raise ValueError(
+                "joint_command_mode must be 'position' or 'position_velocity'."
+            )
 
         robot_uid = _robot_uid(robot)
         get_robot = getattr(simulation, "get_robot", None)
@@ -487,6 +494,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         self._scene_binding = selected_scene_binding
         self._robot_profile_binding = selected_profile_binding
         self._step_dt = _positive_finite(step_dt, field_name="step_dt")
+        self._joint_command_mode = joint_command_mode
         self._planner_cfg = selected_planner_cfg
         self._motion_generator_factory = motion_generator_factory
         self._grasp_pose_generators = (
@@ -539,11 +547,22 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             raise TypeError("environment must expose step_dt.") from exc
         if simulation is None or robot is None:
             raise TypeError("environment must expose non-None sim and robot values.")
+        expert_trajectory_cfg = getattr(
+            getattr(environment, "cfg", None),
+            "expert_trajectory",
+            None,
+        )
+        joint_command_mode = getattr(
+            expert_trajectory_cfg,
+            "joint_command_mode",
+            "position",
+        )
         return cls(
             simulation,
             robot,
             registration,
             step_dt=step_dt,
+            joint_command_mode=joint_command_mode,
             planner_cfg=planner_cfg,
             motion_generator_factory=motion_generator_factory,
             grasp_pose_generators=grasp_pose_generators,
@@ -751,6 +770,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         return TaskProgramEnvironmentAdapter(
             self,
             step_dt=self._step_dt,
+            joint_command_mode=self._joint_command_mode,
             registration=self._registration,
         )
 

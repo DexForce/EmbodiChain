@@ -29,6 +29,8 @@ import torch
 from tensordict import TensorDict
 from unittest.mock import MagicMock, Mock, patch
 
+from embodichain.lab.gym.envs.expert_trajectory import build_expert_action_spec
+
 # Skip all tests if LeRobot is not available
 try:
     import pandas as pd
@@ -346,6 +348,42 @@ class TestLeRobotRecorderFeatures:
         }
         assert "annotation.segment_attempt_id" in features
         assert "annotation.continuity_id" in features
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_position_velocity_action_feature_uses_canonical_layout(
+        self, mock_lerobot_dataset
+    ):
+        env = MockEnvForDataset(num_joints=2, has_sensors=False)
+        env.expert_action_spec = build_expert_action_spec(
+            joint_names=["joint_0", "joint_1"],
+            joint_command_mode="position_velocity",
+        )
+        mock_dataset_instance = Mock()
+        mock_dataset_instance.meta = Mock()
+        mock_dataset_instance.meta.info = {"fps": 30}
+        mock_lerobot_dataset.create.return_value = mock_dataset_instance
+        recorder = LeRobotRecorder(
+            MockFunctorCfg(
+                params={
+                    "save_path": "/tmp/test_dataset",
+                    "robot_meta": {"robot_type": "test_robot"},
+                    "instruction": {"lang": "test task"},
+                    "extra": {"task_description": "test"},
+                    "use_videos": False,
+                }
+            ),
+            env,
+        )
+
+        action_feature = recorder._build_features()[LeRobotKey.ACTION.value]
+
+        assert action_feature["shape"] == (4,)
+        assert action_feature["names"] == [
+            "joint_0.position",
+            "joint_1.position",
+            "joint_0.velocity",
+            "joint_1.velocity",
+        ]
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_build_features_with_sensor(self, mock_lerobot_dataset):
@@ -767,6 +805,57 @@ class TestLeRobotRecorderFrameConversion:
         assert LeRobotKey.ACTION.value in frame
         assert frame["annotation.segment_id"].tolist() == [2]
         assert frame["annotation.segment_end"].tolist() == [1]
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_convert_frame_keeps_structured_position_velocity_action(
+        self, mock_lerobot_dataset
+    ):
+        env = MockEnvForDataset(num_joints=2, has_sensors=False)
+        env.expert_action_spec = build_expert_action_spec(
+            joint_names=["joint_0", "joint_1"],
+            joint_command_mode="position_velocity",
+        )
+        mock_dataset_instance = Mock()
+        mock_dataset_instance.meta = Mock()
+        mock_dataset_instance.meta.info = {"fps": 30}
+        mock_lerobot_dataset.create.return_value = mock_dataset_instance
+        recorder = LeRobotRecorder(
+            MockFunctorCfg(
+                params={
+                    "save_path": "/tmp/test_dataset",
+                    "robot_meta": {"robot_type": "test_robot"},
+                    "instruction": {"lang": "test task"},
+                    "extra": {"task_description": "test"},
+                    "use_videos": False,
+                }
+            ),
+            env,
+        )
+        obs = TensorDict(
+            {
+                "robot": {
+                    "qpos": torch.zeros(2),
+                    "qvel": torch.zeros(2),
+                    "qf": torch.zeros(2),
+                },
+                "sensor": {},
+            },
+            batch_size=[],
+        )
+        action = TensorDict(
+            {
+                "qpos": torch.tensor([1.0, 2.0]),
+                "qvel": torch.tensor([0.1, 0.2]),
+            },
+            batch_size=[],
+        )
+
+        frame = recorder._convert_frame_to_lerobot(obs, action, "test_task")
+
+        torch.testing.assert_close(
+            frame[LeRobotKey.ACTION.value],
+            torch.tensor([1.0, 2.0, 0.1, 0.2]),
+        )
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_convert_frame_with_depth_and_mask(self, mock_lerobot_dataset):

@@ -33,9 +33,11 @@ import math
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
 import torch
+from tensordict import TensorDict
 
 from embodichain.lab.gym.envs._json import json_safe_copy as _json_safe_copy
 from embodichain.lab.gym.envs.demo import DemoSegment
+from embodichain.lab.gym.envs.expert_trajectory import JointCommandMode
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.sim.atomic_actions.bindings import (
     JointPositionTarget,
@@ -428,13 +430,16 @@ class JointPositionGymTransportEncoder:
             raise TypeError("Joint-position transport requires JointPositionTarget.")
         if not isinstance(command.payload, JointPositionPayload):
             raise TypeError("Joint-position transport requires JointPositionPayload.")
-        if not isinstance(base_action, torch.Tensor):
+        if isinstance(base_action, torch.Tensor):
+            qpos = base_action
+        elif isinstance(base_action, TensorDict) and "qpos" in base_action:
+            qpos = base_action["qpos"]
+        else:
             raise TypeError(
-                "The built-in joint-position encoder requires a tensor base action; "
-                "register structured transports after it or provide a compatible "
-                "custom composition encoder."
+                "The built-in joint-position encoder requires a tensor action or "
+                "a TensorDict containing qpos."
             )
-        if base_action.dim() != 2 or base_action.shape[0] != command.batch_size:
+        if qpos.dim() != 2 or qpos.shape[0] != command.batch_size:
             raise ValueError(
                 "The full-qpos base action must have shape (batch_size, robot_dof)."
             )
@@ -442,25 +447,51 @@ class JointPositionGymTransportEncoder:
             command.batch_size,
         ):
             raise ValueError("active_mask must be bool with one value per command row.")
-        if active_mask.device != base_action.device:
+        if active_mask.device != qpos.device:
             raise ValueError("active_mask and base_action must share a device.")
         joint_ids = command.target.joint_ids
-        if max(joint_ids) >= base_action.shape[1]:
+        if max(joint_ids) >= qpos.shape[1]:
             raise ValueError(
                 f"Joint ID {max(joint_ids)} exceeds full qpos width "
-                f"{base_action.shape[1]}."
+                f"{qpos.shape[1]}."
             )
         positions = command.payload.positions
-        if positions.device != base_action.device:
+        if positions.device != qpos.device:
             raise ValueError("Joint payload and base action must share a device.")
-        if not base_action.is_floating_point():
+        if not qpos.is_floating_point():
             raise TypeError("The full-qpos base action must be floating point.")
 
+        action_qpos = qpos.clone()
+        columns = torch.tensor(joint_ids, dtype=torch.long, device=qpos.device)
+        selected = action_qpos.index_select(1, columns)
+        selected[active_mask] = positions[active_mask].to(dtype=action_qpos.dtype)
+        action_qpos[:, columns] = selected
+        if isinstance(base_action, torch.Tensor):
+            return action_qpos
+
+        velocities = command.payload.velocities
+        if velocities is None:
+            raise ValueError(
+                "position_velocity joint commands require payload velocities."
+            )
+        if "qvel" not in base_action:
+            raise TypeError(
+                "Position-velocity joint actions require qpos and qvel base targets."
+            )
+        qvel = base_action["qvel"]
+        if qvel.shape != qpos.shape or qvel.device != qpos.device:
+            raise ValueError(
+                "Full qpos and qvel base targets must share shape and device."
+            )
+        action_qvel = qvel.clone()
+        selected_velocity = action_qvel.index_select(1, columns)
+        selected_velocity[active_mask] = velocities[active_mask].to(
+            dtype=action_qvel.dtype
+        )
+        action_qvel[:, columns] = selected_velocity
         action = base_action.clone()
-        columns = torch.tensor(joint_ids, dtype=torch.long, device=action.device)
-        selected = action.index_select(1, columns)
-        selected[active_mask] = positions[active_mask].to(dtype=action.dtype)
-        action[:, columns] = selected
+        action["qpos"] = action_qpos
+        action["qvel"] = action_qvel
         return action
 
     def hold(
@@ -487,6 +518,8 @@ class RuntimeCommandFrameEncoder:
         include_joint_position: Whether to install the built-in joint-position
             encoder. Standard assemblies disable it when their exact profile uses
             only custom endpoint transports.
+        joint_command_mode: Whether joint commands emit qpos alone or structured
+            qpos and qvel targets.
     """
 
     def __init__(
@@ -495,12 +528,18 @@ class RuntimeCommandFrameEncoder:
         *,
         transports: Iterable[RuntimeTransportActionEncoder] = (),
         include_joint_position: bool = True,
+        joint_command_mode: JointCommandMode = "position",
     ) -> None:
         if not isinstance(qpos_provider, CurrentQposProvider):
             raise TypeError("qpos_provider must implement CurrentQposProvider.")
         if type(include_joint_position) is not bool:
             raise TypeError("include_joint_position must be a bool.")
+        if joint_command_mode not in ("position", "position_velocity"):
+            raise ValueError(
+                "joint_command_mode must be 'position' or 'position_velocity'."
+            )
         self._qpos_provider = qpos_provider
+        self._joint_command_mode = joint_command_mode
         self._transports: dict[str, RuntimeTransportActionEncoder] = {}
         self._frozen = False
         if include_joint_position:
@@ -622,11 +661,28 @@ class RuntimeCommandFrameEncoder:
             raise ValueError("Current qpos must contain finite floating-point values.")
         return qpos.clone()
 
+    def _action_from_qpos(self, qpos: torch.Tensor) -> EnvAction:
+        """Build the configured controller action on top of observed qpos."""
+        if self._joint_command_mode == "position":
+            return qpos.clone()
+        return TensorDict(
+            {
+                "qpos": qpos.clone(),
+                "qvel": torch.zeros_like(qpos),
+            },
+            batch_size=qpos.shape[:1],
+            device=qpos.device,
+        )
+
+    def _base_action(self, env_ids: torch.Tensor) -> EnvAction:
+        """Capture one safe controller base action for the configured mode."""
+        return self._action_from_qpos(self._base_qpos(env_ids))
+
     def encode(self, frame: RuntimeCommandFrame) -> EnvAction:
         """Encode one frame on top of a fresh full-qpos hold action."""
         if not isinstance(frame, RuntimeCommandFrame):
             raise TypeError("frame must be a RuntimeCommandFrame.")
-        action: EnvAction = self._base_qpos(frame.env_ids)
+        action = self._base_action(frame.env_ids)
         by_transport: dict[str, list[EndpointCommand]] = {}
         for command in frame.commands:
             transport = self._transports.get(command.transport_id)
@@ -654,7 +710,7 @@ class RuntimeCommandFrameEncoder:
         """Encode an observed-position safe hold for addressed transports."""
         if not isinstance(context, PlanningContext):
             raise TypeError("context must be a PlanningContext.")
-        action: EnvAction = context.robot.qpos.clone()
+        action = self._action_from_qpos(context.robot.qpos)
         by_transport: dict[str, list[RuntimeEndpointTarget]] = {}
         for target in targets:
             if not isinstance(target, RuntimeEndpointTarget):
@@ -681,7 +737,7 @@ class RuntimeCommandFrameEncoder:
 
     def encode_idle_hold(self, env_ids: torch.Tensor) -> EnvAction:
         """Return a fresh full-qpos hold when no transport was armed yet."""
-        return self._base_qpos(env_ids)
+        return self._base_action(env_ids)
 
 
 class BufferedGymCommandSink:

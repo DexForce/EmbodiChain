@@ -63,6 +63,9 @@ class MotionPolicy:
     sample_count: int = 50
     """Requested trajectory sample count when the backend does not preserve samples."""
 
+    velocity_targets: Literal["auto", "zero"] = "auto"
+    """Use trajectory velocities or explicit zero velocity targets."""
+
     dynamic_collision_mode: DynamicCollisionMode = DynamicCollisionMode.AUTO
     """How this invocation consumes live scene-snapshot collision entities."""
 
@@ -76,6 +79,8 @@ class MotionPolicy:
                 f"strategy must be one of {sorted(valid_strategies)}, "
                 f"got {self.strategy!r}."
             )
+        if self.velocity_targets not in {"auto", "zero"}:
+            raise ValueError("velocity_targets must be auto or zero.")
         if self.sample_count < 2:
             raise ValueError("sample_count must be at least 2.")
         mode = self.dynamic_collision_mode

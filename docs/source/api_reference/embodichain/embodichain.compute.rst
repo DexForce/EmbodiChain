@@ -44,6 +44,8 @@ means trajectory deformation.
 
 .. autosummary::
 
+   differentiate_positions
+   resample_in_time
    interpolate_with_distance
    interpolate_with_nums
    resample_with_distance
@@ -54,6 +56,13 @@ means trajectory deformation.
    :members:
    :imported-members:
 
+Timed trajectories use ``dt`` arrival intervals. ``differentiate_positions``
+uses nonuniform central differences and one-sided endpoints, accepting only
+unchanged positions at repeated timestamps. It does not impose rest boundaries
+or motion limits. ``resample_in_time`` preserves endpoints and total duration
+while sampling the original time profile; callers must recompute derivatives
+after changing samples or timing.
+
 Implementation modules
 ----------------------
 
@@ -61,6 +70,9 @@ Implementation modules
    :members:
 
 .. automodule:: embodichain.compute.trajectory.resampling
+   :members:
+
+.. automodule:: embodichain.compute.trajectory.timing
    :members:
 
 .. automodule:: embodichain.compute.trajectory.warping

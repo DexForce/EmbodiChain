@@ -14,8 +14,8 @@ explicit cuRobo world.
   planner bypass is inferred from a missing backend-options object.
 * **Strict timed results**: A planner result with positions must include
   per-waypoint `dt`; `duration` is derived from it. The generator validates that
-  contract, preserves total duration when resampling, and holds failed rows at
-  `start_qpos`.
+  contract, supplies matching velocity targets, preserves total duration when
+  resampling, and holds failed rows at `start_qpos` with zero velocity.
 * **Flexible planner selection**: Supports TOPPRA, NeuralPlanner (experimental), and the optional CuroboPlanner backend, which plans on CUDA with either CPU or CUDA physics simulation.
 * **Automatic constraint handling**: Retrieves velocity and acceleration limits from the robot or uses user-specified/default values.
 * **Backend-aware target handling**: Generates discrete trajectories using joint or Cartesian interpolation where appropriate; cuRobo receives original Cartesian goals so it can perform collision-aware IK itself.
@@ -160,6 +160,30 @@ or global default. Custom planners likewise must return `PlanResult.dt` with
 shape `(B, N)` whenever they return positions; `duration` is exposed as the
 derived value `dt.sum(dim=1)`.
 
+## Physical playback
+
+Planner output is a timed command: apply position and velocity sample `i`, then
+advance physics by `dt[i + 1]` before observing sample `i + 1`. Clear the target
+velocity to zero after dispatching the terminal position and during its hold.
+The motion-generator tutorial implements that controller loop. Planning-only
+visualizations may instead teleport current state to each waypoint; for example,
+the cuRobo planner demo does this deliberately to display the collision-checked
+path without measuring drive tracking.
+
+For a reproducible physical comparison, run:
+
+```bash
+python examples/sim/motion/trajectory_velocity_tracking.py --headless \
+    --device cpu --output-dir trajectory_velocity_results
+```
+
+It restores the same configured initial state and clears dynamics before each
+trial, then executes the same smooth reference. One mode explicitly writes zero target velocity and the other sends differentiated
+velocity targets. The CSV preserves the actual measurement timestamps; the plot
+and printed RMSE/P95/maximum errors describe this particular drive configuration
+and cadence rather than asserting that velocity feed-forward always improves
+tracking.
+
 #### Cartesian Space Planning
 
 ```python
@@ -241,3 +265,28 @@ print(f"Estimated sample count: {sample_count}")
 * CuroboPlanner is optional and requires CUDA plus a matching cuRobo V2 installation; see [the cuRobo planner page](curobo_planner.md) and [NVIDIA's installation guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html).
 * Run the collision-aware Panda demo with `python examples/sim/motion/planners/curobo_planner.py --headless --hold-steps 1 --step-repeat 1`.
 * The sample count estimation is useful for predicting computational load and memory requirements.
+
+
+### Task Program velocity targets
+
+Configured Atomic Skill execution policies retain `ik_interp` by default and
+make the velocity-target choice explicit:
+
+```yaml
+motion:
+  strategy: ik_interp
+  sample_count: 40
+  velocity_targets: auto
+```
+
+`auto` uses native planner velocities when available and derives missing
+velocities from the final timed joint trajectory, including composite skills.
+`zero` commands position targets with explicit zero velocity targets.
+Execution uses the existing `Robot.set_qpos` and `Robot.set_qvel` target APIs.
+A nonzero damping gain is needed for a velocity contribution.
+
+Stationary joint intervals and the final settling command use zero target
+velocity. These are execution holds, not a claim that numerical differentiation
+makes a piecewise-linear path smoothly start or stop. Neither differentiation
+nor time resampling certifies joint velocity/acceleration limits; use a suitable
+time-parameterizing planner and validate any subsequently retimed trajectory.

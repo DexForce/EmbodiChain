@@ -45,7 +45,8 @@ from embodichain.lab.sim.motion.planners import (
 from embodichain.compute.trajectory import (
     interpolate_with_distance,
     interpolate_with_nums,
-    resample_with_distance,
+    resample_in_time,
+    differentiate_positions,
 )
 from embodichain.utils import logger, configclass
 from .planners.utils import (
@@ -859,8 +860,6 @@ class MotionGenerator:
             )
         if dt.device != device or not torch.isfinite(dt).all() or (dt < 0).any():
             raise ValueError("MotionGenerator returned invalid time deltas.")
-        raw_duration = dt.sum(dim=1)
-
         resampled = False
         preserve_samples = getattr(self.planner, "preserve_plan_samples", False) is True
         if (
@@ -868,19 +867,8 @@ class MotionGenerator:
             and not preserve_samples
             and positions.shape[1] != options.sample_count
         ):
-            positions = resample_with_distance(
-                trajectory=positions,
-                interp_num=options.sample_count,
-                device=device,
-            )
+            positions, dt = resample_in_time(positions, dt, options.sample_count)
             resampled = True
-            dt = torch.zeros(
-                positions.shape[:2],
-                dtype=result.dt.dtype,
-                device=device,
-            )
-            if positions.shape[1] > 1:
-                dt[:, 1:] = raw_duration[:, None] / (positions.shape[1] - 1)
 
         def normalize_derivative(
             value: torch.Tensor | None,
@@ -929,6 +917,8 @@ class MotionGenerator:
                     accelerations,
                     torch.zeros_like(accelerations),
                 )
+        if velocities is None:
+            velocities = differentiate_positions(positions, dt)
 
         return PlanResult(
             success=success,

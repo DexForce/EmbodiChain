@@ -6,6 +6,7 @@
 |------|------|
 | Public simulation package | `embodichain/lab/sim/__init__.py` |
 | Motion capability namespace | `embodichain/lab/sim/motion/__init__.py` |
+| Fixed-cadence trajectory playback | `embodichain/lab/sim/motion/execution.py` |
 | World and scene owner | `embodichain/lab/sim/sim_manager.py` → `SimulationManager` |
 | Global simulation config | `embodichain/lab/sim/sim_manager.py` → `SimulationManagerCfg` |
 | Object and physics configs | `embodichain/lab/sim/cfg.py` |
@@ -72,6 +73,12 @@ exclusive.
 then advances the world for the requested number of physics steps. Each
 environment control step normally calls it with
 `sim_steps_per_control`.
+
+Standalone timed-trajectory playback uses `play_joint_trajectory()`. It keeps
+`SimulationManagerCfg.physics_dt` unchanged, requires the selected command
+period to be an integer multiple of that physics period, and advances that
+many physics substeps per command. Planner arrival intervals are input to
+retiming, never replacement values for the physics timestep.
 
 `scripts/tutorials/sim/gizmo_robot.py` supports only manual physics. It initializes
 GPU physics after robot creation when needed, sets both current and target
@@ -247,6 +254,8 @@ supported explicit options.
 - Physics advances through explicit `SimulationManager.update()` calls.
   Interactive loops own their fixed physics timestep and optional wall-clock
   pacing.
+- Never pass a planner waypoint interval as `SimulationManager.update()`'s
+  physics timestep. Quantize the path to a fixed command grid first.
 - Drawing markers and publishing visualization do not advance physics.
   Use `capture_visualization(force=True)` to publish marker edits while paused.
 - Reset only the requested environment rows and honor

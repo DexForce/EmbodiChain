@@ -168,32 +168,6 @@ def test_preserving_failed_trajectories_keeps_report_unless_resampled(
         assert result.constraint_report is report
 
 
-@pytest.fixture(autouse=True)
-def _torch_resampling(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Use deterministic Torch resampling without initializing Warp."""
-
-    def resample(
-        trajectory: torch.Tensor,
-        interp_num: int,
-        device: torch.device,
-    ) -> torch.Tensor:
-        indices = torch.linspace(
-            0,
-            trajectory.shape[1] - 1,
-            interp_num,
-            device=device,
-        )
-        lower = indices.floor().to(torch.long)
-        upper = indices.ceil().to(torch.long)
-        weights = (indices - lower).view(1, -1, 1)
-        return torch.lerp(trajectory[:, lower], trajectory[:, upper], weights)
-
-    monkeypatch.setattr(
-        "embodichain.lab.sim.motion.motion_generator.resample_with_distance",
-        resample,
-    )
-
-
 class _DirectCartesianPlanner:
     """Fake backend that consumes raw Cartesian targets (like cuRobo).
 
@@ -903,3 +877,64 @@ class TestNormalizedPlanResult:
             result.positions[1],
             start[1].unsqueeze(0).expand(positions.shape[1], -1),
         )
+
+
+def test_ik_interpolation_materializes_reference_velocity() -> None:
+    generator = _mock_generator()
+    start = torch.zeros(BATCH_SIZE, CONTROLLED_DOF)
+    result = generator.generate(
+        [PlanState.from_qpos(torch.ones_like(start))],
+        MotionGenOptions(
+            strategy="ik_interp",
+            sample_count=5,
+            start_qpos=start,
+            interpolation_dt=0.25,
+        ),
+    )
+    assert result.velocities is not None
+    torch.testing.assert_close(result.velocities, torch.ones_like(result.positions))
+
+
+def test_normalization_preserves_native_derivatives_and_zeros_failed_rows() -> None:
+    generator = _mock_generator()
+    positions = (
+        torch.arange(3.0).view(1, 3, 1).expand(BATCH_SIZE, -1, CONTROLLED_DOF).clone()
+    )
+    native = torch.full_like(positions, 0.3)
+    result = generator._normalize_plan_result(
+        PlanResult(
+            success=torch.tensor([True, False]),
+            positions=positions,
+            velocities=native,
+            dt=torch.tensor([[0.0, 1.0, 1.0]]).expand(BATCH_SIZE, -1),
+        ),
+        [PlanState.from_qpos(positions[:, -1])],
+        MotionGenOptions(start_qpos=positions[:, 0]),
+    )
+    torch.testing.assert_close(result.velocities[0], native[0])
+    assert torch.equal(result.velocities[1], torch.zeros_like(native[1]))
+
+
+def test_normalization_resamples_by_time_and_recomputes_derivatives() -> None:
+    generator = _mock_generator()
+    positions = (
+        torch.tensor([0.0, 1.0, 2.0])
+        .view(1, 3, 1)
+        .expand(BATCH_SIZE, -1, CONTROLLED_DOF)
+        .clone()
+    )
+    result = generator._normalize_plan_result(
+        PlanResult(
+            success=True,
+            positions=positions,
+            velocities=torch.full_like(positions, 99.0),
+            dt=torch.tensor([[0.0, 0.75, 0.25]]).expand(BATCH_SIZE, -1),
+        ),
+        [PlanState.from_qpos(positions[:, -1])],
+        MotionGenOptions(start_qpos=positions[:, 0], sample_count=5),
+    )
+    torch.testing.assert_close(
+        result.positions[0, :, 0], torch.tensor([0.0, 1 / 3, 2 / 3, 1.0, 2.0])
+    )
+    assert result.velocities is not None
+    torch.testing.assert_close(result.velocities[0, 1, 0], torch.tensor(4 / 3))

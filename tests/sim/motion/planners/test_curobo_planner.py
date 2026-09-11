@@ -346,7 +346,9 @@ def test_extract_segment_uses_curobo_exclusive_last_tstep(monkeypatch):
         ),
     )
 
-    success, extracted, dt = planner._extract_segment(result, SimpleNamespace())
+    success, extracted, dt, velocities, accelerations = planner._extract_segment(
+        result, SimpleNamespace()
+    )
 
     assert success.tolist() == [True, True]
     assert extracted.shape == (2, 5, 1)
@@ -355,6 +357,8 @@ def test_extract_segment_uses_curobo_exclusive_last_tstep(monkeypatch):
     assert extracted[1, :, 0].tolist() == [10.0, 11.0, 12.0, 13.0, 14.0]
     assert dt[0].tolist() == pytest.approx([0.0, 0.1, 0.1, 0.0, 0.0])
     assert dt[1].tolist() == pytest.approx([0.0, 0.2, 0.2, 0.2, 0.2])
+    assert velocities is None
+    assert accelerations is None
 
 
 @pytest.mark.parametrize(
@@ -1775,7 +1779,8 @@ def test_curobo_reuses_non_graph_backend():
                     binding,
                     MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
-            )
+            ),
+            context=engine.initial_context(control_dt=0.1),
         )
         success = result.plan_success
         trajectory = result.trajectory.positions
@@ -1794,7 +1799,8 @@ def test_curobo_reuses_non_graph_backend():
                     binding,
                     MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
-            )
+            ),
+            context=engine.initial_context(control_dt=0.1),
         )
         success = result.plan_success
         assert bool(success.item()), "second plan failed"
@@ -1832,7 +1838,8 @@ def test_curobo_uses_accelerator_with_cpu_physics():
                     binding,
                     MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
-            )
+            ),
+            context=engine.initial_context(control_dt=0.1),
         )
         success = result.plan_success
         trajectory = result.trajectory.positions
@@ -1847,3 +1854,95 @@ def test_curobo_uses_accelerator_with_cpu_physics():
     finally:
         sim.destroy()
         SimulationManager.flush_cleanup_queue()
+
+
+def test_curobo_assembly_generates_missing_velocities_and_zeros_failed_rows() -> None:
+    planner = object.__new__(CuroboPlanner)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    result = planner._assemble_result(
+        [[torch.tensor([[0.0], [1.0], [2.0]])], []],
+        [[torch.tensor([0.0, 0.5, 0.5])], []],
+        torch.tensor([[0.0], [3.0]]),
+        torch.tensor([True, False]),
+        2,
+        1,
+    )
+    assert result.velocities is not None
+    torch.testing.assert_close(result.velocities[0], torch.full((3, 1), 2.0))
+    assert torch.count_nonzero(result.velocities[1]) == 0
+
+
+def test_curobo_extraction_maps_native_derivatives_and_clears_padding() -> None:
+    planner = object.__new__(CuroboPlanner)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    backend = SimpleNamespace(
+        curobo_joint_names_sig=None,
+        curobo_to_sim_col_idx=None,
+        sim_joint_names=["b", "a"],
+        profile=SimpleNamespace(sim_to_curobo_joint_names={"a": "a", "b": "b"}),
+    )
+    position = torch.arange(12.0).reshape(2, 3, 2)
+    velocity = position + 10
+    result = SimpleNamespace(
+        success=torch.tensor([True, True]),
+        interpolated_last_tstep=torch.tensor([3, 2]),
+        interpolated_trajectory=SimpleNamespace(
+            position=position,
+            velocity=velocity,
+            acceleration=velocity + 10,
+            joint_names=["a", "b"],
+            dt=torch.tensor([[0.1], [0.2]]),
+        ),
+    )
+    _, positions, dt, velocities, accelerations = planner._extract_segment(
+        result, backend
+    )
+    torch.testing.assert_close(velocities[0], velocity[0, :, [1, 0]])
+    torch.testing.assert_close(accelerations[0], (velocity + 10)[0, :, [1, 0]])
+    assert torch.count_nonzero(velocities[1, 2:]) == 0
+    assert torch.count_nonzero(accelerations[1, 2:]) == 0
+    assert dt[1, 2] == 0
+
+
+def test_curobo_assembly_preserves_native_rows_when_a_peer_has_no_derivatives() -> None:
+    planner = object.__new__(CuroboPlanner)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    q = torch.tensor([[0.0], [1.0], [2.0]])
+    dt = torch.tensor([0.0, 0.5, 0.5])
+    result = planner._assemble_result(
+        [[q], [q]],
+        [[dt], [dt]],
+        torch.zeros(2, 1),
+        torch.ones(2, dtype=torch.bool),
+        2,
+        1,
+        per_env_velocities=[[torch.full_like(q, 0.7)], [None]],
+    )
+    torch.testing.assert_close(result.velocities[0], torch.full_like(q, 0.7))
+    torch.testing.assert_close(result.velocities[1], torch.full_like(q, 2.0))
+
+
+def test_curobo_failed_native_derivatives_do_not_poison_successful_peers() -> None:
+    planner = object.__new__(CuroboPlanner)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    backend = SimpleNamespace(
+        curobo_joint_names_sig=None,
+        curobo_to_sim_col_idx=None,
+        sim_joint_names=["a"],
+        profile=SimpleNamespace(sim_to_curobo_joint_names={"a": "a"}),
+    )
+    velocities = torch.tensor([[[0.0], [1.0]], [[float("nan")], [float("nan")]]])
+    result = SimpleNamespace(
+        success=torch.tensor([True, False]),
+        interpolated_last_tstep=torch.tensor([2, 2]),
+        interpolated_trajectory=SimpleNamespace(
+            position=torch.zeros(2, 2, 1),
+            velocity=velocities,
+            acceleration=None,
+            joint_names=["a"],
+            dt=torch.tensor([[0.1], [0.1]]),
+        ),
+    )
+    _, _, _, actual, _ = planner._extract_segment(result, backend)
+    torch.testing.assert_close(actual[0], velocities[0])
+    assert torch.count_nonzero(actual[1]) == 0

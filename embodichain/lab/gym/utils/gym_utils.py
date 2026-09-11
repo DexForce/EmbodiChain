@@ -656,6 +656,16 @@ def config_to_cfg(
 
     env_cfg.robot = robot_cfg
 
+    # Parse source-neutral expert trajectory settings owned by the environment.
+    # Keep this under ``env`` so deployment configs do not duplicate runtime
+    # fields at the top level.
+    if "expert_trajectory" in config.get("env", {}):
+        from embodichain.lab.gym.envs.expert_trajectory import ExpertTrajectoryCfg
+
+        env_cfg.expert_trajectory = ExpertTrajectoryCfg(
+            **config["env"]["expert_trajectory"]
+        )
+
     # parser sensor config
     env_cfg.sensor = [SensorCfg.from_dict(s) for s in config.get("sensor", [])]
 
