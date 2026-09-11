@@ -64,7 +64,7 @@ class MeshCollisionCfg:
     max_hulls: int | None = None
     """Maximum hull count for ``convex_decomposition``; must be at least two."""
 
-    acd_method: Literal["coacd", "vhacd"] | None = None
+    acd_method: Literal["visacd", "coacd", "vhacd"] | None = None
     """Approximate-convex-decomposition implementation."""
 
     sdf_resolution: int | None = None
@@ -114,8 +114,8 @@ class MeshCollisionCfg:
                     "convex_decomposition requires max_hulls to be an integer "
                     "of at least 2."
                 )
-            if self.acd_method not in (None, "coacd", "vhacd"):
-                raise ValueError("acd_method must be 'coacd' or 'vhacd'.")
+            if self.acd_method not in (None, "visacd", "coacd", "vhacd"):
+                raise ValueError("acd_method must be 'visacd', 'coacd', or 'vhacd'.")
         elif self.max_hulls is not None or self.acd_method is not None:
             raise ValueError(
                 "max_hulls and acd_method are valid only for convex_decomposition."
@@ -236,7 +236,7 @@ def _mesh_collision_cfg_init_with_legacy_max_hulls(
     self: MeshCollisionCfg,
     approximation: MeshCollisionApproximation | None = None,
     max_hulls: int | None = None,
-    acd_method: Literal["coacd", "vhacd"] | None = None,
+    acd_method: Literal["visacd", "coacd", "vhacd"] | None = None,
     sdf_resolution: int | None = None,
     is_hydroelastic: bool | None = None,
     sdf_narrow_band_range: tuple[float, float] | None = None,

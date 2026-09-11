@@ -1019,7 +1019,7 @@ def test_spawn_rejects_unsupported_convex_decomposition_method() -> None:
         ),
     )
 
-    with pytest.raises(ValueError, match="only acd_method='coacd'"):
+    with pytest.raises(ValueError, match="acd_method='visacd' or 'coacd'"):
         rigid_desc_from_cfg(cfg)
 
 

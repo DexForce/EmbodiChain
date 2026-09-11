@@ -579,7 +579,7 @@ def _load_rigid_mesh_prototype(
             cache_path=cache_dir,
             actor_type=body_type,
             max_convex_hull_num=collision_cfg.max_hulls,
-            method=collision_cfg.acd_method or "coacd",
+            method=collision_cfg.acd_method or "visacd",
         )
     elif collision_cfg.approximation == "sdf":
         if collision_cfg.sdf_resolution is None:

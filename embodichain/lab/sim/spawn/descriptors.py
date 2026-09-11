@@ -1534,7 +1534,7 @@ def _compile_geometry(
             "sdf": CollisionApproximation.SDF,
         }[collision_cfg.approximation]
         max_hulls = collision_cfg.max_hulls or 1
-        acd_method = collision_cfg.acd_method or "coacd"
+        acd_method = collision_cfg.acd_method or "visacd"
 
         if collision_cfg.approximation == "triangle_mesh" and cfg.body_type != "static":
             raise ValueError(
@@ -1548,10 +1548,11 @@ def _compile_geometry(
             )
         if (
             collision_cfg.approximation == "convex_decomposition"
-            and acd_method != "coacd"
+            and acd_method not in ("visacd", "coacd")
         ):
             raise ValueError(
-                "Spawn supports only acd_method='coacd' for convex_decomposition."
+                "Spawn supports only acd_method='visacd' or 'coacd' "
+                "for convex_decomposition."
             )
         if collision_cfg.sdf_resolution is not None:
             logger.log_warning(

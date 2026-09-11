@@ -643,9 +643,12 @@ Mesh collision construction is geometry-owned. `MeshCfg.collision` contains a
 `MeshCollisionCfg` with an explicit `convex_hull`, `convex_decomposition`,
 `triangle_mesh`, or `sdf` approximation. Strategy-specific fields are validated
 when the config is constructed; numerical values never infer the strategy in
-the canonical schema. Newton SDF and hydroelastic mesh settings share this
-single owner. `RigidBodyPhysicsCfg` and articulation link overlays do not carry
-mesh cooking. An imported articulation retains its source mesh approximation
+the canonical schema. When `convex_decomposition` is selected without an
+explicit method, the runtime uses VisACD by default; CoACD remains an explicit
+portable option, while the Spawn path does not support VHACD. Newton SDF and
+hydroelastic mesh settings share this single owner. `RigidBodyPhysicsCfg` and
+articulation link overlays do not carry mesh cooking. An imported articulation
+retains its source mesh approximation
 until a named source-shape overlay API is introduced.
 
 `MassPropertiesCfg.recompute_inertia=True` discards source-authored inertia so

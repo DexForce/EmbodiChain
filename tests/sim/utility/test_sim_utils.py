@@ -71,7 +71,7 @@ def test_mesh_cfg_default_acd_method_is_forwarded_to_dexsim() -> None:
     arena = _load_mesh_with_method()
 
     assert arena.acd_kwargs is not None
-    assert arena.acd_kwargs["method"] == "coacd"
+    assert arena.acd_kwargs["method"] == "visacd"
     assert arena.acd_kwargs["max_convex_hull_num"] == _CONVEX_HULL_COUNT
 
 
