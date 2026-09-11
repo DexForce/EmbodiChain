@@ -405,6 +405,7 @@ def test_flush_cleanup_queue_waits_after_running_pending_destroy(
     collect = MagicMock()
     wait_scene_destruction = MagicMock()
     monkeypatch.setattr(SimulationManager, "_cleanup_queue", cleanup_queue)
+    monkeypatch.setattr(SimulationManager, "_instances", {})
     monkeypatch.setattr(gc, "collect", collect)
     monkeypatch.setattr(
         SimulationManager, "wait_scene_destruction", wait_scene_destruction

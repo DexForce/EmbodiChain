@@ -104,6 +104,7 @@ class BaseTestMotionGenerator(object):
         cls.motion_cfg = MotionGenCfg(
             planner_cfg=ToppraPlannerCfg(
                 robot_uid=cls.robot.uid,
+                sim_instance_id=cls.robot_sim.instance_id,
             )
         )
         cls.motion_gen = MotionGenerator(cfg=cls.motion_cfg)

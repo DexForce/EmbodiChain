@@ -331,7 +331,6 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "is_solid",
         "collision_group",
         "collision_filter_parent",
-        "condim",  # Solver-specific contact dimensionality stays in DexSim.
         "is_visible",
         "is_site",
     }
