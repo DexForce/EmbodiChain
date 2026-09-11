@@ -69,6 +69,15 @@ class TestManipulabilityMetricUnit:
         out = metric.compute(np.random.rand(100, 3))
         assert out == {}
 
+    def test_precomputed_condition_numbers_feed_isotropy(self):
+        metric = ManipulabilityMetric()
+        out = metric.compute(
+            np.zeros((3, 3)),
+            manipulability_scores=np.array([0.5, 0.5, 0.5]),
+            condition_numbers=np.array([2.0, 4.0, 6.0]),
+        )
+        assert abs(out["mean_condition"] - 4.0) < 1e-9
+
 
 class TestAnalyzerManipulability:
     """End-to-end score plumbing on the library CobotMagic robot."""
@@ -130,6 +139,46 @@ class TestAnalyzerManipulability:
         )
         assert "manipulability_scores" not in results
         assert analyzer.manipulability_scores is None
+
+    def test_isotropy_condition_stats_honored(self):
+        results, _ = self._analyze()
+        manip = results["metrics"]["manipulability"]
+        # Default ManipulabilityConfig has compute_isotropy=True; the
+        # documented condition statistics must actually be produced.
+        assert manip["mean_condition"] >= 1.0
+        assert manip["std_condition"] >= 0.0
+
+    def test_cache_hit_repairs_entry_from_different_metric_config(self, tmp_path):
+        from embodichain.lab.sim.motion.workspace.configs.cache_config import (
+            CacheConfig,
+        )
+
+        def run(metric_cfg):
+            cfg = WorkspaceAnalyzerConfig(
+                mode=AnalysisMode.JOINT_SPACE,
+                sampling=SamplingConfig(num_samples=100),
+                control_part_name="left_arm",
+                metric=metric_cfg,
+                cache=CacheConfig(enabled=True, cache_dir=tmp_path),
+            )
+            analyzer = WorkspaceAnalyzer(
+                robot=self.robot, config=cfg, sim_manager=self.sim
+            )
+            return analyzer.analyze(num_samples=100)
+
+        # First run writes a cache entry WITHOUT manipulability.
+        first = run(MetricConfig(enabled_metrics=[MetricType.REACHABILITY]))
+        assert "manipulability_scores" not in first
+
+        # Second run (default metrics) hits the same key — metric settings are
+        # not part of the cache identity — and must repair the entry on load.
+        second = run(None)
+        assert "manipulability_scores" in second
+        assert second["manipulability_scores"].shape == (
+            len(second["joint_configurations"]),
+        )
+        assert second["metrics"]["manipulability"]["mean_manipulability"] > 0.0
+        assert second["metrics"]["manipulability"]["mean_condition"] >= 1.0
 
     def test_scores_survive_cache_serialization(self):
         results, _ = self._analyze()

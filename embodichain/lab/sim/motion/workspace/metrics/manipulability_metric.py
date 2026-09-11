@@ -48,6 +48,7 @@ class ManipulabilityMetric(BaseMetric):
         joint_configurations: np.ndarray | None = None,
         jacobians: np.ndarray | None = None,
         manipulability_scores: np.ndarray | None = None,
+        condition_numbers: np.ndarray | None = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """Compute manipulability metrics.
@@ -58,6 +59,9 @@ class ManipulabilityMetric(BaseMetric):
             jacobians: Precomputed Jacobian matrices, shape (N, 6, num_joints).
             manipulability_scores: Precomputed per-point Yoshikawa scores,
                 shape (N,). Takes precedence over ``jacobians``.
+            condition_numbers: Precomputed per-point Jacobian condition
+                numbers, shape (N,). Used for isotropy statistics when
+                ``jacobians`` is not provided.
             **kwargs: Additional arguments.
 
         Returns:
@@ -109,10 +113,13 @@ class ManipulabilityMetric(BaseMetric):
         }
 
         # Compute isotropy if requested
-        if self.config.compute_isotropy and jacobians is not None:
-            condition_numbers = self._compute_condition_numbers(jacobians)
-            self.results["mean_condition"] = float(condition_numbers.mean())
-            self.results["std_condition"] = float(condition_numbers.std())
+        if self.config.compute_isotropy:
+            if condition_numbers is None and jacobians is not None:
+                condition_numbers = self._compute_condition_numbers(jacobians)
+            if condition_numbers is not None:
+                condition_numbers = self._to_numpy(condition_numbers)
+                self.results["mean_condition"] = float(condition_numbers.mean())
+                self.results["std_condition"] = float(condition_numbers.std())
 
         return self.results
 
