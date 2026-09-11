@@ -13,8 +13,6 @@ embodichain.lab.sim.motion.planners
     TrapezoidalPlanOptions
     TrapezoidalPlannerCfg
     TrapezoidalPlanner
-    MotionGenCfg
-    MotionGenerator
     TrajectorySampleMethod
     MovePart
     MoveType
@@ -67,6 +65,9 @@ Torch also gathers profile coefficients directly by selected phase, avoiding
 full sample-by-phase copies of position, velocity, acceleration, and jerk data.
 All-stationary batches use a hold fast path and skip constraint projection,
 profile construction, segment lookup, and backend dispatch.
+Through ``MotionGenerator``, the planner consumes ``start_qpos`` plus sparse
+joint goals without generic pre-interpolation. Its native sample grid,
+velocities, accelerations, timing, and constraint report are preserved.
 
 .. autoclass:: TrapezoidalPlanOptions
     :members:
@@ -93,8 +94,9 @@ the same ``MotionGenerator`` entry point::
         )
     )
     result = generator.generate(
-        [PlanState.from_qpos(start), PlanState.from_qpos(goal)],
+        [PlanState.from_qpos(goal)],
         MotionGenOptions(
+            start_qpos=start,
             plan_opts=TrapezoidalPlanOptions(
                 profile="double_s",
                 constraints={
@@ -114,18 +116,6 @@ The complete batched simulation tutorial is
 Pass ``--backend torch`` or ``--backend warp`` to compare implementations.
 For repeatable timing and memory measurements, run
 ``scripts/benchmark/motion_generation/trapezoidal_planner.py``.
-
-Motion Generator
-----------------
-
-.. autoclass:: MotionGenCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict, validate
-
-.. autoclass:: MotionGenerator
-    :members:
-    :inherited-members:
-    :show-inheritance:
 
 Utilities
 ---------

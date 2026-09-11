@@ -710,6 +710,8 @@ class TrapezoidalPlanner(BasePlanner):
     """Plan batched linear joint paths with trapezoidal or Double-S timing."""
 
     supported_move_types = frozenset({MoveType.JOINT_MOVE})
+    uses_sparse_joint_waypoints = True
+    preserve_plan_samples = True
 
     def default_plan_options(self) -> TrapezoidalPlanOptions:
         """Return backend-default planning options."""
