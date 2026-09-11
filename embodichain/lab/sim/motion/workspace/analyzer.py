@@ -45,6 +45,10 @@ from embodichain.lab.sim.motion.workspace.configs import (
     VisualizationType,
     VisualizationConfig,
     MetricConfig,
+    MetricType,
+)
+from embodichain.lab.sim.motion.workspace.metrics.manipulability_metric import (
+    ManipulabilityMetric,
 )
 from embodichain.lab.sim.motion.workspace.samplers import (
     SamplerFactory,
@@ -228,6 +232,7 @@ class WorkspaceAnalyzer:
         self.metrics_results: Dict[str, Any] = {}
         self.current_mode: AnalysisMode | None = None
         self.success_rates: torch.Tensor | None = None
+        self.manipulability_scores: torch.Tensor | None = None
         # Path of the most recently written/read results cache entry (None until
         # a disk results cache is used). Exposed for CLI consumers.
         self._last_cache_path: Path | None = None
@@ -1564,6 +1569,13 @@ class WorkspaceAnalyzer:
 
         # Step 3: Compute metrics (common for both modes)
         logger.log_info("[3/3] Computing metrics...")
+        self.manipulability_scores = None
+        if self._manipulability_enabled():
+            self.manipulability_scores = self._compute_manipulability_scores()
+            if self.manipulability_scores is not None:
+                # Row-aligned with joint_configurations (and therefore with
+                # reachable points in Cartesian/plane modes).
+                results["manipulability_scores"] = self.manipulability_scores
         metrics = self._compute_metrics()
         results["metrics"] = metrics
         results["config"] = self.config
@@ -2011,6 +2023,47 @@ class WorkspaceAnalyzer:
         )
         return colors
 
+    def _manipulability_enabled(self) -> bool:
+        """Whether manipulability computation is selected in the metric config."""
+        enabled = self.config.metric.enabled_metrics or []
+        return MetricType.ALL in enabled or MetricType.MANIPULABILITY in enabled
+
+    def _compute_manipulability_scores(self) -> torch.Tensor | None:
+        """Compute per-configuration Yoshikawa manipulability scores.
+
+        Uses the active control part's solver Jacobian on the stored
+        ``joint_configurations``, so every score row stays aligned with the
+        configuration (and, in Cartesian/plane modes, with the reachable
+        point) at the same index: ``w = sqrt(det(J @ J^T))``.
+
+        Returns:
+            Scores with shape ``(N,)`` on the analysis device, or ``None``
+            when no configurations or no solver Jacobian are available.
+        """
+        qpos = self.joint_configurations
+        if qpos is None or len(qpos) == 0:
+            return None
+        solver = self.robot.get_solver(self.control_part_name)
+        if solver is None:
+            logger.log_warning(
+                "No solver available for manipulability computation; skipping."
+            )
+            return None
+
+        chunk_size = 10000
+        scores = []
+        with torch.no_grad():
+            for start in range(0, len(qpos), chunk_size):
+                chunk = torch.as_tensor(
+                    qpos[start : start + chunk_size],
+                    dtype=torch.float32,
+                    device=solver.device,
+                )
+                jac = solver.get_jacobian(chunk)
+                jjt = jac @ jac.transpose(1, 2)
+                scores.append(torch.sqrt(torch.clamp(torch.det(jjt), min=0.0)))
+        return torch.cat(scores).to(self.device)
+
     def _compute_metrics(self) -> Dict[str, Any]:
         """Compute workspace metrics based on configuration."""
         if self.workspace_points is None or len(self.workspace_points) == 0:
@@ -2019,8 +2072,7 @@ class WorkspaceAnalyzer:
 
         metrics = {}
 
-        # TODO: Implement metric computation using metrics module
-        # For now, compute basic statistics
+        # Basic geometric statistics
         points_np = self.workspace_points.cpu().numpy()
 
         metrics["bounding_box"] = {
@@ -2035,6 +2087,15 @@ class WorkspaceAnalyzer:
 
         # Approximate volume (bounding box)
         metrics["bounding_box_volume"] = float(np.prod(dimensions))
+
+        # True Yoshikawa manipulability aggregates from the per-point scores
+        # computed during analysis (see _compute_manipulability_scores).
+        if self.manipulability_scores is not None:
+            metric = ManipulabilityMetric(self.config.metric.manipulability)
+            metrics["manipulability"] = metric.compute(
+                points_np,
+                manipulability_scores=self.manipulability_scores.cpu().numpy(),
+            )
 
         logger.log_info(f"Computed {len(metrics)} metrics")
 
@@ -2409,6 +2470,7 @@ class WorkspaceAnalyzer:
         )
         self.joint_configurations = results.get("joint_configurations")
         self.success_rates = results.get("success_rates")
+        self.manipulability_scores = results.get("manipulability_scores")
         if mode_str in ("cartesian_space", "plane_sampling"):
             self.reachable_points = results.get("reachable_points")
             self.reachability_mask = results.get("reachability_mask")

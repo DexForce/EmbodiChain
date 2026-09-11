@@ -299,7 +299,8 @@ topics:
   title: Robot Workspace
   aliases: [robot workspace, workspace analyzer, reachability cache, 机器人工作空间, 可达空间, 工作空间缓存]
   keywords: [WorkspaceAnalyzer, AnalysisMode, ResultsCache, RobotWorkspace, RobotWorkspaceCfg, workspace_cfg,
-    sample_reachable_pose, analyze-workspace, workspace-cache, results.npz]
+    sample_reachable_pose, analyze-workspace, workspace-cache, results.npz, manipulability_scores,
+    ManipulabilityMetric]
   paths: [topics/robot-workspace/robot-workspace.md]
   source_of_truth:
   - embodichain/lab/sim/motion/workspace/analyzer.py
