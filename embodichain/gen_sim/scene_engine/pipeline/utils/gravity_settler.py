@@ -284,7 +284,8 @@ class GravitySettler:
                 attrs=self._rigid_body_attrs(physics),
                 body_type=body_type,
                 max_convex_hull_num=self._max_convex_hull_num(physics),
-                acd_method="visacd",
+                # DexSim 0.4.3 does not provide the CUDA-only visacd backend.
+                acd_method="vhacd",
             )
         )
 
