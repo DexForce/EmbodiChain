@@ -199,6 +199,7 @@ def with_release_clearance(registration: Any, *, program: dict[str, Any]) -> Any
     return replace(
         registration,
         call_catalog=catalog,
+        relation_grounders=(),
         robot_profile_binding=replace(
             registration.robot_profile_binding, presets=tuple(presets)
         ),

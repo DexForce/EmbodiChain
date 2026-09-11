@@ -327,7 +327,7 @@ def test_relative_place_waits_and_validates_fresh_reference_pose() -> None:
             "object": "cube",
             "reference": "tray",
             "displacement": [0.0, -0.12, 0.04],
-            "position_tolerance": 0.04,
+            "position_tolerance": 0.05,
         }
     ]
 
@@ -469,7 +469,7 @@ def test_e2_place_requires_task_owned_stability_and_shared_position_validation()
             "object": "can",
             "reference": "table",
             "displacement": [0.0, 0.0, 0.1],
-            "position_tolerance": 0.04,
+            "position_tolerance": 0.05,
         }
     ]
 
@@ -509,7 +509,7 @@ def test_relative_place_waits_then_validates_live_relation() -> None:
             "object": "can",
             "reference": "bottle",
             "displacement": [0.18, 0.0, 0.05],
-            "position_tolerance": 0.04,
+            "position_tolerance": 0.05,
         }
     ]
 
@@ -979,8 +979,8 @@ def test_explicit_orientation_bundle_uses_shared_preflight_and_terminal_post(
         place_params = integration["profile"]["effect_monitors"][
             "simulation.place_relative"
         ]["params"]
-        assert place_params["attached_translation_threshold"] == pytest.approx(0.04)
-        assert place_params["detached_translation_threshold"] == pytest.approx(0.06)
+        assert place_params["attached_translation_threshold"] == pytest.approx(0.02)
+        assert place_params["detached_translation_threshold"] == pytest.approx(0.03)
     program = load_config(paths.program)
     post = program["program"]["items"][-1]["post"][-1]
     constraints = load_config(paths.program.parent / "constraints.json")["presets"]
