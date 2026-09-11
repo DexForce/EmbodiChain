@@ -79,7 +79,7 @@ A small cubic rigid body (``padding_box``) is placed beneath the cloth so the cl
 .. literalinclude:: ../../../scripts/tutorials/sim/create_cloth.py
    :language: python
    :start-at:     padding_box_cfg = RigidObjectCfg(
-   :end-at:     print("[INFO]: Add soft object complete!")
+   :end-at:     print("[INFO]: Add cloth object complete!")
 
 The Code Execution
 ~~~~~~~~~~~~~~~~~~

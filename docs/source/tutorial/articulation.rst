@@ -36,7 +36,7 @@ with native or browser visualization.
 
 .. literalinclude:: ../../../scripts/tutorials/sim/create_articulation.py
    :language: python
-   :start-at: # Configure the simulation.
+   :start-at: def create_articulation
    :end-at: sim = SimulationManager(sim_cfg)
 
 Loading the URDF

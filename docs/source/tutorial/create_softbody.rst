@@ -24,7 +24,7 @@ The Code Explained
 Configuring the simulation
 --------------------------
 
-The first step is to configure the simulation environment. This is done using the :class:`SimulationManagerCfg` data class, which allows you to specify parameters like window dimensions, headless mode, physics timestep, simulation device (CPU/GPU), and rendering options like ray tracing. Reminded that soft body simulation can only run on cuda deive.
+The first step is to configure the simulation environment. This is done using the :class:`SimulationManagerCfg` data class, which allows you to specify parameters like window dimensions, headless mode, physics timestep, simulation device (CPU/GPU), and rendering options like ray tracing. Soft-body simulation requires a CUDA device and the Newton backend; the script validates both options before creating the scene.
 
 
 .. literalinclude:: ../../../scripts/tutorials/sim/create_softbody.py

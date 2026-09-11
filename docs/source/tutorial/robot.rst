@@ -99,7 +99,6 @@ To run the robot simulation script:
 
 .. code-block:: bash
 
-   cd /root/sources/embodichain
    python scripts/tutorials/sim/create_robot.py
 
 You can customize the simulation with various command-line options:
@@ -115,8 +114,8 @@ You can customize the simulation with various command-line options:
    # Run in headless mode
    python scripts/tutorials/sim/create_robot.py --headless
    
-   # Enable ray tracing rendering
-   python scripts/tutorials/sim/create_robot.py --renderer
+   # Select a renderer backend
+   python scripts/tutorials/sim/create_robot.py --renderer rt
 
 The simulation will show the robot moving through different poses, demonstrating basic joint control capabilities.
 

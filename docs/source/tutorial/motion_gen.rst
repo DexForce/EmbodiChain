@@ -29,15 +29,34 @@ The tutorial corresponds to the ``motion_generator.py`` script in the ``scripts/
         :language: python
         :linenos:
 
+Run the executable from the repository root. It creates one CobotMagic arm,
+plans joint and Cartesian three-waypoint paths, and replays both paths:
+
+.. code-block:: bash
+
+   python scripts/tutorials/sim/motion_generator.py --headless --device cpu
+
+Use ``--num-envs N`` for a batched scene, ``--physics newton`` to select the
+Newton backend, or ``--viser`` to publish the scene in a browser. Headless
+runs record a whole-scene MP4 by default; pass ``--disable-record`` to skip
+recording or ``--record-save-path PATH`` to choose the output file.
+
 Typical Usage
 ~~~~~~~~~~~~~
 
 .. code-block:: python
 
+   import numpy as np
+   import torch
+
    from embodichain.lab.sim.motion.motion_generator import MotionGenerator, MotionGenCfg
-   from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
-   from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanOptions
-   from embodichain.lab.sim.motion.planners.utils import PlanState, TrajectorySampleMethod, MoveType
+   from embodichain.lab.sim.motion.planners import (
+       MoveType,
+       PlanState,
+       ToppraPlanOptions,
+       ToppraPlannerCfg,
+       TrajectorySampleMethod,
+   )
 
    # Assume you have a robot instance and arm_name
    # Constraints are now specified in ToppraPlanOptions, not in ToppraPlannerCfg
@@ -69,7 +88,10 @@ Typical Usage
 
    # Plan a joint-space trajectory (use generate() method instead of plan())
    target_states = [
-       PlanState(move_type=MoveType.JOINT_MOVE, qpos=torch.tensor([0.5, 0.2, 0., 0., 0., 0.]))
+       PlanState.from_qpos(
+           torch.tensor([[0.5, 0.2, 0., 0., 0., 0.]]),
+           move_type=MoveType.JOINT_MOVE,
+       )
    ]
    plan_result = motion_gen.generate(
        target_states=target_states,
@@ -88,7 +110,7 @@ API Reference
 
 .. code-block:: python
 
-   from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanOptions
+   from embodichain.lab.sim.motion.planners import ToppraPlanOptions, ToppraPlannerCfg
 
    motion_cfg = MotionGenCfg(
        planner_cfg=ToppraPlannerCfg(
@@ -161,18 +183,19 @@ API Reference
 
 - Estimates the number of samples needed for a trajectory.
 
-**plan_with_collision**
+**Collision-world integration**
 
-.. code-block:: python
-
-   plan_with_collision(...)
-
-- (Reserved) Plan trajectory with collision checking (not yet implemented).
+Collision-capable planners expose their world contract through
+``MotionGenerator.collision_world_info`` and can bind live obstacle poses with
+``MotionGenerator.bind_collision_world(plan_opts, obstacle_poses=...)``. The
+selected planner must advertise update support; otherwise binding raises a
+clear ``ValueError``.
 
 Notes & Best Practices
 ~~~~~~~~~~~~~~~~~~~~~~
 
-- Only collision-free planning is currently supported; collision checking is a placeholder.
+- Collision-world support is planner-specific; inspect
+  ``motion_gen.collision_world_info`` before supplying obstacle poses.
 - Input/outputs are numpy arrays or torch tensors; ensure type consistency.
 - Robot instance must implement get_joint_ids, compute_fk, compute_ik, get_proprioception, etc.
 - For custom planners, extend the PlannerType Enum and _create_planner methods.
