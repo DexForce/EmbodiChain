@@ -882,6 +882,7 @@ embodichain.lab.sim.objects.rigid_object
 
 .. autosummary::
 
+   CollisionShapeDesc
    RigidBodyData
    RigidObject
    RigidObjectCfg
@@ -952,7 +953,10 @@ embodichain.lab.sim.motion.planners.curobo.curobo_yaml
 .. autosummary::
 
    generate_curobo_robot_yaml
-   generate_curobo_world_yaml
+   generate_curobo_world_scene
+   visualize_curobo_collision_models
+   visualize_curobo_robot_collision_model
+   visualize_curobo_world_collision_model
 
 embodichain.lab.sim.motion.planners.neural_planner
 --------------------------------------------------

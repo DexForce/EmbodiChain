@@ -18,10 +18,8 @@ planners:
       warmup_iterations: 1
       preserve_plan_samples: true
       world:
-        obstacle_representation: sphere
         multi_env: false
       auto_gen:
-        fit_type: voxel
         sphere_density: 0.1
         collision_sphere_buffer: 0.0
   - id: ik_interpolate

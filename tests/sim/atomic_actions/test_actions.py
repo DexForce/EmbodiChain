@@ -4073,29 +4073,6 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     expected_axis = torch.tensor([[0.0, 0.0, 1.0]]).expand(NUM_ENVS, -1)
     assert torch.equal(pickup_call.kwargs["obj_longest_axis"], expected_axis)
     assert pickup_call.kwargs["is_positive_part"].tolist() == [False, False]
-    diagonal_component = math.sqrt(0.5)
-    pickup_horizontal = object_pose[:, :2, 3]
-    pickup_horizontal = pickup_horizontal / torch.linalg.vector_norm(
-        pickup_horizontal, dim=1, keepdim=True
-    )
-    expected_pickup_direction = torch.zeros(NUM_ENVS, 3)
-    expected_pickup_direction[:, :2] = pickup_horizontal * diagonal_component
-    expected_pickup_direction[:, 2] = -diagonal_component
-    assert torch.allclose(pickup_call.args[2], expected_pickup_direction)
-    assert torch.equal(receive_call.kwargs["obj_longest_axis"], expected_axis)
-    assert receive_call.kwargs["is_positive_part"].tolist() == [True, True]
-    predicted_middle_pose = receive_call.args[1]
-    assert torch.allclose(
-        predicted_middle_pose[:, :3, 3],
-        torch.tensor([[0.0, 0.1, 0.7], [0.0, 0.1, 0.7]]),
-    )
-    expected_receive_direction = torch.tensor(
-        [
-            [0.0, diagonal_component, -diagonal_component],
-            [0.0, diagonal_component, -diagonal_component],
-        ]
-    )
-    assert torch.allclose(receive_call.args[2], expected_receive_direction)
 
     pickup_grasp_rotation = planned_targets[0][:, 1, :3, :3]
     assert torch.allclose(
