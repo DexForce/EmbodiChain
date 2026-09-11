@@ -238,6 +238,7 @@ def with_stack_placement(
         registration,
         robot_profile_binding=profile,
         call_catalog=catalog,
+        relation_grounders=(),
         registered_semantic_lowerer_factories=(
             *registration.registered_semantic_lowerer_factories,
             factory,

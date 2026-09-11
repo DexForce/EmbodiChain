@@ -227,6 +227,7 @@ def with_held_alignment(
     return replace(
         registration,
         call_catalog=catalog,
+        relation_grounders=(),
         robot_profile_binding=replace(
             registration.robot_profile_binding, presets=tuple(presets)
         ),

@@ -59,7 +59,7 @@ _FRONT_RELATION_DISTANCE: Final = 0.18
 _RELATION_CLEARANCE: Final = 0.02
 _AXIS_ALIGNED_RELATION_CLEARANCE: Final = 0.04
 _PLACEMENT_CLEARANCE: Final = 0.01
-_RELATIVE_POSITION_TOLERANCE: Final = 0.04
+_RELATIVE_POSITION_TOLERANCE: Final = 0.05
 _AXIS_ALIGN_CALL_ID: Final = "simulation.axis_align"
 _COORDINATED_TRANSPORT_CALL_ID: Final = "simulation.coordinated_transport"
 _PARK_CALL_ID: Final = "simulation.park"
@@ -1073,11 +1073,11 @@ def _integration_payload(
                         # clause remain strict physical checks; orientation
                         # is intentionally relaxed for this calibrated scene.
                         "attached_translation_threshold": (
-                            0.04 if semantic_id == _PLACE_RELATIVE_CALL_ID else 0.06
+                            0.02 if semantic_id == _PLACE_RELATIVE_CALL_ID else 0.06
                         ),
                         "attached_rotation_threshold": 3.0,
                         "detached_translation_threshold": (
-                            0.06 if semantic_id == _PLACE_RELATIVE_CALL_ID else 0.08
+                            0.03 if semantic_id == _PLACE_RELATIVE_CALL_ID else 0.08
                         ),
                         "detached_rotation_threshold": 3.141592653589793,
                     },

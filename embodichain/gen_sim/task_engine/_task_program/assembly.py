@@ -137,7 +137,14 @@ def load_deployment(
         raise ValueError("Task stability presets cannot replace core settling presets.")
     for name in constraints:
         settle_presets[name] = settle_presets["rigid_object"].snapshot()
-    registration = replace(base.integration.registration, settle_presets=settle_presets)
+    # ``SimulationTaskProgramRegistration`` materializes built-in relation
+    # grounders during ``__post_init__``.  Do not feed those already-materialized
+    # entries back through ``replace`` or placement scenes get duplicate keys.
+    registration = replace(
+        base.integration.registration,
+        settle_presets=settle_presets,
+        relation_grounders=(),
+    )
     program = load_config(base.program_path)
     from .align_held import with_held_alignment
 
