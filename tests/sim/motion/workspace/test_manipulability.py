@@ -180,6 +180,36 @@ class TestAnalyzerManipulability:
         assert second["metrics"]["manipulability"]["mean_manipulability"] > 0.0
         assert second["metrics"]["manipulability"]["mean_condition"] >= 1.0
 
+    def test_cache_hit_strips_fields_when_metric_disabled(self, tmp_path):
+        """Symmetric direction: an enabled run writes a score-bearing entry;
+        a later disabled run hitting the same key must strip the fields so
+        cached and fresh analyses expose the same result contract."""
+        from embodichain.lab.sim.motion.workspace.configs.cache_config import (
+            CacheConfig,
+        )
+
+        def run(metric_cfg):
+            cfg = WorkspaceAnalyzerConfig(
+                mode=AnalysisMode.JOINT_SPACE,
+                sampling=SamplingConfig(num_samples=100),
+                control_part_name="left_arm",
+                metric=metric_cfg,
+                cache=CacheConfig(enabled=True, cache_dir=tmp_path),
+            )
+            analyzer = WorkspaceAnalyzer(
+                robot=self.robot, config=cfg, sim_manager=self.sim
+            )
+            return analyzer.analyze(num_samples=100)
+
+        # Enabled run computes scores and persists them in the entry.
+        first = run(None)
+        assert "manipulability_scores" in first
+
+        # Disabled run hits the score-bearing entry: fields must be stripped.
+        second = run(MetricConfig(enabled_metrics=[MetricType.REACHABILITY]))
+        assert "manipulability_scores" not in second
+        assert "manipulability" not in second.get("metrics", {})
+
     def test_scores_survive_cache_serialization(self):
         results, _ = self._analyze()
         arrays, meta = serialize_results(results)

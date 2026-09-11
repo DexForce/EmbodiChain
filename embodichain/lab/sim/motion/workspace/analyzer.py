@@ -2087,13 +2087,26 @@ class WorkspaceAnalyzer:
         ``joint_configurations`` costs milliseconds and repairs such entries
         transparently.
         """
-        self.manipulability_scores = None
         if not self._manipulability_enabled():
+            # Strip fields a differently-configured producer may have cached,
+            # so cached and fresh analyses expose the same result contract.
+            self.manipulability_scores = None
+            results.pop("manipulability_scores", None)
+            metrics = results.get("metrics")
+            if isinstance(metrics, dict):
+                metrics.pop("manipulability", None)
             return
         scores, conditions = self._compute_manipulability_values()
-        self.manipulability_scores = scores
         if scores is None:
+            # Enabled but not computable here (e.g. no solver): keep any
+            # cached scores — they were derived from the same joint
+            # configurations and remain valid.
+            cached = results.get("manipulability_scores")
+            self.manipulability_scores = (
+                torch.as_tensor(cached) if cached is not None else None
+            )
             return
+        self.manipulability_scores = scores
         results["manipulability_scores"] = scores
         metric = ManipulabilityMetric(self.config.metric.manipulability)
         metrics = results.setdefault("metrics", {})
