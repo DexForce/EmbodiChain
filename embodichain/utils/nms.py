@@ -20,7 +20,6 @@ import math
 
 import numpy as np
 import torch
-import warp as wp
 
 from embodichain.utils.math import quat_from_matrix
 
@@ -29,114 +28,10 @@ __all__ = ["pose_nms", "pose_nms_indices"]
 _POSE_NMS_CHUNK_SIZE = 2048
 
 
-@wp.func
-def _poses_are_close(
-    positions: wp.array(dtype=wp.float32, ndim=2),
-    quaternions: wp.array(dtype=wp.float32, ndim=2),
-    reference_idx: int,
-    target_idx: int,
-    rotation_cosine_threshold: float,
-    distance_threshold_squared: float,
-    rotation_always_close: bool,
-) -> bool:
-    """Compare poses through their relative rotation and translation."""
-    # For unit xyzw quaternions, the real component of
-    # inverse(q_reference) * q_target is their dot product. Its absolute value
-    # gives the shortest relative rotation while treating q and -q equally.
-    relative_rotation_w = (
-        quaternions[reference_idx, 0] * quaternions[target_idx, 0]
-        + quaternions[reference_idx, 1] * quaternions[target_idx, 1]
-        + quaternions[reference_idx, 2] * quaternions[target_idx, 2]
-        + quaternions[reference_idx, 3] * quaternions[target_idx, 3]
-    )
-    relative_translation_x = positions[target_idx, 0] - positions[reference_idx, 0]
-    relative_translation_y = positions[target_idx, 1] - positions[reference_idx, 1]
-    relative_translation_z = positions[target_idx, 2] - positions[reference_idx, 2]
-
-    rotation_close = rotation_always_close or (
-        wp.abs(relative_rotation_w) > rotation_cosine_threshold
-    )
-    translation_close = (
-        relative_translation_x * relative_translation_x
-        + relative_translation_y * relative_translation_y
-        + relative_translation_z * relative_translation_z
-        < distance_threshold_squared
-    )
-    return rotation_close and translation_close
-
-
-@wp.kernel(enable_backward=False)
-def _pose_pair_close_kernel(
-    positions: wp.array(dtype=wp.float32, ndim=2),
-    quaternions: wp.array(dtype=wp.float32, ndim=2),
-    reference_offset: int,
-    target_offset: int,
-    num_targets: int,
-    rotation_cosine_threshold: float,
-    distance_threshold_squared: float,
-    rotation_always_close: bool,
-    close: wp.array(dtype=wp.uint8),
-) -> None:
-    """Compute a tile of the pairwise pose-closeness matrix."""
-    pair_idx = wp.tid()
-    reference_local_idx = pair_idx // num_targets
-    target_local_idx = pair_idx - reference_local_idx * num_targets
-    reference_idx = reference_offset + reference_local_idx
-    target_idx = target_offset + target_local_idx
-
-    if reference_idx == target_idx:
-        close[pair_idx] = wp.uint8(0)
-        return
-
-    close[pair_idx] = wp.uint8(
-        _poses_are_close(
-            positions,
-            quaternions,
-            reference_idx,
-            target_idx,
-            rotation_cosine_threshold,
-            distance_threshold_squared,
-            rotation_always_close,
-        )
-    )
-
-
-@wp.kernel(enable_backward=False)
-def _count_close_poses_kernel(
-    positions: wp.array(dtype=wp.float32, ndim=2),
-    quaternions: wp.array(dtype=wp.float32, ndim=2),
-    reference_offset: int,
-    target_offset: int,
-    num_targets: int,
-    rotation_cosine_threshold: float,
-    distance_threshold_squared: float,
-    rotation_always_close: bool,
-    close_counts: wp.array(dtype=wp.int32),
-) -> None:
-    """Accumulate close-neighbor counts for a pairwise tile."""
-    pair_idx = wp.tid()
-    reference_local_idx = pair_idx // num_targets
-    target_local_idx = pair_idx - reference_local_idx * num_targets
-    reference_idx = reference_offset + reference_local_idx
-    target_idx = target_offset + target_local_idx
-
-    if reference_idx != target_idx and _poses_are_close(
-        positions,
-        quaternions,
-        reference_idx,
-        target_idx,
-        rotation_cosine_threshold,
-        distance_threshold_squared,
-        rotation_always_close,
-    ):
-        wp.atomic_add(close_counts, reference_idx, 1)
-
-
 def _poses_to_components(poses: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Convert pose matrices to positions and normalized xyzw quaternions."""
-    # Warp composite arrays currently use float32 storage. NMS only uses these
-    # values for threshold decisions; the returned poses retain their original
-    # dtype and autograd relationship.
+    # NMS only uses these float32 values for threshold decisions; the returned
+    # poses retain their original dtype and autograd relationship.
     poses_f32 = poses.detach().to(dtype=torch.float32).contiguous()
     positions = poses_f32[:, :3, 3].contiguous()
     quaternions_wxyz = quat_from_matrix(poses_f32[:, :3, :3])
@@ -147,6 +42,53 @@ def _poses_to_components(poses: torch.Tensor) -> tuple[torch.Tensor, torch.Tenso
     return positions, quaternions
 
 
+def _close_block(
+    ref_positions: torch.Tensor,
+    ref_quaternions: torch.Tensor,
+    positions: torch.Tensor,
+    quaternions: torch.Tensor,
+    rotation_cosine_threshold: float,
+    distance_threshold_squared: float,
+    rotation_always_close: bool,
+    chunk_size: int,
+) -> torch.Tensor:
+    """Compute one (refs x all) tile row of the pairwise closeness matrix.
+
+    For unit xyzw quaternions, the real component of
+    ``inverse(q_reference) * q_target`` is their dot product. Its absolute
+    value gives the shortest relative rotation while treating ``q`` and ``-q``
+    equally. Translation closeness compares the squared Euclidean distance.
+
+    Args:
+        ref_positions: Reference positions with shape ``(R, 3)``.
+        ref_quaternions: Reference quaternions with shape ``(R, 4)``.
+        positions: All positions with shape ``(N, 3)``.
+        quaternions: All quaternions with shape ``(N, 4)``.
+        rotation_cosine_threshold: ``cos(angle_th / 2)`` decision value.
+        distance_threshold_squared: Squared translation threshold.
+        rotation_always_close: Whether rotation is trivially satisfied.
+        chunk_size: Maximum target-tile width processed per step.
+
+    Returns:
+        Boolean closeness rows with shape ``(R, N)``.
+    """
+    num_refs = ref_positions.shape[0]
+    num_poses = positions.shape[0]
+    close = torch.empty(num_refs, num_poses, dtype=torch.bool, device=positions.device)
+    for target_offset in range(0, num_poses, chunk_size):
+        target_end = min(target_offset + chunk_size, num_poses)
+        diff = ref_positions[:, None, :] - positions[None, target_offset:target_end, :]
+        tile_close = diff.pow(2).sum(dim=-1) < distance_threshold_squared
+        if not rotation_always_close:
+            dots = (
+                ref_quaternions[:, None, :]
+                * quaternions[None, target_offset:target_end, :]
+            ).sum(dim=-1)
+            tile_close &= dots.abs() > rotation_cosine_threshold
+        close[:, target_offset:target_end] = tile_close
+    return close
+
+
 def _count_close_poses(
     positions: torch.Tensor,
     quaternions: torch.Tensor,
@@ -155,40 +97,26 @@ def _count_close_poses(
     rotation_always_close: bool,
     chunk_size: int,
 ) -> torch.Tensor:
-    """Count close neighbors using bounded Warp pairwise tiles."""
+    """Count close neighbors using bounded pairwise tiles."""
     num_poses = positions.shape[0]
-    positions_wp = wp.from_torch(positions, dtype=wp.float32)
-    quaternions_wp = wp.from_torch(quaternions, dtype=wp.float32)
-    if positions_wp.device.is_cuda:
-        # The components were produced by Torch immediately before this call.
-        # Make them visible to Warp before launching on its stream.
-        torch.cuda.synchronize(positions.device)
-    close_counts_wp = wp.zeros(num_poses, dtype=wp.int32, device=positions_wp.device)
-
+    close_counts = torch.zeros(num_poses, dtype=torch.int64, device=positions.device)
     for reference_offset in range(0, num_poses, chunk_size):
-        num_references = min(chunk_size, num_poses - reference_offset)
-        for target_offset in range(0, num_poses, chunk_size):
-            num_targets = min(chunk_size, num_poses - target_offset)
-            wp.launch(
-                kernel=_count_close_poses_kernel,
-                dim=num_references * num_targets,
-                inputs=[
-                    positions_wp,
-                    quaternions_wp,
-                    reference_offset,
-                    target_offset,
-                    num_targets,
-                    rotation_cosine_threshold,
-                    distance_threshold_squared,
-                    rotation_always_close,
-                    close_counts_wp,
-                ],
-                device=positions_wp.device,
-            )
-    if positions_wp.device.is_cuda:
-        wp.synchronize_device(positions_wp.device)
-        torch.cuda.synchronize(positions.device)
-    return wp.to_torch(close_counts_wp).clone()
+        reference_end = min(reference_offset + chunk_size, num_poses)
+        block = _close_block(
+            positions[reference_offset:reference_end],
+            quaternions[reference_offset:reference_end],
+            positions,
+            quaternions,
+            rotation_cosine_threshold,
+            distance_threshold_squared,
+            rotation_always_close,
+            chunk_size,
+        )
+        # A pose is not its own neighbor.
+        rows = torch.arange(reference_end - reference_offset, device=positions.device)
+        block[rows, rows + reference_offset] = False
+        close_counts[reference_offset:reference_end] = block.sum(dim=1)
+    return close_counts
 
 
 def _greedy_keep_indices(
@@ -200,66 +128,50 @@ def _greedy_keep_indices(
     rotation_always_close: bool,
     chunk_size: int,
 ) -> torch.Tensor:
-    """Apply greedy suppression while computing pairwise tiles with Warp."""
+    """Apply greedy suppression over batched pairwise closeness rows.
+
+    References are visited strictly in ``visit_order``. Closeness rows are
+    computed in bounded blocks, and only for references that are still alive
+    when their block starts; a reference suppressed earlier can never be kept,
+    so skipping its row is semantics-preserving and makes the run time scale
+    with the number of survivors rather than with the raw candidate count.
+    """
     num_poses = positions.shape[0]
     ordered_positions = positions[visit_order].contiguous()
     ordered_quaternions = quaternions[visit_order].contiguous()
-    positions_wp = wp.from_torch(ordered_positions, dtype=wp.float32)
-    quaternions_wp = wp.from_torch(ordered_quaternions, dtype=wp.float32)
-    if positions_wp.device.is_cuda:
-        # The indexing operations above run on Torch's stream.
-        torch.cuda.synchronize(ordered_positions.device)
 
-    # Keep the host-side closeness block bounded to roughly chunk_size**2
-    # entries even when there are far more poses than one target tile.
-    reference_chunk_size = max(1, min(chunk_size, chunk_size**2 // num_poses))
     suppressed = np.zeros(num_poses, dtype=np.bool_)
     keep_ordered_indices: list[int] = []
 
-    for reference_offset in range(0, num_poses, reference_chunk_size):
-        num_references = min(reference_chunk_size, num_poses - reference_offset)
-        max_num_targets = min(chunk_size, num_poses)
-        close_buffer_wp = wp.empty(
-            num_references * max_num_targets,
-            dtype=wp.uint8,
-            device=positions_wp.device,
+    for reference_offset in range(0, num_poses, chunk_size):
+        reference_end = min(reference_offset + chunk_size, num_poses)
+        alive_local = np.flatnonzero(~suppressed[reference_offset:reference_end])
+        if alive_local.size == 0:
+            continue
+        alive_ordered = alive_local + reference_offset
+        alive_torch = torch.as_tensor(
+            alive_ordered, dtype=torch.long, device=positions.device
         )
-        close_block = np.empty((num_references, num_poses), dtype=np.bool_)
+        block = _close_block(
+            ordered_positions[alive_torch],
+            ordered_quaternions[alive_torch],
+            ordered_positions,
+            ordered_quaternions,
+            rotation_cosine_threshold,
+            distance_threshold_squared,
+            rotation_always_close,
+            chunk_size,
+        )
+        # A pose never suppresses itself.
+        rows = torch.arange(alive_torch.numel(), device=positions.device)
+        block[rows, alive_torch] = False
+        block_np = block.cpu().numpy()
 
-        for target_offset in range(0, num_poses, chunk_size):
-            num_targets = min(chunk_size, num_poses - target_offset)
-            num_pairs = num_references * num_targets
-            wp.launch(
-                kernel=_pose_pair_close_kernel,
-                dim=num_pairs,
-                inputs=[
-                    positions_wp,
-                    quaternions_wp,
-                    reference_offset,
-                    target_offset,
-                    num_targets,
-                    rotation_cosine_threshold,
-                    distance_threshold_squared,
-                    rotation_always_close,
-                    close_buffer_wp,
-                ],
-                device=positions_wp.device,
-            )
-            # The tile is consumed by NumPy immediately, so make the Warp
-            # launch complete before copying it to host memory.
-            if close_buffer_wp.device.is_cuda:
-                wp.synchronize_device(close_buffer_wp.device)
-            close_block[:, target_offset : target_offset + num_targets] = (
-                close_buffer_wp.numpy()[:num_pairs].reshape(num_references, num_targets)
-                != 0
-            )
-
-        for reference_local_idx in range(num_references):
-            reference_idx = reference_offset + reference_local_idx
+        for row_idx, reference_idx in enumerate(alive_ordered):
             if suppressed[reference_idx]:
                 continue
-            keep_ordered_indices.append(reference_idx)
-            suppressed |= close_block[reference_local_idx]
+            keep_ordered_indices.append(int(reference_idx))
+            suppressed |= block_np[row_idx]
             suppressed[reference_idx] = True
 
     ordered_keep = torch.tensor(
@@ -278,8 +190,8 @@ def pose_nms_indices(
     """Return pose indices after removing poses that are too close.
 
     Pose matrices are first converted into ``(N, 3)`` positions and unit
-    ``(N, 4)`` xyzw quaternions. Warp kernels compare their relative rotation
-    and Euclidean relative translation in bounded pairwise tiles.
+    ``(N, 4)`` xyzw quaternions. Relative rotation and Euclidean relative
+    translation are compared in bounded batched pairwise tiles.
 
     Args:
         poses: Input pose matrices. Shape is ``(N, 4, 4)``.
@@ -290,7 +202,7 @@ def pose_nms_indices(
         preserve_order: Whether to greedily select poses in input order. If
             ``False``, poses with fewer close neighbors are selected first.
             Defaults to ``False``.
-        chunk_size: Maximum size of either dimension of a Warp pairwise tile.
+        chunk_size: Maximum size of either dimension of a pairwise tile.
             Defaults to 2048.
 
     Returns:
@@ -298,7 +210,7 @@ def pose_nms_indices(
 
     Raises:
         ValueError: If ``poses`` is not shaped as ``(N, 4, 4)``, is not on a
-            Warp-supported device, or ``chunk_size`` is not positive.
+            CPU or CUDA device, or ``chunk_size`` is not positive.
     """
     if poses.ndim != 3 or poses.shape[-2:] != (4, 4):
         raise ValueError(f"Invalid input shape {poses.shape}, expected (N, 4, 4).")
@@ -317,10 +229,13 @@ def pose_nms_indices(
     if angle_th <= 0.0 or dist_th <= 0.0:
         return torch.arange(num_poses, dtype=torch.long, device=poses.device)
 
-    # ``pose_nms`` may be called without a SimulationManager. ``wp.init`` is
-    # idempotent when the simulation has already initialized Warp.
-    wp.init()
     positions, quaternions = _poses_to_components(poses)
+    # The pairwise threshold math is elementwise float32 with fixed reduction
+    # order, so offloading it to CUDA produces the same decisions as the CPU
+    # path. Indices are returned on the input device either way.
+    if poses.device.type == "cpu" and torch.cuda.is_available():
+        positions = positions.cuda()
+        quaternions = quaternions.cuda()
     rotation_always_close = angle_th > math.pi
     rotation_cosine_threshold = (
         math.cos(0.5 * float(angle_th)) if not rotation_always_close else 0.0
@@ -337,7 +252,7 @@ def pose_nms_indices(
             distance_threshold_squared,
             rotation_always_close,
             chunk_size,
-        ).to(dtype=torch.long)
+        ).to(poses.device)
         tie_breaker = torch.arange(num_poses, dtype=torch.long, device=poses.device)
         visit_priority = close_counts * (num_poses + 1) + tie_breaker
         visit_order = torch.argsort(visit_priority)
@@ -345,12 +260,12 @@ def pose_nms_indices(
     return _greedy_keep_indices(
         positions,
         quaternions,
-        visit_order,
+        visit_order.to(positions.device),
         rotation_cosine_threshold,
         distance_threshold_squared,
         rotation_always_close,
         chunk_size,
-    )
+    ).to(poses.device)
 
 
 def pose_nms(
@@ -365,7 +280,7 @@ def pose_nms(
         poses: Input pose matrices. Shape is ``(N, 4, 4)``.
         angle_th: Rotation threshold in radians. Defaults to pi / 36.
         dist_th: Translation threshold. Defaults to 0.003.
-        chunk_size: Maximum size of either dimension of a Warp pairwise tile.
+        chunk_size: Maximum size of either dimension of a pairwise tile.
             Defaults to 2048.
 
     Returns:

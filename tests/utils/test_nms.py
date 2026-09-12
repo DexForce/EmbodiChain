@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 import torch
 import warp as wp
@@ -135,3 +136,148 @@ def test_pose_nms_cuda_input_keeps_indices_on_cuda() -> None:
 
     assert indices.tolist() == [2, 0]
     assert indices.device.type == "cuda"
+
+
+def _reference_pose_nms_indices(
+    poses: torch.Tensor,
+    angle_th: float,
+    dist_th: float,
+    preserve_order: bool,
+) -> list[int]:
+    """Literal O(N^2) implementation of the documented NMS semantics."""
+    from embodichain.utils.nms import _poses_to_components
+
+    num_poses = poses.shape[0]
+    positions, quaternions = _poses_to_components(poses)
+    rotation_always_close = angle_th > np.pi
+    cos_th = 0.0 if rotation_always_close else float(np.cos(0.5 * angle_th))
+    dist_sq = float(dist_th * dist_th)
+
+    diff = positions[:, None, :] - positions[None, :, :]
+    close = diff.pow(2).sum(-1) < dist_sq
+    if not rotation_always_close:
+        dots = (quaternions[:, None, :] * quaternions[None, :, :]).sum(-1)
+        close &= dots.abs() > cos_th
+    close.fill_diagonal_(False)
+
+    if preserve_order:
+        order = list(range(num_poses))
+    else:
+        counts = close.sum(dim=1).cpu()
+        priority = counts * (num_poses + 1) + torch.arange(num_poses)
+        order = torch.argsort(priority).tolist()
+
+    close_np = close.cpu().numpy()
+    suppressed = np.zeros(num_poses, dtype=bool)
+    keep: list[int] = []
+    for idx in order:
+        if suppressed[idx]:
+            continue
+        keep.append(idx)
+        suppressed |= close_np[idx]
+        suppressed[idx] = True
+    return keep
+
+
+def _clustered_poses(n: int, seed: int, device: str = "cpu") -> torch.Tensor:
+    """Random pose set with deliberate near-duplicate clusters."""
+    g = torch.Generator().manual_seed(seed)
+    n_centers = max(1, n // 8)
+    centers_pos = torch.rand(n_centers, 3, generator=g) * 0.5
+    centers_aa = torch.rand(n_centers, 3, generator=g) * 2.0 - 1.0
+    assign = torch.randint(0, n_centers, (n,), generator=g)
+    # Jitter spans both sides of the thresholds (3 mm / 5 deg defaults).
+    pos = centers_pos[assign] + (torch.rand(n, 3, generator=g) - 0.5) * 0.01
+    aa = centers_aa[assign] + (torch.rand(n, 3, generator=g) - 0.5) * 0.3
+
+    angle = aa.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+    axis = aa / angle
+    k = torch.zeros(n, 3, 3)
+    k[:, 0, 1], k[:, 0, 2] = -axis[:, 2], axis[:, 1]
+    k[:, 1, 0], k[:, 1, 2] = axis[:, 2], -axis[:, 0]
+    k[:, 2, 0], k[:, 2, 1] = -axis[:, 1], axis[:, 0]
+    eye = torch.eye(3).expand(n, 3, 3)
+    sin, cos = torch.sin(angle)[..., None], torch.cos(angle)[..., None]
+    rot = eye + sin * k + (1 - cos) * (k @ k)
+
+    poses = torch.eye(4).repeat(n, 1, 1)
+    poses[:, :3, :3] = rot
+    poses[:, :3, 3] = pos
+    return poses.to(device)
+
+
+@pytest.mark.parametrize("preserve_order", [True, False])
+@pytest.mark.parametrize("chunk_size", [1, 7, 128, 2048])
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_pose_nms_matches_reference_semantics(preserve_order, chunk_size, seed):
+    """Blocked batched implementation must match the literal reference."""
+    poses = _clustered_poses(400, seed)
+    expected = _reference_pose_nms_indices(
+        poses, angle_th=np.pi / 36, dist_th=0.003, preserve_order=preserve_order
+    )
+    got = pose_nms_indices(
+        poses,
+        angle_th=np.pi / 36,
+        dist_th=0.003,
+        preserve_order=preserve_order,
+        chunk_size=chunk_size,
+    )
+    assert got.tolist() == expected
+
+
+@pytest.mark.parametrize("preserve_order", [True, False])
+def test_pose_nms_rotation_always_close_branch(preserve_order):
+    """angle_th > pi treats every rotation as close (translation only)."""
+    poses = _clustered_poses(200, seed=3)
+    expected = _reference_pose_nms_indices(
+        poses, angle_th=4.0, dist_th=0.02, preserve_order=preserve_order
+    )
+    got = pose_nms_indices(
+        poses, angle_th=4.0, dist_th=0.02, preserve_order=preserve_order
+    )
+    assert got.tolist() == expected
+
+
+def test_pose_nms_all_duplicates_keep_single():
+    poses = _pose().repeat(500, 1, 1)
+    indices = pose_nms_indices(poses, preserve_order=True)
+    assert indices.tolist() == [0]
+
+
+@pytest.mark.gpu
+def test_pose_nms_cuda_matches_cpu_reference():
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is not available")
+    poses = _clustered_poses(400, seed=4)
+    expected = _reference_pose_nms_indices(
+        poses, angle_th=np.pi / 36, dist_th=0.003, preserve_order=False
+    )
+    got = pose_nms_indices(poses.cuda(), preserve_order=False)
+    assert got.cpu().tolist() == expected
+
+
+def _tight_clustered_poses(n: int, seed: int) -> torch.Tensor:
+    """Heavily duplicated pose set: few survivors, exercising alive filtering."""
+    g = torch.Generator().manual_seed(seed)
+    n_centers = max(1, n // 100)
+    base = _clustered_poses(n_centers, seed)
+    assign = torch.randint(0, n_centers, (n,), generator=g)
+    poses = base[assign].clone()
+    # Jitter well below the 3 mm / 5 deg thresholds.
+    poses[:, :3, 3] += (torch.rand(n, 3, generator=g) - 0.5) * 0.001
+    return poses
+
+
+@pytest.mark.parametrize("preserve_order", [True, False])
+def test_pose_nms_heavy_suppression_matches_reference(preserve_order):
+    """Large tight-cluster input (the realistic grasp-candidate profile):
+    the CUDA-offloaded pairwise math must reproduce the literal CPU
+    reference exactly."""
+    poses = _tight_clustered_poses(6000, seed=5)
+    expected = _reference_pose_nms_indices(
+        poses, angle_th=np.pi / 36, dist_th=0.003, preserve_order=preserve_order
+    )
+    got = pose_nms_indices(poses, preserve_order=preserve_order)
+    assert got.tolist() == expected
+    # Suppression must actually be heavy for this test to mean anything.
+    assert len(expected) < 6000 // 10
