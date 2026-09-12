@@ -26,7 +26,7 @@ import numpy as np
 from dexsim.types import PhysicalAttr
 
 from embodichain.utils import configclass
-from embodichain.utils.math import convert_quat
+from embodichain.utils.math import quat_wxyz_to_xyzw, quat_xyzw_to_wxyz
 
 
 @configclass
@@ -618,7 +618,7 @@ class RigidBodyPhysicsCfg:
                 if target_name in {"inertia", "com_position"}:
                     value = np.asarray(value, dtype=np.float32)
                 elif target_name == "com_quaternion":
-                    value = convert_quat(np.asarray(value, dtype=np.float32), to="wxyz")
+                    value = quat_xyzw_to_wxyz(np.asarray(value, dtype=np.float32))
                 setattr(attr, target_name, value)
         return attr
 
@@ -635,7 +635,7 @@ class RigidBodyPhysicsCfg:
 
         com_quaternion = _array("com_quaternion")
         if com_quaternion is not None:
-            com_quaternion = convert_quat(com_quaternion, to="xyzw")
+            com_quaternion = quat_wxyz_to_xyzw(com_quaternion)
         return cls(
             mass_props=MassPropertiesCfg(
                 mass=getattr(attr, "mass", None),

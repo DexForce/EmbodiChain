@@ -73,3 +73,9 @@ policy_T_policy_tcp = policy_T_world
                     @ world_T_runtime_tcp
                     @ runtime_tcp_T_policy_tcp
 ```
+
+Pose targets and FK observations inside `NeuralPlanner` use EmbodiChain's
+`xyz + xyzw` convention. `quat_from_matrix()` already returns `xyzw`; no
+additional quaternion reordering is required before the ONNX observation is
+assembled. Conversions to `wxyz` belong only at an explicitly documented
+external-library boundary.

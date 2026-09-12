@@ -38,7 +38,11 @@ from dexsim.types import RigidBodyShape
 
 from embodichain.lab.sim.objects.rigid_object import CollisionShapeDesc
 from embodichain.utils import logger
-from embodichain.utils.math import convert_quat, matrix_from_quat, quat_from_matrix
+from embodichain.utils.math import (
+    matrix_from_quat,
+    quat_from_matrix,
+    quat_xyzw_to_wxyz,
+)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import RigidObject, Robot
@@ -388,7 +392,7 @@ def _convex_hull_to_voxel_entry(
     pose = torch.as_tensor(pose, dtype=torch.float32).detach().to("cpu")
     if pose.shape == (4, 4):
         position = pose[:3, 3]
-        quaternion = convert_quat(quat_from_matrix(pose[:3, :3]), to="wxyz")
+        quaternion = quat_xyzw_to_wxyz(quat_from_matrix(pose[:3, :3]))
         pose = torch.cat([position, quaternion])
     if pose.shape != (7,):
         raise ValueError(
@@ -445,7 +449,7 @@ def _pose_matrix_to_list(pose: torch.Tensor) -> list[float]:
     """Convert a homogeneous pose matrix to cuRobo ``xyz+wxyz`` format."""
     pose = torch.as_tensor(pose, dtype=torch.float32).detach().cpu()
     return torch.cat(
-        [pose[:3, 3], convert_quat(quat_from_matrix(pose[:3, :3]), to="wxyz")]
+        [pose[:3, 3], quat_xyzw_to_wxyz(quat_from_matrix(pose[:3, :3]))]
     ).tolist()
 
 

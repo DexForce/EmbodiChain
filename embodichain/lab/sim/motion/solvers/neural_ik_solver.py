@@ -20,7 +20,6 @@ import torch.nn as nn
 
 from embodichain.utils import configclass
 from embodichain.utils.math import (
-    convert_quat,
     quat_error_magnitude,
     quat_from_matrix,
 )

@@ -86,6 +86,10 @@ OBSTACLE_MOVE_DURATION = 0.6
 AUTO_PLAY_LEAD_IN_DURATION = 0.75
 POST_EXECUTION_HOLD_DURATION = 1.0
 TRACKING_ERROR_THRESHOLD = 0.1
+# Keep cuRobo's optimizer active before the robot's fitted collision spheres
+# reach the obstacle.  The default 10 mm activation distance can still produce
+# a sampled TCP path with only ~7 mm geometric clearance around this cuboid.
+REPLAN_COLLISION_ACTIVATION_DISTANCE = 0.02
 MINIMUM_REPLAN_DETOUR = 0.04
 MAXIMUM_BLOCKED_PATH_CLEARANCE = 0.0
 MINIMUM_REPLAN_CLEARANCE = 0.01
@@ -429,6 +433,7 @@ def main() -> None:
         MotionGenCfg(
             planner_cfg=CuroboPlannerCfg(
                 robot_uid=robot.uid,
+                collision_activation_distance=REPLAN_COLLISION_ACTIVATION_DISTANCE,
                 # Newton physics captures CUDA graphs on the same device.
                 use_cuda_graph=args.physics != "newton",
                 # The coarse default voxel fit under-covers the hand and
@@ -440,6 +445,12 @@ def main() -> None:
                 ),
                 world=CuroboWorldCfg(
                     rigid_objects=[obstacle],
+                    # Keep the authored cube analytic in cuRobo.  The Newton
+                    # facade exposes primitive geometry through its retained
+                    # descriptor; auto mode would voxelize the fallback mesh
+                    # and can produce a path inside the tutorial's strict
+                    # 10-mm clearance contract.
+                    overrides={OBSTACLE_UID: "cuboid"},
                     dynamic_obstacle_names=[OBSTACLE_UID],
                     multi_env=args.num_envs > 1,
                 ),
@@ -493,6 +504,13 @@ def main() -> None:
         robot,
         session.active_commands,
         control_part=CONTROL_PART,
+    )
+    # cuRobo may emit a compact command sequence after trajectory resampling;
+    # keep the obstacle injection point inside that sequence instead of
+    # assuming the historical 12-command minimum.
+    obstacle_move_command = max(
+        1,
+        min(MOVE_AFTER_COMMAND, initial_eef_path.shape[1] // 4),
     )
     blocking_obstacle_pose, blocking_waypoint_index = _blocking_obstacle_pose(
         obstacle.get_local_pose(to_matrix=True),
@@ -564,12 +582,13 @@ def main() -> None:
         if (
             not args.no_obstacle_motion
             and not obstacle_moved
-            and step.command_count >= MOVE_AFTER_COMMAND
+            and step.command_count >= obstacle_move_command
         ):
             start_pose = obstacle.get_local_pose(to_matrix=True).clone()
             logger.log_warning(
                 f"Moving the collision obstacle over {OBSTACLE_MOVE_DURATION:.2f} s "
-                f"after {step.command_count} accepted commands; start XYZ="
+                f"after {step.command_count} accepted commands (trigger at "
+                f"{obstacle_move_command}); start XYZ="
                 f"{start_pose[:, :3, 3].detach().cpu().tolist()}."
             )
             moved_pose = _animate_obstacle_to_pose(

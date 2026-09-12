@@ -16,8 +16,11 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from dexsim.engine import BoxGeometry
+from dexsim.spawn.descs import CollisionDesc, GeometryDesc
 from dexsim.types import RigidBodyShape
 
 from embodichain.lab.sim.objects import RigidObject
@@ -48,6 +51,20 @@ class _FakePhysicalEntity:
 
     def get_physical_body(self):
         return self.physical_body
+
+
+class _DescriptorEntity:
+    """New-style SpawnedRigidBody shape-query fixture."""
+
+    def __init__(self, collision):
+        self.object_desc = SimpleNamespace(
+            collisions=[collision],
+            body_scale=(1.0, 1.0, 1.0),
+        )
+        self._physics_binding = None
+
+    def native(self):
+        return None
 
 
 def _box_geometry(half_extents):
@@ -95,3 +112,16 @@ def test_get_collision_shapes_reports_unavailable_sdf_geometry():
 
     with pytest.raises(RuntimeError, match="canonical collision mesh"):
         rigid_object.get_collision_shapes()
+
+
+def test_get_collision_shapes_reads_new_spawned_body_descriptor():
+    collision = CollisionDesc.from_geometry(GeometryDesc.cube((0.2, 0.4, 0.6)))
+    rigid_object = RigidObject.__new__(RigidObject)
+    rigid_object.uid = "descriptor_fixture"
+    rigid_object._entities = [_DescriptorEntity(collision)]
+
+    shapes = rigid_object.get_collision_shapes()
+
+    assert len(shapes) == 1
+    assert shapes[0].shape_type == RigidBodyShape.BOX
+    assert shapes[0].half_extents.tolist() == pytest.approx([0.1, 0.2, 0.3])

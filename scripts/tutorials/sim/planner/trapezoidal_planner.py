@@ -644,7 +644,7 @@ def compute_eef_trajectory(
 
     Returns:
         End-effector position and quaternion as ``(N, 7)`` in the local arena
-        frame, ordered as ``x, y, z, qw, qx, qy, qz``.
+        frame, ordered as ``x, y, z, qx, qy, qz, qw`` (``xyz + xyzw``).
     """
     if joint_positions.ndim != 3:
         raise ValueError("joint_positions must have shape (B, N, DOF).")

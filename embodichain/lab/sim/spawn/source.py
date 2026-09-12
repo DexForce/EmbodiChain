@@ -305,7 +305,14 @@ def _native_source_rigid_body(
     com_position: np.ndarray | None,
     com_quaternion: np.ndarray | None,
 ) -> RigidBodyPhysicsDesc:
-    """Convert one native ``PhysicalAttr`` into a sparse Spawn body snapshot."""
+    """Convert one native ``PhysicalAttr`` into a sparse Spawn body snapshot.
+
+    This helper deliberately preserves DexSim Spawn's native ``wxyz``
+    ``com_quaternion`` because the returned descriptor is consumed by the
+    Default/Newton Spawn adapters, not exposed as an EmbodiChain config.
+    Public config conversion happens in ``RigidBodyPhysicsCfg`` at the
+    boundary before this snapshot is applied.
+    """
     dexsim_values = {
         item.name: getattr(attrib, item.name, None)
         for item in fields(DexsimPhysicsDesc)

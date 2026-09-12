@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import torch
 
 from embodichain.utils.math import (
@@ -26,6 +27,8 @@ from embodichain.utils.math import (
     quat_conjugate,
     quat_from_matrix,
     quat_mul,
+    quat_wxyz_to_xyzw,
+    quat_xyzw_to_wxyz,
     trans_matrix_to_xyz_quat,
     xyz_quat_to_4x4_matrix,
 )
@@ -92,3 +95,19 @@ def test_identity_and_boundary_conversion_orders_are_explicit() -> None:
     torch.testing.assert_close(
         convert_quat(xyzw, to="wxyz"), torch.tensor([[4.0, 1.0, 2.0, 3.0]])
     )
+
+
+def test_named_quaternion_boundary_helpers_make_direction_explicit() -> None:
+    xyzw = torch.tensor([[1.0, 2.0, 3.0, 4.0]])
+    wxyz = torch.tensor([[4.0, 1.0, 2.0, 3.0]])
+
+    torch.testing.assert_close(quat_xyzw_to_wxyz(xyzw), wxyz)
+    torch.testing.assert_close(quat_wxyz_to_xyzw(wxyz), xyzw)
+
+
+def test_named_quaternion_boundary_helpers_preserve_numpy_backend() -> None:
+    xyzw = np.array([[1.0, 2.0, 3.0, 4.0]], dtype=np.float32)
+    wxyz = np.array([[4.0, 1.0, 2.0, 3.0]], dtype=np.float32)
+
+    np.testing.assert_array_equal(quat_xyzw_to_wxyz(xyzw), wxyz)
+    np.testing.assert_array_equal(quat_wxyz_to_xyzw(wxyz), xyzw)

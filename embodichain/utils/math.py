@@ -287,6 +287,11 @@ def convert_quat(
     The convention to convert TO is specified as an optional argument. If to == 'xyzw',
     then the input is in 'wxyz' format, and vice-versa.
 
+    .. note::
+        New code should prefer :func:`quat_xyzw_to_wxyz` or
+        :func:`quat_wxyz_to_xyzw`, whose names state both sides of the
+        conversion and prevent accidental same-convention conversions.
+
     Args:
         quat: The quaternion of shape (..., 4).
         to: Convention to convert the quaternion to. The input is interpreted as
@@ -326,6 +331,35 @@ def convert_quat(
         else:
             # xyzw -> wxyz
             return quat.roll(1, dims=-1)
+
+
+def quat_xyzw_to_wxyz(quat: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
+    """Convert an ``xyzw`` quaternion to the native ``wxyz`` order.
+
+    This named wrapper makes the input and output conventions explicit at
+    external-library boundaries.  ``convert_quat`` remains available for
+    backwards compatibility, but its ``to=`` argument intentionally infers
+    the input convention from the requested output and is easier to misuse.
+
+    Args:
+        quat: Quaternion(s) in ``xyzw`` order, shaped ``(..., 4)``.
+
+    Returns:
+        Quaternion(s) in ``wxyz`` order, with the same backend and shape.
+    """
+    return convert_quat(quat, to="wxyz")
+
+
+def quat_wxyz_to_xyzw(quat: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
+    """Convert a native ``wxyz`` quaternion to EmbodiChain's ``xyzw`` order.
+
+    Args:
+        quat: Quaternion(s) in ``wxyz`` order, shaped ``(..., 4)``.
+
+    Returns:
+        Quaternion(s) in ``xyzw`` order, with the same backend and shape.
+    """
+    return convert_quat(quat, to="xyzw")
 
 
 @torch.jit.script

@@ -27,22 +27,42 @@ from functools import cached_property
 from dexsim.scene import Scene
 from dexsim.engine import MaterialInst
 from dexsim.types import RigidBodyShape
-from dexsim.engine import (
-    BoxGeometry,
-    CapsuleGeometry,
-    ConvexMeshGeometry,
-    PlaneGeometry,
-    SDFGeometry,
-    SphereGeometry,
-    TriangleMeshGeometry,
-)
 from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg, RigidObjectCfg
 from embodichain.lab.sim.objects.backends import (
     SceneRigidBodyView,
+    collision_shapes_from_entity,
     is_newton_scene,
 )
 from embodichain.lab.sim.objects.backends.base import RigidBodyViewBase
-from embodichain.lab.sim.physics.newton import is_newton_gradient_mode
+from embodichain.lab.sim.objects.backends.rigid_physics import (
+    apply_legacy_physical_attr,
+    can_use_newton_entity_dynamics_fallback,
+    get_legacy_damping,
+    get_legacy_friction,
+    get_legacy_inertia,
+    get_legacy_mass,
+    get_newton_physical_attr,
+    get_newton_physical_attr_or_none,
+    mirror_newton_physical_attr,
+    newton_lifecycle_state,
+    set_legacy_collision_filter,
+    set_legacy_damping,
+    set_legacy_friction,
+    set_legacy_inertia,
+    set_legacy_mass,
+)
+from embodichain.lab.sim.objects.backends.lifecycle import (
+    apply_rigid_initial_state,
+    destroy_rigid_entities,
+)
+from embodichain.lab.sim.objects.backends.controls import (
+    get_body_scale,
+    set_body_scale,
+    set_collision_enabled,
+    create_physical_visible_node,
+    set_physical_visible,
+    set_visible,
+)
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim import (
     VisualMaterial,
@@ -66,7 +86,6 @@ from embodichain.utils import logger
 if TYPE_CHECKING:
     from dexsim.scene import SpawnedRigidBody
 
-_UINT64_MAX = (1 << 64) - 1
 __all__ = ["CollisionShapeDesc", "RigidBodyData", "RigidObject", "RigidObjectCfg"]
 
 
@@ -581,22 +600,12 @@ class RigidObject(BatchEntity):
 
     def _get_newton_attr(self, env_idx: int):
         """Return DexSim Newton metadata physical attributes for an entity."""
-        entity = self._entities[env_idx]
-        entity_handle = int(entity.get_native_handle())
-        if entity_handle < 0:
-            entity_handle &= _UINT64_MAX
-
-        manager = getattr(self._ps, "manager", None)
-        attr = None
-        if manager is not None:
-            attr = (
-                getattr(manager, "dexsim_meta", {}).get(entity_handle, {}).get("attr")
-            )
-        if attr is None:
-            logger.log_error(
-                f"Newton physical attributes for rigid object '{self.uid}' env {env_idx} are unavailable."
-            )
-        return attr
+        return get_newton_physical_attr(
+            self._ps,
+            self._entities[env_idx],
+            env_idx,
+            self.uid,
+        )
 
     def _get_newton_attr_or_none(self, env_idx: int):
         """Return the Newton meta PhysicalAttr, or None when not present.
@@ -605,14 +614,10 @@ class RigidObject(BatchEntity):
         from grouped Spawn descriptors may not carry a legacy ``attr`` mirror.
         Used by not-ready setter paths to tolerate that representation.
         """
-        entity = self._entities[env_idx]
-        entity_handle = int(entity.get_native_handle())
-        if entity_handle < 0:
-            entity_handle &= _UINT64_MAX
-        manager = getattr(self._ps, "manager", None)
-        if manager is None:
-            return None
-        return getattr(manager, "dexsim_meta", {}).get(entity_handle, {}).get("attr")
+        return get_newton_physical_attr_or_none(
+            self._ps,
+            self._entities[env_idx],
+        )
 
     def _set_newton_attr_meta(self, env_idx: int, physical_attr) -> None:
         """Mirror a :class:`dexsim.types.PhysicalAttr` onto the stored Newton meta.
@@ -624,26 +629,13 @@ class RigidObject(BatchEntity):
         that mirror in sync so :meth:`get_damping` / :meth:`get_mass` and the
         next scene rebuild see the user's intent.
         """
-        attr = self._get_newton_attr(env_idx)
-        for name in (
-            "mass",
-            "density",
-            "dynamic_friction",
-            "static_friction",
-            "restitution",
-            "contact_offset",
-            "rest_offset",
-            "linear_damping",
-            "angular_damping",
-            "sleep_threshold",
-            "enable_ccd",
-            "max_depenetration_velocity",
-            "min_position_iters",
-            "min_velocity_iters",
-            "max_linear_velocity",
-            "max_angular_velocity",
-        ):
-            setattr(attr, name, getattr(physical_attr, name))
+        mirror_newton_physical_attr(
+            self._ps,
+            self._entities[env_idx],
+            env_idx,
+            self.uid,
+            physical_attr,
+        )
 
     def _warn_newton_unsupported(self, api_name: str) -> None:
         logger.log_warning(
@@ -652,8 +644,7 @@ class RigidObject(BatchEntity):
         )
 
     def _newton_lifecycle_state(self) -> str:
-        manager = getattr(self._ps, "manager", None)
-        return getattr(getattr(manager, "lifecycle_state", None), "name", "")
+        return newton_lifecycle_state(self._ps)
 
     def _can_use_newton_entity_dynamics_fallback(self) -> bool:
         """Return whether per-entity Newton patches are safe before GPU view is ready.
@@ -661,7 +652,7 @@ class RigidObject(BatchEntity):
         DexSim Newton only supports MeshObject force/torque helpers in ``BUILDER``
         state. Calling them while the model is ``STALE`` can index stale body ids.
         """
-        return self._newton_lifecycle_state() == "BUILDER"
+        return can_use_newton_entity_dynamics_fallback(self._ps)
 
     @property
     def body_state(self) -> torch.Tensor:
@@ -745,9 +736,7 @@ class RigidObject(BatchEntity):
 
         filter_data_np = filter_data.cpu().numpy().astype(np.uint32)
         for i, env_idx in enumerate(local_env_ids):
-            self._entities[env_idx].get_physical_body().set_collision_filter_data(
-                filter_data_np[i]
-            )
+            set_legacy_collision_filter(self._entities[env_idx], filter_data_np[i])
 
     def set_local_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
@@ -1053,7 +1042,7 @@ class RigidObject(BatchEntity):
 
         # TODO: maybe need to improve the physical attributes setter efficiency.
         for i, env_idx in enumerate(local_env_ids):
-            self._entities[env_idx].set_physical_attr(physical_attrs[i])
+            apply_legacy_physical_attr(self._entities[env_idx], physical_attrs[i])
 
     def _set_newton_attrs(
         self,
@@ -1130,7 +1119,7 @@ class RigidObject(BatchEntity):
                 if attr is not None:
                     attr.mass = float(mass_np[i])
             else:
-                self._entities[env_idx].get_physical_body().set_mass(mass_np[i])
+                set_legacy_mass(self._entities[env_idx], mass_np[i])
 
     def get_mass(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
         """Get mass for the rigid object.
@@ -1174,7 +1163,7 @@ class RigidObject(BatchEntity):
             if is_newton_scene(self._ps):
                 mass = self._get_newton_attr(env_idx).mass
             else:
-                mass = self._entities[env_idx].get_physical_body().get_mass()
+                mass = get_legacy_mass(self._entities[env_idx])
             masses.append(mass)
 
         return torch.as_tensor(masses, dtype=torch.float32, device=self.device)
@@ -1213,12 +1202,7 @@ class RigidObject(BatchEntity):
                 if attr is not None:
                     attr.dynamic_friction = float(friction_np[i])
             else:
-                self._entities[env_idx].get_physical_body().set_dynamic_friction(
-                    friction_np[i]
-                )
-                self._entities[env_idx].get_physical_body().set_static_friction(
-                    friction_np[i]
-                )
+                set_legacy_friction(self._entities[env_idx], friction_np[i])
 
     def get_friction(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
         """Get friction for the rigid object.
@@ -1250,9 +1234,7 @@ class RigidObject(BatchEntity):
             if is_newton_scene(self._ps):
                 friction = self._get_newton_attr(env_idx).dynamic_friction
             else:
-                friction = (
-                    self._entities[env_idx].get_physical_body().get_dynamic_friction()
-                )
+                friction = get_legacy_friction(self._entities[env_idx])
             frictions.append(friction)
 
         return torch.as_tensor(frictions, dtype=torch.float32, device=self.device)
@@ -1299,11 +1281,8 @@ class RigidObject(BatchEntity):
 
         damping_np = damping.cpu().numpy()
         for i, env_idx in enumerate(local_env_ids):
-            self._entities[env_idx].get_physical_body().set_linear_damping(
-                damping_np[i, 0]
-            )
-            self._entities[env_idx].get_physical_body().set_angular_damping(
-                damping_np[i, 1]
+            set_legacy_damping(
+                self._entities[env_idx], damping_np[i, 0], damping_np[i, 1]
             )
 
     def get_damping(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
@@ -1343,11 +1322,8 @@ class RigidObject(BatchEntity):
                 linear_damping = attr.linear_damping
                 angular_damping = attr.angular_damping
             else:
-                linear_damping = (
-                    self._entities[env_idx].get_physical_body().get_linear_damping()
-                )
-                angular_damping = (
-                    self._entities[env_idx].get_physical_body().get_angular_damping()
+                linear_damping, angular_damping = get_legacy_damping(
+                    self._entities[env_idx]
                 )
             dampings.append([linear_damping, angular_damping])
 
@@ -1386,9 +1362,7 @@ class RigidObject(BatchEntity):
                 if attr is not None:
                     attr.inertia = np.asarray(inertia_np[i], dtype=np.float32)
             else:
-                self._entities[
-                    env_idx
-                ].get_physical_body().set_mass_space_inertia_tensor(inertia_np[i])
+                set_legacy_inertia(self._entities[env_idx], inertia_np[i])
 
     def get_inertia(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
         """Get inertia tensor for the rigid object.
@@ -1427,11 +1401,7 @@ class RigidObject(BatchEntity):
             if is_newton_scene(self._ps):
                 inertia = self._get_newton_attr(env_idx).inertia
             else:
-                inertia = (
-                    self._entities[env_idx]
-                    .get_physical_body()
-                    .get_mass_space_inertia_tensor()
-                )
+                inertia = get_legacy_inertia(self._entities[env_idx])
             inertias.append(inertia)
 
         return torch.as_tensor(
@@ -1654,7 +1624,7 @@ class RigidObject(BatchEntity):
         """
         ids = env_ids if env_ids is not None else range(self.num_instances)
         return torch.as_tensor(
-            np.array([self._entities[id].get_body_scale() for id in ids]),
+            np.array([get_body_scale(self._entities[id]) for id in ids]),
             dtype=torch.float32,
             device=self.device,
         )
@@ -1677,7 +1647,7 @@ class RigidObject(BatchEntity):
 
         for i, env_idx in enumerate(local_env_ids):
             scale_np = scale[i].cpu().numpy()
-            self._entities[env_idx].set_body_scale(*scale_np)
+            set_body_scale(self._entities[env_idx], scale_np)
 
     def set_com_pose(
         self, com_pose: torch.Tensor, env_ids: Sequence[int] | None = None
@@ -1850,87 +1820,9 @@ class RigidObject(BatchEntity):
 
     def _get_collision_shapes_for_entity(self, env_id: int) -> list[CollisionShapeDesc]:
         """Return physical collision descriptors for one simulator entity."""
-        physical_body = self._entities[env_id].get_physical_body()
-        if physical_body is None:
-            raise RuntimeError(f"RigidObject {self.uid!r} has no DexSim physical body.")
-
-        shape_count = int(physical_body.get_shape_count())
-        shapes: list[CollisionShapeDesc] = []
-        for shape_idx in range(shape_count):
-            try:
-                geometry = physical_body.get_shape_geometry(shape_idx)
-            except Exception as exc:  # noqa: BLE001
-                raise RuntimeError(
-                    f"DexSim could not expose collision shape {shape_idx} for "
-                    f"RigidObject {self.uid!r}. SDF/custom shapes require a "
-                    "geometry descriptor or canonical collision mesh."
-                ) from exc
-            if geometry is None:
-                raise RuntimeError(
-                    f"DexSim returned no geometry for collision shape {shape_idx} "
-                    f"of RigidObject {self.uid!r}."
-                )
-
-            shape_name = physical_body.get_shape_name(shape_idx) or f"shape_{shape_idx}"
-            local_pose = torch.tensor(geometry.local_pose, dtype=torch.float32)
-            if local_pose.shape != (4, 4):
-                raise RuntimeError(
-                    f"DexSim collision shape {shape_idx} of {self.uid!r} returned "
-                    f"local_pose shape {tuple(local_pose.shape)}, expected (4, 4)."
-                )
-            desc = CollisionShapeDesc(
-                name=str(shape_name),
-                shape_type=self._collision_shape_type(geometry),
-                local_pose=local_pose.clone(),
-            )
-            if isinstance(geometry, BoxGeometry):
-                desc.half_extents = torch.tensor(
-                    geometry.half_extents, dtype=torch.float32
-                )
-            elif isinstance(geometry, SphereGeometry):
-                desc.radius = float(geometry.radius)
-            elif isinstance(geometry, CapsuleGeometry):
-                desc.radius = float(geometry.radius)
-                desc.half_height = float(geometry.half_height)
-            elif isinstance(
-                geometry, (ConvexMeshGeometry, TriangleMeshGeometry, SDFGeometry)
-            ):
-                vertices = torch.tensor(geometry.vertices, dtype=torch.float32).reshape(
-                    -1, 3
-                )
-                triangles = torch.tensor(geometry.triangles, dtype=torch.int32).reshape(
-                    -1, 3
-                )
-                scale = getattr(geometry, "scale", None)
-                if scale is not None:
-                    vertices = vertices * torch.tensor(
-                        scale, dtype=torch.float32
-                    ).reshape(1, 3)
-                desc.vertices = vertices
-                desc.triangles = triangles
-            shapes.append(desc)
-        return shapes
-
-    @staticmethod
-    def _collision_shape_type(geometry: object) -> RigidBodyShape:
-        """Map a concrete DexSim geometry descriptor to its shape enum."""
-        if isinstance(geometry, BoxGeometry):
-            return RigidBodyShape.BOX
-        if isinstance(geometry, PlaneGeometry):
-            return RigidBodyShape.PLANE
-        if isinstance(geometry, SphereGeometry):
-            return RigidBodyShape.SPHERE
-        if isinstance(geometry, CapsuleGeometry):
-            return RigidBodyShape.CAPSULE
-        if isinstance(geometry, ConvexMeshGeometry):
-            return RigidBodyShape.CONVEX
-        if isinstance(geometry, TriangleMeshGeometry):
-            return RigidBodyShape.MESH
-        if isinstance(geometry, SDFGeometry):
-            return RigidBodyShape.SDF
-        raise RuntimeError(
-            f"Unsupported DexSim collision geometry descriptor "
-            f"{type(geometry).__name__}."
+        return collision_shapes_from_entity(
+            self._entities[env_id],
+            object_uid=self.uid,
         )
 
     @staticmethod
@@ -1983,7 +1875,7 @@ class RigidObject(BatchEntity):
 
         enable_list = enable.tolist()
         for i, env_idx in enumerate(local_env_ids):
-            self._entities[env_idx].enable_collision(bool(enable_list[i]))
+            set_collision_enabled(self._entities[env_idx], enable_list[i])
 
     def clear_dynamics(self, env_ids: Sequence[int] | None = None) -> None:
         """Clear the dynamics of the rigid bodies by resetting velocities and applying zero forces and torques.
@@ -2046,7 +1938,8 @@ class RigidObject(BatchEntity):
         if visible:
             if not self._has_collision_visible_node:
                 for i, env_idx in enumerate(self._all_indices):
-                    self._entities[env_idx].create_physical_visible_node(
+                    create_physical_visible_node(
+                        self._entities[env_idx],
                         np.array(
                             [
                                 rgba[0],
@@ -2054,13 +1947,13 @@ class RigidObject(BatchEntity):
                                 rgba[2],
                                 rgba[3],
                             ]
-                        )
+                        ),
                     )
                 self._has_collision_visible_node = True
 
         # create collision visible node if not exist
         for i, env_idx in enumerate(self._all_indices):
-            self._entities[env_idx].set_physical_visible(visible)
+            set_physical_visible(self._entities[env_idx], visible)
 
     def set_visible(self, visible: bool = True) -> None:
         """Set the visibility of the rigid object.
@@ -2069,7 +1962,7 @@ class RigidObject(BatchEntity):
             visible (bool, optional): Whether the rigid object is visible. Defaults to True.
         """
         for i, env_idx in enumerate(self._all_indices):
-            self._entities[env_idx].set_visible(visible)
+            set_visible(self._entities[env_idx], visible)
 
     def _build_cfg_init_pose(self, env_ids: Sequence[int]) -> torch.Tensor:
         """Build initial root poses from cfg as ``(N, 4, 4)`` matrices."""
@@ -2111,31 +2004,7 @@ class RigidObject(BatchEntity):
         ``BUILDER`` via the scene batch API; velocities are cleared after
         preparation through :meth:`SimulationManager.prepare`.
         """
-        if self.is_spawn_bound:
-            if self._spawn_result.backend == "dexsim":
-                # DexSim Direct GPU readiness performs native warm-up updates.
-                # Re-apply the authored state after the batch becomes usable
-                # so prepare() itself is not an observable simulation step.
-                self.reset()
-            else:
-                # Newton finalization materializes the descriptor pose without
-                # advancing simulation; only one-step dynamics buffers need
-                # clearing after batch binding.
-                if not is_newton_gradient_mode(self._spawn_result):
-                    self.clear_dynamics()
-            return
-
-        if is_newton_scene(self._ps):
-            if self._newton_lifecycle_state() == "BUILDER":
-                self.set_local_pose(
-                    self._build_cfg_init_pose(self._all_indices),
-                    env_ids=self._all_indices,
-                )
-            return
-
-        if self.device.type == "cuda":
-            self._world.update(0.001)
-        self.reset()
+        apply_rigid_initial_state(self)
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         local_env_ids = self._all_indices if env_ids is None else env_ids
@@ -2160,12 +2029,4 @@ class RigidObject(BatchEntity):
             # SimulationManager owns topology removal and Scene lifetime.
             # Direct facade destruction must never bypass that owner.
             return
-        env = self._world.get_env()
-        arenas = env.get_all_arenas()
-        if len(arenas) == 0:
-            arenas = [env]
-        for i, entity in enumerate(self._entities):
-            if is_newton_scene(self._ps):
-                arenas[i].remove_actor(entity.get_name())
-            else:
-                arenas[i].remove_actor(entity)
+        destroy_rigid_entities(self._world, self._ps, self._entities)

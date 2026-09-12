@@ -14,13 +14,17 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from .articulation_drive import apply_joint_drive, read_drive_properties
 from .base import ArticulationViewBase, RigidBodyViewBase
+from .collision import collision_shapes_from_entity
 from .newton import is_newton_scene
 from .scene import SceneArticulationView, SceneRigidBodyView
 
 __all__ = [
     "ArticulationViewBase",
     "RigidBodyViewBase",
+    "apply_joint_drive",
+    "collision_shapes_from_entity",
     "is_newton_scene",
     "SceneArticulationView",
     "SceneRigidBodyView",

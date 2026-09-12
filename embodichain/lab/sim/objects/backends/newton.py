@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Sequence
 
 import numpy as np
+import torch
 from dexsim.scene import Scene
 
 if TYPE_CHECKING:
@@ -72,6 +73,78 @@ def _synchronize_standalone_rigid_body_state(
     _, runtime, state_sync = cached
     state_sync.synchronize((runtime.current_state, runtime.other_state))
     return cached
+
+
+def _stabilize_newton_mimic_target_write(
+    *,
+    configured: bool,
+    values: torch.Tensor,
+    env_ids: torch.Tensor,
+    joint_ids: torch.Tensor,
+    velocity: bool,
+    mimic_ids: Sequence[int],
+    mimic_parents: Sequence[int],
+    mimic_multipliers: Sequence[float],
+    mimic_offsets: Sequence[float],
+    qpos_limits: torch.Tensor,
+    qvel_limits: torch.Tensor,
+    articulation_view: Any,
+    device: torch.device,
+) -> None:
+    """Keep Newton mimic follower-drive targets on the commanded relation."""
+    if not configured:
+        return
+
+    selected_columns = {
+        int(joint_id): column
+        for column, joint_id in enumerate(joint_ids.detach().cpu().tolist())
+    }
+    follower_ids: list[int] = []
+    follower_targets: list[torch.Tensor] = []
+    for child_id, parent_id, multiplier, offset in zip(
+        mimic_ids,
+        mimic_parents,
+        mimic_multipliers,
+        mimic_offsets,
+        strict=True,
+    ):
+        parent_column = selected_columns.get(int(parent_id))
+        if parent_column is None:
+            continue
+        target = values[:, parent_column] * float(multiplier)
+        if not velocity:
+            target = target + float(offset)
+        follower_ids.append(int(child_id))
+        follower_targets.append(target)
+
+    if not follower_ids:
+        return
+
+    targets = torch.stack(follower_targets, dim=1)
+    follower_ids_tensor = torch.as_tensor(
+        follower_ids,
+        dtype=torch.int32,
+        device=device,
+    )
+    if velocity:
+        limits = qvel_limits[env_ids][:, follower_ids_tensor]
+        targets = targets.clamp(-limits, limits)
+        articulation_view.apply_qvel(
+            targets,
+            env_ids,
+            follower_ids_tensor,
+            target=True,
+        )
+        return
+
+    limits = qpos_limits[env_ids][:, follower_ids_tensor, :]
+    targets = targets.clamp(limits[..., 0], limits[..., 1])
+    articulation_view.apply_qpos(
+        targets,
+        env_ids,
+        follower_ids_tensor,
+        target=True,
+    )
 
 
 _DEFAULT_MIMIC_NATURAL_FREQUENCY = 1.0e3

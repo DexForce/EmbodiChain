@@ -130,10 +130,10 @@ from embodichain.lab.sim.profiler import Profiler, ProfilerCfg
 from embodichain.lab.visualization.cfg import VisualizationCfg
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import (
-    convert_quat,
     look_at_to_pose,
     matrix_from_quat,
     pose_inv,
+    quat_wxyz_to_xyzw,
 )
 
 if TYPE_CHECKING:
@@ -3345,13 +3345,12 @@ class SimulationManager:
                 device=self.device,
             )
             position = position - self.arena_offsets[0]
-            xyzw = convert_quat(
+            xyzw = quat_wxyz_to_xyzw(
                 torch.as_tensor(
                     command.wxyz,
                     dtype=torch.float32,
                     device=self.device,
-                ),
-                to="xyzw",
+                )
             ).unsqueeze(0)
             pose = torch.eye(
                 4,

@@ -53,23 +53,53 @@ from embodichain.utils.string import (
     resolve_matching_names_values,
 )
 from embodichain.lab.sim.common import BatchEntity
-from embodichain.lab.sim.physics.newton import is_newton_gradient_mode
-from embodichain.lab.sim.objects.backends import (
-    SceneArticulationView,
+from embodichain.lab.sim.objects.backends import SceneArticulationView
+from embodichain.lab.sim.objects.backends.articulation_drive import (
+    apply_joint_drive,
+    read_drive_properties,
+)
+from embodichain.lab.sim.objects.backends.articulation_lifecycle import (
+    prepare_default_spawn_runtime_config,
+)
+from embodichain.lab.sim.objects.backends.articulation_geometry import (
+    get_link_vert_face,
+)
+from embodichain.lab.sim.objects.backends.articulation_physics import (
+    apply_link_com_pose,
+    apply_link_inertia,
+    apply_link_mass,
+    get_link_properties,
+    set_link_physical_attr,
+)
+from embodichain.lab.sim.objects.backends.articulation_topology import (
+    get_joint_descriptor,
+)
+from embodichain.lab.sim.objects.backends.articulation_state import (
+    get_state_joint_names,
+    map_source_qpos_to_state_order,
+    read_state_mimic_info,
+)
+from embodichain.lab.sim.objects.backends.lifecycle import (
+    destroy_articulation_entities,
+    finalize_articulation_spawn,
+)
+from embodichain.lab.sim.objects.backends.controls import (
+    create_physical_visible_node,
+    set_articulation_flag,
+    set_gravity_enabled,
+    set_physical_visible,
 )
 from embodichain.lab.sim.objects.backends.base import ArticulationViewBase
 from embodichain.lab.sim.objects.backends.newton import (
     _configure_newton_mimic_compliance,
+    _stabilize_newton_mimic_target_write,
 )
 from embodichain.utils.math import (
-    convert_quat,
+    matrix_from_euler,
     matrix_from_quat,
     quat_from_matrix,
-    matrix_from_euler,
-)
-from embodichain.lab.sim.utility.sim_utils import (
-    _apply_default_articulation_root_properties,
-    get_dexsim_drive_type,
+    quat_wxyz_to_xyzw,
+    quat_xyzw_to_wxyz,
 )
 from embodichain.lab.sim.utility.solver_utils import (
     create_pk_chain,
@@ -392,21 +422,15 @@ class ArticulationData:
 
     def _entity_drive_properties(self, entity: object) -> tuple[object, ...]:
         """Read drive values without conflating backend target semantics."""
-        if (
-            isinstance(self.articulation_view, SceneArticulationView)
-            and self.is_newton_backend
-        ):
-            return tuple(entity.get_newton_drive())
-        return tuple(entity.get_drive())
+        return read_drive_properties(entity, is_newton=self.is_newton_backend)
 
     def _entity_link_properties(self, entity: object, link_name: str) -> object:
         """Read native mass properties through the active backend contract."""
-        if (
-            isinstance(self.articulation_view, SceneArticulationView)
-            and self.is_newton_backend
-        ):
-            return entity.get_newton_link_properties(link_name)
-        return entity.get_physical_attr(link_name)
+        return get_link_properties(
+            entity,
+            link_name,
+            is_newton=self.is_newton_backend,
+        )
 
     def read_physical_properties(
         self,
@@ -432,9 +456,8 @@ class ArticulationData:
                     np.concatenate(
                         (
                             np.asarray(attr.com_position, dtype=np.float32),
-                            convert_quat(
-                                np.asarray(attr.com_quaternion, dtype=np.float32),
-                                to="xyzw",
+                            quat_wxyz_to_xyzw(
+                                np.asarray(attr.com_quaternion, dtype=np.float32)
                             ),
                         )
                     )
@@ -653,39 +676,11 @@ class ArticulationData:
         link_name: str,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Read complete link geometry through the active backend boundary."""
-        if not self.is_newton_backend:
-            return entity.get_link_vert_face(link_name)
-
-        render_body = entity.get_render_body(link_name)
-        if render_body is None:
-            return (
-                np.empty((0, 3), dtype=np.float32),
-                np.empty((0, 3), dtype=np.int32),
-            )
-
-        mesh_count = int(render_body.get_mesh_count())
-        if mesh_count == 0:
-            return (
-                np.empty((0, 3), dtype=np.float32),
-                np.empty((0, 3), dtype=np.int32),
-            )
-
-        vertex_parts: list[np.ndarray] = []
-        face_parts: list[np.ndarray] = []
-        vertex_offset = 0
-        for mesh_id in range(mesh_count):
-            vertices = np.asarray(
-                render_body.get_vertices(mesh_id),
-                dtype=np.float32,
-            )
-            faces = np.asarray(
-                render_body.get_triangles(mesh_id),
-                dtype=np.int32,
-            )
-            vertex_parts.append(vertices)
-            face_parts.append(faces + vertex_offset)
-            vertex_offset += len(vertices)
-        return np.concatenate(vertex_parts), np.concatenate(face_parts)
+        return get_link_vert_face(
+            entity,
+            link_name,
+            is_newton=self.is_newton_backend,
+        )
 
 
 class Articulation(BatchEntity):
@@ -894,30 +889,7 @@ class Articulation(BatchEntity):
         try:
             self._initialize_spawn_bound(result)
             self._apply_spawn_config()
-            if is_newton_gradient_mode(result):
-                initial_qpos = torch.as_tensor(self.cfg.init_qpos).reshape(-1)
-                if initial_qpos.numel() != self.dof:
-                    raise ValueError(
-                        f"Articulation {self.uid!r} expected {self.dof} initial "
-                        f"joint positions, got {initial_qpos.numel()}."
-                    )
-                if torch.any(initial_qpos != 0.0):
-                    raise NotImplementedError(
-                        "Newton gradient mode cannot apply non-zero init_qpos after "
-                        "Spawn finalization. Author the initial coordinates in the "
-                        "source asset or initialize them in a differentiable task "
-                        "before opening a Warp tape."
-                    )
-                # Spawn already authored the root pose and zero joint/dynamics
-                # state during model construction. Its Batch mutation APIs are
-                # intentionally fenced once the model requires gradients.
-            elif self._data.is_newton_backend:
-                # The finalized model starts with clean dynamics. Clearing one
-                # facade here would select only part of a multi-articulation
-                # world, which Newton's MuJoCo solver explicitly rejects.
-                self.reset(clear_dynamics=False)
-            else:
-                self.reset()
+            finalize_articulation_spawn(self, result)
         except Exception:
             self.__dict__.clear()
             self.__dict__.update(declared_state)
@@ -962,33 +934,15 @@ class Articulation(BatchEntity):
         which otherwise makes identical hand mimic constraints substantially
         softer on CUDA.
         """
-        if result is None or getattr(result, "backend", None) != "dexsim":
-            return
-
-        topology_revision = int(result.topology_revision)
-        if self._prepared_default_root_topology_revision == topology_revision:
-            return
-
         root_props = getattr(self.cfg, "root_props", None)
-        default_root_values_configured = root_props is not None and (
-            root_props.sleep_threshold is not None
-            or root_props.min_position_iters is not None
-            or root_props.min_velocity_iters is not None
+        self._prepared_default_root_topology_revision = (
+            prepare_default_spawn_runtime_config(
+                result,
+                self._entities,
+                root_props,
+                self._prepared_default_root_topology_revision,
+            )
         )
-        if default_root_values_configured:
-            for entity in self._entities:
-                # SpawnedArticulation deliberately fences these setters, while
-                # its Default-native binding exposes the articulation-root API.
-                native_articulation = getattr(entity, "_physics_binding", None)
-                if native_articulation is None:
-                    raise RuntimeError(
-                        "Default Spawn articulation has no native physics binding."
-                    )
-                _apply_default_articulation_root_properties(
-                    native_articulation,
-                    root_props,
-                )
-        self._prepared_default_root_topology_revision = topology_revision
 
     def __str__(self) -> str:
         if self.is_declared:
@@ -1090,90 +1044,21 @@ class Articulation(BatchEntity):
         """
         if not self._entities:
             return []
-        entity = self._entities[0]
-        try:
-            layout = entity.joint_dof_layout
-        except (AttributeError, RuntimeError):
-            return entity.get_actived_joint_names()
-        return [joint.name for joint in layout]
+        return get_state_joint_names(self._entities[0])
 
     def _source_qpos_to_state_order(self, qpos: torch.Tensor) -> torch.Tensor:
         """Map source-ordered initial qpos values to the runtime state order."""
-        if not self.is_spawn_bound:
-            return qpos
-
-        source_joint_names = self._entities[0].get_actived_joint_names()
-        state_joint_names = self._state_joint_names()
-        if source_joint_names == state_joint_names:
-            return qpos
-
-        source_indices = {name: index for index, name in enumerate(source_joint_names)}
-        try:
-            state_order = [source_indices[name] for name in state_joint_names]
-        except KeyError as error:
-            raise RuntimeError(
-                "Spawn articulation state layout contains a joint absent from "
-                "the source articulation layout."
-            ) from error
-        return qpos[..., state_order]
+        return map_source_qpos_to_state_order(
+            self._entities[0],
+            qpos,
+            is_spawn_bound=self.is_spawn_bound,
+        )
 
     def _state_mimic_info(self) -> _MimicInfo:
         """Map source-articulation mimic indices to state-buffer indices."""
-        entity = self._entities[0]
-        source_info = entity.get_mimic_info()
-        source_mimic_ids = np.asarray(source_info.mimic_id, dtype=np.int32).reshape(-1)
-        source_parent_ids = np.asarray(
-            source_info.mimic_parent, dtype=np.int32
-        ).reshape(-1)
-        multipliers = np.asarray(
-            source_info.mimic_multiplier, dtype=np.float32
-        ).reshape(-1)
-        offsets = np.asarray(source_info.mimic_offset, dtype=np.float32).reshape(-1)
-        relation_count = len(source_mimic_ids)
-        if not all(
-            len(values) == relation_count
-            for values in (source_parent_ids, multipliers, offsets)
-        ):
-            raise RuntimeError("Articulation mimic metadata has inconsistent lengths.")
-        if relation_count == 0:
-            return _MimicInfo(
-                mimic_id=source_mimic_ids,
-                mimic_parent=source_parent_ids,
-                mimic_multiplier=multipliers,
-                mimic_offset=offsets,
-            )
-
-        source_joint_names = entity.get_actived_joint_names()
-        try:
-            state_joint_ids = {
-                joint.name: int(joint.dof_start) for joint in entity.joint_dof_layout
-            }
-        except (AttributeError, RuntimeError):
-            state_joint_ids = {
-                name: index for index, name in enumerate(source_joint_names)
-            }
-
-        try:
-            mimic_ids = np.asarray(
-                [
-                    state_joint_ids[source_joint_names[int(source_id)]]
-                    for source_id in source_mimic_ids
-                ],
-                dtype=np.int32,
-            )
-            parent_ids = np.asarray(
-                [
-                    state_joint_ids[source_joint_names[int(source_id)]]
-                    for source_id in source_parent_ids
-                ],
-                dtype=np.int32,
-            )
-        except (IndexError, KeyError) as error:
-            raise RuntimeError(
-                "Articulation mimic metadata references a joint absent from "
-                "the backing state layout."
-            ) from error
-
+        mimic_ids, parent_ids, multipliers, offsets = read_state_mimic_info(
+            self._entities[0]
+        )
         return _MimicInfo(
             mimic_id=mimic_ids,
             mimic_parent=parent_ids,
@@ -1216,56 +1101,20 @@ class Articulation(BatchEntity):
         keeps its low-gain follower stabilizer pointed at the same commanded
         relation; it never copies measured qpos or qvel into follower state.
         """
-        if not self._newton_mimic_compliance_configured:
-            return
-
-        selected_columns = {
-            int(joint_id): column
-            for column, joint_id in enumerate(joint_ids.detach().cpu().tolist())
-        }
-        follower_ids: list[int] = []
-        follower_targets: list[torch.Tensor] = []
-        for child_id, parent_id, multiplier, offset in zip(
-            self.mimic_ids,
-            self.mimic_parents,
-            self.mimic_multipliers,
-            self.mimic_offsets,
-            strict=True,
-        ):
-            parent_column = selected_columns.get(int(parent_id))
-            if parent_column is None:
-                continue
-            target = values[:, parent_column] * float(multiplier)
-            if not velocity:
-                target = target + float(offset)
-            follower_ids.append(int(child_id))
-            follower_targets.append(target)
-
-        if not follower_ids:
-            return
-
-        targets = torch.stack(follower_targets, dim=1)
-        follower_ids_tensor = torch.as_tensor(
-            follower_ids, dtype=torch.int32, device=self.device
-        )
-        if velocity:
-            limits = self.body_data.qvel_limits[env_ids][:, follower_ids_tensor]
-            targets = targets.clamp(-limits, limits)
-            self._data.articulation_view.apply_qvel(
-                targets,
-                env_ids,
-                follower_ids_tensor,
-                target=True,
-            )
-            return
-
-        limits = self.body_data.qpos_limits[env_ids][:, follower_ids_tensor, :]
-        targets = targets.clamp(limits[..., 0], limits[..., 1])
-        self._data.articulation_view.apply_qpos(
-            targets,
-            env_ids,
-            follower_ids_tensor,
-            target=True,
+        _stabilize_newton_mimic_target_write(
+            configured=self._newton_mimic_compliance_configured,
+            values=values,
+            env_ids=env_ids,
+            joint_ids=joint_ids,
+            velocity=velocity,
+            mimic_ids=self.mimic_ids,
+            mimic_parents=self.mimic_parents,
+            mimic_multipliers=self.mimic_multipliers,
+            mimic_offsets=self.mimic_offsets,
+            qpos_limits=self.body_data.qpos_limits,
+            qvel_limits=self.body_data.qvel_limits,
+            articulation_view=self._data.articulation_view,
+            device=self.device,
         )
 
     @cached_property
@@ -1323,36 +1172,11 @@ class Articulation(BatchEntity):
         entity = self._entities[0]
         joints_by_child: dict[str, ArticulationJointKinematics] = {}
         for joint_name in entity.get_joint_names():
-            if getattr(self._data, "is_newton_backend", False):
-                get_joint_desc = getattr(entity, "get_joint_desc", None)
-                if not callable(get_joint_desc):
-                    raise ValueError(
-                        "Native articulation has no joint topology for "
-                        f"{joint_name!r}."
-                    )
-                try:
-                    native = get_joint_desc(joint_name)
-                except (KeyError, StopIteration) as exc:
-                    raise ValueError(
-                        "Native articulation has no joint topology for "
-                        f"{joint_name!r}."
-                    ) from exc
-            else:
-                native = entity.get_joint_info(joint_name)
-                if native is None:
-                    get_joint_desc = getattr(entity, "get_joint_desc", None)
-                    if not callable(get_joint_desc):
-                        raise ValueError(
-                            "Native articulation has no joint topology for "
-                            f"{joint_name!r}."
-                        )
-                    try:
-                        native = get_joint_desc(joint_name)
-                    except (KeyError, StopIteration) as exc:
-                        raise ValueError(
-                            "Native articulation has no joint topology for "
-                            f"{joint_name!r}."
-                        ) from exc
+            native = get_joint_descriptor(
+                entity,
+                joint_name,
+                is_newton=getattr(self._data, "is_newton_backend", False),
+            )
             native_joint_type = getattr(
                 native.joint_type,
                 "name",
@@ -2154,10 +1978,13 @@ class Articulation(BatchEntity):
         for i, env_idx in enumerate(env_list):
             entity = self._entities[env_idx]
             for j, name in enumerate(names):
-                if self.is_spawn_bound or self._data.is_newton_backend:
-                    entity.set_link_mass(name, mass[i, j].item())
-                else:
-                    entity.set_mass(name, mass[i, j].item())
+                apply_link_mass(
+                    entity,
+                    name,
+                    mass[i, j].item(),
+                    is_spawn_bound=self.is_spawn_bound,
+                    is_newton=self._data.is_newton_backend,
+                )
 
     def get_mass(
         self,
@@ -2203,22 +2030,17 @@ class Articulation(BatchEntity):
             entity = self._entities[env_idx]
             for j, name in enumerate(names):
                 value = np.asarray(values[i, j], dtype=np.float32)
-                if self.is_spawn_bound:
-                    status = entity.set_link_inertia(name, value)
-                    if status < 0:
-                        raise RuntimeError(
-                            f"set_link_inertia failed for env {env_idx}, "
-                            f"link {name!r}, with status {status}."
-                        )
-                elif not self._data.is_newton_backend:
-                    entity.get_physical_body(name).set_mass_space_inertia_tensor(value)
-                else:
-                    attr = entity.get_physical_attr(name)
-                    attr.inertia = value
-                    entity.set_physical_attr(
-                        attr,
-                        name,
-                        is_replace_inertial=False,
+                status = apply_link_inertia(
+                    entity,
+                    name,
+                    value,
+                    is_spawn_bound=self.is_spawn_bound,
+                    is_newton=self._data.is_newton_backend,
+                )
+                if status is not None and status < 0:
+                    raise RuntimeError(
+                        f"set_link_inertia failed for env {env_idx}, "
+                        f"link {name!r}, with status {status}."
                     )
 
     def get_inertia(
@@ -2258,29 +2080,21 @@ class Articulation(BatchEntity):
             for j, name in enumerate(names):
                 position = np.asarray(values[i, j, :3], dtype=np.float32)
                 quaternion = np.asarray(
-                    convert_quat(values[i, j, 3:7], to="wxyz"),
+                    quat_xyzw_to_wxyz(values[i, j, 3:7]),
                     dtype=np.float32,
                 )
-                if self.is_spawn_bound:
-                    status = entity.set_link_com_pose(name, position, quaternion)
-                    if status < 0:
-                        raise RuntimeError(
-                            f"set_link_com_pose failed for env {env_idx}, "
-                            f"link {name!r}, with status {status}."
-                        )
-                elif not self._data.is_newton_backend:
-                    entity.get_physical_body(name).set_cmass_local_pose(
-                        position,
-                        quaternion,
-                    )
-                else:
-                    attr = entity.get_physical_attr(name)
-                    attr.com_position = position
-                    attr.com_quaternion = quaternion
-                    entity.set_physical_attr(
-                        attr,
-                        name,
-                        is_replace_inertial=False,
+                status = apply_link_com_pose(
+                    entity,
+                    name,
+                    position,
+                    quaternion,
+                    is_spawn_bound=self.is_spawn_bound,
+                    is_newton=self._data.is_newton_backend,
+                )
+                if status is not None and status < 0:
+                    raise RuntimeError(
+                        f"set_link_com_pose failed for env {env_idx}, "
+                        f"link {name!r}, with status {status}."
                     )
 
     def get_com_pose(
@@ -2332,7 +2146,7 @@ class Articulation(BatchEntity):
         for env_idx in local_env_ids:
             entity = self._entities[env_idx]
             for name in matched_link_names:
-                attrs.append(entity.get_physical_attr(name))
+                attrs.append(get_link_properties(entity, name, is_newton=False))
         return attrs
 
     def get_newton_link_properties(
@@ -2374,7 +2188,7 @@ class Articulation(BatchEntity):
         for env_idx in local_env_ids:
             entity = self._entities[env_idx]
             for name in matched_link_names:
-                properties.append(entity.get_newton_link_properties(name))
+                properties.append(get_link_properties(entity, name, is_newton=True))
         return properties
 
     def set_link_physical_attr(
@@ -2433,10 +2247,11 @@ class Articulation(BatchEntity):
         for env_idx in local_env_ids:
             entity = self._entities[env_idx]
             for name in matched_link_names:
-                entity.set_physical_attr(
+                set_link_physical_attr(
+                    entity,
                     physical_attr,
                     name,
-                    is_replace_inertial=replace_inertial,
+                    replace_inertial=replace_inertial,
                 )
 
     def set_joint_drive(
@@ -2497,71 +2312,21 @@ class Articulation(BatchEntity):
                 "target_mode='none' or 'effort'."
             )
 
-        def _drive_arg(value: torch.Tensor, index: int) -> float | np.ndarray:
-            result = value[index].detach().cpu().numpy()
-            return result.item() if result.size == 1 else result
-
         for i, env_idx in enumerate(local_env_ids):
-            if self.is_spawn_bound and self.body_data.is_newton_backend:
-                if resolved_drive_type == "acceleration" and target_mode_value in {
-                    1,
-                    2,
-                    3,
-                }:
-                    raise NotImplementedError(
-                        "Newton Spawn does not have an exact equivalent of "
-                        "the Default acceleration drive. Use "
-                        "drive_type='force' or disable the drive."
-                    )
-                drive_args = {"joint_ids": local_joint_ids}
-                if target_mode_value is not None:
-                    drive_args["target_mode"] = target_mode_value
-                if stiffness is not None:
-                    drive_args["target_ke"] = _drive_arg(stiffness, i)
-                if damping is not None:
-                    drive_args["target_kd"] = _drive_arg(damping, i)
-                if max_effort is not None:
-                    drive_args["effort_limit"] = _drive_arg(max_effort, i)
-                if max_velocity is not None:
-                    drive_args["velocity_limit"] = _drive_arg(max_velocity, i)
-                if friction is not None:
-                    drive_args["friction"] = _drive_arg(friction, i)
-                if armature is not None:
-                    drive_args["armature"] = _drive_arg(armature, i)
-                if target_mode_value in {0, 4}:
-                    drive_args["target_ke"] = 0.0
-                    drive_args["target_kd"] = 0.0
-                elif target_mode_value == 2:
-                    drive_args["target_ke"] = 0.0
-                self._entities[env_idx].set_newton_drive(**drive_args)
-                continue
-
-            drive_args = {"joint_ids": local_joint_ids}
-            default_drive_type = resolved_drive_type
-            if target_mode_value in {0, 4}:
-                default_drive_type = "none"
-            elif target_mode_value in {1, 2, 3} and default_drive_type is None:
-                default_drive_type = "force"
-            if default_drive_type is not None:
-                drive_args["drive_type"] = get_dexsim_drive_type(default_drive_type)
-            if stiffness is not None:
-                drive_args["stiffness"] = _drive_arg(stiffness, i)
-            if damping is not None:
-                drive_args["damping"] = _drive_arg(damping, i)
-            if max_effort is not None:
-                drive_args["max_force"] = _drive_arg(max_effort, i)
-            if max_velocity is not None:
-                drive_args["max_velocity"] = _drive_arg(max_velocity, i)
-            if friction is not None:
-                drive_args["joint_friction"] = _drive_arg(friction, i)
-            if armature is not None:
-                drive_args["armature"] = _drive_arg(armature, i)
-            if target_mode_value in {0, 4}:
-                drive_args["stiffness"] = 0.0
-                drive_args["damping"] = 0.0
-            elif target_mode_value == 2:
-                drive_args["stiffness"] = 0.0
-            self._entities[env_idx].set_drive(**drive_args)
+            apply_joint_drive(
+                self._entities[env_idx],
+                is_newton=self.is_spawn_bound and self.body_data.is_newton_backend,
+                joint_ids=local_joint_ids,
+                row_index=i,
+                resolved_drive_type=resolved_drive_type,
+                target_mode_value=target_mode_value,
+                stiffness=stiffness,
+                damping=damping,
+                max_effort=max_effort,
+                max_velocity=max_velocity,
+                friction=friction,
+                armature=armature,
+            )
 
         if max_velocity is not None:
             max_velocity = torch.as_tensor(
@@ -2708,9 +2473,9 @@ class Articulation(BatchEntity):
         for env_idx in local_env_ids:
             entity = self._entities[int(env_idx)]
             if self._data is not None and self._data.is_newton_backend:
-                target_modes = np.asarray(entity.get_newton_drive()[-1])[
-                    local_joint_ids
-                ]
+                target_modes = np.asarray(
+                    read_drive_properties(entity, is_newton=True)[-1]
+                )[local_joint_ids]
                 drive_types.append(
                     [
                         (DriveType.NONE if int(mode) in {0, 4} else DriveType.FORCE)
@@ -2757,7 +2522,9 @@ class Articulation(BatchEntity):
 
         target_modes = []
         for env_idx in local_env_ids:
-            modes = self._entities[int(env_idx)].get_newton_drive()[-1]
+            modes = read_drive_properties(self._entities[int(env_idx)], is_newton=True)[
+                -1
+            ]
             target_modes.append(
                 [int(value) for value in np.asarray(modes)[local_joint_ids]]
             )
@@ -3518,15 +3285,15 @@ class Articulation(BatchEntity):
             for i, env_idx in enumerate(self._all_indices):
                 for link_name in link_names:
                     if self._has_collision_visible_node_dict[link_name] is False:
-                        self._entities[env_idx].create_physical_visible_node(
-                            rgba, link_name
+                        create_physical_visible_node(
+                            self._entities[env_idx], rgba, link_name
                         )
                         self._has_collision_visible_node_dict[link_name] = True
 
         # set visibility
         for i, env_idx in enumerate(self._all_indices):
             for link_name in link_names:
-                self._entities[env_idx].set_physical_visible(visible, link_name)
+                set_physical_visible(self._entities[env_idx], visible, link_name)
 
     def set_fix_base(
         self,
@@ -3541,8 +3308,8 @@ class Articulation(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         for i, env_idx in enumerate(local_env_ids):
-            self._entities[env_idx].set_articulation_flag(
-                ArticulationFlag.FIX_BASE, fix
+            set_articulation_flag(
+                self._entities[env_idx], ArticulationFlag.FIX_BASE, fix
             )
 
     def set_self_collision(
@@ -3558,8 +3325,10 @@ class Articulation(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         for i, env_idx in enumerate(local_env_ids):
-            self._entities[env_idx].set_articulation_flag(
-                ArticulationFlag.DISABLE_SELF_COLLISION, not enable
+            set_articulation_flag(
+                self._entities[env_idx],
+                ArticulationFlag.DISABLE_SELF_COLLISION,
+                not enable,
             )
 
     def set_gravity(
@@ -3575,21 +3344,18 @@ class Articulation(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         for env_idx in local_env_ids:
-            self._entities[env_idx].enable_gravity(bool(enable))
+            set_gravity_enabled(self._entities[env_idx], enable)
 
     def destroy(self) -> None:
         if self.is_declared or self.is_spawn_bound:
             # The finalized Scene is the sole owner of native lifetime.
             return
-        env = self._world.get_env()
-        arenas = env.get_all_arenas()
-        if len(arenas) == 0:
-            arenas = [env]
-        for i, entity in enumerate(self._entities):
-            if self._data.is_newton_backend:
-                arenas[i].remove_skeleton(entity)
-            else:
-                arenas[i].remove_articulation(entity)
+        destroy_articulation_entities(
+            self._world,
+            self._ps,
+            self._entities,
+            is_newton=self._data.is_newton_backend,
+        )
 
 
 __all__ = ["ArticulationData", "Articulation", "ArticulationJointKinematics"]

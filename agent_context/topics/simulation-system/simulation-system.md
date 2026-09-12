@@ -168,10 +168,13 @@ Backend and library adapters must preserve the external API's native order and
 convert exactly once at that boundary. DexSim/Spawn rigid and articulation pose
 buffers are native `xyzw + xyz`, so their adapters only permute pose layout.
 DexSim mass-property and COM descriptors are native `wxyz`, so those adapters
-use `convert_quat()` explicitly. Newton/Warp transforms expose position plus an
-`xyzw` quaternion and therefore need no component-order conversion. Use a
-non-symmetric rotation when testing an adapter; an identity or 180-degree
-single-axis rotation can hide an incorrect order.
+use the direction-specific `quat_xyzw_to_wxyz()`/
+`quat_wxyz_to_xyzw()` helpers explicitly. The legacy `convert_quat()` remains
+available for compatibility but should not be used when the input convention is
+already known. Newton/Warp transforms expose position plus an `xyzw` quaternion
+and therefore need no component-order conversion. Use a non-symmetric rotation
+when testing an adapter; an identity or 180-degree single-axis rotation can
+hide an incorrect order.
 
 Deformables use the same public hierarchy for both topologies:
 `DeformableObjectCfg` is specialized by `VolumeDeformableObjectCfg` and
