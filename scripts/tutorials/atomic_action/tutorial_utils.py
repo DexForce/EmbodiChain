@@ -39,7 +39,11 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.cfg import LightCfg, MarkerCfg, RenderCfg, RobotCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
-from embodichain.lab.sim.motion.planners import CuroboPlannerCfg, ToppraPlannerCfg
+from embodichain.lab.sim.motion.planners import (
+    CuroboPlannerCfg,
+    ToppraPlannerCfg,
+    TrapezoidalPlannerCfg,
+)
 from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
@@ -90,7 +94,8 @@ TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
     palm_depth=0.096,
 )
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.036
-DEFAULT_TUTORIAL_LIGHT_POS = (1.0, 0.0, 3.0)
+DEFAULT_TUTORIAL_SUN_DIRECTION = (0.0, 0.0, -1.0)
+DEFAULT_TUTORIAL_SUN_INTENSITY = 5.0
 _FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
 _DEFAULT_GRIPPER_TCP_Z = 0.17
 _GRIPPER_TCP = (
@@ -118,6 +123,12 @@ TUTORIAL_ROBOTS: tuple[TutorialRobot, ...] = (
     "franka",
     "ur10",
 )
+TutorialPlanner = Literal["toppra", "trapezoidal", "curobo"]
+TUTORIAL_PLANNERS: tuple[TutorialPlanner, ...] = (
+    "toppra",
+    "trapezoidal",
+    "curobo",
+)
 
 
 def create_tutorial_argument_parser(
@@ -126,8 +137,29 @@ def create_tutorial_argument_parser(
     features: Collection[TutorialCliFeature] = (),
     default_device: str | None = None,
     default_renderer: str | None = None,
+    default_planner: TutorialPlanner = "trapezoidal",
 ) -> argparse.ArgumentParser:
-    """Create a launcher parser with the shared atomic-tutorial switches."""
+    """Create a launcher parser with the shared atomic-tutorial switches.
+
+    Args:
+        description: Command-line program description.
+        features: Optional groups of tutorial-specific shared arguments.
+        default_device: Optional device override for the launcher arguments.
+        default_renderer: Optional renderer override for the launcher arguments.
+        default_planner: Planner selected when ``--planner`` is omitted. The
+            shared default is deterministic ``trapezoidal`` timing.
+
+    Returns:
+        The configured argument parser.
+
+    Raises:
+        ValueError: If ``default_planner`` is not a supported tutorial backend.
+    """
+    if default_planner not in TUTORIAL_PLANNERS:
+        raise ValueError(
+            f"default_planner must be one of {TUTORIAL_PLANNERS}, "
+            f"got {default_planner!r}."
+        )
     parser = argparse.ArgumentParser(description=description)
     add_env_launcher_args_to_parser(parser)
     defaults = {}
@@ -148,6 +180,16 @@ def create_tutorial_argument_parser(
         choices=TUTORIAL_ROBOTS,
         default="ur5",
         help="Robot construction to use (default: ur5).",
+    )
+    parser.add_argument(
+        "--planner",
+        choices=TUTORIAL_PLANNERS,
+        default=default_planner,
+        help=(
+            "Motion-planner backend: toppra, trapezoidal, or curobo "
+            f"(default: {default_planner}). NeuralPlanner is not exposed "
+            "by this tutorial selector."
+        ),
     )
     if "debug_state" in features:
         parser.add_argument(
@@ -183,7 +225,7 @@ def create_tutorial_simulation(
     args: argparse.Namespace,
     *,
     arena_space: float = 2.5,
-    light_pos: Sequence[float] = DEFAULT_TUTORIAL_LIGHT_POS,
+    sun_direction: Sequence[float] = DEFAULT_TUTORIAL_SUN_DIRECTION,
 ) -> SimulationManager:
     """Create the shared simulation setup used by atomic-action tutorials.
 
@@ -191,7 +233,8 @@ def create_tutorial_simulation(
         args: Parsed launcher arguments containing environment count, device,
             and renderer selections.
         arena_space: Spacing between parallel simulation arenas in meters.
-        light_pos: Position of the scene's key light.
+        sun_direction: Direction of the single global sun light. The vector
+            points from the light toward the scene.
 
     Returns:
         A simulation manager with the tutorial key light configured.
@@ -212,9 +255,10 @@ def create_tutorial_simulation(
     sim.add_light(
         cfg=LightCfg(
             uid="main_light",
+            light_type="sun",
             color=(0.6, 0.6, 0.6),
-            intensity=30.0,
-            init_pos=list(light_pos),
+            intensity=DEFAULT_TUTORIAL_SUN_INTENSITY,
+            direction=tuple(sun_direction),
         )
     )
     return sim
@@ -312,32 +356,93 @@ def add_tutorial_robot(
     )
 
 
-def create_toppra_motion_generator(robot: Robot) -> MotionGenerator:
-    """Create the standard TOPPRA motion generator for a tutorial robot.
+def create_tutorial_motion_generator(
+    robot: Robot,
+    planner: TutorialPlanner = "trapezoidal",
+) -> MotionGenerator:
+    """Create a selected non-neural motion generator for a tutorial robot.
+
+    The selector intentionally mirrors the planner types that are usable from
+    the atomic-action tutorials. ``NeuralPlanner`` is omitted because it needs
+    a model-specific ONNX configuration and is not a drop-in backend for these
+    examples.
 
     Args:
         robot: Robot whose trajectories will be planned.
+        planner: Planner backend to construct.
+
+    Returns:
+        The configured motion generator for ``planner``.
+
+    Raises:
+        ValueError: If ``planner`` is not one of the supported tutorial
+            backends.
+    """
+    planner_cfg_types = {
+        "toppra": ToppraPlannerCfg,
+        "trapezoidal": TrapezoidalPlannerCfg,
+        "curobo": CuroboPlannerCfg,
+    }
+    if planner not in TUTORIAL_PLANNERS:
+        raise ValueError(
+            f"Unsupported tutorial planner {planner!r}; "
+            f"choose one of {TUTORIAL_PLANNERS}."
+        )
+    planner_cfg = planner_cfg_types[planner](robot_uid=robot.uid)
+    return MotionGenerator(cfg=MotionGenCfg(planner_cfg=planner_cfg))
+
+
+def create_toppra_motion_generator(
+    robot: Robot,
+    planner: TutorialPlanner = "toppra",
+) -> MotionGenerator:
+    """Create a tutorial motion generator, defaulting to TOPPRA.
+
+    ``planner`` keeps this historical helper compatible while allowing a
+    tutorial to opt into the shared command-line selector.
+
+    Args:
+        robot: Robot whose trajectories will be planned.
+        planner: Planner backend to construct.
 
     Returns:
         The configured motion generator.
     """
-    return MotionGenerator(
-        cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
-    )
+    return create_tutorial_motion_generator(robot, planner)
 
 
-def create_curobo_motion_generator(robot: Robot) -> MotionGenerator:
-    """Create a cuRobo-backed motion generator for a tutorial robot.
+def create_trapezoidal_motion_generator(
+    robot: Robot,
+    planner: TutorialPlanner = "trapezoidal",
+) -> MotionGenerator:
+    """Create a tutorial motion generator, defaulting to trapezoidal timing.
 
     Args:
         robot: Robot whose trajectories will be planned.
+        planner: Planner backend to construct.
 
     Returns:
-        The configured motion generator with an empty external collision world.
+        The configured motion generator.
     """
-    return MotionGenerator(
-        cfg=MotionGenCfg(planner_cfg=CuroboPlannerCfg(robot_uid=robot.uid))
-    )
+    return create_tutorial_motion_generator(robot, planner)
+
+
+def create_curobo_motion_generator(
+    robot: Robot,
+    planner: TutorialPlanner = "curobo",
+) -> MotionGenerator:
+    """Create a tutorial motion generator, defaulting to cuRobo.
+
+    Args:
+        robot: Robot whose trajectories will be planned.
+        planner: Planner backend to construct. The default preserves the
+            historical cuRobo helper behavior.
+
+    Returns:
+        The configured motion generator. For cuRobo, its external collision
+        world is empty until a tutorial supplies one explicitly.
+    """
+    return create_tutorial_motion_generator(robot, planner)
 
 
 def get_hand_open_close_qpos(
@@ -1122,7 +1227,8 @@ __all__ = [
     "DEFAULT_AXIS_LEN",
     "DEFAULT_AXIS_SIZE",
     "DEFAULT_GRIPPER_CLOSE_QPOS",
-    "DEFAULT_TUTORIAL_LIGHT_POS",
+    "DEFAULT_TUTORIAL_SUN_DIRECTION",
+    "DEFAULT_TUTORIAL_SUN_INTENSITY",
     "GRIPPER_HAND_JOINT_PATTERN",
     "GRIPPER_URDF_PATH",
     "ROBOTIQ_2F_140_TCP",
@@ -1130,7 +1236,9 @@ __all__ = [
     "ROBOTIQ_HAND_JOINT_PATTERN",
     "TOP_DOWN_EEF_ROTATION",
     "TutorialCliFeature",
+    "TutorialPlanner",
     "TutorialRobot",
+    "TUTORIAL_PLANNERS",
     "TUTORIAL_ROBOTS",
     "add_tutorial_robot",
     "add_ur5_gripper_robot",
@@ -1141,8 +1249,10 @@ __all__ = [
     "create_parallel_jaw_grasp_pose_generator",
     "create_curobo_motion_generator",
     "create_franka_panda_robot_cfg",
+    "create_trapezoidal_motion_generator",
     "create_toppra_motion_generator",
     "create_tutorial_argument_parser",
+    "create_tutorial_motion_generator",
     "create_tutorial_robot_cfg",
     "create_tutorial_simulation",
     "create_ur10_robotiq_robot_cfg",

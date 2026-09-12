@@ -384,7 +384,10 @@ def run_coordinated_pickment_demo(
         label=preset.label,
     )
     left_to_right_arm_direction = compute_left_to_right_arm_direction(robot, sim.device)
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_toppra_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "trapezoidal"),
+    )
 
     hand_close_qpos = (
         ROBOTIQ_2F_140_CLOSE_QPOS if args.robot == "ur10" else preset.hand_close_qpos
@@ -521,7 +524,6 @@ def main() -> None:
     sim = create_tutorial_simulation(
         args,
         arena_space=3.0,
-        light_pos=(0.0, -0.4, 3.0),
     )
     robot = create_dual_robot(sim, args.robot)
     run_coordinated_pickment_demo(args, sim, robot)

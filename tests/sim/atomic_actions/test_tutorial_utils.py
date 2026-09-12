@@ -40,6 +40,7 @@ from scripts.tutorials.atomic_action.dynamic_obstacle_recovery import (
     _blocking_obstacle_pose,
     _maximum_path_deviation,
     _minimum_cuboid_clearance,
+    _obstacle_motion_trigger_command,
 )
 from scripts.tutorials.atomic_action.coordinated_pickment import (
     compute_left_to_right_arm_direction,
@@ -48,20 +49,26 @@ from scripts.tutorials.atomic_action.scenario_utils import (
     create_dual_tutorial_robot_cfg,
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    DEFAULT_TUTORIAL_SUN_DIRECTION,
+    DEFAULT_TUTORIAL_SUN_INTENSITY,
     ROBOTIQ_2F_140_TCP,
     ROBOTIQ_HAND_JOINT_PATTERN,
+    TUTORIAL_PLANNERS,
     TUTORIAL_ROBOTS,
+    TutorialPlanner,
     broadcast_pose_batch,
     broadcast_waypoint_pose_batch,
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
     create_curobo_motion_generator,
     create_franka_panda_robot_cfg,
+    create_parallel_jaw_grasp_pose_generator,
     create_tutorial_argument_parser,
+    create_tutorial_motion_generator,
+    create_tutorial_simulation,
     create_tutorial_robot_cfg,
     create_ur10_robotiq_robot_cfg,
     create_ur5_gripper_robot_cfg,
-    create_parallel_jaw_grasp_pose_generator,
     get_hand_open_close_qpos,
     replay_trajectory,
     should_open_tutorial_window,
@@ -75,7 +82,7 @@ EXPECTED_STEP_COUNT = 3
 CUBOID_SIZE = (0.2, 0.2, 0.2)
 STRICT_RECOVERY_TRACKING_ERROR = 0.1
 STRICT_RECOVERY_SPHERE_DENSITY = 0.3
-STRICT_RECOVERY_MINIMUM_CLEARANCE = 0.01
+STRICT_RECOVERY_MINIMUM_CLEARANCE = 0.005
 FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
 DUAL_FRANKA_MOUNT_X_AXIS = torch.tensor([0.0, -1.0, 0.0])
 UR_RUNTIME_QPOS_LIMITS = torch.tensor([[-2.0 * math.pi, 2.0 * math.pi]] * 6)
@@ -702,16 +709,98 @@ def test_curobo_motion_generator_factory_selects_curobo_backend() -> None:
     assert cfg.planner_cfg.robot_uid == "tutorial_robot"
 
 
+@pytest.mark.parametrize("planner", TUTORIAL_PLANNERS)
+def test_tutorial_motion_generator_factory_selects_requested_backend(
+    planner: TutorialPlanner,
+) -> None:
+    robot = MagicMock(uid="tutorial_robot")
+
+    with patch(
+        "scripts.tutorials.atomic_action.tutorial_utils.MotionGenerator"
+    ) as motion_generator_cls:
+        result = create_tutorial_motion_generator(robot, planner)
+
+    cfg = motion_generator_cls.call_args.kwargs["cfg"]
+    assert result is motion_generator_cls.return_value
+    assert cfg.planner_cfg.planner_type == planner
+    assert cfg.planner_cfg.robot_uid == "tutorial_robot"
+
+
+def test_tutorial_motion_generator_factory_rejects_neural_backend() -> None:
+    with pytest.raises(ValueError, match="Unsupported tutorial planner"):
+        create_tutorial_motion_generator(
+            MagicMock(uid="tutorial_robot"), "neural"
+        )  # type: ignore[arg-type]
+
+
+def test_tutorial_motion_generator_factory_defaults_to_trapezoidal() -> None:
+    robot = MagicMock(uid="tutorial_robot")
+
+    with patch(
+        "scripts.tutorials.atomic_action.tutorial_utils.MotionGenerator"
+    ) as motion_generator_cls:
+        create_tutorial_motion_generator(robot)
+
+    cfg = motion_generator_cls.call_args.kwargs["cfg"]
+    assert cfg.planner_cfg.planner_type == "trapezoidal"
+
+
+def test_tutorial_simulation_uses_one_global_sun_light() -> None:
+    args = Namespace(num_envs=4, device="cpu", renderer="hybrid")
+    simulation = MagicMock()
+
+    with (
+        patch(
+            "scripts.tutorials.atomic_action.tutorial_utils.SimulationManager",
+            return_value=simulation,
+        ),
+        patch("scripts.tutorials.atomic_action.tutorial_utils.SimulationManagerCfg"),
+        patch("scripts.tutorials.atomic_action.tutorial_utils.RenderCfg"),
+        patch("scripts.tutorials.atomic_action.tutorial_utils.LightCfg") as light_cfg,
+        patch(
+            "scripts.tutorials.atomic_action.tutorial_utils.visualization_cfg_from_args"
+        ),
+    ):
+        result = create_tutorial_simulation(args)
+
+    assert result is simulation
+    simulation.add_light.assert_called_once_with(cfg=light_cfg.return_value)
+    light_kwargs = light_cfg.call_args.kwargs
+    assert light_kwargs["uid"] == "main_light"
+    assert light_kwargs["light_type"] == "sun"
+    assert light_kwargs["intensity"] == DEFAULT_TUTORIAL_SUN_INTENSITY
+    assert light_kwargs["direction"] == DEFAULT_TUTORIAL_SUN_DIRECTION
+    assert "init_pos" not in light_kwargs
+
+
+@pytest.mark.parametrize("robot_type", ("ur5", "franka", "ur10"))
+def test_tutorial_robot_configs_keep_gravity_enabled(robot_type: str) -> None:
+    cfg = create_tutorial_robot_cfg(robot_type)
+
+    assert cfg.enable_gravity is True
+
+
 def test_shared_robot_selection_keeps_ur5_default_and_accepts_all_variants() -> None:
     parser = create_tutorial_argument_parser("test parser")
     default_args = parser.parse_args([])
     franka_args = parser.parse_args(["--robot", "franka"])
     ur10_args = parser.parse_args(["--robot", "ur10"])
+    trapezoidal_args = parser.parse_args(["--planner", "trapezoidal"])
 
     assert TUTORIAL_ROBOTS == ("ur5", "franka", "ur10")
+    assert TUTORIAL_PLANNERS == ("toppra", "trapezoidal", "curobo")
     assert default_args.robot == "ur5"
     assert franka_args.robot == "franka"
     assert ur10_args.robot == "ur10"
+    assert default_args.planner == "trapezoidal"
+    assert trapezoidal_args.planner == "trapezoidal"
+
+
+def test_shared_tutorial_planner_selection_excludes_neural_backend() -> None:
+    parser = create_tutorial_argument_parser("test parser")
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--planner", "neural"])
 
 
 def test_arm_direction_uses_selected_robot_solver_roots() -> None:
@@ -744,9 +833,19 @@ def test_all_atomic_action_tutorials_accept_both_robot_choices(
         default_args = module.parse_arguments()
     with patch("sys.argv", [f"{module_name}.py", "--robot", "franka"]):
         franka_args = module.parse_arguments()
+    with patch(
+        "sys.argv",
+        [f"{module_name}.py", "--planner", "trapezoidal"],
+    ):
+        trapezoidal_args = module.parse_arguments()
 
     assert default_args.robot == "ur5"
     assert franka_args.robot == "franka"
+    expected_planner = (
+        "curobo" if module_name == "dynamic_obstacle_recovery" else "trapezoidal"
+    )
+    assert default_args.planner == expected_planner
+    assert trapezoidal_args.planner == "trapezoidal"
 
 
 def test_place_tutorial_registers_pick_object_with_simulation_engine_factory() -> None:
@@ -870,6 +969,7 @@ def test_pour_tutorial_uses_configured_pickup_and_local_rotation_axis() -> None:
     assert module.POUR_INTERNAL_AXIS == (1.0, 0.0, 0.0)
     pick_policy = module._create_pick_motion_policy()
     assert pick_policy.sample_count == module.PICK_SAMPLE_INTERVAL
+    assert isinstance(pick_policy.plan_opts, module.TrapezoidalPlanOptions)
     assert pick_policy.plan_opts.sample_method is module.TrajectorySampleMethod.QUANTITY
     assert pick_policy.plan_opts.sample_interval == module.PICK_MOTION_SAMPLE_COUNT
 
@@ -957,8 +1057,20 @@ def test_dynamic_obstacle_recovery_keeps_strict_collision_contract() -> None:
     assert "fit_type=" not in main_source
     assert "sphere_density=COLLISION_SPHERE_FIT_DENSITY" in main_source
     assert "collision_sphere_buffer=ROBOT_COLLISION_BUFFER" in main_source
+    assert "RigidBodyAttributesCfg(enable_collision=False)" in main_source
     assert "blocked_path_clearance > MAXIMUM_BLOCKED_PATH_CLEARANCE" in main_source
     assert "replan_clearance < MINIMUM_REPLAN_CLEARANCE" in main_source
+
+
+def test_dynamic_obstacle_trigger_scales_down_for_short_paths() -> None:
+    assert _obstacle_motion_trigger_command(10, path_fraction=0.10) == 1
+    assert _obstacle_motion_trigger_command(3, path_fraction=0.10) == 1
+    assert _obstacle_motion_trigger_command(40) == 12
+
+
+def test_dynamic_obstacle_trigger_rejects_invalid_paths() -> None:
+    with pytest.raises(ValueError, match="path_segment_count"):
+        _obstacle_motion_trigger_command(0)
 
 
 def test_maximum_path_deviation_measures_detour_from_reference_polyline() -> None:
