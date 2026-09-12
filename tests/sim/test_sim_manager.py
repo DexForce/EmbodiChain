@@ -66,7 +66,7 @@ DEFAULT_LOOK_AT = (
 pytestmark = pytest.mark.no_sim
 
 
-@pytest.mark.parametrize("renderer", ["hybrid", "fast-rt", "offline-rt", "auto"])
+@pytest.mark.parametrize("renderer", ["hybrid", "fast-rt", "rt", "auto"])
 @pytest.mark.parametrize("headless", [False, True])
 @pytest.mark.parametrize("dlss_enabled", [False, True])
 def test_convert_sim_config_applies_dlss_for_all_renderers_and_camera_modes(

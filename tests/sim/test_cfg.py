@@ -918,7 +918,7 @@ def test_render_cfg_applies_tone_mapping_and_fixed_exposure() -> None:
     expected_exposure = 1.25
     world_config = dexsim.WorldConfig()
     render_cfg = RenderCfg(
-        renderer="offline-rt",
+        renderer="rt",
         tone_mapping_enabled=True,
         tone_mapping_exposure=expected_exposure,
     )

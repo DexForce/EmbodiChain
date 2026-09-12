@@ -32,7 +32,7 @@ import torch
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.cli.sim import add_sim_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.motion.motion_generator import (
@@ -51,7 +51,7 @@ from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
     _plan_linear_profiles,
 )
 from embodichain.lab.sim.robots import CobotMagicCfg
-from embodichain.lab.sim.cfg import MarkerCfg
+from embodichain.lab.sim.cfg import MarkerCfg, physics_cfg_for_backend
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.utils.math import euler_xyz_from_quat
 
@@ -107,11 +107,8 @@ def sample_count(value: str) -> int:
 
 def parse_args() -> argparse.Namespace:
     """Parse tutorial arguments."""
-    # The shared launcher owns a boolean ``--profile`` flag for environment
-    # timing. This focused tutorial intentionally reuses that concise name for
-    # its trajectory profile and therefore replaces the shared action.
     parser = argparse.ArgumentParser(description=__doc__, conflict_handler="resolve")
-    add_env_launcher_args_to_parser(parser)
+    add_sim_args_to_parser(parser)
     parser.add_argument(
         "--profile",
         choices=(*PROFILE_SPECS, "both"),
@@ -894,6 +891,7 @@ def main() -> None:
             headless=args.headless,
             sim_device=args.device,
             num_envs=args.num_envs,
+            physics_cfg=physics_cfg_for_backend(args.physics),
             visualization=visualization_cfg_from_args(args),
         )
     )

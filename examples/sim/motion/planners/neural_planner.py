@@ -38,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.set_defaults(arena_space=2.0)
     parser.add_argument(
         "--onnx-model-path",
-        required=True,
+        default=None,
         help="Path to a standalone NMG ONNX policy.",
     )
     parser.add_argument(
@@ -221,6 +221,8 @@ def play_trajectory(
 
 def main(args: argparse.Namespace | None = None) -> None:
     args = parse_args() if args is None else args
+    if not args.onnx_model_path:
+        raise ValueError("--onnx-model-path is required to run NeuralPlanner.")
     if args.num_envs != 1:
         raise ValueError("The current exported NMG ONNX policy requires --num_envs 1.")
     if args.num_waypoints < 1:

@@ -84,6 +84,9 @@ def test_post_base_initialization_failure_releases_simulation(monkeypatch):
     def base_init(env, cfg, **kwargs):
         env.cfg = cfg
         env.sim = sim
+        env._num_envs = 1
+        env.robot = SimpleNamespace(joint_names=["joint"])
+        env.active_joint_ids = [0]
 
     monkeypatch.setattr(module.BaseEnv, "__init__", base_init)
     monkeypatch.setattr(module.SimulationManager, "flush_cleanup_queue", Mock())
