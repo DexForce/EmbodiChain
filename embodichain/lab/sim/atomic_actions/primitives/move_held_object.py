@@ -43,14 +43,17 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
 )
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan
 from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
     SkillBindingContract,
 )
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
-from embodichain.lab.sim.atomic_actions.trajectory_ops import build_pose_plan_states
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    build_pose_plan_states,
+    to_full_robot_trajectory,
+)
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
@@ -171,28 +174,23 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
         success = result.success & eligible
-        arm_traj = result.positions
 
-        full = torch.empty(
-            (self.num_envs, arm_traj.shape[1], self.robot_dof),
-            dtype=torch.float32,
-            device=self.device,
+        base_qpos = state.last_qpos.clone()
+        base_qpos[:, hand_joint_ids] = hand_grasp_qpos
+        _, timed = to_full_robot_trajectory(
+            result,
+            base_qpos=base_qpos,
+            joint_ids=arm_joint_ids,
+            env_ids=context.env_ids,
+            control_dt=context.require_control_dt(),
         )
-        full[:, :, :] = state.last_qpos.unsqueeze(1)
-        full[:, :, arm_joint_ids] = arm_traj
-        full[:, :, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
-        assert result.dt is not None
 
         return self.build_plan(
             request,
             context,
             success=success,
-            trajectory=TimedTrajectory.from_positions(
-                full,
-                env_ids=context.env_ids,
-                dt=result.dt,
-            ),
-            segment_lengths={"transport": full.shape[1]},
+            trajectory=timed,
+            segment_lengths={"transport": timed.waypoint_count},
         )
 
 

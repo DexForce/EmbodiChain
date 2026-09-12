@@ -19,18 +19,70 @@
 from __future__ import annotations
 
 import argparse
+from embodichain.cli.sim import (
+    add_sim_args_to_parser,
+    add_seed_arg_to_parser,
+    resolve_seed,
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Use a Franka Panda and MotionGenerator to open a drawer."
+    )
+    add_sim_args_to_parser(parser)
+    add_seed_arg_to_parser(parser, scope="PyTorch IK seed sampling")
+    parser.add_argument(
+        "--hold-steps",
+        type=int,
+        default=100,
+        help="Physics steps to hold the final open-drawer pose before exiting.",
+    )
+    parser.add_argument(
+        "--auto-start",
+        action="store_true",
+        help="Execute trajectories without waiting for Enter.",
+    )
+    parser.add_argument(
+        "--record-save-path",
+        type=str,
+        default=None,
+        help="Optional MP4 path for recording from a fixed headless camera.",
+    )
+    parser.add_argument(
+        "--record-fps",
+        type=int,
+        default=30,
+        help="Frames per second for headless recording.",
+    )
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
 from collections.abc import Sequence
+from typing import Literal
 
 import torch
 
 from embodichain.data import get_data_path
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    ArticulationRootPropertiesCfg,
     JointDrivePropertiesCfg,
+    LinkPhysicsOverrideCfg,
+    NewtonCollisionPropertiesCfg,
+    NewtonPhysicsCfg,
+    NewtonRigidBodyMaterialCfg,
+    PhysicsBackendCfg,
     RenderCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
+    physics_cfg_for_backend,
 )
 from embodichain.lab.sim.objects import Articulation, Robot
 from embodichain.lab.sim.motion.motion_generator import (
@@ -61,10 +113,21 @@ __all__ = [
 ARM_NAME = "arm"
 HAND_NAME = "hand"
 HANDLE_LINK_NAME = "handle_xpos"
+DRAWER_CONTACT_LINK_NAME = "inner_box"
+LEFT_FINGER_LINK_NAME = "fr3_leftfinger"
+RIGHT_FINGER_LINK_NAME = "fr3_rightfinger"
 DRAWER_ASSET = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 
 APPROACH_DISTANCE = 0.10
 PULL_DISTANCE = 0.16
+NEWTON_GRASP_CONTACT_STIFFNESS = 4.0e4
+NEWTON_GRASP_CONTACT_DAMPING = 4.0e2
+# Match the shared atomic-action grasp profile.  ``condim=4`` activates the
+# torsional term in MuJoCo-Warp; the rolling coefficient is retained for
+# solvers/condim=6 that support it.  Keep both coefficients on the fingers and
+# handle only; changing the world material would alter unrelated contacts.
+NEWTON_GRASP_TORSIONAL_FRICTION = 0.1
+NEWTON_GRASP_ROLLING_FRICTION = 0.01
 DRAWER_SUCCESS_THRESHOLD = 0.10
 HALF_OPEN_FRACTION = 0.5
 HALF_OPEN_TOLERANCE = 0.02
@@ -75,6 +138,24 @@ RECORD_LOOK_AT = (
     (0.45, 0.0, 0.52),
     (0.0, 0.0, 1.0),
 )
+
+
+def _newton_grasp_contact_override(
+    link_names_expr: str,
+) -> LinkPhysicsOverrideCfg:
+    """Build the Newton contact material used at the drawer grasp."""
+    return LinkPhysicsOverrideCfg(
+        link_names_expr=[link_names_expr],
+        attrs=RigidBodyPhysicsCfg(
+            collision_props=NewtonCollisionPropertiesCfg(condim=4),
+            material_props=NewtonRigidBodyMaterialCfg(
+                ke=NEWTON_GRASP_CONTACT_STIFFNESS,
+                kd=NEWTON_GRASP_CONTACT_DAMPING,
+                torsional_friction=NEWTON_GRASP_TORSIONAL_FRICTION,
+                rolling_friction=NEWTON_GRASP_ROLLING_FRICTION,
+            ),
+        ),
+    )
 
 
 def create_scene(sim: SimulationManager) -> tuple[Robot, Articulation]:
@@ -96,31 +177,46 @@ def create_scene(sim: SimulationManager) -> tuple[Robot, Articulation]:
             "uid": "tutorial_franka",
             "robot_type": "panda",
             "attrs": {
-                "static_friction": 1.0,
-                "dynamic_friction": 1.0,
+                "material_props": {
+                    "static_friction": 1.0,
+                    "dynamic_friction": 1.0,
+                },
             },
         }
     )
+    if sim.is_newton_backend:
+        robot_cfg.link_attrs = {
+            **(robot_cfg.link_attrs or {}),
+            "newton_gripper_contacts": _newton_grasp_contact_override(
+                f"(?:{LEFT_FINGER_LINK_NAME}|{RIGHT_FINGER_LINK_NAME})"
+            ),
+        }
     robot = sim.add_robot(cfg=robot_cfg)
     if robot is None:
         raise RuntimeError("Failed to add the Franka Panda robot.")
 
     # Keep the drawer base fixed while leaving its prismatic joint passive. The
     # 180-degree yaw makes the drawer's opening direction point toward Franka.
-    drawer = sim.add_articulation(
-        cfg=ArticulationCfg(
-            uid="drawer",
-            fpath=get_data_path(DRAWER_ASSET),
-            init_pos=(0.72, 0.0, 0.42),
-            init_rot=(0.0, 0.0, 180.0),
-            fix_base=True,
-            drive_pros=JointDrivePropertiesCfg(drive_type="none"),
-            attrs=RigidBodyAttributesCfg(
-                static_friction=1.0,
-                dynamic_friction=1.0,
-            ),
-        )
+    drawer_cfg = ArticulationCfg(
+        uid="drawer",
+        fpath=get_data_path(DRAWER_ASSET),
+        asset_physics_mode="overlay",
+        init_pos=(0.72, 0.0, 0.42),
+        init_rot=(0.0, 0.0, 180.0),
+        root_props=ArticulationRootPropertiesCfg(fixed_base=True),
+        joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {"material_props": {"static_friction": 1.0, "dynamic_friction": 1.0}}
+        ),
     )
+    if sim.is_newton_backend:
+        # The handle marker has no geometry; its collision belongs to inner_box.
+        drawer_cfg.link_attrs = {
+            "newton_handle_contacts": _newton_grasp_contact_override(
+                DRAWER_CONTACT_LINK_NAME
+            )
+        }
+    drawer = sim.add_articulation(cfg=drawer_cfg)
     return robot, drawer
 
 
@@ -230,6 +326,34 @@ def play_arm_trajectory(
         sim.update(step=physics_steps_per_waypoint)
 
 
+def _move_arm_to_poses(
+    sim: SimulationManager,
+    robot: Robot,
+    motion_generator: MotionGenerator,
+    target_poses: Sequence[torch.Tensor],
+    *,
+    sample_count: int,
+    physics_steps_per_waypoint: int = 4,
+    wait_for_input: bool = False,
+) -> None:
+    """Plan and execute arm motion through Cartesian target poses."""
+    start_qpos = robot.get_qpos(name=ARM_NAME)
+    trajectory = generate_arm_trajectory(
+        motion_generator,
+        qpos_waypoints=solve_ik_waypoints(robot, target_poses, start_qpos),
+        start_qpos=start_qpos,
+        sample_count=sample_count,
+    )
+    if wait_for_input:
+        input("[READY]: Trajectory planned. Press Enter to start execution...")
+    play_arm_trajectory(
+        sim,
+        robot,
+        trajectory,
+        physics_steps_per_waypoint=physics_steps_per_waypoint,
+    )
+
+
 def move_gripper(
     sim: SimulationManager,
     robot: Robot,
@@ -311,11 +435,10 @@ def open_drawer(
     hand_limits = robot.get_qpos_limits(name=HAND_NAME)
     hand_open_qpos = hand_limits[..., 1]
     hand_closed_qpos = hand_limits[..., 0]
+    # Newton must clear every articulation in a world together. Establish the
+    # initial scene state before opening the fingers for the approach.
+    sim.reset_objects_state()
     move_gripper(sim, robot, hand_open_qpos, num_steps=20)
-
-    # Finish tool initialization before establishing the task's initial state.
-    # This also clears any startup contact impulse from opening the fingers.
-    drawer.reset()
     sim.update(step=5)
 
     # Roll the asset's handle frame 90 degrees around TCP Z. Its approach axis
@@ -324,21 +447,14 @@ def open_drawer(
     approach_pose = grasp_pose.clone()
     approach_pose[:, :3, 3] -= grasp_pose[:, :3, 2] * APPROACH_DISTANCE
 
-    start_qpos = robot.get_qpos(name=ARM_NAME)
-    approach_waypoints = solve_ik_waypoints(
+    _move_arm_to_poses(
+        sim,
         robot,
-        target_poses=[approach_pose, grasp_pose],
-        start_qpos=start_qpos,
-    )
-    approach_trajectory = generate_arm_trajectory(
         motion_generator,
-        qpos_waypoints=approach_waypoints,
-        start_qpos=start_qpos,
+        [approach_pose, grasp_pose],
         sample_count=60,
+        wait_for_input=wait_for_input,
     )
-    if wait_for_input:
-        input("[READY]: Trajectory planned. Press Enter to start execution...")
-    play_arm_trajectory(sim, robot, approach_trajectory)
 
     # Close around the handle, then allow contacts to settle before pulling.
     move_gripper(sim, robot, hand_closed_qpos)
@@ -350,22 +466,12 @@ def open_drawer(
     pull_pose = grasped_handle_pose.clone()
     pull_pose[:, :3, 3] -= grasped_handle_pose[:, :3, 2] * PULL_DISTANCE
 
-    pull_start_qpos = robot.get_qpos(name=ARM_NAME)
-    pull_waypoints = solve_ik_waypoints(
-        robot,
-        target_poses=[pull_pose],
-        start_qpos=pull_start_qpos,
-    )
-    pull_trajectory = generate_arm_trajectory(
-        motion_generator,
-        qpos_waypoints=pull_waypoints,
-        start_qpos=pull_start_qpos,
-        sample_count=80,
-    )
-    play_arm_trajectory(
+    _move_arm_to_poses(
         sim,
         robot,
-        pull_trajectory,
+        motion_generator,
+        [pull_pose],
+        sample_count=80,
         physics_steps_per_waypoint=5,
     )
     sim.update(step=50)
@@ -390,36 +496,27 @@ def open_drawer(
     push_pose = pushed_handle_pose.clone()
     push_pose[:, :3, 3] += pushed_handle_pose[:, :3, 2] * push_distance.unsqueeze(-1)
 
-    push_start_qpos = robot.get_qpos(name=ARM_NAME)
-    push_waypoints = solve_ik_waypoints(
-        robot,
-        target_poses=[push_pose],
-        start_qpos=push_start_qpos,
-    )
-    push_trajectory = generate_arm_trajectory(
-        motion_generator,
-        qpos_waypoints=push_waypoints,
-        start_qpos=push_start_qpos,
-        sample_count=50,
-    )
-    play_arm_trajectory(
+    _move_arm_to_poses(
         sim,
         robot,
-        push_trajectory,
+        motion_generator,
+        [push_pose],
+        sample_count=50,
         physics_steps_per_waypoint=5,
     )
     sim.update(step=50)
 
     drawer_qpos = drawer.get_qpos()
     final_opening = drawer_qpos[:, 0]
+    half_open_error = torch.abs(final_opening - half_open_target)
     print(
-        "[INFO]: Drawer opening after half push (m): "
-        f"{final_opening.detach().cpu().tolist()}",
+        "[INFO]: Drawer opening after half push (m): final="
+        f"{final_opening.detach().cpu().tolist()}, target="
+        f"{half_open_target.detach().cpu().tolist()}, abs_error="
+        f"{half_open_error.detach().cpu().tolist()}",
         flush=True,
     )
-    if not torch.all(
-        torch.abs(final_opening - half_open_target) <= HALF_OPEN_TOLERANCE
-    ).item():
+    if not torch.all(half_open_error <= HALF_OPEN_TOLERANCE).item():
         raise RuntimeError(
             "The drawer did not return to half of its pulled opening. "
             f"Expected an error no greater than {HALF_OPEN_TOLERANCE:.2f} m."
@@ -427,36 +524,37 @@ def open_drawer(
     return drawer_qpos
 
 
-def main() -> None:
+def _tutorial_physics_cfg(
+    backend: Literal["default", "newton"],
+) -> PhysicsBackendCfg:
+    """Build the physics configuration used by this tutorial."""
+    physics_cfg = physics_cfg_for_backend(backend)
+    if isinstance(physics_cfg, NewtonPhysicsCfg):
+        # Keep the same MuJoCo-Warp solver/contact profile as the atomic-action
+        # tutorial and packaged Newton task.  The finer drawer substep cadence
+        # is intentional; per-world capacities remain auto-sized by DexSim
+        # from the finalized scene.
+        physics_cfg.num_substeps = 20
+        physics_cfg.collision_cfg = None
+        physics_cfg.solver_cfg = {
+            "solver_type": "mujoco_warp",
+            "solver": "newton",
+            "integrator": "implicitfast",
+            "iterations": 20,
+            "ls_iterations": 100,
+            "cone": "elliptic",
+            "impratio": 1_000.0,
+            "use_mujoco_contacts": True,
+            "enable_multiccd": True,
+        }
+    return physics_cfg
+
+
+def main(args: argparse.Namespace | None = None) -> None:
     """Run the Franka drawer-manipulation tutorial."""
-    parser = argparse.ArgumentParser(
-        description="Use a Franka Panda and MotionGenerator to open a drawer."
-    )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--hold-steps",
-        type=int,
-        default=100,
-        help="Physics steps to hold the final open-drawer pose before exiting.",
-    )
-    parser.add_argument(
-        "--auto-start",
-        action="store_true",
-        help="Execute trajectories without waiting for Enter.",
-    )
-    parser.add_argument(
-        "--record-save-path",
-        type=str,
-        default=None,
-        help="Optional MP4 path for recording from a fixed headless camera.",
-    )
-    parser.add_argument(
-        "--record-fps",
-        type=int,
-        default=30,
-        help="Frames per second for headless recording.",
-    )
-    args = parser.parse_args()
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
     if args.num_envs < 1:
         parser.error("--num_envs must be at least 1")
     if args.hold_steps < 0:
@@ -466,15 +564,25 @@ def main() -> None:
     if args.record_save_path is not None and not args.headless:
         parser.error("--record-save-path requires --headless")
 
+    open_native_window = not args.headless and not args.viser
+
+    # PytorchSolver samples multiple IK seeds; make the tutorial trajectory
+    # reproducible across repeated runs of the same backend.
+    seed = resolve_seed(args.seed)
+    print(f"[INFO]: IK sampling seed: {seed}", flush=True)
+    torch.manual_seed(seed)
+
+    # Construct the World without a window so Spawn can finish first.
     sim = SimulationManager(
         SimulationManagerCfg(
             width=RECORD_WIDTH,
             height=RECORD_HEIGHT,
-            headless=args.headless,
+            headless=True,
             sim_device=args.device,
             num_envs=args.num_envs,
             arena_space=args.arena_space,
             physics_dt=1.0 / 100.0,
+            physics_cfg=_tutorial_physics_cfg(args.physics),
             render_cfg=RenderCfg(renderer=args.renderer),
             visualization=visualization_cfg_from_args(args),
         )
@@ -483,9 +591,8 @@ def main() -> None:
     try:
         robot, drawer = create_scene(sim)
 
-        if sim.is_use_gpu_physics:
-            sim.init_gpu_physics()
-        if not args.headless and not args.viser:
+        sim.prepare()
+        if open_native_window:
             sim.open_window()
 
         sim.update(step=5)
@@ -527,8 +634,11 @@ def main() -> None:
         if sim.is_window_recording():
             sim.stop_window_record()
         sim.wait_window_record_saves()
-        sim.destroy()
+        sim.destroy(exit_process=False)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main(_cli_args)
+    finally:
+        SimulationManager.flush_cleanup_queue()

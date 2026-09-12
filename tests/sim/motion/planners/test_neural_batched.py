@@ -16,7 +16,11 @@
 from __future__ import annotations
 
 import torch
-import pytest
+
+
+def _set_identity_policy_frames(planner) -> None:
+    planner._policy_frame_from_world = torch.eye(4)
+    planner._runtime_tcp_from_policy_tcp = torch.eye(4)
 
 
 class TestNeuralParseWaypoints:
@@ -28,6 +32,9 @@ class TestNeuralParseWaypoints:
         planner = NeuralPlanner.__new__(NeuralPlanner)
         planner.device = torch.device("cpu")
         planner._num_waypoints = 4
+        planner._action_dim = 7
+        planner._intermediate_orientation = True
+        _set_identity_policy_frames(planner)
         B = 3
         states = [
             PlanState.from_xpos(
@@ -36,10 +43,16 @@ class TestNeuralParseWaypoints:
             )
             for _ in range(2)
         ]
-        pos, quat, mask, k = planner._parse_waypoints(states)
+        pos, quat, joint, mask, pos_mask, rot_mask, joint_mask, k = (
+            planner._parse_waypoints(states)
+        )
         assert pos.shape == (B, 4, 3)
         assert quat.shape == (B, 4, 4)
+        assert joint.shape == (B, 4, 7)
         assert mask.shape == (B, 4)
+        assert torch.equal(pos_mask, mask)
+        assert torch.equal(rot_mask, mask)
+        assert torch.count_nonzero(joint_mask) == 0
         assert k == 2
 
 
@@ -58,9 +71,11 @@ class TestNeuralPlanBatched:
         planner._max_steps = 5
         planner._pos_eps = 1e9  # always reached
         planner._rot_eps = 1e9
+        planner._joint_eps = 1e9
         planner._intermediate_orientation = True
         planner._use_relative_obs = False
-        planner._obs_dim = 57  # 7+7+4*3+4*4+4+4+7
+        planner._obs_dim = 101
+        _set_identity_policy_frames(planner)
         planner.cfg = type(
             "c",
             (),
@@ -72,9 +87,8 @@ class TestNeuralPlanBatched:
             },
         )()
 
-        # stub actor: returns zeros so qpos never changes but eps is huge -> reached
-        planner._actor = lambda obs: torch.zeros(obs.shape[0], 7)
-        planner._normalizer = type("n", (), {"normalize": lambda self, o: o})()
+        # Stub ONNX policy: qpos stays fixed but the huge eps marks each goal reached.
+        planner._policy = lambda obs: torch.zeros(obs.shape[0], 7)
 
         # stub robot FK + limits
         class _Robot:
@@ -125,10 +139,11 @@ class TestNeuralEarlyConvergenceHold:
         planner._max_steps = 5
         planner._pos_eps = 1e9
         planner._rot_eps = 1e9
+        planner._joint_eps = 1e9
         planner._intermediate_orientation = True
         planner._use_relative_obs = False
-        # joint(7)+ee(7)+wp_pos(4*3)+wp_quat(4*4)+onehot(4)+valid(4)+last_act(7)=57
-        planner._obs_dim = 57
+        planner._obs_dim = 101
+        _set_identity_policy_frames(planner)
         planner.cfg = type(
             "c",
             (),
@@ -140,9 +155,8 @@ class TestNeuralEarlyConvergenceHold:
             },
         )()
 
-        # actor: non-trivial action so qpos would drift if not masked
-        planner._actor = lambda obs: torch.ones(obs.shape[0], 7) * 0.5
-        planner._normalizer = type("n", (), {"normalize": lambda self, o: o})()
+        # Non-trivial policy action so qpos would drift if not masked.
+        planner._policy = lambda obs: torch.ones(obs.shape[0], 7) * 0.5
 
         class _Robot:
             num_instances = 3
@@ -168,7 +182,17 @@ class TestNeuralEarlyConvergenceHold:
         # episode_k = 2 (2 waypoints). Env 0: reached=True every step ->
         #   active_idx 0->1 (step0), 1->2 (step1) => converges after step 1.
         # Envs 1,2: reached=False always -> never converge within max_steps.
-        def fake_reach(ee_pose, wp_pos, wp_quat, active_idx, episode_k):
+        def fake_reach(
+            joint_pos,
+            ee_pose,
+            wp_pos,
+            wp_quat,
+            wp_joint,
+            pos_mask,
+            rot_mask,
+            joint_mask,
+            active_idx,
+        ):
             r = torch.zeros(ee_pose.shape[0], dtype=torch.bool, device=ee_pose.device)
             r[0] = True
             return r

@@ -23,6 +23,9 @@ from copy import deepcopy
 from embodichain.utils import configclass, logger
 from embodichain.lab.sim.motion.solvers import SolverCfg, BaseSolver
 from embodichain.lab.sim.motion.solvers.qpos_seed_sampler import QposSeedSampler
+from embodichain.lab.sim.motion.solvers.qpos_seed_sel_sampler import (
+    QposSeedSelSampler,
+)
 from embodichain.lab.sim.utility.solver_utils import validate_iteration_params
 
 if TYPE_CHECKING:
@@ -70,10 +73,27 @@ class PytorchSolverCfg(SolverCfg):
 
     ik_nearest_weight: list[float] | None = None
     """Weights for the inverse kinematics nearest calculation.
-    
+
     The weights influence how the solver prioritizes closeness to the seed position
     when multiple solutions are available.
     """
+
+    enable_seed_selection: bool = False
+    """Retrieve multi-start seeds from a precomputed FK database.
+
+    When enabled, the random slots of the multi-start seed batch are replaced
+    by database configurations whose flange poses are nearest to each target
+    (re-ranked by the predicted joint-space correction). Slot ``0`` still
+    holds the caller-provided seed. The database is built lazily on the first
+    ``get_ik`` call and rebuilt automatically when joint limits change.
+    """
+
+    seed_db_size: int = 20000
+    """Number of joint configurations stored in the seed-selection database."""
+
+    seed_rot_scale: float = 0.2
+    """Metres-per-radian weight of the rotation block in the seed-retrieval
+    pose metric."""
 
     def init_solver(
         self, device: torch.device = torch.device("cpu"), **kwargs
@@ -174,6 +194,33 @@ class PytorchSolver(BaseSolver):
         )
 
         self.dof = self.pk_serial_chain.n_joints
+
+        # Optional database-driven seed selection. The database stores flange
+        # poses (no TCP), so runtime ``set_tcp`` calls never invalidate it;
+        # ``get_ik`` queries it with the TCP-stripped target accordingly.
+        self._seed_sampler: QposSeedSelSampler | None = None
+        if cfg.enable_seed_selection:
+            self._seed_sampler = QposSeedSelSampler(
+                num_samples=self._num_samples,
+                dof=self.dof,
+                device=self.device,
+                fk_fn=self._compute_flange_fk,
+                jacobian_fn=self.get_jacobian,
+                db_size=cfg.seed_db_size,
+                rot_scale=cfg.seed_rot_scale,
+            )
+
+    def _compute_flange_fk(self, qpos: torch.Tensor) -> torch.Tensor:
+        """Compute end-link poses without the TCP transform.
+
+        Args:
+            qpos (torch.Tensor): Joint positions with shape (N, dof).
+
+        Returns:
+            torch.Tensor: Flange poses with shape (N, 4, 4).
+        """
+        qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
+        return self.compiled_fk(qpos)[-1, :, :, :]
 
     def get_iteration_params(self) -> dict:
         r"""Returns the current iteration parameters.
@@ -340,7 +387,7 @@ class PytorchSolver(BaseSolver):
                                             Can be:
                                             - 1D tensor of shape (dof,): Single seed for all target positions
                                             - 2D tensor of shape (batch_size, dof): Individual seed per position
-                                            If None, defaults to zero configuration. Defaults to None.
+                                            If None, defaults to the joint-range midpoint. Defaults to None.
             num_samples (int | None): The number of random samples to generate. Must be positive.
                                      Defaults to None.
             return_all_solutions (bool, optional): If True, returns all valid solutions found.
@@ -361,7 +408,7 @@ class PytorchSolver(BaseSolver):
 
         # Prepare qpos_seed
         if qpos_seed is None:
-            qpos_seed = torch.zeros(self.dof, device=self.device)
+            qpos_seed = self.get_default_qpos_seed()
         else:
             qpos_seed = torch.as_tensor(qpos_seed, device=self.device)
 
@@ -391,15 +438,28 @@ class PytorchSolver(BaseSolver):
 
         batch_size = target_xpos.shape[0]
 
-        sampler = QposSeedSampler(
-            num_samples=self._num_samples, dof=self.dof, device=self.device
-        )
-        random_qpos_seeds = sampler.sample(
-            qpos_seed,
-            self.lower_qpos_limits,
-            self.upper_qpos_limits,
-            batch_size,
-        )
+        if self._seed_sampler is not None:
+            # Database retrieval: ``target_xpos`` is in the flange frame here
+            # (TCP stripped above), matching the frame the database stores.
+            sampler = self._seed_sampler
+            sampler.num_samples = self._num_samples
+            random_qpos_seeds = sampler.sample(
+                qpos_seed,
+                self.lower_qpos_limits,
+                self.upper_qpos_limits,
+                batch_size,
+                target_xpos=target_xpos,
+            )
+        else:
+            sampler = QposSeedSampler(
+                num_samples=self._num_samples, dof=self.dof, device=self.device
+            )
+            random_qpos_seeds = sampler.sample(
+                qpos_seed,
+                self.lower_qpos_limits,
+                self.upper_qpos_limits,
+                batch_size,
+            )
         target_xpos_repeated = sampler.repeat_target_xpos(
             target_xpos, self._num_samples
         )

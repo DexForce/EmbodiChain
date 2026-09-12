@@ -82,15 +82,6 @@ def test_all_atomic_action_tutorials_import_without_running_main() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_atomic_action_public_exports_exist() -> None:
-    """Every declared public export should resolve on the package."""
-    missing = [
-        name for name in atomic_actions.__all__ if not hasattr(atomic_actions, name)
-    ]
-
-    assert missing == []
-
-
 def test_atomic_action_star_import_resolves_all_public_exports() -> None:
     """Star import should not fail on a stale public export."""
     namespace: dict[str, object] = {}

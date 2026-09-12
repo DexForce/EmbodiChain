@@ -22,6 +22,22 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.data.assets.demo_assets
+-----------------------------------
+
+Downloadable bundles used by standalone manipulation and deformable-body
+demos. Each class resolves one versioned archive into the configured
+EmbodiChain data cache.
+
+.. currentmodule:: embodichain.data.assets.demo_assets
+
+.. autosummary::
+
+   CoordinatedPlacementAndPickment
+   DeformableDemoData
+   MultiW1Data
+   ScoopIceNewEnv
+
 embodichain.data.assets.planner_assets
 --------------------------------------
 
@@ -814,6 +830,49 @@ embodichain.lab.sim.atomic_actions.transports
    EndpointCommandRouter
    EndpointCommandTransport
 
+embodichain.lab.sim.diff
+------------------------
+
+Public bridge from task-defined Newton kinematics and Warp tapes into PyTorch
+autograd. It does not advance the Newton dynamics solver.
+
+.. currentmodule:: embodichain.lab.sim.diff
+
+.. autosummary::
+
+   NewtonStepFunc
+   tape_context
+
+embodichain.lab.sim.diff.bridge
+-------------------------------
+
+.. currentmodule:: embodichain.lab.sim.diff.bridge
+
+.. autosummary::
+
+   NewtonStepFunc
+   tape_context
+
+embodichain.lab.sim.diff.runtime
+--------------------------------
+
+.. currentmodule:: embodichain.lab.sim.diff.runtime
+
+.. autosummary::
+
+   NewtonDifferentiableRuntime
+
+embodichain.lab.sim.objects.articulation
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.objects.articulation
+
+.. autosummary::
+
+   ArticulationData
+   Articulation
+   ArticulationJointKinematics
+
 embodichain.lab.sim.atomic_actions.verification
 ------------------------------------------------
 
@@ -828,6 +887,106 @@ embodichain.lab.sim.atomic_actions.verification
    HeldObjectGuardResult
    PhaseEffectGateRequest
    PhaseEffectGateResult
+
+embodichain.lab.sim.objects.constraint
+--------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.objects.constraint
+
+.. autosummary::
+
+   RigidConstraint
+
+embodichain.lab.sim.objects.gizmo
+---------------------------------
+
+.. currentmodule:: embodichain.lab.sim.objects.gizmo
+
+Native robot targets use DexSim's controller with Newton IK by default.
+Set ``GizmoCfg.ik_solver="embodichain"`` to reuse the robot control part's
+configured solver, including PinkSolver; Viser uses the same solver adapter.
+
+.. autosummary::
+
+   Gizmo
+   GizmoCfg
+   create_robot_ik_gizmo_controller
+
+embodichain.lab.sim.objects.rigid_object
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.objects.rigid_object
+
+.. autosummary::
+
+   CollisionShapeDesc
+   RigidBodyData
+   RigidObject
+   RigidObjectCfg
+
+embodichain.lab.sim.objects.rigid_object_group
+----------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.objects.rigid_object_group
+
+.. autosummary::
+
+   RigidBodyGroupData
+   RigidObjectGroup
+   RigidObjectGroupCfg
+
+embodichain.lab.sim.objects.robot
+---------------------------------
+
+.. currentmodule:: embodichain.lab.sim.objects.robot
+
+.. autosummary::
+
+   ControlGroup
+   Robot
+
+
+embodichain.lab.sim.physics
+---------------------------
+
+Manager-level physics backend selection and lifecycle contracts for the
+Default and Newton implementations integrated through DexSim.
+
+.. currentmodule:: embodichain.lab.sim.physics
+
+.. autosummary::
+
+   PhysicsBackend
+   DefaultPhysicsBackend
+   NewtonPhysicsBackend
+   make_physics_backend
+
+embodichain.lab.sim.physics.base
+--------------------------------
+
+.. currentmodule:: embodichain.lab.sim.physics.base
+
+.. autosummary::
+
+   PhysicsBackend
+
+embodichain.lab.sim.physics.default
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.physics.default
+
+.. autosummary::
+
+   DefaultPhysicsBackend
+
+embodichain.lab.sim.physics.newton
+----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.physics.newton
+
+.. autosummary::
+
+   NewtonPhysicsBackend
 
 embodichain.lab.sim.motion.planners.base_planner
 ------------------------------------------------
@@ -863,7 +1022,10 @@ embodichain.lab.sim.motion.planners.curobo.curobo_yaml
 .. autosummary::
 
    generate_curobo_robot_yaml
-   generate_curobo_world_yaml
+   generate_curobo_world_scene
+   visualize_curobo_collision_models
+   visualize_curobo_robot_collision_model
+   visualize_curobo_world_collision_model
 
 embodichain.lab.sim.motion.motion_generator
 ----------------------------------------------------
@@ -887,6 +1049,29 @@ embodichain.lab.sim.motion.planners.neural_planner
    NeuralPlannerCfg
    NeuralPlanOptions
 
+embodichain.lab.sim.motion.planners.bezier
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.planners.bezier
+
+Differentiable quadratic and quintic Bézier geometry, including
+HolisticMotion-compatible waypoint blending and path-constraint projection.
+Use ``BezierPath.parameter_at_arc_length(distance)`` to convert a scalar
+time law's geometric distances to polynomial parameters. Reuse those parameters
+for ``evaluate``, ``arc_tangent``, and ``arc_curvature``; normalized arc length
+is generally different from the Bézier parameter. Lookup accuracy is controlled
+by ``table_count`` independently of the output sample count.
+
+.. autosummary::
+
+   BezierPath
+   bezier_arc_length
+   bezier_derivative
+   bezier_evaluate
+   sample_bezier_path
+
+.. automethod:: BezierPath.parameter_at_arc_length
+
 embodichain.lab.sim.motion.planners.toppra_planner
 --------------------------------------------------
 
@@ -897,6 +1082,44 @@ embodichain.lab.sim.motion.planners.toppra_planner
    ToppraPlanner
    ToppraPlannerCfg
    ToppraPlanOptions
+
+embodichain.lab.sim.motion.planners.se3
+---------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.planners.se3
+
+SE(3) screw interpolation and constrained Cartesian line trajectories with
+explicit twist, acceleration, jerk, and timing outputs.
+
+.. autosummary::
+
+   SE3LineResult
+   plan_se3_line
+
+embodichain.lab.sim.motion.planners.trapezoidal_planner
+-------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.planners.trapezoidal_planner
+
+.. autosummary::
+
+   TrapezoidalPlanOptions
+   TrapezoidalPlanner
+   TrapezoidalPlannerCfg
+
+embodichain.utils.warp.kinematics.trapezoidal_warp
+--------------------------------------------------
+
+.. currentmodule:: embodichain.utils.warp.kinematics.trapezoidal_warp
+
+Warp-accelerated helpers construct scalar trapezoidal or Double-S motion
+profiles and compose their sampled path derivatives into batched joint-space
+trajectories.
+
+.. autosummary::
+
+   build_profile_warp
+   compose_profile_samples_warp
 
 embodichain.lab.sim.motion.planners.utils
 -----------------------------------------
@@ -914,6 +1137,258 @@ embodichain.lab.sim.motion.planners.utils
    calculate_point_allocations
    interpolate_xpos
    interpolate_xpos_batched
+
+embodichain.lab.sim.robots.cobotmagic
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.robots.cobotmagic
+
+.. autosummary::
+
+   CobotMagicCfg
+
+embodichain.lab.sim.robots.dexforce_w1.hand_specs
+-------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.hand_specs
+
+.. autosummary::
+
+   W1HandSideSpec
+   W1HandSpec
+   get_default_w1_hand_version
+   get_w1_hand_spec
+   normalize_w1_hand_mappings
+
+embodichain.lab.sim.robots.dexforce_w1.specs
+--------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.specs
+
+.. autosummary::
+
+   W1VersionSpec
+   get_w1_version_spec
+
+embodichain.lab.sim.robots.dexforce_w1.types
+--------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.types
+
+.. autosummary::
+
+   DexforceW1Version
+   DexforceW1HandVersion
+   DexforceW1ArmSide
+   DexforceW1Type
+   DexforceW1HandBrand
+
+embodichain.lab.sim.robots.dexforce_w1.utils
+--------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.utils
+
+.. autosummary::
+
+   ChassisManager
+   TorsoManager
+   HeadManager
+   ArmManager
+   HandManager
+   EyesManager
+   build_dexforce_w1_assembly_urdf_cfg
+
+embodichain.lab.sim.robots.dual_arm
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.robots.dual_arm
+
+.. autosummary::
+
+   DualArmRobotCfg
+   build_dual_arm_cfg
+   resolve_mounts
+
+embodichain.lab.sim.robots.franka_panda
+---------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.robots.franka_panda
+
+.. autosummary::
+
+   FrankaPandaCfg
+
+embodichain.lab.sim.robots.ur_robot
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.robots.ur_robot
+
+.. autosummary::
+
+   URRobotCfg
+
+embodichain.lab.sim.sensors.camera
+----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.camera
+
+.. autosummary::
+
+   Camera
+   CameraCfg
+
+embodichain.lab.sim.sensors.contact_sensor
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact_sensor
+
+.. autosummary::
+
+   ArticulationContactFilterCfg
+   ContactSensor
+   ContactSensorCfg
+
+embodichain.lab.sim.sim_manager
+-------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sim_manager
+
+.. autosummary::
+
+   SIM_CACHE_DIR
+   MATERIAL_CACHE_DIR
+   CONVEX_DECOMP_DIR
+   REACHABLE_XPOS_DIR
+
+embodichain.lab.task_program.semantics.calls
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.task_program.semantics.calls
+
+.. autosummary::
+
+   DeclarativeValue
+   HandOver
+   Pick
+   Place
+   PlaceRelationTarget
+   RegisteredSemanticCall
+   SemanticCallCatalog
+   SemanticCallDescriptor
+   SemanticCallSpec
+   SemanticPose
+   builtin_semantic_call_catalog
+
+.. automodule:: embodichain.lab.task_program.semantics.calls
+   :members:
+   :no-index:
+
+embodichain.lab.task_program.semantics.integration
+------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.task_program.semantics.integration
+
+.. autosummary::
+
+   BoundSemanticCall
+   LinkedSemanticCall
+   PathPart
+   SceneEntityManifest
+   SceneManifest
+   SemanticDiagnostic
+   SemanticIntegrationManifest
+   SemanticValidationError
+
+.. automodule:: embodichain.lab.task_program.semantics.integration
+   :members:
+   :no-index:
+
+embodichain.lab.task_program.semantics.effects
+--------------------------------------------------
+
+.. automodule:: embodichain.lab.task_program.semantics.effects
+   :members:
+   :no-index:
+
+embodichain.lab.task_program.semantics.evidence
+---------------------------------------------------
+
+.. automodule:: embodichain.lab.task_program.semantics.evidence
+   :members:
+   :no-index:
+
+embodichain.lab.task_program.semantics.profiles
+---------------------------------------------------
+
+.. currentmodule:: embodichain.lab.task_program.semantics.profiles
+
+.. autosummary::
+
+   AmbiguousSkillBindingError
+   BoundRobotSkillProfile
+   ControlPartEndpoint
+   ControlPartEndpointAdapter
+   EffectAssurance
+   EndpointResolution
+   ProfileValidationError
+   ResourceEndpoint
+   ResourceEndpointAdapter
+   ResolvedRobotResource
+   ResolvedResourceEndpoint
+   ResolvedSkillBinding
+   ResourceBinding
+   ResourceClaim
+   RobotResource
+   RobotSkillProfile
+   SkillPolicyPreset
+   UnsupportedSkillError
+   WorkflowRecoveryPolicy
+
+embodichain.lab.task_program.semantics.scene
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.task_program.semantics.scene
+
+.. autosummary::
+
+   AmbiguousSceneAffordanceError
+   GRASP_AFFORDANCE_CAPABILITY
+   PLACE_IN_AFFORDANCE_CAPABILITY
+   PLACE_ON_AFFORDANCE_CAPABILITY
+   RegistrySceneProvider
+   SceneAffordanceRef
+   SceneArticulationRef
+   SceneCollisionRole
+   SceneCollisionWorldMode
+   SceneDynamics
+   SceneEntityRef
+   SceneEntityMetadata
+   SceneEntityRegistration
+   SceneEntityStateProvider
+   SceneGeometryProvider
+   SceneLinkRef
+   SceneObjectRef
+   SceneRegistry
+   UnsupportedSceneAffordanceError
+
+.. automodule:: embodichain.lab.task_program.semantics.scene
+   :members:
+   :no-index:
+
+embodichain.lab.sim.motion.solvers.base_solver
+----------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.solvers.base_solver
+
+Shared solver configuration and runtime contracts for IK, FK, joint limits,
+and optional continuous batch IK. Continuous selection defaults to unsupported;
+implementations opt in through ``supports_continuous_batch_ik`` and implement
+the protected ``_select_continuous_ik_path`` hook for batched candidates.
+
+.. autosummary::
+
+   BaseSolver
+   SolverCfg
 
 embodichain.lab.sim.motion.solvers.neural_ik_solver
 ---------------------------------------------------
@@ -934,6 +1409,19 @@ embodichain.lab.sim.motion.solvers.null_space_posture_task
 
    NullSpacePostureTask
 
+embodichain.lab.sim.motion.solvers.opw_solver
+---------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.solvers.opw_solver
+
+Configuration and runtime solver for analytic OPW forward and inverse
+kinematics of compatible six-axis manipulators.
+
+.. autosummary::
+
+   OPWSolver
+   OPWSolverCfg
+
 embodichain.lab.sim.motion.solvers.pink_solver
 ----------------------------------------------
 
@@ -953,6 +1441,73 @@ embodichain.lab.sim.motion.solvers.srs_solver
 
    SRSSolver
    SRSSolverCfg
+
+embodichain.lab.sim.spawn
+-------------------------
+
+Translation boundary from EmbodiChain object configs and singleton USD assets
+into DexSim Spawn descriptors.
+
+.. currentmodule:: embodichain.lab.sim.spawn
+
+.. autosummary::
+
+   articulation_desc_from_cfg
+   articulation_desc_from_usd
+   rigid_desc_from_cfg
+   rigid_desc_from_usd
+   surface_deformable_desc_from_cfg
+   volume_deformable_desc_from_cfg
+
+embodichain.lab.sim.spawn.descriptors
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.descriptors
+
+.. autosummary::
+
+   articulation_desc_from_cfg
+   configure_articulation_desc
+   rigid_desc_from_cfg
+   surface_deformable_desc_from_cfg
+   volume_deformable_desc_from_cfg
+
+embodichain.lab.sim.spawn.scene
+-------------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.scene
+
+.. autosummary::
+
+   SpawnScene
+
+embodichain.lab.sim.spawn.source
+--------------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.source
+
+.. autosummary::
+
+   resolve_articulation_source
+
+embodichain.lab.sim.spawn.usd
+-----------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.usd
+
+.. autosummary::
+
+   articulation_desc_from_usd
+   rigid_desc_from_usd
+
+embodichain.lab.sim.utility.render_utils
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.utility.render_utils
+
+.. autosummary::
+
+   select_default_renderer
 
 embodichain.lab.sim.motion.workspace.caches.cache_utils
 -------------------------------------------------------
@@ -1590,6 +2145,7 @@ embodichain.learning.rl.algo.apg
 
    APG
    APGCfg
+   complete_discounted_return
    segmented_discounted_return
 
 embodichain.learning.rl.algo.base
@@ -1690,6 +2246,18 @@ embodichain.learning.rl.experimental.newton.train_planar_reach
    NewtonPlanarReachTrainingCfg
    train_planar_reach
 
+embodichain.learning.rl.gradients
+---------------------------------
+
+Row-wise action-adjoint clipping and its rollout-level diagnostics.
+
+.. currentmodule:: embodichain.learning.rl.gradients
+
+.. autosummary::
+
+   BatchedGradientNormStats
+   clip_batched_gradient_norm
+
 embodichain.learning.rl.models.actor_critic
 -------------------------------------------
 
@@ -1716,6 +2284,15 @@ embodichain.learning.rl.models.policy
 .. autosummary::
 
    Policy
+
+embodichain.learning.rl.normalization
+-------------------------------------
+
+.. currentmodule:: embodichain.learning.rl.normalization
+
+.. autosummary::
+
+   RunningObservationNormalizer
 
 embodichain.learning.rl.utils.optimizer
 ---------------------------------------
@@ -1979,6 +2556,18 @@ embodichain_tasks.manipulation.tableware.stack_cups
 
    StackCupsEnv
 
+embodichain_tasks.special.franka_reach_apg
+-------------------------------------------
+
+Differentiable Franka FR3 reach environment that demonstrates the explicit
+kinematics route used by analytic policy-gradient experiments.
+
+.. currentmodule:: embodichain_tasks.special.franka_reach_apg
+
+.. autosummary::
+
+   FrankaReachApgEnv
+
 embodichain_tasks.special.simple_task
 -------------------------------------
 
@@ -2005,3 +2594,26 @@ embodichain_tasks.utils.importer
 .. autosummary::
 
    import_packages
+
+Standalone simulation command-line options
+-----------------------------------------
+
+``embodichain.cli.sim`` builds simulation arguments without importing the
+simulation runtime. Gym launchers compose these options with configuration
+and recording flags. Seed options are opt-in: ``resolve_seed`` resolves ``-1``
+to an effective 32-bit seed without changing random streams or deterministic
+kernel policy; callers log and apply that seed to their own generators.
+
+.. currentmodule:: embodichain.cli.sim
+
+.. autosummary::
+
+   add_sim_args_to_parser
+   add_seed_arg_to_parser
+   resolve_seed
+
+.. autofunction:: add_sim_args_to_parser
+
+.. autofunction:: add_seed_arg_to_parser
+
+.. autofunction:: resolve_seed

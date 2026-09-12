@@ -21,6 +21,8 @@ through :func:`~embodichain.lab.gym.utils.registration.make`.
    .. autosummary::
 
       demo
+      differentiable_env
+      expert_trajectory
       task_program
       managers
       types
@@ -85,7 +87,64 @@ callback for the active lease. It runs after controller submission and before
 physics, allowing the collector to copy actual controller targets. An exception
 occurs after the command was submitted, so the attempt still counts and the
 collector must stop safely.
+Differentiable Environment
+--------------------------
 
+``DifferentiableEnv`` keeps the standard environment lifecycle while bridging
+task-defined Newton kinematics into PyTorch autograd for analytic
+policy-gradient tasks. Subclasses provide action, kinematics, and output
+kernels; the base class owns tape-aware stepping and deferred resets without
+advancing the Newton solver.
+
+.. currentmodule:: embodichain.lab.gym.envs.differentiable_env
+
+.. autoclass:: DifferentiableEnv
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
+Expert Trajectories
+-------------------
+
+Expert trajectory configuration is source-neutral: handwritten generators,
+motion generation, and Task Program execution use the same environment-owned
+joint command mode. Position-only control remains the default. The optional
+position-velocity mode records a stable flat ``[qpos, qvel]`` action layout
+without changing the policy-facing Gym action space.
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_trajectory
+
+.. autosummary::
+   :nosignatures:
+
+   EXPERT_TRAJECTORY_SCHEMA_VERSION
+   ExpertActionSpec
+   ExpertJointTrajectory
+   ExpertTrajectoryCfg
+   JointCommandMode
+   build_expert_action_spec
+   encode_expert_action
+   prepare_expert_joint_trajectory
+
+.. autodata:: EXPERT_TRAJECTORY_SCHEMA_VERSION
+
+.. autoclass:: ExpertActionSpec
+    :members:
+
+.. autoclass:: ExpertJointTrajectory
+    :members:
+
+.. autoclass:: ExpertTrajectoryCfg
+    :members:
+    :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autodata:: JointCommandMode
+
+.. autofunction:: build_expert_action_spec
+
+.. autofunction:: encode_expert_action
+
+.. autofunction:: prepare_expert_joint_trajectory
 Controller-ready Actions
 ------------------------
 

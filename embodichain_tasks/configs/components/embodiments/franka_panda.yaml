@@ -4,6 +4,22 @@ simulation:
   class_type: FrankaPanda
   robot_type: panda
   uid: FrankaPanda
+  # Keep the Newton grasp response scoped to the two fingertip links. The
+  # native fields are ignored by the Default backend and therefore do not
+  # change the existing Franka reference trajectory.
+  link_attrs:
+    newton_gripper_contacts:
+      link_names_expr: ["fr3_leftfinger|fr3_rightfinger"]
+      attrs:
+        collision_props:
+          backend: newton
+          condim: 4
+        material_props:
+          backend: newton
+          ke: 40000.0
+          kd: 400.0
+          torsional_friction: 0.1
+          rolling_friction: 0.01
 
 sensor: []
 

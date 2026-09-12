@@ -53,7 +53,8 @@ class Policy(nn.Module, ABC):
         """Sample actions into the provided TensorDict without gradients.
 
         Args:
-            tensordict: Input TensorDict containing `obs`.
+            tensordict: Input TensorDict containing ``obs`` and, for policies
+                with a privileged critic, ``critic_obs``.
             deterministic: If True, return the mean action; otherwise sample
 
         Returns:
@@ -73,7 +74,8 @@ class Policy(nn.Module, ABC):
         ``sample()`` call from silently producing zero pathwise gradients.
 
         Args:
-            tensordict: Input TensorDict containing ``obs``.
+            tensordict: Input TensorDict containing ``obs`` and, for policies
+                with a privileged critic, ``critic_obs``.
             deterministic: If True, return a differentiable deterministic
                 action.
 
@@ -100,7 +102,8 @@ class Policy(nn.Module, ABC):
         """Write value estimate for the given observations into the TensorDict.
 
         Args:
-            tensordict: Input TensorDict containing `obs`.
+            tensordict: Input TensorDict containing ``obs`` and, for policies
+                with a privileged critic, ``critic_obs``.
 
         Returns:
             TensorDict with `value` populated.
@@ -112,7 +115,8 @@ class Policy(nn.Module, ABC):
         """Evaluate actions and return current policy outputs.
 
         Args:
-            tensordict: TensorDict containing `obs` and `action`.
+            tensordict: TensorDict containing ``obs``, ``action``, and
+                optional ``critic_obs``.
 
         Returns:
             A new TensorDict containing `sample_log_prob`, `entropy`, and `value`.

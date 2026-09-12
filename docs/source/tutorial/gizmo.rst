@@ -173,7 +173,7 @@ The gizmo-robot interaction follows this workflow:
 The Simulation Loop
 -------------------
 
-The tutorial uses manual physics only. After setting initial joint positions
+The tutorial advances physics through ``sim.update()``. After setting initial joint positions
 and drive targets, each iteration advances one physics step:
 
 .. literalinclude:: ../../../scripts/tutorials/sim/gizmo_robot.py
@@ -235,7 +235,7 @@ Tips and Best Practices
 
 **Performance optimization:**
 
-- Use ``sim.update(step=1)`` to service interaction and advance manual physics
+- Use ``sim.update(step=1)`` to service interaction and advance physics
 - Reduce IK solver iterations for better real-time performance if needed
 - Pace manual steps using ``physics_dt``
 

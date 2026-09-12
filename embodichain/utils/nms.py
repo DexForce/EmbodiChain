@@ -139,8 +139,7 @@ def _poses_to_components(poses: torch.Tensor) -> tuple[torch.Tensor, torch.Tenso
     # dtype and autograd relationship.
     poses_f32 = poses.detach().to(dtype=torch.float32).contiguous()
     positions = poses_f32[:, :3, 3].contiguous()
-    quaternions_wxyz = quat_from_matrix(poses_f32[:, :3, :3])
-    quaternions = torch.cat([quaternions_wxyz[:, 1:], quaternions_wxyz[:, :1]], dim=-1)
+    quaternions = quat_from_matrix(poses_f32[:, :3, :3])
     quaternions = quaternions / torch.linalg.vector_norm(
         quaternions, dim=-1, keepdim=True
     ).clamp_min(torch.finfo(quaternions.dtype).eps)

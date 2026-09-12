@@ -40,6 +40,7 @@ some object preparation setters, are not included.
 
    SimulationManager
    SimulationManagerCfg
+   get_physics_scene
 
 .. currentmodule:: embodichain.lab.sim.sim_manager
 
@@ -47,7 +48,23 @@ some object preparation setters, are not included.
    :members:
    :undoc-members:
    :show-inheritance:
-   :exclude-members: visualize_point_cloud
+   :exclude-members: register_contact_material_schedule, register_kinematic_joint_trajectory, register_kinematic_nodal_trajectory, register_particle_contact_material_schedule, visualize_point_cloud
+
+.. rubric:: Newton runtime controls
+
+Runtime controls must be registered after declaring their target assets and
+before :meth:`SimulationManager.prepare`. The manager expands logical UIDs to
+the concrete paths of every Arena, so callers do not need access to the private
+Spawn scene. The particle-material schedule is host-side and disables CUDA
+Graph replay; the other controls are graph-compatible.
+
+.. automethod:: SimulationManager.register_kinematic_joint_trajectory
+
+.. automethod:: SimulationManager.register_kinematic_nodal_trajectory
+
+.. automethod:: SimulationManager.register_contact_material_schedule
+
+.. automethod:: SimulationManager.register_particle_contact_material_schedule
 
 .. rubric:: Native point-cloud visualization
 
@@ -58,3 +75,8 @@ some object preparation setters, are not included.
    :undoc-members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict, validate
+
+Active Physics Scene
+--------------------
+
+.. autofunction:: get_physics_scene

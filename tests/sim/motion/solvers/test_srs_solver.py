@@ -401,7 +401,7 @@ class BaseRobotSolverTest:
 
     def setup_simulation(self, solver_type: str, device: str = "cpu"):
         # Set up simulation with specified device (CPU or CUDA)
-        config = SimulationManagerCfg(headless=True, sim_device=device)
+        config = SimulationManagerCfg(headless=True, device=device)
         self.sim = SimulationManager(config)
 
         # Load robot URDF file
@@ -426,7 +426,7 @@ class BaseRobotSolverTest:
                 "torso": ["ANKLE", "KNEE", "BUTTOCK", "WAIST"],
                 "head": [f"NECK{i + 1}" for i in range(2)],
             },
-            "drive_pros": {
+            "joint_drive_props": {
                 "stiffness": {
                     "LEFT_J[1-7]": 1e4,
                     "RIGHT_J[1-7]": 1e4,
@@ -453,14 +453,18 @@ class BaseRobotSolverTest:
                 },
             },
             "attrs": {
-                "mass": 1e-1,
-                "static_friction": 0.95,
-                "dynamic_friction": 0.9,
-                "linear_damping": 0.7,
-                "angular_damping": 0.7,
-                "max_depenetration_velocity": 10.0,
-                "min_position_iters": 32,
-                "min_velocity_iters": 8,
+                "mass_props": {"mass": 1e-1},
+                "rigid_props": {
+                    "linear_damping": 0.7,
+                    "angular_damping": 0.7,
+                    "max_depenetration_velocity": 10.0,
+                    "min_position_iters": 32,
+                    "min_velocity_iters": 8,
+                },
+                "material_props": {
+                    "static_friction": 0.95,
+                    "dynamic_friction": 0.9,
+                },
             },
             "solver_cfg": {
                 "left_arm": {
@@ -489,6 +493,7 @@ class BaseRobotSolverTest:
         }
 
         self.robot: Robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+        self.sim.prepare()
 
         # Wait for robot to stabilize.
         self.sim.update(step=100)

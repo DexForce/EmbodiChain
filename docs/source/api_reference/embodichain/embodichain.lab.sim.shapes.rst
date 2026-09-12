@@ -6,11 +6,23 @@ embodichain.lab.sim.shapes
 Overview
 --------
 
-Geometry configuration objects used to build the collision and visual shapes of
-rigid bodies. :class:`ShapeCfg` is the common base; :class:`MeshCfg`,
+Geometry configuration objects used to build collision, visual, and deformable
+simulation shapes. :class:`ShapeCfg` is the common base; :class:`MeshCfg`,
 :class:`CubeCfg`, and :class:`SphereCfg` describe triangle-mesh, box, and
-sphere primitives respectively, and :class:`LoadOption` controls how mesh
-assets are loaded and decomposed.
+sphere primitives respectively. :class:`MeshCollisionCfg` explicitly selects
+the collision representation and its cooking settings, while
+:class:`LoadOption` controls mesh loading.
+
+``MeshCfg`` accepts either a file path or explicit vertex/triangle arrays; for
+surface deformables, the array-backed form preserves node order for particle
+flags and kinematic trajectories. Volume deformables generate a separate
+tetrahedral simulation mesh during voxelization.
+
+.. rubric:: Type aliases
+
+.. autosummary::
+
+   MeshCollisionApproximation
 
 .. rubric:: Classes
 
@@ -18,6 +30,7 @@ assets are loaded and decomposed.
 
    CubeCfg
    LoadOption
+   MeshCollisionCfg
    MeshCfg
    ShapeCfg
    SphereCfg
@@ -31,6 +44,12 @@ assets are loaded and decomposed.
    :exclude-members: __init__, copy, replace, to_dict, validate
 
 .. autoclass:: MeshCfg
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: MeshCollisionCfg
    :members:
    :undoc-members:
    :show-inheritance:

@@ -23,6 +23,7 @@ from unittest.mock import Mock
 
 import pytest
 import torch
+from tensordict import TensorDict
 
 from embodichain.lab.gym.envs.demo import execute_demo_episode
 from embodichain.lab.gym.envs.task_program.bridge import (
@@ -126,6 +127,7 @@ def _joint_frame(
     duration: float,
     active_mask: torch.Tensor | None = None,
     positions: torch.Tensor | None = None,
+    velocities: torch.Tensor | None = None,
 ) -> RuntimeCommandFrame:
     active_mask = torch.tensor([True, True]) if active_mask is None else active_mask
     positions = (
@@ -138,7 +140,10 @@ def _joint_frame(
                     control_part="arm",
                     joint_ids=(1, 3),
                 ),
-                payload=JointPositionPayload(positions=positions),
+                payload=JointPositionPayload(
+                    positions=positions,
+                    velocities=velocities,
+                ),
             ),
         ),
         active_mask=active_mask,
@@ -1018,6 +1023,60 @@ def test_joint_encoder_emits_full_qpos_and_holds_inactive_rows() -> None:
     assert torch.equal(action[0, torch.tensor([1, 3])], torch.tensor([10.0, 30.0]))
     assert torch.equal(action[0, torch.tensor([0, 2, 4])], qpos[0, [0, 2, 4]])
     assert torch.equal(action[1], qpos[1])
+
+
+def test_joint_encoder_emits_full_qpos_qvel_and_zeros_inactive_rows() -> None:
+    qpos = torch.arange(BATCH_SIZE * ROBOT_DOF, dtype=torch.float32).reshape(
+        BATCH_SIZE, ROBOT_DOF
+    )
+    encoder = RuntimeCommandFrameEncoder(
+        _QposProvider(qpos),
+        joint_command_mode="position_velocity",
+    )
+    frame = _joint_frame(
+        duration=STEP_DT,
+        active_mask=torch.tensor([True, False]),
+        velocities=torch.tensor([[1.0, 3.0], [11.0, 13.0]]),
+    )
+
+    action = encoder.encode(frame)
+
+    assert isinstance(action, TensorDict)
+    assert torch.equal(
+        action["qpos"][0, torch.tensor([1, 3])], torch.tensor([10.0, 30.0])
+    )
+    assert torch.equal(action["qpos"][1], qpos[1])
+    assert torch.equal(action["qvel"][0], torch.tensor([0.0, 1.0, 0.0, 3.0, 0.0]))
+    assert torch.equal(action["qvel"][1], torch.zeros(ROBOT_DOF))
+
+
+def test_position_velocity_joint_encoder_rejects_missing_velocity() -> None:
+    encoder = RuntimeCommandFrameEncoder(
+        _QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF)),
+        joint_command_mode="position_velocity",
+    )
+
+    with pytest.raises(ValueError, match="velocities"):
+        encoder.encode(_joint_frame(duration=STEP_DT))
+
+
+def test_position_velocity_hold_uses_observed_qpos_and_zero_qvel() -> None:
+    qpos = torch.arange(BATCH_SIZE * ROBOT_DOF, dtype=torch.float32).reshape(
+        BATCH_SIZE, ROBOT_DOF
+    )
+    encoder = RuntimeCommandFrameEncoder(
+        _QposProvider(qpos),
+        joint_command_mode="position_velocity",
+    )
+
+    action = encoder.encode_hold(
+        _joint_frame(duration=STEP_DT).targets,
+        _context(qpos=qpos),
+    )
+
+    assert isinstance(action, TensorDict)
+    assert torch.equal(action["qpos"], qpos)
+    assert torch.equal(action["qvel"], torch.zeros_like(qpos))
 
 
 def test_frame_encoder_supports_registered_future_transport() -> None:

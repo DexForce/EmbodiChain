@@ -57,6 +57,9 @@ trajectory-generation = [
   "trimesh>=4.12,<5",
   "yourdfpy>=0.0.60,<0.1",
 ]
+nmg = [
+  "onnxruntime>=1.20",
+]
 gensim = [
   "bpy",
   "gradio>=6.17.3,<6.18",

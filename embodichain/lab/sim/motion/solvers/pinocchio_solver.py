@@ -204,10 +204,12 @@ class PinocchioSolver(BaseSolver):
             }
             self.opti.solver("ipopt", opts)
 
-        # Initialize joint positions to zero
-        self.init_qpos = np.zeros(self.robot.model.nq)
+        # Initialize joint positions to the feasibility-safe default seed
+        # (joint-range midpoint) when the reduced model matches the solver
+        # DOF; otherwise keep the neutral configuration.
+        self.init_qpos = self._default_init_qpos()
 
-        # Perform forward kinematics with zero configuration
+        # Perform forward kinematics with the default configuration
         self.pin.forwardKinematics(self.robot.model, self.robot.data, self.init_qpos)
 
         # Retrieve the pose of the specified root link
@@ -216,6 +218,21 @@ class PinocchioSolver(BaseSolver):
         self.root_base_xpos = np.eye(4)
         self.root_base_xpos[:3, :3] = root_base_pose.rotation
         self.root_base_xpos[:3, 3] = root_base_pose.translation.T
+
+    def _default_init_qpos(self) -> np.ndarray:
+        """Default optimization seed sized for the reduced Pinocchio model.
+
+        Returns:
+            np.ndarray: The joint-range midpoint when the model configuration
+            size matches the solver DOF, otherwise the neutral configuration.
+        """
+        if (
+            self.lower_qpos_limits is not None
+            and self.upper_qpos_limits is not None
+            and self.lower_qpos_limits.shape[0] == self.robot.model.nq
+        ):
+            return self.get_default_qpos_seed().detach().cpu().numpy().astype(float)
+        return np.zeros(self.robot.model.nq)
 
     def set_tcp(self, tcp: np.ndarray):
         self.tcp = tcp
@@ -376,7 +393,7 @@ class PinocchioSolver(BaseSolver):
 
         Args:
             target_xpos (torch.Tensor | np.ndarray | None): Desired end-effector pose as a (4, 4) homogeneous transformation matrix.
-            qpos_seed (np.ndarray | None): Initial joint positions used as the seed for optimization. If None, uses zero configuration.
+            qpos_seed (np.ndarray | None): Initial joint positions used as the seed for optimization. If None, uses the joint-range midpoint.
             qvel_seed (np.ndarray | None): Initial joint velocities (not used in current implementation).
             return_all_solutions (bool, optional): If True, return all valid IK solutions found; otherwise, return only the best solution. Default is False.
             **kwargs: Additional keyword arguments for future extensions.
@@ -391,6 +408,10 @@ class PinocchioSolver(BaseSolver):
                 self.init_qpos = qpos_seed.detach().cpu().numpy()
             else:
                 self.init_qpos = np.array(qpos_seed)
+        else:
+            # Reset to the default seed instead of silently reusing whatever
+            # seed the previous call left in ``init_qpos``.
+            self.init_qpos = self._default_init_qpos()
 
         if isinstance(target_xpos, torch.Tensor):
             target_xpos = target_xpos.detach().cpu().numpy()
