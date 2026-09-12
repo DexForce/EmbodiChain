@@ -174,6 +174,7 @@ def test_missing_curobo_is_actionable(monkeypatch):
         "curobo.batch_motion_planner",
         "curobo.collision_checking",
         "curobo.types",
+        "curobo.scene",
     ],
 )
 def test_curobo_import_preserves_caller_precision(
@@ -195,6 +196,7 @@ def test_curobo_import_preserves_caller_precision(
                 "Pose",
                 "GoalToolPose",
                 "DeviceCfg",
+                "Scene",
             )
         }
     )

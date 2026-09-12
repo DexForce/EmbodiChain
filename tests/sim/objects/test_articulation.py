@@ -106,6 +106,20 @@ def test_set_gravity_updates_all_environments_by_default() -> None:
     ]
 
 
+@pytest.mark.no_sim
+def test_clear_dynamics_routes_full_reset_through_backend_view() -> None:
+    """Clearing dynamics delegates to the backend's complete native reset."""
+    articulation = object.__new__(Articulation)
+    articulation._all_indices = torch.arange(2, dtype=torch.int32)
+    articulation._data = SimpleNamespace(articulation_view=MagicMock())
+
+    articulation.clear_dynamics()
+
+    articulation._data.articulation_view.clear_dynamics.assert_called_once()
+    env_ids = articulation._data.articulation_view.clear_dynamics.call_args.args[0]
+    assert torch.equal(env_ids, articulation._all_indices)
+
+
 def test_get_qf_returns_all_articulation_joint_efforts():
     expected_qf = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=torch.float32)
     articulation = object.__new__(Articulation)

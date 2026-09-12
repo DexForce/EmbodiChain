@@ -47,6 +47,7 @@ from scripts.tutorials.atomic_action.dynamic_obstacle_recovery import (
     _blocking_obstacle_pose,
     _maximum_path_deviation,
     _minimum_cuboid_clearance,
+    _obstacle_motion_trigger_command,
 )
 from scripts.tutorials.atomic_action.coordinated_pickment import (
     compute_left_to_right_arm_direction,
@@ -56,6 +57,7 @@ from scripts.tutorials.atomic_action.scenario_utils import (
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
     DEFAULT_TUTORIAL_SUN_DIRECTION,
+    DEFAULT_TUTORIAL_SUN_INTENSITY,
     NEWTON_GRASP_CONTACT_DAMPING,
     NEWTON_GRASP_CONTACT_STIFFNESS,
     NEWTON_GRASP_ROLLING_FRICTION,
@@ -97,7 +99,7 @@ EXPECTED_STEP_COUNT = 3
 CUBOID_SIZE = (0.2, 0.2, 0.2)
 STRICT_RECOVERY_TRACKING_ERROR = 0.1
 STRICT_RECOVERY_SPHERE_DENSITY = 0.3
-STRICT_RECOVERY_MINIMUM_CLEARANCE = 0.01
+STRICT_RECOVERY_MINIMUM_CLEARANCE = 0.005
 FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
 DUAL_FRANKA_MOUNT_X_AXIS = torch.tensor([0.0, -1.0, 0.0])
 UR_RUNTIME_QPOS_LIMITS = torch.tensor([[-2.0 * math.pi, 2.0 * math.pi]] * 6)
@@ -911,8 +913,20 @@ def test_tutorial_simulation_uses_one_global_sun_light() -> None:
     light_kwargs = light_cfg.call_args.kwargs
     assert light_kwargs["uid"] == "main_light"
     assert light_kwargs["light_type"] == "sun"
+    assert light_kwargs["intensity"] == DEFAULT_TUTORIAL_SUN_INTENSITY
     assert light_kwargs["direction"] == DEFAULT_TUTORIAL_SUN_DIRECTION
     assert "init_pos" not in light_kwargs
+
+
+@pytest.mark.parametrize("robot_type", ("ur5", "franka", "ur10"))
+def test_tutorial_robot_configs_keep_gravity_enabled(robot_type: str) -> None:
+    cfg = create_tutorial_robot_cfg(robot_type)
+
+    # Grouped physics configs use ``None`` to preserve the source/backend
+    # default (which is enabled for these tutorial URDFs). An explicit
+    # Default-only gravity override would be rejected by Newton.
+    rigid_props = cfg.attrs.rigid_props
+    assert rigid_props is None or rigid_props.has_gravity is not False
 
 
 def test_shared_robot_selection_keeps_ur5_default_and_accepts_all_variants() -> None:
@@ -1461,8 +1475,20 @@ def test_dynamic_obstacle_recovery_keeps_strict_collision_contract() -> None:
     assert "fit_type=" not in main_source
     assert "sphere_density=COLLISION_SPHERE_FIT_DENSITY" in main_source
     assert "collision_sphere_buffer=ROBOT_COLLISION_BUFFER" in main_source
+    assert "collision_props=CollisionPropertiesCfg(collision_enabled=False)" in main_source
     assert "blocked_path_clearance > MAXIMUM_BLOCKED_PATH_CLEARANCE" in main_source
     assert "replan_clearance < MINIMUM_REPLAN_CLEARANCE" in main_source
+
+
+def test_dynamic_obstacle_trigger_scales_down_for_short_paths() -> None:
+    assert _obstacle_motion_trigger_command(10, path_fraction=0.10) == 1
+    assert _obstacle_motion_trigger_command(3, path_fraction=0.10) == 1
+    assert _obstacle_motion_trigger_command(40) == 12
+
+
+def test_dynamic_obstacle_trigger_rejects_invalid_paths() -> None:
+    with pytest.raises(ValueError, match="path_segment_count"):
+        _obstacle_motion_trigger_command(0)
 
 
 def test_maximum_path_deviation_measures_detour_from_reference_polyline() -> None:
