@@ -367,10 +367,9 @@ def test_articulated_usdcs_use_visible_rgba_in_scene_order(
         articulated_generation_client=client,  # type: ignore[arg-type]
     )
 
-    assert [call[0] for call in client.calls] == [
-        "white drawer with a pull handle",
-        "black microwave with a hinged door",
-    ]
+    assert "white drawer with a pull handle" in client.calls[0][0]
+    assert "black microwave with a hinged door" in client.calls[1][0]
+    assert all("self-contained USDC" in call[0] for call in client.calls)
     assert drawer.articulated_usdc_path == str(
         tmp_path / "articulated_geometry" / "drawer_001.usdc"
     )
