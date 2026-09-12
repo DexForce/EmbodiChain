@@ -467,17 +467,19 @@ def quat_from_matrix(matrix: torch.Tensor) -> torch.Tensor:
         )
     )
 
-    # we produce the desired quaternion multiplied by each of r, i, j, k
+    # We produce the desired quaternion multiplied by each of r, i, j, k.
+    # Keep the candidate rows in EmbodiChain's public ``xyzw`` order so this
+    # routine does not need an intermediate scalar-first (``wxyz``) result.
     quat_by_rijk = torch.stack(
         [
             # pyre-fixme[58]: `**` is not supported for operand types `Tensor` and `int`.
-            torch.stack([q_abs[..., 0] ** 2, m21 - m12, m02 - m20, m10 - m01], dim=-1),
+            torch.stack([m21 - m12, m02 - m20, m10 - m01, q_abs[..., 0] ** 2], dim=-1),
             # pyre-fixme[58]: `**` is not supported for operand types `Tensor` and `int`.
-            torch.stack([m21 - m12, q_abs[..., 1] ** 2, m10 + m01, m02 + m20], dim=-1),
+            torch.stack([q_abs[..., 1] ** 2, m10 + m01, m02 + m20, m21 - m12], dim=-1),
             # pyre-fixme[58]: `**` is not supported for operand types `Tensor` and `int`.
-            torch.stack([m02 - m20, m10 + m01, q_abs[..., 2] ** 2, m12 + m21], dim=-1),
+            torch.stack([m10 + m01, q_abs[..., 2] ** 2, m12 + m21, m02 - m20], dim=-1),
             # pyre-fixme[58]: `**` is not supported for operand types `Tensor` and `int`.
-            torch.stack([m10 - m01, m20 + m02, m21 + m12, q_abs[..., 3] ** 2], dim=-1),
+            torch.stack([m20 + m02, m21 + m12, q_abs[..., 3] ** 2, m10 - m01], dim=-1),
         ],
         dim=-2,
     )
@@ -489,10 +491,10 @@ def quat_from_matrix(matrix: torch.Tensor) -> torch.Tensor:
 
     # if not for numerical problems, quat_candidates[i] should be same (up to a sign),
     # forall i; we pick the best-conditioned one (with the largest denominator)
-    quaternion_wxyz = quat_candidates[
+    quaternion_xyzw = quat_candidates[
         torch.nn.functional.one_hot(q_abs.argmax(dim=-1), num_classes=4) > 0.5, :
     ].reshape(batch_dim + (4,))
-    return torch.cat([quaternion_wxyz[..., 1:], quaternion_wxyz[..., :1]], dim=-1)
+    return quaternion_xyzw
 
 
 def xyz_quat_to_4x4_matrix(xyz_quat: torch.Tensor) -> torch.Tensor:

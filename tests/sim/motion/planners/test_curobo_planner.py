@@ -53,6 +53,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     _validate_dynamic_obstacles,
 )
 from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
+    _curobo_pose_to_components,
     _convex_hull_to_voxel_entry,
     _parse_mimic_joint_names,
     _world_collision_sphere_data,
@@ -63,7 +64,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
     visualize_curobo_world_collision_model,
 )
 from embodichain.lab.sim.motion.planners.utils import MoveType
-from embodichain.utils.math import matrix_from_quat
+from embodichain.utils.math import matrix_from_quat, quat_xyzw_to_wxyz
 
 _SIM_ROBOT_UID = "curobo_franka_inprocess_test"
 _SIM_CONTROL_PART = "arm"
@@ -984,6 +985,15 @@ def _identity_pose(
     )
 
 
+def _identity_pose_matrix(
+    translation: tuple[float, float, float] = (0.45, 0.0, 0.18),
+) -> torch.Tensor:
+    """Return an EmbodiChain homogeneous pose in ``xyz + xyzw`` semantics."""
+    pose = torch.eye(4, dtype=torch.float32)
+    pose[:3, 3] = torch.tensor(translation, dtype=torch.float32)
+    return pose
+
+
 def _identity_curobo_pose(
     translation: tuple[float, float, float] = (0.45, 0.0, 0.18),
 ) -> torch.Tensor:
@@ -1054,19 +1064,24 @@ def _track_convex_hull_preprocessing(monkeypatch, calls=None):
 def test_voxel_entry_computes_convex_hull_before_signed_distance(monkeypatch):
     calls = []
     _track_convex_hull_preprocessing(monkeypatch, calls)
+    quaternion_xyzw = torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32)
+    quaternion_xyzw /= torch.linalg.vector_norm(quaternion_xyzw)
+    pose_matrix = _identity_pose_matrix()
+    pose_matrix[:3, :3] = matrix_from_quat(quaternion_xyzw.unsqueeze(0))[0]
 
     name, fields = _convex_hull_to_voxel_entry(
         "block",
         _unit_cube_vertices(),
         _cube_faces(),
-        _identity_curobo_pose(),
+        pose_matrix,
         voxel_size=0.25,
         voxel_padding=0.25,
     )
 
     assert len(calls) == 1
     assert name == "block"
-    assert fields["pose"] == pytest.approx(_identity_curobo_pose().tolist())
+    expected_pose = torch.cat((pose_matrix[:3, 3], quat_xyzw_to_wxyz(quaternion_xyzw)))
+    assert fields["pose"] == pytest.approx(expected_pose.tolist())
     assert fields["dims"] == pytest.approx([1.5, 1.5, 1.5])
     assert tuple(fields["feature_tensor"].shape) == (6, 6, 6)
     assert fields["feature_tensor"].amin() < 0.0
@@ -1100,9 +1115,21 @@ def test_voxel_entry_rejects_invalid_settings(voxel_size, voxel_padding, match):
             "block",
             _unit_cube_vertices(),
             _cube_faces(),
-            _identity_pose(),
+            _identity_pose_matrix(),
             voxel_size=voxel_size,
             voxel_padding=voxel_padding,
+        )
+
+
+def test_voxel_entry_rejects_7d_pose_to_keep_convention_unambiguous():
+    with pytest.raises(ValueError, match="pose_matrix.*4, 4"):
+        _convex_hull_to_voxel_entry(
+            "block",
+            _unit_cube_vertices(),
+            _cube_faces(),
+            _identity_curobo_pose(),
+            voxel_size=0.25,
+            voxel_padding=0.25,
         )
 
 
@@ -1308,6 +1335,20 @@ def test_mixed_collision_visualization_supports_cuboid():
 
     assert centers.shape == (8, 3)
     assert radii.shape == (8,)
+
+
+def test_curobo_world_pose_is_converted_from_wxyz_before_visualization():
+    """cuRobo serialized poses must cross back to EmbodiChain math exactly once."""
+    quaternion_xyzw = torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32)
+    quaternion_xyzw /= torch.linalg.vector_norm(quaternion_xyzw)
+    expected_rotation = matrix_from_quat(quaternion_xyzw)
+    position = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32)
+    serialized_pose = torch.cat((position, quat_xyzw_to_wxyz(quaternion_xyzw)))
+
+    decoded_position, decoded_rotation = _curobo_pose_to_components(serialized_pose)
+
+    torch.testing.assert_close(decoded_position, position)
+    torch.testing.assert_close(decoded_rotation, expected_rotation)
 
 
 def test_world_scene_object_override_can_force_voxel(monkeypatch):

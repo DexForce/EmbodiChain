@@ -173,8 +173,9 @@ use the direction-specific `quat_xyzw_to_wxyz()`/
 available for compatibility but should not be used when the input convention is
 already known. Explicitly named adapter/protocol values can retain an external
 order: visualization `*wxyz` fields, cuRobo serialized poses, and DexSim
-`PhysicalAttr`/Spawn descriptors are not EmbodiChain-domain poses and must not
-enter EmbodiChain math without the boundary conversion. Newton/Warp transforms
+`PhysicalAttr`/Spawn descriptors, and GenSim
+`rotation_quaternion_wxyz` responses, are not EmbodiChain-domain poses and must
+not enter EmbodiChain math without the boundary conversion. Newton/Warp transforms
 expose position plus an `xyzw` quaternion and therefore need no component-order
 conversion. Use a non-symmetric rotation when testing an adapter; an identity or
 180-degree single-axis rotation can hide an incorrect order.

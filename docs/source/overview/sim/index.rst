@@ -255,7 +255,8 @@ ordering. A 7-dimensional pose is ``(px, py, pz, qx, qy, qz, qw)`` and the
 identity is ``(0, 0, 0, 1)``. Backend adapters perform any native-order
 conversion exactly once at the boundary. Explicitly named adapter/protocol
 values can retain an external order, including visualization ``*wxyz`` fields,
-cuRobo serialized poses, and DexSim ``PhysicalAttr``/Spawn descriptors. The
+cuRobo serialized poses, DexSim ``PhysicalAttr``/Spawn descriptors, and GenSim
+``rotation_quaternion_wxyz`` responses. The
 domain convention applies to object and link state, robot FK/IK, sensor
 offsets, semantic poses, and task configuration.
 

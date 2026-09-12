@@ -2124,6 +2124,11 @@ class Articulation(BatchEntity):
         Returns:
             List of :class:`~dexsim.types.PhysicalAttr`, one per (env, link) pair in
             row-major order (env-major).
+
+        .. attention::
+            ``PhysicalAttr.com_quaternion`` uses DexSim's native ``wxyz`` order.
+            Use :meth:`get_com_pose` when an EmbodiChain ``xyz + xyzw`` tensor is
+            required.
         """
         if self._data is not None and self._data.is_newton_backend:
             raise RuntimeError(
@@ -2165,6 +2170,11 @@ class Articulation(BatchEntity):
         Returns:
             One typed descriptor per selected ``(environment, link)`` pair in
             environment-major order.
+
+        .. attention::
+            The returned Spawn descriptor is a backend-native object;
+            ``com_quaternion`` is stored in ``wxyz`` order. Use
+            :meth:`get_com_pose` for the EmbodiChain ``xyz + xyzw`` view.
         """
         if not (
             self.is_spawn_bound
@@ -2211,6 +2221,9 @@ class Articulation(BatchEntity):
 
         .. attention::
             This compatibility API exposes DexSim ``PhysicalAttr`` semantics.
+            Pass a :class:`RigidBodyPhysicsCfg` for EmbodiChain ``xyz + xyzw``
+            COM values; a supplied :class:`~dexsim.types.PhysicalAttr` must keep
+            DexSim's native ``wxyz`` quaternion order.
             Newton properties must use typed Spawn descriptors.
         """
         is_newton = self._data is not None and self._data.is_newton_backend
