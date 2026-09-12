@@ -16,9 +16,19 @@
 
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Any, Tuple
 
 import warp as wp
+
+__all__ = [
+    "wp_vec6f",
+    "wp_vec48f",
+    "normalize_to_pi",
+    "URParam",
+    "ur_single_fk",
+    "ur_ik_kernel",
+    "ur_ik_nearest_kernel",
+]
 
 wp_vec6f = wp.types.vector(length=6, dtype=float)
 wp_vec48f = wp.types.vector(length=48, dtype=float)
@@ -227,31 +237,12 @@ def _shift_to_limit(q: float, lo: float, hi: float) -> float:
     return q
 
 
-@wp.kernel
-def ur_ik_kernel(
-    xpos: wp.array(dtype=float),  # [n_sample * 16]  row-major 4x4 target poses
-    params: URParam,
-    lower_qpos_limits_wp: wp.array(dtype=float),  # [6]  lower joint limits
-    upper_qpos_limits_wp: wp.array(dtype=float),  # [6]  upper joint limits
-    qpos: wp.array(dtype=float),  # [n_sample * 512 * DOF]  output joint solutions
-    ik_valid: wp.array(dtype=int),  # [n_sample * 512]         output validity flags
-):
-    """Compute expanded analytical IK solutions for a batch of UR poses.
-
-    Each thread handles one target pose. The 8 base analytical solutions are
-    expanded to ``8 * 2**6 = 512`` candidates: for every base solution and every
-    joint, a second FK-equivalent value shifted by +/- 2*pi is generated when it
-    falls inside the joint limits (UR joints are 2*pi-periodic, so this preserves
-    the end-effector pose). When no shifted value fits the limits, the joint's own
-    value is repeated. Each candidate is flagged valid only if the base FK matches
-    the target *and* every joint lies within its limits.
-    """
-    i = wp.tid()
-    DOF = int(6)
-    N_SOL = int(8)
-    N_SHIFT = int(64)  # 2**6 per-joint +/- 2*pi shift combinations
+@wp.func
+def _ur_ik_branches(
+    xpos: wp.array(dtype=float), params: URParam, i: int
+) -> Tuple[wp_vec48f, wp.mat44f]:
+    """Compute the eight ordered analytical branches and their target pose."""
     base = i * 16
-
     # Load rotation and translation from the row-major 4x4 target pose.
     r11 = xpos[base + 0]
     r12 = xpos[base + 1]
@@ -424,6 +415,34 @@ def ur_ik_kernel(
         t6_5nb,  # sol 7
     )
 
+    return theta, target_pose
+
+
+@wp.kernel
+def ur_ik_kernel(
+    xpos: wp.array(dtype=float),  # [n_sample * 16]  row-major 4x4 target poses
+    params: URParam,
+    lower_qpos_limits_wp: wp.array(dtype=float),  # [6]  lower joint limits
+    upper_qpos_limits_wp: wp.array(dtype=float),  # [6]  upper joint limits
+    qpos: wp.array(dtype=float),  # [n_sample * 512 * DOF]  output joint solutions
+    ik_valid: wp.array(dtype=int),  # [n_sample * 512]         output validity flags
+):
+    """Compute expanded analytical IK solutions for a batch of UR poses.
+
+    Each thread handles one target pose. The 8 base analytical solutions are
+    expanded to ``8 * 2**6 = 512`` candidates: for every base solution and every
+    joint, a second FK-equivalent value shifted by +/- 2*pi is generated when it
+    falls inside the joint limits (UR joints are 2*pi-periodic, so this preserves
+    the end-effector pose). When no shifted value fits the limits, the joint's own
+    value is repeated. Each candidate is flagged valid only if the base FK matches
+    the target *and* every joint lies within its limits.
+    """
+    i = wp.tid()
+    DOF = int(6)
+    N_SOL = int(8)
+    N_SHIFT = int(64)  # 2**6 per-joint +/- 2*pi shift combinations
+    theta, target_pose = _ur_ik_branches(xpos, params, i)
+
     # Expand each of the 8 base solutions into 2**6 = 64 per-joint +/- 2*pi shift
     # variants, yielding 8 * 64 = 512 candidates total. Shifting is FK-equivalent
     # and only applied when it lands inside the joint limits; otherwise the joint's
@@ -498,3 +517,83 @@ def ur_ik_kernel(
             ):
                 valid = int(0)
             ik_valid[i * N_SOL * N_SHIFT + j * N_SHIFT + k] = valid
+
+
+@wp.kernel(enable_backward=False)
+def ur_ik_nearest_kernel(
+    xpos: wp.array(dtype=float),
+    params: URParam,
+    lower_limits: wp.array(dtype=float),
+    upper_limits: wp.array(dtype=float),
+    qpos_seed: wp.array(dtype=Any, ndim=2),
+    joint_weights: wp.array(dtype=Any),
+    qpos: wp.array(dtype=float, ndim=2),
+    ik_valid: wp.array(dtype=int),
+):
+    """Generate, validate and select one UR solution per target in local storage.
+
+    Args:
+        xpos: Flattened target transforms, shape ``(N * 16,)``.
+        params: UR Denavit-Hartenberg parameters.
+        lower_limits: Six lower joint limits in radians.
+        upper_limits: Six upper joint limits in radians.
+        qpos_seed: Joint seeds, shape ``(N, 6)``.
+        joint_weights: Six weights, with the same dtype as the seeds.
+        qpos: Output joint values, shape ``(N, 6)``.
+        ik_valid: Output validity flags, shape ``(N,)``.
+
+    Candidates follow the all-solutions kernel's branch and periodic order.
+    Strict improvement retains the first equal-distance candidate. When all
+    candidates are invalid, the first candidate is returned with a false flag,
+    matching the previous masked ``torch.norm`` / ``argmin`` selection.
+    """
+    i = wp.tid()
+    theta, target_pose = _ur_ik_branches(xpos, params, i)
+    best_q = wp_vec6f()
+    best_valid = int(0)
+    best_distance = qpos_seed.dtype(wp.inf)
+    tol = float(1e-9)
+
+    for j in range(8):
+        base_q = wp_vec6f()
+        shifted_q = wp_vec6f()
+        for t in range(6):
+            base_q[t] = normalize_to_pi(theta[j * 6 + t])
+            shifted_q[t] = _shift_to_limit(base_q[t], lower_limits[t], upper_limits[t])
+
+        fk_result = ur_single_fk(
+            base_q[0], base_q[1], base_q[2], base_q[3], base_q[4], base_q[5], params
+        )
+        t_err, r_err = _ur_transform_err(fk_result, target_pose)
+        fk_ok = int(1)
+        if t_err > float(1e-2) or r_err > float(1e-1):
+            fk_ok = int(0)
+
+        for k in range(64):
+            candidate = wp_vec6f()
+            valid = fk_ok
+            squared_distance = qpos_seed.dtype(0.0)
+            for t in range(6):
+                q = base_q[t] if (k & (1 << t)) == 0 else shifted_q[t]
+                candidate[t] = q
+                if q < lower_limits[t] - tol or q > upper_limits[t] + tol:
+                    valid = int(0)
+                delta = (qpos_seed.dtype(q) - qpos_seed[i, t]) * joint_weights[t]
+                squared_distance = squared_distance + delta * delta
+
+            if j == 0 and k == 0:
+                best_q = candidate
+                best_valid = valid
+            # Retain the norm (including its rounding) for equal-distance ties.
+            distance = wp.sqrt(squared_distance)
+            if valid != 0 and (
+                distance < best_distance
+                or (wp.isnan(distance) and not wp.isnan(best_distance))
+            ):
+                best_distance = distance
+                best_q = candidate
+                best_valid = valid
+
+    for t in range(6):
+        qpos[i, t] = best_q[t]
+    ik_valid[i] = best_valid
