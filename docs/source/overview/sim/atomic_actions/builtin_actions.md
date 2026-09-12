@@ -1063,5 +1063,9 @@ python scripts/tutorials/atomic_action/pickup.py --headless --auto_play --device
 python scripts/tutorials/atomic_action/hand_over.py --headless --auto_play --device cpu
 ```
 
+The scripts share a `--planner` selector for the non-neural backends
+(`toppra`, `trapezoidal`, or `curobo`). See {doc}`/tutorial/atomic_actions` for
+backend-specific caveats and examples.
+
 See {doc}`/tutorial/atomic_actions` for engine setup, static compilation,
 closed-loop execution, effect verification, and custom-action guidance.

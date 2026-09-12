@@ -390,7 +390,8 @@ def _publish_path_overlays(
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the dynamic-obstacle tutorial."""
     parser = create_tutorial_argument_parser(
-        "Demonstrate collision-world revision recovery with cuRobo."
+        "Demonstrate collision-world revision recovery with cuRobo.",
+        default_planner="curobo",
     )
     parser.add_argument(
         "--no_obstacle_motion",
@@ -403,6 +404,11 @@ def parse_arguments() -> argparse.Namespace:
 def main() -> None:
     """Move an obstacle during execution and replan from the latest snapshot."""
     args = parse_arguments()
+    if getattr(args, "planner", "curobo") != "curobo":
+        raise ValueError(
+            "dynamic_obstacle_recovery requires --planner curobo because "
+            "the demo updates a live collision world during execution."
+        )
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot)
     obstacle = sim.add_rigid_object(

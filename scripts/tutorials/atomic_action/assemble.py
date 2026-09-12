@@ -134,6 +134,7 @@ def parse_arguments() -> argparse.Namespace:
             "visualize_axes",
         ),
         default_renderer="hybrid",
+        default_planner="curobo",
     )
     return parser.parse_args()
 
@@ -257,7 +258,10 @@ def run_assemble_demo(
         can,
         label="soda_can",
     )
-    motion_gen = create_curobo_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "curobo"),
+    )
     left_open, left_close = get_hand_open_close_qpos(
         robot, hand_control_part="left_hand", close_qpos=HAND_CLOSE_QPOS
     )

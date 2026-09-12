@@ -384,7 +384,10 @@ def run_coordinated_pickment_demo(
         label=preset.label,
     )
     left_to_right_arm_direction = compute_left_to_right_arm_direction(robot, sim.device)
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_toppra_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "toppra"),
+    )
 
     hand_close_qpos = (
         ROBOTIQ_2F_140_CLOSE_QPOS if args.robot == "ur10" else preset.hand_close_qpos

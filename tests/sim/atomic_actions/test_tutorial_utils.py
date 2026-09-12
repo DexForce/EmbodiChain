@@ -50,18 +50,21 @@ from scripts.tutorials.atomic_action.scenario_utils import (
 from scripts.tutorials.atomic_action.tutorial_utils import (
     ROBOTIQ_2F_140_TCP,
     ROBOTIQ_HAND_JOINT_PATTERN,
+    TUTORIAL_PLANNERS,
     TUTORIAL_ROBOTS,
+    TutorialPlanner,
     broadcast_pose_batch,
     broadcast_waypoint_pose_batch,
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
     create_curobo_motion_generator,
     create_franka_panda_robot_cfg,
+    create_parallel_jaw_grasp_pose_generator,
     create_tutorial_argument_parser,
+    create_tutorial_motion_generator,
     create_tutorial_robot_cfg,
     create_ur10_robotiq_robot_cfg,
     create_ur5_gripper_robot_cfg,
-    create_parallel_jaw_grasp_pose_generator,
     get_hand_open_close_qpos,
     replay_trajectory,
     should_open_tutorial_window,
@@ -702,16 +705,51 @@ def test_curobo_motion_generator_factory_selects_curobo_backend() -> None:
     assert cfg.planner_cfg.robot_uid == "tutorial_robot"
 
 
+@pytest.mark.parametrize("planner", TUTORIAL_PLANNERS)
+def test_tutorial_motion_generator_factory_selects_requested_backend(
+    planner: TutorialPlanner,
+) -> None:
+    robot = MagicMock(uid="tutorial_robot")
+
+    with patch(
+        "scripts.tutorials.atomic_action.tutorial_utils.MotionGenerator"
+    ) as motion_generator_cls:
+        result = create_tutorial_motion_generator(robot, planner)
+
+    cfg = motion_generator_cls.call_args.kwargs["cfg"]
+    assert result is motion_generator_cls.return_value
+    assert cfg.planner_cfg.planner_type == planner
+    assert cfg.planner_cfg.robot_uid == "tutorial_robot"
+
+
+def test_tutorial_motion_generator_factory_rejects_neural_backend() -> None:
+    with pytest.raises(ValueError, match="Unsupported tutorial planner"):
+        create_tutorial_motion_generator(
+            MagicMock(uid="tutorial_robot"), "neural"
+        )  # type: ignore[arg-type]
+
+
 def test_shared_robot_selection_keeps_ur5_default_and_accepts_all_variants() -> None:
     parser = create_tutorial_argument_parser("test parser")
     default_args = parser.parse_args([])
     franka_args = parser.parse_args(["--robot", "franka"])
     ur10_args = parser.parse_args(["--robot", "ur10"])
+    trapezoidal_args = parser.parse_args(["--planner", "trapezoidal"])
 
     assert TUTORIAL_ROBOTS == ("ur5", "franka", "ur10")
+    assert TUTORIAL_PLANNERS == ("toppra", "trapezoidal", "curobo")
     assert default_args.robot == "ur5"
     assert franka_args.robot == "franka"
     assert ur10_args.robot == "ur10"
+    assert default_args.planner == "toppra"
+    assert trapezoidal_args.planner == "trapezoidal"
+
+
+def test_shared_tutorial_planner_selection_excludes_neural_backend() -> None:
+    parser = create_tutorial_argument_parser("test parser")
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--planner", "neural"])
 
 
 def test_arm_direction_uses_selected_robot_solver_roots() -> None:
@@ -744,9 +782,15 @@ def test_all_atomic_action_tutorials_accept_both_robot_choices(
         default_args = module.parse_arguments()
     with patch("sys.argv", [f"{module_name}.py", "--robot", "franka"]):
         franka_args = module.parse_arguments()
+    with patch(
+        "sys.argv",
+        [f"{module_name}.py", "--planner", "trapezoidal"],
+    ):
+        trapezoidal_args = module.parse_arguments()
 
     assert default_args.robot == "ur5"
     assert franka_args.robot == "franka"
+    assert trapezoidal_args.planner == "trapezoidal"
 
 
 def test_place_tutorial_registers_pick_object_with_simulation_engine_factory() -> None:

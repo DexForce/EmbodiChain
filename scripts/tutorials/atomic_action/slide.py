@@ -162,7 +162,10 @@ def create_invocation(
             target_pose,
         ),
         control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
-        motion_policy=MotionPolicy(sample_count=TRAJECTORY_SAMPLE_COUNT),
+        motion_policy=MotionPolicy(
+            strategy="motion_gen",
+            sample_count=TRAJECTORY_SAMPLE_COUNT,
+        ),
         skill_options=SlideOptions(
             direction=direction,
             hand_interp_steps=HAND_INTERP_STEPS,
@@ -188,7 +191,10 @@ def main() -> None:
     )
     drawer = create_drawer(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_toppra_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "toppra"),
+    )
     semantics = create_drawer_semantics(drawer)
     affordance = semantics.affordance
     assert isinstance(affordance, SlideAffordance)

@@ -39,6 +39,7 @@ from embodichain.lab.sim.atomic_actions import (
     PourOptions,
 )
 from embodichain.lab.sim.motion.planners import (
+    TrapezoidalPlanOptions,
     ToppraPlanOptions,
     TrajectorySampleMethod,
 )
@@ -60,6 +61,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
+    TutorialPlanner,
 )
 
 POUR_INTERNAL_AXIS = (1.0, 0.0, 0.0)
@@ -92,15 +94,28 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _create_pick_motion_policy() -> MotionPolicy:
-    """Create the PickUp policy with an explicit valid TOPPRA sample count."""
+def _create_pick_motion_policy(planner: TutorialPlanner = "toppra") -> MotionPolicy:
+    """Create a planner-specific PickUp policy with a fixed motion sample count."""
+    if planner == "toppra":
+        plan_opts = ToppraPlanOptions(
+            sample_method=TrajectorySampleMethod.QUANTITY,
+            sample_interval=PICK_MOTION_SAMPLE_COUNT,
+        )
+    elif planner == "trapezoidal":
+        plan_opts = TrapezoidalPlanOptions(
+            sample_method=TrajectorySampleMethod.QUANTITY,
+            sample_interval=PICK_MOTION_SAMPLE_COUNT,
+        )
+    elif planner == "curobo":
+        # cuRobo owns its native sampling and does not use the joint-space
+        # sample-count options above.
+        plan_opts = None
+    else:
+        raise ValueError(f"Unsupported tutorial planner {planner!r}.")
     return MotionPolicy(
         strategy="motion_gen",
         sample_count=PICK_SAMPLE_INTERVAL,
-        plan_opts=ToppraPlanOptions(
-            sample_method=TrajectorySampleMethod.QUANTITY,
-            sample_interval=PICK_MOTION_SAMPLE_COUNT,
-        ),
+        plan_opts=plan_opts,
     )
 
 
@@ -115,7 +130,8 @@ def main() -> None:
     )
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
-    motion_gen = create_toppra_motion_generator(robot)
+    planner = getattr(args, "planner", "toppra")
+    motion_gen = create_toppra_motion_generator(robot, planner=planner)
 
     engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
@@ -149,7 +165,7 @@ def main() -> None:
                 "pick_up",
                 GraspGoal(semantics),
                 control_parts=control_parts,
-                motion_policy=_create_pick_motion_policy(),
+                motion_policy=_create_pick_motion_policy(planner),
                 skill_options=PickUpOptions(
                     approach_direction=torch.tensor(
                         APPROACH_DIRECTION,

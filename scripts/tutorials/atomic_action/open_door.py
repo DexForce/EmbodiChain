@@ -161,7 +161,10 @@ def main() -> None:
         draw_axis_marker(sim, "door_handle_link_pose", handle_pose)
 
     engine = AtomicActionEngine(
-        motion_generator=create_toppra_motion_generator(robot),
+        motion_generator=create_toppra_motion_generator(
+            robot,
+            planner=getattr(args, "planner", "toppra"),
+        ),
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
                 open=hand_open,
@@ -190,7 +193,10 @@ def main() -> None:
                     open_fraction=open_fraction,
                 ),
                 control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
-                motion_policy=MotionPolicy(sample_count=TRAJECTORY_SAMPLE_COUNT),
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=TRAJECTORY_SAMPLE_COUNT,
+                ),
                 skill_options=OpenDoorOptions(
                     hand_interp_steps=HAND_INTERP_STEPS,
                     door_waypoint_count=args.door_waypoint_count,

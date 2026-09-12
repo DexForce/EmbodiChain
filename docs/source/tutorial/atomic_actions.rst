@@ -159,6 +159,66 @@ The ``motion_generator`` variable in the snippets below is a configured
 :class:`~embodichain.lab.sim.motion.motion_generator.MotionGenerator`; its robot, planner,
 device, cache, and collision world become the resources owned by the engine.
 
+Selecting a motion planner
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Every runnable atomic-action tutorial accepts the shared ``--planner`` switch.
+It selects the non-neural backend used to construct its
+``MotionGenerator``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 30 52
+
+   * - Value
+     - Backend
+     - Behavior and availability
+   * - ``toppra``
+     - :class:`~embodichain.lab.sim.motion.planners.ToppraPlanner`
+     - Time-optimal joint-space timing. This remains the default for tutorials
+       that previously used TOPPRA.
+   * - ``trapezoidal``
+     - :class:`~embodichain.lab.sim.motion.planners.TrapezoidalPlanner`
+     - Deterministic trapezoidal joint-space timing. Cartesian targets are
+       converted through the shared IK/interpolation path before planning;
+       quantity sampling retains every converted waypoint. When options are
+       resolved from the backend-neutral request, ``MotionGenerator`` treats
+       the requested count as a lower bound; an explicitly supplied
+       ``TrapezoidalPlanOptions.sample_interval`` remains authoritative.
+       Fixed-length composite skill phases resample that position path back to
+       their requested phase count before combining arm and hand commands.
+   * - ``curobo``
+     - :class:`~embodichain.lab.sim.motion.planners.CuroboPlanner`
+     - CUDA-backed Cartesian/joint planning with collision-world support when
+       the tutorial supplies one. This remains the default for the tutorials
+       that previously used cuRobo.
+
+``NeuralPlanner`` is intentionally not a choice here: it requires a
+tutorial-specific ONNX model and frame configuration rather than being a
+drop-in backend for these examples. For example, the same pose tutorial can
+be run with each supported backend as follows:
+
+.. code-block:: bash
+
+   python scripts/tutorials/atomic_action/move_end_effector.py --device cpu --planner toppra
+   python scripts/tutorials/atomic_action/move_end_effector.py --device cpu --planner trapezoidal
+   python scripts/tutorials/atomic_action/move_end_effector.py --device cuda --planner curobo
+
+The selector does not override a skill's explicit motion contract. In
+particular, ``dynamic_obstacle_recovery.py`` is deliberately cuRobo-only because
+it updates a live collision world; ``coordinated_pickment.py``,
+``coordinated_placement.py``, and ``hand_over.py`` use dual-arm planning that
+currently rejects cuRobo. ``control_dt.py`` intentionally uses
+``strategy="ik_interp"`` to compare control periods, so its planner choice is
+constructed for consistency but does not change that interpolation experiment.
+``coordinated_pickment.py`` likewise retains its synchronized multi-arm
+IK/keyframe implementation; its selector validates the backend but does not
+replace those custom synchronized phases.
+The exact Cartesian-linear portions of ``OpenDoor``, ``Press``, and ``Slide``
+likewise remain IK-grounded; their planner choice applies to the other
+motion-generation portions. ``Twist`` uses the selected planner for each of
+its pose segments.
+
 Control-part commands
 ---------------------
 

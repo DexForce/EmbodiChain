@@ -95,6 +95,62 @@ def repeat_qpos(qpos: torch.Tensor, n_waypoints: int) -> torch.Tensor:
     return qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
 
 
+def resample_planned_trajectory(
+    trajectory: torch.Tensor,
+    sample_count: int,
+) -> torch.Tensor:
+    """Fit a planner path to a composite action's fixed phase length.
+
+    Some planners preserve their native samples instead of honoring the
+    backend-neutral requested count. Composite atomic actions allocate arm and
+    hand phases together, so they need a common count at this boundary. The
+    position-only resampling intentionally happens after planning; native
+    planner derivatives are not used by these position-composed phases.
+
+    Args:
+        trajectory: Batched joint path with shape ``(B, N, D)``.
+        sample_count: Required number of output samples.
+
+    Returns:
+        The original path when its length already matches, otherwise a
+        cumulative-distance resampling with exactly ``sample_count`` samples.
+
+    Raises:
+        TypeError: If ``trajectory`` is not a floating-point tensor.
+        ValueError: If the path or requested sample count is invalid.
+    """
+    if not isinstance(trajectory, torch.Tensor):
+        raise TypeError("trajectory must be a torch.Tensor.")
+    if trajectory.ndim != 3:
+        raise ValueError("trajectory must have shape (B, N, D).")
+    if not torch.is_floating_point(trajectory):
+        raise TypeError("trajectory must be a floating-point tensor.")
+    if trajectory.shape[1] == 0 or trajectory.shape[2] == 0:
+        raise ValueError("trajectory must have non-zero N and D dimensions.")
+    if isinstance(sample_count, bool) or not isinstance(sample_count, int):
+        raise TypeError("sample_count must be an integer.")
+    if sample_count < 1:
+        raise ValueError("sample_count must be positive.")
+    if trajectory.shape[0] == 0:
+        return trajectory.new_empty((0, sample_count, trajectory.shape[2]))
+    if trajectory.shape[1] == sample_count:
+        return trajectory
+    if trajectory.shape[1] == 1:
+        return trajectory.expand(-1, sample_count, -1).clone()
+    resampled = resample_with_distance(
+        trajectory,
+        sample_count,
+        device=trajectory.device,
+    )
+    # Preserve the planner's exact boundary states even when the Warp path
+    # performs its arithmetic in float32 or the Torch fallback rounds a
+    # cumulative-distance fraction at an endpoint.
+    resampled = resampled.to(dtype=trajectory.dtype).clone()
+    resampled[:, 0] = trajectory[:, 0]
+    resampled[:, -1] = trajectory[:, -1]
+    return resampled
+
+
 def assemble_full_robot_trajectory(
     base_qpos: torch.Tensor,
     part_trajectories: Sequence[tuple[Sequence[int], torch.Tensor]],
@@ -138,7 +194,7 @@ def plan_named_arm_trajectory(
         raise TypeError("Motion planning success must be a torch.Tensor.")
     if result.positions is None:
         raise ValueError("Motion planning result must contain joint positions.")
-    return result.success, result.positions
+    return result.success, resample_planned_trajectory(result.positions, n_waypoints)
 
 
 def arm_qpos_from_state(
@@ -240,6 +296,7 @@ __all__ = [
     "arm_qpos_from_state",
     "assemble_full_robot_trajectory",
     "plan_named_arm_trajectory",
+    "resample_planned_trajectory",
     "require_shared_task_state_key",
     "repeat_qpos",
     "resolve_batched_pose",

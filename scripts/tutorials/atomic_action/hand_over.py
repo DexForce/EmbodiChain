@@ -190,7 +190,10 @@ def run_handover_demo(
     obj.clear_dynamics()
     publish_tutorial_scene(sim, args)
     object_semantics = create_antipodal_semantics(obj, label="handover")
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_toppra_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "toppra"),
+    )
 
     left_open, left_close = get_hand_open_close_qpos(
         robot, hand_control_part="left_hand", close_qpos=HAND_CLOSE_QPOS
