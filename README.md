@@ -67,6 +67,10 @@ gym config with `id`, install with `pip install -e .`, and launch it with
 `embodichain run-env`. See the
 [embodichain_tasks README](https://github.com/DexForce/EmbodiChain/blob/main/embodichain_tasks/README.md)
 for details.
+EmbodiChain environments can also be used with the optional
+[RLinf integration](https://dexforce.github.io/EmbodiChain/main/guides/rlinf.html);
+the integration guide documents the separate runtime, task registration, and
+current compatibility boundary.
 
 ## Contribution Guide
 
