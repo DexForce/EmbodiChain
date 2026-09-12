@@ -249,7 +249,9 @@ class SemanticTaskPlanner:
                             "position": [
                                 float(value) for value in objects[object_id]["init_pos"]
                             ],
-                            "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                            "quaternion_wxyz": _initial_quaternion_wxyz(
+                                objects[object_id].get("init_rot", [0.0, 0.0, 0.0])
+                            ),
                         }
                     ],
                 }
@@ -269,6 +271,15 @@ class SemanticTaskPlanner:
                             "kind": "registered",
                             "call_id": _POUR_CALL_ID,
                             "arguments": {"object": object_id},
+                            "resources": {"primary": resource},
+                        },
+                        {
+                            "kind": "registered",
+                            "call_id": _MOVE_HELD_OBJECT_CALL_ID,
+                            "arguments": {
+                                "object": object_id,
+                                "target": return_target,
+                            },
                             "resources": {"primary": resource},
                         },
                         {
@@ -883,6 +894,21 @@ def _upright_targets(step_id: str, position: list[float]) -> dict[str, Any]:
         }
         for suffix in ("upright_target", "upright_staging_target")
     }
+
+
+def _initial_quaternion_wxyz(rotation: Any) -> list[float]:
+    """Convert the scene's XYZ degree rotation into the original object pose."""
+    if not isinstance(rotation, (list, tuple)) or len(rotation) != 3:
+        raise ValueError("E3 return pose requires a three-value init_rot.")
+    x, y, z = (math.radians(float(value)) / 2.0 for value in rotation)
+    cx, cy, cz = math.cos(x), math.cos(y), math.cos(z)
+    sx, sy, sz = math.sin(x), math.sin(y), math.sin(z)
+    return [
+        cx * cy * cz + sx * sy * sz,
+        sx * cy * cz - cx * sy * sz,
+        cx * sy * cz + sx * cy * sz,
+        cx * cy * sz - sx * sy * cz,
+    ]
 
 
 def _park_call(resource: str) -> dict[str, Any]:
