@@ -85,6 +85,26 @@ def test_set_gravity_updates_all_environments_by_default() -> None:
     ]
 
 
+@pytest.mark.no_sim
+def test_clear_dynamics_clears_current_and_target_joint_velocities() -> None:
+    """Clearing dynamics resets both velocity state and drive targets."""
+    articulation = object.__new__(Articulation)
+    articulation._all_indices = torch.arange(2, dtype=torch.int32)
+    articulation._data = SimpleNamespace(dof=3)
+    articulation.device = torch.device("cpu")
+    articulation.set_qvel = MagicMock()
+    articulation.set_qf = MagicMock()
+
+    articulation.clear_dynamics()
+
+    assert [call.kwargs["target"] for call in articulation.set_qvel.call_args_list] == [
+        False,
+        True,
+    ]
+    for call in articulation.set_qvel.call_args_list:
+        assert torch.equal(call.args[0], torch.zeros((2, 3)))
+
+
 def test_get_qf_returns_all_articulation_joint_efforts():
     expected_qf = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=torch.float32)
     articulation = object.__new__(Articulation)

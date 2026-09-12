@@ -95,6 +95,7 @@ TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
 )
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.036
 DEFAULT_TUTORIAL_SUN_DIRECTION = (0.0, 0.0, -1.0)
+DEFAULT_TUTORIAL_SUN_INTENSITY = 5.0
 _FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
 _DEFAULT_GRIPPER_TCP_Z = 0.17
 _GRIPPER_TCP = (
@@ -256,7 +257,7 @@ def create_tutorial_simulation(
             uid="main_light",
             light_type="sun",
             color=(0.6, 0.6, 0.6),
-            intensity=30.0,
+            intensity=DEFAULT_TUTORIAL_SUN_INTENSITY,
             direction=tuple(sun_direction),
         )
     )
@@ -1227,6 +1228,7 @@ __all__ = [
     "DEFAULT_AXIS_SIZE",
     "DEFAULT_GRIPPER_CLOSE_QPOS",
     "DEFAULT_TUTORIAL_SUN_DIRECTION",
+    "DEFAULT_TUTORIAL_SUN_INTENSITY",
     "GRIPPER_HAND_JOINT_PATTERN",
     "GRIPPER_URDF_PATH",
     "ROBOTIQ_2F_140_TCP",
