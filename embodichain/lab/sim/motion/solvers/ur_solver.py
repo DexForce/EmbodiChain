@@ -226,7 +226,10 @@ class URSolver(BaseSolver):
         closest_indices = torch.argmin(distances, dim=1)
         ik_qpos = all_solutions[torch.arange(n_sample), closest_indices]
         ik_validity = all_solutions_validity[torch.arange(n_sample), closest_indices]
-        return ik_validity, ik_qpos
+        # ``ik_qpos`` indexes the reusable candidate scratch buffer.  Copy both
+        # outputs before releasing the borrow so a subsequent solve cannot
+        # mutate tensors returned to the caller.
+        return ik_validity.clone(), ik_qpos.clone()
 
     @staticmethod
     def dh_matrix(theta_i, d_i, a_i, alpha_i):

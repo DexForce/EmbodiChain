@@ -121,6 +121,18 @@ def test_candidate_reuse_and_old_results_remain_valid(solver, monkeypatch):
     solver._ik_buffers.zeros = original_zeros
 
 
+def test_selected_results_remain_valid_after_scratch_reuse(solver):
+    """Selected IK outputs must not alias reusable candidate storage."""
+    qpos, poses = _targets(solver, 7)
+    valid, result = solver.get_ik(poses, qpos)
+    expected_valid, expected_result = valid.clone(), result.clone()
+
+    solver.get_ik(poses.flip(0), qpos.flip(0))
+
+    torch.testing.assert_close(valid, expected_valid)
+    torch.testing.assert_close(result, expected_result)
+
+
 def test_best_solution_round_trip_and_limits(solver):
     qpos, poses = _targets(solver, 13)
     success, result = solver.get_ik_batch(

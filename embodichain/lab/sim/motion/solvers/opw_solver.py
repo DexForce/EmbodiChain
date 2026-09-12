@@ -364,7 +364,9 @@ class OPWSolver(BaseSolver):
             wp.to_torch(best_ik_result_wp).reshape(n_sample, 1, 6).to(self.device)
         )
         best_ik_valid = wp.to_torch(best_ik_valid_wp).to(self.device)
-        return best_ik_valid, best_ik_result
+        # Keep the public result independent from Warp-owned temporary storage
+        # and from allocator reuse in a subsequent solve.
+        return best_ik_valid.clone(), best_ik_result.clone()
 
     @property
     def supports_continuous_batch_ik(self) -> bool:
