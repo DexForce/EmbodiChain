@@ -1475,7 +1475,9 @@ def test_dynamic_obstacle_recovery_keeps_strict_collision_contract() -> None:
     assert "fit_type=" not in main_source
     assert "sphere_density=COLLISION_SPHERE_FIT_DENSITY" in main_source
     assert "collision_sphere_buffer=ROBOT_COLLISION_BUFFER" in main_source
-    assert "collision_props=CollisionPropertiesCfg(collision_enabled=False)" in main_source
+    assert (
+        "collision_props=CollisionPropertiesCfg(collision_enabled=False)" in main_source
+    )
     assert "blocked_path_clearance > MAXIMUM_BLOCKED_PATH_CLEARANCE" in main_source
     assert "replan_clearance < MINIMUM_REPLAN_CLEARANCE" in main_source
 
