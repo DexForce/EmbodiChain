@@ -80,6 +80,7 @@ See also
     train_script.md
     multi_gpu.md
     locomotion.md
+    ../../guides/rlinf
 
 See Also
 --------
