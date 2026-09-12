@@ -14,12 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Run the env-batched NeuralPlanner waypoint example.
+"""Run the ONNX NeuralPlanner waypoint example.
 
 From the repository root::
 
-    python examples/sim/motion/planners/neural_planner.py --headless
-    python examples/sim/motion/planners/neural_planner.py --headless --device cuda:1
+    python examples/sim/motion/planners/neural_planner.py --headless \
+        --onnx-model-path /path/to/policy.onnx
+    python examples/sim/motion/planners/neural_planner.py --headless \
+        --device cuda:1 --onnx-model-path /path/to/policy.onnx
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ import time
 import numpy as np
 import torch
 
-from embodichain.data.assets.planner_assets import download_neural_planner_checkpoint
+from embodichain.compute.trajectory import differentiate_positions, resample_in_time
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
@@ -51,6 +53,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="NeuralPlanner waypoint example")
     add_env_launcher_args_to_parser(parser)
     parser.set_defaults(device=default_device, arena_space=2.0)
+    parser.add_argument(
+        "--onnx-model-path",
+        required=True,
+        help="Path to a standalone NMG ONNX policy.",
+    )
     parser.add_argument(
         "--num-waypoints",
         type=int,
@@ -165,6 +172,8 @@ def play_trajectory(
     robot: Robot,
     arm_name: str,
     positions: torch.Tensor,
+    velocities: torch.Tensor | None,
+    dt: torch.Tensor,
     step_repeat: int = 4,
     delay: float = 0.0,
 ) -> None:
@@ -177,24 +186,40 @@ def play_trajectory(
             f"({robot.num_instances}, N, controlled_dof), got "
             f"{tuple(positions.shape)}."
         )
-    for waypoint_idx in range(positions.shape[1]):
+    if dt.shape != positions.shape[:2] or not torch.allclose(dt, dt[:1].expand_as(dt)):
+        raise ValueError("dt must match positions and be shared by all environments.")
+    max_interval = step_repeat * sim.sim_config.physics_dt
+    if torch.allclose(dt[:, 1:], torch.full_like(dt[:, 1:], max_interval)):
+        playback_dt = dt
+        if velocities is None:
+            velocities = differentiate_positions(positions, playback_dt)
+    else:
+        interval_count = max(1, int(np.ceil(float(dt[0, 1:].sum()) / max_interval)))
+        positions, playback_dt = resample_in_time(positions, dt, interval_count + 1)
+        velocities = differentiate_positions(positions, playback_dt)
+    assert velocities is not None
+    for waypoint_idx in range(positions.shape[1] - 1):
         robot.set_qpos(qpos=positions[:, waypoint_idx], joint_ids=joint_ids)
-        sim.update(step=step_repeat)
+        robot.set_qvel(qvel=velocities[:, waypoint_idx], joint_ids=joint_ids)
+        interval = float(playback_dt[0, waypoint_idx + 1])
+        sim.update(physics_dt=interval / step_repeat, step=step_repeat)
         if delay > 0.0:
             time.sleep(delay)
+    robot.set_qpos(qpos=positions[:, -1], joint_ids=joint_ids)
+    robot.set_qvel(qvel=torch.zeros_like(positions[:, -1]), joint_ids=joint_ids)
 
 
 def main() -> None:
     args = parse_args()
-    if args.num_envs < 1:
-        raise ValueError("--num_envs must be at least 1.")
+    if args.num_envs != 1:
+        raise ValueError("The current exported NMG ONNX policy requires --num-envs 1.")
     if args.num_waypoints < 1:
         raise ValueError("--num-waypoints must be at least 1.")
     if args.step_repeat < 1:
         raise ValueError("--step-repeat must be at least 1.")
     if args.hold_steps < 0:
         raise ValueError("--hold-steps must be non-negative.")
-    checkpoint_path = download_neural_planner_checkpoint()
+    onnx_model_path = args.onnx_model_path
 
     sim_device = _resolve_device(args.device, args.gpu_id)
     resolved_device = torch.device(sim_device)
@@ -244,7 +269,7 @@ def main() -> None:
             cfg=MotionGenCfg(
                 planner_cfg=NeuralPlannerCfg(
                     robot_uid=robot.uid,
-                    checkpoint_path=checkpoint_path,
+                    onnx_model_path=onnx_model_path,
                     control_part=arm_name,
                 )
             )
@@ -283,6 +308,8 @@ def main() -> None:
             robot,
             arm_name,
             result.positions,
+            result.velocities,
+            dt=result.dt,
             step_repeat=args.step_repeat,
         )
         sim.update(step=args.hold_steps)

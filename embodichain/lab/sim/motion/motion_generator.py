@@ -34,6 +34,9 @@ from embodichain.lab.sim.motion.planners import (
     ToppraPlanner,
     ToppraPlannerCfg,
     ToppraPlanOptions,
+    TrapezoidalPlanner,
+    TrapezoidalPlannerCfg,
+    TrapezoidalPlanOptions,
     NeuralPlanner,
     NeuralPlannerCfg,
     CuroboPlanner,
@@ -42,7 +45,8 @@ from embodichain.lab.sim.motion.planners import (
 from embodichain.compute.trajectory import (
     interpolate_with_distance,
     interpolate_with_nums,
-    resample_with_distance,
+    resample_in_time,
+    differentiate_positions,
 )
 from embodichain.utils import logger, configclass
 from .planners.utils import (
@@ -63,7 +67,6 @@ __all__ = ["MotionGenerator", "MotionGenCfg", "MotionGenOptions"]
 
 @configclass
 class MotionGenCfg:
-
     planner_cfg: BasePlannerCfg = MISSING
     """Configuration for the underlying planner. Must include 'planner_type' attribute to specify 
     which planner to use, and any additional parameters required by that planner.
@@ -74,7 +77,6 @@ class MotionGenCfg:
 
 @configclass
 class MotionGenOptions:
-
     strategy: Literal["motion_gen", "ik_interp"] = "motion_gen"
     """Motion strategy: backend planning or deterministic IK interpolation."""
 
@@ -168,6 +170,7 @@ class MotionGenerator:
 
     _support_planner_dict = {
         "toppra": (ToppraPlanner, ToppraPlannerCfg),
+        "trapezoidal": (TrapezoidalPlanner, TrapezoidalPlannerCfg),
         "neural": (NeuralPlanner, NeuralPlannerCfg),
         "curobo": (CuroboPlanner, CuroboPlannerCfg),
     }
@@ -213,6 +216,11 @@ class MotionGenerator:
         )
 
     @property
+    def supports_heterogeneous_waypoints(self) -> bool:
+        """Whether the selected backend accepts mixed waypoint movement types."""
+        return getattr(self.planner, "supports_heterogeneous_waypoints", False) is True
+
+    @property
     def dynamic_collision_entity_ids(self) -> tuple[str, ...]:
         """Return canonical dynamic-obstacle IDs declared by the planner."""
         info = self.collision_world_info
@@ -237,8 +245,7 @@ class MotionGenerator:
             for entity_id in entity_ids
         ):
             raise TypeError(
-                f"{field_name} keys must be non-empty strings without outer "
-                "whitespace."
+                f"{field_name} keys must be non-empty strings without outer whitespace."
             )
         return set(entity_ids)
 
@@ -414,17 +421,32 @@ class MotionGenerator:
             raise ValueError("sample_count must be at least 2.")
         if plan_opts is not None:
             return deepcopy(plan_opts)
-        if sample_count is not None and self.planner.cfg.planner_type == "toppra":
-            return ToppraPlanOptions(
-                sample_method=TrajectorySampleMethod.QUANTITY,
-                sample_interval=sample_count,
-                constraints={
-                    "velocity": 0.2 if velocity_limit is None else velocity_limit,
-                    "acceleration": (
-                        0.5 if acceleration_limit is None else acceleration_limit
-                    ),
-                },
+        planner_type = getattr(getattr(self.planner, "cfg", None), "planner_type", None)
+        if planner_type in {"toppra", "trapezoidal"} and (
+            sample_count is not None
+            or velocity_limit is not None
+            or acceleration_limit is not None
+        ):
+            options_type = (
+                ToppraPlanOptions
+                if planner_type == "toppra"
+                else TrapezoidalPlanOptions
             )
+            constraints: dict[str, float] = {
+                "velocity": 0.2 if velocity_limit is None else velocity_limit,
+                "acceleration": (
+                    0.5 if acceleration_limit is None else acceleration_limit
+                ),
+            }
+            if planner_type == "trapezoidal":
+                constraints["jerk"] = 2.0
+            options_kwargs: dict[str, object] = {"constraints": constraints}
+            if sample_count is not None:
+                options_kwargs.update(
+                    sample_method=TrajectorySampleMethod.QUANTITY,
+                    sample_interval=sample_count,
+                )
+            return options_type(**options_kwargs)
         return self.planner.default_plan_options()
 
     @classmethod
@@ -488,11 +510,19 @@ class MotionGenerator:
             )
 
         move_types = {state.move_type for state in target_states}
-        if len(move_types) != 1:
+        heterogeneous = len(move_types) > 1
+        if heterogeneous and not self.supports_heterogeneous_waypoints:
             names = sorted(move_type.name for move_type in move_types)
-            raise ValueError(f"All target states must share move_type; got {names}.")
+            raise ValueError(
+                f"{type(self.planner).__name__} does not support heterogeneous "
+                f"waypoints; got {names}."
+            )
+        if heterogeneous and options.strategy == "ik_interp":
+            raise ValueError(
+                "strategy='ik_interp' does not support heterogeneous waypoints."
+            )
         move_type = target_states[0].move_type
-        use_interpolation = (
+        use_interpolation = not heterogeneous and (
             options.preserve_cartesian_samples
             or options.strategy == "ik_interp"
             or (
@@ -512,9 +542,17 @@ class MotionGenerator:
         options: MotionGenOptions,
     ) -> PlanResult:
         """Dispatch batched targets through the configured planner backend."""
+        move_types = {state.move_type for state in target_states}
         move_type = target_states[0].move_type
+        uses_sparse_joint_waypoints = (
+            len(move_types) == 1
+            and move_type == MoveType.JOINT_MOVE
+            and self.planner.uses_sparse_joint_waypoints
+        )
         should_preinterpolate = (
-            options.is_interpolate
+            len(move_types) == 1
+            and options.is_interpolate
+            and not uses_sparse_joint_waypoints
             and not self.planner.supports_move_type(MoveType.EEF_MOVE)
             and self.planner.supports_move_type(MoveType.JOINT_MOVE)
         )
@@ -565,10 +603,36 @@ class MotionGenerator:
             ]
         else:
             target_plan_states = target_states
+            if uses_sparse_joint_waypoints and options.start_qpos is not None:
+                if any(state.qpos is None for state in target_states):
+                    raise ValueError("JOINT_MOVE target states require qpos tensors.")
+                reference_qpos = target_states[0].qpos
+                assert reference_qpos is not None
+                start_qpos = options.start_qpos
+                if start_qpos.dim() == 1:
+                    start_qpos = start_qpos.unsqueeze(0)
+                start_qpos = start_qpos.to(reference_qpos)
+                if start_qpos.shape != reference_qpos.shape:
+                    raise ValueError(
+                        "start_qpos and joint target shapes must match; received "
+                        f"{tuple(start_qpos.shape)} and {tuple(reference_qpos.shape)}."
+                    )
+                # A single target still needs the observed start as an
+                # explicit waypoint, including when it is stationary. Repeated
+                # waypoints are valid and represent a zero-duration hold.
+                if len(target_states) == 1 or not torch.equal(
+                    start_qpos, reference_qpos
+                ):
+                    target_plan_states = [
+                        PlanState(move_type=MoveType.JOINT_MOVE, qpos=start_qpos),
+                        *target_states,
+                    ]
 
-        unsupported_move_types = (
-            set() if self.planner.supports_move_type(move_type) else {move_type}
-        )
+        unsupported_move_types = {
+            candidate
+            for candidate in move_types
+            if not self.planner.supports_move_type(candidate)
+        }
         if not should_preinterpolate and unsupported_move_types:
             unsupported_names = sorted(
                 move_type.name for move_type in unsupported_move_types
@@ -826,8 +890,6 @@ class MotionGenerator:
             )
         if dt.device != device or not torch.isfinite(dt).all() or (dt < 0).any():
             raise ValueError("MotionGenerator returned invalid time deltas.")
-        raw_duration = dt.sum(dim=1)
-
         resampled = False
         preserve_samples = getattr(self.planner, "preserve_plan_samples", False) is True
         if (
@@ -835,19 +897,8 @@ class MotionGenerator:
             and not preserve_samples
             and positions.shape[1] != options.sample_count
         ):
-            positions = resample_with_distance(
-                trajectory=positions,
-                interp_num=options.sample_count,
-                device=device,
-            )
+            positions, dt = resample_in_time(positions, dt, options.sample_count)
             resampled = True
-            dt = torch.zeros(
-                positions.shape[:2],
-                dtype=result.dt.dtype,
-                device=device,
-            )
-            if positions.shape[1] > 1:
-                dt[:, 1:] = raw_duration[:, None] / (positions.shape[1] - 1)
 
         def normalize_derivative(
             value: torch.Tensor | None,
@@ -868,7 +919,18 @@ class MotionGenerator:
 
         velocities = normalize_derivative(result.velocities, "velocities")
         accelerations = normalize_derivative(result.accelerations, "accelerations")
-        if start_qpos is not None and not success.all():
+        constraint_report = None if resampled else result.constraint_report
+        preserve_failed_positions = (
+            getattr(self.planner, "preserve_failed_plan_positions", False) is True
+        )
+        if (
+            start_qpos is not None
+            and not success.all()
+            and not preserve_failed_positions
+        ):
+            # The backend report describes the original failed rows. A generic
+            # facade cannot recompute arbitrary planner-specific diagnostics.
+            constraint_report = None
             held = (
                 start_qpos.to(dtype=positions.dtype).unsqueeze(1).expand_as(positions)
             )
@@ -885,6 +947,8 @@ class MotionGenerator:
                     accelerations,
                     torch.zeros_like(accelerations),
                 )
+        if velocities is None:
+            velocities = differentiate_positions(positions, dt)
 
         return PlanResult(
             success=success,
@@ -893,6 +957,7 @@ class MotionGenerator:
             velocities=velocities,
             accelerations=accelerations,
             dt=dt,
+            constraint_report=constraint_report,
         )
 
     def _runtime_device(self) -> torch.device:
@@ -1085,7 +1150,7 @@ class MotionGenerator:
             alpha = 1.0 if batch_size == 1 else max(0.2, 1.0 / np.sqrt(batch_size))
 
             for i in range(self.dofs):
-                label = f"Joint {i+1}" if b == 0 else ""
+                label = f"Joint {i + 1}" if b == 0 else ""
                 axs[0].plot(
                     time_steps,
                     positions[b, :, i].numpy(),

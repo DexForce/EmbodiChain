@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Literal
 from unittest.mock import Mock, patch
 
@@ -29,6 +30,10 @@ from embodichain.lab.sim.motion.planners.base_planner import (
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenerator,
     MotionGenOptions,
+)
+from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
+    TrapezoidalPlanner,
+    TrapezoidalPlanOptions,
 )
 from embodichain.lab.sim.motion.planners.utils import PlanState, PlanResult, MoveType
 
@@ -71,30 +76,177 @@ def _timed_result(
     )
 
 
-@pytest.fixture(autouse=True)
-def _torch_resampling(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Use deterministic Torch resampling without initializing Warp."""
-
-    def resample(
-        trajectory: torch.Tensor,
-        interp_num: int,
-        device: torch.device,
-    ) -> torch.Tensor:
-        indices = torch.linspace(
-            0,
-            trajectory.shape[1] - 1,
-            interp_num,
-            device=device,
-        )
-        lower = indices.floor().to(torch.long)
-        upper = indices.ceil().to(torch.long)
-        weights = (indices - lower).view(1, -1, 1)
-        return torch.lerp(trajectory[:, lower], trajectory[:, upper], weights)
-
-    monkeypatch.setattr(
-        "embodichain.lab.sim.motion.motion_generator.resample_with_distance",
-        resample,
+@pytest.mark.parametrize("sample_count", [None, 101])
+def test_generate_preserves_trapezoidal_constraint_report(
+    sample_count: int | None,
+) -> None:
+    planner = object.__new__(TrapezoidalPlanner)
+    planner.device = torch.device("cpu")
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+    generator.device = torch.device("cpu")
+    targets = [
+        PlanState.from_qpos(torch.tensor([qpos], dtype=torch.float64))
+        for qpos in ([0.0, 0.0], [1.0, 0.0], [1.0, 1.0])
+    ]
+    options = TrapezoidalPlanOptions(
+        profile="double_s",
+        stop_at_waypoints=False,
+        blend_tolerance=0.1,
+        sample_interval=101,
     )
+    raw = planner.plan(targets, options)
+    result = generator.generate(
+        targets, MotionGenOptions(plan_opts=options, sample_count=sample_count)
+    )
+    assert result.constraint_report is not None
+    assert torch.equal(result.positions, raw.positions)
+    assert torch.equal(result.dt, raw.dt)
+    for name, value in raw.constraint_report.items():
+        assert torch.equal(result.constraint_report[name], value)
+
+
+def _trapezoidal_generator() -> MotionGenerator:
+    """Build the real CPU planner behind the MotionGenerator facade."""
+    planner = object.__new__(TrapezoidalPlanner)
+    planner.cfg = SimpleNamespace(planner_type="trapezoidal")
+    planner.device = torch.device("cpu")
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+    generator.device = torch.device("cpu")
+    return generator
+
+
+def test_trapezoidal_generator_prepends_start_for_single_joint_target() -> None:
+    generator = _trapezoidal_generator()
+    start = torch.tensor([[0.0, 0.0]], dtype=torch.float64)
+    goal = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
+
+    result = generator.generate(
+        [PlanState.from_qpos(goal)],
+        MotionGenOptions(
+            start_qpos=start,
+            plan_opts=TrapezoidalPlanOptions(sample_interval=21, backend="torch"),
+        ),
+    )
+
+    torch.testing.assert_close(result.positions[:, 0], start)
+    torch.testing.assert_close(result.positions[:, -1], goal)
+
+
+def test_trapezoidal_generator_holds_stationary_single_joint_target() -> None:
+    generator = _trapezoidal_generator()
+    start = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
+
+    result = generator.generate(
+        [PlanState.from_qpos(start)],
+        MotionGenOptions(
+            start_qpos=start,
+            plan_opts=TrapezoidalPlanOptions(sample_interval=2, backend="torch"),
+        ),
+    )
+
+    assert bool(result.success.all())
+    assert result.positions.shape[1] == 2
+    torch.testing.assert_close(
+        result.positions, start.unsqueeze(1).expand_as(result.positions)
+    )
+    assert result.velocities is not None
+    assert result.accelerations is not None
+    torch.testing.assert_close(result.velocities, torch.zeros_like(result.velocities))
+    torch.testing.assert_close(
+        result.accelerations, torch.zeros_like(result.accelerations)
+    )
+
+
+def test_trapezoidal_generator_preserves_native_derivatives() -> None:
+    generator = _trapezoidal_generator()
+    start = torch.tensor([[0.0, 0.0]], dtype=torch.float64)
+    goal = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
+    target_states = [PlanState.from_qpos(start), PlanState.from_qpos(goal)]
+    plan_options = TrapezoidalPlanOptions(sample_interval=21, backend="torch")
+    expected = generator.planner.plan(target_states, plan_options)
+
+    result = generator.generate(
+        target_states,
+        MotionGenOptions(
+            start_qpos=start,
+            sample_count=8,
+            plan_opts=plan_options,
+        ),
+    )
+
+    torch.testing.assert_close(result.positions, expected.positions)
+    torch.testing.assert_close(result.dt, expected.dt)
+    assert result.velocities is not None
+    assert expected.velocities is not None
+    torch.testing.assert_close(result.velocities, expected.velocities)
+    assert result.accelerations is not None
+    assert expected.accelerations is not None
+    torch.testing.assert_close(result.accelerations, expected.accelerations)
+
+
+@pytest.mark.parametrize("change", ["resample", "hold_failed_rows", "preserve"])
+def test_generate_invalidates_report_only_when_trajectory_changes(change: str) -> None:
+    raw = _timed_result(
+        torch.ones(BATCH_SIZE, 5, CONTROLLED_DOF),
+        success=torch.tensor([True, change != "hold_failed_rows"]),
+    )
+    report = {"within_limits": torch.ones(BATCH_SIZE, dtype=torch.bool)}
+    raw.constraint_report = report
+    generator = _mock_generator(result=raw, preserve_plan_samples=change == "preserve")
+    result = generator.generate(
+        [PlanState.from_xpos(torch.eye(4).repeat(BATCH_SIZE, 1, 1))],
+        MotionGenOptions(
+            sample_count=8 if change != "hold_failed_rows" else 5,
+            start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+        ),
+    )
+    assert raw.constraint_report is report
+    if change == "preserve":
+        assert result.constraint_report is report
+    else:
+        assert result.constraint_report is None
+    if change == "resample":
+        assert result.positions.shape[1] == 8
+    if change == "hold_failed_rows":
+        assert torch.count_nonzero(result.positions[1]) == 0
+        assert torch.all(raw.positions[1] == 1.0)
+
+
+@pytest.mark.parametrize(
+    ("sample_count", "preserve_samples"), [(5, False), (8, False), (8, True)]
+)
+def test_preserving_failed_trajectories_keeps_report_unless_resampled(
+    sample_count: int, preserve_samples: bool
+) -> None:
+    raw = _timed_result(
+        torch.ones(BATCH_SIZE, 5, CONTROLLED_DOF),
+        success=torch.tensor([True, False]),
+    )
+    report = {"within_limits": torch.tensor([True, False])}
+    raw.constraint_report = report
+    generator = _mock_generator(result=raw, preserve_plan_samples=preserve_samples)
+    generator.planner.preserve_failed_plan_positions = True
+
+    result = generator.generate(
+        [PlanState.from_xpos(torch.eye(4).repeat(BATCH_SIZE, 1, 1))],
+        MotionGenOptions(
+            sample_count=sample_count,
+            start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+        ),
+    )
+
+    assert torch.equal(result.success, raw.success)
+    assert torch.all(result.positions[1] == 1.0)
+    assert raw.constraint_report is report
+    torch.testing.assert_close(result.duration, raw.duration)
+    resampled = sample_count != 5 and not preserve_samples
+    assert result.positions.shape[1] == (sample_count if resampled else 5)
+    if resampled:
+        assert result.constraint_report is None
+    else:
+        assert result.constraint_report is report
 
 
 class _DirectCartesianPlanner:
@@ -162,6 +314,56 @@ def test_direct_cartesian_planner_requires_joint_fallback_inputs():
         generator.generate(
             [PlanState.from_qpos(torch.zeros(1, 2))],
             MotionGenOptions(plan_opts=PlanOptions()),
+        )
+
+
+def test_motion_generator_dispatches_heterogeneous_waypoints_by_capability():
+    planner = Mock()
+    planner.supports_heterogeneous_waypoints = True
+    planner.supports_move_type.side_effect = lambda move_type: move_type in {
+        MoveType.EEF_MOVE,
+        MoveType.JOINT_MOVE,
+    }
+    planner.preserve_plan_samples = True
+    planner.default_plan_options.return_value = PlanOptions()
+    planner.with_motion_context.side_effect = (
+        lambda options, *, start_qpos, control_part: options
+    )
+    planner.plan.return_value = PlanResult(
+        success=torch.ones(1, dtype=torch.bool),
+        positions=torch.zeros(1, 5, 2),
+        dt=torch.full((1, 5), 0.01),
+    )
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+    generator.device = torch.device("cpu")
+    targets = [
+        PlanState.from_xpos(torch.eye(4).unsqueeze(0)),
+        PlanState.from_qpos(torch.zeros(1, 2)),
+    ]
+
+    result = generator.generate(
+        targets,
+        MotionGenOptions(start_qpos=torch.zeros(1, 2), control_part="arm"),
+    )
+
+    assert result.success.all().item()
+    assert planner.plan.call_args.kwargs["target_states"] is targets
+
+
+def test_motion_generator_rejects_heterogeneous_waypoints_without_capability():
+    planner = _DirectCartesianPlanner()
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+    generator.device = torch.device("cpu")
+
+    with pytest.raises(ValueError, match="does not support heterogeneous"):
+        generator.generate(
+            [
+                PlanState.from_xpos(torch.eye(4).unsqueeze(0)),
+                PlanState.from_qpos(torch.zeros(1, 2)),
+            ],
+            MotionGenOptions(start_qpos=torch.zeros(1, 2), control_part="arm"),
         )
 
 
@@ -371,6 +573,24 @@ def _mock_planner(b=3, n=15, dofs=6):
         lambda options, *, start_qpos, control_part: options
     )
     return planner
+
+
+def test_resolve_trapezoidal_limits_without_sample_count() -> None:
+    planner = Mock()
+    planner.cfg.planner_type = "trapezoidal"
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+
+    options = generator.resolve_plan_options(
+        plan_opts=None,
+        sample_count=None,
+        velocity_limit=0.01,
+        acceleration_limit=0.02,
+    )
+
+    assert isinstance(options, TrapezoidalPlanOptions)
+    assert options.constraints["velocity"] == 0.01
+    assert options.constraints["acceleration"] == 0.02
 
 
 def _mock_generator(
@@ -738,3 +958,64 @@ class TestNormalizedPlanResult:
             result.positions[1],
             start[1].unsqueeze(0).expand(positions.shape[1], -1),
         )
+
+
+def test_ik_interpolation_materializes_reference_velocity() -> None:
+    generator = _mock_generator()
+    start = torch.zeros(BATCH_SIZE, CONTROLLED_DOF)
+    result = generator.generate(
+        [PlanState.from_qpos(torch.ones_like(start))],
+        MotionGenOptions(
+            strategy="ik_interp",
+            sample_count=5,
+            start_qpos=start,
+            interpolation_dt=0.25,
+        ),
+    )
+    assert result.velocities is not None
+    torch.testing.assert_close(result.velocities, torch.ones_like(result.positions))
+
+
+def test_normalization_preserves_native_derivatives_and_zeros_failed_rows() -> None:
+    generator = _mock_generator()
+    positions = (
+        torch.arange(3.0).view(1, 3, 1).expand(BATCH_SIZE, -1, CONTROLLED_DOF).clone()
+    )
+    native = torch.full_like(positions, 0.3)
+    result = generator._normalize_plan_result(
+        PlanResult(
+            success=torch.tensor([True, False]),
+            positions=positions,
+            velocities=native,
+            dt=torch.tensor([[0.0, 1.0, 1.0]]).expand(BATCH_SIZE, -1),
+        ),
+        [PlanState.from_qpos(positions[:, -1])],
+        MotionGenOptions(start_qpos=positions[:, 0]),
+    )
+    torch.testing.assert_close(result.velocities[0], native[0])
+    assert torch.equal(result.velocities[1], torch.zeros_like(native[1]))
+
+
+def test_normalization_resamples_by_time_and_recomputes_derivatives() -> None:
+    generator = _mock_generator()
+    positions = (
+        torch.tensor([0.0, 1.0, 2.0])
+        .view(1, 3, 1)
+        .expand(BATCH_SIZE, -1, CONTROLLED_DOF)
+        .clone()
+    )
+    result = generator._normalize_plan_result(
+        PlanResult(
+            success=True,
+            positions=positions,
+            velocities=torch.full_like(positions, 99.0),
+            dt=torch.tensor([[0.0, 0.75, 0.25]]).expand(BATCH_SIZE, -1),
+        ),
+        [PlanState.from_qpos(positions[:, -1])],
+        MotionGenOptions(start_qpos=positions[:, 0], sample_count=5),
+    )
+    torch.testing.assert_close(
+        result.positions[0, :, 0], torch.tensor([0.0, 1 / 3, 2 / 3, 1.0, 2.0])
+    )
+    assert result.velocities is not None
+    torch.testing.assert_close(result.velocities[0, 1, 0], torch.tensor(4 / 3))

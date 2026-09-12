@@ -1156,12 +1156,16 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
         value,
         path=path,
         required=frozenset({"sample_count"}),
-        optional=frozenset({"strategy", "dynamic_collision_mode"}),
+        optional=frozenset({"strategy", "dynamic_collision_mode", "velocity_targets"}),
     )
     return MotionPolicy(
         strategy=_identifier(
             config.get("strategy", "ik_interp"),
             path=f"{path}.strategy",
+        ),
+        velocity_targets=_identifier(
+            config.get("velocity_targets", "auto"),
+            path=f"{path}.velocity_targets",
         ),
         sample_count=_integer(
             config["sample_count"],

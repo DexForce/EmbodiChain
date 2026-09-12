@@ -240,7 +240,7 @@ def add_common_benchmark_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--renderer",
         type=str,
-        choices=("auto", "hybrid", "fast-rt", "rt"),
+        choices=("auto", "hybrid", "fast-rt", "offline-rt"),
         default="auto",
         help="Renderer backend used by SimulationManager.",
     )

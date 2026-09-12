@@ -16,8 +16,10 @@
 
 """cuRobo V2 collision-aware planning through the atomic-action interface.
 
-The demo creates one or more copies of the selected robot and a kinematic
-cuboid represented in both DexSim and cuRobo. With multiple environments, each
+The demo creates one or more copies of the selected robot and an Open3D box
+mesh stored in a temporary file. Its DexSim collision mesh is reduced to a
+convex hull and converted into a cuRobo ESDF voxel obstacle. With multiple
+environments, each
 obstacle receives a small reproducible XY/yaw perturbation and cuRobo allocates
 an independent collision world for each environment. The demo then executes a
 batched ``MoveEndEffector`` action through :class:`AtomicActionEngine`, replays
@@ -39,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -75,7 +78,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
 )
 import numpy as np
 from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg, DexforceW1Cfg
-from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.sim.shapes import MeshCfg
 
 __all__ = ["main"]
 
@@ -105,7 +108,11 @@ def parse_args() -> argparse.Namespace:
     # This standalone example does not merge a gym config after parsing, so
     # override the launcher's ``None`` sentinel with a concrete single-world
     # default.
-    parser.set_defaults(arena_space=2.0, num_envs=1)
+    parser.set_defaults(
+        arena_space=2.0,
+        num_envs=1,
+        seed=DEFAULT_RANDOM_SEED,
+    )
     # Backward-compatible aliases used by older versions of this example.
     parser.add_argument(
         "--step-repeat",
@@ -168,12 +175,6 @@ def parse_args() -> argparse.Namespace:
             "Maximum absolute obstacle yaw perturbation in degrees when "
             "num_envs > 1."
         ),
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=DEFAULT_RANDOM_SEED,
-        help="Random seed used for per-environment obstacle perturbations.",
     )
     parser.add_argument(
         "--cuda-graph",
@@ -244,7 +245,7 @@ def _build_scene(
     gpu_id: int = 0,
     visualization: VisualizationCfg | None = None,
 ) -> tuple[SimulationManager, Robot, RigidObject, torch.Tensor, str]:
-    """Create the batched robot scene with an identical cuboid in each arena."""
+    """Create the batched robot scene with an identical box mesh in each arena."""
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
@@ -457,27 +458,84 @@ def _build_scene(
     if robot is None:
         raise RuntimeError(f"Failed to add robot '{robot_type}' to the cuRobo demo.")
     target_xpos = _resolve_batched_target(target_xpos, robot.num_instances)
-    if robot_type == "w1":
-        # Keep the W1-specific IK diagnostic batched so it remains useful when
-        # checking solver and cuRobo reachability across multiple environments.
-        is_success, ik_qpos = robot.compute_ik(pose=target_xpos, name=control_part)
-        print(f"robot compute ik success: {is_success}, ik_qpos: {ik_qpos}")
-
-    # This object is also exported into the cuRobo collision world below via
-    # CuroboWorldCfg.rigid_objects, so the simulator and planner share geometry
-    # automatically (no hand-authored collision YAML to keep in sync).
-    demo_block = sim.add_rigid_object(
-        cfg=RigidObjectCfg(
-            uid="demo_block",
-            shape=CubeCfg(size=demo_block_size),
-            attrs=RigidBodyAttributesCfg(),
-            body_type="kinematic",
-            init_pos=demo_block_position,
-            init_rot=(0.0, 0.0, 0.0),
-        )
+    # if robot_type == "w1":
+    # Keep the W1-specific IK diagnostic batched so it remains useful when
+    # checking solver and cuRobo reachability across multiple environments.
+    # import ipdb; ipdb.set_trace()
+    init_qpos = torch.tensor(
+        robot.cfg.init_qpos, dtype=torch.float32, device=robot.device
     )
+    arm_init_qpos = (
+        init_qpos[robot.get_joint_ids(control_part)]
+        .unsqueeze(0)
+        .expand(num_envs, -1)
+        .clone()
+    )
+    is_success, ik_qpos = robot.compute_ik(
+        pose=target_xpos, name=control_part, joint_seed=arm_init_qpos
+    )
+    print(f"robot target xpos ik success: {is_success}, ik_qpos: {ik_qpos}")
+
+    # Load an Open3D-generated box mesh through DexSim, then remove the source
+    # file: cuRobo reads the live physical collision descriptor rather than the
+    # temporary render asset. The mesh-backed descriptor is always converted to
+    # a convex-hull ESDF voxel by generate_curobo_world_scene().
+    demo_block_mesh_path = _create_temporary_box_mesh(demo_block_size)
+    try:
+        demo_block = sim.add_rigid_object(
+            cfg=RigidObjectCfg(
+                uid="demo_block",
+                shape=MeshCfg(fpath=str(demo_block_mesh_path)),
+                attrs=RigidBodyAttributesCfg(),
+                body_type="kinematic",
+                init_pos=demo_block_position,
+                init_rot=(0.0, 0.0, 0.0),
+            )
+        )
+    finally:
+        demo_block_mesh_path.unlink(missing_ok=True)
 
     return sim, robot, demo_block, target_xpos, control_part
+
+
+def _create_temporary_box_mesh(size: list[float]) -> Path:
+    """Write a centered Open3D box mesh to a temporary OBJ file.
+
+    Args:
+        size: Box dimensions in metres as ``[length, width, height]``.
+
+    Returns:
+        Path to the generated temporary mesh. The caller owns its deletion.
+
+    Raises:
+        ValueError: If ``size`` does not contain three positive finite values.
+        RuntimeError: If Open3D cannot write the temporary mesh.
+    """
+    dimensions = np.asarray(size, dtype=np.float64)
+    if dimensions.shape != (3,) or not np.isfinite(dimensions).all():
+        raise ValueError("Box mesh size must contain three finite dimensions.")
+    if np.any(dimensions <= 0.0):
+        raise ValueError("Box mesh dimensions must be positive.")
+
+    import open3d as o3d
+
+    mesh = o3d.geometry.TriangleMesh.create_box(
+        width=float(dimensions[0]),
+        height=float(dimensions[1]),
+        depth=float(dimensions[2]),
+    )
+    mesh.translate((-0.5 * dimensions).tolist())
+    mesh.compute_vertex_normals()
+    with tempfile.NamedTemporaryFile(
+        prefix="embodichain_curobo_box_",
+        suffix=".obj",
+        delete=False,
+    ) as temporary_file:
+        mesh_path = Path(temporary_file.name)
+    if not o3d.io.write_triangle_mesh(str(mesh_path), mesh):
+        mesh_path.unlink(missing_ok=True)
+        raise RuntimeError(f"Open3D failed to write temporary box mesh {mesh_path}.")
+    return mesh_path
 
 
 def _resolve_batched_target(target: torch.Tensor, num_envs: int) -> torch.Tensor:
@@ -710,6 +768,9 @@ def main() -> None:
             seed=args.seed,
         )
         use_independent_worlds = args.num_envs > 1
+        visualize_robot_collision_models = (
+            not args.headless and not use_independent_worlds
+        )
         if use_independent_worlds:
             for name, poses in obstacle_poses.items():
                 yaw_deg = torch.rad2deg(torch.atan2(poses[:, 1, 0], poses[:, 0, 0]))
@@ -733,7 +794,6 @@ def main() -> None:
                     robot_uid=robot.uid,
                     world=CuroboWorldCfg(
                         rigid_objects=obstacles,
-                        obstacle_representation="cuboid",
                         dynamic_obstacle_names=(
                             [obstacle.uid for obstacle in obstacles]
                             if use_independent_worlds
@@ -747,6 +807,11 @@ def main() -> None:
                 )
             )
         )
+        if visualize_robot_collision_models:
+            # This overlays the exact cached robot spheres and obstacle ESDF
+            # surface used by cuRobo in the DexSim window. Press Enter in the
+            # terminal to remove the overlay and continue planner creation.
+            motion_generator.planner.visualize_robot_collision_models(control_part)
         engine = AtomicActionEngine(motion_generator)
         binding = engine.bind_control_parts(
             "move_end_effector",

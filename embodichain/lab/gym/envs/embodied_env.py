@@ -65,6 +65,11 @@ from embodichain.lab.gym.envs.demo import (
     DemoSegmentResult,
 )
 from embodichain.lab.gym.envs.types import ControllerAction
+from embodichain.lab.gym.envs.expert_trajectory import (
+    ExpertTrajectoryCfg,
+    build_expert_action_spec,
+    encode_expert_action,
+)
 from embodichain.lab.gym.envs.managers import (
     EventManager,
     ObservationManager,
@@ -206,6 +211,9 @@ class EmbodiedEnvCfg(EnvCfg):
 
     Please refer to the :class:`embodichain.lab.gym.envs.managers.ActionManager` class for more details.
     """
+
+    expert_trajectory: ExpertTrajectoryCfg = ExpertTrajectoryCfg()
+    """Source-neutral expert trajectory control and recording settings."""
 
     extensions: Union[Dict[str, Any], None] = None
     """Extension parameters for task-specific configurations.
@@ -363,6 +371,19 @@ class EmbodiedEnv(BaseEnv):
 
         super().__init__(cfg, **kwargs)
 
+        self.expert_action_spec = build_expert_action_spec(
+            joint_names=[
+                self.robot.joint_names[joint_id] for joint_id in self.active_joint_ids
+            ],
+            joint_command_mode=self.cfg.expert_trajectory.joint_command_mode,
+        )
+        self._expert_action_space = gym.spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(self.num_envs, self.expert_action_spec.width),
+            dtype=np.float32,
+        )
+
         if task_program_adapter_factory is not None:
             from embodichain.lab.task_program.integrations import (
                 TaskProgramEnvironmentAdapter,
@@ -396,7 +417,7 @@ class EmbodiedEnv(BaseEnv):
         if self.cfg.init_rollout_buffer:
             self.rollout_buffer = init_rollout_buffer_from_gym_space(
                 obs_space=self.observation_space,
-                action_space=self.action_space,
+                action_space=self._expert_action_space,
                 max_episode_steps=self.max_episode_steps,
                 num_envs=self.num_envs,
                 device=self.device,
@@ -418,7 +439,7 @@ class EmbodiedEnv(BaseEnv):
                 num_envs=self.num_envs,
                 device=self.device,
                 uids=self.cfg.trajectory_uids,
-                action_space=self.action_space,
+                action_space=self._expert_action_space,
             )
             self._traj_steps = torch.zeros(
                 self.num_envs, dtype=torch.long, device=self.device
@@ -1080,7 +1101,7 @@ class EmbodiedEnv(BaseEnv):
         if execution_cfg is None:
             execution_cfg = DemoExecutionCfg()
         attempt_id = int(getattr(self, "_demo_attempt_id", 0))
-        return {
+        metadata = {
             "schema_version": DEMO_SCHEMA_VERSION,
             "episode_index": int(getattr(self, "_demo_episode_index", 0)),
             "output_mode": execution_cfg.mode,
@@ -1103,6 +1124,10 @@ class EmbodiedEnv(BaseEnv):
             "terminal_reason": "unknown",
             "segments": [],
         }
+        expert_action_spec = getattr(self, "expert_action_spec", None)
+        if expert_action_spec is not None:
+            metadata.update(expert_action_spec.metadata(step_dt=self.step_dt))
+        return metadata
 
     def _begin_demo_episode_recording(
         self,
@@ -1373,7 +1398,17 @@ class EmbodiedEnv(BaseEnv):
         buffer_env_ids = env_ids.to(buffer_device)
         buffer_step_ids = step_ids.to(buffer_device)
 
-        if isinstance(action, TensorDict):
+        expert_action_spec = getattr(self, "expert_action_spec", None)
+        if (
+            expert_action_spec is not None
+            and expert_action_spec.joint_command_mode == "position_velocity"
+        ):
+            action_to_store = encode_expert_action(
+                action,
+                spec=expert_action_spec,
+                active_joint_ids=self.active_joint_ids,
+            )
+        elif isinstance(action, TensorDict):
             action_to_store = (
                 action["qpos"]
                 if "qpos" in action
@@ -1897,7 +1932,12 @@ class EmbodiedEnv(BaseEnv):
         is_controller_action = isinstance(action, ControllerAction)
         if is_controller_action:
             action = action.value
-        if self._traj_buffer is not None:
+        record_position_velocity = (
+            self._traj_buffer is not None
+            and getattr(self, "expert_action_spec", None) is not None
+            and self.expert_action_spec.joint_command_mode == "position_velocity"
+        )
+        if self._traj_buffer is not None and not record_position_velocity:
             self._traj_raw_action = (
                 action.clone() if hasattr(action, "clone") else action
             )
@@ -1908,6 +1948,12 @@ class EmbodiedEnv(BaseEnv):
         action = self._prepare_controller_action(action)
         if getattr(self, "_demo_no_auto_reset", False):
             action = self._mask_controller_demo_action(action)
+        if record_position_velocity:
+            self._traj_raw_action = encode_expert_action(
+                action,
+                spec=self.expert_action_spec,
+                active_joint_ids=self.active_joint_ids,
+            )
         return action
 
     def _postprocess_action(self, action):
@@ -2308,6 +2354,7 @@ class EmbodiedEnv(BaseEnv):
                 self.get_demo_episode_metadata(int(env_id)) for env_id in env_ids
             ],
         }
+        meta.update(self.expert_action_spec.metadata(step_dt=self.step_dt))
         torch.save({"states": states, "actions": actions, "meta": meta}, path)
         return path
 

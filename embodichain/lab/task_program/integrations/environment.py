@@ -84,6 +84,7 @@ from embodichain.lab.gym.envs.task_program.bridge import (
     SegmentPostPolicyPort,
     SegmentValidatorPort,
 )
+from embodichain.lab.gym.envs.expert_trajectory import JointCommandMode
 from .catalog import (
     TaskProgramIntegrationCatalog,
     IntegrationFingerprintMismatch,
@@ -297,6 +298,7 @@ class TaskProgramEnvironmentAdapter:
     Args:
         factory: Environment-owned live-provider and engine factory.
         step_dt: Authoritative Gym control cadence in seconds.
+        joint_command_mode: Expert joint targets emitted at the Gym boundary.
         integration_catalog: Optional immutable task-registration catalog used
             for provider-free compilation.
         registration: Optional exact standard task registration. When present,
@@ -324,6 +326,7 @@ class TaskProgramEnvironmentAdapter:
         factory: TaskProgramEnvironmentFactory,
         *,
         step_dt: float,
+        joint_command_mode: JointCommandMode = "position",
         integration_catalog: TaskProgramIntegrationCatalog | None = None,
         registration: SimulationTaskProgramRegistration | None = None,
         call_catalog: SemanticCallCatalog | None = None,
@@ -346,6 +349,10 @@ class TaskProgramEnvironmentAdapter:
             raise TypeError("step_dt must be a real number.")
         if not math.isfinite(float(step_dt)) or float(step_dt) <= 0.0:
             raise ValueError("step_dt must be finite and positive.")
+        if joint_command_mode not in ("position", "position_velocity"):
+            raise ValueError(
+                "joint_command_mode must be 'position' or 'position_velocity'."
+            )
         scene_registry_id = _validate_identifier(
             factory.scene_registry_id,
             field_name="factory.scene_registry_id",
@@ -485,6 +492,7 @@ class TaskProgramEnvironmentAdapter:
         self._scene_registry_id = scene_registry_id
         self._robot_profile_id = robot_profile_id
         self._step_dt = float(step_dt)
+        self._joint_command_mode = joint_command_mode
         self._registration = registration
         self._integration_catalog = integration_catalog
         self._call_catalog = selected_catalog
@@ -527,6 +535,11 @@ class TaskProgramEnvironmentAdapter:
             Positive control step duration in seconds.
         """
         return self._step_dt
+
+    @property
+    def joint_command_mode(self) -> JointCommandMode:
+        """Return the environment-owned expert joint command mode."""
+        return self._joint_command_mode
 
     def compile(self, program: TaskProgramCfg) -> CompiledTaskProgram:
         """Compile one program after exact integration-selection validation.
@@ -711,6 +724,7 @@ class TaskProgramEnvironmentAdapter:
             observation_provider,
             transports=self._runtime_transports,
             include_joint_position=include_joint_position,
+            joint_command_mode=self._joint_command_mode,
         )
         if expected_transport_ids is not None:
             if command_encoder.transport_ids != expected_transport_ids:

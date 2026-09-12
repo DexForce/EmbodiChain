@@ -27,6 +27,8 @@ from typing import Any, ClassVar, Generic, TYPE_CHECKING
 
 import torch
 
+from embodichain.compute.trajectory import differentiate_positions
+
 from .affordance import Affordance
 from .bindings import EndpointBinding, JointPositionTarget
 from .effects import StateDelta
@@ -546,7 +548,33 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             raise ValueError("Trajectory and planning context batch sizes must match.")
         if timed.robot_dof != context.robot.robot_dof:
             raise ValueError("Trajectory robot_dof must match the planning context.")
-        timed = timed.hold_rows(success_mask, context.robot.qpos)
+        planner = (
+            None
+            if self._planning_services is None
+            else self._planning_services.motion_generator.planner
+        )
+        preserve_failed_positions = (
+            getattr(planner, "preserve_failed_plan_positions", False) is True
+        )
+        if not preserve_failed_positions:
+            timed = timed.hold_rows(success_mask, context.robot.qpos)
+
+        # Composite skills may rebuild positions/timing after MotionGenerator.
+        # Derive references only after that final composition, before lowering.
+        velocities = timed.velocities
+        if request.motion_policy.velocity_targets == "zero":
+            velocities = torch.zeros_like(timed.positions)
+        elif velocities is None:
+            velocities = differentiate_positions(timed.positions, timed.dt)
+        else:
+            velocities = velocities.clone()
+        if timed.waypoint_count:
+            # Commands are held until the next arrival. A stationary interval
+            # and the final settling window must never retain a moving target.
+            stationary = timed.positions[:, 1:] == timed.positions[:, :-1]
+            velocities[:, :-1] = velocities[:, :-1].masked_fill(stationary, 0.0)
+            velocities[:, -1] = 0.0
+        timed = replace(timed, velocities=velocities)
 
         commands = self._joint_command_sequence(
             request,

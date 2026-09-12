@@ -31,27 +31,60 @@ Worker details:
 - `TIME` sampling can produce per-env waypoint counts; shorter trajectories are tail-padded by repeating the final waypoint and `duration` records the real endpoint per env.
 - Per-env failures set `success[b] = False` and fill the env's trajectory with its start qpos; other envs continue. `BrokenProcessPool` tears the pool down and rebuilds it on the next call.
 
+### TrapezoidalPlanner
+
+`TrapezoidalPlanOptions` selects trapezoidal or Double-S timing for joint
+waypoints, with optional quintic corner blending. `TIME` sampling pads shorter
+batch rows at their exact final position with zero velocity and acceleration,
+starting at each row's actual endpoint. Padding has zero arrival intervals.
+
+With `stop_at_waypoints=False`, straight runs are compressed using normalized
+edge directions and a cosine tolerance relative to the first edge of each
+retained run. Small waypoint spacing does not change the angular test, and
+successive small turns cannot accumulate into an unchecked shortcut.
+Positive `blend_tolerance` requires `stop_at_waypoints=False`; conflicting
+settings raise `ValueError` both during option construction and at planning
+entry, including when options have been mutated after construction.
+
+Constraint reports use joint units for both derivative peaks and `*_limit`
+summaries. Each summary limit is the maximum configured limit over joints;
+per-joint utilization and `within_limits` retain heterogeneous limits. The
+projected scalar path limits are internal timing inputs, not report limits.
+
+Torch and Warp scalar sampling clamp times outside the trajectory to the
+endpoint state. Scalar trapezoidal acceleration uses the one-sided phase value
+at an endpoint; the joint planner explicitly turns completed rows into holds.
+
+The tutorial `scripts/tutorials/sim/planner/trapezoidal_planner.py` replays
+position samples by interpolating targets at physics ticks. A partial final
+tick preserves total duration divided by replay speed. Zero-time samples do
+not advance physics; multiple environments require identical timing rows.
+
 ### NeuralPlanner (experimental)
 
-Learning-based EEF waypoint planner. Franka Panda only.
+Closed-loop waypoint planner using a standalone NMG ONNX policy.
 
-- Checkpoint: `download_neural_planner_checkpoint()` from HuggingFace (gated, needs `HF_TOKEN`)
+- Model: `NeuralPlannerCfg.onnx_model_path`; requires the `nmg` optional dependency.
 - Use via `MotionGenerator` with `planner_type="neural"` and `plan_opts=NeuralPlanOptions(...)`
-- Input: `EEF_MOVE` `PlanState` list with batched `xpos:(B, 4, 4)`
-- Key cfg: `checkpoint_path` (from download), `control_part`
-- Natively batched: transformer forward, reach checks, and convergence holds all operate on `(B, ...)`.
+- Input: batched `EEF_MOVE` and `JOINT_MOVE` states, including mixed waypoint lists.
+- Native rollout samples are preserved even when not all waypoints converge;
+  the success mask still reports those failures.
 
 ### MotionGenerator
 
 Unified interface for trajectory planning with optional pre-interpolation.
 
 - Wraps a `BasePlanner` instance (resolved from `planner_cfg.planner_type`).
-- Supported planner types: TOPPRA, NeuralPlanner, and cuRobo.
+- Supported planner types: TOPPRA, TrapezoidalPlanner, NeuralPlanner, and cuRobo.
 - `MotionGenCfg.planner_cfg` is **MISSING** — must be provided.
 - `generate()` and `interpolate_trajectory()` are env-batched (`B, N, DOF`).
 - `generate()` always returns a normalized `PlanResult`; failed rows hold the
-  supplied `start_qpos`, and every returned trajectory has explicit `dt` and
-  a `duration` derived from it.
+  supplied `start_qpos` unless the backend opts into `preserve_failed_plan_positions`.
+  Every returned trajectory has explicit `dt` and a `duration` derived from it.
+- A joint planner can declare `uses_sparse_joint_waypoints=True` to receive
+  `start_qpos` plus the requested joint waypoints without generic interpolation.
+  Pair it with `preserve_plan_samples=True` when its native samples and
+  derivatives must survive result normalization.
 
 Grasp-pose generation is a sibling planning service, not a
 `MotionGenerator` feature. `embodichain.toolkits.graspkit` owns its standalone

@@ -976,3 +976,28 @@ def test_examples_have_no_importable_task_environment_modules() -> None:
 
 
 __all__: list[str] = []
+
+
+@pytest.mark.parametrize("mode", ["auto", "zero"])
+def test_motion_velocity_target_policy_decodes(mode: str) -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+
+    policy = _decode_motion_policy(
+        {"sample_count": 40, "velocity_targets": mode}, path="motion"
+    )
+    assert policy.velocity_targets == mode
+    assert policy.strategy == "ik_interp"
+
+
+@pytest.mark.parametrize("mode", ["keep_old", "required"])
+def test_motion_velocity_target_policy_rejects_unknown_mode(mode: str) -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+
+    with pytest.raises(ValueError, match="velocity_targets"):
+        _decode_motion_policy(
+            {"sample_count": 40, "velocity_targets": mode}, path="motion"
+        )

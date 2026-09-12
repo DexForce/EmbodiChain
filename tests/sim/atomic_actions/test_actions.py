@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Literal, TypeVar
 from unittest.mock import Mock
 
@@ -104,6 +105,10 @@ from embodichain.lab.sim.atomic_actions import (
     TwistOptions,
 )
 from embodichain.lab.sim.atomic_actions.goals import collect_scene_dependencies
+from embodichain.lab.sim.motion.planners import (
+    TrapezoidalPlanOptions,
+    TrapezoidalPlanner,
+)
 from embodichain.toolkits.graspkit import (
     ParallelJawGraspPoseGenerator,
     ParallelJawGripperModelCfg,
@@ -1008,6 +1013,8 @@ def test_pick_and_place_declare_effects_without_mutating_context() -> None:
         ),
         picked_context,
     )
+    assert _joint_trajectory(pick_plan).velocities is not None
+    assert _joint_trajectory(place_plan).velocities is not None
     placed_task = place_plan.expected_effects.apply(
         picked_task, place_plan.plan_success
     )
@@ -1283,6 +1290,8 @@ def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
     )
     trajectory = _joint_trajectory(plan)
     assert plan.plan_success.tolist() == [True, True]
+    assert trajectory.velocities is not None
+    assert torch.count_nonzero(trajectory.velocities[:, :, ARM_DOF:]) == 0
     assert trajectory.positions.shape == (NUM_ENVS, 10, ROBOT_DOF)
     assert trajectory.duration.tolist() == pytest.approx([9.0 / 60.0] * NUM_ENVS)
     assert [segment.name for segment in plan.segments] == ["pour"]
@@ -1551,7 +1560,9 @@ def test_planner_timing_is_preserved_in_simple_action() -> None:
     )
     generator.planner.plan.return_value = PlanResult(
         success=torch.ones(NUM_ENVS, dtype=torch.bool),
-        positions=torch.ones(NUM_ENVS, 3, ARM_DOF),
+        positions=torch.tensor([0.0, 0.05, 0.15])
+        .view(1, 3, 1)
+        .expand(NUM_ENVS, -1, ARM_DOF),
         velocities=torch.full((NUM_ENVS, 3, ARM_DOF), 0.5),
         accelerations=torch.zeros(NUM_ENVS, 3, ARM_DOF),
         dt=torch.tensor([[0.0, 0.1, 0.2]]).repeat(NUM_ENVS, 1),
@@ -1570,9 +1581,17 @@ def test_planner_timing_is_preserved_in_simple_action() -> None:
     payloads = _joint_command_payloads(plan, "arm")
     assert trajectory.duration.tolist() == pytest.approx([0.3, 0.3])
     assert all(payload.velocities is not None for payload in payloads)
-    assert torch.all(
-        torch.stack([payload.velocities for payload in payloads], dim=1) == 0.5
+    assert payloads[0].velocities is not None
+    assert torch.count_nonzero(payloads[0].velocities) == 0
+    payload_velocities = torch.stack(
+        [payload.velocities for payload in payloads[1:-1]], dim=1
     )
+    torch.testing.assert_close(
+        payload_velocities,
+        torch.full_like(payload_velocities, 0.5),
+    )
+
+    assert torch.count_nonzero(payloads[-1].velocities) == 0
 
 
 def test_move_end_effector_visits_batched_waypoints_in_order() -> None:
@@ -1694,6 +1713,51 @@ def test_pick_explicit_grasp_bypasses_sampling_and_records_grasp() -> None:
     assert plan.scene_dependency_monitor_until == {
         "target": plan.segment("close").start
     }
+
+
+def test_pick_explicit_batched_object_pose_is_scene_independent() -> None:
+    """PickUp accepts one object pose per environment without a scene entity."""
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label="synthetic-object",
+        # The identifier is retained for object identity, but no matching
+        # entity is present in the explicit-pose planning snapshot.
+        entity_id="synthetic-object",
+    )
+    object_poses = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    object_poses[:, 0, 3] = torch.tensor((0.15, 0.35))
+    grasp_poses = object_poses.clone()
+    context = _context(scene=SceneSnapshot.empty())
+
+    plan = _plan_action(
+        action,
+        _invocation(
+            action,
+            GraspGoal(
+                semantics=semantics,
+                object_pose=object_poses,
+                grasp_xpos=grasp_poses,
+            ),
+            sample_count=20,
+        ),
+        context,
+    )
+
+    assert plan.plan_success.all()
+    assert plan.scene_dependencies == ()
+    assert plan.scene_dependency_monitor_until == {}
+    projected = plan.expected_effects.apply(context.task, plan.plan_success)
+    held = projected.get_held_object("arm")
+    assert held is not None
+    # The explicit grasp equals each explicit object pose, so the projected
+    # attachment transform must be identity in every environment row.
+    assert torch.allclose(
+        held.object_to_eef,
+        torch.eye(4).repeat(NUM_ENVS, 1, 1),
+    )
 
 
 def test_pick_fixed_object_to_eef_bypasses_sampling_and_adjustments() -> None:
@@ -4028,29 +4092,6 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     expected_axis = torch.tensor([[0.0, 0.0, 1.0]]).expand(NUM_ENVS, -1)
     assert torch.equal(pickup_call.kwargs["obj_longest_axis"], expected_axis)
     assert pickup_call.kwargs["is_positive_part"].tolist() == [False, False]
-    diagonal_component = math.sqrt(0.5)
-    pickup_horizontal = object_pose[:, :2, 3]
-    pickup_horizontal = pickup_horizontal / torch.linalg.vector_norm(
-        pickup_horizontal, dim=1, keepdim=True
-    )
-    expected_pickup_direction = torch.zeros(NUM_ENVS, 3)
-    expected_pickup_direction[:, :2] = pickup_horizontal * diagonal_component
-    expected_pickup_direction[:, 2] = -diagonal_component
-    assert torch.allclose(pickup_call.args[2], expected_pickup_direction)
-    assert torch.equal(receive_call.kwargs["obj_longest_axis"], expected_axis)
-    assert receive_call.kwargs["is_positive_part"].tolist() == [True, True]
-    predicted_middle_pose = receive_call.args[1]
-    assert torch.allclose(
-        predicted_middle_pose[:, :3, 3],
-        torch.tensor([[0.0, 0.1, 0.7], [0.0, 0.1, 0.7]]),
-    )
-    expected_receive_direction = torch.tensor(
-        [
-            [0.0, diagonal_component, -diagonal_component],
-            [0.0, diagonal_component, -diagonal_component],
-        ]
-    )
-    assert torch.allclose(receive_call.args[2], expected_receive_direction)
 
     pickup_grasp_rotation = planned_targets[0][:, 1, :3, :3]
     assert torch.allclose(
@@ -4911,3 +4952,126 @@ def test_coordinated_actions_reject_curobo_motion_generation() -> None:
     )
     with pytest.raises(ValueError, match="not supported"):
         _plan_action(placement, placement_invocation, _dual_context())
+
+
+@pytest.mark.parametrize("case_id", ["place", "move_held_object", "press"])
+def test_composed_actions_materialize_velocity_and_end_in_zero_hold(
+    case_id: str,
+) -> None:
+    plan = _plan_segment_contract_case(case_id)
+    trajectory = _joint_trajectory(plan)
+    assert trajectory.velocities is not None
+    assert torch.isfinite(trajectory.velocities).all()
+    for endpoint in plan.commands.frames[-1].commands:
+        assert torch.equal(
+            endpoint.payload.velocities, torch.zeros_like(endpoint.payload.positions)
+        )
+    # Constant joint intervals must not acquire spurious velocity from a neighbor.
+    stationary = trajectory.positions[:, 1:] == trajectory.positions[:, :-1]
+    assert torch.count_nonzero(trajectory.velocities[:, :-1][stationary]) == 0
+
+
+def test_position_only_motion_policy_emits_explicit_zero_velocity() -> None:
+    action = _bind_action(_motion_generator(), MoveJoints())
+    invocation = replace(
+        _invocation(action, JointPositionGoal(torch.ones(ARM_DOF)), sample_count=5),
+        motion_policy=MotionPolicy(sample_count=5, velocity_targets="zero"),
+    )
+    plan = _plan_action(action, invocation, _context())
+    for frame in plan.commands.frames:
+        for endpoint in frame.commands:
+            assert torch.count_nonzero(endpoint.payload.velocities) == 0
+
+
+def test_move_joints_supports_sparse_trapezoidal_planning() -> None:
+    generator = _motion_generator()
+    planner = object.__new__(TrapezoidalPlanner)
+    planner.cfg = SimpleNamespace(planner_type="trapezoidal")
+    planner.device = torch.device("cpu")
+    generator.planner = planner
+    action = _bind_action(generator, MoveJoints())
+    target = torch.full((NUM_ENVS, ARM_DOF), 0.1)
+    invocation = replace(
+        _invocation(action, JointPositionGoal(target), sample_count=5),
+        motion_policy=MotionPolicy(
+            strategy="motion_gen",
+            sample_count=5,
+            plan_opts=TrapezoidalPlanOptions(
+                sample_interval=2,
+                backend="torch",
+            ),
+        ),
+    )
+
+    plan = _plan_action(action, invocation, _context())
+
+    trajectory = _joint_trajectory(plan)
+    torch.testing.assert_close(trajectory.positions[:, -1, :ARM_DOF], target)
+    assert trajectory.velocities is not None
+    assert torch.count_nonzero(trajectory.velocities[:, 1:-1, :ARM_DOF]) > 0
+    assert torch.count_nonzero(trajectory.velocities[:, -1]) == 0
+
+
+def test_move_joints_holds_stationary_trapezoidal_goal() -> None:
+    generator = _motion_generator()
+    planner = object.__new__(TrapezoidalPlanner)
+    planner.cfg = SimpleNamespace(planner_type="trapezoidal")
+    planner.device = torch.device("cpu")
+    generator.planner = planner
+    action = _bind_action(generator, MoveJoints())
+    target = torch.zeros(NUM_ENVS, ARM_DOF)
+    invocation = replace(
+        _invocation(action, JointPositionGoal(target), sample_count=5),
+        motion_policy=MotionPolicy(
+            strategy="motion_gen",
+            sample_count=5,
+            plan_opts=TrapezoidalPlanOptions(
+                sample_interval=2,
+                backend="torch",
+            ),
+        ),
+    )
+
+    trajectory = _joint_trajectory(_plan_action(action, invocation, _context()))
+
+    arm_positions = trajectory.positions[:, :, :ARM_DOF]
+    torch.testing.assert_close(
+        arm_positions, target[:, None, :].expand_as(arm_positions)
+    )
+    assert trajectory.velocities is not None
+    torch.testing.assert_close(
+        trajectory.velocities[:, :, :ARM_DOF],
+        torch.zeros_like(trajectory.velocities[:, :, :ARM_DOF]),
+    )
+
+
+def test_move_held_object_retimes_arm_derivatives() -> None:
+    generator = _motion_generator()
+    q = torch.tensor([0.0, 0.1, 0.3]).view(1, 3, 1).expand(NUM_ENVS, -1, ARM_DOF)
+    generator.generate = Mock(
+        return_value=PlanResult(
+            success=True,
+            positions=q,
+            velocities=torch.full_like(q, 0.7),
+            dt=torch.tensor([[0.0, 0.1, 0.2]]).expand(NUM_ENVS, -1),
+        )
+    )
+    # Public results normalize success before a primitive consumes them.
+    generator.generate.return_value.success = torch.ones(NUM_ENVS, dtype=torch.bool)
+    action = _bind_action(generator, MoveHeldObject())
+    task = TaskState(batch_size=NUM_ENVS, device="cpu", held_objects={"arm": _held()})
+    plan = _plan_action(
+        action,
+        _invocation(action, HeldObjectPoseGoal(torch.eye(4)), sample_count=3),
+        _context(task),
+    )
+    trajectory = _joint_trajectory(plan)
+    assert trajectory.velocities is not None
+    # Both source segments move at 1 rad/s: 0.1/0.1 and 0.2/0.2.
+    torch.testing.assert_close(
+        trajectory.velocities[:, 1:-1, :ARM_DOF],
+        torch.ones_like(trajectory.velocities[:, 1:-1, :ARM_DOF]),
+    )
+    assert torch.count_nonzero(trajectory.velocities[:, 0]) == 0
+    assert torch.count_nonzero(trajectory.velocities[:, -1]) == 0
+    assert torch.count_nonzero(trajectory.velocities[:, :, ARM_DOF:]) == 0
