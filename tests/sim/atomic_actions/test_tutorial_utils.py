@@ -55,6 +55,7 @@ from scripts.tutorials.atomic_action.scenario_utils import (
     create_dual_tutorial_robot_cfg,
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    DEFAULT_TUTORIAL_SUN_DIRECTION,
     NEWTON_GRASP_CONTACT_DAMPING,
     NEWTON_GRASP_CONTACT_STIFFNESS,
     NEWTON_GRASP_ROLLING_FRICTION,
@@ -62,8 +63,10 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     NEWTON_NATIVE_CONTACT_DIMENSION,
     ROBOTIQ_2F_140_TCP,
     ROBOTIQ_HAND_JOINT_PATTERN,
+    TUTORIAL_PLANNERS,
     TUTORIAL_ROBOTS,
     add_tutorial_robot,
+    TutorialPlanner,
     broadcast_pose_batch,
     broadcast_waypoint_pose_batch,
     clone_local_pose_from_first_env,
@@ -73,11 +76,13 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_curobo_motion_generator,
     create_franka_panda_robot_cfg,
     create_tutorial_rigid_body_physics,
+    create_parallel_jaw_grasp_pose_generator,
     create_tutorial_argument_parser,
+    create_tutorial_motion_generator,
+    create_tutorial_simulation,
     create_tutorial_robot_cfg,
     create_ur10_robotiq_robot_cfg,
     create_ur5_gripper_robot_cfg,
-    create_parallel_jaw_grasp_pose_generator,
     get_hand_open_close_qpos,
     replay_trajectory,
     run_tutorial,
@@ -847,16 +852,90 @@ def test_run_tutorial_uses_deferred_simulation_cleanup() -> None:
     flush_cleanup_queue.assert_called_once_with()
 
 
+@pytest.mark.parametrize("planner", TUTORIAL_PLANNERS)
+def test_tutorial_motion_generator_factory_selects_requested_backend(
+    planner: TutorialPlanner,
+) -> None:
+    robot = MagicMock(uid="tutorial_robot")
+
+    with patch(
+        "scripts.tutorials.atomic_action.tutorial_utils.MotionGenerator"
+    ) as motion_generator_cls:
+        result = create_tutorial_motion_generator(robot, planner)
+
+    cfg = motion_generator_cls.call_args.kwargs["cfg"]
+    assert result is motion_generator_cls.return_value
+    assert cfg.planner_cfg.planner_type == planner
+    assert cfg.planner_cfg.robot_uid == "tutorial_robot"
+
+
+def test_tutorial_motion_generator_factory_rejects_neural_backend() -> None:
+    with pytest.raises(ValueError, match="Unsupported tutorial planner"):
+        create_tutorial_motion_generator(
+            MagicMock(uid="tutorial_robot"), "neural"
+        )  # type: ignore[arg-type]
+
+
+def test_tutorial_motion_generator_factory_defaults_to_trapezoidal() -> None:
+    robot = MagicMock(uid="tutorial_robot")
+
+    with patch(
+        "scripts.tutorials.atomic_action.tutorial_utils.MotionGenerator"
+    ) as motion_generator_cls:
+        create_tutorial_motion_generator(robot)
+
+    cfg = motion_generator_cls.call_args.kwargs["cfg"]
+    assert cfg.planner_cfg.planner_type == "trapezoidal"
+
+
+def test_tutorial_simulation_uses_one_global_sun_light() -> None:
+    args = Namespace(num_envs=4, device="cpu", renderer="hybrid")
+    simulation = MagicMock()
+
+    with (
+        patch(
+            "scripts.tutorials.atomic_action.tutorial_utils.SimulationManager",
+            return_value=simulation,
+        ),
+        patch("scripts.tutorials.atomic_action.tutorial_utils.SimulationManagerCfg"),
+        patch("scripts.tutorials.atomic_action.tutorial_utils.RenderCfg"),
+        patch("scripts.tutorials.atomic_action.tutorial_utils.LightCfg") as light_cfg,
+        patch(
+            "scripts.tutorials.atomic_action.tutorial_utils.visualization_cfg_from_args"
+        ),
+    ):
+        result = create_tutorial_simulation(args)
+
+    assert result is simulation
+    simulation.add_light.assert_called_once_with(cfg=light_cfg.return_value)
+    light_kwargs = light_cfg.call_args.kwargs
+    assert light_kwargs["uid"] == "main_light"
+    assert light_kwargs["light_type"] == "sun"
+    assert light_kwargs["direction"] == DEFAULT_TUTORIAL_SUN_DIRECTION
+    assert "init_pos" not in light_kwargs
+
+
 def test_shared_robot_selection_keeps_ur5_default_and_accepts_all_variants() -> None:
     parser = create_tutorial_argument_parser("test parser")
     default_args = parser.parse_args([])
     franka_args = parser.parse_args(["--robot", "franka"])
     ur10_args = parser.parse_args(["--robot", "ur10"])
+    trapezoidal_args = parser.parse_args(["--planner", "trapezoidal"])
 
     assert TUTORIAL_ROBOTS == ("ur5", "franka", "ur10")
+    assert TUTORIAL_PLANNERS == ("toppra", "trapezoidal", "curobo")
     assert default_args.robot == "ur5"
     assert franka_args.robot == "franka"
     assert ur10_args.robot == "ur10"
+    assert default_args.planner == "trapezoidal"
+    assert trapezoidal_args.planner == "trapezoidal"
+
+
+def test_shared_tutorial_planner_selection_excludes_neural_backend() -> None:
+    parser = create_tutorial_argument_parser("test parser")
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--planner", "neural"])
 
 
 def test_handover_tutorial_defaults_to_cpu_for_grasp_planning() -> None:
@@ -907,9 +986,19 @@ def test_all_atomic_action_tutorials_accept_both_robot_choices(
         default_args = module.parse_arguments()
     with patch("sys.argv", [f"{module_name}.py", "--robot", "franka"]):
         franka_args = module.parse_arguments()
+    with patch(
+        "sys.argv",
+        [f"{module_name}.py", "--planner", "trapezoidal"],
+    ):
+        trapezoidal_args = module.parse_arguments()
 
     assert default_args.robot == "ur5"
     assert franka_args.robot == "franka"
+    expected_planner = (
+        "curobo" if module_name == "dynamic_obstacle_recovery" else "trapezoidal"
+    )
+    assert default_args.planner == expected_planner
+    assert trapezoidal_args.planner == "trapezoidal"
 
 
 def test_place_tutorial_registers_pick_object_with_simulation_engine_factory() -> None:
@@ -1213,6 +1302,7 @@ def test_pour_tutorial_uses_configured_pickup_and_local_rotation_axis() -> None:
     assert module.POUR_INTERNAL_AXIS == (1.0, 0.0, 0.0)
     pick_policy = module._create_pick_motion_policy()
     assert pick_policy.sample_count == module.PICK_SAMPLE_INTERVAL
+    assert isinstance(pick_policy.plan_opts, module.TrapezoidalPlanOptions)
     assert pick_policy.plan_opts.sample_method is module.TrajectorySampleMethod.QUANTITY
     assert pick_policy.plan_opts.sample_interval == module.PICK_MOTION_SAMPLE_COUNT
 

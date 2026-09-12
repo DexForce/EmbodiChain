@@ -293,6 +293,9 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             interpolation_dt=context.control_dt,
         )
         if request.motion_policy.strategy == "motion_gen":
+            # Keep the native combined path for the pose-based split. The
+            # motion generator resolves backend defaults when no explicit
+            # planner options were supplied.
             motion_options.sample_count = None
         motion_result = self.motion_generator.generate(
             build_pose_plan_states(torch.cat([down_xpos, back_xpos], dim=1)),

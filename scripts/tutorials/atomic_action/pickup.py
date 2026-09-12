@@ -135,6 +135,7 @@ def main() -> None:
     motion_gen = create_curobo_motion_generator(
         robot,
         use_cuda_graph=args.physics != "newton",
+        planner=getattr(args, "planner", "trapezoidal"),
     )
     engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,

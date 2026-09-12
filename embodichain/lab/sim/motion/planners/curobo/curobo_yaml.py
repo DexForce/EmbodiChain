@@ -377,6 +377,9 @@ def _convex_hull_to_voxel_entry(
 
     The grid is centered at the object's local origin, so the voxel obstacle's
     pose stays identical to the source object's pose during dynamic updates.
+    A homogeneous ``(4, 4)`` input uses EmbodiChain ``xyz + xyzw`` and is
+    converted once to cuRobo's serialized ``xyz + wxyz`` format. A 7D input is
+    expected to already be in cuRobo's native ``xyz + wxyz`` format.
     """
     vertices = (
         torch.as_tensor(vertices, dtype=torch.float32).detach().to("cpu").reshape(-1, 3)
@@ -396,7 +399,8 @@ def _convex_hull_to_voxel_entry(
         pose = torch.cat([position, quaternion])
     if pose.shape != (7,):
         raise ValueError(
-            f"pose must be (7,) [x,y,z,qw,qx,qy,qz] or (4, 4), got {tuple(pose.shape)}."
+            f"pose must be a cuRobo (7,) [x,y,z,qw,qx,qy,qz] vector or an "
+            f"EmbodiChain (4, 4) matrix, got {tuple(pose.shape)}."
         )
 
     import open3d as o3d

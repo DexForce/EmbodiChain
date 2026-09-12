@@ -186,7 +186,10 @@ def main() -> None:
     target = create_rigid_knob(sim) if args.rigid_object else create_microwave(sim)
     sim.prepare()
     hand_open, hand_close = get_hand_open_close_qpos(robot)
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_toppra_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "trapezoidal"),
+    )
     semantics, target_pose = create_knob_semantics(target)
 
     engine = AtomicActionEngine(
@@ -213,7 +216,10 @@ def main() -> None:
                     target_pose,
                 ),
                 control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
-                motion_policy=MotionPolicy(sample_count=TWIST_SAMPLE_INTERVAL),
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=TWIST_SAMPLE_INTERVAL,
+                ),
                 skill_options=TwistOptions(
                     hand_interp_steps=HAND_INTERP_STEPS,
                     pre_grasp_distance=0.12,

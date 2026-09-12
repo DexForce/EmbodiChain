@@ -199,7 +199,10 @@ def main() -> None:
     target = create_rigid_button(sim) if args.rigid_object else create_microwave(sim)
     sim.prepare()
     hand_open, hand_close = get_hand_open_close_qpos(robot, close_qpos=0.040)
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_toppra_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "trapezoidal"),
+    )
     semantics, target_pose = create_button_semantics(target)
     affordance = semantics.affordance
     assert isinstance(affordance, PressAffordance)
@@ -228,7 +231,10 @@ def main() -> None:
                     target_pose,
                 ),
                 control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
-                motion_policy=MotionPolicy(sample_count=PRESS_SAMPLE_INTERVAL),
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=PRESS_SAMPLE_INTERVAL,
+                ),
                 skill_options=PressOptions(
                     hand_interp_steps=HAND_INTERP_STEPS,
                     approach_distance=0.12,

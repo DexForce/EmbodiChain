@@ -63,6 +63,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
     visualize_curobo_world_collision_model,
 )
 from embodichain.lab.sim.motion.planners.utils import MoveType
+from embodichain.utils.math import matrix_from_quat
 
 _SIM_ROBOT_UID = "curobo_franka_inprocess_test"
 _SIM_CONTROL_PART = "arm"
@@ -983,6 +984,16 @@ def _identity_pose(
     )
 
 
+def _identity_curobo_pose(
+    translation: tuple[float, float, float] = (0.45, 0.0, 0.18),
+) -> torch.Tensor:
+    """Return the same identity pose serialized as cuRobo ``xyz+wxyz``."""
+    return torch.tensor(
+        [*translation, 1.0, 0.0, 0.0, 0.0],
+        dtype=torch.float32,
+    )
+
+
 class _FakeRigidObject:
     """Expose the physical-shape and pose API required by the world generator."""
 
@@ -1048,14 +1059,14 @@ def test_voxel_entry_computes_convex_hull_before_signed_distance(monkeypatch):
         "block",
         _unit_cube_vertices(),
         _cube_faces(),
-        _identity_pose(),
+        _identity_curobo_pose(),
         voxel_size=0.25,
         voxel_padding=0.25,
     )
 
     assert len(calls) == 1
     assert name == "block"
-    assert fields["pose"] == pytest.approx(_identity_pose().tolist())
+    assert fields["pose"] == pytest.approx(_identity_curobo_pose().tolist())
     assert fields["dims"] == pytest.approx([1.5, 1.5, 1.5])
     assert tuple(fields["feature_tensor"].shape) == (6, 6, 6)
     assert fields["feature_tensor"].amin() < 0.0
@@ -1076,7 +1087,7 @@ def test_voxel_entry_preserves_homogeneous_object_pose(monkeypatch):
         voxel_padding=0.0,
     )
 
-    assert fields["pose"] == pytest.approx(_identity_pose().tolist())
+    assert fields["pose"] == pytest.approx(_identity_curobo_pose().tolist())
 
 
 @pytest.mark.parametrize(

@@ -559,7 +559,10 @@ def run_coordinated_placement_demo(
     log_scene_targets(bread_pose, pan_pose)
     bread_semantics = create_manual_object_semantics(bread, BREAD_LABEL)
     pan_semantics = create_manual_object_semantics(pan, PAN_LABEL)
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_toppra_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "trapezoidal"),
+    )
 
     right_open, right_close = get_hand_open_close_qpos(
         robot,
@@ -871,7 +874,6 @@ def main() -> None:
     sim = create_tutorial_simulation(
         args,
         arena_space=3.0,
-        light_pos=(0.0, -0.4, 3.0),
     )
     robot = create_dual_robot(sim, args.robot)
     run_coordinated_placement_demo(args, sim, robot)

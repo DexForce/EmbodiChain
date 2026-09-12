@@ -65,7 +65,12 @@ def main() -> None:
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot)
     sim.prepare()
-    engine = AtomicActionEngine(motion_generator=create_toppra_motion_generator(robot))
+    engine = AtomicActionEngine(
+        motion_generator=create_toppra_motion_generator(
+            robot,
+            planner=getattr(args, "planner", "trapezoidal"),
+        )
+    )
 
     initial_qpos = robot.get_qpos().clone()
     start_arm_qpos = robot.get_qpos(name="arm")[0]

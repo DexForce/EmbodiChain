@@ -265,7 +265,9 @@ def test_neural_planner_disables_grad_for_all_fk_calls(tmp_path, monkeypatch):
 
     monkeypatch.setattr(fake_sim.robot, "compute_fk", checked_compute_fk)
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
     planner = NeuralPlanner(
         NeuralPlannerCfg(
@@ -454,7 +456,9 @@ def test_neural_planner_builds_joint_constraint_observation(tmp_path, monkeypatc
     model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
     planner = NeuralPlanner(
         NeuralPlannerCfg(
@@ -505,7 +509,9 @@ def test_neural_planner_parses_ordered_pose_then_joint_sequence(tmp_path, monkey
     model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
     planner = NeuralPlanner(
         NeuralPlannerCfg(
@@ -545,7 +551,9 @@ def test_neural_planner_accepts_joint_move_goal(tmp_path, monkeypatch):
     model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
     planner = NeuralPlanner(
         NeuralPlannerCfg(
@@ -571,7 +579,9 @@ def test_neural_planner_applies_policy_frame_and_tcp_transforms(tmp_path, monkey
     model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
     left = [
         [-1.0, 0.0, 0.0, 0.0],
@@ -710,7 +720,9 @@ def test_motion_generator_neural_preserves_failed_rollout_positions(
     model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
 
     motion_generator = MotionGenerator(
@@ -744,7 +756,9 @@ def test_neural_planner_rejects_pytorch_checkpoint(tmp_path, monkeypatch):
     pytorch_checkpoint_path.write_bytes(b"not-an-onnx-model")
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
 
     with pytest.raises(ValueError, match="only accepts standalone .onnx"):

@@ -241,7 +241,7 @@ def _compose_goal_pose(
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the moving-target tutorial."""
     parser = create_tutorial_argument_parser(
-        "Demonstrate ExecutionRunner replanning after a visible target move."
+        "Demonstrate ExecutionRunner replanning after a visible target move.",
     )
     parser.add_argument(
         "--no_target_motion",
@@ -269,6 +269,7 @@ def main() -> None:
     motion_gen = create_curobo_motion_generator(
         robot,
         use_cuda_graph=args.physics != "newton",
+        planner=getattr(args, "planner", "trapezoidal"),
     )
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, target, hand_open)

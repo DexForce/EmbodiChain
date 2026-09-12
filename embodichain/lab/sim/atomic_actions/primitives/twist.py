@@ -53,7 +53,10 @@ from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
-from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    arm_qpos_from_state,
+    resample_planned_trajectory,
+)
 from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
@@ -373,7 +376,9 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
-        return result.success, result.positions
+        return result.success, resample_planned_trajectory(
+            result.positions, sample_count
+        )
 
     def _twisted_grasp_poses(
         self,

@@ -250,11 +250,14 @@ shapes; global physics resources explicitly marked non-per-environment remain
 shared. Use the public UID and name queries to select rows, joints, links, and
 sensors.
 
-All EmbodiChain-owned public poses and quaternions use ``xyzw`` ordering. A
-7-dimensional pose is ``(px, py, pz, qx, qy, qz, qw)`` and the identity is
-``(0, 0, 0, 1)``. Backend adapters perform any native-order conversion at the
-boundary. This convention applies to object and link state, robot FK/IK,
-sensor offsets, semantic poses, and task configuration.
+All EmbodiChain domain-facing public poses and quaternions use ``xyzw``
+ordering. A 7-dimensional pose is ``(px, py, pz, qx, qy, qz, qw)`` and the
+identity is ``(0, 0, 0, 1)``. Backend adapters perform any native-order
+conversion exactly once at the boundary. Explicitly named adapter/protocol
+values can retain an external order, including visualization ``*wxyz`` fields,
+cuRobo serialized poses, and DexSim ``PhysicalAttr``/Spawn descriptors. The
+domain convention applies to object and link state, robot FK/IK, sensor
+offsets, semantic poses, and task configuration.
 
 Volume and surface deformables share the ``DeformableObject`` state contract
 (``nodal_pos_w``, ``nodal_vel_w``, and ``nodal_state_w``), while their mesh
