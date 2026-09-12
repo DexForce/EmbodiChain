@@ -51,7 +51,7 @@ camera_cfg = CameraCfg(
     extrinsics=CameraCfg.ExtrinsicsCfg(
         parent="ee_link",        # Attach to robot end-effector
         pos=[0.09, 0.05, 0.04],  # Relative position
-        quat=[1, 0, 0, 0],       # Relative rotation [x, y, z, w]
+        quat=[0, 0, 0, 1],       # Relative rotation [x, y, z, w]
     ),
     enable_color=True,
     enable_depth=True,

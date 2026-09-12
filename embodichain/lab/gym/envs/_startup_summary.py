@@ -22,7 +22,7 @@ import inspect
 import os
 import shutil
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import MISSING
 from functools import partial
 
@@ -90,6 +90,49 @@ def _callable_name(func: object, full: bool) -> str:
     return target.__name__
 
 
+def _scene_entity_cfgs(value: object) -> Iterator[SceneEntityCfg]:
+    """Yield scene entity configurations nested in a functor parameter value."""
+    if isinstance(value, SceneEntityCfg):
+        yield value
+    elif isinstance(value, Mapping):
+        for nested in value.values():
+            yield from _scene_entity_cfgs(nested)
+    elif isinstance(value, (list, tuple)):
+        for nested in value:
+            yield from _scene_entity_cfgs(nested)
+
+
+def _scene_entity_label(value: SceneEntityCfg) -> str:
+    """Format a resolved scene entity for the compact functor table."""
+    selectors: list[str] = []
+    for prefix in ("joint", "body"):
+        names = getattr(value, f"{prefix}_names")
+        if names is not None:
+            selectors.append(f"{prefix}_names={_describe(names)}")
+        else:
+            ids = getattr(value, f"{prefix}_ids")
+            if not (isinstance(ids, slice) and ids == slice(None)):
+                selectors.append(f"{prefix}_ids={_describe(ids)}")
+    suffix = f" ({', '.join(selectors)})" if selectors else ""
+    return f"{value.uid}{suffix}"
+
+
+def _scene_entity_details(params: Mapping[str, object]) -> str | None:
+    """Return a compact summary of scene entities referenced by functor params."""
+    entities: list[str] = []
+    seen: set[int] = set()
+    for value in params.values():
+        for entity in _scene_entity_cfgs(value):
+            if id(entity) in seen:
+                continue
+            seen.add(id(entity))
+            entities.append(_scene_entity_label(entity))
+    if not entities:
+        return None
+    key = "entity" if len(entities) == 1 else "entities"
+    return f"{key}=" + ", ".join(entities)
+
+
 def _functor_cells(
     manager_name: str, manager: object, mode: str, name: str, full: bool
 ) -> list[str]:
@@ -112,6 +155,11 @@ def _functor_cells(
         elif manager_name == "DatasetManager":
             setting = "ON" if manager.save_failed_episodes else "OFF"
             details.append(f"save failed episodes={setting}")
+    params = getattr(cfg, "params", {})
+    if not full:
+        entity_details = _scene_entity_details(params)
+        if entity_details is not None:
+            details.append(entity_details)
     if full:
         if isinstance(func, partial):
             bound = [f"args={_describe(func.args)}"] if func.args else []
@@ -120,7 +168,6 @@ def _functor_cells(
             )
             if bound:
                 details.append("Bound: " + ", ".join(bound))
-        params = getattr(cfg, "params", {})
         details.append(
             "Params:\n"
             + "\n".join(f"{key}={_describe(value)}" for key, value in params.items())

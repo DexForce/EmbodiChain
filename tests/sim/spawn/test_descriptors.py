@@ -65,13 +65,14 @@ from embodichain.lab.sim.cfg import (
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
     RigidObjectCfg,
+    RigidObjectGroupCfg,
     RobotCfg,
     VolumeDeformablePhysicsCfg,
     VolumeDeformableMeshingCfg,
     VolumeDeformableObjectCfg,
 )
 from embodichain.lab.sim.shapes import CubeCfg, LoadOption, MeshCfg
-from embodichain.lab.sim.objects import Articulation
+from embodichain.lab.sim.objects import Articulation, RigidObject, RigidObjectGroup
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
     surface_deformable_desc_from_cfg,
@@ -2169,6 +2170,52 @@ def test_spawn_post_config_only_applies_render_uv() -> None:
     articulation._set_default_joint_drive.assert_not_called()
     entity.get_render_body.assert_called_once_with("base")
     render_body.set_projective_uv.assert_called_once_with()
+
+
+def test_rigid_object_spawn_applies_projective_uv() -> None:
+    render_body = Mock()
+    entity = Mock()
+    entity.get_render_body.return_value = render_body
+    rigid_object = object.__new__(RigidObject)
+    rigid_object.cfg = SimpleNamespace(
+        shape=MeshCfg(
+            compute_uv=True,
+            project_direction=[1.0, 2.0, 3.0],
+        )
+    )
+    rigid_object._entities = [entity]
+
+    rigid_object._apply_spawn_visual_uv()
+
+    entity.get_render_body.assert_called_once_with()
+    project_direction = render_body.set_projective_uv.call_args.args[0]
+    np.testing.assert_array_equal(project_direction, np.array([1.0, 2.0, 3.0]))
+
+
+def test_rigid_object_group_spawn_applies_projective_uv() -> None:
+    render_body = Mock()
+    entity = Mock()
+    entity.get_render_body.return_value = render_body
+    group = object.__new__(RigidObjectGroup)
+    group.cfg = RigidObjectGroupCfg(
+        uid="group",
+        rigid_objects={
+            "member": RigidObjectCfg(
+                uid="member",
+                shape=MeshCfg(
+                    compute_uv=True,
+                    project_direction=[3.0, 2.0, 1.0],
+                ),
+            )
+        },
+    )
+    group._entities = [[entity]]
+
+    group._apply_spawn_visual_uv()
+
+    entity.get_render_body.assert_called_once_with()
+    project_direction = render_body.set_projective_uv.call_args.args[0]
+    np.testing.assert_array_equal(project_direction, np.array([3.0, 2.0, 1.0]))
 
 
 def test_spawn_post_config_applies_default_only_root_properties() -> None:

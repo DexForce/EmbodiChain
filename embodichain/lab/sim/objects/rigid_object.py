@@ -487,11 +487,30 @@ class RigidObject(BatchEntity):
         self.is_shared_visual_material = False
 
         super().__init__(cfg, entities, self.device)
+        self._apply_spawn_visual_uv()
         self._initialize_existing_visual_material()
         self._apply_initial_state()
         if self._data is not None:
             self._capture_default_physical_properties()
         self._has_collision_visible_node = False
+
+    def _apply_spawn_visual_uv(self) -> None:
+        """Apply configured projective UV mapping to spawned render bodies."""
+        shape = self.cfg.shape
+        if not isinstance(shape, MeshCfg) or not shape.compute_uv:
+            return
+
+        project_direction = np.asarray(shape.project_direction, dtype=np.float32)
+        for entity in self._entities:
+            render_body = entity.get_render_body()
+            if render_body is None:
+                continue
+            project_uv = getattr(render_body, "set_projective_uv", None)
+            if project_uv is None:
+                raise NotImplementedError(
+                    "compute_uv requires a render body with set_projective_uv()."
+                )
+            project_uv(project_direction)
 
     def bind_spawn(
         self,

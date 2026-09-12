@@ -328,6 +328,57 @@ def test_functor_details_show_type_specific_settings(mode):
         assert expected in rendered
 
 
+def test_compact_functor_details_include_scene_entities():
+    """Entity resolution details use the shared functor table in compact mode."""
+    from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
+
+    env = _make_summary_env("compact")
+    env.event_manager.configs["reset_robot"].params = {
+        "entity_cfg": SceneEntityCfg(uid="robot", body_names=["base"])
+    }
+    env.event_manager.configs["randomize_objects"].params = {
+        "entity_cfgs": [
+            SceneEntityCfg(uid="bottle"),
+            SceneEntityCfg(uid="cup"),
+        ]
+    }
+
+    rendered = " ".join("\n".join(env._initialization_summary_lines()).split())
+
+    assert "entity=robot (body_names=['base'])" in rendered
+    assert "entities=bottle, cup" in rendered
+
+
+def test_scene_entity_resolution_does_not_emit_a_second_functor_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Entity resolution is reported by the shared startup table only."""
+    from embodichain.lab.gym.envs.managers.cfg import EventCfg, SceneEntityCfg
+    from embodichain.lab.gym.envs.managers.manager_base import ManagerBase
+
+    class _NoopManager(ManagerBase):
+        @property
+        def active_functors(self):
+            return []
+
+        def _prepare_functors(self):
+            pass
+
+    manager = object.__new__(_NoopManager)
+    manager._env = SimpleNamespace(sim=object())
+    cfg = EventCfg(
+        func=_summary_functor,
+        params={"entity_cfg": SceneEntityCfg(uid="cube")},
+    )
+    monkeypatch.setattr(SceneEntityCfg, "resolve", lambda self, sim: None)
+
+    def unexpected_print(*args, **kwargs):
+        pytest.fail("Scene entity resolution must not print a standalone functor log")
+
+    monkeypatch.setattr("builtins.print", unexpected_print)
+    manager._process_functor_cfg_at_play("reset_objects", cfg)
+
+
 def test_full_details_expand_parameters_without_evaluating_values():
     from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 

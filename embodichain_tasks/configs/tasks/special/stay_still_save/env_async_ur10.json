@@ -51,11 +51,10 @@
         "direct": [
             {
                 "uid": "light_1",
-                "light_type": "point",
+                "light_type": "sun",
                 "color": [1.0, 1.0, 1.0],
-                "intensity": 50.0,
-                "init_pos": [2, 0, 2],
-                "radius": 10.0
+                "intensity": 5.0,
+                "direction": [0.0, 0.0, -1.0]
             }
         ]
     },

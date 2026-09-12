@@ -27,6 +27,7 @@ from embodichain.lab.sim import BatchEntity
 from embodichain.lab.sim.cfg import RigidObjectGroupCfg
 from embodichain.lab.sim.material import VisualMaterial
 from embodichain.lab.sim.objects.backends.scene import SceneRigidBodyView
+from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.utils.math import (
     matrix_from_euler,
     matrix_from_quat,
@@ -361,8 +362,32 @@ class RigidObjectGroup(BatchEntity):
         )
 
         super().__init__(cfg, rows, self.device)
+        self._apply_spawn_visual_uv()
         self._capture_default_physical_properties()
         self.reset()
+
+    def _apply_spawn_visual_uv(self) -> None:
+        """Apply configured projective UV mapping to grouped render bodies."""
+        member_cfgs = list(self.cfg.rigid_objects.values())
+        for object_index, member_cfg in enumerate(member_cfgs):
+            shape = member_cfg.shape
+            if not isinstance(shape, MeshCfg) or not shape.compute_uv:
+                continue
+
+            project_direction = np.asarray(
+                shape.project_direction,
+                dtype=np.float32,
+            )
+            for row in self._entities:
+                render_body = row[object_index].get_render_body()
+                if render_body is None:
+                    continue
+                project_uv = getattr(render_body, "set_projective_uv", None)
+                if project_uv is None:
+                    raise NotImplementedError(
+                        "compute_uv requires a render body with set_projective_uv()."
+                    )
+                project_uv(project_direction)
 
     def bind_spawn(self, result: Scene) -> None:
         """Atomically bind the declaration facade to env-major Spawn handles."""

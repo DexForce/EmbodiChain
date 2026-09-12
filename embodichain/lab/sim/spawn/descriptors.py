@@ -1582,11 +1582,8 @@ def _compile_geometry(
                 "triangle_mesh collision is supported only for static rigid objects."
             )
 
-        if shape.compute_uv:
-            logger.log_warning(
-                "Mesh UV projection is not represented by GeometryDesc and was "
-                "not applied."
-            )
+        # Projective UV mapping is applied to the materialized RenderBody by
+        # RigidObject after Spawn has created the file-backed mesh.
         if (
             collision_cfg.approximation == "convex_decomposition"
             and acd_method not in ("visacd", "coacd")
