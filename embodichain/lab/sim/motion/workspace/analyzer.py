@@ -45,6 +45,10 @@ from embodichain.lab.sim.motion.workspace.configs import (
     VisualizationType,
     VisualizationConfig,
     MetricConfig,
+    MetricType,
+)
+from embodichain.lab.sim.motion.workspace.metrics.manipulability_metric import (
+    ManipulabilityMetric,
 )
 from embodichain.lab.sim.motion.workspace.samplers import (
     SamplerFactory,
@@ -228,6 +232,7 @@ class WorkspaceAnalyzer:
         self.metrics_results: Dict[str, Any] = {}
         self.current_mode: AnalysisMode | None = None
         self.success_rates: torch.Tensor | None = None
+        self.manipulability_scores: torch.Tensor | None = None
         # Path of the most recently written/read results cache entry (None until
         # a disk results cache is used). Exposed for CLI consumers.
         self._last_cache_path: Path | None = None
@@ -1411,6 +1416,11 @@ class WorkspaceAnalyzer:
             if cached_results is not None:
                 logger.log_info("Loaded results from cache")
                 self._restore_analysis_state(cached_results)
+                # Metric settings are not part of the cache key: entries
+                # written under a different metric configuration (or before
+                # manipulability existed) are repaired here from the cached
+                # joint configurations.
+                self._apply_manipulability(cached_results)
                 self._log_analysis_summary(cached_results)
                 if visualize:
                     self._visualize_workspace()
@@ -1566,6 +1576,7 @@ class WorkspaceAnalyzer:
         logger.log_info("[3/3] Computing metrics...")
         metrics = self._compute_metrics()
         results["metrics"] = metrics
+        self._apply_manipulability(results)
         results["config"] = self.config
         results["analysis_time"] = time.time() - start_time
 
@@ -2011,6 +2022,115 @@ class WorkspaceAnalyzer:
         )
         return colors
 
+    def _manipulability_enabled(self) -> bool:
+        """Whether manipulability computation is selected in the metric config."""
+        enabled = self.config.metric.enabled_metrics or []
+        return MetricType.ALL in enabled or MetricType.MANIPULABILITY in enabled
+
+    def _compute_manipulability_values(
+        self,
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        """Compute per-configuration Yoshikawa scores and condition numbers.
+
+        Uses the active control part's solver Jacobian on the stored
+        ``joint_configurations``, so every row stays aligned with the
+        configuration (and, in Cartesian/plane modes, with the reachable
+        point) at the same index: ``w = sqrt(det(J @ J^T))``. Condition
+        numbers (max/min singular value) are computed only when the metric
+        config enables isotropy.
+
+        Returns:
+            Tuple of scores ``(N,)`` and condition numbers ``(N,)`` (or
+            ``None``) on the analysis device; ``(None, None)`` when no
+            configurations or no solver Jacobian are available.
+        """
+        qpos = self.joint_configurations
+        if qpos is None or len(qpos) == 0:
+            return None, None
+        solver = self.robot.get_solver(self.control_part_name)
+        if solver is None:
+            logger.log_warning(
+                "No solver available for manipulability computation; skipping."
+            )
+            return None, None
+
+        want_isotropy = self.config.metric.manipulability.compute_isotropy
+        chunk_size = 10000
+        scores, conditions = [], []
+        with torch.no_grad():
+            for start in range(0, len(qpos), chunk_size):
+                chunk = torch.as_tensor(
+                    qpos[start : start + chunk_size],
+                    dtype=torch.float32,
+                    device=solver.device,
+                )
+                jac = solver.get_jacobian(chunk)
+                jjt = jac @ jac.transpose(1, 2)
+                scores.append(torch.sqrt(torch.clamp(torch.det(jjt), min=0.0)))
+                if want_isotropy:
+                    singulars = torch.linalg.svdvals(jac)
+                    conditions.append(
+                        singulars[:, 0] / torch.clamp(singulars[:, -1], min=1e-15)
+                    )
+        return (
+            torch.cat(scores).to(self.device),
+            torch.cat(conditions).to(self.device) if conditions else None,
+        )
+
+    def _apply_manipulability(self, results: Dict[str, Any]) -> None:
+        """Attach manipulability scores and aggregates to a results dict.
+
+        Used on both the fresh-analysis path and the cache-hit path. Metric
+        settings are deliberately not part of the results-cache key, so a
+        cached entry may have been produced under a different metric
+        configuration (or before scores existed); recomputing from the cached
+        ``joint_configurations`` costs milliseconds and repairs such entries
+        transparently.
+        """
+        if not self._manipulability_enabled():
+            # Strip fields a differently-configured producer may have cached,
+            # so cached and fresh analyses expose the same result contract.
+            self.manipulability_scores = None
+            results.pop("manipulability_scores", None)
+            metrics = results.get("metrics")
+            if isinstance(metrics, dict):
+                metrics.pop("manipulability", None)
+            return
+        scores, conditions = self._compute_manipulability_values()
+        if scores is None:
+            # Enabled but not computable here (e.g. no solver): cached scores
+            # remain valid — they are pure kinematics of the same joint
+            # configurations. Per-point condition numbers are not cached, so
+            # condition statistics are unavailable on this path.
+            cached = results.get("manipulability_scores")
+            if cached is None:
+                self.manipulability_scores = None
+                metrics = results.get("metrics")
+                if isinstance(metrics, dict):
+                    metrics.pop("manipulability", None)
+                return
+            scores = torch.as_tensor(cached).to(self.device)
+            conditions = None
+        self.manipulability_scores = scores
+        results["manipulability_scores"] = scores
+        # Aggregates are always recomputed under the CURRENT metric
+        # configuration: cached aggregates may reflect a different
+        # jacobian_threshold or isotropy setting, since metric settings are
+        # not part of the cache key.
+        metric = ManipulabilityMetric(self.config.metric.manipulability)
+        metrics = results.setdefault("metrics", {})
+        metrics["manipulability"] = metric.compute(
+            (
+                self.workspace_points.cpu().numpy()
+                if self.workspace_points is not None
+                else np.empty((0, 3))
+            ),
+            manipulability_scores=scores.cpu().numpy(),
+            condition_numbers=(
+                conditions.cpu().numpy() if conditions is not None else None
+            ),
+        )
+
     def _compute_metrics(self) -> Dict[str, Any]:
         """Compute workspace metrics based on configuration."""
         if self.workspace_points is None or len(self.workspace_points) == 0:
@@ -2019,8 +2139,7 @@ class WorkspaceAnalyzer:
 
         metrics = {}
 
-        # TODO: Implement metric computation using metrics module
-        # For now, compute basic statistics
+        # Basic geometric statistics
         points_np = self.workspace_points.cpu().numpy()
 
         metrics["bounding_box"] = {
@@ -2035,6 +2154,9 @@ class WorkspaceAnalyzer:
 
         # Approximate volume (bounding box)
         metrics["bounding_box_volume"] = float(np.prod(dimensions))
+
+        # Manipulability aggregates are attached by _apply_manipulability,
+        # which also runs on the cache-hit path.
 
         logger.log_info(f"Computed {len(metrics)} metrics")
 
@@ -2409,6 +2531,7 @@ class WorkspaceAnalyzer:
         )
         self.joint_configurations = results.get("joint_configurations")
         self.success_rates = results.get("success_rates")
+        self.manipulability_scores = results.get("manipulability_scores")
         if mode_str in ("cartesian_space", "plane_sampling"):
             self.reachable_points = results.get("reachable_points")
             self.reachability_mask = results.get("reachability_mask")

@@ -16,6 +16,7 @@
 
 from typing import Dict, Any
 import numpy as np
+from embodichain.utils import logger
 from embodichain.lab.sim.motion.workspace.metrics.base_metric import (
     BaseMetric,
 )
@@ -27,8 +28,10 @@ from embodichain.lab.sim.motion.workspace.configs.metric_config import (
 class ManipulabilityMetric(BaseMetric):
     """Manipulability metric for workspace analysis.
 
-    Computes dexterity and manipulability measures throughout the workspace.
-    Note: Full implementation requires robot Jacobian computation.
+    Computes Yoshikawa manipulability statistics from robot Jacobians or from
+    precomputed per-point scores. Without either input no statistics are
+    produced: an earlier centroid-distance placeholder was measured to be
+    *negatively* correlated with true manipulability and has been removed.
     """
 
     def __init__(self, config: ManipulabilityConfig | None = None):
@@ -44,6 +47,8 @@ class ManipulabilityMetric(BaseMetric):
         workspace_points: np.ndarray,
         joint_configurations: np.ndarray | None = None,
         jacobians: np.ndarray | None = None,
+        manipulability_scores: np.ndarray | None = None,
+        condition_numbers: np.ndarray | None = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """Compute manipulability metrics.
@@ -52,6 +57,11 @@ class ManipulabilityMetric(BaseMetric):
             workspace_points: Workspace points in Cartesian space, shape (N, 3).
             joint_configurations: Joint configurations, shape (N, num_joints).
             jacobians: Precomputed Jacobian matrices, shape (N, 6, num_joints).
+            manipulability_scores: Precomputed per-point Yoshikawa scores,
+                shape (N,). Takes precedence over ``jacobians``.
+            condition_numbers: Precomputed per-point Jacobian condition
+                numbers, shape (N,). Used for isotropy statistics when
+                ``jacobians`` is not provided.
             **kwargs: Additional arguments.
 
         Returns:
@@ -60,7 +70,12 @@ class ManipulabilityMetric(BaseMetric):
                 - std_manipulability: Standard deviation
                 - min_manipulability: Minimum value
                 - max_manipulability: Maximum value
-                - mean_condition: Average condition number (if isotropy enabled)
+                - mean_condition: Average condition number (if isotropy enabled
+                  and Jacobians were provided)
+
+            Without ``jacobians`` or ``manipulability_scores`` an empty dict is
+            returned: true manipulability cannot be derived from Cartesian
+            points alone, and fabricated statistics are worse than none.
         """
         points = self._to_numpy(workspace_points)
 
@@ -72,31 +87,22 @@ class ManipulabilityMetric(BaseMetric):
                 "max_manipulability": 0.0,
             }
 
-        # If Jacobians are not provided, we cannot compute true manipulability
-        # Return placeholder statistics
-        if jacobians is None:
-            # Estimate based on distance from centroid (simple heuristic)
-            centroid = points.mean(axis=0)
-            distances = np.linalg.norm(points - centroid, axis=1)
-
-            # Normalize to [0, 1] range (higher manipulability near center)
-            max_dist = distances.max() if distances.max() > 0 else 1.0
-            manipulability_scores = 1.0 - (distances / max_dist)
-
-            # Filter by threshold
-            valid_mask = manipulability_scores >= self.config.jacobian_threshold
-            valid_scores = manipulability_scores[valid_mask]
-
-            if len(valid_scores) == 0:
-                valid_scores = np.array([0.0])
-        else:
-            # Compute true manipulability from Jacobians
+        if manipulability_scores is not None:
+            manipulability_scores = self._to_numpy(manipulability_scores)
+        elif jacobians is not None:
             manipulability_scores = self._compute_manipulability_index(jacobians)
-            valid_mask = manipulability_scores >= self.config.jacobian_threshold
-            valid_scores = manipulability_scores[valid_mask]
+        else:
+            logger.log_warning(
+                "ManipulabilityMetric needs jacobians or precomputed scores; "
+                "skipping (no placeholder statistics are produced)."
+            )
+            self.results = {}
+            return self.results
 
-            if len(valid_scores) == 0:
-                valid_scores = np.array([0.0])
+        valid_mask = manipulability_scores >= self.config.jacobian_threshold
+        valid_scores = manipulability_scores[valid_mask]
+        if len(valid_scores) == 0:
+            valid_scores = np.array([0.0])
 
         self.results = {
             "mean_manipulability": float(valid_scores.mean()),
@@ -107,10 +113,13 @@ class ManipulabilityMetric(BaseMetric):
         }
 
         # Compute isotropy if requested
-        if self.config.compute_isotropy and jacobians is not None:
-            condition_numbers = self._compute_condition_numbers(jacobians)
-            self.results["mean_condition"] = float(condition_numbers.mean())
-            self.results["std_condition"] = float(condition_numbers.std())
+        if self.config.compute_isotropy:
+            if condition_numbers is None and jacobians is not None:
+                condition_numbers = self._compute_condition_numbers(jacobians)
+            if condition_numbers is not None:
+                condition_numbers = self._to_numpy(condition_numbers)
+                self.results["mean_condition"] = float(condition_numbers.mean())
+                self.results["std_condition"] = float(condition_numbers.std())
 
         return self.results
 
