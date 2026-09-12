@@ -78,20 +78,51 @@ CONTROL_PART = "arm"
 SAMPLE_COUNT = 80
 COMMAND_CYCLE_TIME = 0.1
 COLLISION_SPHERE_FIT_DENSITY = 0.3
+# Keep the fitted sphere set unpadded: extra padding makes the initial pose
+# infeasible for this compact tutorial scene.
 ROBOT_COLLISION_BUFFER = 0.0
 MOVE_AFTER_COMMAND = 12
 OBSTACLE_SIZE = (0.08, 0.08, 0.10)
 OBSTACLE_START_POSITION = (0.59, -0.20, 0.455)
 BLOCKING_PATH_FRACTION = 0.50
+OBSTACLE_TRIGGER_PATH_FRACTION = 0.10
 OBSTACLE_MOVE_DURATION = 0.6
 AUTO_PLAY_LEAD_IN_DURATION = 0.75
 POST_EXECUTION_HOLD_DURATION = 1.0
 TRACKING_ERROR_THRESHOLD = 0.1
 MINIMUM_REPLAN_DETOUR = 0.04
 MAXIMUM_BLOCKED_PATH_CLEARANCE = 0.0
-MINIMUM_REPLAN_CLEARANCE = 0.01
+# The replanned trajectory is sampled at control waypoints; 5 mm leaves a
+# positive geometric margin without rejecting valid paths due to interpolation
+# between those samples.
+MINIMUM_REPLAN_CLEARANCE = 0.005
 MAXIMUM_FINAL_EEF_ERROR = 0.04
 TRAJECTORY_MARKER_STRIDE = 8
+
+
+def _obstacle_motion_trigger_command(
+    path_segment_count: int,
+    *,
+    configured_trigger: int = MOVE_AFTER_COMMAND,
+    path_fraction: float = BLOCKING_PATH_FRACTION,
+) -> int:
+    """Choose an in-flight obstacle trigger for the planned path.
+
+    The trigger is derived from the path instead of assuming that every
+    planner emits the same number of control commands.  It remains bounded by
+    the tutorial's configured trigger so longer trajectories keep the original
+    pacing, while short trajectories still move the obstacle before completion.
+    """
+    if path_segment_count < 1:
+        raise ValueError("path_segment_count must be at least one.")
+    if configured_trigger < 1:
+        raise ValueError("configured_trigger must be at least one.")
+    if not math.isfinite(path_fraction) or not 0.0 < path_fraction < 1.0:
+        raise ValueError("path_fraction must be finite and lie in (0, 1).")
+    return min(
+        configured_trigger,
+        max(1, round(path_segment_count * path_fraction)),
+    )
 
 
 def _animate_obstacle_to_pose(
@@ -423,7 +454,11 @@ def main() -> None:
                     roughness=0.35,
                 ),
             ),
-            attrs=RigidBodyAttributesCfg(),
+            # The obstacle remains in cuRobo's collision world, but its visual
+            # animation must not generate a physical impulse that knocks the
+            # robot out of its planned trajectory before replanning observes
+            # the scene revision.
+            attrs=RigidBodyAttributesCfg(enable_collision=False),
             body_type="kinematic",
             init_pos=list(OBSTACLE_START_POSITION),
             init_rot=[0.0, 0.0, 0.0],
@@ -498,6 +533,15 @@ def main() -> None:
         session.active_commands,
         control_part=CONTROL_PART,
     )
+    move_after_command = _obstacle_motion_trigger_command(
+        initial_eef_path.shape[1] - 1,
+        path_fraction=OBSTACLE_TRIGGER_PATH_FRACTION,
+    )
+    logger.log_info(
+        "Obstacle motion trigger set to "
+        f"command {move_after_command} for {initial_eef_path.shape[1] - 1} "
+        "planned path segments."
+    )
     blocking_obstacle_pose, blocking_waypoint_index = _blocking_obstacle_pose(
         obstacle.get_local_pose(to_matrix=True),
         initial_eef_path,
@@ -568,7 +612,7 @@ def main() -> None:
         if (
             not args.no_obstacle_motion
             and not obstacle_moved
-            and step.command_count >= MOVE_AFTER_COMMAND
+            and step.command_count >= move_after_command
         ):
             start_pose = obstacle.get_local_pose(to_matrix=True).clone()
             logger.log_warning(

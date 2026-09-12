@@ -2074,7 +2074,7 @@ class Articulation(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         zeros = torch.zeros((len(local_env_ids), self.dof), device=self.device)
-        self.set_qvel(zeros, env_ids=local_env_ids)
+        self.set_qvel(zeros, env_ids=local_env_ids, target=False)
         self.set_qvel(zeros, env_ids=local_env_ids, target=True)
         self.set_qf(zeros, env_ids=local_env_ids)
 
