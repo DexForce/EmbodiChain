@@ -389,6 +389,58 @@ See the Profiling section under Run Env for report format. Outputs are written t
 
 ---
 
+## Policy Evaluation
+
+Evaluate the latest checkpoint from an EmbodiChain training run:
+
+```bash
+embodichain eval-policy outputs/my_policy_<timestamp>
+```
+
+Open a simulator task in the Viewer:
+
+```bash
+embodichain eval-policy outputs/my_policy_<timestamp> \
+    --checkpoint best \
+    --viewer \
+    --renderer hybrid
+```
+
+Evaluate an explicit EmbodiChain checkpoint:
+
+```bash
+embodichain eval-policy \
+    --checkpoint /path/to/policy.pt \
+    --config /path/to/train.yaml \
+    --gym-config /path/to/gym.yaml
+```
+
+### Main arguments
+
+| Argument | Default | Description |
+|---|---|---|
+| ``RUN`` | *(optional)* | Training run containing ``run-manifest.json`` |
+| ``--checkpoint`` | ``latest`` with RUN | ``latest``, ``best``, or a checkpoint path |
+| ``--config`` | RUN manifest | Training configuration override |
+| ``--gym-config`` | RUN manifest | Simulator task configuration override |
+| ``--episodes`` | Training configuration | Number of completed task episodes |
+| ``--num-envs`` | Training configuration | Number of parallel Headless environments |
+| ``--viewer`` | Headless | Open the original simulator task in the DexSim Viewer |
+| ``--control-steps`` | Viewer runs continuously | Exact number of Policy actions |
+| ``--duration`` | *(optional)* | Duration converted to integer control steps |
+| ``--command`` | Task default | Native velocity command ``vx vy yaw_rate`` or external Profile command |
+| ``--keymap`` | ``wasd`` | Viewer command keys: ``wasd`` or ``arrows`` |
+| ``--renderer`` | Training configuration or ``hybrid`` | Viewer renderer |
+| ``--device`` | Training configuration | PyTorch inference device |
+| ``--sim-device`` | Inference device | Simulation device |
+| ``--output`` | RUN or checkpoint evaluations | Evaluation output parent directory |
+
+External Motion Profiles use the same command with `--profile`. See
+{doc}`policy_evaluation` for training-run layout, execution paths, Viewer
+controls, output reports, and the complete ANYmal-C example.
+
+---
+
 ## Annotate Grasp
 
 Launch the browser-based grasp-region annotation tool.

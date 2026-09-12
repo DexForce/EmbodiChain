@@ -27,24 +27,82 @@ from tensordict import TensorDict
 
 from embodichain.learning.rl.utils import (
     dict_to_tensordict,
-    flatten_dict_observation,
+    flatten_observation_groups,
 )
 
-__all__ = ["evaluate_episodes"]
+__all__ = [
+    "convert_policy_action_for_env",
+    "evaluate_episodes",
+    "infer_policy_action",
+    "prepare_policy_observation",
+]
 
 
-def _flat_observation(observation: Any, device: torch.device) -> torch.Tensor:
+def prepare_policy_observation(
+    observation: Any,
+    device: torch.device | str,
+    groups: tuple[str, ...] | None = None,
+) -> torch.Tensor:
+    """Flatten one Environment observation in the configured input order."""
+    device = torch.device(device)
     tensor_dict = dict_to_tensordict(observation, device)
-    return flatten_dict_observation(tensor_dict)
+    return flatten_observation_groups(tensor_dict, groups)
 
 
-def _action_for_env(env: Any, action: torch.Tensor) -> Any:
+def infer_policy_action(
+    policy: torch.nn.Module,
+    observation: Any,
+    *,
+    device: torch.device | str,
+    num_envs: int,
+    observation_transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
+) -> torch.Tensor:
+    """Run the same deterministic Policy call used by RL evaluation."""
+    device = torch.device(device)
+    policy_module = getattr(policy, "module", policy)
+    actor_obs = prepare_policy_observation(
+        observation,
+        device,
+        getattr(policy_module, "actor_obs_groups", None),
+    )
+    if observation_transform is not None:
+        actor_obs = observation_transform(actor_obs)
+    fields = {"obs": actor_obs}
+    if getattr(policy_module, "uses_separate_critic_obs", False):
+        fields["critic_obs"] = prepare_policy_observation(
+            observation,
+            device,
+            getattr(policy_module, "critic_obs_groups", None),
+        )
+    policy_input = TensorDict(fields, batch_size=[num_envs], device=device)
+    return policy.get_action(policy_input, deterministic=True)["action"]
+
+
+def convert_policy_action_for_env(env: Any, action: torch.Tensor) -> Any:
+    """Move and convert a flat Policy action for the task Environment.
+
+    Args:
+        env: Environment that owns action preprocessing and simulation state.
+        action: Flat action produced on the Policy inference device.
+
+    Returns:
+        Action on the Environment device, converted through its action manager
+        when one is available.
+    """
     action_manager = getattr(env, "action_manager", None)
     if action_manager is None and hasattr(env, "get_wrapper_attr"):
         try:
             action_manager = env.get_wrapper_attr("action_manager")
         except AttributeError:
             action_manager = None
+    env_device = getattr(env, "device", None)
+    if env_device is None and hasattr(env, "get_wrapper_attr"):
+        try:
+            env_device = env.get_wrapper_attr("device")
+        except AttributeError:
+            env_device = None
+    if env_device is not None:
+        action = action.to(env_device)
     if action_manager is None:
         return action
     return action_manager.convert_policy_action_to_env_action(action)
@@ -118,17 +176,15 @@ def evaluate_episodes(
     try:
         observation, _ = env.reset(seed=seed)
         while len(returns) < num_episodes:
-            flat_observation = _flat_observation(observation, device)
-            if observation_transform is not None:
-                flat_observation = observation_transform(flat_observation)
-            policy_input = TensorDict(
-                {"obs": flat_observation},
-                batch_size=[num_envs],
+            action = infer_policy_action(
+                policy,
+                observation,
                 device=device,
+                num_envs=num_envs,
+                observation_transform=observation_transform,
             )
-            policy_output = policy.get_action(policy_input, deterministic=True)
             observation, reward, terminated, truncated, info = env.step(
-                _action_for_env(env, policy_output["action"])
+                convert_policy_action_for_env(env, action)
             )
             reward = torch.as_tensor(reward, device=device).reshape(num_envs)
             done = (

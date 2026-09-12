@@ -37,7 +37,7 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
 )
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
@@ -51,7 +51,10 @@ from embodichain.lab.sim.atomic_actions.requirements import (
     SkillBindingContract,
 )
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
-from embodichain.lab.sim.atomic_actions.trajectory_ops import build_pose_plan_states
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    build_pose_plan_states,
+    to_full_robot_trajectory,
+)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -189,25 +192,22 @@ class Pour(AtomicAction[PourGoal, PourOptions]):
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
-        full = torch.empty(
-            (self.num_envs, result.positions.shape[1], self.robot_dof),
-            dtype=context.robot.qpos.dtype,
-            device=self.device,
+        base_qpos = context.last_qpos.clone()
+        base_qpos[:, hand_joint_ids] = hand_grasp_qpos
+        _, timed = to_full_robot_trajectory(
+            result,
+            base_qpos=base_qpos,
+            joint_ids=arm_joint_ids,
+            env_ids=context.env_ids,
+            control_dt=context.require_control_dt(),
         )
-        full[:] = context.last_qpos.unsqueeze(1)
-        full[:, :, arm_joint_ids] = result.positions
-        full[:, :, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
 
         return self.build_plan(
             request,
             context,
             success=success,
-            trajectory=TimedTrajectory.from_positions(
-                full,
-                env_ids=context.env_ids,
-                dt=result.dt,
-            ),
-            segment_lengths={"pour": full.shape[1]},
+            trajectory=timed,
+            segment_lengths={"pour": timed.waypoint_count},
         )
 
 

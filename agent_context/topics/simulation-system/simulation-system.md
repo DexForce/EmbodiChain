@@ -6,6 +6,7 @@
 |------|------|
 | Public simulation package | `embodichain/lab/sim/__init__.py` |
 | Motion capability namespace | `embodichain/lab/sim/motion/__init__.py` |
+| Fixed-cadence trajectory playback | `embodichain/lab/sim/motion/execution.py` |
 | World and scene owner | `embodichain/lab/sim/sim_manager.py` → `SimulationManager` |
 | Global simulation config | `embodichain/lab/sim/sim_manager.py` → `SimulationManagerCfg` |
 | Spawn lifecycle coordinator | `embodichain/lab/sim/spawn/scene.py` → `SpawnScene` |
@@ -232,7 +233,7 @@ The former public `set_manual_update()` switch is removed. The manager owns
 manual mode internally, and `SimulationManager.update()` is the only supported
 physics-time advancement boundary.
 
-`SpawnScene` always requests DexSim replication with
+ `SpawnScene` always requests DexSim replication with
 `collision_policy="isolated"`. Consequently, when `num_envs > 1`, all
 per-environment dynamic, kinematic, and static rigid shapes and every
 articulation link shape collide only with entities in the same Arena. Global
@@ -317,7 +318,14 @@ host-side writes and disables CUDA Graph replay, while shape-material and joint
 trajectory controls remain graph-compatible. Register all controls before
 `prepare()` and never reach into `_spawn_scene.builder` from a task or demo.
 
-`scripts/tutorials/sim/gizmo_robot.py` advances physics through `sim.update()`. It initializes
+Standalone timed-trajectory playback uses `play_joint_trajectory()`. It keeps
+`SimulationManagerCfg.physics_dt` unchanged, requires the selected command
+period to be an integer multiple of that physics period, and advances that
+many physics substeps per command. Planner arrival intervals are input to
+retiming, never replacement values for the physics timestep.
+
+`scripts/tutorials/sim/gizmo_robot.py` advances physics through `sim.update()` and
+supports only manual physics. It initializes
 GPU physics after robot creation when needed, sets both current and target
 joint positions, and advances once before opening the window. It explicitly
 sets `GizmoCfg(ik_start_enabled=True)` so the native controller activates on the
@@ -581,9 +589,10 @@ blindly.
 
 `RenderCfg.apply_to_dexsim_config()` owns renderer, sampling, tone mapping,
 and `DLSSCfg` conversion into `WorldConfig`. DLSS settings apply to `hybrid`,
-`fast-rt`, and `rt`, after automatic renderer resolution. Defaults enable
-the DLSS master switch and SR, with Balanced quality and zero render dimensions
-for engine-derived scaling. Offscreen DLSS and RR retain DexSim native defaults.
+`fast-rt`, and `rt`, after automatic renderer resolution. Defaults enable the
+DLSS master switch and SR, with Balanced quality and zero render dimensions for
+engine-derived scaling. Window and offscreen DLSS/RR switches remain independent
+where supported, and offscreen settings retain DexSim native defaults.
 Always forward the master switch, including `False`. Headless initialization
 must retain DLSS settings because offscreen cameras or a later window can use
 them. The actual window/camera owns output size; compatibility target fields
@@ -914,6 +923,9 @@ Entity/IK gizmo configuration is owned by [native gizmos](../sim-visualization/n
   object initialization is only for state and supported live batch properties.
 - Physics advances only through `SimulationManager.update()`; there is no
   public stepping-mode configuration or switch.
+ - Interactive loops own their fixed physics timestep and optional wall-clock
+   pacing; never pass a planner waypoint interval as `SimulationManager.update()`'s
+   physics timestep. Quantize the path to a fixed command grid first.
 - Drawing markers and publishing visualization do not advance physics.
   Use `capture_visualization(force=True)` to publish marker edits while paused.
 - Reset only the requested environment rows and honor

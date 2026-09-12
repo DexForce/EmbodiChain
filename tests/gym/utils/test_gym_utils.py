@@ -578,7 +578,7 @@ def test_launcher_preserves_gym_renderer_when_cli_omits_override():
 
     assert args.renderer is None
     assert "renderer" not in merged_config
-    assert merged_config["render_cfg"]["renderer"] == "rt"
+    assert merged_config["render_cfg"]["renderer"] == "offline-rt"
 
 
 def test_launcher_seed_overrides_gym_config() -> None:
@@ -1737,7 +1737,7 @@ class TestConfigToCfgFromFile:
                 "speed_tolerance": 0.1,
             },
             "render_cfg": {
-                "renderer": "rt",
+                "renderer": "offline-rt",
                 "spp": 4,
                 "tone_mapping_enabled": True,
                 "tone_mapping_exposure": 1.25,
@@ -1806,7 +1806,7 @@ class TestConfigToCfgFromFile:
         assert cfg.sim_cfg.physics_config.enable_ccd is True
         assert cfg.sim_cfg.physics_config.length_tolerance == 0.02
         assert cfg.sim_cfg.physics_config.speed_tolerance == 0.1
-        assert cfg.sim_cfg.render_cfg.renderer == "rt"
+        assert cfg.sim_cfg.render_cfg.renderer == "offline-rt"
         assert cfg.sim_cfg.render_cfg.spp == 4
         assert cfg.sim_cfg.render_cfg.tone_mapping_enabled is True
         assert cfg.sim_cfg.render_cfg.tone_mapping_exposure == 1.25
@@ -1876,7 +1876,7 @@ class TestConfigToCfgFromFile:
                 "enable_ccd": True,
             },
             "render_cfg": {
-                "renderer": "rt",
+                "renderer": "offline-rt",
                 "spp": 8,
                 "tone_mapping_enabled": True,
             },

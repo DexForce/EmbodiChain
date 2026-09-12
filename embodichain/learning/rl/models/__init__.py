@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 import inspect
 from typing import Dict, Type
 
@@ -28,6 +29,7 @@ from .actor_critic import ActorCritic
 from .actor_only import ActorOnly
 from .policy import Policy
 from .mlp import MLP
+from .normalizer import EmpiricalNormalizer
 
 # In-module policy registry
 _POLICY_REGISTRY: Dict[str, Type[Policy]] = {}
@@ -58,6 +60,48 @@ def _resolve_space_dim(space_or_dim: spaces.Space | int, name: str) -> int:
     )
 
 
+def resolve_policy_obs_groups(
+    policy_block: Mapping[str, object],
+) -> tuple[tuple[str, ...] | None, tuple[str, ...] | None]:
+    """Resolve actor and critic observation groups from policy configuration.
+
+    Args:
+        policy_block: Policy configuration containing an optional
+            ``obs_groups`` mapping.
+
+    Returns:
+        Actor and critic observation group names. Both are ``None`` when the
+        existing flatten-all behavior is selected.
+
+    Raises:
+        TypeError: If the observation-group configuration is malformed.
+        ValueError: If the actor observation set is empty.
+    """
+    raw_groups = policy_block.get("obs_groups")
+    if raw_groups is None:
+        return None, None
+    if not isinstance(raw_groups, Mapping):
+        raise TypeError("policy.obs_groups must be a mapping.")
+
+    def _normalize(name: str, value: object) -> tuple[str, ...] | None:
+        if value is None:
+            return None
+        if isinstance(value, str) or not isinstance(value, Sequence):
+            raise TypeError(f"policy.obs_groups.{name} must be a list of names.")
+        groups = tuple(value)
+        if not all(isinstance(group, str) for group in groups):
+            raise TypeError(f"policy.obs_groups.{name} must contain only string names.")
+        if len(groups) == 0:
+            raise ValueError(f"policy.obs_groups.{name} cannot be empty.")
+        return groups
+
+    actor_groups = _normalize("actor", raw_groups.get("actor"))
+    if actor_groups is None:
+        raise ValueError("policy.obs_groups.actor is required when obs_groups is set.")
+    critic_groups = _normalize("critic", raw_groups.get("critic"))
+    return actor_groups, actor_groups if critic_groups is None else critic_groups
+
+
 def build_policy(
     policy_block: dict,
     obs_space: spaces.Space | int,
@@ -65,6 +109,7 @@ def build_policy(
     device: torch.device,
     actor: torch.nn.Module | None = None,
     critic: torch.nn.Module | None = None,
+    critic_obs_space: spaces.Space | int | None = None,
 ) -> Policy:
     """Build a policy from config using spaces for extensibility.
 
@@ -78,6 +123,7 @@ def build_policy(
             f"Policy '{name}' is not registered. Available policies: {available}"
         )
     policy_cls = _POLICY_REGISTRY[name]
+    actor_obs_groups, critic_obs_groups = resolve_policy_obs_groups(policy_block)
 
     if name == "actor_critic":
         if actor is None or critic is None:
@@ -85,6 +131,15 @@ def build_policy(
                 "ActorCritic policy requires external 'actor' and 'critic' modules."
             )
         obs_dim = _resolve_space_dim(obs_space, "obs_space")
+        critic_obs_dim = (
+            None
+            if critic_obs_space is None
+            else _resolve_space_dim(critic_obs_space, "critic_obs_space")
+        )
+        if actor_obs_groups != critic_obs_groups and critic_obs_dim is None:
+            raise ValueError(
+                "A distinct critic observation group requires critic_obs_space."
+            )
         action_dim = _resolve_space_dim(action_space, "action_space")
         return policy_cls(
             obs_dim=obs_dim,
@@ -92,6 +147,17 @@ def build_policy(
             device=device,
             actor=actor,
             critic=critic,
+            critic_obs_dim=critic_obs_dim,
+            actor_obs_groups=actor_obs_groups,
+            critic_obs_groups=critic_obs_groups,
+            actor_obs_normalization=bool(
+                policy_block.get("actor_obs_normalization", False)
+            ),
+            critic_obs_normalization=bool(
+                policy_block.get("critic_obs_normalization", False)
+            ),
+            initial_action_std=float(policy_block.get("initial_action_std", 1.0)),
+            action_std_range=tuple(policy_block.get("action_std_range", (1e-6, 1e6))),
         )
     elif name == "actor_only":
         if actor is None:
@@ -103,6 +169,7 @@ def build_policy(
             action_dim=action_dim,
             device=device,
             actor=actor,
+            actor_obs_groups=actor_obs_groups,
         )
 
     init_params = inspect.signature(policy_cls.__init__).parameters
@@ -164,6 +231,8 @@ __all__ = [
     "build_policy",
     "build_mlp_from_cfg",
     "get_policy_class",
+    "resolve_policy_obs_groups",
     "Policy",
     "MLP",
+    "EmpiricalNormalizer",
 ]

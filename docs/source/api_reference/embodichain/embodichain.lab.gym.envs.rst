@@ -22,6 +22,7 @@ through :func:`~embodichain.lab.gym.utils.registration.make`.
 
       demo
       differentiable_env
+      expert_trajectory
       task_program
       managers
       types
@@ -72,6 +73,49 @@ advancing the Newton solver.
     :members:
     :inherited-members:
     :show-inheritance:
+
+Expert Trajectories
+-------------------
+
+Expert trajectory configuration is source-neutral: handwritten generators,
+motion generation, and Task Program execution use the same environment-owned
+joint command mode. Position-only control remains the default. The optional
+position-velocity mode records a stable flat ``[qpos, qvel]`` action layout
+without changing the policy-facing Gym action space.
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_trajectory
+
+.. autosummary::
+   :nosignatures:
+
+   EXPERT_TRAJECTORY_SCHEMA_VERSION
+   ExpertActionSpec
+   ExpertJointTrajectory
+   ExpertTrajectoryCfg
+   JointCommandMode
+   build_expert_action_spec
+   encode_expert_action
+   prepare_expert_joint_trajectory
+
+.. autodata:: EXPERT_TRAJECTORY_SCHEMA_VERSION
+
+.. autoclass:: ExpertActionSpec
+    :members:
+
+.. autoclass:: ExpertJointTrajectory
+    :members:
+
+.. autoclass:: ExpertTrajectoryCfg
+    :members:
+    :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autodata:: JointCommandMode
+
+.. autofunction:: build_expert_action_spec
+
+.. autofunction:: encode_expert_action
+
+.. autofunction:: prepare_expert_joint_trajectory
 
 Controller-ready Actions
 ------------------------

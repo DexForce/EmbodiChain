@@ -109,9 +109,32 @@ the selected `RecoveryPolicy`.
 trajectory or endpoint command must align to it; integrations must not silently
 resample fractional durations.
 
+Primitive planner results are explicitly retimed before their controlled-joint
+paths are embedded into a full-robot `TimedTrajectory`. Off-grid duration rounds
+up to a whole control interval, qvel is recomputed from the executed samples,
+and now-invalid native acceleration samples are discarded.
+
 Tracking recovery is separate from task-level semantic recovery:
 
 - Atomic Actions owns planning failure, target/collision revision, transport
   acknowledgement, tracking error, timeout, retry, and safe stop.
 - Task Program may perform bounded workflow recovery after the action reaches
   a semantic effect boundary.
+
+## Velocity target contract
+
+`MotionPolicy.velocity_targets` selects `auto` (use trajectory velocities,
+default) or `zero` (explicit position-only control).
+Configured execution policies decode the same field under `motion`.
+`AtomicAction.build_plan` derives missing velocities after composite skills
+have assembled their final full-robot positions and timing. Stationary joint
+intervals and terminal settling commands use zero velocity; failed rows remain
+held. MoveHeldObject and Pour preserve native arm derivatives when embedding
+unchanged timed planner output. Differentiation does not retime composite
+paths to enforce robot velocity/acceleration limits.
+
+`SimulationExecutionAdapter` always clears absent velocity references to zero;
+it never substitutes observed velocities or depends on peer active masks.
+It writes position and velocity targets through the existing `set_qpos` and
+`set_qvel` APIs. Inactive rows hold observed positions with zero target velocity.
+A nonzero damping gain is needed for the velocity error to contribute to tracking.

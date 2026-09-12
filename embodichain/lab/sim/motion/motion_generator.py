@@ -45,7 +45,8 @@ from embodichain.lab.sim.motion.planners import (
 from embodichain.compute.trajectory import (
     interpolate_with_distance,
     interpolate_with_nums,
-    resample_with_distance,
+    resample_in_time,
+    differentiate_positions,
 )
 from embodichain.utils import logger, configclass
 from .planners.utils import (
@@ -543,9 +544,15 @@ class MotionGenerator:
         """Dispatch batched targets through the configured planner backend."""
         move_types = {state.move_type for state in target_states}
         move_type = target_states[0].move_type
+        uses_sparse_joint_waypoints = (
+            len(move_types) == 1
+            and move_type == MoveType.JOINT_MOVE
+            and self.planner.uses_sparse_joint_waypoints
+        )
         should_preinterpolate = (
             len(move_types) == 1
             and options.is_interpolate
+            and not uses_sparse_joint_waypoints
             and not self.planner.supports_move_type(MoveType.EEF_MOVE)
             and self.planner.supports_move_type(MoveType.JOINT_MOVE)
         )
@@ -596,6 +603,30 @@ class MotionGenerator:
             ]
         else:
             target_plan_states = target_states
+            if uses_sparse_joint_waypoints and options.start_qpos is not None:
+                if any(state.qpos is None for state in target_states):
+                    raise ValueError("JOINT_MOVE target states require qpos tensors.")
+                reference_qpos = target_states[0].qpos
+                assert reference_qpos is not None
+                start_qpos = options.start_qpos
+                if start_qpos.dim() == 1:
+                    start_qpos = start_qpos.unsqueeze(0)
+                start_qpos = start_qpos.to(reference_qpos)
+                if start_qpos.shape != reference_qpos.shape:
+                    raise ValueError(
+                        "start_qpos and joint target shapes must match; received "
+                        f"{tuple(start_qpos.shape)} and {tuple(reference_qpos.shape)}."
+                    )
+                # A single target still needs the observed start as an
+                # explicit waypoint, including when it is stationary. Repeated
+                # waypoints are valid and represent a zero-duration hold.
+                if len(target_states) == 1 or not torch.equal(
+                    start_qpos, reference_qpos
+                ):
+                    target_plan_states = [
+                        PlanState(move_type=MoveType.JOINT_MOVE, qpos=start_qpos),
+                        *target_states,
+                    ]
 
         unsupported_move_types = {
             candidate
@@ -859,8 +890,6 @@ class MotionGenerator:
             )
         if dt.device != device or not torch.isfinite(dt).all() or (dt < 0).any():
             raise ValueError("MotionGenerator returned invalid time deltas.")
-        raw_duration = dt.sum(dim=1)
-
         resampled = False
         preserve_samples = getattr(self.planner, "preserve_plan_samples", False) is True
         if (
@@ -868,19 +897,8 @@ class MotionGenerator:
             and not preserve_samples
             and positions.shape[1] != options.sample_count
         ):
-            positions = resample_with_distance(
-                trajectory=positions,
-                interp_num=options.sample_count,
-                device=device,
-            )
+            positions, dt = resample_in_time(positions, dt, options.sample_count)
             resampled = True
-            dt = torch.zeros(
-                positions.shape[:2],
-                dtype=result.dt.dtype,
-                device=device,
-            )
-            if positions.shape[1] > 1:
-                dt[:, 1:] = raw_duration[:, None] / (positions.shape[1] - 1)
 
         def normalize_derivative(
             value: torch.Tensor | None,
@@ -929,6 +947,8 @@ class MotionGenerator:
                     accelerations,
                     torch.zeros_like(accelerations),
                 )
+        if velocities is None:
+            velocities = differentiate_positions(positions, dt)
 
         return PlanResult(
             success=success,

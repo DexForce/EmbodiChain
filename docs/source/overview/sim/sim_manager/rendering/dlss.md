@@ -3,7 +3,7 @@
 EmbodiChain exposes the core NVIDIA DLSS controls through
 {class}`~embodichain.lab.sim.cfg.DLSSCfg` and passes them to DexSim when the
 {class}`~embodichain.lab.sim.sim_manager.SimulationManager` creates its world.
-The integration applies to the `hybrid`, `fast-rt`, and `rt` renderers. DexSim
+The integration applies to the `hybrid`, `fast-rt`, and `offline-rt` renderers. DexSim
 owns DLSS feature detection, initialization, temporal history, and fallback;
 constructing a configuration object does not by itself initialize DLSS.
 
@@ -99,7 +99,7 @@ sim_config = SimulationManagerCfg(
     width=1920,
     height=1080,
     render_cfg=RenderCfg(
-        renderer="rt",
+        renderer="offline-rt",
         dlss=DLSSCfg(render_width=1280, render_height=720),
     ),
 )

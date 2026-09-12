@@ -20,6 +20,32 @@ import argparse
 import time
 from embodichain.cli.sim import add_sim_args_to_parser
 
+import numpy as np
+import torch
+
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
+from embodichain.lab.sim.cfg import RenderCfg
+from embodichain.lab.sim.objects import Robot
+from embodichain.lab.sim.motion.motion_generator import (
+    MotionGenCfg,
+    MotionGenOptions,
+    MotionGenerator,
+)
+from embodichain.lab.sim.motion.execution import (
+    JointTrajectoryPlaybackCfg,
+    play_joint_trajectory,
+)
+from embodichain.lab.sim.motion.planners import (
+    PlanState,
+    ToppraPlanOptions,
+    ToppraPlannerCfg,
+)
+from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
+from embodichain.lab.sim.robots import CobotMagicCfg
+
+RECORD_WIDTH = 1920
+RECORD_HEIGHT = 1080
 DEFAULT_ARENA_SPACE = 3.0
 
 
@@ -129,6 +155,8 @@ def move_robot_along_trajectory(
     robot: Robot,
     arm_name: str,
     qpos_trajectory: torch.Tensor | Sequence[torch.Tensor],
+    qvel_trajectory: torch.Tensor | None,
+    dt: torch.Tensor,
 ) -> None:
     """Play back a planned joint trajectory for one or more environments.
 
@@ -141,7 +169,10 @@ def move_robot_along_trajectory(
         arm_name: Name of the robot arm to control.
         qpos_trajectory: Joint positions shaped ``(B, N, DOF)``, ``(N, DOF)``,
             or a sequence of waypoint tensors.
-        delay: Time delay between each step in seconds.
+        qvel_trajectory: Matching native planner velocities, when available.
+            Playback validates this shape but recomputes velocities after
+            retiming to the executed control grid.
+        dt: Per-waypoint arrival intervals shaped ``(B, N)``.
     """
     if isinstance(qpos_trajectory, Sequence):
         qpos_steps = list(qpos_trajectory)
@@ -158,11 +189,16 @@ def move_robot_along_trajectory(
             "qpos_trajectory must have shape (B, N, DOF) or (N, DOF), "
             f"got {tuple(qpos_trajectory.shape)}."
         )
-
-    joint_ids = robot.get_joint_ids(arm_name)
-    for qpos_step in qpos_trajectory.transpose(0, 1):
-        robot.set_qpos(qpos=qpos_step, joint_ids=joint_ids)
-        sim.update(step=4)
+    if qvel_trajectory is not None and qvel_trajectory.shape != qpos_trajectory.shape:
+        raise ValueError("qvel_trajectory must have the same shape as qpos_trajectory.")
+    play_joint_trajectory(
+        sim,
+        robot,
+        positions=qpos_trajectory,
+        dt=dt,
+        joint_ids=robot.get_joint_ids(arm_name),
+        cfg=JointTrajectoryPlaybackCfg(joint_command_mode="position_velocity"),
+    )
 
 
 def create_demo_trajectory(
@@ -301,6 +337,8 @@ def main(args: argparse.Namespace | None = None) -> None:
             robot=robot,
             arm_name=arm_name,
             qpos_trajectory=joint_plan.positions,
+            qvel_trajectory=joint_plan.velocities,
+            dt=joint_plan.dt,
         )
 
         options.is_linear = True
@@ -318,6 +356,8 @@ def main(args: argparse.Namespace | None = None) -> None:
             robot=robot,
             arm_name=arm_name,
             qpos_trajectory=cartesian_plan.positions,
+            qvel_trajectory=cartesian_plan.velocities,
+            dt=cartesian_plan.dt,
         )
     finally:
         if sim.is_window_recording():

@@ -129,6 +129,7 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
             base_qpos=context.robot.qpos,
             joint_ids=joint_ids,
             env_ids=context.env_ids,
+            control_dt=context.require_control_dt(),
         )
         return self.build_plan(
             request,

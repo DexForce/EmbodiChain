@@ -217,7 +217,7 @@ Command-line options:
 - ``--device cpu|cuda``: Choose simulation device
 - ``--num_envs N``: Number of parallel environments
 - ``--headless``: Run without GUI for automated testing
-- ``--renderer auto|hybrid|fast-rt|rt``: Select the renderer
+- ``--renderer auto|hybrid|fast-rt|offline-rt``: Select the renderer
 - ``--viser``: Use browser-based interaction
 
 Once running:

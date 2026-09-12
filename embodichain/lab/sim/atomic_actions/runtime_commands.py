@@ -130,6 +130,7 @@ class JointPositionPayload(RuntimeCommandPayload):
     Args:
         positions: Joint positions with shape ``(batch_size, control_dof)``.
         velocities: Optional joint velocities with the same shape and device.
+            Missing velocities mean a zero velocity target in simulation.
     """
 
     TRANSPORT_ID: ClassVar[str] = JointPositionTarget.TRANSPORT_ID
