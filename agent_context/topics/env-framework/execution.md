@@ -110,7 +110,7 @@ EmbodiedEnv.__init__(cfg)
   │     │     ├── _setup_robot()  → Robot + single_action_space
   │     │     ├── _prepare_scene()  → lights, background, objects
   │     │     └── _setup_sensors() → sensors dict
-  │     ├── init GPU physics (if CUDA)
+  │     ├── SimulationManager.prepare() (backend-neutral readiness boundary)
   │     ├── open window (if not headless)
   │     └── _init_sim_state()
   │           ├── _apply_functor_filter() (strip visual rand if configured)

@@ -42,6 +42,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     init_rollout_buffer_from_config,
 )
 from embodichain.lab.sim.robots import URRobotCfg
+from embodichain.lab.sim.cfg import DefaultPhysicsCfg, NewtonPhysicsCfg
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.utils.utility import load_config, save_config
 
@@ -61,6 +62,178 @@ _TABLEWARE_CONFIG_ROOT = (
 )
 CUBE_ROBOT_PROFILE_ID = "ur5_dh_pgi_140_80"
 CUBE_SCENE_REGISTRY_ID = "task_program_repeated_pick_place"
+
+
+def test_env_launcher_args_include_physics():
+    """Test that launcher args expose the physics backend config selector."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+
+    default_args = parser.parse_args([])
+    assert default_args.physics == "default"
+    assert default_args.device is None
+
+    newton_args = parser.parse_args(["--physics", "newton"])
+    assert newton_args.physics == "newton"
+    assert newton_args.device is None
+
+
+def test_required_gym_launcher_preserves_device_when_omitted() -> None:
+    """A config-backed launcher does not manufacture a CPU override."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    args = parser.parse_args(["--gym_config", "newton.yaml"])
+    gym_config = {"physics": "newton", "device": "cuda:1"}
+
+    merged_config = merge_args_with_gym_config(args, gym_config)
+
+    assert args.device is None
+    assert merged_config["device"] == "cuda:1"
+
+
+def test_required_gym_launcher_applies_explicit_cpu_device() -> None:
+    """An explicit CPU selection overrides a Newton config uniformly."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    args = parser.parse_args(["--gym_config", "newton.yaml", "--device", "cpu"])
+
+    merged_config = merge_args_with_gym_config(args, {"physics": "newton"})
+
+    assert merged_config["device"] == "cpu"
+
+
+def test_merge_args_with_gym_config_rejects_physics_override():
+    """A launcher cannot change the backend owned by a Gym config file."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    args = parser.parse_args(["--gym_config", "default.yaml", "--physics", "newton"])
+
+    with pytest.raises(ValueError, match="cannot override a file-owned backend"):
+        merge_args_with_gym_config(args, {"physics": "default"})
+
+
+def test_merge_args_with_gym_config_accepts_declared_physics():
+    """The optional launcher value may confirm the file-owned backend."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    args = parser.parse_args(["--gym_config", "newton.yaml", "--physics", "newton"])
+
+    merged_config = merge_args_with_gym_config(args, {"physics": "newton"})
+
+    assert merged_config["physics"] == "newton"
+
+
+def test_config_to_cfg_requires_explicit_physics_backend():
+    """Inline Gym configs cannot rely on an implicit Default backend."""
+    config = {"id": "EmbodiedEnv-v1", "env": {}, "robot": {"uid": "robot"}}
+
+    with pytest.raises(ValueError, match="explicitly declare physics"):
+        config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+
+@pytest.mark.parametrize("backend", (None, True, "physx", " newton"))
+def test_config_to_cfg_rejects_invalid_physics_backend(backend: object) -> None:
+    """Only the two exact public backend names are accepted."""
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": backend,
+        "env": {},
+        "robot": {"uid": "robot"},
+    }
+
+    with pytest.raises(ValueError, match="exactly 'default' or 'newton'"):
+        config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+
+@pytest.mark.parametrize(
+    ("backend", "physics_config", "field_name"),
+    (
+        ("default", {"num_substeps": 2}, "num_substeps"),
+        ("newton", {"enable_ccd": True}, "enable_ccd"),
+    ),
+)
+def test_config_to_cfg_rejects_other_backend_physics_fields(
+    backend: str,
+    physics_config: dict[str, object],
+    field_name: str,
+) -> None:
+    """Backend-native world fields must match the declared backend."""
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": backend,
+        "physics_config": physics_config,
+        "env": {},
+        "robot": {"uid": "robot"},
+    }
+
+    with pytest.raises(
+        ValueError,
+        match=rf"physics_config does not match.*{backend}.*{field_name}",
+    ):
+        config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+
+@pytest.mark.parametrize(
+    ("backend", "physics_config", "config_type"),
+    (
+        ("default", {"enable_ccd": True}, DefaultPhysicsCfg),
+        ("newton", {"num_substeps": 2}, NewtonPhysicsCfg),
+    ),
+)
+def test_config_to_cfg_builds_declared_physics_config(
+    backend: str,
+    physics_config: dict[str, object],
+    config_type: type[DefaultPhysicsCfg] | type[NewtonPhysicsCfg],
+) -> None:
+    """Each file constructs only the physics config type it declares."""
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": backend,
+        "physics_config": physics_config,
+        "env": {},
+        "robot": {"uid": "robot"},
+    }
+
+    cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+    assert type(cfg.sim_cfg.physics_cfg) is config_type
+
+
+@pytest.mark.parametrize(
+    ("backend", "expected_device"),
+    (("default", "cpu"), ("newton", "cuda:0")),
+    ids=("default", "newton"),
+)
+def test_config_to_cfg_preserves_backend_device_default(
+    backend: str,
+    expected_device: str,
+) -> None:
+    """Omitting device keeps the selected backend's own default."""
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": backend,
+        "env": {},
+        "robot": {"uid": "robot"},
+    }
+
+    cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+    assert cfg.sim_cfg.device == expected_device
+
+
+def test_config_to_cfg_applies_explicit_cpu_to_newton() -> None:
+    """The shared device field explicitly selects Newton CPU execution."""
+    config = {
+        "id": "EmbodiedEnv-v1",
+        "physics": "newton",
+        "device": "cpu",
+        "env": {},
+        "robot": {"uid": "robot"},
+    }
+
+    cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+    assert cfg.sim_cfg.device == "cpu"
 
 
 class TestInitRolloutBufferFromConfig:
@@ -297,11 +470,12 @@ def test_merge_args_with_gym_config_overrides_max_episodes():
         device="cpu",
         headless=False,
         renderer="auto",
+        physics="default",
         gpu_id=0,
         arena_space=5.0,
         max_episodes=12,
     )
-    gym_config = {"max_episodes": 3, "id": "Dummy-v0"}
+    gym_config = {"max_episodes": 3, "id": "Dummy-v0", "physics": "default"}
 
     merged_config = merge_args_with_gym_config(args, gym_config)
 
@@ -316,11 +490,12 @@ def test_merge_args_with_gym_config_keeps_default_max_episodes():
         device="cpu",
         headless=False,
         renderer="auto",
+        physics="default",
         gpu_id=0,
         arena_space=5.0,
         max_episodes=None,
     )
-    gym_config = {"max_episodes": 3, "id": "Dummy-v0"}
+    gym_config = {"max_episodes": 3, "id": "Dummy-v0", "physics": "default"}
 
     merged_config = merge_args_with_gym_config(args, gym_config)
 
@@ -346,7 +521,9 @@ def test_merge_args_with_gym_config_enables_headless_viser():
         viser_env_ids=[1, 3],
     )
 
-    merged_config = merge_args_with_gym_config(args, {"id": "Dummy-v0"})
+    merged_config = merge_args_with_gym_config(
+        args, {"id": "Dummy-v0", "physics": "default"}
+    )
 
     assert merged_config["headless"] is True
     assert merged_config["visualization"] == {
@@ -379,7 +556,9 @@ def test_merge_args_with_gym_config_accepts_all_viser_environments():
         viser_env_ids=["all"],
     )
 
-    merged_config = merge_args_with_gym_config(args, {"id": "Dummy-v0"})
+    merged_config = merge_args_with_gym_config(
+        args, {"id": "Dummy-v0", "physics": "default"}
+    )
 
     assert merged_config["visualization"]["env_ids"] is None
 
@@ -390,12 +569,16 @@ def test_launcher_preserves_gym_renderer_when_cli_omits_override():
     add_env_launcher_args_to_parser(parser, require_gym_config=True)
 
     args = parser.parse_args(["--gym_config", "gym_config.yaml"])
-    gym_config = {"id": "Dummy-v0", "render_cfg": {"renderer": "offline-rt"}}
+    gym_config = {
+        "id": "Dummy-v0",
+        "physics": "default",
+        "render_cfg": {"renderer": "rt"},
+    }
     merged_config = merge_args_with_gym_config(args, gym_config)
 
     assert args.renderer is None
     assert "renderer" not in merged_config
-    assert merged_config["render_cfg"]["renderer"] == "offline-rt"
+    assert merged_config["render_cfg"]["renderer"] == "rt"
 
 
 def test_launcher_seed_overrides_gym_config() -> None:
@@ -404,7 +587,7 @@ def test_launcher_seed_overrides_gym_config() -> None:
     add_env_launcher_args_to_parser(parser, require_gym_config=True)
 
     args = parser.parse_args(["--gym_config", "gym_config.yaml", "--seed", "1234"])
-    merged_config = merge_args_with_gym_config(args, {"seed": 99})
+    merged_config = merge_args_with_gym_config(args, {"physics": "default", "seed": 99})
 
     assert merged_config["seed"] == 1234
 
@@ -415,7 +598,7 @@ def test_launcher_preserves_config_seed_without_override() -> None:
     add_env_launcher_args_to_parser(parser, require_gym_config=True)
 
     args = parser.parse_args(["--gym_config", "gym_config.yaml"])
-    merged_config = merge_args_with_gym_config(args, {"seed": 99})
+    merged_config = merge_args_with_gym_config(args, {"physics": "default", "seed": 99})
 
     assert merged_config["seed"] == 99
 
@@ -459,7 +642,9 @@ def test_viser_launcher_flag_implies_headless_viser_commands():
     add_env_launcher_args_to_parser(parser)
 
     args = parser.parse_args(["--viser"])
-    merged_config = merge_args_with_gym_config(args, {"id": "Dummy-v0"})
+    merged_config = merge_args_with_gym_config(
+        args, {"id": "Dummy-v0", "physics": "default"}
+    )
 
     assert merged_config["headless"] is True
     assert merged_config["visualization"]["backend"] == "viser"
@@ -589,6 +774,7 @@ class TestConfigToCfgFromFile:
         simulation = load_config(_CUBE_ENVIRONMENT_PATH)["simulation"]
         return {
             "environment_id": "configured_pick",
+            "physics": "default",
             "max_episodes": 5,
             "max_episode_steps": 1200,
             "simulation": simulation,
@@ -639,6 +825,7 @@ class TestConfigToCfgFromFile:
     def test_robot_class_type_preserves_ur_variant(self):
         config = {
             "id": "EmbodiedEnv-v1",
+            "physics": "default",
             "env": {},
             "robot": {
                 "class_type": "URRobot",
@@ -678,6 +865,7 @@ class TestConfigToCfgFromFile:
         )
         config = {
             "id": "EmbodiedEnv-v1",
+            "physics": "default",
             "env": {},
             "embodiment": {
                 "component": "embodiment.yaml",
@@ -750,6 +938,7 @@ class TestConfigToCfgFromFile:
         )
         config = {
             "id": "EmbodiedEnv-v1",
+            "physics": "default",
             "env": {},
             "embodiment": {"component": "embodiment.yaml"},
             field_name: {} if field_name == "robot" else [],
@@ -776,6 +965,7 @@ class TestConfigToCfgFromFile:
         )
         config = {
             "id": "EmbodiedEnv-v1",
+            "physics": "default",
             "env": {},
             "robot": {"uid": "TestRobot"},
             "scene": {"component": "scene.yaml"},
@@ -888,6 +1078,64 @@ class TestConfigToCfgFromFile:
         config["scene"] = {"component": "scene.yaml"}
 
         with pytest.raises(ValueError, match="environment.component owns"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "task.ur5.yaml",
+            )
+
+    def test_environment_component_requires_physics_backend(self, tmp_path) -> None:
+        """A reusable physical environment owns one explicit backend."""
+        self._write_deployment(tmp_path)
+        environment_path = tmp_path / "env.yaml"
+        environment = load_config(environment_path)
+        environment.pop("physics")
+        save_config(environment_path, environment)
+
+        with pytest.raises(ValueError, match="missing required fields.*physics"):
+            config_to_cfg(
+                self._environment_component_gym_config(),
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "task.ur5.yaml",
+            )
+
+    def test_environment_component_builds_declared_newton_config(
+        self,
+        tmp_path,
+    ) -> None:
+        """A Newton environment component owns its matching world settings."""
+        self._write_deployment(tmp_path)
+        environment_path = tmp_path / "env.yaml"
+        environment = load_config(environment_path)
+        environment["physics"] = "newton"
+        environment["physics_config"] = {"num_substeps": 2}
+        save_config(environment_path, environment)
+
+        cfg = config_to_cfg(
+            self._environment_component_gym_config(),
+            manager_modules=DEFAULT_MANAGER_MODULES,
+            source_path=tmp_path / "task.ur5.yaml",
+        )
+
+        assert isinstance(cfg.sim_cfg.physics_cfg, NewtonPhysicsCfg)
+        assert cfg.sim_cfg.physics_cfg.num_substeps == 2
+
+    @pytest.mark.parametrize(
+        ("field_name", "value"),
+        (("physics", "newton"), ("physics_config", {"num_substeps": 2})),
+    )
+    def test_environment_component_owns_physics_configuration(
+        self,
+        tmp_path,
+        field_name: str,
+        value: object,
+    ) -> None:
+        """A deployment cannot override its environment's backend or settings."""
+        self._write_deployment(tmp_path)
+        config = self._environment_component_gym_config()
+        config[field_name] = value
+
+        with pytest.raises(ValueError, match="owns physics and physics_config"):
             config_to_cfg(
                 config,
                 manager_modules=DEFAULT_MANAGER_MODULES,
@@ -1390,8 +1638,6 @@ class TestConfigToCfgFromFile:
         ("field_name", "invalid_value"),
         [
             ("dlss_enabled", "false"),
-            ("offscreen_dlss_enabled", 0),
-            ("rayreconstruction_enabled", 1),
             ("upscale_enabled", None),
             ("upsample_ratio", "2.0"),
             ("exposure_compensation", "1.0"),
@@ -1407,6 +1653,7 @@ class TestConfigToCfgFromFile:
         """Malformed file values fail at DLSS decoding with the offending field name."""
         config = {
             "id": "EmbodiedEnv-v1",
+            "physics": "default",
             "env": {},
             "robot": {
                 "class_type": "URRobot",
@@ -1431,6 +1678,7 @@ class TestConfigToCfgFromFile:
         """Task deployments default to native interaction and can opt out."""
         config = {
             "id": "EmbodiedEnv-v1",
+            "physics": "default",
             "env": {},
             "robot": {"uid": "TestRobot"},
         }
@@ -1458,6 +1706,7 @@ class TestConfigToCfgFromFile:
             path,
             {
                 "id": "EmbodiedEnv-v1",
+                "physics": "default",
                 "env": {},
                 "robot": {"uid": "robot"},
                 "robot_ik_gizmo": settings,
@@ -1477,6 +1726,7 @@ class TestConfigToCfgFromFile:
     def test_yaml_gym_config_parses_to_cfg(self, tmp_path):
         config = {
             "id": "EmbodiedEnv-v1",
+            "physics": "default",
             "seed": 2026,
             "max_episode_steps": 100,
             "physics_config": {
@@ -1487,14 +1737,12 @@ class TestConfigToCfgFromFile:
                 "speed_tolerance": 0.1,
             },
             "render_cfg": {
-                "renderer": "offline-rt",
+                "renderer": "rt",
                 "spp": 4,
                 "tone_mapping_enabled": True,
                 "tone_mapping_exposure": 1.25,
                 "dlss": {
                     "dlss_enabled": True,
-                    "offscreen_dlss_enabled": True,
-                    "rayreconstruction_enabled": False,
                     "upscale_enabled": True,
                     "dlss_quality": 1,
                 },
@@ -1558,7 +1806,7 @@ class TestConfigToCfgFromFile:
         assert cfg.sim_cfg.physics_config.enable_ccd is True
         assert cfg.sim_cfg.physics_config.length_tolerance == 0.02
         assert cfg.sim_cfg.physics_config.speed_tolerance == 0.1
-        assert cfg.sim_cfg.render_cfg.renderer == "offline-rt"
+        assert cfg.sim_cfg.render_cfg.renderer == "rt"
         assert cfg.sim_cfg.render_cfg.spp == 4
         assert cfg.sim_cfg.render_cfg.tone_mapping_enabled is True
         assert cfg.sim_cfg.render_cfg.tone_mapping_exposure == 1.25
@@ -1569,8 +1817,6 @@ class TestConfigToCfgFromFile:
         world_config = dexsim.WorldConfig()
         cfg.sim_cfg.render_cfg.apply_to_dexsim_config(world_config)
         assert world_config.dlss_config.dlss_enabled is True
-        assert world_config.dlss_config.offscreen_dlss_enabled is True
-        assert world_config.dlss_config.rayreconstruction_enabled is False
         assert world_config.dlss_config.upscale_enabled is True
         assert world_config.dlss_config.dlss_quality == 1
         assert cfg.sim_cfg.visualization.backend == "viser"
@@ -1581,6 +1827,7 @@ class TestConfigToCfgFromFile:
     def test_json_dataset_save_failed_episodes_parses_from_top_level(self, tmp_path):
         config = {
             "id": "EmbodiedEnv-v1",
+            "physics": "default",
             "env": {
                 "events": {},
                 "observations": {},
@@ -1622,13 +1869,14 @@ class TestConfigToCfgFromFile:
     def test_build_env_cfg_applies_modifier_before_parsing(self, tmp_path):
         config = {
             "id": "EmbodiedEnv-v1",
+            "physics": "default",
             "max_episode_steps": 100,
             "physics_config": {
                 "gravity": [0.0, 0.0, -3.71],
                 "enable_ccd": True,
             },
             "render_cfg": {
-                "renderer": "offline-rt",
+                "renderer": "rt",
                 "spp": 8,
                 "tone_mapping_enabled": True,
             },
@@ -1689,6 +1937,7 @@ class TestConfigToCfgFromFile:
     ):
         config = {
             "id": "EmbodiedEnv-v1",
+            "physics": "default",
             "max_episode_steps": 100,
             "env": {
                 "events": {},
@@ -1857,3 +2106,54 @@ def test_load_trajectory_rejects_misaligned_state_action_steps():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_launcher_omissions_preserve_runtime_configuration() -> None:
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    args = parser.parse_args(["--gym_config", "task.yaml"])
+    config = dict(
+        physics="newton",
+        num_envs=8,
+        arena_space=2.5,
+        gpu_id=1,
+        device="cuda:1",
+        headless=True,
+        seed=123,
+    )
+    assert merge_args_with_gym_config(args, config) == config
+
+
+def test_launcher_explicit_runtime_overrides_win() -> None:
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    args = parser.parse_args(
+        [
+            "--gym_config",
+            "task.yaml",
+            "--num_envs",
+            "2",
+            "--arena_space",
+            "3",
+            "--gpu_id",
+            "0",
+            "--seed",
+            "0",
+        ]
+    )
+    config = dict(physics="newton", num_envs=8, arena_space=2.5, gpu_id=1, seed=123)
+    merged = merge_args_with_gym_config(args, config)
+    assert (
+        merged["num_envs"],
+        merged["arena_space"],
+        merged["gpu_id"],
+        merged["seed"],
+    ) == (2, 3.0, 0, 0)
+
+
+def test_launcher_can_explicitly_disable_configured_headless() -> None:
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    args = parser.parse_args(["--gym_config", "task.yaml", "--no-headless"])
+    merged = merge_args_with_gym_config(args, {"physics": "default", "headless": True})
+    assert merged["headless"] is False

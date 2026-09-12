@@ -26,4 +26,3 @@ embodichain.lab.task_program.compiler
       CompiledTaskProgramValidator
       TaskProgramCompileError
       TaskProgramCompiler
-

@@ -24,7 +24,7 @@ The Code Explained
 Configuring the simulation
 --------------------------
 
-The first step is to configure the simulation environment. This is done using the :class:`SimulationManagerCfg` data class, which allows you to specify parameters like window dimensions, headless mode, physics timestep, simulation device (CPU/GPU), and rendering options like ray tracing. Reminded that soft body simulation can only run on cuda deive.
+The first step is to configure the simulation environment. This is done using the :class:`SimulationManagerCfg` data class, which allows you to specify parameters like window dimensions, headless mode, physics timestep, simulation device (CPU/GPU), and rendering options like ray tracing. Soft-body simulation requires a CUDA device and the Newton backend; the script validates both options before creating the scene.
 
 
 .. literalinclude:: ../../../scripts/tutorials/sim/create_softbody.py
@@ -35,11 +35,11 @@ The first step is to configure the simulation environment. This is done using th
 Adding a soft body to the scene
 -------------------------------
 
-With the simulation context created, we can add a soft (deformable) object. This tutorial demonstrates adding a soft-body cow mesh to the scene using the :meth:`SimulationManager.add_soft_object` method. The object's geometry and physical parameters are defined through configuration objects:
+With the simulation context created, we can add a soft (deformable) object. This tutorial demonstrates adding a soft-body cow mesh to the scene using the :meth:`SimulationManager.add_deformable_object` method. The object's geometry and physical parameters are defined through configuration objects:
 
 - :class:`cfg.MeshCfg` for the mesh shape (``cow.obj``)
-- :class:`cfg.SoftbodyVoxelAttributesCfg` for voxelization and simulation mesh resolution
-- :class:`cfg.SoftbodyPhysicalAttributesCfg` for material properties (Young's modulus, Poisson's ratio, density, frictions, solver iterations)
+- :class:`cfg.VolumeDeformableMeshingCfg` for voxelization and simulation mesh resolution
+- :class:`cfg.VolumeDeformablePhysicsCfg` for ``attrs`` (``youngs``, ``poissons``, volume density, and ``surface_props``)
 
 .. literalinclude:: ../../../scripts/tutorials/sim/create_softbody.py
    :language: python

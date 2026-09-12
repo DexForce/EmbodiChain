@@ -121,6 +121,7 @@ Focused examples live under ``scripts/tutorials/atomic_action``:
 
 * ``move_end_effector.py``
 * ``move_joints.py``
+* ``axis_align.py``
 * ``control_dt.py``
 * ``pickup.py``
 * ``move_held_object.py``
@@ -133,6 +134,7 @@ Focused examples live under ``scripts/tutorials/atomic_action``:
 * ``coordinated_pickment.py``
 * ``coordinated_placement.py``
 * ``hand_over.py``
+* ``open_door.py``
 * ``moving_target_recovery.py``
 * ``dynamic_obstacle_recovery.py``
 

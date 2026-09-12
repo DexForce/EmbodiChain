@@ -29,7 +29,7 @@ from embodichain.lab.sim.motion.planners.base_planner import (
 )
 from embodichain.lab.sim.motion.planners.utils import MoveType, PlanResult, PlanState
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import convert_quat, quat_error_magnitude, quat_from_matrix
+from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
 __all__ = [
     "NeuralPlanner",
@@ -475,9 +475,11 @@ class NeuralPlanner(BasePlanner):
                     xpos = xpos.unsqueeze(0)
                 policy_xpos = self._to_policy_frame(xpos)
                 waypoint_pos[:, idx] = policy_xpos[:, :3, 3]
-                quat_xyzw = convert_quat(
-                    quat_from_matrix(policy_xpos[:, :3, :3]), to="xyzw"
-                )
+                # ``quat_from_matrix`` already returns EmbodiChain's public
+                # ``xyzw`` convention.  Do not pass it through ``convert_quat``:
+                # that helper interprets its input as the opposite convention
+                # and would rotate the components a second time.
+                quat_xyzw = quat_from_matrix(policy_xpos[:, :3, :3])
                 waypoint_quat[:, idx] = (
                     _canonicalize_quat_xyzw(quat_xyzw)
                     if getattr(self, "_canonicalize_quat_obs", False)
@@ -542,9 +544,12 @@ class NeuralPlanner(BasePlanner):
         return self.robot.compute_fk(qpos=qpos, name=control_part, to_matrix=True)
 
     def _fk_pose_xyzw(self, qpos: torch.Tensor, control_part: str) -> torch.Tensor:
+        """Return the policy-frame FK pose as ``xyz + xyzw``."""
         fk = self._to_policy_frame(self._fk_matrix(qpos, control_part))
         pos = fk[:, :3, 3]
-        quat_xyzw = convert_quat(quat_from_matrix(fk[:, :3, :3]), to="xyzw")
+        # ``quat_from_matrix`` is an EmbodiChain ``xyzw`` producer; converting
+        # it again would turn a valid pose into a different rotation.
+        quat_xyzw = quat_from_matrix(fk[:, :3, :3])
         if getattr(self, "_canonicalize_quat_obs", False):
             quat_xyzw = _canonicalize_quat_xyzw(quat_xyzw)
         return torch.cat([pos, quat_xyzw], dim=-1)
@@ -687,9 +692,11 @@ class NeuralPlanner(BasePlanner):
         active_rot_mask = rot_mask[idx, active_idx_clamped] > 0.5
         active_joint_mask = joint_mask[idx, active_idx_clamped] > 0.5
         pos_dist = (ee_pose[:, :3] - active_pos).norm(dim=-1)
-        ee_quat_wxyz = convert_quat(ee_pose[:, 3:7], to="wxyz")
-        active_quat_wxyz = convert_quat(active_quat_xyzw, to="wxyz")
-        rot_dist = quat_error_magnitude(ee_quat_wxyz, active_quat_wxyz)
+        # All planner poses are ``xyz + xyzw`` and ``quat_error_magnitude``
+        # consumes xyzw.  Keeping the values in that convention avoids a
+        # needless round trip through the native/external ``wxyz`` layout.
+        ee_quat_xyzw = ee_pose[:, 3:7]
+        rot_dist = quat_error_magnitude(ee_quat_xyzw, active_quat_xyzw)
         rot_ok = torch.where(
             active_rot_mask,
             rot_dist < self._rot_eps,

@@ -1689,7 +1689,7 @@ def _decode_handover_pose_provider(
             {
                 "kind",
                 "final_position",
-                "final_quaternion_wxyz",
+                "final_quaternion_xyzw",
             }
         ),
     )
@@ -1705,9 +1705,9 @@ def _decode_handover_pose_provider(
             path=f"{path}.final_position",
             expected_length=3,
         ),
-        final_quaternion_wxyz=_finite_tuple(
-            config["final_quaternion_wxyz"],
-            path=f"{path}.final_quaternion_wxyz",
+        final_quaternion_xyzw=_finite_tuple(
+            config["final_quaternion_xyzw"],
+            path=f"{path}.final_quaternion_xyzw",
             expected_length=4,
         ),
     )

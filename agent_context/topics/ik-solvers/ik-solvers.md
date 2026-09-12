@@ -11,7 +11,7 @@
 |---|---|
 | `embodichain/lab/sim/motion/solvers/__init__.py` | Public re-exports for all solver classes and configs |
 | `embodichain/lab/sim/motion/solvers/base_solver.py` | `BaseSolver` ABC + `SolverCfg` base config |
-| `embodichain/lab/sim/cfg.py` | `RobotCfg.solver_cfg` — where solver config is wired into a robot |
+| `embodichain/lab/sim/cfg/robot.py` | `RobotCfg.solver_cfg` — where solver config is wired into a robot |
 | `embodichain/lab/sim/motion/solvers/qpos_seed_sampler.py` | `QposSeedSampler` — random joint-seed generation |
 | `embodichain/lab/sim/motion/solvers/null_space_posture_task.py` | `NullSpacePostureTask` — Pink null-space posture objective |
 | `embodichain/lab/sim/utility/solver_utils.py` | Helpers: `create_pk_serial_chain`, `build_reduced_pinocchio_robot`, `validate_iteration_params`, `compute_pinocchio_fk` |

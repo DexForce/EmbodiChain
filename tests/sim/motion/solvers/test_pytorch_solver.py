@@ -73,7 +73,7 @@ class BaseSolverTest:
 
     def setup_simulation(self, solver_type: str):
         # Set up simulation with specified device (CPU or CUDA)
-        config = SimulationManagerCfg(headless=True, sim_device="cpu")
+        config = SimulationManagerCfg(headless=True, device="cpu")
         self.sim = SimulationManager(config)
 
         # Load robot URDF file
@@ -104,6 +104,7 @@ class BaseSolverTest:
         }
 
         self.robot: Robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+        self.sim.prepare()
 
         # Wait for robot to stabilize.
         self.sim.update(step=100)

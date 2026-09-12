@@ -38,7 +38,6 @@ through :func:`register_policy` / :func:`get_policy_class`.
    :members:
    :undoc-members:
    :show-inheritance:
-
 Observation normalization
 -------------------------
 

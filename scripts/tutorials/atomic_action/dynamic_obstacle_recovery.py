@@ -49,7 +49,7 @@ from embodichain.lab.sim.atomic_actions import (
     TimedCommandSequence,
     TrackingPolicy,
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+from embodichain.lab.sim.cfg import CollisionPropertiesCfg, RigidBodyPhysicsCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot
 from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
@@ -90,6 +90,10 @@ OBSTACLE_MOVE_DURATION = 0.6
 AUTO_PLAY_LEAD_IN_DURATION = 0.75
 POST_EXECUTION_HOLD_DURATION = 1.0
 TRACKING_ERROR_THRESHOLD = 0.1
+# Keep cuRobo's optimizer active before the robot's fitted collision spheres
+# reach the obstacle.  The default 10 mm activation distance can still produce
+# a sampled TCP path with only ~7 mm geometric clearance around this cuboid.
+REPLAN_COLLISION_ACTIVATION_DISTANCE = 0.02
 MINIMUM_REPLAN_DETOUR = 0.04
 MAXIMUM_BLOCKED_PATH_CLEARANCE = 0.0
 # The replanned trajectory is sampled at control waypoints; 5 mm leaves a
@@ -458,12 +462,15 @@ def main() -> None:
             # animation must not generate a physical impulse that knocks the
             # robot out of its planned trajectory before replanning observes
             # the scene revision.
-            attrs=RigidBodyAttributesCfg(enable_collision=False),
+            attrs=RigidBodyPhysicsCfg(
+                collision_props=CollisionPropertiesCfg(collision_enabled=False)
+            ),
             body_type="kinematic",
             init_pos=list(OBSTACLE_START_POSITION),
             init_rot=[0.0, 0.0, 0.0],
         )
     )
+    sim.prepare()
     # Initialize GPU physics before planning or recording so the first visible
     # frame and the initial planning context share the same settled state.
     sim.update(step=10)
@@ -471,7 +478,11 @@ def main() -> None:
         MotionGenCfg(
             planner_cfg=CuroboPlannerCfg(
                 robot_uid=robot.uid,
-                # Keep MorphIt's fitted sphere set dense, but add no extra radius
+                collision_activation_distance=REPLAN_COLLISION_ACTIVATION_DISTANCE,
+                # Newton physics captures CUDA graphs on the same device.
+                use_cuda_graph=args.physics != "newton",
+                # The coarse default voxel fit under-covers the hand and
+                # fingertips. Keep the denser morphit fit, but no extra radius
                 # padding: 5 mm makes this tutorial's initial pose infeasible.
                 auto_gen=CuroboAutoGenCfg(
                     sphere_density=COLLISION_SPHERE_FIT_DENSITY,
@@ -479,6 +490,12 @@ def main() -> None:
                 ),
                 world=CuroboWorldCfg(
                     rigid_objects=[obstacle],
+                    # Keep the authored cube analytic in cuRobo.  The Newton
+                    # facade exposes primitive geometry through its retained
+                    # descriptor; auto mode would voxelize the fallback mesh
+                    # and can produce a path inside the tutorial's strict
+                    # 10-mm clearance contract.
+                    overrides={OBSTACLE_UID: "cuboid"},
                     dynamic_obstacle_names=[OBSTACLE_UID],
                     multi_env=args.num_envs > 1,
                 ),
@@ -617,7 +634,8 @@ def main() -> None:
             start_pose = obstacle.get_local_pose(to_matrix=True).clone()
             logger.log_warning(
                 f"Moving the collision obstacle over {OBSTACLE_MOVE_DURATION:.2f} s "
-                f"after {step.command_count} accepted commands; start XYZ="
+                f"after {step.command_count} accepted commands (trigger at "
+                f"{move_after_command}); start XYZ="
                 f"{start_pose[:, :3, 3].detach().cpu().tolist()}."
             )
             moved_pose = _animate_obstacle_to_pose(

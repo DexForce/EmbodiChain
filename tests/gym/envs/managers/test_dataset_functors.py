@@ -148,29 +148,14 @@ class MockFunctorCfg:
         self.params = params or {}
 
 
-# Tests that don't require LeRobot
-class TestDatasetFunctorBasics:
-    """Basic tests for dataset functors."""
+def test_recorder_rejects_missing_lerobot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing optional dependencies fail explicitly before recorder setup."""
+    from embodichain.lab.gym.envs.managers import datasets
 
-    def test_lerobot_available_flag(self):
-        """Test that LEROBOT_AVAILABLE flag reflects actual availability."""
-        # This test just verifies the import worked
-        try:
-            from embodichain.lab.envs.managers.datasets import LEROBOT_AVAILABLE
-        except ImportError:
-            pass  # Expected if not installed
+    monkeypatch.setattr(datasets, "LEROBOT_AVAILABLE", False)
 
-    def test_dataset_functor_module_imports(self):
-        """Test that dataset functor module can be imported."""
-        try:
-            from embodichain.lab.gym.envs.managers import datasets
-
-            # Check module has expected attributes
-            assert (
-                hasattr(datasets, "LeRobotRecorder") or not datasets.LEROBOT_AVAILABLE
-            )
-        except ImportError:
-            pass  # Module might not exist
+    with pytest.raises(RuntimeError, match="LeRobot is not installed"):
+        datasets.LeRobotRecorder(MockFunctorCfg(), MockEnvForDataset())
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")

@@ -860,7 +860,7 @@ class randomize_anchor_height(Functor):
             return
 
         # Both RigidObject and Articulation return (N, 7) by default:
-        # (x, y, z, qw, qx, qy, qz)
+        # (x, y, z, qx, qy, qz, qw)
         pose = obj.get_local_pose()  # (N, 7)
         current_z = pose[env_ids, 2]
         if absolute:

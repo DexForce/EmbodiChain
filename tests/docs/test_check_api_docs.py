@@ -71,6 +71,7 @@ def test_discover_public_modules_uses_static_all(tmp_path: Path) -> None:
     _write(package_path / "feature" / "__init__.py", '__all__ = ["Feature"]\n')
     _write(package_path / "module.py", '__all__ = ["NotPackageLevel"]\n')
     _write(package_path / "_private" / "__init__.py", '__all__ = ["Hidden"]\n')
+    _write(package_path / ".generated" / "__init__.py", "__all__ = build_exports()\n")
 
     modules = discover_public_modules((PackageRoot("sample", package_path),))
 

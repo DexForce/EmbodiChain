@@ -19,6 +19,8 @@
 Algorithms (PPO/GRPO), rollout buffers, collectors, policy/model builders, and the training entry point; rollout data flows as ``TensorDict`` objects.
 """
 
+from __future__ import annotations
+
 from . import algo
 from . import buffer
 from . import models
@@ -29,26 +31,37 @@ from .differentiable_trainer import (
 )
 from .env import (
     DifferentiableObservation,
+    DifferentiableRolloutSpec,
     DifferentiableVecEnv,
     LearningVecEnv,
     build_learning_env,
     get_registered_learning_env_names,
     register_learning_env,
+    ScheduledDifferentiableVecEnv,
+    stratified_rollout_value,
 )
 from .evaluation import evaluate_episodes
+from .gradients import BatchedGradientNormStats, clip_batched_gradient_norm
+from .normalization import RunningObservationNormalizer
 from .routing import get_trainer_class
 
 __all__ = [
     "DifferentiableObservation",
     "DifferentiableTrainer",
     "DifferentiableTrainerCfg",
+    "DifferentiableRolloutSpec",
     "DifferentiableVecEnv",
+    "BatchedGradientNormStats",
     "LearningVecEnv",
+    "RunningObservationNormalizer",
+    "ScheduledDifferentiableVecEnv",
     "build_learning_env",
+    "clip_batched_gradient_norm",
     "evaluate_episodes",
     "get_registered_learning_env_names",
     "get_trainer_class",
     "register_learning_env",
+    "stratified_rollout_value",
     "algo",
     "buffer",
     "models",

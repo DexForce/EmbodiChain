@@ -28,8 +28,23 @@ from .rigid_object_group import (
     RigidBodyGroupData,
     RigidObjectGroupCfg,
 )
-from .soft_object import SoftObject, SoftBodyData, SoftObjectCfg
-from .cloth_object import ClothObject, ClothBodyData, ClothObjectCfg
+from .deformable import (
+    DeformableObject,
+    DeformableObjectData,
+    SurfaceDeformableObject,
+    VolumeDeformableObject,
+)
+
+# Compatibility aliases for the former native soft-body and cloth facades.
+SoftObject = VolumeDeformableObject
+ClothObject = SurfaceDeformableObject
+SoftBodyData = DeformableObjectData
+ClothBodyData = DeformableObjectData
+from ..cfg import (
+    DeformableObjectCfg,
+    SurfaceDeformableObjectCfg,
+    VolumeDeformableObjectCfg,
+)
 from .articulation import (
     Articulation,
     ArticulationData,

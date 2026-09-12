@@ -98,6 +98,7 @@ def main() -> None:
             }
         )
         robot = sim_manager.add_robot(cfg=cfg)
+        sim_manager.prepare()
         print("DexforceW1 robot added to the simulation.")
 
         analyzer = WorkspaceAnalyzer(

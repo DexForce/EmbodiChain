@@ -3,27 +3,15 @@
 EmbodiChain exposes the core NVIDIA DLSS controls through
 {class}`~embodichain.lab.sim.cfg.DLSSCfg` and passes them to DexSim when the
 {class}`~embodichain.lab.sim.sim_manager.SimulationManager` creates its world.
-The integration applies to the `hybrid`, `fast-rt`, and `offline-rt` renderers. DexSim
+The integration applies to the `hybrid`, `fast-rt`, and `rt` renderers. DexSim
 owns DLSS feature detection, initialization, temporal history, and fallback;
 constructing a configuration object does not by itself initialize DLSS.
 
 ## Processing model
 
-DLSS has two selectable processing modes in the current integration:
-
-- **Ray Reconstruction (RR)** denoises ray-traced input and reconstructs the
-  output image.
-- **Super Resolution (SR)** upscales the image when RR is disabled.
-
-RR and SR are exposed as separate switches, but they are not chained in one
-frame. RR takes precedence when it is enabled:
-
-| RR | SR | Effective path |
-| :---: | :---: | :--- |
-| Enabled | Enabled | RR performs denoising and reconstruction. |
-| Enabled | Disabled | RR runs without a separate SR stage. |
-| Disabled | Enabled | Standalone SR performs the upscale. |
-| Disabled | Disabled | The standard OptiX denoiser/rendering path is used. |
+DexSim manages Ray Reconstruction (RR) for denoising and reconstruction,
+and Super Resolution (SR) for upscaling. Offscreen DLSS and RR use DexSim's
+native defaults. `upscale_enabled` controls standalone SR when RR is disabled.
 
 ## EmbodiChain configuration
 
@@ -32,8 +20,6 @@ The following fields are available under `RenderCfg.dlss`:
 | Parameter | Default | Description |
 | :--- | :---: | :--- |
 | `dlss_enabled` | `True` | Master switch for DLSS on window and offscreen targets. |
-| `offscreen_dlss_enabled` | `True` | Enables DLSS for offscreen camera outputs, including headless simulations. |
-| `rayreconstruction_enabled` | `True` | Enables RR denoising and reconstruction. |
 | `upscale_enabled` | `True` | Enables standalone SR when RR is disabled. |
 | `dlss_quality` | `2` | Quality preset: `-1` auto, `0` ultra performance, `1` performance, `2` balanced, `3` quality, `4` ultra quality, or `5` DLAA. |
 | `render_width`, `render_height` | `0` | Optional internal dimensions for FastRT/OfflineRT windows. Zero derives the dimensions from the quality preset. |
@@ -78,7 +64,7 @@ preset.
 
 ## Examples
 
-Enable DLSS for offscreen camera observations in a headless simulation:
+Configure DLSS quality in a headless simulation:
 
 ```python
 from embodichain.lab.sim import DLSSCfg, SimulationManagerCfg
@@ -90,7 +76,6 @@ sim_config = SimulationManagerCfg(
         renderer="hybrid",
         dlss=DLSSCfg(
             dlss_enabled=True,
-            offscreen_dlss_enabled=True,
             dlss_quality=3,
         ),
     ),
@@ -114,7 +99,7 @@ sim_config = SimulationManagerCfg(
     width=1920,
     height=1080,
     render_cfg=RenderCfg(
-        renderer="offline-rt",
+        renderer="rt",
         dlss=DLSSCfg(render_width=1280, render_height=720),
     ),
 )

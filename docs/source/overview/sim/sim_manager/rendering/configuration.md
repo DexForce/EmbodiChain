@@ -8,7 +8,7 @@ ray-tracing sample count, tone mapping, and DLSS settings used by
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `renderer` | `str` | `"auto"` | Renderer backend: `auto`, `hybrid`, `fast-rt`, or `offline-rt`. |
+| `renderer` | `str` | `"auto"` | Renderer backend: `auto`, `hybrid`, `fast-rt`, or `rt`. |
 | `spp` | `int` | `1` | Samples per pixel for ray-traced rendering. Must be at least `1`. |
 | `tone_mapping_enabled` | `bool` | `False` | Apply modified Reinhard tone mapping to RGB output. |
 | `tone_mapping_exposure` | `float` | `1.0` | Fixed linear exposure multiplier used before tone mapping. |

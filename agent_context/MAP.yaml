@@ -8,22 +8,32 @@ defaults:
 topics:
 - id: simulation-system
   title: Simulation System
-  aliases: [simulation system, simulation manager, motion module, sim motion, 运动能力模块, 仿真系统, 仿真管理器]
+  aliases: [simulation system, simulation manager, Newton physics backend, motion module, sim motion, camera attachment, 运动能力模块, 仿真系统, 仿真管理器]
   keywords: [SimulationManager, SimulationManagerCfg, RenderCfg, DLSSCfg, DLSS, frame_time_delta_ms,
-    offscreen_dlss_enabled, explicit physics stepping, arena, DexSim, ArticulationJointKinematics,
-    get_parent_joint_chain, enable_gravity, fixed-cadence playback]
+    offscreen_dlss_enabled, explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
+    DefaultPhysicsCfg, NewtonPhysicsCfg, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
+    ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
+    fixed-cadence playback, quaternion, xyzw]
   paths: [topics/simulation-system/simulation-system.md]
   source_of_truth:
   - embodichain/lab/sim/motion/__init__.py
   - embodichain/lab/sim/sim_manager.py
+  - embodichain/cli/sim.py
+  - embodichain/cli/_visualization.py
   - embodichain/lab/sim/__init__.py
-  - embodichain/lab/sim/cfg.py
+  - embodichain/lab/sim/cfg/
+  - embodichain/lab/sim/physics/
+  - embodichain/lab/sim/spawn/
   - embodichain/lab/sim/common.py
+  - embodichain/lab/sim/_startup_summary.py
+  - embodichain/lab/sim/_runtime_controls.py
   - embodichain/lab/sim/objects/articulation.py
+  - embodichain/lab/sim/objects/backends/
+  - embodichain/lab/sim/objects/deformable/
   - embodichain/lab/sim/objects/gizmo.py
   - embodichain/lab/gym/envs/base_env.py
-  watch_paths: [embodichain/lab/sim/sim_manager.py, embodichain/lab/sim/cfg.py, embodichain/lab/sim/objects/,
-    tests/sim/]
+  watch_paths: [embodichain/lab/sim/sim_manager.py, embodichain/lab/sim/cfg/, embodichain/lab/sim/physics/,
+    embodichain/lab/sim/spawn/, embodichain/lab/sim/objects/, tests/sim/]
   related_topics: [env-framework, robot-system, sensor-system, sim-visualization, ik-solvers, motion-planning,
     atomic-actions, rl-learning, configclass-pattern, robot-workspace]
   status: active
@@ -32,7 +42,8 @@ topics:
   aliases: [env framework, environment framework, task registration, list task, expert trajectory, 环境框架, 任务环境,
     专家轨迹]
   keywords: [BaseEnv, EmbodiedEnv, EnvCfg, register_env, list-task, run-env, target_control_frequency,
-    sim_steps_per_control, step_dt, environment.component, embodiment.component, ControllerAction, EnvProfiler,
+    sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
+    physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
     ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema]
   paths: [topics/env-framework/env-framework.md]
   source_of_truth:
@@ -43,6 +54,7 @@ topics:
   - embodichain/lab/gym/utils/_component_composition.py
   - embodichain/lab/gym/utils/registration.py
   - embodichain/lab/gym/envs/base_env.py
+  - embodichain/lab/gym/envs/_startup_summary.py
   - embodichain/lab/gym/envs/embodied_env.py
   - embodichain/lab/gym/envs/expert_trajectory.py
   - embodichain/lab/gym/envs/demo.py
@@ -95,21 +107,23 @@ topics:
 - id: robot-system
   title: Robot System
   aliases: [robot system, robot config, 机器人配置, 机器人系统]
-  keywords: [RobotCfg, control_parts, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg, FrankaPandaCfg,
-    URRobotCfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg]
+  keywords: [RobotCfg, RobotPresetCfg, control_parts, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg,
+    FrankaPandaCfg, URRobotCfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
+    asset_physics_mode, target_mode, mimic joint, quaternion, xyzw]
   paths: [topics/robot-system/robot-system.md]
   source_of_truth:
   - embodichain/lab/sim/objects/robot.py
   - embodichain/lab/sim/robots/
-  - embodichain/lab/sim/cfg.py
-  watch_paths: [embodichain/lab/sim/robots/, embodichain/lab/sim/objects/robot.py, embodichain/lab/sim/cfg.py]
+  - embodichain/lab/sim/cfg/
+  - embodichain/lab/gym/envs/embodied_env.py
+  watch_paths: [embodichain/lab/sim/robots/, embodichain/lab/sim/objects/robot.py, embodichain/lab/sim/cfg/]
   related_topics: [simulation-system, ik-solvers, motion-planning, sensor-system, sim-visualization, robot-workspace]
   status: active
 - id: sensor-system
   title: Sensor System
   aliases: [sensor system, camera attachment, 传感器, 相机挂载]
-  keywords: [CameraCfg, StereoCameraCfg, ContactSensorCfg, SensorCfg, get_sensor_obs, resolve_parent_nodes,
-    scatter_contact_data, tiled image]
+  keywords: [CameraCfg, StereoCameraCfg, ContactSensorCfg, ContactQuery, Newton contact, SensorCfg,
+    get_sensor_obs, resolve_parent_nodes, scatter_contact_data, tiled image, quaternion, xyzw]
   paths: [topics/sensor-system/sensor-system.md]
   source_of_truth:
   - embodichain/lab/sim/sensors/base_sensor.py
@@ -126,7 +140,7 @@ topics:
   title: Simulation Visualization
   aliases: [browser visualization, viser, sim visualization, 仿真可视化]
   keywords: [VisualizationCfg, ViserServerCfg, SceneManifest, visualization, EntityGizmoManipulator, robot_ik_gizmo,
-    GizmoCfg, backpressure, capture_visualization]
+    GizmoCfg, backpressure, capture_visualization, Newton deformable, particle set, render topology, quaternion, xyzw]
   paths: [topics/sim-visualization/sim-visualization.md]
   source_of_truth:
   - embodichain/lab/visualization/protocol.py
@@ -134,6 +148,7 @@ topics:
   - embodichain/lab/visualization/
   - embodichain/lab/sim/sim_manager.py
   - embodichain/lab/sim/objects/gizmo.py
+  - embodichain/lab/sim/objects/deformable/
   - embodichain/lab/scripts/preview_asset.py
   watch_paths: [embodichain/lab/visualization/, embodichain/lab/sim/objects/gizmo.py, embodichain/lab/sim/sim_manager.py,
     tests/visualization/]
@@ -147,7 +162,7 @@ topics:
   keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
     expansion, GenerationSession, TrajectoryAugmentationCfg, CandidateTrajectoryBatch,
     collision world, compute trajectory, trajectory resampling, trajectory warping, retime_to_control_grid,
-    JointTrajectoryPlaybackCfg, play_joint_trajectory]
+    JointTrajectoryPlaybackCfg, play_joint_trajectory, quaternion, xyzw, wxyz]
   paths: [topics/motion-planning/motion-planning.md]
   source_of_truth:
   - embodichain/lab/sim/motion/planners/base_planner.py
@@ -176,7 +191,8 @@ topics:
   title: RL Learning Pipeline
   aliases: [rl learning, rl config, reinforcement learning, 强化学习, 训练配置]
   keywords: [train-rl, Trainer, trainer.gym_config, learning_env, RolloutKind, DifferentiableTrainer,
-    PPO, GRPO, APG, SyncCollector]
+    PPO, GRPO, APG, SyncCollector, ScheduledDifferentiableVecEnv, DifferentiableRolloutSpec,
+    complete rollout, full horizon, gradient accumulation, action adjoint, observation normalization]
   paths: [topics/rl-learning/rl-learning.md]
   source_of_truth:
   - embodichain/learning/rl/train.py
@@ -185,11 +201,27 @@ topics:
   - embodichain/learning/rl/utils/trainer.py
   - embodichain/learning/rl/differentiable_trainer.py
   - embodichain/learning/rl/evaluation.py
+  - embodichain/learning/rl/gradients.py
+  - embodichain/learning/rl/normalization.py
   - embodichain/learning/rl/utils/config.py
   - embodichain/learning/rl/algo/
   - embodichain_tasks/configs/tasks/
   watch_paths: [embodichain/learning/rl/, embodichain_tasks/configs/tasks/, tests/learning/]
   related_topics: [simulation-system, env-framework, manager-functor, configclass-pattern]
+  status: active
+- id: differentiable-env
+  title: Differentiable Environment (APG)
+  aliases: [differentiable env, DifferentiableEnv, apg, analytic policy gradient, differentiable rl,
+    Warp tape autograd, NewtonStepFunc, 可微环境]
+  keywords: [differentiable, gradient, apg, autograd, warp tape, requires_grad, semi_implicit,
+    DifferentiableEnv, NewtonStepFunc, quaternion, xyzw]
+  paths: [topics/differentiable-env/differentiable-env.md]
+  source_of_truth:
+  - embodichain/lab/gym/envs/differentiable_env.py
+  - embodichain/lab/sim/cfg/simulation.py
+  - embodichain/lab/sim/diff/
+  - embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py
+  related_topics: [env-framework, rl-learning]
   status: active
 - id: configclass-pattern
   title: Configclass Pattern
@@ -240,7 +272,8 @@ topics:
   title: Embodied Task Program
   aliases: [task program, semantic call, 任务程序, 语义调用]
   keywords: [TaskProgramCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
-    EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, execution_policy, joint_command_mode]
+    EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, execution_policy, SemanticPose, quaternion_xyzw,
+    joint_command_mode]
   paths: [topics/task-programs/task-programs.md]
   source_of_truth:
   - embodichain/lab/task_program/

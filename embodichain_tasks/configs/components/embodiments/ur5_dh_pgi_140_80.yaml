@@ -11,13 +11,29 @@ simulation:
   control_parts:
     hand:
       - gripper_finger1_joint_1
-  drive_pros:
+  joint_drive_props:
     stiffness:
       gripper_finger1_joint_1: 1000.0
     damping:
       gripper_finger1_joint_1: 100.0
     max_effort:
       gripper_finger1_joint_1: 10000.0
+  # Newton's native MuJoCo-Warp path needs torsional friction to keep the
+  # parallel-jaw grasp closed during the lift. The backend-specific overlay
+  # is ignored by Default, so the portable task behavior remains unchanged.
+  link_attrs:
+    newton_gripper_contacts:
+      link_names_expr: ["gripper_finger[12]_link_1"]
+      attrs:
+        collision_props:
+          backend: newton
+          condim: 4
+        material_props:
+          backend: newton
+          ke: 40000.0
+          kd: 400.0
+          torsional_friction: 0.1
+          rolling_friction: 0.01
   solver_cfg:
     arm:
       tcp:

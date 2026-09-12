@@ -49,12 +49,9 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     TaskState,
 )
-from embodichain.lab.sim.cfg import (
-    RigidBodyAttributesCfg,
-    RigidObjectCfg,
-)
+from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.scenario_utils import (
     add_dual_tutorial_robot,
@@ -76,6 +73,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     clone_local_pose_from_first_env,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     draw_axis_marker,
     format_tensor,
@@ -231,7 +229,7 @@ def create_table(sim: SimulationManager) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="table",
             shape=MeshCfg(fpath=resolve_cached_data_path(TABLE_MESH_PATH)),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=10.0,
                 dynamic_friction=0.9,
                 static_friction=0.95,
@@ -250,9 +248,14 @@ def create_bread(sim: SimulationManager) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="bread",
             shape=MeshCfg(
-                fpath=resolve_cached_data_path(BREAD_MESH_PATH), compute_uv=False
+                fpath=resolve_cached_data_path(BREAD_MESH_PATH),
+                compute_uv=False,
+                collision=MeshCollisionCfg(
+                    approximation="convex_decomposition",
+                    max_hulls=8,
+                ),
             ),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
                 contact_offset=0.003,
                 rest_offset=0.001,
@@ -260,9 +263,9 @@ def create_bread(sim: SimulationManager) -> RigidObject:
                 min_position_iters=32,
                 min_velocity_iters=8,
                 max_depenetration_velocity=10.0,
+                newton_contact=sim.is_newton_backend,
             ),
             body_scale=(1.75, 1.75, 1.75),
-            max_convex_hull_num=8,
             init_pos=list(BREAD_INIT_POS),
             init_rot=list(BREAD_INIT_ROT),
         )
@@ -275,9 +278,14 @@ def create_pan(sim: SimulationManager) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="pan",
             shape=MeshCfg(
-                fpath=resolve_cached_data_path(PAN_MESH_PATH), compute_uv=False
+                fpath=resolve_cached_data_path(PAN_MESH_PATH),
+                compute_uv=False,
+                collision=MeshCollisionCfg(
+                    approximation="convex_decomposition",
+                    max_hulls=16,
+                ),
             ),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
                 dynamic_friction=0.97,
                 static_friction=0.99,
@@ -289,9 +297,9 @@ def create_pan(sim: SimulationManager) -> RigidObject:
                 min_position_iters=32,
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
+                newton_contact=sim.is_newton_backend,
             ),
             body_scale=(1.75, 1.75, 1.75),
-            max_convex_hull_num=16,
             init_pos=list(PAN_INIT_POS),
             init_rot=list(PAN_INIT_ROT),
         )
@@ -535,6 +543,7 @@ def run_coordinated_placement_demo(
     create_table(sim)
     bread = create_bread(sim)
     pan = create_pan(sim)
+    sim.prepare()
     settle_object(sim, bread, step=0)
     settle_object(sim, pan, step=0)
     bread_pose_batch = clone_local_pose_from_first_env(bread)

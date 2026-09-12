@@ -37,19 +37,19 @@ if TYPE_CHECKING:
 
 def _validated_pose(
     position: tuple[float, float, float],
-    quaternion_wxyz: tuple[float, float, float, float],
+    quaternion_xyzw: tuple[float, float, float, float],
     *,
     field_name: str,
 ) -> SemanticPose:
     """Build and validate one unbatched semantic pose declaration."""
     if type(position) is not tuple or len(position) != 3:
         raise TypeError(f"{field_name}_position must be an exact 3-tuple.")
-    if type(quaternion_wxyz) is not tuple or len(quaternion_wxyz) != 4:
-        raise TypeError(f"{field_name}_quaternion_wxyz must be an exact 4-tuple.")
+    if type(quaternion_xyzw) is not tuple or len(quaternion_xyzw) != 4:
+        raise TypeError(f"{field_name}_quaternion_xyzw must be an exact 4-tuple.")
     try:
         return SemanticPose(
             position=position,
-            quaternion_wxyz=quaternion_wxyz,
+            quaternion_xyzw=quaternion_xyzw,
         )
     except (TypeError, ValueError) as exc:
         raise type(exc)(f"Invalid {field_name} hand-over pose: {exc}") from exc
@@ -67,18 +67,18 @@ class ConfiguredHandOverPoseProvider(HandOverPoseProvider):
 
     Args:
         final_position: World-frame object delivery position.
-        final_quaternion_wxyz: World-frame object delivery orientation.
+        final_quaternion_xyzw: World-frame object delivery orientation.
     """
 
     provider_id: ClassVar[str] = "simulation.configured_handover_pose"
 
     final_position: tuple[float, float, float]
-    final_quaternion_wxyz: tuple[float, float, float, float]
+    final_quaternion_xyzw: tuple[float, float, float, float]
 
     def __post_init__(self) -> None:
         final = _validated_pose(
             self.final_position,
-            self.final_quaternion_wxyz,
+            self.final_quaternion_xyzw,
             field_name="final",
         )
         object.__setattr__(
@@ -88,8 +88,8 @@ class ConfiguredHandOverPoseProvider(HandOverPoseProvider):
         )
         object.__setattr__(
             self,
-            "final_quaternion_wxyz",
-            tuple(float(value) for value in final.quaternion_wxyz.tolist()),
+            "final_quaternion_xyzw",
+            tuple(float(value) for value in final.quaternion_xyzw.tolist()),
         )
 
     def resolve(
@@ -114,7 +114,7 @@ class ConfiguredHandOverPoseProvider(HandOverPoseProvider):
             final=SemanticObjectTarget(
                 pose=SemanticPose(
                     position=self.final_position,
-                    quaternion_wxyz=self.final_quaternion_wxyz,
+                    quaternion_xyzw=self.final_quaternion_xyzw,
                 )
             ),
         )

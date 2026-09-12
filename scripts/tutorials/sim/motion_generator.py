@@ -20,50 +20,18 @@ import argparse
 import time
 from collections.abc import Sequence
 
-import numpy as np
-import torch
+from embodichain.cli.sim import add_sim_args_to_parser
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.sim.cfg import RenderCfg
-from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.motion.motion_generator import (
-    MotionGenCfg,
-    MotionGenOptions,
-    MotionGenerator,
-)
-from embodichain.lab.sim.motion.execution import (
-    JointTrajectoryPlaybackCfg,
-    play_joint_trajectory,
-)
-from embodichain.lab.sim.motion.planners import (
-    PlanState,
-    ToppraPlanOptions,
-    ToppraPlannerCfg,
-)
-from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
-from embodichain.lab.sim.robots import CobotMagicCfg
-
-RECORD_WIDTH = 1920
-RECORD_HEIGHT = 1080
 DEFAULT_ARENA_SPACE = 3.0
-DEFAULT_RECORD_TARGET_Z = 0.95
-DEFAULT_RECORD_MAX_MEMORY = 2048
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse command line arguments for the motion-generator tutorial."""
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
     parser = argparse.ArgumentParser(
         description="Generate and replay MotionGenerator trajectories for one or more environments."
     )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--arena-space",
-        type=float,
-        default=DEFAULT_ARENA_SPACE,
-        help="Spacing between replicated tutorial environments.",
-    )
+    add_sim_args_to_parser(parser)
+    parser.set_defaults(arena_space=DEFAULT_ARENA_SPACE)
     parser.add_argument(
         "--step-delay",
         type=float,
@@ -87,7 +55,48 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable automatic whole-scene recording in headless mode.",
     )
-    return parser.parse_args()
+    return parser
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command line arguments for the motion-generator tutorial."""
+    parser = build_parser()
+    return parser.parse_args() if argv is None else parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = parse_args()
+
+
+import numpy as np
+import torch
+
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
+from embodichain.lab.visualization import visualization_cfg_from_args
+from embodichain.lab.sim.objects import Robot
+from embodichain.lab.sim.motion.motion_generator import (
+    MotionGenCfg,
+    MotionGenOptions,
+    MotionGenerator,
+)
+from embodichain.lab.sim.motion.execution import (
+    JointTrajectoryPlaybackCfg,
+    play_joint_trajectory,
+)
+from embodichain.lab.sim.motion.planners import (
+    PlanState,
+    ToppraPlanOptions,
+    ToppraPlannerCfg,
+)
+from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
+from embodichain.lab.sim.robots import CobotMagicCfg
+
+RECORD_WIDTH = 1920
+RECORD_HEIGHT = 1080
+DEFAULT_RECORD_TARGET_Z = 0.95
+DEFAULT_RECORD_MAX_MEMORY = 2048
 
 
 def compute_record_look_at(
@@ -229,9 +238,9 @@ def start_headless_recording(
     return True
 
 
-def main() -> None:
+def main(args: argparse.Namespace | None = None) -> None:
     """Run the motion-generator tutorial."""
-    args = parse_args()
+    args = parse_args() if args is None else args
 
     np.set_printoptions(precision=5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
@@ -242,7 +251,8 @@ def main() -> None:
             height=RECORD_HEIGHT,
             headless=True,
             physics_dt=1.0 / 100.0,
-            sim_device=args.device,
+            device=args.device,
+            physics_cfg=physics_cfg_for_backend(args.physics),
             render_cfg=RenderCfg(renderer=args.renderer),
             num_envs=args.num_envs,
             arena_space=args.arena_space,
@@ -253,8 +263,7 @@ def main() -> None:
     robot: Robot = sim.add_robot(cfg=CobotMagicCfg.from_dict({"uid": "CobotMagic"}))
     arm_name = "left_arm"
 
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    sim.prepare()
 
     if not args.headless:
         sim.open_window()
@@ -336,4 +345,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

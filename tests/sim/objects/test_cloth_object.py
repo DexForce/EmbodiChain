@@ -18,13 +18,23 @@ from __future__ import annotations
 
 import os
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import ClothPhysicalAttributesCfg
+from embodichain.lab.sim.cfg import (
+    SurfaceElementPropertiesCfg,
+    SurfaceDeformablePhysicsCfg,
+    NewtonPhysicsCfg,
+)
 from embodichain.lab.sim.shapes import MeshCfg
-from embodichain.lab.sim.objects import ClothObjectCfg, ClothObject
+from embodichain.lab.sim.objects import (
+    SurfaceDeformableObject,
+    SurfaceDeformableObjectCfg,
+    DeformableObject,
+    DeformableObjectData,
+)
 import open3d as o3d
 import pytest
 import torch
 import tempfile
+import warp as wp
 
 
 def create_2d_grid_mesh(width: float, height: float, nx: int = 1, ny: int = 1):
@@ -43,7 +53,7 @@ def create_2d_grid_mesh(width: float, height: float, nx: int = 1, ny: int = 1):
     # Vectorized vertex positions using PyTorch
     x_lin = torch.linspace(-w / 2.0, w / 2.0, steps=nx + 1, dtype=torch.float64)
     y_lin = torch.linspace(-h / 2.0, h / 2.0, steps=ny + 1, dtype=torch.float64)
-    yy, xx = torch.meshgrid(y_lin, x_lin)  # shapes: (ny+1, nx+1)
+    yy, xx = torch.meshgrid(y_lin, x_lin, indexing="ij")
     xx_flat = xx.reshape(-1)
     yy_flat = yy.reshape(-1)
     zz_flat = torch.full_like(xx_flat, 0, dtype=torch.float64)
@@ -68,15 +78,17 @@ class BaseSoftObjectTest:
             height=1080,
             headless=True,
             physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-            sim_device="cuda",
+            device="cuda",
             num_envs=4,
             arena_space=3.0,
+            physics_cfg=NewtonPhysicsCfg(
+                solver_cfg={"solver_type": "vbd"},
+            ),
         )
 
         # Create the simulation instance
         self.sim = SimulationManager(sim_cfg)
 
-        # Enable manual physics update for precise control
         self.num_envs = 4
 
         cloth_verts, cloth_faces = create_2d_grid_mesh(
@@ -89,27 +101,27 @@ class BaseSoftObjectTest:
         cloth_save_path = os.path.join(tempfile.gettempdir(), "cloth_mesh.ply")
         o3d.io.write_triangle_mesh(cloth_save_path, cloth_mesh)
         # add softbody to the scene
-        self.cloth: ClothObject = self.sim.add_cloth_object(
-            cfg=ClothObjectCfg(
+        self.cloth: SurfaceDeformableObject = self.sim.add_deformable_object(
+            cfg=SurfaceDeformableObjectCfg(
                 uid="cloth",
                 shape=MeshCfg(fpath=cloth_save_path),
                 init_pos=[0.5, 0.0, 0.3],
                 init_rot=[0, 0, 0],
-                physical_attr=ClothPhysicalAttributesCfg(
-                    mass=0.01,
-                    youngs=1e10,
-                    poissons=0.4,
-                    thickness=0.04,
-                    bending_stiffness=0.01,
-                    bending_damping=0.1,
-                    dynamic_friction=0.95,
-                    min_position_iters=30,
+                attrs=SurfaceDeformablePhysicsCfg(
+                    density=1.0,
+                    surface_props=SurfaceElementPropertiesCfg(
+                        tri_ke=1.0e4,
+                        tri_ka=1.0e4,
+                        tri_kd=10.0,
+                        edge_ke=100.0,
+                        edge_kd=1.0,
+                    ),
                 ),
             )
         )
+        self.sim.prepare()
 
     def test_run_simulation(self):
-        self.sim.init_gpu_physics()
         for _ in range(100):
             self.sim.update(step=1)
         self.cloth.reset()
@@ -117,28 +129,93 @@ class BaseSoftObjectTest:
             self.sim.update(step=1)
 
     def test_remove(self):
-        self.sim.remove_asset(self.cloth.uid)
-        assert (
-            self.cloth.uid not in self.sim._soft_objects
-        ), "Cow UID still present after removal"
+        with pytest.raises(NotImplementedError, match="pending removal"):
+            self.sim.remove_asset(self.cloth.uid)
+        assert self.sim.get_deformable_object(self.cloth.uid) is self.cloth
 
     def test_get_current_vertex_positions(self):
-        vertex_positions = self.cloth.get_current_vertex_position()
+        vertex_positions = self.cloth.data.nodal_pos_w
         assert vertex_positions.shape == (
             self.sim.num_envs,
-            self.cloth._data.n_vertices,
+            self.cloth.data.n_nodes,
             3,
         ), "Vertex positions shape mismatch"
 
     def test_get_deformable_mesh_geometry(self):
         """Test current cloth vertices and matching surface triangles."""
-        self.sim.init_gpu_physics()
-        vertices = self.cloth.get_current_vertex_position()
-        triangles = self.cloth.get_triangles(env_ids=[0])
+        self.sim.prepare()
+        vertices = self.cloth.data.nodal_pos_w
+        triangles = self.cloth.get_surface_triangles(env_ids=[0])
 
         assert vertices.ndim == 3 and vertices.shape[0] == self.sim.num_envs
         assert triangles.ndim == 3 and triangles.shape[0] == 1
         assert int(triangles.max()) < vertices.shape[1]
+
+    def test_set_local_pose_updates_selected_particle_batch(self):
+        """Setting one instance pose writes only its packed simulation nodes."""
+        before = self.cloth.data.nodal_pos_w
+        translation = torch.tensor([0.5, 0.0, 0.0], device=self.cloth.device)
+        pose = torch.eye(
+            4,
+            dtype=torch.float32,
+            device=self.cloth.device,
+        ).unsqueeze(0)
+        pose[:, :3, 3] = (
+            torch.as_tensor(
+                self.cloth.cfg.init_pos,
+                dtype=torch.float32,
+                device=self.cloth.device,
+            )
+            + translation
+        )
+
+        self.cloth.set_local_pose(pose, env_ids=[0])
+        after = self.cloth.data.nodal_pos_w
+
+        torch.testing.assert_close(after[0], before[0] + translation)
+        torch.testing.assert_close(after[1:], before[1:])
+
+    def test_unified_deformable_contract(self):
+        self.sim.update(step=5)
+        assert isinstance(self.cloth, DeformableObject)
+        assert isinstance(self.cloth, SurfaceDeformableObject)
+        assert self.cloth.deformable_type == "surface"
+        assert self.sim.get_deformable_object("cloth") is self.cloth
+        assert self.sim.get_deformable_object_uid_list() == ["cloth"]
+
+        assert type(self.cloth.data) is DeformableObjectData
+        positions = self.cloth.data.nodal_pos_w
+        velocities = self.cloth.data.nodal_vel_w
+        state = self.cloth.data.nodal_state_w
+        default_state = self.cloth.data.default_nodal_state_w
+        assert positions.shape[-1] == 3
+        assert velocities.shape == positions.shape
+        assert state.shape == (*positions.shape[:-1], 6)
+        assert default_state.shape == state.shape
+        native_velocities = torch.stack(
+            [
+                wp.to_torch(particle_set.get_particle_velocities()).clone()
+                for particle_set in self.cloth.data.entities
+            ]
+        )
+        assert torch.count_nonzero(native_velocities) > 0
+        torch.testing.assert_close(velocities, native_velocities)
+        render_vertices = self.cloth.get_surface_vertices()
+        assert render_vertices.shape[0] == self.sim.num_envs
+        arena_offsets = torch.as_tensor(
+            self.sim.arena_offsets,
+            dtype=render_vertices.dtype,
+            device=render_vertices.device,
+        )
+        arena_local_vertices = render_vertices - arena_offsets[:, None, :]
+        torch.testing.assert_close(
+            arena_local_vertices,
+            arena_local_vertices[0].expand_as(arena_local_vertices),
+        )
+        torch.testing.assert_close(
+            self.cloth.get_surface_triangles(env_ids=[0]),
+            self.cloth.get_surface_triangles(env_ids=[0]),
+        )
 
     def teardown_method(self):
         """Clean up resources after each test method."""

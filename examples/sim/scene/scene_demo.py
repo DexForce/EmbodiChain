@@ -23,13 +23,38 @@ from __future__ import annotations
 import argparse
 import time
 from pathlib import Path
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create a simulation scene with SimulationManager"
+    )
+    parser.add_argument(
+        "--scene",
+        type=str,
+        default="kitchen",
+        choices=["kitchen", "factory", "office", "local"],
+        help="Choose which scene to load",
+    )
+    add_sim_args_to_parser(parser)
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
 import math
 import embodichain.utils.logger as logger
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
     RenderCfg,
-    RigidBodyAttributesCfg,
+    physics_cfg_for_backend,
+    RigidBodyPhysicsCfg,
     LightCfg,
     RobotCfg,
     URDFCfg,
@@ -38,7 +63,6 @@ from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot
 from embodichain.data.assets.scene_assets import SceneData
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 
 
 def resolve_asset_path(scene_name: str) -> str:
@@ -77,9 +101,6 @@ def resolve_asset_path(scene_name: str) -> str:
 
 def run_simulation(sim: SimulationManager):
     """Run the simulation loop."""
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
     try:
         while True:
             time.sleep(0.01)
@@ -90,19 +111,10 @@ def run_simulation(sim: SimulationManager):
         logger.log_info("Simulation terminated successfully.")
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Create a simulation scene with SimulationManager"
-    )
-    parser.add_argument(
-        "--scene",
-        type=str,
-        default="kitchen",
-        choices=["kitchen", "factory", "office", "local"],
-        help="Choose which scene to load",
-    )
-    add_env_launcher_args_to_parser(parser)
-    args = parser.parse_args()
+def main(args: argparse.Namespace | None = None) -> None:
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
 
     logger.log_info(f"Initializing scene '{args.scene}'")
 
@@ -119,8 +131,9 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         num_envs=args.num_envs,
         arena_space=10.0,
         visualization=visualization_cfg_from_args(args),
@@ -142,11 +155,15 @@ def main():
         cfg = LightCfg(uid=uid, intensity=intensity, radius=600, init_pos=[x, y, z])
         lights.append(sim.add_light(cfg))
 
-    physics_attrs = RigidBodyAttributesCfg(
-        mass=10,
-        dynamic_friction=0.5,
-        static_friction=0.5,
-        restitution=0.1,
+    physics_attrs = RigidBodyPhysicsCfg.from_dict(
+        {
+            "mass_props": {"mass": 10},
+            "material_props": {
+                "dynamic_friction": 0.5,
+                "static_friction": 0.5,
+                "restitution": 0.1,
+            },
+        }
     )
 
     try:
@@ -179,6 +196,8 @@ def main():
         logger.log_info(f"Failed to load scene asset: {e}")
         return
 
+    sim.prepare()
+
     logger.log_info(f"Scene '{args.scene}' setup complete!")
     logger.log_info(f"Running simulation with {args.num_envs} environment(s)")
     logger.log_info("Press Ctrl+C to stop the simulation")
@@ -190,4 +209,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

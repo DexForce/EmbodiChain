@@ -55,17 +55,19 @@ def infer_policy_action(
     *,
     device: torch.device | str,
     num_envs: int,
+    observation_transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
 ) -> torch.Tensor:
     """Run the same deterministic Policy call used by RL evaluation."""
     device = torch.device(device)
     policy_module = getattr(policy, "module", policy)
-    fields = {
-        "obs": prepare_policy_observation(
-            observation,
-            device,
-            getattr(policy_module, "actor_obs_groups", None),
-        )
-    }
+    actor_obs = prepare_policy_observation(
+        observation,
+        device,
+        getattr(policy_module, "actor_obs_groups", None),
+    )
+    if observation_transform is not None:
+        actor_obs = observation_transform(actor_obs)
+    fields = {"obs": actor_obs}
     if getattr(policy_module, "uses_separate_critic_obs", False):
         fields["critic_obs"] = prepare_policy_observation(
             observation,
@@ -143,8 +145,20 @@ def evaluate_episodes(
     device: torch.device | str,
     seed: int | None = None,
     on_step: Callable[[dict[str, Any]], None] | None = None,
+    observation_transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
 ) -> dict[str, float]:
-    """Evaluate exactly ``num_episodes`` completed asynchronous episodes."""
+    """Evaluate exactly ``num_episodes`` completed asynchronous episodes.
+
+    Args:
+        policy: Policy evaluated with deterministic actions.
+        env: Vector environment with automatic row reset.
+        num_episodes: Exact number of completed episodes to collect.
+        device: Policy device.
+        seed: Optional environment reset seed.
+        on_step: Optional callback for raw step info.
+        observation_transform: Optional frozen preprocessing transform, such as
+            a running observation normalizer.
+    """
     if num_episodes <= 0:
         raise ValueError("num_episodes must be positive.")
     device = torch.device(device)
@@ -167,6 +181,7 @@ def evaluate_episodes(
                 observation,
                 device=device,
                 num_envs=num_envs,
+                observation_transform=observation_transform,
             )
             observation, reward, terminated, truncated, info = env.step(
                 convert_policy_action_for_env(env, action)

@@ -86,6 +86,8 @@ For new task-first compositions, prefer:
 This is a component, not a runnable deployment. It owns:
 
 - `environment_id`;
+- exactly one explicit `physics: default|newton` backend and its optional,
+  backend-matching `physics_config`;
 - ordinary environment values such as episode limits and environment count;
 - physical simulation entities under `simulation`; and
 - manager configuration under `env`.
@@ -117,8 +119,10 @@ embodiment:
 
 The original inline Gym format remains supported. When extending an existing
 inline `env.json` or `env.yaml`, preserve that representation unless the user
-asked for component extraction. Never select a component and repeat its owned
-inline fields in the same deployment.
+asked for component extraction. Every inline runnable config declares exactly
+one `physics: default|newton` backend. Never select a component and repeat its
+owned inline fields, including `physics` or `physics_config`, in the same
+deployment. Use separate environment files for backend-specific settings.
 
 ### Optional Python entry point
 
@@ -173,6 +177,7 @@ trainer-routing smoke test when dependencies permit.
 - [ ] Task family, optional subdomain, task name, and runnable IDs are stable
 - [ ] Python and config paths share the same task-first hierarchy
 - [ ] Environment component and runnable deployment ownership are not mixed
+- [ ] Each environment file declares one backend and only matching physics fields
 - [ ] A Python task module exists only when the selected route needs it
 - [ ] No solution-method directory or same-named task package was introduced
 - [ ] Existing components and manager functors were reused where possible

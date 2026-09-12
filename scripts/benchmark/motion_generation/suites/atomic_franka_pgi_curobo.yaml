@@ -8,8 +8,9 @@ robot:
   provider: franka_pgi
   config:
     attrs:
-      static_friction: 1.0
-      dynamic_friction: 1.0
+      material_props:
+        static_friction: 1.0
+        dynamic_friction: 1.0
     solver_cfg:
       arm:
         tcp:
@@ -109,8 +110,9 @@ tracks:
           drive:
             drive_type: none
           attrs:
-            static_friction: 1.0
-            dynamic_friction: 1.0
+            material_props:
+              static_friction: 1.0
+              dynamic_friction: 1.0
           fix_base: true
           settle_steps: 10
           reset_settle_steps: 0

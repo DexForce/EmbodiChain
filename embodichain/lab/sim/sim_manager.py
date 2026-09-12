@@ -22,17 +22,29 @@ import sys
 import queue
 import time
 import threading
+from contextlib import contextmanager
 import dexsim
 import torch
 import numpy as np
 import warp as wp
 
-from tqdm import tqdm
 from pathlib import Path
 from copy import deepcopy
 from datetime import datetime
-from functools import cached_property
-from typing import TYPE_CHECKING, Callable, Dict, List, Sequence, Union
+from functools import cached_property, partial
+from numbers import Integral
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Literal,
+    Mapping,
+    Sequence,
+    Union,
+)
 from dataclasses import dataclass, asdict, field, MISSING
 
 # Global cache directories
@@ -41,26 +53,28 @@ MATERIAL_CACHE_DIR = SIM_CACHE_DIR / "mat_cache"
 CONVEX_DECOMP_DIR = SIM_CACHE_DIR / "convex_decomposition"
 REACHABLE_XPOS_DIR = SIM_CACHE_DIR / "robot_reachable_xpos"
 
+
+def _is_usd_path(path: object | None) -> bool:
+    """Return whether a source path is a USD stage."""
+    return path is not None and str(path).lower().endswith((".usd", ".usda", ".usdc"))
+
+
 from dexsim.types import (
+    ActorType,
     Backend,
     ThreadMode,
-    PhysicalAttr,
-    ActorType,
-    RigidBodyShape,
-    RigidBodyGPUAPIReadType,
-    ArticulationGPUAPIReadType,
 )
 from dexsim.core import TASK_RETURN
-from dexsim.engine import CudaArray, Material
+from dexsim.engine import Material, ObjectManipulator
 from dexsim.models import MeshObject
-from dexsim.render import Light as _Light, LightType, Windows
-from dexsim.engine import ObjectManipulator
+from dexsim.render import LightType, Windows
 
 from embodichain.lab.sim.objects import (
     RigidObject,
     RigidObjectGroup,
-    SoftObject,
-    ClothObject,
+    DeformableObject,
+    SurfaceDeformableObject,
+    VolumeDeformableObject,
     Articulation,
     Robot,
     Light,
@@ -78,27 +92,53 @@ from embodichain.lab.sim.sensors import (
 from embodichain.lab.sim.sensors.attachment import resolve_parent_nodes
 from embodichain.lab.sim.cfg import (
     RenderCfg,
-    PhysicsCfg,
-    MarkerCfg,
+    PhysicsBackendCfg,
     GPUMemoryCfg,
+    DefaultPhysicsCfg,
+    NewtonPhysicsCfg,
+    validate_physics_cfg,
+    MarkerCfg,
     WindowRecordCfg,
     WindowCameraPoseCfg,
     LightCfg,
     RigidObjectCfg,
-    SoftObjectCfg,
-    ClothObjectCfg,
+    DeformableObjectCfg,
+    SurfaceDeformableObjectCfg,
+    VolumeDeformableObjectCfg,
     RigidObjectGroupCfg,
     ArticulationCfg,
+    ArticulationRootPropertiesCfg,
     RobotCfg,
+    RobotPresetCfg,
     RigidConstraintCfg,
 )
+from embodichain.lab.sim.physics import make_physics_backend
+from embodichain.lab.sim.spawn.descriptors import (
+    articulation_desc_from_cfg,
+    configure_articulation_desc,
+    rigid_desc_from_cfg,
+    surface_deformable_desc_from_cfg,
+    volume_deformable_desc_from_cfg,
+)
+from embodichain.lab.sim.spawn.usd import (
+    articulation_desc_from_usd,
+    rigid_desc_from_usd,
+)
+from embodichain.lab.sim.spawn.scene import SpawnScene
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
 from embodichain.lab.sim.profiler import Profiler, ProfilerCfg
 from embodichain.lab.visualization.cfg import VisualizationCfg
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import look_at_to_pose, matrix_from_quat, pose_inv
+from embodichain.utils.math import (
+    look_at_to_pose,
+    matrix_from_quat,
+    pose_inv,
+    quat_wxyz_to_xyzw,
+)
 
 if TYPE_CHECKING:
+    from dexsim.engine import PhysicsScene
+    from dexsim.scene import Scene
     from dexsim.interaction import EntityGizmoConfig, EntityGizmoManipulator
     from embodichain.lab.visualization import (
         RuntimeHealth,
@@ -111,6 +151,7 @@ if TYPE_CHECKING:
 __all__ = [
     "SimulationManager",
     "SimulationManagerCfg",
+    "get_physics_scene",
     "SIM_CACHE_DIR",
     "MATERIAL_CACHE_DIR",
     "CONVEX_DECOMP_DIR",
@@ -118,12 +159,144 @@ __all__ = [
 ]
 
 
+@contextmanager
+def _temporary_warp_kernel_log_suppression(
+    physics_cfg: PhysicsBackendCfg,
+) -> Iterator[None]:
+    """Temporarily suppress informational Warp logs for Newton operations."""
+    if not (
+        isinstance(physics_cfg, NewtonPhysicsCfg)
+        and physics_cfg.suppress_warp_kernel_logs
+    ):
+        yield
+        return
+
+    previous_log_level = wp.config.log_level
+    try:
+        # Warp emits its startup banner and module-load timers at INFO level.
+        # Keep warnings and errors visible.
+        wp.config.log_level = wp.LOG_WARNING
+        yield
+    finally:
+        wp.config.log_level = previous_log_level
+
+
+def _initialize_warp_runtime(physics_cfg: PhysicsBackendCfg) -> None:
+    """Initialize Warp while honoring Newton startup-log suppression."""
+    with _temporary_warp_kernel_log_suppression(physics_cfg):
+        wp.init()
+
+
+# Deformable objects are Newton particle sets. The Default implementation is
+# deliberately absent so stale soft/cloth configurations fail at declaration.
+_DEFORMABLE_BACKEND_IMPLEMENTATIONS = {
+    "default": {},
+    "newton": {
+        "volume": (
+            VolumeDeformableObjectCfg,
+            VolumeDeformableObject,
+            volume_deformable_desc_from_cfg,
+            "soft_object",
+        ),
+        "surface": (
+            SurfaceDeformableObjectCfg,
+            SurfaceDeformableObject,
+            surface_deformable_desc_from_cfg,
+            "cloth_object",
+        ),
+    },
+}
+
+
 @configclass
 class SimulationManagerCfg:
     """Global robot simulation configuration."""
 
+    def __init__(
+        self,
+        width: int = 1920,
+        height: int = 1080,
+        headless: bool = False,
+        render_cfg: RenderCfg | None = None,
+        gpu_id: int = 0,
+        thread_mode: ThreadMode = ThreadMode.RENDER_SHARE_ENGINE,
+        cpu_num: int = 1,
+        num_envs: int = 1,
+        arena_space: float = 5.0,
+        enable_entity_gizmo: bool = True,
+        robot_ik_gizmo: GizmoCfg | dict | None = GizmoCfg(),
+        physics_dt: float | None = None,
+        device: str | torch.device | None = None,
+        physics_cfg: PhysicsBackendCfg | None = None,
+        sim_device: str | torch.device | None = None,
+        physics_config: PhysicsBackendCfg | None = None,
+        gpu_memory_config: GPUMemoryCfg | None = None,
+        profiler: ProfilerCfg | None = None,
+        visualization: VisualizationCfg | None = None,
+        window_record: WindowRecordCfg | None = None,
+        window_camera_pose: WindowCameraPoseCfg | None = None,
+        startup_summary: Literal["compact", "full", "off"] = "compact",
+        dexsim_startup_info: bool = False,
+    ) -> None:
+        self.startup_summary = startup_summary
+        self.dexsim_startup_info = dexsim_startup_info
+        self.width = width
+        self.height = height
+        self.headless = headless
+        self.render_cfg = RenderCfg() if render_cfg is None else render_cfg
+        self.gpu_id = gpu_id
+        self.thread_mode = thread_mode
+        self.cpu_num = cpu_num
+        self.num_envs = num_envs
+        self.arena_space = arena_space
+        self.enable_entity_gizmo = enable_entity_gizmo
+        self.robot_ik_gizmo = deepcopy(robot_ik_gizmo)
+        if physics_cfg is None:
+            physics_cfg = (
+                DefaultPhysicsCfg() if physics_config is None else physics_config
+            )
+        self.physics_cfg = physics_cfg
+        if gpu_memory_config is not None:
+            if not isinstance(self.physics_cfg, DefaultPhysicsCfg):
+                logger.log_error(
+                    "gpu_memory_config is only supported by the default physics backend.",
+                    ValueError,
+                )
+            self.physics_cfg.gpu_memory = gpu_memory_config
+        self.profiler = profiler
+        self.visualization = (
+            VisualizationCfg() if visualization is None else visualization
+        )
+        self.window_record = (
+            WindowRecordCfg() if window_record is None else window_record
+        )
+        self.window_camera_pose = (
+            WindowCameraPoseCfg() if window_camera_pose is None else window_camera_pose
+        )
+        if physics_dt is not None:
+            self.physics_cfg.physics_dt = physics_dt
+        # ``None`` is an omission sentinel, not a request for the generic
+        # PhysicsBackendCfg default.  Leave the concrete config untouched so
+        # NewtonPhysicsCfg's CUDA default remains authoritative.  A non-None
+        # value is an intentional runtime override and is applied uniformly.
+        runtime_device = device if device is not None else sim_device
+        if runtime_device is not None:
+            self.physics_cfg.device = runtime_device
+
+        self.__post_init__()
+
     width: int = 1920
     """The width of the simulation window."""
+
+    startup_summary: Literal["compact", "full", "off"] = "compact"
+    """Startup table detail. ``off`` disables both simulation and Gym summaries."""
+
+    dexsim_startup_info: bool = False
+    """Show DexSim's native startup information in addition to our summary.
+
+    Warnings and errors remain visible regardless of this setting. Requires
+    a DexSim build exposing ``WorldConfig.log_startup_info``.
+    """
 
     height: int = 1080
     """The height of the simulation window."""
@@ -182,8 +355,13 @@ class SimulationManagerCfg:
     arena_space: float = 5.0
     """The distance between each arena when building multiple arenas."""
 
-    physics_dt: float = 1.0 / 100.0
-    """The time step for the physics simulation."""
+    physics_cfg: PhysicsBackendCfg = field(default_factory=DefaultPhysicsCfg)
+    """Physics backend configuration (type selects default vs Newton backend).
+
+    The concrete config owns the default device: Default uses ``cpu`` and
+    Newton uses ``cuda:0``.  The constructor's optional ``device``/``sim_device``
+    arguments are applied only when explicitly provided.
+    """
 
     profiler: ProfilerCfg | None = None
     """Optional simulation profiler. ``None`` disables profiling.
@@ -192,14 +370,6 @@ class SimulationManagerCfg:
     ``sim_update`` root. When the manager is owned by an environment, the same
     profiler instance composes with the environment's step/reset hierarchy.
     """
-
-    sim_device: Union[str, torch.device] = "cpu"
-    """The device for the physics simulation. Can be 'cpu', 'cuda', or a torch.device object."""
-
-    physics_config: PhysicsCfg = field(default_factory=PhysicsCfg)
-    """The physics configuration parameters."""
-    gpu_memory_config: GPUMemoryCfg = field(default_factory=GPUMemoryCfg)
-    """The GPU memory configuration parameters."""
 
     window_record: WindowRecordCfg = field(default_factory=WindowRecordCfg)
     """Viewer window recording settings (hotkey, paths, FPS, memory budget)."""
@@ -211,7 +381,10 @@ class SimulationManagerCfg:
     """Live browser visualization settings."""
 
     def __post_init__(self) -> None:
-        """Apply visualization-dependent simulation defaults."""
+        """Validate physics and apply visualization-dependent defaults."""
+        if self.startup_summary not in ("compact", "full", "off"):
+            raise ValueError("startup_summary must be 'compact', 'full', or 'off'.")
+        validate_physics_cfg(self.physics_cfg)
         if isinstance(self.robot_ik_gizmo, dict):
             self.robot_ik_gizmo = GizmoCfg(**self.robot_ik_gizmo)
         if self.robot_ik_gizmo is not None and not isinstance(
@@ -220,6 +393,58 @@ class SimulationManagerCfg:
             raise TypeError("robot_ik_gizmo must be a GizmoCfg, mapping, or None.")
         if self.visualization.backend == "viser":
             self.headless = True
+
+    @property
+    def physics_dt(self) -> float:
+        """The time step for the physics simulation."""
+        return self.physics_cfg.physics_dt
+
+    @physics_dt.setter
+    def physics_dt(self, value: float) -> None:
+        self.physics_cfg.physics_dt = value
+
+    @property
+    def device(self) -> str | torch.device:
+        """The device for the physics simulation."""
+        return self.physics_cfg.device
+
+    @device.setter
+    def device(self, value: str | torch.device) -> None:
+        self.physics_cfg.device = value
+
+    @property
+    def sim_device(self) -> str | torch.device:
+        """Legacy alias for :attr:`device`."""
+        return self.device
+
+    @sim_device.setter
+    def sim_device(self, value: str | torch.device) -> None:
+        self.device = value
+
+    @property
+    def physics_config(self) -> PhysicsBackendCfg:
+        """Legacy alias for :attr:`physics_cfg`."""
+        return self.physics_cfg
+
+    @physics_config.setter
+    def physics_config(self, value: PhysicsBackendCfg) -> None:
+        validate_physics_cfg(value)
+        self.physics_cfg = value
+
+    @property
+    def gpu_memory_config(self) -> GPUMemoryCfg | None:
+        """Legacy alias for the default backend GPU-memory configuration."""
+        if not isinstance(self.physics_cfg, DefaultPhysicsCfg):
+            return None
+        return self.physics_cfg.gpu_memory
+
+    @gpu_memory_config.setter
+    def gpu_memory_config(self, value: GPUMemoryCfg) -> None:
+        if not isinstance(self.physics_cfg, DefaultPhysicsCfg):
+            raise AttributeError(
+                "gpu_memory_config is unavailable for the Newton physics backend."
+            )
+        self.physics_cfg.gpu_memory = value
 
 
 @dataclass
@@ -262,11 +487,13 @@ class SimulationManager:
         - manager the scenes and the simulation environment.
             - parallel scenes simulation on both CPU and GPU.
             - create and setup the rendering related settings, eg. environment map, lighting, materials, etc.
-            - physics simulation management, eg. time step, manual update, etc.
+            - physics simulation management, including time steps and explicit stepping.
             - interactive control via gizmo and window callbacks events.
 
     Args:
         sim_config (SimulationManagerCfg, optional): simulation configuration. Defaults to SimulationManagerCfg().
+        defer_startup_summary: Let an owning environment emit one combined table
+            after task and manager initialization. Standalone callers keep False.
     """
 
     _instances = {}
@@ -280,23 +507,41 @@ class SimulationManager:
         "ContactSensor": ContactSensor,
     }
 
-    def __new__(cls, sim_config: SimulationManagerCfg = SimulationManagerCfg()):
+    def __new__(
+        cls,
+        sim_config: SimulationManagerCfg = SimulationManagerCfg(),
+        *,
+        defer_startup_summary: bool = False,
+    ):
         """Create or return the instance based on instance_id."""
-        n_instance = len(list(cls._instances.keys()))
+        n_instance = 0
+        while n_instance in cls._instances:
+            n_instance += 1
         instance = super(SimulationManager, cls).__new__(cls)
         # Store sim_config in the instance for use in __init__ or elsewhere
         instance.sim_config = sim_config
         instance._is_constructed = False
+        instance.instance_id = n_instance
         cls._instances[n_instance] = instance
         return instance
 
     def __init__(
-        self, sim_config: SimulationManagerCfg = SimulationManagerCfg()
+        self,
+        sim_config: SimulationManagerCfg = SimulationManagerCfg(),
+        *,
+        defer_startup_summary: bool = False,
     ) -> None:
-        instance_id = SimulationManager.get_instance_num() - 1
-
-        # Mark as initialized
-        self.instance_id = instance_id
+        self._defer_startup_summary = defer_startup_summary
+        self._startup_summary_logged = False
+        self._scene_summary_logged = False
+        self._requested_renderer = sim_config.render_cfg.renderer
+        solver_cfg = getattr(sim_config.physics_cfg, "solver_cfg", None)
+        self._requested_solver = str(
+            solver_cfg.get("solver_type", solver_cfg.get("class_type", "auto"))
+            if isinstance(solver_cfg, Mapping)
+            else getattr(solver_cfg, "solver_type", "auto")
+        )
+        instance_id = self.instance_id
 
         # Cache paths
         self._sim_cache_dir = SIM_CACHE_DIR
@@ -316,11 +561,28 @@ class SimulationManager:
         self.sim_config = sim_config
         self.device = torch.device("cpu")
 
+        # Initialize physics backend (selected by the type of physics_cfg).
+        # The backend is held as an instance member; SimulationManager delegates
+        # all backend-specific lifecycle/scene/capability logic to it instead of
+        # branching on a backend name throughout the manager.
+        self.physics = make_physics_backend(sim_config.physics_cfg, self)
+
         world_config = self._convert_sim_config(sim_config)
+        self._world_config = world_config
         self.profiler = Profiler(sim_config.profiler, self.device)
 
-        # Initialize warp runtime context before creating the world.
-        wp.init()
+        # Initialize Warp before creating the world. For Newton, honor the
+        # configured startup/kernel-log suppression from the very first init.
+        _initialize_warp_runtime(sim_config.physics_cfg)
+        self._render_device_name: str | None = None
+        if sim_config.startup_summary != "off":
+            # Warp already enumerated these devices during initialization. Read
+            # its cached names instead of lazily initializing PyTorch CUDA just
+            # to print diagnostics for CPU-physics/explicit-renderer programs.
+            for render_device in wp.get_cuda_devices():
+                if render_device.ordinal == sim_config.gpu_id:
+                    self._render_device_name = render_device.name
+                    break
         self._world: dexsim.World = dexsim.World(world_config)
         # The caller owns physics time, including while the scene is assembled.
         self._world.set_manual_update(True)
@@ -350,14 +612,11 @@ class SimulationManager:
         )
         self._window_camera_pose_input_control: ObjectManipulator | None = None
 
-        self._world.set_delta_time(sim_config.physics_dt)
+        self._world.set_delta_time(sim_config.physics_cfg.physics_dt)
         self._world.show_coordinate_axis(False)
 
-        dexsim.set_physics_config(**sim_config.physics_config.to_dexsim_args())
-        dexsim.set_physics_gpu_memory_config(**sim_config.gpu_memory_config.to_dict())
-
-        self._is_initialized_gpu_physics = False
-        self._ps = self._world.get_physics_scene()
+        # Activate the physics backend now that the dexsim World exists.
+        self.physics.activate(sim_config)
 
         # activate physics
         self.enable_physics(True)
@@ -381,13 +640,23 @@ class SimulationManager:
         self._rigid_objects: Dict[str, RigidObject] = dict()
         self._constraints: Dict[str, RigidConstraint] = dict()
         self._rigid_object_groups: Dict[str, RigidObjectGroup] = dict()
-        self._soft_objects: Dict[str, SoftObject] = dict()
-        self._cloth_objects: Dict[str, ClothObject] = dict()
+        self._deformable_objects: Dict[str, DeformableObject] = dict()
         self._articulations: Dict[str, Articulation] = dict()
         self._robots: Dict[str, Robot] = dict()
 
         self._sensors: Dict[str, BaseSensor] = dict()
-        self._lights: Dict[str, _Light] = dict()
+        self._lights: Dict[str, Light] = dict()
+
+        self._spawn_scene = SpawnScene(
+            self._world,
+            num_envs=sim_config.num_envs,
+            spacing=(sim_config.arena_space, sim_config.arena_space, 0.0),
+        )
+        self._arenas = list(self._spawn_scene.builder.prepare_arenas())
+        self._prepared_spawn_topology_revision = -1
+        self._ready_spawn_topology_revision = -1
+        self._synced_spawn_render_topology_revision = -1
+        self._camera_attachment_topology_revision = -1
 
         self._visualization_runtime = None
         self._visualization_overlays: SceneOverlays | None = None
@@ -406,19 +675,60 @@ class SimulationManager:
 
         self._init_sim_resources()
 
-        self._create_default_plane()
+        # The plane material and visibility are authored before declaration so
+        # both eager Default loading and deferred Newton loading see them.
+        self._spawn_default_plane_visibility = True
+        self._default_plane = None
         self.set_default_background()
+        self._declare_spawn_default_plane()
         self.set_default_global_lighting()
 
-        self._build_multiple_arenas(sim_config.num_envs)
+        # SpawnScene has already prepared the configured Arenas. Start the
+        # optional browser runtime after default resources are declared.
         self.start_visualization()
-
         if sim_config.headless is False:
             self._window = self._world.get_windows()
             self.is_window_opened = self._window is not None
             self._enable_default_entity_gizmo()
 
         self._is_constructed = True
+        if not self._defer_startup_summary:
+            self._log_startup_summary()
+
+    def _log_startup_summary(self) -> None:
+        """Emit the engine snapshot once, after successful construction."""
+        if self.sim_config.startup_summary == "off" or self._startup_summary_logged:
+            return
+        from ._startup_summary import format_summary, simulation_rows
+
+        logger.log_info(
+            format_summary("Simulation initialized", simulation_rows(self)),
+            prefix=False,
+        )
+        self._startup_summary_logged = True
+
+    def _log_scene_summary(self) -> None:
+        """Emit the first usable scene snapshot, never a partial prepare."""
+        if (
+            not getattr(self, "_is_constructed", False)
+            or getattr(self, "_defer_startup_summary", True)
+            or getattr(self, "_scene_summary_logged", True)
+            or self.sim_config.startup_summary == "off"
+            or self.spawn_result is None
+        ):
+            return
+        from ._startup_summary import format_summary, scene_is_ready, scene_rows
+
+        if not scene_is_ready(self):
+            return
+        if (
+            self.physics.name == "newton"
+            and self.physics.cuda_graph_status == "pending"
+        ):
+            return
+
+        logger.log_info(format_summary("Scene ready", scene_rows(self)), prefix=False)
+        self._scene_summary_logged = True
 
     @classmethod
     def get_instance(cls, instance_id: int = 0) -> SimulationManager:
@@ -479,7 +789,7 @@ class SimulationManager:
 
         Args:
             renderer: The renderer to set. One of ``"auto"``, ``"hybrid"``,
-                ``"fast-rt"``, or ``"offline-rt"``. When ``"auto"``, the renderer is
+                ``"fast-rt"``, or ``"rt"``. When ``"auto"``, the renderer is
                 resolved immediately from the detected GPU via
                 :func:`embodichain.lab.sim.utility.render_utils.select_default_renderer`.
             gpu_id: The CUDA device index to query when ``renderer="auto"``.
@@ -490,7 +800,7 @@ class SimulationManager:
         from embodichain.lab.sim import cfg
         from embodichain.lab.sim.utility.render_utils import select_default_renderer
 
-        valid = {"auto", "hybrid", "fast-rt", "offline-rt"}
+        valid = {"auto", "hybrid", "fast-rt", "rt"}
         if renderer not in valid:
             logger.log_error(
                 f"Invalid renderer '{renderer}'. Must be one of {sorted(valid)}."
@@ -514,12 +824,65 @@ class SimulationManager:
         Returns:
             int: number of arenas.
         """
-        return len(self._arenas) if len(self._arenas) > 0 else 1
+        return self.sim_config.num_envs
+
+    @property
+    def spawn_result(self) -> "Scene | None":
+        """Return the finalized Scene, or ``None`` before first prepare."""
+        spawn_scene = getattr(self, "_spawn_scene", None)
+        if spawn_scene is None or not spawn_scene.builder.is_finalized:
+            return None
+        return spawn_scene.builder.result
 
     @property
     def is_use_gpu_physics(self) -> bool:
-        """Check if the physics simulation is using GPU."""
+        """Whether the active physics backend is running on GPU."""
         return self.device.type == "cuda"
+
+    @property
+    def physics_backend(self) -> str:
+        """Return the active physics backend name."""
+        return self.physics.name
+
+    @property
+    def is_default_backend(self) -> bool:
+        """Whether the Default physics backend is active."""
+        return self.physics.name == "default"
+
+    @property
+    def is_newton_backend(self) -> bool:
+        """Whether the Newton physics backend is active."""
+        return self.physics.name == "newton"
+
+    @property
+    def _active_newton_solver_type(self) -> str | None:
+        """Return the active backend's resolved solver type, when available."""
+        return self.physics.solver_type if self.is_newton_backend else None
+
+    @property
+    def newton_manager(self):
+        """Compatibility accessor for the removed NewtonManager API.
+
+        A non-Newton backend still returns ``None``. The Newton backend raises
+        an actionable error because Spawn owns its World-level runtime and no
+        independent NewtonManager exists.
+        """
+        return self.physics.newton_manager
+
+    @property
+    def differentiable_runtime(self):
+        """Return the differentiable facade over the Spawn-owned Newton runtime."""
+        runtime = self.physics.differentiable_runtime
+        if runtime is None:
+            raise RuntimeError(
+                f"The {self.physics.name} physics backend does not expose a "
+                "differentiable runtime."
+            )
+        return runtime
+
+    @property
+    def is_physics_manually_update(self) -> bool:
+        return self._world.is_physics_manually_update()
 
     @property
     def asset_uids(self) -> List[str]:
@@ -536,8 +899,7 @@ class SimulationManager:
         uid_list.extend(list(self._robots.keys()))
         uid_list.extend(list(self._rigid_objects.keys()))
         uid_list.extend(list(self._rigid_object_groups.keys()))
-        uid_list.extend(list(self._soft_objects.keys()))
-        uid_list.extend(list(self._cloth_objects.keys()))
+        uid_list.extend(list(self._deformable_objects.keys()))
         uid_list.extend(list(self._articulations.keys()))
         return uid_list
 
@@ -601,6 +963,16 @@ class SimulationManager:
         """Start the configured live visualizer and publish the current scene."""
         if self.sim_config.visualization.backend == "none":
             return None
+        visualizable_assets = (
+            getattr(self, "_rigid_objects", {}),
+            getattr(self, "_rigid_object_groups", {}),
+            getattr(self, "_deformable_objects", {}),
+            getattr(self, "_articulations", {}),
+            getattr(self, "_robots", {}),
+            getattr(self, "_sensors", {}),
+        )
+        if getattr(self, "_spawn_scene", None) is not None and any(visualizable_assets):
+            self.prepare()
         if getattr(self, "is_window_opened", False):
             raise RuntimeError(
                 "Cannot start the Viser backend while the native DexSim window "
@@ -635,6 +1007,11 @@ class SimulationManager:
         )
         self._visualization_error_reported = False
         logger.log_info(f"Viser visualization ready at {runtime.endpoint}")
+        if (
+            getattr(self, "_spawn_scene", None) is not None
+            and self.spawn_result is not None
+        ):
+            self.sync_render_state()
         runtime.capture(
             sim_step=self._visualization_sim_step,
             sim_time=self._visualization_sim_time,
@@ -681,6 +1058,7 @@ class SimulationManager:
             != self._visualization_topology_revision
         ):
             self.refresh_visualization()
+        self.sync_render_state()
         return runtime.capture(
             sim_step=self._visualization_sim_step,
             sim_time=self._visualization_sim_time,
@@ -736,6 +1114,7 @@ class SimulationManager:
         self, sim_config: SimulationManagerCfg
     ) -> dexsim.WorldConfig:
         world_config = dexsim.WorldConfig()
+        world_config.log_startup_info = sim_config.dexsim_startup_info
         win_config = dexsim.WindowsConfig()
         win_config.width = sim_config.width
         win_config.height = sim_config.height
@@ -746,8 +1125,6 @@ class SimulationManager:
         world_config.backend = Backend.VULKAN
         world_config.thread_mode = sim_config.thread_mode
         world_config.cache_path = str(self._material_cache_dir)
-        world_config.length_tolerance = sim_config.physics_config.length_tolerance
-        world_config.speed_tolerance = sim_config.physics_config.speed_tolerance
 
         if sim_config.render_cfg.renderer == "auto":
             from embodichain.lab.sim.utility.render_utils import (
@@ -755,22 +1132,19 @@ class SimulationManager:
             )
 
             resolved_renderer = select_default_renderer(sim_config.gpu_id)
-            logger.log_info(
+            logger.log_debug(
                 f"Auto-selected '{resolved_renderer}' renderer for gpu_id={sim_config.gpu_id}."
             )
             sim_config.render_cfg.renderer = resolved_renderer
 
         sim_config.render_cfg.apply_to_dexsim_config(world_config)
 
-        if type(sim_config.sim_device) is str:
-            self.device = torch.device(sim_config.sim_device)
+        if type(sim_config.device) is str:
+            self.device = torch.device(sim_config.device)
         else:
-            self.device = sim_config.sim_device
+            self.device = sim_config.device
 
         if self.device.type == "cuda":
-            world_config.enable_gpu_sim = True
-            world_config.direct_gpu_api = True
-
             if self.device.index is not None and sim_config.gpu_id != self.device.index:
                 logger.log_warning(
                     f"Conflict gpu_id {sim_config.gpu_id} and device index {self.device.index}. Using device index."
@@ -781,6 +1155,10 @@ class SimulationManager:
 
         world_config.gpu_id = sim_config.gpu_id
 
+        # Apply backend-specific WorldConfig fields (default tolerances/GPU flags
+        # or the Newton cfg) via the active backend.
+        self.physics.configure_world(world_config, sim_config)
+
         return world_config
 
     def _init_sim_resources(self) -> None:
@@ -788,6 +1166,463 @@ class SimulationManager:
         from embodichain.data.assets import SimResources
 
         self._default_resources = SimResources()
+
+    def register_kinematic_joint_trajectory(
+        self,
+        uid: str,
+        joint_positions: torch.Tensor | np.ndarray,
+        *,
+        fps: float | None = None,
+        root_poses: torch.Tensor | np.ndarray | None = None,
+    ) -> None:
+        """Register a Newton kinematic joint trajectory for every arena.
+
+        The leading trajectory dimension follows EmbodiChain's batched arena
+        layout. Each arena row is lowered to one DexSim runtime control with
+        the corresponding concrete Spawn articulation path. Row zero is the
+        initial sample; when ``fps`` is omitted, each call to :meth:`update`
+        advances to the next sample.
+
+        .. attention::
+            Declare the target robot or articulation first, then call this
+            method before :meth:`prepare`. Runtime controls are part of the
+            finalized Newton simulation pipeline and cannot be added later.
+
+        Args:
+            uid: UID of a robot or articulation declared on this manager.
+            joint_positions: Batched positions in the articulation's public
+                qpos order with shape ``(num_envs, frames, dof)``.
+            fps: Optional trajectory sample rate. When omitted, samples advance
+                once per EmbodiChain physics frame.
+            root_poses: Optional batched world-space root transforms with shape
+                ``(num_envs, frames, 4, 4)``.
+
+        Raises:
+            RuntimeError: If the active backend is not Newton, the Spawn scene
+                is already finalized, or its arena count is inconsistent.
+            KeyError: If ``uid`` is not a declared robot or articulation.
+            ValueError: If an input has an invalid batch shape or non-finite
+                values.
+        """
+        if not isinstance(uid, str) or not uid:
+            raise ValueError("uid must be a non-empty string.")
+        if not self.is_newton_backend:
+            raise RuntimeError(
+                "Kinematic joint trajectory controls require the Newton backend."
+            )
+        if uid not in self._robots and uid not in self._articulations:
+            raise KeyError(f"Robot or articulation {uid!r} is not declared.")
+
+        scene = self._spawn_scene
+        if scene.builder.is_finalized:
+            raise RuntimeError(
+                "Kinematic joint trajectories must be registered before "
+                "SimulationManager.prepare()."
+            )
+
+        if isinstance(joint_positions, torch.Tensor):
+            positions = joint_positions.detach().cpu().numpy()
+        else:
+            positions = np.asarray(joint_positions)
+        positions = np.asarray(positions, dtype=np.float32)
+        expected_prefix = (self.num_envs,)
+        if (
+            positions.ndim != 3
+            or positions.shape[:1] != expected_prefix
+            or positions.shape[1] == 0
+            or positions.shape[2] == 0
+        ):
+            raise ValueError(
+                "joint_positions must have non-empty shape "
+                f"({self.num_envs}, frames, dof); got {positions.shape}."
+            )
+        if not np.isfinite(positions).all():
+            raise ValueError("joint_positions must contain only finite values.")
+
+        poses: np.ndarray | None = None
+        if root_poses is not None:
+            if isinstance(root_poses, torch.Tensor):
+                poses = root_poses.detach().cpu().numpy()
+            else:
+                poses = np.asarray(root_poses)
+            poses = np.asarray(poses, dtype=np.float32)
+            expected_shape = (self.num_envs, positions.shape[1], 4, 4)
+            if poses.shape != expected_shape:
+                raise ValueError(
+                    f"root_poses must have shape {expected_shape}; got {poses.shape}."
+                )
+            if not np.isfinite(poses).all():
+                raise ValueError("root_poses must contain only finite values.")
+
+        arena_names = scene.arena_names
+        if len(arena_names) != self.num_envs:
+            raise RuntimeError(
+                "Spawn arena count does not match SimulationManager.num_envs: "
+                f"{len(arena_names)} != {self.num_envs}."
+            )
+
+        from dexsim.engine.newton_physics import KinematicJointTrajectoryControl
+
+        controls = tuple(
+            KinematicJointTrajectoryControl(
+                f"{arena_name}/{uid}",
+                positions[env_index],
+                fps=fps,
+                root_poses=None if poses is None else poses[env_index],
+            )
+            for env_index, arena_name in enumerate(arena_names)
+        )
+        for control in controls:
+            scene.builder.add_runtime_control(control)
+
+    def register_contact_material_schedule(
+        self,
+        uid: str,
+        keyframes: Mapping[str, Sequence[Sequence[float]]],
+        *,
+        link_names: Sequence[str] | None = None,
+    ) -> None:
+        """Register time-varying Newton contact properties for an asset.
+
+        The manager expands the declared UID to the concrete Spawn path in
+        every Arena. Supported keyframe tracks are ``dynamic_friction``,
+        ``stiffness``, and ``damping``; each track contains ``(time, value)``
+        pairs and is sampled piecewise-constantly in simulation time.
+
+        .. attention::
+            Declare the rigid object, robot, or articulation first and call
+            this method before :meth:`prepare`. Runtime controls are part of
+            the finalized Newton pipeline and cannot be added later.
+
+        Args:
+            uid: UID of a declared rigid object, robot, or articulation.
+            keyframes: Contact-property tracks keyed by property name.
+            link_names: Optional articulation-link names to update. ``None``
+                updates every collision shape belonging to the target.
+
+        Raises:
+            RuntimeError: If the backend is not Newton, the scene is already
+                finalized, or its Arena count is inconsistent.
+            KeyError: If ``uid`` does not identify a declared supported asset.
+            ValueError: If the UID or keyframes are invalid.
+        """
+        if not isinstance(uid, str) or not uid:
+            raise ValueError("uid must be a non-empty string.")
+        if not self.is_newton_backend:
+            raise RuntimeError("Contact material schedules require the Newton backend.")
+        if (
+            uid not in self._rigid_objects
+            and uid not in self._robots
+            and uid not in self._articulations
+        ):
+            raise KeyError(
+                f"Rigid object, robot, or articulation {uid!r} is not declared."
+            )
+
+        scene = self._spawn_scene
+        if scene.builder.is_finalized:
+            raise RuntimeError(
+                "Contact material schedules must be registered before "
+                "SimulationManager.prepare()."
+            )
+        arena_names = scene.arena_names
+        if len(arena_names) != self.num_envs:
+            raise RuntimeError(
+                "Spawn arena count does not match SimulationManager.num_envs: "
+                f"{len(arena_names)} != {self.num_envs}."
+            )
+
+        from dexsim.engine.newton_physics import ContactMaterialSchedule
+
+        controls = tuple(
+            ContactMaterialSchedule(
+                f"{arena_name}/{uid}",
+                keyframes,
+                link_names=link_names,
+            )
+            for arena_name in arena_names
+        )
+        for control in controls:
+            scene.builder.add_runtime_control(control)
+
+    def register_particle_contact_material_schedule(
+        self,
+        keyframes: Mapping[str, Sequence[Sequence[float]]],
+    ) -> None:
+        """Register time-varying Newton particle contact properties.
+
+        Supported tracks are ``dynamic_friction``, ``stiffness``, and
+        ``damping``. Values apply scene-wide to particle-versus-rigid contacts
+        and are sampled piecewise-constantly in simulation time.
+
+        .. attention::
+            Register this control before :meth:`prepare`. This host-side
+            control requires direct Newton stepping and therefore disables
+            CUDA Graph replay for the finalized simulation.
+
+        Args:
+            keyframes: Particle contact-property tracks containing ``(time,
+                value)`` pairs.
+
+        Raises:
+            RuntimeError: If the backend is not Newton or the scene is already
+                finalized.
+            ValueError: If the keyframes are invalid.
+        """
+        if not self.is_newton_backend:
+            raise RuntimeError(
+                "Particle contact material schedules require the Newton backend."
+            )
+        scene = self._spawn_scene
+        if scene.builder.is_finalized:
+            raise RuntimeError(
+                "Particle contact material schedules must be registered before "
+                "SimulationManager.prepare()."
+            )
+
+        from dexsim.engine.newton_physics import ParticleContactMaterialSchedule
+
+        scene.builder.add_runtime_control(ParticleContactMaterialSchedule(keyframes))
+
+    def register_kinematic_nodal_trajectory(
+        self,
+        uid: str,
+        node_indices: torch.Tensor | np.ndarray | Sequence[int],
+        position_offsets: torch.Tensor | np.ndarray,
+        *,
+        fps: float | None = None,
+        rebuild_self_contact_bvh: bool = False,
+    ) -> None:
+        """Register a Newton trajectory for selected deformable nodes.
+
+        Each selected node is fixed during Newton model construction and then
+        moved relative to the world position captured when the runtime control
+        initializes. The manager expands the batched offsets to one control per
+        Arena without exposing the private Spawn scene.
+
+        When ``fps`` is provided, samples are linearly interpolated at Newton
+        substep times. Otherwise one sample is consumed per substep. The final
+        sample is held after the trajectory ends.
+
+        .. attention::
+            Declare the deformable first and clear the Newton ``ACTIVE`` bit in
+            its ``particle_flags`` for every selected node. Then register this
+            control before :meth:`prepare`. This host-side control makes Newton
+            use direct substep launches instead of CUDA Graph replay. Surface
+            node indices can follow an array-backed mesh directly; volume node
+            indices refer to the generated tetrahedral simulation particles,
+            not source-mesh vertices.
+
+        Args:
+            uid: UID of a deformable declared on this manager.
+            node_indices: Shared one-dimensional simulation-particle indices.
+            position_offsets: Batched world-frame position offsets with shape
+                ``(num_envs, samples, selected_nodes, 3)``.
+            fps: Optional trajectory sample rate in samples per second.
+            rebuild_self_contact_bvh: Whether to request a full solver BVH
+                rebuild at the start of every physics frame when supported.
+
+        Raises:
+            RuntimeError: If the active backend is not Newton, the Spawn scene
+                is already finalized, or its Arena count is inconsistent.
+            KeyError: If ``uid`` is not a declared deformable.
+            TypeError: If node indices, ``fps``, or the BVH option have invalid
+                types.
+            ValueError: If an input has an invalid shape or value, or selected
+                nodes were not configured as inactive particles.
+        """
+        if not isinstance(uid, str) or not uid:
+            raise ValueError("uid must be a non-empty string.")
+        if not self.is_newton_backend:
+            raise RuntimeError(
+                "Kinematic nodal trajectory controls require the Newton backend."
+            )
+        if uid not in self._deformable_objects:
+            raise KeyError(f"Deformable object {uid!r} is not declared.")
+
+        scene = self._spawn_scene
+        if scene.builder.is_finalized:
+            raise RuntimeError(
+                "Kinematic nodal trajectories must be registered before "
+                "SimulationManager.prepare()."
+            )
+
+        if isinstance(node_indices, torch.Tensor):
+            raw_indices = node_indices.detach().cpu().numpy()
+        else:
+            raw_indices = np.asarray(node_indices)
+        if raw_indices.ndim != 1 or raw_indices.size == 0:
+            raise ValueError("node_indices must be a non-empty one-dimensional array.")
+        if raw_indices.dtype.kind not in "iu":
+            raise TypeError("node_indices must contain integers.")
+        if np.any(raw_indices < 0):
+            raise ValueError("node_indices must be non-negative.")
+        if np.any(raw_indices > np.iinfo(np.int32).max):
+            raise ValueError("node_indices exceed the supported int32 range.")
+        indices = np.asarray(raw_indices, dtype=np.int32)
+        if len(np.unique(indices)) != len(indices):
+            raise ValueError("node_indices must not contain duplicates.")
+
+        configured_flags = self._deformable_objects[uid].cfg.particle_flags
+        if configured_flags is None:
+            raise ValueError(
+                "Kinematic nodes require particle_flags with the Newton ACTIVE "
+                "bit cleared before model construction."
+            )
+        flags = np.asarray(configured_flags)
+        if flags.ndim == 0:
+            selected_flags = np.full(len(indices), int(flags), dtype=np.int64)
+        elif flags.ndim == 1:
+            if int(indices.max()) >= len(flags):
+                raise ValueError(
+                    "node_indices exceed the configured particle_flags length: "
+                    f"max index {int(indices.max())}, length {len(flags)}."
+                )
+            selected_flags = flags[indices]
+        else:
+            raise ValueError(
+                "Configured particle_flags must be scalar or one-dimensional."
+            )
+        newton_active_particle_flag = 1
+        if np.any(
+            np.asarray(selected_flags, dtype=np.int64) & newton_active_particle_flag
+        ):
+            raise ValueError(
+                "Every kinematic node must have the Newton ACTIVE particle flag cleared."
+            )
+
+        if isinstance(position_offsets, torch.Tensor):
+            offsets = position_offsets.detach().cpu().numpy()
+        else:
+            offsets = np.asarray(position_offsets)
+        offsets = np.asarray(offsets, dtype=np.float32)
+        if (
+            offsets.ndim != 4
+            or offsets.shape[0] != self.num_envs
+            or offsets.shape[1] == 0
+            or offsets.shape[2:] != (len(indices), 3)
+        ):
+            raise ValueError(
+                "position_offsets must have non-empty shape "
+                f"({self.num_envs}, samples, {len(indices)}, 3); got "
+                f"{offsets.shape}."
+            )
+        if not np.isfinite(offsets).all():
+            raise ValueError("position_offsets must contain only finite values.")
+
+        if fps is not None:
+            if isinstance(fps, bool) or not isinstance(
+                fps, (int, float, np.integer, np.floating)
+            ):
+                raise TypeError("fps must be a finite positive number or None.")
+            fps = float(fps)
+            if not np.isfinite(fps) or fps <= 0.0:
+                raise ValueError("fps must be a finite positive number.")
+        if not isinstance(rebuild_self_contact_bvh, bool):
+            raise TypeError("rebuild_self_contact_bvh must be a bool.")
+
+        arena_names = scene.arena_names
+        if len(arena_names) != self.num_envs:
+            raise RuntimeError(
+                "Spawn arena count does not match SimulationManager.num_envs: "
+                f"{len(arena_names)} != {self.num_envs}."
+            )
+
+        from embodichain.lab.sim._runtime_controls import (
+            _KinematicNodalTrajectoryControl,
+        )
+
+        controls = tuple(
+            _KinematicNodalTrajectoryControl(
+                f"{arena_name}/{uid}",
+                indices,
+                offsets[env_index],
+                fps=fps,
+                rebuild_self_contact_bvh=rebuild_self_contact_bvh,
+            )
+            for env_index, arena_name in enumerate(arena_names)
+        )
+        for control in controls:
+            scene.builder.add_runtime_control(control)
+
+    def prepare(self) -> None:
+        """Materialize declarations, bind state, and restore camera parents."""
+        self._ready_spawn_topology_revision = -1
+        scene = self._spawn_scene
+        result = scene.builder.result
+        if (
+            not scene.builder.is_finalized
+            or result is None
+            or result.needs_rebuild
+            or scene.builder.has_pending_changes
+        ):
+            if result is not None:
+                # These native cameras are owned outside Spawn. Detach them
+                # before a rebuild removes their articulation render parents.
+                for sensor in self._sensors.values():
+                    if (
+                        isinstance(sensor, Camera)
+                        and sensor.cfg.extrinsics.parent is not None
+                    ):
+                        sensor._detach_from_parent_nodes()
+            result = scene.commit()
+            self._env = result.get_arena("default")
+            self._arenas = [result.get_arena(name) for name in scene.arena_names]
+            self.__dict__.pop("arena_offsets", None)
+            if self._default_plane is None:
+                self._bind_default_plane(scene.handles("default_plane")[0])
+
+        # Runtime readiness belongs to the SimulationManager. Keep this and
+        # facade binding outside the topology-change branch so a failed call
+        # remains retryable without rematerializing the scene.
+        scene.prepare_runtime_config(result)
+        self._prepare_spawn_runtime(result)
+        scene.bind()
+        self._sync_spawn_render_state(result)
+
+        topology_revision = int(result.topology_revision)
+        if (
+            getattr(self, "_camera_attachment_topology_revision", -1)
+            != topology_revision
+        ):
+            self._attach_parented_cameras()
+            self._camera_attachment_topology_revision = topology_revision
+        self._ready_spawn_topology_revision = topology_revision
+
+    def _prepare_spawn_runtime(self, result: Scene) -> None:
+        """Prepare backend runtime buffers for one Spawn topology revision."""
+        topology_revision = int(result.topology_revision)
+        if getattr(self, "_prepared_spawn_topology_revision", -1) == topology_revision:
+            return
+        self.physics.prepare_spawn_runtime(result)
+        self._prepared_spawn_topology_revision = topology_revision
+
+    def _sync_spawn_render_state(self, result: Scene) -> None:
+        """Publish newly bound state once for each Spawn topology revision."""
+        topology_revision = int(result.topology_revision)
+        if (
+            getattr(self, "_synced_spawn_render_topology_revision", -1)
+            == topology_revision
+        ):
+            return
+        self.physics.sync_render_state(result)
+        self._synced_spawn_render_topology_revision = topology_revision
+
+    def sync_render_state(self) -> None:
+        """Publish current physics state to render resources without stepping.
+
+        Use this after direct state writes, such as an environment reset, and
+        before reading cameras or publishing a visualization frame.
+
+        Raises:
+            RuntimeError: If the Spawn scene has not been prepared.
+        """
+        result = self.spawn_result
+        if result is None:
+            raise RuntimeError(
+                "Render-state synchronization requires a prepared Spawn scene."
+            )
+        self.physics.sync_render_state(result)
 
     def enable_physics(self, enable: bool) -> None:
         """Enable or disable physics simulation.
@@ -798,31 +1633,23 @@ class SimulationManager:
         self._world.enable_physics(enable)
 
     def init_gpu_physics(self) -> None:
-        """Initialize the GPU physics simulation."""
-        if self.device.type != "cuda":
-            logger.log_warning(
-                "The simulation device is not cuda, cannot initialize GPU physics."
-            )
-            return
+        """Prepare the Spawn-owned physics runtime.
 
-        if self._is_initialized_gpu_physics:
-            return
+        This backwards-compatible alias now has the same backend-neutral
+        behavior as :meth:`prepare`.
+        """
+        self.prepare()
 
-        for art in self._articulations.values():
-            art.reallocate_body_data()
-        for robot in self._robots.values():
-            robot.reallocate_body_data()
+    def finalize_newton_physics(self) -> None:
+        """Prepare the Spawn-owned physics runtime.
 
-        # Re-establish rigid object positions after articulation resets, ensuring
-        # no articulation kinematics step has inadvertently corrupted the broadphase
-        # state for rigid bodies.
-        for rigid_obj in self._rigid_objects.values():
-            rigid_obj.reset()
-
-        self._is_initialized_gpu_physics = True
+        This backwards-compatible alias now has the same backend-neutral
+        behavior as :meth:`prepare`.
+        """
+        self.prepare()
 
     def render_camera_group(self, group_ids: list[int]) -> None:
-        """Render all camera group in the simulation.
+        """Synchronize physics state and render camera groups.
 
         Args:
             group_ids (list[int]): The list of camera group ids to render.
@@ -830,7 +1657,9 @@ class SimulationManager:
         Note: This interface is only valid when Ray Tracing rendering backend is enabled.
         """
 
+        self.sync_render_state()
         self._world.render_camera_group(group_ids)
+        self._log_scene_summary()
 
     def update(self, physics_dt: float | None = None, step: int = 10) -> None:
         """Advance physics explicitly and publish the resulting simulation state.
@@ -841,17 +1670,11 @@ class SimulationManager:
 
         Args:
             physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
-            step (int, optional): the number of steps to update physics. Defaults to 10.
+            step (int, optional): the number of :meth:`World.update` calls per invocation. Defaults to 10.
         """
         with self.profiler.section("sim_update", is_root=True):
             with self.profiler.section("gpu_physics_check"):
-                if self.is_use_gpu_physics and not self._is_initialized_gpu_physics:
-                    logger.log_warning(
-                        "Using GPU physics, but not initialized yet. "
-                        "Forcing initialization."
-                    )
-                    with self.profiler.section("gpu_physics_init"):
-                        self.init_gpu_physics()
+                self.prepare()
 
             with self.profiler.section("physics_steps"):
                 if physics_dt is None:
@@ -861,7 +1684,10 @@ class SimulationManager:
                     with self.profiler.section("gizmo_update"):
                         self.update_gizmos()
                     with self.profiler.section("world_update"):
-                        self._world.update(physics_dt)
+                        with _temporary_warp_kernel_log_suppression(
+                            self.sim_config.physics_cfg
+                        ):
+                            self._world.update(physics_dt)
                     self._visualization_sim_step += 1
                     self._visualization_sim_time += physics_dt
                     if (
@@ -877,6 +1703,9 @@ class SimulationManager:
                             self.capture_visualization_safely(
                                 capture_camera_images=i == step - 1
                             )
+
+            if step > 0:
+                self._log_scene_summary()
 
     def get_env(self, arena_index: int = -1) -> dexsim.environment.Arena:
         """Get the arena or env by index.
@@ -976,6 +1805,14 @@ class SimulationManager:
     def get_world(self) -> dexsim.World:
         return self._world
 
+    def get_physics_scene(self) -> "PhysicsScene":
+        """Return the Default backend's compatibility scene after Spawn preparation.
+
+        Newton has no ``PhysicsScene`` facade and raises with guidance to use
+        :attr:`spawn_result` instead.
+        """
+        return self.physics.get_scene()
+
     def can_open_native_window(self) -> bool:
         """Return whether the native DexSim window may be opened.
 
@@ -1025,6 +1862,7 @@ class SimulationManager:
         ):
             self.enable_window_camera_pose_hotkey(**self._window_camera_pose_hotkey_cfg)
         self.is_window_opened = True
+        self._log_scene_summary()
         return True
 
     def close_window(self) -> None:
@@ -1038,32 +1876,6 @@ class SimulationManager:
         self._window_record_input_control = None
         self._window_camera_pose_input_control = None
         self.is_window_opened = False
-
-    def _build_multiple_arenas(self, num: int, space: float | None = None) -> None:
-        """Build multiple arenas in a grid pattern.
-
-        This interface is used for vectorized simulation.
-
-        Args:
-            num (int): number of arenas to build.
-            space (float | None, optional): The distance between each arena. Defaults to the arena_space in sim_config.
-        """
-
-        if space is None:
-            space = self.sim_config.arena_space
-
-        if num <= 0:
-            logger.log_warning("Number of arenas must be greater than 0.")
-            return
-
-        scene_grid_length = int(np.ceil(np.sqrt(num)))
-
-        for i in range(num):
-            arena = self._env.add_arena(f"arena_{i}")
-
-            id_x, id_y = i % scene_grid_length, i // scene_grid_length
-            arena.set_root_node_position([id_x * space, id_y * space, 0])
-            self._arenas.append(arena)
 
     def set_indirect_lighting(self, name: str) -> None:
         """Set indirect lighting.
@@ -1094,23 +1906,67 @@ class SimulationManager:
         if intensity is not None:
             self._env.set_env_light_intensity(intensity)
 
-    def _create_default_plane(self):
-        default_length = 1000
-        repeat_uv_size = int(default_length / 2)
-        self._default_plane = self._env.create_plane(
-            0, default_length, repeat_uv_size, repeat_uv_size
-        )
-        self._default_plane.set_name("default_plane")
-        plane_collision = self._env.create_cube(
-            default_length, default_length, default_length / 10
-        )
-        plane_collision.set_visible(False)
-        plane_collision_pose = np.eye(4, dtype=float)
-        plane_collision_pose[2, 3] = -default_length / 20 - 0.001
-        plane_collision.set_local_pose(plane_collision_pose)
-        plane_collision.add_rigidbody(ActorType.KINEMATIC, RigidBodyShape.CONVEX)
+    def _declare_spawn_default_plane(self) -> None:
+        """Declare the global ground in the World's Spawn scene."""
 
-        # TODO: add default physics attributes for the plane.
+        from dexsim.spawn import (
+            CollisionApproximation,
+            CollisionDesc,
+            DexsimCollisionDesc,
+            GeometryDesc,
+            NewtonCollisionDesc,
+            ObjectDesc,
+            RenderDesc,
+            RigidBodyPhysicsDesc,
+        )
+
+        default_length = 1000.0
+        geometry = GeometryDesc.plane(default_length)
+        repeat_uv_size = default_length / 2.0
+        render = RenderDesc.from_geometry(
+            geometry,
+            material=self._spawn_default_plane_material,
+        )
+        render.uv_coords = np.asarray(
+            [
+                [0.0, 0.0],
+                [repeat_uv_size, 0.0],
+                [repeat_uv_size, repeat_uv_size],
+                [0.0, repeat_uv_size],
+            ],
+            dtype=np.float32,
+        )
+        collision = CollisionDesc.from_geometry(
+            geometry,
+            approximation=CollisionApproximation.NONE,
+        )
+        collision.dexsim = DexsimCollisionDesc(
+            dynamic_friction=0.5,
+            static_friction=0.5,
+        )
+        collision.newton = NewtonCollisionDesc(mu=0.5)
+        collision.render_source_index = 0
+        descriptor = ObjectDesc(
+            name="default_plane",
+            renders=[render],
+            collisions=[collision],
+            physics=RigidBodyPhysicsDesc.static(),
+            per_env=False,
+        )
+
+        self._spawn_scene.declare(
+            "rigid_object",
+            "default_plane",
+            descriptor,
+        )
+        handles = self._spawn_scene.handles("default_plane")
+        if handles:
+            self._bind_default_plane(handles[0])
+
+    def _bind_default_plane(self, plane: Any) -> None:
+        """Retain the spawned ground plane and apply its visibility."""
+        self._default_plane = plane
+        plane.set_visible(self._spawn_default_plane_visibility)
 
     def set_default_global_lighting(self) -> None:
         """Set default global lighting for the scene.
@@ -1127,7 +1983,6 @@ class SimulationManager:
         """Set default background."""
 
         mat_name = "plane_mat"
-        mat = None
         mat_path = self._default_resources.get_material_path("PlaneDark")
         color_texture = os.path.join(mat_path, "PlaneDark_2K_Color.jpg")
         roughness_texture = os.path.join(mat_path, "PlaneDark_2K_Roughness.jpg")
@@ -1140,7 +1995,11 @@ class SimulationManager:
             )
         )
 
-        self._default_plane.set_material(mat.get_instance("plane_mat").mat)
+        material = mat.get_instance("plane_mat").mat
+        # Consumed by _declare_spawn_default_plane(). Keeping the native
+        # material in the descriptor preserves the VisualMaterial registry
+        # used by visual randomization without forcing finalization.
+        self._spawn_default_plane_material = material
         self._visual_materials[mat_name] = mat
 
     def set_ground_plane_visibility(self, visible: bool) -> None:
@@ -1149,10 +2008,10 @@ class SimulationManager:
         Args:
             visible (bool): _description_
         """
-        if visible:
-            self._default_plane.set_visible(True)
-        else:
-            self._default_plane.set_visible(False)
+        self._spawn_default_plane_visibility = bool(visible)
+        if self._default_plane is None:
+            return
+        self._default_plane.set_visible(bool(visible))
 
     def set_texture_cache(
         self, key: str, texture: Union[torch.Tensor, List[torch.Tensor]]
@@ -1186,16 +2045,26 @@ class SimulationManager:
 
     def get_asset(
         self, uid: str
-    ) -> Light | BaseSensor | Robot | RigidObject | Articulation | None:
+    ) -> (
+        Light
+        | BaseSensor
+        | Robot
+        | RigidObject
+        | RigidObjectGroup
+        | DeformableObject
+        | Articulation
+        | None
+    ):
         """Get an asset by its UID.
 
-        The asset can be a light, sensor, robot, rigid object or articulation.
+        The asset can be a light, sensor, robot, rigid object, deformable, or
+        articulation.
 
         Args:
             uid (str): The UID of the asset.
 
         Returns:
-            Light | BaseSensor | Robot | RigidObject | Articulation | None: The asset instance if found, otherwise None.
+            The asset instance if found, otherwise ``None``.
         """
         if uid in self._lights:
             return self._lights[uid]
@@ -1207,17 +2076,14 @@ class SimulationManager:
             return self._rigid_objects[uid]
         if uid in self._rigid_object_groups:
             return self._rigid_object_groups[uid]
-        if uid in self._soft_objects:
-            return self._soft_objects[uid]
-        if uid in self._cloth_objects:
-            return self._cloth_objects[uid]
+        if uid in self._deformable_objects:
+            return self._deformable_objects[uid]
         if uid in self._articulations:
             return self._articulations[uid]
 
         logger.log_warning(f"Asset {uid} not found.")
         return None
 
-    # Light type string → dexsim LightType enum mapping
     _LIGHT_TYPE_MAP: dict[str, LightType] = {
         "point": LightType.POINT,
         "sun": LightType.SUN,
@@ -1226,8 +2092,6 @@ class SimulationManager:
         "rect": LightType.RECT,
         "mesh": LightType.MESH,
     }
-
-    # Light types that are created as a single global scene light (not per-environment).
     _GLOBAL_LIGHT_TYPES: tuple[str, ...] = ("sun", "direction")
 
     def add_light(self, cfg: LightCfg) -> Light:
@@ -1252,7 +2116,7 @@ class SimulationManager:
             Light: The created light instance.
 
         Raises:
-            RuntimeError: If ``cfg.light_type`` is not one of the supported types.
+            ValueError: If ``cfg.light_type`` is not supported.
         """
         if cfg.uid is None:
             uid = "light"
@@ -1263,45 +2127,41 @@ class SimulationManager:
         if uid in self._lights:
             logger.log_error(f"Light {uid} already exists.")
 
-        light_type_str = cfg.light_type
-        light_type = self._LIGHT_TYPE_MAP.get(light_type_str)
+        light_type = self._LIGHT_TYPE_MAP.get(cfg.light_type)
         if light_type is None:
-            supported = ", ".join(self._LIGHT_TYPE_MAP.keys())
-            logger.log_error(
-                f"Unsupported light type: '{light_type_str}'. "
+            supported = ", ".join(self._LIGHT_TYPE_MAP)
+            raise ValueError(
+                f"Unsupported light type {cfg.light_type!r}. "
                 f"Supported types: {supported}."
             )
 
-        # Validation warnings for type-specific constraints
-        if light_type_str == "mesh" and not cfg.mesh_path:
+        if cfg.light_type == "mesh" and not cfg.mesh_path:
             logger.log_warning(
                 f"Mesh light '{uid}' has no mesh_path set. "
                 f"Use set_mesh() to assign a MeshObject."
             )
-        if light_type_str == "rect" and (cfg.rect_width <= 0 or cfg.rect_height <= 0):
+        if cfg.light_type == "rect" and (cfg.rect_width <= 0 or cfg.rect_height <= 0):
             logger.log_warning(
                 f"Rect light '{uid}' has zero or negative dimensions "
                 f"(width={cfg.rect_width}, height={cfg.rect_height})."
             )
 
         if cfg.light_type in self._GLOBAL_LIGHT_TYPES:
-            # Global scene light: create a single instance on the root
-            # environment. Infinite-distance lights (sun, direction) are
-            # physically scene-global and should not be duplicated per arena.
-            light = self._env.create_light(uid, light_type)
-            batch_lights = Light(cfg=cfg, entities=[light])
+            batch_lights = Light(
+                cfg=cfg,
+                entities=[self._env.create_light(uid, light_type)],
+            )
         else:
-            # Per-environment batched light: one instance per arena.
-            env_list = [self._env] if len(self._arenas) == 0 else self._arenas
-            light_list = []
-            for i, env in enumerate(env_list):
-                light_name = f"{uid}_{i}"
-                light = env.create_light(light_name, light_type)
-                light_list.append(light)
-            batch_lights = Light(cfg=cfg, entities=light_list)
+            batch_lights = Light(
+                cfg=cfg,
+                entities=[
+                    arena.create_light(f"{uid}_{index}", light_type)
+                    for index, arena in enumerate(self._arenas)
+                ],
+            )
 
         self._lights[uid] = batch_lights
-
+        self.notify_visualization_topology_changed()
         return batch_lights
 
     def get_light(self, uid: str) -> Light | None:
@@ -1326,6 +2186,133 @@ class SimulationManager:
         """
         return list(self._lights.keys())
 
+    def add_usd(
+        self,
+        name: str,
+        file_path: str,
+        *,
+        pose: np.ndarray | None = None,
+        robot_cfgs: dict[str, RobotCfg] | None = None,
+    ) -> dict[str, RigidObject | Articulation | Robot]:
+        """Declare the supported entities in a USD scene.
+
+        The returned facades are keyed by their USD prim paths. They remain in
+        declared state until :meth:`prepare` finalizes the shared Spawn scene,
+        then bind in place to the resulting DexSim handles.
+
+        USD does not identify which articulations should expose EmbodiChain's
+        robot interface. Pass those explicitly through ``robot_cfgs``; all
+        other articulation descriptions become :class:`Articulation` objects.
+
+        Args:
+            name: Name passed to DexSim's USD scene parser.
+            file_path: USD, USDA, or USDC file path.
+            pose: Optional scene-root transform.
+            robot_cfgs: Robot configurations keyed by USD prim path. These
+                provide robot-side metadata while physics remains authored by
+                the USD scene.
+
+        Returns:
+            Supported EmbodiChain facades keyed by USD prim path.
+
+        Raises:
+            RuntimeError: If called after the Spawn scene was finalized.
+        """
+        if self.spawn_result is not None:
+            raise RuntimeError(
+                "add_usd() must be called before SimulationManager.prepare()."
+            )
+
+        from dexsim.spawn import ArticulationDesc, MeshObjectDesc
+
+        descriptors = self._spawn_scene.builder.add_usd(
+            name,
+            file_path,
+            pose=pose,
+            per_env=True,
+        )
+        assets: dict[str, RigidObject | Articulation | Robot] = {}
+        robot_cfgs = robot_cfgs or {}
+
+        for descriptor in descriptors:
+            source_path = (
+                descriptor.usd.prim_path
+                if descriptor.usd is not None and descriptor.usd.prim_path
+                else descriptor.name
+            )
+
+            if type(descriptor) is MeshObjectDesc:
+                body_type = "static"
+                if descriptor.physics is not None:
+                    body_type = {
+                        ActorType.DYNAMIC: "dynamic",
+                        ActorType.KINEMATIC: "kinematic",
+                        ActorType.STATIC: "static",
+                    }[descriptor.physics.actor_type]
+                cfg = RigidObjectCfg(
+                    uid=descriptor.name,
+                    init_local_pose=descriptor.pose.copy(),
+                    body_type=body_type,
+                    body_scale=tuple(float(value) for value in descriptor.body_scale),
+                    asset_physics_mode="preserve",
+                )
+                facade = RigidObject(
+                    cfg=cfg,
+                    device=self.device,
+                )
+
+                self._spawn_scene.track(
+                    "rigid_object",
+                    descriptor.name,
+                    descriptor,
+                    facade=facade,
+                )
+                self._rigid_objects[descriptor.name] = facade
+                assets[source_path] = facade
+                continue
+
+            if isinstance(descriptor, ArticulationDesc):
+                robot_cfg = robot_cfgs.get(source_path)
+                facade_type: type[Articulation] = (
+                    Robot if robot_cfg is not None else Articulation
+                )
+                cfg = (
+                    deepcopy(robot_cfg)
+                    if robot_cfg is not None
+                    else ArticulationCfg(uid=descriptor.name)
+                )
+                cfg.uid = descriptor.name
+                cfg.fpath = file_path
+                cfg.init_local_pose = descriptor.pose.copy()
+                cfg.asset_physics_mode = "preserve"
+                if robot_cfg is None:
+                    cfg.root_props = ArticulationRootPropertiesCfg()
+                else:
+                    cfg.root_props = cfg.root_props.copy()
+                cfg.root_props.fixed_base = bool(descriptor.fixed_base)
+                cfg.root_props.self_collision_enabled = descriptor.enable_self_collision
+                cfg.body_scale = tuple(float(value) for value in descriptor.body_scale)
+                cfg.build_pk_chain = False
+                facade = facade_type(
+                    cfg=cfg,
+                    device=self.device,
+                )
+
+                self._spawn_scene.track(
+                    "articulation",
+                    descriptor.name,
+                    descriptor,
+                    facade=facade,
+                )
+                registry = (
+                    self._robots if robot_cfg is not None else self._articulations
+                )
+                registry[descriptor.name] = facade
+                assets[source_path] = facade
+
+        self.notify_visualization_topology_changed()
+        return assets
+
     def add_rigid_object(
         self,
         cfg: RigidObjectCfg,
@@ -1338,95 +2325,204 @@ class SimulationManager:
         Returns:
             RigidObject: The added rigid object instance handle.
         """
-        from embodichain.lab.sim.utility.sim_utils import (
-            load_mesh_objects_from_cfg,
-        )
+        return self._declare_rigid_object(cfg, replace=False)
 
-        uid = cfg.uid
-        if uid is None:
-            logger.log_error("Rigid object uid must be specified.")
-        if uid in self._rigid_objects:
-            logger.log_error(f"Rigid object {uid} already exists.")
+    def replace_rigid_object(self, cfg: RigidObjectCfg) -> RigidObject:
+        """Replace a rigid object with the same UID in one preparation.
 
-        env_list = [self._env] if len(self._arenas) == 0 else self._arenas
-        obj_list = load_mesh_objects_from_cfg(
-            cfg=cfg,
-            env_list=env_list,
-            cache_dir=self._convex_decomp_dir,
-        )
-
-        rigid_obj = RigidObject(cfg=cfg, entities=obj_list, device=self.device)
-
-        if cfg.shape.visual_material:
-            mat = self.create_visual_material(cfg.shape.visual_material)
-            rigid_obj.set_visual_material(mat, update_default=True)
-
-        self._rigid_objects[uid] = rigid_obj
-        self.notify_visualization_topology_changed()
-
-        return rigid_obj
-
-    def add_soft_object(self, cfg: SoftObjectCfg) -> SoftObject:
-        """Add a soft object to the scene.
+        The replacement uses its configured initial state and physical
+        properties. Previously returned handles for this object must not be
+        reused. Other scene objects retain their runtime state.
 
         Args:
-            cfg (SoftObjectCfg): Configuration for the soft object.
+            cfg: New configuration whose UID identifies an existing rigid object.
 
         Returns:
-            SoftObject: The added soft object instance handle.
+            The replacement object, ready for state access if the scene was
+            already materialized.
+
+        Raises:
+            KeyError: If the UID does not identify an existing rigid object.
+
+        Note:
+            Replacement applies to all instances of the logical object. A
+            backend preparation failure is propagated; this operation does
+            not provide rollback of native resources.
         """
-        if not self.is_use_gpu_physics:
-            logger.log_error("Soft object requires GPU physics to be enabled.")
+        return self._declare_rigid_object(cfg, replace=True)
 
-        from embodichain.lab.sim.utility import (
-            load_soft_object_from_cfg,
-        )
+    def replace_rigid_objects(
+        self, cfgs: Sequence[RigidObjectCfg]
+    ) -> list[RigidObject]:
+        """Replace multiple existing rigid objects in one preparation.
 
-        uid = cfg.uid
-        if uid is None:
-            logger.log_error("Soft object uid must be specified.")
-
-        env_list = [self._env] if len(self._arenas) == 0 else self._arenas
-        obj_list = load_soft_object_from_cfg(
-            cfg=cfg,
-            env_list=env_list,
-        )
-
-        soft_obj = SoftObject(cfg=cfg, entities=obj_list, device=self.device)
-        self._soft_objects[uid] = soft_obj
-        self.notify_visualization_topology_changed()
-        return soft_obj
-
-    def add_cloth_object(self, cfg: ClothObjectCfg) -> ClothObject:
-        """Add a cloth object to the scene.
+        All UIDs and descriptors are checked before scene mutation. Returned
+        facades follow input order and are ready after the single preparation
+        when the scene was materialized. Run events needing the new objects
+        after this call. Old replaced handles must be discarded; other objects
+        retain their state. Native preparation failures do not roll back.
 
         Args:
-            cfg (ClothObjectCfg): Configuration for the cloth object.
+            cfgs: Replacement configurations with distinct, existing UIDs.
 
         Returns:
-            ClothObject: The added cloth object instance handle.
-        """
-        if not self.is_use_gpu_physics:
-            logger.log_error("Cloth object requires GPU physics to be enabled.")
+            Replacement objects in input order, or an empty list for no input.
 
-        from embodichain.lab.sim.utility import (
-            load_cloth_object_from_cfg,
-        )
+        Raises:
+            ValueError: A UID is missing or duplicated, or translation fails.
+            KeyError: A UID does not identify an existing rigid object.
+        """
+        return self._declare_rigid_objects(cfgs, replace=True)
+
+    def _declare_rigid_object(
+        self, cfg: RigidObjectCfg, *, replace: bool
+    ) -> RigidObject:
+        return self._declare_rigid_objects([cfg], replace=replace)[0]
+
+    def _declare_rigid_objects(
+        self, cfgs: Sequence[RigidObjectCfg], *, replace: bool
+    ) -> list[RigidObject]:
+        """Translate the complete batch before changing the scene."""
+        cfgs = list(cfgs)
+        if not cfgs:
+            return []
+        seen: set[str] = set()
+        for cfg in cfgs:
+            uid = cfg.uid
+            if uid is None:
+                raise ValueError("Rigid object uid must be specified.")
+            if uid in seen:
+                raise ValueError(f"Duplicate rigid object uid {uid!r}.")
+            seen.add(uid)
+            if replace and uid not in self._rigid_objects:
+                raise KeyError(f"Rigid object {uid!r} does not exist.")
+            if not replace and uid in self._rigid_objects:
+                raise ValueError(f"Rigid object {uid!r} already exists.")
+
+        declarations = []
+        for cfg in cfgs:
+            source_path = getattr(cfg.shape, "fpath", None)
+            if _is_usd_path(source_path):
+                descriptor, materials = rigid_desc_from_usd(
+                    cfg,
+                    per_env=True,
+                    newton_solver_type=self._active_newton_solver_type,
+                )
+            else:
+                descriptor, materials = rigid_desc_from_cfg(
+                    cfg,
+                    per_env=True,
+                    newton_solver_type=self._active_newton_solver_type,
+                )
+            rigid_obj = RigidObject(cfg=cfg, device=self.device)
+            declarations.append((cfg.uid, descriptor, materials, rigid_obj))
+
+        was_materialized = self.spawn_result is not None
+        for uid, descriptor, materials, rigid_obj in declarations:
+            self._spawn_scene.builder.materials.update(materials)
+            if replace:
+                self._spawn_scene.remove(uid)
+            self._spawn_scene.declare("rigid_object", uid, descriptor, facade=rigid_obj)
+            self._rigid_objects[uid] = rigid_obj
+        self.notify_visualization_topology_changed()
+        if was_materialized:
+            self.prepare()
+        return [item[3] for item in declarations]
+
+    def add_deformable_object(self, cfg: DeformableObjectCfg) -> DeformableObject:
+        """Declare a volume or surface deformable in the scene.
+
+        Deformables are DexSim 0.5 typed particle sets owned by the Newton
+        Spawn scene. The Default backend is intentionally unsupported.
+
+        Args:
+            cfg: Volume- or surface-deformable configuration.
+
+        Returns:
+            The declared deformable facade.
+
+        Raises:
+            NotImplementedError: If the active backend or device cannot host
+                the requested deformable type.
+            ValueError: If the discriminator or UID is invalid.
+        """
+        deformable_type = cfg.deformable_type
+        if deformable_type == "volume":
+            supported = self.physics.supports_volume_deformables
+        elif deformable_type == "surface":
+            supported = self.physics.supports_surface_deformables
+        else:
+            raise ValueError(
+                f"Unsupported deformable_type {deformable_type!r}; expected "
+                "'volume' or 'surface'."
+            )
+        if not supported:
+            raise NotImplementedError(
+                "EmbodiChain deformable objects require the Newton backend; "
+                f"the {self.physics.name} backend does not support them."
+            )
+        if self.device.type != "cuda":
+            raise NotImplementedError(
+                "Newton deformable particle sets currently require a CUDA device."
+            )
+        solver_type = self._active_newton_solver_type
+        supported_solvers = {"auto", "dexuni", "xpbd", "semi_implicit", "vbd"}
+        if solver_type not in supported_solvers:
+            raise NotImplementedError(
+                f"Newton solver {solver_type!r} does not support deformable "
+                "particle sets; select one of 'auto', 'dexuni', 'xpbd', "
+                "'semi_implicit', or 'vbd'."
+            )
+        physics_cfg = self.sim_config.physics_cfg
+        if isinstance(physics_cfg, NewtonPhysicsCfg) and physics_cfg.requires_grad:
+            raise NotImplementedError(
+                "Newton deformable state mutation is unavailable when "
+                "requires_grad=True."
+            )
+        if self.spawn_result is not None:
+            raise NotImplementedError(
+                "DexSim Spawn does not yet support adding deformables after "
+                "finalization."
+            )
 
         uid = cfg.uid
         if uid is None:
-            logger.log_error("Cloth object uid must be specified.")
+            raise ValueError("Deformable object uid must be specified.")
+        if uid in self._deformable_objects:
+            raise ValueError(f"Deformable object {uid!r} already exists.")
 
-        env_list = [self._env] if len(self._arenas) == 0 else self._arenas
-        obj_list = load_cloth_object_from_cfg(
-            cfg=cfg,
-            env_list=env_list,
+        backend_implementations = _DEFORMABLE_BACKEND_IMPLEMENTATIONS.get(
+            self.physics.name
         )
+        if not backend_implementations:
+            raise NotImplementedError(
+                f"No deformable implementation is registered for the "
+                f"{self.physics.name} backend."
+            )
 
-        cloth_obj = ClothObject(cfg=cfg, entities=obj_list, device=self.device)
-        self._cloth_objects[uid] = cloth_obj
+        config_cls, object_cls, descriptor_factory, spawn_kind = (
+            backend_implementations[deformable_type]
+        )
+        if not isinstance(cfg, config_cls):
+            raise TypeError(
+                f"A {deformable_type} deformable requires "
+                f"{config_cls.__name__}, got {type(cfg).__name__}."
+            )
+        descriptor, materials = descriptor_factory(cfg, per_env=True)
+        self._spawn_scene.builder.materials.update(materials)
+        deformable = object_cls(
+            cfg,
+            device=self.device,
+        )
+        self._spawn_scene.declare(
+            spawn_kind,
+            uid,
+            descriptor,
+            facade=deformable,
+        )
+        self._deformable_objects[uid] = deformable
         self.notify_visualization_topology_changed()
-        return cloth_obj
+        return deformable
 
     def get_rigid_object(self, uid: str) -> RigidObject | None:
         """Get a rigid object by its unique ID.
@@ -1442,33 +2538,12 @@ class SimulationManager:
             return None
         return self._rigid_objects[uid]
 
-    def get_soft_object(self, uid: str) -> SoftObject | None:
-        """Get a soft object by its unique ID.
-
-        Args:
-            uid (str): The unique ID of the soft object.
-
-        Returns:
-            SoftObject | None: The soft object instance if found, otherwise None.
-        """
-        if uid not in self._soft_objects:
-            logger.log_warning(f"Soft object {uid} not found.")
+    def get_deformable_object(self, uid: str) -> DeformableObject | None:
+        """Get a deformable object by its unique ID."""
+        if uid not in self._deformable_objects:
+            logger.log_warning(f"Deformable object {uid} not found.")
             return None
-        return self._soft_objects[uid]
-
-    def get_cloth_object(self, uid: str) -> ClothObject | None:
-        """Get a cloth object by its unique ID.
-
-        Args:
-            uid (str): The unique ID of the cloth object.
-
-        Returns:
-            ClothObject | None: The cloth object instance if found, otherwise None.
-        """
-        if uid not in self._cloth_objects:
-            logger.log_warning(f"Cloth object {uid} not found.")
-            return None
-        return self._cloth_objects[uid]
+        return self._deformable_objects[uid]
 
     def get_rigid_object_uid_list(self) -> List[str]:
         """Get current rigid body uid list
@@ -1485,20 +2560,7 @@ class SimulationManager:
         env_ids: Sequence[int],
         name: str,
     ) -> list[np.ndarray]:
-        """Broadcast a local-frame spec to one matrix per target env.
-
-        Args:
-            frame: None -> identity; (4,4) -> repeated; (N,4,4) -> indexed per env.
-            num_envs: Total number of arenas (used to validate (N,4,4)).
-            env_ids: Target env indices to produce frames for.
-            name: Constraint name (for error messages).
-
-        Returns:
-            A list of (4,4) numpy arrays, one per env in env_ids.
-
-        Raises:
-            RuntimeError: If an (N,4,4) frame's N != num_envs, or shape is invalid.
-        """
+        """Broadcast a local constraint frame to the selected environments."""
         if frame is None:
             identity = np.eye(4, dtype=np.float32)
             return [identity for _ in env_ids]
@@ -1548,15 +2610,11 @@ class SimulationManager:
         cfg: RigidConstraintCfg,
         env_ids: Sequence[int] | torch.Tensor | None = None,
     ) -> RigidConstraint:
-        """Create a fixed constraint between two RigidObjects.
+        """Create a fixed constraint between two rigid objects.
 
-        Binds ``rigid_object_a``'s entity[i] to ``rigid_object_b``'s entity[i]
-        within arena[i], for each env in ``env_ids``. Local frames default to
-        welding the objects at their *current* relative pose:
-        ``local_frame_a`` defaults to identity (object A's origin) and
-        ``local_frame_b`` defaults to ``inv(pose_B) @ pose_A`` (computed per env),
-        so the offset is preserved rather than the two origins being pulled
-        together. Pass explicit frames to define a specific joint frame.
+        Constraints are native Default-backend resources owned by each Arena.
+        Spawn owns the two actors; this method only borrows their native actor
+        handles while creating the constraint.
 
         Args:
             cfg: The constraint configuration.
@@ -1564,20 +2622,17 @@ class SimulationManager:
                 the :class:`EventManager`) or a sequence of ints. None -> all arenas.
 
         Returns:
-            The created :class:`RigidConstraint`.
-
-        Raises:
-            RuntimeError: If either object is missing, the name is already in use,
-                a frame shape is invalid, or dexsim fails to create a handle.
+            The created constraint batch.
         """
-        # validate constraint type (only fixed supported in v1)
+        if hasattr(self, "physics") and not self.physics.supports_rigid_constraints:
+            raise NotImplementedError(
+                f"The {self.physics.name} backend does not support rigid constraints."
+            )
         if cfg.constraint_type != "fixed":
             logger.log_error(
                 f"Constraint '{cfg.name}' has unsupported type "
-                f"'{cfg.constraint_type}'. Only 'fixed' is supported in v1."
+                f"'{cfg.constraint_type}'. Only 'fixed' is supported."
             )
-
-        # resolve objects
         if cfg.rigid_object_a_uid not in self._rigid_objects:
             logger.log_error(
                 f"RigidObject '{cfg.rigid_object_a_uid}' not found for constraint "
@@ -1588,16 +2643,16 @@ class SimulationManager:
                 f"RigidObject '{cfg.rigid_object_b_uid}' not found for constraint "
                 f"'{cfg.name}'. Available: {list(self._rigid_objects.keys())}."
             )
-        rigid_object_a = self._rigid_objects[cfg.rigid_object_a_uid]
-        rigid_object_b = self._rigid_objects[cfg.rigid_object_b_uid]
-
-        # validate duplicate name
         if cfg.name in self._constraints:
             logger.log_error(
                 f"Constraint '{cfg.name}' already exists. Remove it before recreating."
             )
 
-        # validate object entity counts match num_envs
+        rigid_object_a = self._rigid_objects[cfg.rigid_object_a_uid]
+        rigid_object_b = self._rigid_objects[cfg.rigid_object_b_uid]
+        if hasattr(self, "_spawn_scene"):
+            self.prepare()
+
         num_envs = self.num_envs
         if rigid_object_a.num_instances != num_envs:
             logger.log_error(
@@ -1610,50 +2665,52 @@ class SimulationManager:
                 f"{rigid_object_b.num_instances} instances but num_envs is {num_envs}."
             )
 
-        # resolve target env_ids (accepts None / tensor / sequence)
         target_env_ids = self._normalize_env_ids(env_ids, num_envs)
-
-        # broadcast local frames.
-        # local_frame_a defaults to identity (object A's origin).
-        # local_frame_b defaults to the current relative pose of A w.r.t. B
-        # (inv(pose_B) @ pose_A), so that with both frames left as None the
-        # constraint welds the objects at their *current* relative pose instead
-        # of pulling their origins together.
         frames_a = self._broadcast_frame(
             cfg.local_frame_a, num_envs, target_env_ids, cfg.name
         )
         if cfg.local_frame_b is None:
             pose_a = rigid_object_a.get_local_pose(to_matrix=True)
             pose_b = rigid_object_b.get_local_pose(to_matrix=True)
-            frame_b = torch.bmm(pose_inv(pose_b), pose_a)  # (N, 4, 4)
-            frame_b = frame_b.cpu().numpy().astype(np.float32)
+            frame_b = (
+                torch.bmm(pose_inv(pose_b), pose_a).cpu().numpy().astype(np.float32)
+            )
             frames_b = [frame_b[i] for i in target_env_ids]
         else:
             frames_b = self._broadcast_frame(
                 cfg.local_frame_b, num_envs, target_env_ids, cfg.name
             )
 
-        # pre-size handles list with None, fill target envs
         handles: list = [None] * num_envs
         try:
-            for idx, env_id in enumerate(target_env_ids):
+            for index, env_id in enumerate(target_env_ids):
+                actor_a = rigid_object_a._entities[env_id]
+                actor_b = rigid_object_b._entities[env_id]
+                if getattr(rigid_object_a, "is_spawn_bound", False) is True:
+                    actor_a = actor_a.native()
+                if getattr(rigid_object_b, "is_spawn_bound", False) is True:
+                    actor_b = actor_b.native()
+                if actor_a is None or actor_b is None:
+                    logger.log_error(
+                        f"Constraint '{cfg.name}' references a released Spawn actor "
+                        f"in environment {env_id}."
+                    )
+
                 arena = self.get_env(env_id)
-                name_i = cfg.name if num_envs <= 1 else f"{cfg.name}_{env_id}"
+                name = cfg.name if num_envs <= 1 else f"{cfg.name}_{env_id}"
                 handle = arena.create_fixed_constraint(
-                    name_i,
-                    rigid_object_a._entities[env_id],
-                    rigid_object_b._entities[env_id],
-                    frames_a[idx],
-                    frames_b[idx],
+                    name,
+                    actor_a,
+                    actor_b,
+                    frames_a[index],
+                    frames_b[index],
                 )
                 if handle is None:
                     logger.log_error(
-                        f"Failed to create constraint '{name_i}' in arena {env_id}."
+                        f"Failed to create constraint '{name}' in arena {env_id}."
                     )
                 handles[env_id] = handle
         except Exception:
-            # Ensure partially created per-arena constraints are removed if a later
-            # arena fails, so create/remove semantics stay consistent.
             RigidConstraint(
                 cfg=cfg,
                 constraint_handles=handles,
@@ -1673,21 +2730,9 @@ class SimulationManager:
         self._constraints[cfg.name] = constraint
         return constraint
 
-    def get_soft_object_uid_list(self) -> List[str]:
-        """Get current soft body uid list
-
-        Returns:
-            List[str]: list of soft body uid.
-        """
-        return list(self._soft_objects.keys())
-
-    def get_cloth_object_uid_list(self) -> List[str]:
-        """Get current cloth body uid list
-
-        Returns:
-            List[str]: list of cloth body uid.
-        """
-        return list(self._cloth_objects.keys())
+    def get_deformable_object_uid_list(self) -> List[str]:
+        """Return all deformable object UIDs in declaration order."""
+        return list(self._deformable_objects.keys())
 
     def remove_rigid_constraint(
         self,
@@ -1749,43 +2794,72 @@ class SimulationManager:
 
         Args:
             cfg (RigidObjectGroupCfg): Configuration for the rigid object group.
-        """
-        from embodichain.lab.sim.utility.sim_utils import (
-            load_mesh_objects_from_cfg,
-        )
 
+        Returns:
+            The stable Group facade. During initial scene construction it is
+            bound to Spawn handles by :meth:`prepare`.
+        """
+        if not self.physics.supports_rigid_object_group:
+            raise NotImplementedError(
+                f"The {self.physics.name} backend does not support rigid object groups."
+            )
         uid = cfg.uid
         if uid is None:
-            logger.log_error("Rigid object group uid must be specified.")
+            raise ValueError("Rigid object group uid must be specified.")
         if uid in self._rigid_object_groups:
-            logger.log_error(f"Rigid object group {uid} already exists.")
-
+            raise ValueError(f"Rigid object group {uid!r} already exists.")
         if cfg.body_type == "static":
-            logger.log_error("Rigid object group cannot be static.")
+            raise ValueError("Rigid object group cannot be static.")
+        if not cfg.rigid_objects:
+            raise ValueError("Rigid object group must contain at least one object.")
 
-        env_list = [self._env] if len(self._arenas) == 0 else self._arenas
+        actor_type = {
+            "dynamic": ActorType.DYNAMIC,
+            "kinematic": ActorType.KINEMATIC,
+        }[cfg.body_type]
+        descriptors = []
+        for index, member in enumerate(cfg.rigid_objects.values()):
+            member_cfg = deepcopy(member)
+            member_cfg.uid = f"{uid}__member_{index}"
+            member_cfg.body_type = cfg.body_type
+            source_path = getattr(member_cfg.shape, "fpath", None)
+            if _is_usd_path(source_path):
+                descriptor, materials = rigid_desc_from_usd(
+                    member_cfg,
+                    per_env=True,
+                    newton_solver_type=self._active_newton_solver_type,
+                )
+            else:
+                descriptor, materials = rigid_desc_from_cfg(
+                    member_cfg,
+                    per_env=True,
+                    newton_solver_type=self._active_newton_solver_type,
+                )
+            if descriptor.physics is None:
+                raise ValueError(
+                    f"Rigid object group member {index} has no rigid-body physics."
+                )
+            descriptor.physics.actor_type = actor_type
+            self._spawn_scene.builder.materials.update(materials)
+            descriptors.append(descriptor)
 
-        obj_group_list = []
-        for key, rigid_cfg in tqdm(
-            cfg.rigid_objects.items(), desc="Loading rigid objects"
-        ):
-            obj_list = load_mesh_objects_from_cfg(
-                cfg=rigid_cfg,
-                env_list=env_list,
-                cache_dir=self._convex_decomp_dir,
-            )
-            obj_group_list.append(obj_list)
-
-        # Convert [a1, a2, ...], [b1, b2, ...] to [(a1, b1, ...), (a2, b2, ...), ...]
-        obj_group_list = list(zip(*obj_group_list))
-        rigid_obj_group = RigidObjectGroup(
-            cfg=cfg, entities=obj_group_list, device=self.device
+        group = RigidObjectGroup(
+            cfg,
+            device=self.device,
         )
 
-        self._rigid_object_groups[uid] = rigid_obj_group
+        was_materialized = self.spawn_result is not None
+        self._spawn_scene.declare(
+            "rigid_object_group",
+            uid,
+            tuple(descriptors),
+            facade=group,
+        )
+        self._rigid_object_groups[uid] = group
         self.notify_visualization_topology_changed()
-
-        return rigid_obj_group
+        if was_materialized:
+            self.prepare()
+        return group
 
     def get_rigid_object_group(self, uid: str) -> RigidObjectGroup | None:
         """Get a rigid object group by its unique ID.
@@ -1854,54 +2928,23 @@ class SimulationManager:
         Returns:
             Articulation: The added articulation instance handle.
         """
-
         uid = cfg.uid
         if uid is None:
+            if cfg.fpath is None:
+                raise ValueError(
+                    "Articulation configuration must provide fpath when uid "
+                    "is not specified."
+                )
             uid = os.path.splitext(os.path.basename(cfg.fpath))[0]
             cfg.uid = uid
         if uid in self._articulations:
-            logger.log_error(f"Articulation {uid} already exists.")
+            raise ValueError(f"Articulation {uid!r} already exists.")
 
-        env_list = [self._env] if len(self._arenas) == 0 else self._arenas
-        obj_list = []
-
-        is_usd = cfg.fpath.endswith((".usd", ".usda", ".usdc"))
-        if is_usd:
-            # TODO: Currently add checking for num_envs when file is USD. After we support spawn via cloning, we can remove this.
-            if len(env_list) > 1:
-                logger.log_error(f"Currently not supporting multiple arenas for USD.")
-            env = self._env
-            results = env.import_from_usd_file(
-                cfg.fpath, return_object=True, cache_dir=self._convex_decomp_dir
-            )
-            # print("USD import results:", results)
-
-            articulations_found = []
-            for key, value in results.items():
-                if isinstance(value, dexsim.engine.Articulation):
-                    articulations_found.append(value)
-
-            if len(articulations_found) == 0:
-                logger.log_error(f"No articulation found in USD file {cfg.fpath}.")
-            elif len(articulations_found) > 1:
-                logger.log_error(
-                    f"Multiple articulations found in USD file {cfg.fpath}. "
-                )
-            elif len(articulations_found) == 1:
-                obj_list.append(articulations_found[0])
-        else:
-            # non-usd file does not support this option, will be forced set False to avoid potential issues.
-            cfg.use_usd_properties = False
-
-            for env in env_list:
-                art = env.load_urdf(cfg.fpath)
-                obj_list.append(art)
-
-        articulation = Articulation(cfg=cfg, entities=obj_list, device=self.device)
-
+        was_materialized = self.spawn_result is not None
+        articulation = self._declare_spawn_articulation(cfg, Articulation)
         self._articulations[uid] = articulation
-        self.notify_visualization_topology_changed()
-
+        if was_materialized:
+            self.prepare()
         return articulation
 
     def get_articulation(self, uid: str) -> Articulation | None:
@@ -1926,15 +2969,29 @@ class SimulationManager:
         """
         return list(self._articulations.keys())
 
-    def add_robot(self, cfg: RobotCfg) -> Robot | None:
+    def add_robot(self, cfg: RobotCfg | RobotPresetCfg) -> Robot | None:
         """Add a Robot to the scene.
 
         Args:
-            cfg (RobotCfg): Configuration for the robot.
+            cfg: A concrete robot configuration or a replace-only backend
+                preset. Presets are resolved from ``physics_cfg`` before the
+                robot is declared.
 
         Returns:
             Robot | None: The added robot instance handle, or None if failed.
         """
+        if not self.physics.supports_robot:
+            logger.log_error(
+                f"Robot support is not enabled for the "
+                f"{self.physics.name} backend yet.",
+                error_type=NotImplementedError,
+            )
+
+        if isinstance(cfg, RobotPresetCfg):
+            cfg = cfg.resolve(
+                self.sim_config.physics_cfg,
+                newton_solver_type=self._active_newton_solver_type,
+            )
 
         uid = cfg.uid
         if cfg.fpath is None:
@@ -1959,45 +3016,59 @@ class SimulationManager:
             logger.log_error(f"Robot {uid} already exists.")
             return self._robots[uid]
 
-        env_list = [self._env] if len(self._arenas) == 0 else self._arenas
-        obj_list = []
-
-        is_usd = cfg.fpath.endswith((".usd", ".usda", ".usdc"))
-        if is_usd:
-            # TODO: Currently add checking for num_envs when file is USD. After we support spawn via cloning, we can remove this.
-            if len(env_list) > 1:
-                logger.log_error(f"Currently not supporting multiple arenas for USD.")
-            env = self._env
-            results = env.import_from_usd_file(cfg.fpath, return_object=True)
-            # print("USD import results:", results)
-
-            articulations_found = []
-            for key, value in results.items():
-                if isinstance(value, dexsim.engine.Articulation):
-                    articulations_found.append(value)
-
-            if len(articulations_found) == 0:
-                logger.log_error(f"No articulation found in USD file {cfg.fpath}.")
-            elif len(articulations_found) > 1:
-                logger.log_error(
-                    f"Multiple articulations found in USD file {cfg.fpath}. "
-                )
-            elif len(articulations_found) == 1:
-                obj_list.append(articulations_found[0])
-        else:
-            # non-usd file does not support this option, will be forced set False to avoid potential issues.
-            cfg.use_usd_properties = False
-
-            for env in env_list:
-                art = env.load_urdf(cfg.fpath)
-                obj_list.append(art)
-
-        robot = Robot(cfg=cfg, entities=obj_list, device=self.device)
-
+        was_materialized = self.spawn_result is not None
+        robot = self._declare_spawn_articulation(cfg, Robot)
         self._robots[uid] = robot
-        self.notify_visualization_topology_changed()
-
+        if was_materialized:
+            self.prepare()
         return robot
+
+    def _declare_spawn_articulation(
+        self,
+        cfg: ArticulationCfg,
+        facade_type: type[Articulation],
+    ) -> Articulation:
+        """Declare an articulation facade and bind its Batch after finalize.
+
+        DexSim remains the sole articulation source loader. EmbodiChain applies
+        regex/group configuration to the resolved descriptor before either
+        backend materializes it. Runtime Batch data is created at the shared
+        prepare boundary.
+        """
+        if _is_usd_path(cfg.fpath):
+            descriptor, materials = articulation_desc_from_usd(
+                cfg,
+                per_env=True,
+                newton_solver_type=self._active_newton_solver_type,
+            )
+            self._spawn_scene.builder.materials.update(materials)
+        else:
+            descriptor = articulation_desc_from_cfg(
+                cfg,
+                per_env=True,
+                newton_solver_type=self._active_newton_solver_type,
+            )
+        if cfg.uid is None:
+            cfg.uid = descriptor.name
+
+        facade = facade_type(
+            cfg=cfg,
+            device=self.device,
+        )
+
+        self._spawn_scene.declare(
+            "articulation",
+            descriptor.name,
+            descriptor,
+            facade=facade,
+            configure_source=partial(
+                configure_articulation_desc,
+                cfg=cfg,
+                newton_solver_type=self._active_newton_solver_type,
+            ),
+        )
+        self.notify_visualization_topology_changed()
+        return facade
 
     def get_robot(self, uid: str) -> Robot | None:
         """Get a Robot by its unique ID.
@@ -2051,7 +3122,7 @@ class SimulationManager:
         result = controller.register_external_target(
             self._DEFAULT_PLANE_GIZMO_TARGET_ID,
             dexsim.interaction.EntityGizmoTargetType.RIGID_BODY,
-            default_plane,
+            default_plane.native(),
             ActorType.STATIC,
         )
         if result != dexsim.interaction.EntityGizmoResult.SUCCESS:
@@ -2274,17 +3345,19 @@ class SimulationManager:
                 device=self.device,
             )
             position = position - self.arena_offsets[0]
-            wxyz = torch.as_tensor(
-                command.wxyz,
-                dtype=torch.float32,
-                device=self.device,
+            xyzw = quat_wxyz_to_xyzw(
+                torch.as_tensor(
+                    command.wxyz,
+                    dtype=torch.float32,
+                    device=self.device,
+                )
             ).unsqueeze(0)
             pose = torch.eye(
                 4,
                 dtype=torch.float32,
                 device=self.device,
             ).unsqueeze(0)
-            pose[0, :3, :3] = matrix_from_quat(wxyz)[0]
+            pose[0, :3, :3] = matrix_from_quat(xyzw)[0]
             pose[0, :3, 3] = position
             if not gizmo.request_local_pose(pose, source_id=source_id):
                 continue
@@ -2426,7 +3499,13 @@ class SimulationManager:
             gizmo.set_visible(visible)
 
     def add_sensor(self, sensor_cfg: SensorCfg) -> BaseSensor:
-        """General interface to add a sensor to the scene and returns a handle.
+        """Create a sensor on the pre-created simulation Arenas.
+
+        Cameras keep EmbodiChain's native CameraGroup implementation. A camera
+        attached to an articulation link is created immediately and attached
+        after the physical Spawn scene is prepared. Contact sensors are created
+        after preparation and query contacts through the backend-neutral Spawn
+        Scene API.
 
         Args:
             sensor_cfg (SensorCfg): configuration for the sensor.
@@ -2435,39 +3514,102 @@ class SimulationManager:
             BaseSensor: The added sensor instance handle.
         """
         sensor_type = sensor_cfg.sensor_type
-        if sensor_type not in self.SUPPORTED_SENSOR_TYPES:
-            logger.log_warning(f"Unsupported sensor type: {sensor_type}")
-            return None
+        uid = sensor_cfg.uid
+        if uid is None:
+            uid = f"{sensor_type.lower()}_{len(self._sensors)}"
+            sensor_cfg.uid = uid
+        if uid in self._sensors:
+            raise ValueError(f"Sensor {uid!r} already exists.")
 
-        sensor_uid = sensor_cfg.uid
-        if sensor_uid is None:
-            sensor_uid = f"{sensor_type.lower()}_{len(self._sensors)}"
-            sensor_cfg.uid = sensor_uid
-
-        if sensor_uid in self._sensors:
-            logger.log_warning(f"Sensor {sensor_uid} already exists.")
-            return None
-
-        parent_nodes = None
-        if (
-            isinstance(sensor_cfg, CameraCfg)
-            and sensor_cfg.extrinsics.parent is not None
-        ):
-            parent_nodes = resolve_parent_nodes(
-                parent=sensor_cfg.extrinsics.parent,
-                assets={**self._articulations, **self._robots},
-                num_envs=self.num_envs,
+        sensor_factory = self.SUPPORTED_SENSOR_TYPES.get(sensor_type)
+        if sensor_factory is None:
+            raise ValueError(
+                f"Unsupported sensor type {sensor_type!r}. Supported types: "
+                f"{sorted(self.SUPPORTED_SENSOR_TYPES)}."
             )
+        if sensor_type == "ContactSensor" and not self.physics.supports_contact_sensor:
+            raise NotImplementedError(
+                f"ContactSensor is not supported by the {self.physics.name} "
+                "physics backend."
+            )
+        if isinstance(sensor_factory, type) and issubclass(sensor_factory, Camera):
+            if len(self._arenas) != self.num_envs:
+                raise RuntimeError(
+                    "Camera creation requires all Spawn Arenas to be "
+                    f"prepared ({len(self._arenas)} of {self.num_envs} ready)."
+                )
+            parent_nodes = None
+            if (
+                sensor_cfg.extrinsics.parent is not None
+                and self._spawn_scene.builder.result is not None
+            ):
+                # Resolve before allocating native camera views so an invalid
+                # parent cannot leave partially constructed render resources.
+                parent_nodes = self._resolve_spawn_sensor_parent_nodes(
+                    sensor_cfg.extrinsics.parent
+                )
+            sensor = sensor_factory(
+                sensor_cfg,
+                self.device,
+                owner=self,
+            )
+            if parent_nodes is not None:
+                sensor.attach_to_parent_nodes(parent_nodes)
+        elif isinstance(sensor_factory, type) and issubclass(
+            sensor_factory, ContactSensor
+        ):
+            self.prepare()
+            # ``solver_type='auto'`` is resolved while preparing the Spawn
+            # scene, so the early capability check above is not sufficient.
+            if not self.physics.supports_contact_sensor:
+                raise NotImplementedError(
+                    f"ContactSensor is not supported by the {self.physics.name} "
+                    "physics backend with the resolved solver/device."
+                )
+            sensor = sensor_factory(
+                sensor_cfg,
+                self.device,
+                owner=self,
+            )
+        else:
+            # Custom native sensors require a prepared physics scene; cameras
+            # only depend on the pre-created Arenas.
+            self.prepare()
+            # Preserve custom test/plugin factories whose two-argument
+            # constructor predates the manager-owned render context.
+            sensor = sensor_factory(sensor_cfg, self.device)
 
-        sensor = self.SUPPORTED_SENSOR_TYPES[sensor_type](sensor_cfg, self.device)
-        if isinstance(sensor, Camera) and parent_nodes is not None:
-            sensor.attach_to_parent_nodes(parent_nodes)
-
-        self._sensors[sensor_uid] = sensor
-        if isinstance(sensor, Camera):
-            self.notify_visualization_topology_changed()
-
+        self._sensors[uid] = sensor
+        self.notify_visualization_topology_changed()
         return sensor
+
+    def _attach_camera_parent(self, sensor: Camera) -> None:
+        """Resolve and attach one camera to its configured parent nodes."""
+        parent = sensor.cfg.extrinsics.parent
+        if parent is None:
+            return
+        parent_nodes = self._resolve_spawn_sensor_parent_nodes(parent)
+        sensor.attach_to_parent_nodes(parent_nodes)
+
+    def _attach_parented_cameras(self) -> None:
+        """Restore parented cameras after a Spawn topology change."""
+        for sensor in self._sensors.values():
+            if isinstance(sensor, Camera) and sensor.cfg.extrinsics.parent is not None:
+                self._attach_camera_parent(sensor)
+
+    def _resolve_spawn_sensor_parent_nodes(self, parent: str) -> list[object]:
+        """Resolve one canonical articulation link to a render node per Arena.
+
+        A plain link name remains compatible with existing CameraCfg values.
+        When more than one robot/articulation owns that link, callers can use
+        ``"<asset_uid>/<link_name>"`` to disambiguate without introducing
+        backend clone suffixes.
+        """
+        assets: dict[str, Articulation] = {
+            **self._articulations,
+            **self._robots,
+        }
+        return resolve_parent_nodes(parent, assets, self.num_envs)
 
     def get_sensor(self, uid: str) -> BaseSensor | None:
         """Get a sensor by its UID.
@@ -2494,48 +3636,35 @@ class SimulationManager:
     def remove_asset(self, uid: str) -> bool:
         """Remove an asset by its UID.
 
-        The asset can be a light, sensor, robot, rigid object or articulation.
-
-        Note:
-            Currently, lights and sensors are not supported to be removed.
+        Native render lights are not removed by this method. Sensors and
+        Spawn-owned physical assets are supported.
 
         Args:
             uid (str): The UID of the asset.
         Returns:
             bool: True if the asset is removed successfully, otherwise False.
         """
-        if uid in self._rigid_objects:
-            obj = self._rigid_objects.pop(uid)
-            obj.destroy()
+        if uid in self._sensors:
+            sensor = self._sensors.pop(uid)
+            destroy = getattr(sensor, "destroy", None)
+            if callable(destroy):
+                destroy()
             self.notify_visualization_topology_changed()
             return True
 
-        if uid in self._soft_objects:
-            obj = self._soft_objects.pop(uid)
-            obj.destroy()
-            self.notify_visualization_topology_changed()
-            return True
+        scene = self._spawn_scene
+        if uid not in scene:
+            return False
+        if uid == "default_plane":
+            raise ValueError("The Spawn-owned default plane cannot be removed.")
 
-        if uid in self._cloth_objects:
-            obj = self._cloth_objects.pop(uid)
-            obj.destroy()
-            self.notify_visualization_topology_changed()
-            return True
+        was_materialized = scene.builder.is_finalized
+        scene.remove(uid)
+        if was_materialized:
+            self.prepare()
 
-        if uid in self._rigid_object_groups:
-            group = self._rigid_object_groups.pop(uid)
-            group.destroy()
-            self.notify_visualization_topology_changed()
-            return True
-
-        if uid in self._articulations:
-            art = self._articulations.pop(uid)
-            art.destroy()
-            self.notify_visualization_topology_changed()
-            return True
-
-        if uid in self._robots:
-            robot = self._robots.pop(uid)
+        robot = self._robots.get(uid)
+        if robot is not None:
             for key, gizmo in self.get_gizmo_items():
                 if gizmo.target is robot:
                     self.disable_gizmo(key)
@@ -2544,11 +3673,14 @@ class SimulationManager:
                 for key in self._disabled_robot_gizmos
                 if key != uid and not key.startswith(f"{uid}:")
             }
-            robot.destroy()
-            self.notify_visualization_topology_changed()
-            return True
 
-        return False
+        self._rigid_objects.pop(uid, None)
+        self._rigid_object_groups.pop(uid, None)
+        self._deformable_objects.pop(uid, None)
+        self._articulations.pop(uid, None)
+        self._robots.pop(uid, None)
+        self.notify_visualization_topology_changed()
+        return True
 
     def draw_marker(
         self,
@@ -3282,30 +4414,112 @@ class SimulationManager:
             excluded_uids (Sequence[str] | None): List of asset UIDs to exclude from resetting. If None, reset all assets.
         """
         excluded_uids = set(excluded_uids) if excluded_uids is not None else set()
+        articulation_uids = tuple(self._robots) + tuple(self._articulations)
+        reset_articulation_uids = tuple(
+            uid for uid in articulation_uids if uid not in excluded_uids
+        )
+        use_coordinated_newton_clear = bool(
+            self.physics.name == "newton" and reset_articulation_uids
+        )
+        excluded_articulation_uids = excluded_uids.intersection(articulation_uids)
+        solver_type = getattr(self.physics, "solver_type", None)
+        requires_complete_world_clear = solver_type in {
+            None,
+            "auto",
+            "mujoco_warp",
+        }
+        if (
+            use_coordinated_newton_clear
+            and requires_complete_world_clear
+            and excluded_articulation_uids
+        ):
+            raise NotImplementedError(
+                "Resetting selected worlds with excluded Newton articulations "
+                "is unsupported because solver state must be cleared for every "
+                "articulation in each selected world."
+            )
+        newton_articulation_batch = None
+        if use_coordinated_newton_clear:
+            newton_articulation_batch = self._newton_articulation_reset_batch(
+                reset_articulation_uids,
+                env_ids,
+            )
         for uid, robot in self._robots.items():
             if uid not in excluded_uids:
-                robot.reset(env_ids)
+                if use_coordinated_newton_clear:
+                    robot.reset(env_ids, clear_dynamics=False)
+                else:
+                    robot.reset(env_ids)
         for uid, articulation in self._articulations.items():
             if uid not in excluded_uids:
-                articulation.reset(env_ids)
+                if use_coordinated_newton_clear:
+                    articulation.reset(env_ids, clear_dynamics=False)
+                else:
+                    articulation.reset(env_ids)
         for uid, rigid_obj in self._rigid_objects.items():
             if uid not in excluded_uids:
                 rigid_obj.reset(env_ids)
         for uid, rigid_obj_group in self._rigid_object_groups.items():
             if uid not in excluded_uids:
                 rigid_obj_group.reset(env_ids)
-        for uid, soft_obj in self._soft_objects.items():
+        for uid, deformable_obj in self._deformable_objects.items():
             if uid not in excluded_uids:
-                soft_obj.reset(env_ids)
-        for uid, cloth_obj in self._cloth_objects.items():
-            if uid not in excluded_uids:
-                cloth_obj.reset(env_ids)
+                deformable_obj.reset(env_ids)
         for uid, light in self._lights.items():
             if uid not in excluded_uids:
                 light.reset(env_ids)
         for uid, sensor in self._sensors.items():
             if uid not in excluded_uids:
                 sensor.reset(env_ids)
+        if use_coordinated_newton_clear:
+            self._clear_newton_articulation_dynamics(newton_articulation_batch)
+
+    def _newton_articulation_reset_batch(
+        self,
+        articulation_uids: Sequence[str],
+        env_ids: Sequence[int] | None,
+    ) -> Any:
+        """Create the complete Newton articulation batch for selected worlds."""
+        result = self.spawn_result
+        if result is None:
+            raise RuntimeError(
+                "Newton articulation reset requires a prepared Spawn scene."
+            )
+        selected_env_ids = (
+            list(range(self.num_envs))
+            if env_ids is None
+            else torch.as_tensor(env_ids, dtype=torch.long).reshape(-1).tolist()
+        )
+        invalid_env_ids = [
+            env_id
+            for env_id in selected_env_ids
+            if env_id < 0 or env_id >= self.num_envs
+        ]
+        if invalid_env_ids:
+            raise IndexError(
+                f"Environment selection {invalid_env_ids} is outside "
+                f"[0, {self.num_envs})."
+            )
+        handles = []
+        for uid in articulation_uids:
+            uid_handles = self._spawn_scene.handles(uid)
+            if len(uid_handles) != self.num_envs:
+                raise RuntimeError(
+                    f"Articulation {uid!r} exposes {len(uid_handles)} Spawn "
+                    f"handles for {self.num_envs} environments."
+                )
+            handles.extend(uid_handles[env_id] for env_id in selected_env_ids)
+        return result.create_articulation_batch(handles)
+
+    @staticmethod
+    def _clear_newton_articulation_dynamics(batch: Any) -> None:
+        """Clear complete native articulation state for selected worlds."""
+        status = batch.clear_dynamics()
+        if isinstance(status, Integral) and status < 0:
+            raise RuntimeError(
+                "DexSim Scene articulation clear_dynamics failed with "
+                f"status {status}."
+            )
 
     def export_usd(self, fpath: str) -> bool:
         """Export the current simulation scene to a USD file.
@@ -3402,6 +4616,48 @@ class SimulationManager:
 
         import sys, gc
 
+        # Release backend-owned views before Scene closes the native
+        # resources that back them. Newton also synchronizes its device here.
+        self.physics.prepare_for_teardown()
+        # Run wrapper destructors while their World is still alive. The later
+        # collections continue to break cycles left by the native teardown.
+        gc.collect()
+
+        # Render-only cameras may be attached to Spawn articulation link
+        # nodes. Remove their Arena views before closing Scene, which
+        # releases those parent nodes, and before World.quit releases their
+        # CameraGroups.
+        for sensor in list(getattr(self, "_sensors", {}).values()):
+            try:
+                sensor.destroy()
+            except Exception as error:
+                logger.log_warning(
+                    f"Failed to destroy sensor {getattr(sensor, 'uid', None)!r}: "
+                    f"{error!r}"
+                )
+
+        if self._spawn_scene is not None:
+            # Release result-scoped batches/facades before closing the
+            # Scene and, finally, the World that owns native resources.
+            for registry_name in (
+                "_rigid_objects",
+                "_rigid_object_groups",
+                "_deformable_objects",
+                "_articulations",
+                "_robots",
+            ):
+                for asset in getattr(self, registry_name, {}).values():
+                    if hasattr(asset, "_data"):
+                        asset._data = None
+                    if hasattr(asset, "_spawn_result"):
+                        asset._spawn_result = None
+                    if hasattr(asset, "_entities"):
+                        asset._entities = []
+            try:
+                self._spawn_scene.close()
+            finally:
+                self._spawn_scene = None
+
         self.clean_materials()
 
         if self._env:
@@ -3436,15 +4692,13 @@ class SimulationManager:
         _sever_wrapper_refs("_rigid_objects")
         _sever_wrapper_refs("_constraints")
         _sever_wrapper_refs("_rigid_object_groups")
-        _sever_wrapper_refs("_soft_objects")
-        _sever_wrapper_refs("_cloth_objects")
+        _sever_wrapper_refs("_deformable_objects")
         _sever_wrapper_refs("_articulations")
         _sever_wrapper_refs("_robots")
         _sever_wrapper_refs("_sensors")
         _sever_wrapper_refs("_lights")
 
         # Explicitly clear Python references to trigger C++ object destructors
-        self._ps = None
         self._env = None
         self._world = None
         self._default_plane = None
@@ -3499,5 +4753,16 @@ class SimulationManager:
         # After the queue is emptied, perform a top-level full GC to thoroughly reclaim dead objects that haven't released their RefPtrs yet
         gc.collect()
 
-        # At this point, wait for the C++ Scene to return to zero, since the stack is at the top level, there will definitely be no deadlock
-        SimulationManager.wait_scene_destruction()
+        # Other live managers still own native worlds; their world count must
+        # not be mistaken for an incomplete teardown of the drained tasks.
+        if not SimulationManager._instances:
+            SimulationManager.wait_scene_destruction()
+
+
+def get_physics_scene(instance_id: int = 0):
+    """Return the active physics scene from a SimulationManager instance.
+
+    This is the unified EmbodiChain access point for code that previously
+    reached through ``dexsim.default_world().get_physics_scene()``.
+    """
+    return SimulationManager.get_instance(instance_id).get_physics_scene()

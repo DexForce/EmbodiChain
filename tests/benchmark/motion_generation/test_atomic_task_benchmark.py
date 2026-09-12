@@ -274,7 +274,7 @@ def test_atomic_suite_is_franka_pgi_and_curobo_only():
         "rotation_deg": [0.0, 0.0, 90.0],
         "init_qpos": [0.0],
         "drive": {"drive_type": "none"},
-        "attrs": {"static_friction": 1.0, "dynamic_friction": 1.0},
+        "attrs": {"material_props": {"static_friction": 1.0, "dynamic_friction": 1.0}},
         "fix_base": True,
         "settle_steps": 10,
         "reset_settle_steps": 0,

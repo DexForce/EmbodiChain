@@ -14,7 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Shared simulation-state capture and restore helpers for trajectories."""
+"""Shared simulation-state capture and restore helpers for trajectories.
+
+All seven-element root and rigid-object poses use EmbodiChain's
+``(x, y, z, qx, qy, qz, qw)`` convention.
+"""
 
 from __future__ import annotations
 

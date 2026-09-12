@@ -22,6 +22,22 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.data.assets.demo_assets
+-----------------------------------
+
+Downloadable bundles used by standalone manipulation and deformable-body
+demos. Each class resolves one versioned archive into the configured
+EmbodiChain data cache.
+
+.. currentmodule:: embodichain.data.assets.demo_assets
+
+.. autosummary::
+
+   CoordinatedPlacementAndPickment
+   DeformableDemoData
+   MultiW1Data
+   ScoopIceNewEnv
+
 embodichain.data.assets.planner_assets
 --------------------------------------
 
@@ -829,6 +845,38 @@ embodichain.lab.sim.atomic_actions.transports
    EndpointCommandRouter
    EndpointCommandTransport
 
+embodichain.lab.sim.diff
+------------------------
+
+Public bridge from task-defined Newton kinematics and Warp tapes into PyTorch
+autograd. It does not advance the Newton dynamics solver.
+
+.. currentmodule:: embodichain.lab.sim.diff
+
+.. autosummary::
+
+   NewtonStepFunc
+   tape_context
+
+embodichain.lab.sim.diff.bridge
+-------------------------------
+
+.. currentmodule:: embodichain.lab.sim.diff.bridge
+
+.. autosummary::
+
+   NewtonStepFunc
+   tape_context
+
+embodichain.lab.sim.diff.runtime
+--------------------------------
+
+.. currentmodule:: embodichain.lab.sim.diff.runtime
+
+.. autosummary::
+
+   NewtonDifferentiableRuntime
+
 embodichain.lab.sim.objects.articulation
 ----------------------------------------
 
@@ -840,16 +888,6 @@ embodichain.lab.sim.objects.articulation
    Articulation
    ArticulationJointKinematics
 
-embodichain.lab.sim.objects.cloth_object
-----------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.objects.cloth_object
-
-.. autosummary::
-
-   ClothBodyData
-   ClothObject
-   ClothObjectCfg
 
 embodichain.lab.sim.objects.constraint
 --------------------------------------
@@ -908,16 +946,48 @@ embodichain.lab.sim.objects.robot
    ControlGroup
    Robot
 
-embodichain.lab.sim.objects.soft_object
----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.objects.soft_object
+embodichain.lab.sim.physics
+---------------------------
+
+Manager-level physics backend selection and lifecycle contracts for the
+Default and Newton implementations integrated through DexSim.
+
+.. currentmodule:: embodichain.lab.sim.physics
 
 .. autosummary::
 
-   SoftBodyData
-   SoftObject
-   SoftObjectCfg
+   PhysicsBackend
+   DefaultPhysicsBackend
+   NewtonPhysicsBackend
+   make_physics_backend
+
+embodichain.lab.sim.physics.base
+--------------------------------
+
+.. currentmodule:: embodichain.lab.sim.physics.base
+
+.. autosummary::
+
+   PhysicsBackend
+
+embodichain.lab.sim.physics.default
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.physics.default
+
+.. autosummary::
+
+   DefaultPhysicsBackend
+
+embodichain.lab.sim.physics.newton
+----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.physics.newton
+
+.. autosummary::
+
+   NewtonPhysicsBackend
 
 embodichain.lab.sim.motion.planners.base_planner
 ------------------------------------------------
@@ -1157,6 +1227,17 @@ embodichain.lab.sim.sensors.camera
    Camera
    CameraCfg
 
+embodichain.lab.sim.sensors.contact_sensor
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact_sensor
+
+.. autosummary::
+
+   ArticulationContactFilterCfg
+   ContactSensor
+   ContactSensorCfg
+
 embodichain.lab.sim.sim_manager
 -------------------------------
 
@@ -1350,6 +1431,64 @@ embodichain.lab.sim.motion.solvers.srs_solver
 
    SRSSolver
    SRSSolverCfg
+
+embodichain.lab.sim.spawn
+-------------------------
+
+Translation boundary from EmbodiChain object configs and singleton USD assets
+into DexSim Spawn descriptors.
+
+.. currentmodule:: embodichain.lab.sim.spawn
+
+.. autosummary::
+
+   articulation_desc_from_cfg
+   articulation_desc_from_usd
+   rigid_desc_from_cfg
+   rigid_desc_from_usd
+   surface_deformable_desc_from_cfg
+   volume_deformable_desc_from_cfg
+
+embodichain.lab.sim.spawn.descriptors
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.descriptors
+
+.. autosummary::
+
+   articulation_desc_from_cfg
+   configure_articulation_desc
+   rigid_desc_from_cfg
+   surface_deformable_desc_from_cfg
+   volume_deformable_desc_from_cfg
+
+embodichain.lab.sim.spawn.scene
+-------------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.scene
+
+.. autosummary::
+
+   SpawnScene
+
+embodichain.lab.sim.spawn.source
+--------------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.source
+
+.. autosummary::
+
+   resolve_articulation_source
+
+embodichain.lab.sim.spawn.usd
+-----------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.usd
+
+.. autosummary::
+
+   articulation_desc_from_usd
+   rigid_desc_from_usd
 
 embodichain.lab.sim.utility.render_utils
 ----------------------------------------
@@ -1672,6 +1811,7 @@ embodichain.learning.rl.algo.apg
 
    APG
    APGCfg
+   complete_discounted_return
    segmented_discounted_return
 
 embodichain.learning.rl.algo.base
@@ -1772,6 +1912,18 @@ embodichain.learning.rl.experimental.newton.train_planar_reach
    NewtonPlanarReachTrainingCfg
    train_planar_reach
 
+embodichain.learning.rl.gradients
+---------------------------------
+
+Row-wise action-adjoint clipping and its rollout-level diagnostics.
+
+.. currentmodule:: embodichain.learning.rl.gradients
+
+.. autosummary::
+
+   BatchedGradientNormStats
+   clip_batched_gradient_norm
+
 embodichain.learning.rl.models.actor_critic
 -------------------------------------------
 
@@ -1798,6 +1950,15 @@ embodichain.learning.rl.models.policy
 .. autosummary::
 
    Policy
+
+embodichain.learning.rl.normalization
+-------------------------------------
+
+.. currentmodule:: embodichain.learning.rl.normalization
+
+.. autosummary::
+
+   RunningObservationNormalizer
 
 embodichain.learning.rl.utils.optimizer
 ---------------------------------------
@@ -2061,6 +2222,18 @@ embodichain_tasks.manipulation.tableware.stack_cups
 
    StackCupsEnv
 
+embodichain_tasks.special.franka_reach_apg
+-------------------------------------------
+
+Differentiable Franka FR3 reach environment that demonstrates the explicit
+kinematics route used by analytic policy-gradient experiments.
+
+.. currentmodule:: embodichain_tasks.special.franka_reach_apg
+
+.. autosummary::
+
+   FrankaReachApgEnv
+
 embodichain_tasks.special.simple_task
 -------------------------------------
 
@@ -2087,3 +2260,26 @@ embodichain_tasks.utils.importer
 .. autosummary::
 
    import_packages
+
+Standalone simulation command-line options
+-----------------------------------------
+
+``embodichain.cli.sim`` builds simulation arguments without importing the
+simulation runtime. Gym launchers compose these options with configuration
+and recording flags. Seed options are opt-in: ``resolve_seed`` resolves ``-1``
+to an effective 32-bit seed without changing random streams or deterministic
+kernel policy; callers log and apply that seed to their own generators.
+
+.. currentmodule:: embodichain.cli.sim
+
+.. autosummary::
+
+   add_sim_args_to_parser
+   add_seed_arg_to_parser
+   resolve_seed
+
+.. autofunction:: add_sim_args_to_parser
+
+.. autofunction:: add_seed_arg_to_parser
+
+.. autofunction:: resolve_seed
