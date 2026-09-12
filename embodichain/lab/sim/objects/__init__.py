@@ -34,6 +34,12 @@ from .deformable import (
     SurfaceDeformableObject,
     VolumeDeformableObject,
 )
+
+# Compatibility aliases for the former native soft-body and cloth facades.
+SoftObject = VolumeDeformableObject
+ClothObject = SurfaceDeformableObject
+SoftBodyData = DeformableObjectData
+ClothBodyData = DeformableObjectData
 from ..cfg import (
     DeformableObjectCfg,
     SurfaceDeformableObjectCfg,

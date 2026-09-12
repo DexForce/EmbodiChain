@@ -48,6 +48,10 @@ from .deformable import (
     SurfaceDeformableObjectCfg,
     VolumeDeformableObjectCfg,
 )
+
+# Compatibility names retained for users of the pre-Spawn soft/cloth API.
+SoftObjectCfg = VolumeDeformableObjectCfg
+ClothObjectCfg = SurfaceDeformableObjectCfg
 from .rigid import (
     CollisionPropertiesCfg,
     DefaultCollisionPropertiesCfg,
@@ -116,6 +120,8 @@ __all__ = [
     "DeformableObjectCfg",
     "VolumeDeformableObjectCfg",
     "SurfaceDeformableObjectCfg",
+    "SoftObjectCfg",
+    "ClothObjectCfg",
     "RigidObjectGroupCfg",
     "RigidConstraintCfg",
     "SurfaceElementPropertiesCfg",

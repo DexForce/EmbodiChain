@@ -360,6 +360,13 @@ class DefaultPhysicsCfg(PhysicsBackendCfg):
     gpu_memory: GPUMemoryCfg = field(default_factory=GPUMemoryCfg)
     """Fixed-capacity GPU buffers used by Default-backend CUDA simulation."""
 
+    def __post_init__(self) -> None:
+        """Decode mapping input for the nested GPU-memory configuration."""
+        if isinstance(self.gpu_memory, Mapping):
+            self.gpu_memory = GPUMemoryCfg(**self.gpu_memory)
+        if not isinstance(self.gpu_memory, GPUMemoryCfg):
+            raise TypeError("gpu_memory must be a GPUMemoryCfg or mapping.")
+
     def to_dexsim_args(self) -> dict[str, Any]:
         """Convert to DexSim physics arguments.
 

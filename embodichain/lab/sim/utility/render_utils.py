@@ -48,7 +48,7 @@ def select_default_renderer(gpu_id: int = 0) -> str:
 
     Returns:
         The resolved renderer name, one of ``"hybrid"``, ``"fast-rt"``, or
-        ``"offline-rt"``.
+        ``"rt"``.
     """
     from embodichain.lab.sim import cfg
 

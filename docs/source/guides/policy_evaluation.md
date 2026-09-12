@@ -83,7 +83,7 @@ embodichain eval-policy outputs/<experiment>_<timestamp> \
 
 The Viewer uses one environment and keeps running until the window closes. Use
 `--episodes`, `--control-steps`, or `--duration` to select another stopping
-condition. `--renderer` accepts `hybrid`, `fast-rt`, and `offline-rt`.
+condition. `--renderer` accepts `hybrid`, `fast-rt`, and `rt`.
 Tasks exposing `set_velocity_command()` and `velocity_command_bounds()` also
 accept `--command vx vy yaw_rate`; use `--keymap wasd` or `--keymap arrows`
 for interactive command changes.
