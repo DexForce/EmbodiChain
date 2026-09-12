@@ -46,6 +46,9 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     replay_trajectory,
     run_tutorial,
 )
+from scripts.tutorials.atomic_action.tutorial_utils import (
+    initialize_benchmark_simulation,
+)
 
 MOVE_SAMPLE_INTERVAL = 80
 POST_TRAJECTORY_STEPS = 120
@@ -124,3 +127,13 @@ def main() -> None:
 
 if __name__ == "__main__":
     run_tutorial(main)
+
+
+def initialize_simulation(args) -> "SimulationManager":
+    """Create the tutorial simulation for interactive or benchmark runs."""
+    return initialize_benchmark_simulation(args)
+
+
+def create_robot(sim: "SimulationManager") -> "Robot":
+    """Add the default MoveEndEffector tutorial robot."""
+    return add_tutorial_robot(sim, "ur5")

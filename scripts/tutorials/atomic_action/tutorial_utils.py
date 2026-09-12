@@ -1164,3 +1164,43 @@ __all__ = [
     "stop_auto_play_recording",
     "draw_axis_marker",
 ]
+
+
+def initialize_benchmark_simulation(args) -> "SimulationManager":
+    """Create the tutorial simulation from a benchmark-style namespace.
+
+    Benchmark argument namespaces carry only ``device``/``renderer``; fill the
+    remaining launcher fields with tutorial defaults so
+    :func:`create_tutorial_simulation` accepts them unchanged.
+
+    Args:
+        args: Namespace with optional ``num_envs``/``device``/``renderer``.
+
+    Returns:
+        The shared tutorial simulation.
+    """
+    namespace = argparse.Namespace(
+        num_envs=getattr(args, "num_envs", 1),
+        device=getattr(args, "device", "cpu"),
+        renderer=getattr(args, "renderer", "auto"),
+        headless=True,
+    )
+    return create_tutorial_simulation(namespace)
+
+
+def compute_pick_close_end_step(compiled=None, invocation_index: int = 0) -> int:
+    """Trajectory step where PickUp's hand-close segment ends (lift start).
+
+    Args:
+        compiled: Optional compiled engine result; when given, the exact
+            ``lift`` segment start of the selected invocation is returned.
+        invocation_index: Invocation to inspect within ``compiled``.
+
+    Returns:
+        Step index separating the grasp phase from the lift phase. Without a
+        compiled result this uses the tutorial defaults
+        (``sample_count=120`` + ``hand_interp_steps=12`` + ``settle=0``).
+    """
+    if compiled is not None:
+        return int(compiled.segment(invocation_index, "lift").start)
+    return 120 + 12
