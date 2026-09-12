@@ -727,6 +727,7 @@ def test_semantic_planner_composes_e3_from_existing_pour_skills() -> None:
         "pick",
         "registered",
         "registered",
+        "registered",
         "place",
         "registered",
     ]
@@ -746,7 +747,16 @@ def test_semantic_planner_composes_e3_from_existing_pour_skills() -> None:
         "arguments": {"object": "bottle"},
         "resources": {"primary": "right"},
     }
-    assert graph["nodes"][3]["call"]["at"] == {
+    assert graph["nodes"][3]["call"] == {
+        "kind": "registered",
+        "call_id": "simulation.move_held_object",
+        "arguments": {
+            "object": "bottle",
+            "target": "step_01_return_target",
+        },
+        "resources": {"primary": "right"},
+    }
+    assert graph["nodes"][4]["call"]["at"] == {
         "kind": "target_ref",
         "target": "step_01_return_target",
     }

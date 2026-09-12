@@ -212,6 +212,7 @@ def generate_task_program_bundle(
 
     program_id = _program_identifier(selected_graph["task_id"])
     scene_contract = f"{program_id}_scene_v1"
+    selected_graph = _refine_e3_return_targets(selected_graph, scene)
     stability = _task_stability_payload(selected_graph, scene, embodiment_payload)
     save_config(
         paths.program,
@@ -337,6 +338,31 @@ def _refine_coordinated_targets(
         bottom, top = _vertical_mesh_bounds(source, axis_aligned=False)
         displacement[2] = max(0.05, min(0.10, 0.5 * (top - bottom) + 0.03))
         call["arguments"]["world_displacement"] = displacement
+    return validate_semantic_task_graph(result)
+
+
+def _refine_e3_return_targets(
+    graph: SemanticTaskGraph, scene: Any
+) -> SemanticTaskGraph:
+    """Ground E3 return poses at the settled tabletop support height."""
+    if scene.table_top_z is None:
+        return graph
+    objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
+    result = deepcopy(graph)
+    for node in result["nodes"]:
+        if node.get("task_type") != "E3" or node["call"].get("kind") != "place":
+            continue
+        target = node["call"].get("at")
+        if not isinstance(target, dict) or target.get("kind") != "target_ref":
+            continue
+        target_id = str(target["target"])
+        values = result["targets"].get(target_id, {}).get("values", ())
+        object_id = str(node["call"]["object"])
+        source = objects.get(object_id)
+        if source is None or len(values) != 1:
+            continue
+        bottom, _ = _vertical_mesh_bounds(source, axis_aligned=False)
+        values[0]["position"][2] = float(scene.table_top_z) - bottom
     return validate_semantic_task_graph(result)
 
 
@@ -798,6 +824,15 @@ def _integration_payload(
                         "pose": {"kind": "pose", **pose},
                     }
                 )
+            elif "reference" not in arguments:
+                pose = _single_target_pose(graph, target_id)
+                move_held_routes.append(
+                    {
+                        "object_id": object_id,
+                        "target_id": target_id,
+                        "pose": {"kind": "pose", **pose},
+                    }
+                )
             else:
                 reference = str(arguments["reference"])
                 referenced_objects.add(reference)
@@ -956,7 +991,7 @@ def _integration_payload(
                     "kind": "place",
                     "hand_interp_steps": 12,
                     "release_settle_steps": 60,
-                    "lift_height": 0.18,
+                    "lift_height": 0.05,
                     "cartesian_waypoint_count": 2,
                     "preserve_current_object_orientation": True,
                 },
