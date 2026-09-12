@@ -86,6 +86,12 @@ def test_create_scene_configures_newton_grasp_material_only_for_newton(
             tutorial.NEWTON_GRASP_CONTACT_STIFFNESS
         )
         assert robot_material.kd == pytest.approx(tutorial.NEWTON_GRASP_CONTACT_DAMPING)
+        assert robot_material.torsional_friction == pytest.approx(
+            tutorial.NEWTON_GRASP_TORSIONAL_FRICTION
+        )
+        assert robot_material.rolling_friction == pytest.approx(
+            tutorial.NEWTON_GRASP_ROLLING_FRICTION
+        )
         assert drawer_override.link_names_expr == [tutorial.DRAWER_CONTACT_LINK_NAME]
         assert drawer_override.attrs.collision_props.condim == 4
         assert (
@@ -98,20 +104,33 @@ def test_create_scene_configures_newton_grasp_material_only_for_newton(
         assert drawer_material.kd == pytest.approx(
             tutorial.NEWTON_GRASP_CONTACT_DAMPING
         )
+        assert drawer_material.torsional_friction == pytest.approx(
+            tutorial.NEWTON_GRASP_TORSIONAL_FRICTION
+        )
+        assert drawer_material.rolling_friction == pytest.approx(
+            tutorial.NEWTON_GRASP_ROLLING_FRICTION
+        )
     else:
         assert robot_cfg.link_attrs is None
         assert drawer_cfg.link_attrs is None
 
 
-def test_tutorial_newton_physics_cfg_enables_multiccd_with_auto_sized_buffers() -> None:
+def test_tutorial_newton_physics_cfg_uses_shared_mujoco_warp_profile() -> None:
     tutorial = _load_tutorial_module()
 
     cfg = tutorial._tutorial_physics_cfg("newton")
 
     assert cfg.num_substeps == 20
+    assert cfg.collision_cfg is None
     assert cfg.solver_cfg == {
         "solver_type": "mujoco_warp",
+        "solver": "newton",
+        "integrator": "implicitfast",
+        "iterations": 20,
+        "ls_iterations": 100,
         "cone": "elliptic",
+        "impratio": 1_000.0,
+        "use_mujoco_contacts": True,
         "enable_multiccd": True,
     }
 

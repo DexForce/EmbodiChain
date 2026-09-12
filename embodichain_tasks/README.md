@@ -18,7 +18,9 @@ same task:
 ```text
 embodichain_tasks/<category-path>/<task>.py
 configs/tasks/<category-path>/<task>/env.{json,yaml}          # inline runnable, or reusable env.yaml
+configs/tasks/<category-path>/<task>/env.<backend>.yaml       # optional backend companion
 configs/tasks/<category-path>/<task>/task.<embodiment>.yaml   # componentized runnable deployment
+configs/tasks/<category-path>/<task>/task.<embodiment>.<backend>.yaml
 configs/tasks/<category-path>/<task>/task_program/program.yaml
 configs/tasks/<category-path>/<task>/task_program/integration.yaml
 configs/tasks/<category-path>/<task>/agents/<algorithm>.yaml
@@ -44,12 +46,16 @@ fields cannot also be declared inline in the same file.
 
 A configuration-defined Task Program environment uses three explicit owners.
 The reusable `env.yaml` owns episode/environment values and physical simulation
-entities, and contains no Task Program metadata. The integration's nested
-`scene_binding` maps canonical `entity_id` values to physical `simulation_uid`
-values and owns semantic types and affordances. A thin
-`task.<embodiment>.yaml` deployment selects that
-`environment.component`, one reusable embodiment, and all three Task Program
-components (`program`, `integration`, and `execution_policy`).
+entities, and contains no Task Program metadata. When a backend needs native
+solver/contact values, a companion such as `env.newton.yaml` owns those values
+while retaining the same scene geometry and control cadence. The integration's
+nested `scene_binding` maps canonical `entity_id` values to physical
+`simulation_uid` values and owns semantic types and affordances. A thin
+`task.<embodiment>.yaml` deployment selects the Default environment; a backend
+companion such as `task.ur5.newton.yaml` selects `env.newton.yaml`. Both select
+one reusable embodiment and all three Task Program components (`program`,
+`integration`, and `execution_policy`). Give each backend deployment a distinct
+Gym ID because the backend is file-owned.
 
 An embodiment owns the simulation robot and its sensor suite. Its optional
 `skill_profile` owns the logical resources, command presets, and
@@ -114,12 +120,18 @@ selected by the `"id"` field of the gym config.
 # Data generation mode
 embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
 
+# Newton companion (the file owns the backend; --physics only confirms it)
+embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.newton.yaml --physics newton
+
 # Preview mode
 embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml --preview
 
 # Equivalent invocations
 python -m embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
 python -m embodichain.lab.scripts.run_env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
+
+# Another Newton companion
+python -m embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.newton.yaml --physics newton
 ```
 
 ## How registration works

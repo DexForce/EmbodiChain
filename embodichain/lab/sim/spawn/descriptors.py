@@ -833,14 +833,26 @@ def configure_articulation_desc(
             and getattr(link, "_embodichain_has_collision_geometry", None) is False
         ):
             effective_recompute = False
-        apply_physics = _has_articulation_link_physics_overlay(
+        has_overlay = _has_articulation_link_physics_overlay(
             rigid_body,
             collision,
             recompute_inertia=effective_recompute,
         )
+        # The descriptor is backend-neutral and should retain Newton blocks
+        # even while a Default scene is being configured.  The marker is a
+        # narrower policy used only by the Default post-load adapter: a
+        # Newton-only overlay must not make it call the native setter.
+        apply_physics = has_overlay and (
+            newton_solver_type is not None
+            or _has_default_articulation_link_physics_overlay(
+                rigid_body,
+                collision,
+                recompute_inertia=effective_recompute,
+            )
+        )
         setattr(link, "_embodichain_apply_physics", apply_physics)
         setattr(link, "_embodichain_mass_override", rigid_body.mass is not None)
-        if not apply_physics:
+        if not has_overlay:
             continue
         if (
             rigid_body.density is not None
@@ -929,12 +941,13 @@ def _has_articulation_link_physics_overlay(
     *,
     recompute_inertia: bool,
 ) -> bool:
-    """Return whether an exact link needs a native physics write.
+    """Return whether an exact link has any authored physics overlay.
 
     ``RigidBodyPhysicsDesc.dynamic()`` is the compilation container for a
     sparse configuration; its actor type alone is not an authored override.
-    Avoiding a no-op native setter matters for source URDFs because the
-    Default backend otherwise derives a new tensor from collision geometry.
+    Newton-only blocks are retained on the shared descriptor even when the
+    active backend is Default; a separate predicate decides whether that
+    backend should issue a native write.
     """
     if recompute_inertia:
         return True
@@ -948,13 +961,41 @@ def _has_articulation_link_physics_overlay(
             "com_quaternion",
             "collision_filter_data",
             "dexsim",
-            "newton",
         )
     ):
+        return True
+    if getattr(rigid_body, "newton", None) is not None:
         return True
     return any(
         getattr(collision, name) is not None
         for name in ("enable_collision", "dexsim", "newton")
+    )
+
+
+def _has_default_articulation_link_physics_overlay(
+    rigid_body: RigidBodyPhysicsDesc,
+    collision: CollisionDesc,
+    *,
+    recompute_inertia: bool,
+) -> bool:
+    """Return whether the Default adapter should write one link natively."""
+    if recompute_inertia:
+        return True
+    if any(
+        getattr(rigid_body, name) is not None
+        for name in (
+            "mass",
+            "density",
+            "inertia",
+            "com_position",
+            "com_quaternion",
+            "collision_filter_data",
+            "dexsim",
+        )
+    ):
+        return True
+    return any(
+        getattr(collision, name) is not None for name in ("enable_collision", "dexsim")
     )
 
 

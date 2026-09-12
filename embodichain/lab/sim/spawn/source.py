@@ -374,6 +374,8 @@ def _apply_dexsim_source_overlay(
     the Default native setter for every link and trigger unwanted geometric
     inertia derivation. This narrow compatibility boundary keeps its native
     calls limited to links marked by :func:`configure_articulation_desc`.
+    Newton-only blocks may still be present in the copied descriptor for
+    backend parity; this Default-only pass intentionally ignores them.
     """
     binding = getattr(handle, "_physics_binding", None)
     if binding is None:

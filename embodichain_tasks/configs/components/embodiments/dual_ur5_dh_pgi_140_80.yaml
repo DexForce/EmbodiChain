@@ -59,9 +59,17 @@ simulation:
     gripper_fingers:
       link_names_expr: ["(left|right)_gripper_finger[12]_link_1"]
       attrs:
+        collision_props:
+          backend: newton
+          condim: 4
         material_props:
           dynamic_friction: 2.0
           static_friction: 2.0
+          backend: newton
+          ke: 40000.0
+          kd: 400.0
+          torsional_friction: 0.1
+          rolling_friction: 0.01
   solver_cfg:
     left_arm:
       class_type: URSolver

@@ -76,8 +76,8 @@ from embodichain.lab.sim.cfg import (
     ArticulationRootPropertiesCfg,
     JointDrivePropertiesCfg,
     LinkPhysicsOverrideCfg,
-    NewtonPhysicsCfg,
     NewtonCollisionPropertiesCfg,
+    NewtonPhysicsCfg,
     NewtonRigidBodyMaterialCfg,
     PhysicsBackendCfg,
     RenderCfg,
@@ -122,6 +122,12 @@ APPROACH_DISTANCE = 0.10
 PULL_DISTANCE = 0.16
 NEWTON_GRASP_CONTACT_STIFFNESS = 4.0e4
 NEWTON_GRASP_CONTACT_DAMPING = 4.0e2
+# Match the shared atomic-action grasp profile.  ``condim=4`` activates the
+# torsional term in MuJoCo-Warp; the rolling coefficient is retained for
+# solvers/condim=6 that support it.  Keep both coefficients on the fingers and
+# handle only; changing the world material would alter unrelated contacts.
+NEWTON_GRASP_TORSIONAL_FRICTION = 0.1
+NEWTON_GRASP_ROLLING_FRICTION = 0.01
 DRAWER_SUCCESS_THRESHOLD = 0.10
 HALF_OPEN_FRACTION = 0.5
 HALF_OPEN_TOLERANCE = 0.02
@@ -145,6 +151,8 @@ def _newton_grasp_contact_override(
             material_props=NewtonRigidBodyMaterialCfg(
                 ke=NEWTON_GRASP_CONTACT_STIFFNESS,
                 kd=NEWTON_GRASP_CONTACT_DAMPING,
+                torsional_friction=NEWTON_GRASP_TORSIONAL_FRICTION,
+                rolling_friction=NEWTON_GRASP_ROLLING_FRICTION,
             ),
         ),
     )
@@ -522,13 +530,21 @@ def _tutorial_physics_cfg(
     """Build the physics configuration used by this tutorial."""
     physics_cfg = physics_cfg_for_backend(backend)
     if isinstance(physics_cfg, NewtonPhysicsCfg):
-        # Use a finer step and multi-point contacts for the Newton grasp. Leave
-        # per-world capacities auto-sized to avoid oversized CUDA Graph buffers
-        # when the scene is replicated across many environments.
+        # Keep the same MuJoCo-Warp solver/contact profile as the atomic-action
+        # tutorial and packaged Newton task.  The finer drawer substep cadence
+        # is intentional; per-world capacities remain auto-sized by DexSim
+        # from the finalized scene.
         physics_cfg.num_substeps = 20
+        physics_cfg.collision_cfg = None
         physics_cfg.solver_cfg = {
             "solver_type": "mujoco_warp",
+            "solver": "newton",
+            "integrator": "implicitfast",
+            "iterations": 20,
+            "ls_iterations": 100,
             "cone": "elliptic",
+            "impratio": 1_000.0,
+            "use_mujoco_contacts": True,
             "enable_multiccd": True,
         }
     return physics_cfg

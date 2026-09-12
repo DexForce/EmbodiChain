@@ -57,6 +57,8 @@ from scripts.tutorials.atomic_action.scenario_utils import (
 from scripts.tutorials.atomic_action.tutorial_utils import (
     NEWTON_GRASP_CONTACT_DAMPING,
     NEWTON_GRASP_CONTACT_STIFFNESS,
+    NEWTON_GRASP_ROLLING_FRICTION,
+    NEWTON_GRASP_TORSIONAL_FRICTION,
     NEWTON_NATIVE_CONTACT_DIMENSION,
     ROBOTIQ_2F_140_TCP,
     ROBOTIQ_HAND_JOINT_PATTERN,
@@ -267,7 +269,7 @@ def test_atomic_action_tutorial_uses_native_mujoco_contact_settings() -> None:
 
     assert isinstance(default_cfg, DefaultPhysicsCfg)
     assert isinstance(newton_cfg, NewtonPhysicsCfg)
-    assert newton_cfg.num_substeps == 10
+    assert newton_cfg.num_substeps == 20
     assert newton_cfg.collision_cfg is None
     assert newton_cfg.solver_cfg == {
         "solver_type": "mujoco_warp",
@@ -808,6 +810,12 @@ def test_tutorial_rigid_body_physics_adds_only_newton_contact_response() -> None
     assert newton_physics.material_props.kd == pytest.approx(
         NEWTON_GRASP_CONTACT_DAMPING
     )
+    assert newton_physics.material_props.torsional_friction == pytest.approx(
+        NEWTON_GRASP_TORSIONAL_FRICTION
+    )
+    assert newton_physics.material_props.rolling_friction == pytest.approx(
+        NEWTON_GRASP_ROLLING_FRICTION
+    )
     assert newton_physics.collision_props.condim == NEWTON_NATIVE_CONTACT_DIMENSION
     assert default_physics.collision_props is None
 
@@ -978,6 +986,8 @@ def test_shared_tutorial_gripper_uses_newton_contact_material(
     assert isinstance(material, NewtonRigidBodyMaterialCfg)
     assert material.ke == pytest.approx(NEWTON_GRASP_CONTACT_STIFFNESS)
     assert material.kd == pytest.approx(NEWTON_GRASP_CONTACT_DAMPING)
+    assert material.torsional_friction == pytest.approx(NEWTON_GRASP_TORSIONAL_FRICTION)
+    assert material.rolling_friction == pytest.approx(NEWTON_GRASP_ROLLING_FRICTION)
     assert override.attrs.mass_props.recompute_inertia is True
     assert override.attrs.collision_props.condim == NEWTON_NATIVE_CONTACT_DIMENSION
     assert re.fullmatch(override.link_names_expr[0], link_name)
@@ -1030,6 +1040,12 @@ def test_shared_tutorial_tunes_selected_newton_articulation_link() -> None:
     )
     assert override.attrs.material_props.kd == pytest.approx(
         NEWTON_GRASP_CONTACT_DAMPING
+    )
+    assert override.attrs.material_props.torsional_friction == pytest.approx(
+        NEWTON_GRASP_TORSIONAL_FRICTION
+    )
+    assert override.attrs.material_props.rolling_friction == pytest.approx(
+        NEWTON_GRASP_ROLLING_FRICTION
     )
 
 
@@ -1090,6 +1106,10 @@ def test_place_cube_uses_backend_scoped_contact_material(
         result = module.create_pick_object(sim)
 
     cfg = sim.add_rigid_object.call_args.kwargs["cfg"]
+    assert cfg.attrs.mass_props.mass == pytest.approx(0.05)
+    assert cfg.attrs.rigid_props.linear_damping == pytest.approx(0.2)
+    assert cfg.attrs.rigid_props.angular_damping == pytest.approx(0.2)
+    assert cfg.attrs.rigid_props.enable_ccd is None
     material = cfg.attrs.material_props
     assert type(material) is expected_material_type
     assert material.dynamic_friction == pytest.approx(0.97)
@@ -1097,6 +1117,13 @@ def test_place_cube_uses_backend_scoped_contact_material(
     if is_newton_backend:
         assert material.ke == pytest.approx(NEWTON_GRASP_CONTACT_STIFFNESS)
         assert material.kd == pytest.approx(NEWTON_GRASP_CONTACT_DAMPING)
+        assert material.torsional_friction == pytest.approx(
+            NEWTON_GRASP_TORSIONAL_FRICTION
+        )
+        assert material.rolling_friction == pytest.approx(NEWTON_GRASP_ROLLING_FRICTION)
+        assert cfg.attrs.collision_props.condim == NEWTON_NATIVE_CONTACT_DIMENSION
+    else:
+        assert cfg.attrs.collision_props is None
     result.clear_dynamics.assert_called_once_with()
 
 

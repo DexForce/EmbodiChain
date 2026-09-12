@@ -476,15 +476,25 @@ The `open_drawer.py` tutorial combines this option with 20 Newton substeps per
 10 ms control step, while keeping its authored robot gains, collision geometry,
 pull trajectory, success criteria, and push trajectory identical to Default.
 Atomic-action tutorials configure their shared Newton simulation in
-`scripts/tutorials/atomic_action/tutorial_utils.py` with 10 solver substeps
-per 10 ms physics step. They select `mujoco_warp` with
+`scripts/tutorials/atomic_action/tutorial_utils.py` with 20 solver substeps
+per 10 ms physics step (0.5 ms solver intervals). They select `mujoco_warp` with
 `use_mujoco_contacts=True` and set the external `collision_cfg` to `None`.
 MuJoCo-Warp then generates and solves contacts internally at every solver
 substep; external-pipeline settings such as `update_interval`, contact
 reduction, and the external `rigid_contact_max` do not apply. DexSim derives
 the native per-world contact capacity from the finalized scene, avoiding the
 oversized fixed buffers formerly inherited from external-pipeline examples.
-The shared factory leaves the Default backend configuration unchanged.
+The shared factory leaves the Default backend configuration unchanged. For
+parallel-jaw manipulation, the tutorial and packaged task components add a
+Newton-only contact overlay (`condim=4`, `ke=4e4`, `kd=4e2`, torsional friction
+`0.1`, rolling friction `0.01`) to the gripper and directly manipulated object
+contact links. `condim=4` activates torsional friction in MuJoCo-Warp; rolling
+friction is retained for solvers/`condim=6` that support it. This is a scoped
+contact/force-closure candidate profile, not a replacement for Newton's scene-aware
+`AutoSolverCfg`; rigid-only scenes still resolve to XPBD and articulation
+scenes to MuJoCo-Warp. Keep
+backend-specific overlays sparse so the Default adapter continues to use its
+existing portable contact envelope.
 The package dependency must identify the exact DexSim dev build containing
 this API; a base `==0.4.3` requirement also accepts older local-version wheels
 that do not export `AutoSolverCfg` and is therefore insufficient.

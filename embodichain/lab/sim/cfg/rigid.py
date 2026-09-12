@@ -317,10 +317,19 @@ class NewtonRigidBodyMaterialCfg(RigidBodyMaterialCfg):
     """Hydroelastic contact stiffness used when hydroelastic contact is enabled."""
 
     torsional_friction: float | None = None
-    """Torsional friction coefficient resisting spin at a contact point."""
+    """Dimensionless torsional friction coefficient resisting spin.
+
+    Newton and MuJoCo-Warp use this as ``mu_torsional``.  The active solver
+    may ignore it.
+    """
 
     rolling_friction: float | None = None
-    """Rolling friction coefficient resisting rolling motion."""
+    """Dimensionless rolling friction coefficient resisting rolling motion.
+
+    Newton and MuJoCo-Warp use this as ``mu_rolling``.  It is retained in the
+    shared schema for solvers and contact dimensions that support rolling
+    resistance.
+    """
 
 
 _RIGID_PHYSICS_GROUP_FIELDS = frozenset(

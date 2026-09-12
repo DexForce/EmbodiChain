@@ -584,6 +584,7 @@ def test_grouped_rigid_physics_routes_common_and_backend_properties() -> None:
                 dynamic_friction=0.4,
                 ke=1000.0,
                 torsional_friction=0.02,
+                rolling_friction=0.1,
             ),
         ),
     )
@@ -606,6 +607,7 @@ def test_grouped_rigid_physics_routes_common_and_backend_properties() -> None:
     assert collision.newton.mu == 0.4
     assert collision.newton.ke == 1000.0
     assert collision.newton.mu_torsional == 0.02
+    assert collision.newton.mu_rolling == pytest.approx(0.1)
 
 
 def test_portable_collision_envelope_compiles_to_both_backends() -> None:
@@ -1740,6 +1742,48 @@ def test_joint_only_overlay_does_not_author_link_physics() -> None:
     for link, source_link in zip(descriptor.links, before.links, strict=True):
         assert not link._embodichain_apply_physics
         _assert_property_tree_equal(link.rigid_body, source_link.rigid_body)
+
+
+def test_newton_only_link_overlay_is_not_applied_by_default_backend() -> None:
+    """Newton-only link fields must not trigger a Default native setter."""
+    cfg = ArticulationCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        asset_physics_mode="overlay",
+        link_attrs={
+            "newton_fingers": LinkPhysicsOverrideCfg(
+                link_names_expr=["finger_.*"],
+                attrs=RigidBodyPhysicsCfg(
+                    collision_props=NewtonCollisionPropertiesCfg(condim=4),
+                    material_props=NewtonRigidBodyMaterialCfg(
+                        ke=4.0e4,
+                        kd=4.0e2,
+                        torsional_friction=0.1,
+                        rolling_friction=0.01,
+                    ),
+                ),
+            )
+        },
+    )
+
+    default_descriptor = _resolved_articulation_desc()
+    configure_articulation_desc(default_descriptor, cfg, newton_solver_type=None)
+
+    assert not default_descriptor.get_link_desc("base")._embodichain_apply_physics
+    assert not default_descriptor.get_link_desc(
+        "finger_left"
+    )._embodichain_apply_physics
+    default_finger = default_descriptor.get_link_desc("finger_left")
+    assert default_finger.collisions[0].newton.condim == 4
+    assert default_finger.collisions[0].newton.ke == pytest.approx(4.0e4)
+
+    newton_descriptor = _resolved_articulation_desc()
+    configure_articulation_desc(
+        newton_descriptor,
+        cfg,
+        newton_solver_type="mujoco_warp",
+    )
+    assert newton_descriptor.get_link_desc("finger_left")._embodichain_apply_physics
 
 
 def test_density_override_requires_explicit_source_inertia_recomputation() -> None:

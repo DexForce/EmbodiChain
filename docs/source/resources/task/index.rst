@@ -37,8 +37,14 @@ Environment catalog
      - ``TaskProgramRepeatedPickPlace-v1``
      - ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml``
    * - Manipulation
+     - ``TaskProgramRepeatedPickPlace-Newton-v1``
+     - ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.newton.yaml``
+   * - Manipulation
      - ``TaskProgramRepeatedPickPlace-Franka-v1``
      - ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml``
+   * - Manipulation
+     - ``TaskProgramRepeatedPickPlace-Franka-Newton-v1``
+     - ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.newton.yaml``
    * - Special
      - ``SimpleTask-v1``
      - ``embodichain_tasks/configs/tasks/special/simple_task/env_ur10.json``
@@ -57,6 +63,9 @@ Environment catalog
    * - Manipulation
      - ``TaskProgramOpenDrawer-v1``
      - ``embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml``
+   * - Manipulation
+     - ``TaskProgramOpenDrawer-Newton-v1``
+     - ``embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.newton.yaml``
    * - Manipulation
      - ``TaskProgramOpenDrawer-Franka-v1``
      - ``embodichain_tasks/configs/tasks/manipulation/open_drawer/task.franka.yaml``

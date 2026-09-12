@@ -46,7 +46,12 @@ from embodichain.lab.sim.atomic_actions import (
     EntityState,
     HandOverOptions,
 )
-from embodichain.lab.sim.cfg import DefaultPhysicsCfg, RobotCfg
+from embodichain.lab.sim.cfg import (
+    DefaultPhysicsCfg,
+    NewtonCollisionPropertiesCfg,
+    NewtonRigidBodyMaterialCfg,
+    RobotCfg,
+)
 from embodichain.lab.task_program.semantics import (
     BinaryEffectClause,
     BinaryEffectEvidenceQuery,
@@ -268,6 +273,13 @@ def test_hand_over_config_owns_tuned_can_and_pgi_physics() -> None:
     finger_attrs = cfg.robot.link_attrs["gripper_fingers"].attrs
     assert finger_attrs.material_props.dynamic_friction == pytest.approx(2.0)
     assert finger_attrs.material_props.static_friction == pytest.approx(2.0)
+    assert isinstance(finger_attrs.collision_props, NewtonCollisionPropertiesCfg)
+    assert finger_attrs.collision_props.condim == 4
+    assert isinstance(finger_attrs.material_props, NewtonRigidBodyMaterialCfg)
+    assert finger_attrs.material_props.ke == pytest.approx(4.0e4)
+    assert finger_attrs.material_props.kd == pytest.approx(4.0e2)
+    assert finger_attrs.material_props.torsional_friction == pytest.approx(0.1)
+    assert finger_attrs.material_props.rolling_friction == pytest.approx(0.01)
 
 
 def test_hand_over_composition_owns_scene_pose_and_evidence_services() -> None:

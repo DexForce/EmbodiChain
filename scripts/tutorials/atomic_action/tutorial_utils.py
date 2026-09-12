@@ -25,7 +25,6 @@ import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import Literal
 
-import numpy as np
 import torch
 
 from embodichain.data import get_data_path
@@ -110,6 +109,16 @@ TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.036
 NEWTON_GRASP_CONTACT_STIFFNESS = 4.0e4
 NEWTON_GRASP_CONTACT_DAMPING = 4.0e2
+# MuJoCo-Warp's default contact dimension (3) has no torsional friction.  A
+# parallel-jaw grasp needs spin resistance as well as normal stiffness. Values
+# were selected from Newton's native-contact examples and a fixed-seed
+# Default-backend cube pick/place comparison. ``rolling_friction`` is retained
+# for solvers/condim=6 that consume it; MuJoCo-Warp condim=4 activates
+# torsional friction only. Keep this tutorial-local candidate profile on
+# manipulation contact surfaces rather than using it as a world-wide Newton
+# material.
+NEWTON_GRASP_TORSIONAL_FRICTION = 0.1
+NEWTON_GRASP_ROLLING_FRICTION = 0.01
 # The official Newton native-contact grasp example uses condim=4 to retain
 # torsional friction. The tutorial profile applies it just before replay.
 NEWTON_NATIVE_CONTACT_DIMENSION = 4
@@ -222,12 +231,14 @@ def _tutorial_physics_cfg(
     """
     physics_cfg = physics_cfg_for_backend(backend)
     if isinstance(physics_cfg, NewtonPhysicsCfg):
-        # Keep 1 ms internal solver steps for stable robot contacts. DexSim
-        # sizes contact/constraint buffers from the finalized scene, including
-        # the contact dimensions authored on gripper and object surfaces.
+        # Keep 0.5 ms internal solver steps for stable robot contacts. Newton's
+        # tuning guide recommends reducing the solver interval for stiff
+        # contacts and fast-changing manipulator loads. DexSim sizes
+        # contact/constraint buffers from the finalized scene, including the
+        # contact dimensions authored on gripper and object surfaces.
         # MultiCCD retains up to four contacts per gripper-mesh/object pair,
         # which prevents a marginal two-finger grasp from sliding away.
-        physics_cfg.num_substeps = 10
+        physics_cfg.num_substeps = 20
         physics_cfg.collision_cfg = None
         physics_cfg.solver_cfg = {
             "solver_type": "mujoco_warp",
@@ -413,11 +424,13 @@ def create_tutorial_rigid_body_physics(
     values are retained in the Default-backend configuration group; Newton
     safely ignores those properties because it has no equivalent controls.
     Set ``newton_contact`` only for a manipulation contact surface in a Newton
-    scene to use the same less-compliant response as the drawer tutorial.
+    scene to use the task-scoped stiffness, damping, and torsional/rolling
+    friction profile used by the drawer tutorial.
 
     Args:
         newton_contact: Whether to add the Newton-only contact stiffness and
-            damping used on grasped or directly manipulated objects.
+            damping and torsional/rolling friction used on grasped or directly
+            manipulated objects.
 
     Returns:
         Grouped physics configuration accepted by both tutorial backends.
@@ -470,6 +483,8 @@ def create_tutorial_rigid_body_physics(
                     restitution=restitution,
                     ke=NEWTON_GRASP_CONTACT_STIFFNESS,
                     kd=NEWTON_GRASP_CONTACT_DAMPING,
+                    torsional_friction=NEWTON_GRASP_TORSIONAL_FRICTION,
+                    rolling_friction=NEWTON_GRASP_ROLLING_FRICTION,
                 )
                 if newton_contact
                 else RigidBodyMaterialCfg(
@@ -506,6 +521,8 @@ def configure_newton_link_contacts(
                 material_props=NewtonRigidBodyMaterialCfg(
                     ke=NEWTON_GRASP_CONTACT_STIFFNESS,
                     kd=NEWTON_GRASP_CONTACT_DAMPING,
+                    torsional_friction=NEWTON_GRASP_TORSIONAL_FRICTION,
+                    rolling_friction=NEWTON_GRASP_ROLLING_FRICTION,
                 ),
             ),
         ),
@@ -1429,6 +1446,8 @@ __all__ = [
     "ROBOTIQ_HAND_JOINT_PATTERN",
     "NEWTON_GRASP_CONTACT_DAMPING",
     "NEWTON_GRASP_CONTACT_STIFFNESS",
+    "NEWTON_GRASP_ROLLING_FRICTION",
+    "NEWTON_GRASP_TORSIONAL_FRICTION",
     "NEWTON_NATIVE_CONTACT_DIMENSION",
     "NEWTON_NATIVE_CONTACT_SETTLE_DURATION",
     "TOP_DOWN_EEF_ROTATION",
