@@ -1068,6 +1068,9 @@ The scripts share a `--planner` selector for the non-neural backends
 {doc}`/tutorial/atomic_actions` for backend-specific caveats and examples.
 The dynamic-obstacle recovery example remains cuRobo-only because it updates a
 live collision world.
+Every script also receives the same single global `sun` light from the shared
+tutorial scene setup; vectorized environments do not create per-arena point
+lights.
 
 See {doc}`/tutorial/atomic_actions` for engine setup, static compilation,
 closed-loop execution, effect verification, and custom-action guidance.

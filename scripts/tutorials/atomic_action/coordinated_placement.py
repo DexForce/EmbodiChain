@@ -865,7 +865,6 @@ def main() -> None:
     sim = create_tutorial_simulation(
         args,
         arena_space=3.0,
-        light_pos=(0.0, -0.4, 3.0),
     )
     robot = create_dual_robot(sim, args.robot)
     run_coordinated_placement_demo(args, sim, robot)

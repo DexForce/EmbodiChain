@@ -94,7 +94,7 @@ TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
     palm_depth=0.096,
 )
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.036
-DEFAULT_TUTORIAL_LIGHT_POS = (1.0, 0.0, 3.0)
+DEFAULT_TUTORIAL_SUN_DIRECTION = (0.0, 0.0, -1.0)
 _FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
 _DEFAULT_GRIPPER_TCP_Z = 0.17
 _GRIPPER_TCP = (
@@ -224,7 +224,7 @@ def create_tutorial_simulation(
     args: argparse.Namespace,
     *,
     arena_space: float = 2.5,
-    light_pos: Sequence[float] = DEFAULT_TUTORIAL_LIGHT_POS,
+    sun_direction: Sequence[float] = DEFAULT_TUTORIAL_SUN_DIRECTION,
 ) -> SimulationManager:
     """Create the shared simulation setup used by atomic-action tutorials.
 
@@ -232,7 +232,8 @@ def create_tutorial_simulation(
         args: Parsed launcher arguments containing environment count, device,
             and renderer selections.
         arena_space: Spacing between parallel simulation arenas in meters.
-        light_pos: Position of the scene's key light.
+        sun_direction: Direction of the single global sun light. The vector
+            points from the light toward the scene.
 
     Returns:
         A simulation manager with the tutorial key light configured.
@@ -253,9 +254,10 @@ def create_tutorial_simulation(
     sim.add_light(
         cfg=LightCfg(
             uid="main_light",
+            light_type="sun",
             color=(0.6, 0.6, 0.6),
             intensity=30.0,
-            init_pos=list(light_pos),
+            direction=tuple(sun_direction),
         )
     )
     return sim
@@ -1224,7 +1226,7 @@ __all__ = [
     "DEFAULT_AXIS_LEN",
     "DEFAULT_AXIS_SIZE",
     "DEFAULT_GRIPPER_CLOSE_QPOS",
-    "DEFAULT_TUTORIAL_LIGHT_POS",
+    "DEFAULT_TUTORIAL_SUN_DIRECTION",
     "GRIPPER_HAND_JOINT_PATTERN",
     "GRIPPER_URDF_PATH",
     "ROBOTIQ_2F_140_TCP",

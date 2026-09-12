@@ -159,6 +159,11 @@ The ``motion_generator`` variable in the snippets below is a configured
 :class:`~embodichain.lab.sim.motion.motion_generator.MotionGenerator`; its robot, planner,
 device, cache, and collision world become the resources owned by the engine.
 
+All atomic-action tutorials use the shared scene setup, which creates exactly
+one global ``sun`` light (``main_light``) for the whole simulation. The sun
+uses a common downward direction and is not duplicated for each vectorized
+arena; tutorial-specific light positions are no longer needed.
+
 Selecting a motion planner
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 

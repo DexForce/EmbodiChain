@@ -48,6 +48,7 @@ from scripts.tutorials.atomic_action.scenario_utils import (
     create_dual_tutorial_robot_cfg,
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    DEFAULT_TUTORIAL_SUN_DIRECTION,
     ROBOTIQ_2F_140_TCP,
     ROBOTIQ_HAND_JOINT_PATTERN,
     TUTORIAL_PLANNERS,
@@ -62,6 +63,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_parallel_jaw_grasp_pose_generator,
     create_tutorial_argument_parser,
     create_tutorial_motion_generator,
+    create_tutorial_simulation,
     create_tutorial_robot_cfg,
     create_ur10_robotiq_robot_cfg,
     create_ur5_gripper_robot_cfg,
@@ -739,6 +741,33 @@ def test_tutorial_motion_generator_factory_defaults_to_trapezoidal() -> None:
 
     cfg = motion_generator_cls.call_args.kwargs["cfg"]
     assert cfg.planner_cfg.planner_type == "trapezoidal"
+
+
+def test_tutorial_simulation_uses_one_global_sun_light() -> None:
+    args = Namespace(num_envs=4, device="cpu", renderer="hybrid")
+    simulation = MagicMock()
+
+    with (
+        patch(
+            "scripts.tutorials.atomic_action.tutorial_utils.SimulationManager",
+            return_value=simulation,
+        ),
+        patch("scripts.tutorials.atomic_action.tutorial_utils.SimulationManagerCfg"),
+        patch("scripts.tutorials.atomic_action.tutorial_utils.RenderCfg"),
+        patch("scripts.tutorials.atomic_action.tutorial_utils.LightCfg") as light_cfg,
+        patch(
+            "scripts.tutorials.atomic_action.tutorial_utils.visualization_cfg_from_args"
+        ),
+    ):
+        result = create_tutorial_simulation(args)
+
+    assert result is simulation
+    simulation.add_light.assert_called_once_with(cfg=light_cfg.return_value)
+    light_kwargs = light_cfg.call_args.kwargs
+    assert light_kwargs["uid"] == "main_light"
+    assert light_kwargs["light_type"] == "sun"
+    assert light_kwargs["direction"] == DEFAULT_TUTORIAL_SUN_DIRECTION
+    assert "init_pos" not in light_kwargs
 
 
 def test_shared_robot_selection_keeps_ur5_default_and_accepts_all_variants() -> None:
