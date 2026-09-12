@@ -31,7 +31,8 @@ def grid_sample_qpos_from_limits(
     steps_per_joint: int = 4,
     device=None,
     max_samples: int = 4096,
-    safe_margin: float = 5 / 180 * np.pi,  # 5 degrees in radians
+    # Keep boundary samples away from numerically ill-conditioned OPW poses.
+    safe_margin: float = 20 / 180 * np.pi,  # 20 degrees in radians
 ) -> torch.Tensor:
     """Generate grid samples for qpos from qpos_limits.
 
