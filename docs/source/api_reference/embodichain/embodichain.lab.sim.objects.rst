@@ -218,6 +218,212 @@ batch-factory signatures.
 
 .. autofunction:: is_newton_scene
 
+Backend helper functions
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The backend package also exposes the small adapters used by object facades to
+translate drives, state layouts, geometry, physical properties, controls, and
+lifecycle operations across Default and Newton implementations.
+
+.. currentmodule:: embodichain.lab.sim.objects.backends
+
+.. autosummary::
+
+    apply_joint_drive
+    collision_shapes_from_entity
+
+.. autofunction:: apply_joint_drive
+
+.. autofunction:: collision_shapes_from_entity
+
+Articulation drive adapters
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. currentmodule:: embodichain.lab.sim.objects.backends.articulation_drive
+
+.. autosummary::
+
+    apply_joint_drive
+    read_drive_properties
+
+.. autofunction:: apply_joint_drive
+
+.. autofunction:: read_drive_properties
+
+Articulation geometry and lifecycle adapters
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. currentmodule:: embodichain.lab.sim.objects.backends.articulation_geometry
+
+.. autosummary::
+
+    get_link_vert_face
+
+.. autofunction:: get_link_vert_face
+
+.. currentmodule:: embodichain.lab.sim.objects.backends.articulation_lifecycle
+
+.. autosummary::
+
+    prepare_default_spawn_runtime_config
+
+.. autofunction:: prepare_default_spawn_runtime_config
+
+Articulation physics, state, and topology adapters
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. currentmodule:: embodichain.lab.sim.objects.backends.articulation_physics
+
+.. autosummary::
+
+    apply_link_com_pose
+    apply_link_inertia
+    apply_link_mass
+    get_link_properties
+    set_link_physical_attr
+
+.. autofunction:: apply_link_com_pose
+
+.. autofunction:: apply_link_inertia
+
+.. autofunction:: apply_link_mass
+
+.. autofunction:: get_link_properties
+
+.. autofunction:: set_link_physical_attr
+
+.. currentmodule:: embodichain.lab.sim.objects.backends.articulation_state
+
+.. autosummary::
+
+    get_state_joint_names
+    map_source_qpos_to_state_order
+    read_state_mimic_info
+
+.. autofunction:: get_state_joint_names
+
+.. autofunction:: map_source_qpos_to_state_order
+
+.. autofunction:: read_state_mimic_info
+
+.. currentmodule:: embodichain.lab.sim.objects.backends.articulation_topology
+
+.. autosummary::
+
+    get_joint_descriptor
+
+.. autofunction:: get_joint_descriptor
+
+Collision, control, and lifecycle adapters
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. currentmodule:: embodichain.lab.sim.objects.backends.collision
+
+.. autosummary::
+
+    collision_shapes_from_entity
+
+.. autofunction:: collision_shapes_from_entity
+
+.. currentmodule:: embodichain.lab.sim.objects.backends.controls
+
+.. autosummary::
+
+    get_body_scale
+    set_articulation_flag
+    set_body_scale
+    set_collision_enabled
+    set_physical_visible
+    set_gravity_enabled
+    create_physical_visible_node
+    set_visible
+
+.. autofunction:: get_body_scale
+
+.. autofunction:: set_articulation_flag
+
+.. autofunction:: set_body_scale
+
+.. autofunction:: set_collision_enabled
+
+.. autofunction:: set_physical_visible
+
+.. autofunction:: set_gravity_enabled
+
+.. autofunction:: create_physical_visible_node
+
+.. autofunction:: set_visible
+
+.. currentmodule:: embodichain.lab.sim.objects.backends.lifecycle
+
+.. autosummary::
+
+    destroy_articulation_entities
+    destroy_rigid_entities
+    finalize_articulation_spawn
+    apply_rigid_initial_state
+
+.. autofunction:: destroy_articulation_entities
+
+.. autofunction:: destroy_rigid_entities
+
+.. autofunction:: finalize_articulation_spawn
+
+.. autofunction:: apply_rigid_initial_state
+
+Rigid physical-property adapters
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. currentmodule:: embodichain.lab.sim.objects.backends.rigid_physics
+
+.. autosummary::
+
+    apply_legacy_physical_attr
+    get_legacy_damping
+    get_legacy_friction
+    get_legacy_inertia
+    get_legacy_mass
+    can_use_newton_entity_dynamics_fallback
+    get_newton_physical_attr
+    get_newton_physical_attr_or_none
+    mirror_newton_physical_attr
+    newton_lifecycle_state
+    set_legacy_collision_filter
+    set_legacy_damping
+    set_legacy_friction
+    set_legacy_inertia
+    set_legacy_mass
+
+.. autofunction:: apply_legacy_physical_attr
+
+.. autofunction:: get_legacy_damping
+
+.. autofunction:: get_legacy_friction
+
+.. autofunction:: get_legacy_inertia
+
+.. autofunction:: get_legacy_mass
+
+.. autofunction:: can_use_newton_entity_dynamics_fallback
+
+.. autofunction:: get_newton_physical_attr
+
+.. autofunction:: get_newton_physical_attr_or_none
+
+.. autofunction:: mirror_newton_physical_attr
+
+.. autofunction:: newton_lifecycle_state
+
+.. autofunction:: set_legacy_collision_filter
+
+.. autofunction:: set_legacy_damping
+
+.. autofunction:: set_legacy_friction
+
+.. autofunction:: set_legacy_inertia
+
+.. autofunction:: set_legacy_mass
+
 Backend implementation import paths
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
