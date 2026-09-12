@@ -47,6 +47,9 @@ path retains independent per-target seeds and does not require this capability.
 - `motion` subpackages load lazily, and workspace analyzer/visualization APIs
   retain a separate lazy export boundary. Do not introduce offline analysis
   imports into the Robot initialization path.
+- `compute_batch_fk`/`compute_batch_ik` broadcast per-environment root transforms
+  and delegate batch shape handling to solver adapters; see
+  [solver batch contracts](../ik-solvers/ik-solvers.md#batch-adapters-and-analytic-scratch-memory).
 - Focused workspace coverage lives under `tests/sim/motion/workspace/`; solver
   tests live under `tests/sim/motion/solvers/`.
 

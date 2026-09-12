@@ -419,6 +419,8 @@ def build_analyzer_config(
         constraint=constraint,
         ik_samples_per_point=args.ik_samples_per_point,
         control_part_name=control_part_name,
+        retain_diagnostics=not getattr(args, "compact_results", False),
+        sample_within_constraints=getattr(args, "sample_within_constraints", False),
     )
 
     if mode == AnalysisMode.PLANE_SAMPLING:
@@ -565,6 +567,8 @@ def _preview_points_and_colors(
         points = np.asarray(arrays["workspace_points"])
     elif "all_points" in arrays:
         points = np.asarray(arrays["all_points"])
+    elif "reachable_points" in arrays:
+        points = np.asarray(arrays["reachable_points"])
     else:
         points = np.asarray(arrays[next(iter(arrays))])
 
@@ -904,14 +908,25 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--sampler",
         type=str,
         choices=["random", "sobol", "halton", "lhs", "uniform", "gaussian"],
-        default="random",
-        help="Sampling strategy (default: random).",
+        default="sobol",
+        help="Sampling strategy (default: sobol).",
     )
     sampling.add_argument(
         "--seed", type=int, default=42, help="Random seed (default: 42)."
     )
     sampling.add_argument(
         "--batch-size", type=int, default=1000, help="FK/IK batch size (default: 1000)."
+    )
+
+    sampling.add_argument(
+        "--sample-within-constraints",
+        action="store_true",
+        help="Refill samples inside the permitted domain; changes reachability denominator.",
+    )
+    sampling.add_argument(
+        "--compact-results",
+        action="store_true",
+        help="Store reachable points, qpos and aligned scores without rejected-point diagnostics.",
     )
 
     # --- Workspace / plane --------------------------------------------------

@@ -140,3 +140,20 @@ solver interfaces. The compute kernels do not import simulation modules.
 `utils/warp/kinematics/*_solver.py` are compatibility aliases.
 Validate kernel import/compilation with `tests/compute/test_imports.py` and
 solver behavior with the corresponding `tests/sim/motion/solvers/` tests.
+
+## Batch adapters and analytic scratch memory
+
+`BaseSolver.get_fk_batch()` and `get_ik_batch()` flatten and restore arbitrary
+leading batch axes in the chain-root frame. Nearest IK returns a boolean success
+mask with the leading shape and qpos with a final `dof` axis; existing concrete
+`get_fk`/`get_ik` signatures remain available. Robot owns local-arena/root frame
+conversion and broadcasts root transforms without materializing per-target copies.
+
+UR/OPW reuse internal candidate buffers through `solvers/_buffers.py`.
+`prepare_buffers(max_batch)` reserves a high-water capacity; allocation is lazy
+and later larger calls grow it. Public results remain independent of subsequent
+calls, including `return_all_solutions=True`. Calls are serialized by a lock and
+CUDA events; Warp kernels use the current Torch stream. Buffer storage is released
+with the solver. UR retains all 512 periodic candidates and the existing nearest
+selection; OPW retains eight candidates. OPW packs live joint limits in one host
+transfer per call, so limit updates do not require cache invalidation.
