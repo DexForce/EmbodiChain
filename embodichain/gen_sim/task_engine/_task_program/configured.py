@@ -332,12 +332,21 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                 )
             )
         return _RelativePlaceLowererFactory(routes=tuple(routes))
-    if kind in {"articulation_slide", "articulation_withdraw"}:
+    if kind in {
+        "articulation_slide",
+        "articulation_withdraw",
+        "articulation_park",
+    }:
         from .articulation_binding import PrismaticBinding
         from .articulation_slide import (
+            ArticulationParkFactory,
             ArticulationSlideFactory,
             ArticulationWithdrawFactory,
         )
+
+        if kind == "articulation_park":
+            _mapping(value, path=path, required=frozenset({"kind"}))
+            return ArticulationParkFactory()
 
         config = _mapping(value, path=path, required=frozenset({"kind", "bindings"}))
         bindings = tuple(

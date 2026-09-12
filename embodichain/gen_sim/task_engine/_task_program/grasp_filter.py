@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import math
 from typing import Any
 
 import torch
@@ -194,6 +195,87 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
     def get_dual_arm_valid_grasp_poses(self, **kwargs: Any) -> Any:
         """Coordinated grasps have a separate, unchanged paired-contact contract."""
         return self._delegate.get_dual_arm_valid_grasp_poses(**kwargs)
+
+
+class E6ApproachGraspPoseGenerator(ParallelJawGraspPoseGenerator):
+    """Apply the E6 diagonal approach only to bound handle geometries.
+
+    The shared :class:`Slide` action remains unchanged.  Matching is done by
+    immutable handle geometry so the task-scoped policy cannot alter unrelated
+    grasps that use the same robot end-effector.
+    """
+
+    def __init__(
+        self,
+        delegate: ParallelJawGraspPoseGenerator,
+        geometry_keys: frozenset[str],
+    ) -> None:
+        super().__init__(delegate.gripper_model)
+        self._delegate = delegate
+        self._geometry_keys = geometry_keys
+
+    def _approach_direction(
+        self,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        approach_direction: torch.Tensor,
+    ) -> torch.Tensor:
+        if geometry_key(mesh_vertices, mesh_triangles) not in self._geometry_keys:
+            return approach_direction
+        if approach_direction.ndim == 1:
+            direction = approach_direction.unsqueeze(0)
+            squeeze = True
+        elif approach_direction.ndim == 2 and approach_direction.shape[-1] == 3:
+            direction = approach_direction
+            squeeze = False
+        else:
+            raise ValueError(
+                "E6 grasp approach direction must have shape (3,) or (B,3)."
+            )
+        horizontal = direction.clone()
+        horizontal[:, 2] = 0.0
+        norm = torch.linalg.vector_norm(horizontal, dim=-1, keepdim=True)
+        valid = norm.squeeze(-1) > 1.0e-6
+        if valid.any():
+            diagonal = horizontal[valid] / norm[valid]
+            diagonal = diagonal * math.sqrt(0.5)
+            diagonal[:, 2] = -math.sqrt(0.5)
+            direction = direction.clone()
+            direction[valid] = diagonal
+        return direction[0] if squeeze else direction
+
+    def get_valid_grasp_poses(self, **kwargs: Any) -> Any:
+        kwargs = dict(kwargs)
+        kwargs["approach_direction"] = self._approach_direction(
+            kwargs["mesh_vertices"],
+            kwargs["mesh_triangles"],
+            kwargs["approach_direction"],
+        )
+        return self._delegate.get_valid_grasp_poses(**kwargs)
+
+    def get_best_grasp_poses(self, **kwargs: Any) -> Any:
+        kwargs = dict(kwargs)
+        kwargs["approach_direction"] = self._approach_direction(
+            kwargs["mesh_vertices"],
+            kwargs["mesh_triangles"],
+            kwargs["approach_direction"],
+        )
+        return self._delegate.get_best_grasp_poses(**kwargs)
+
+    def get_dual_arm_valid_grasp_poses(self, **kwargs: Any) -> Any:
+        return self._delegate.get_dual_arm_valid_grasp_poses(**kwargs)
+
+
+def install_e6_approach_filters(
+    generators: dict[str, Any], geometry_keys: frozenset[str]
+) -> dict[str, Any]:
+    """Install the task-scoped E6 approach policy by handle geometry key."""
+    if not geometry_keys:
+        return generators
+    return {
+        name: E6ApproachGraspPoseGenerator(generator, geometry_keys)
+        for name, generator in generators.items()
+    }
 
 
 def install_grasp_filters(

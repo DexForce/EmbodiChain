@@ -34,6 +34,7 @@ from .config import TaskEnginePlanningCfg
 from .semantic_graph import SemanticTaskGraph, validate_semantic_task_graph
 from ._task_program.assembly import ADAPTER_CONTRACT, load_deployment
 from ._task_program.articulation_binding import (
+    PARK_CALL,
     SLIDE_CALL,
     WITHDRAW_CALL,
     graph_bindings,
@@ -698,6 +699,7 @@ def _integration_payload(
     relative_lowerer_routes = _relative_place_route_payloads(graph, scene)
     has_relative_place = False
     has_park_call = False
+    has_articulation_park_call = False
     for node in graph["nodes"]:
         call = node["call"]
         if call["kind"] in {"pick", "place", "hand_over"}:
@@ -855,6 +857,8 @@ def _integration_payload(
             referenced_objects.add(str(call["arguments"]["object"]))
         elif call["kind"] == "registered" and call["call_id"] == "simulation.park":
             has_park_call = True
+        elif call["kind"] == "registered" and call["call_id"] == PARK_CALL:
+            has_articulation_park_call = True
         elif call["kind"] == "registered" and call["call_id"] in {
             SLIDE_CALL,
             WITHDRAW_CALL,
@@ -1085,6 +1089,11 @@ def _integration_payload(
                     else {}
                 ),
                 **(
+                    {PARK_CALL: {"kind": "move_joints"}}
+                    if has_articulation_park_call
+                    else {}
+                ),
+                **(
                     {
                         SLIDE_CALL: {
                             "kind": "slide",
@@ -1225,6 +1234,11 @@ def _integration_payload(
                     else []
                 ),
                 *([{"kind": "park"}] if has_park_call else []),
+                *(
+                    [{"kind": "articulation_park"}]
+                    if has_articulation_park_call
+                    else []
+                ),
                 *(
                     [{"kind": "coordinated_hold", "routes": hold_lowerer_routes}]
                     if hold_lowerer_routes

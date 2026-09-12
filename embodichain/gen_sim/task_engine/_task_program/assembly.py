@@ -33,7 +33,12 @@ from embodichain.utils.utility import load_config
 from ..contracts import canonical_hash
 from .stability import StabilityConstraint, TaskStabilityPort
 from .configured import compose_deployment
-from .grasp_filter import GRASP_FILTER_REVISION, install_grasp_filters
+from .grasp_filter import (
+    GRASP_FILTER_REVISION,
+    geometry_key,
+    install_e6_approach_filters,
+    install_grasp_filters,
+)
 
 __all__: list[str] = []
 
@@ -106,17 +111,43 @@ class TaskAdapterFactory:
                     planner_cfg=ToppraPlannerCfg(robot_uid=environment.robot.uid)
                 )
             )
+        grasp_generators = {
+            name: create() for name, create in self.grasp_factories
+        }
+        grasp_generators = install_grasp_filters(
+            self.registration,
+            environment.sim,
+            grasp_generators,
+        )
+        if self.articulation_bindings:
+            import torch
+
+            from .articulation_binding import handle_mesh
+
+            geometry_keys = set()
+            for binding in self.articulation_bindings:
+                art = environment.sim.get_articulation(binding.object_id)
+                if art is None:
+                    raise ValueError(
+                        f"Declared articulation {binding.object_id!r} is absent."
+                    )
+                vertices, faces = handle_mesh(binding, art.cfg.fpath)
+                geometry_keys.add(
+                    geometry_key(
+                        torch.as_tensor(vertices, dtype=torch.float32),
+                        torch.as_tensor(faces, dtype=torch.int64),
+                    )
+                )
+            grasp_generators = install_e6_approach_filters(
+                grasp_generators, frozenset(geometry_keys)
+            )
         factory = _TaskFactory(
             environment.sim,
             environment.robot,
             self.registration,
             step_dt=environment.step_dt,
             motion_generator_factory=motion_factory,
-            grasp_pose_generators=install_grasp_filters(
-                self.registration,
-                environment.sim,
-                {name: create() for name, create in self.grasp_factories},
-            ),
+            grasp_pose_generators=grasp_generators,
             constraints=dict(self.constraints),
             articulation_bindings=self.articulation_bindings,
         )

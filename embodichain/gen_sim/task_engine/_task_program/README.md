@@ -43,8 +43,10 @@ normal physical rollout succeeds; terminal acceptance is not in-flight safety.
   Cartesian samples are solved by the original motion generator; command
   timing, execution, cancellation and recovery remain owned by the core.
 - `articulation_binding.py` inspects and fingerprints a single-prismatic USD and
-  generates explicit Slide/withdraw/Park calls. `articulation_slide.py` binds
-  these to existing public skills and measures joint retention via post-policies.
+  generates explicit Slide/withdraw/Park calls. The E6 Park call is task-owned
+  so cleanup preserves the operated arm posture without changing shared Park
+  semantics. `articulation_slide.py` binds these to existing public skills and
+  measures joint retention via post-policies.
   It does not add a private executor or claim contact-qualified motion.
   Initial table penetration over 2 mm or a buried handle fails before publication
   and at runtime binding. Native joint limits must match the scaled declaration;

@@ -38,6 +38,7 @@ from embodichain.gen_sim.task_engine.task_program_bundle import (
     generate_task_program_bundle,
 )
 from embodichain.gen_sim.task_engine._task_program.articulation_binding import (
+    PARK_CALL,
     PrismaticBinding,
     SLIDE_CALL,
     WITHDRAW_CALL,
@@ -180,7 +181,7 @@ def test_e6_bundle_uses_standard_registration_and_complete_recipe(
     assert [n["call"]["call_id"] for n in graph["nodes"]] == [
         SLIDE_CALL,
         WITHDRAW_CALL,
-        "simulation.park",
+        PARK_CALL,
     ] * len(states)
     assert [n["role"] for n in graph["nodes"]] == [
         "primary",
@@ -234,7 +235,7 @@ def test_e6_rejects_invalid_assets_or_recipes_before_publication(
     elif mutation == "penetration":
         cfg["init_pos"][2] = 0.70
     elif mutation == "incomplete":
-        graph["nodes"][1]["call"]["call_id"] = "simulation.park"
+        graph["nodes"][1]["call"]["call_id"] = PARK_CALL
     elif mutation == "dependency":
         graph["nodes"][1]["depends_on"] = []
     else:

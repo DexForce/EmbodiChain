@@ -18,11 +18,12 @@
 
 from __future__ import annotations
 
-
+import math
 import pytest
 import torch
 
 from embodichain.gen_sim.task_engine._task_program.grasp_filter import (
+    E6ApproachGraspPoseGenerator,
     GraspRule,
     TaskGraspPoseGenerator,
     accepted_candidates,
@@ -50,6 +51,7 @@ class CandidateGenerator(ParallelJawGraspPoseGenerator):
             )
         )
         self.rows = rows
+        self.best_directions = []
 
     def get_valid_grasp_poses(self, **kwargs):
         poses = kwargs["obj_poses"]
@@ -63,6 +65,7 @@ class CandidateGenerator(ParallelJawGraspPoseGenerator):
         return results
 
     def get_best_grasp_poses(self, **kwargs):
+        self.best_directions.append(kwargs["approach_direction"].clone())
         poses = kwargs["obj_poses"]
         return (
             torch.ones(len(poses), dtype=torch.bool),
@@ -164,3 +167,30 @@ def test_rule_identity_must_match_the_bound_object_and_geometry() -> None:
         provider.require_rule("other", "release", VERTICES, TRIANGLES)
     with pytest.raises(ValueError, match="matching"):
         provider.require_rule("can", "release", VERTICES * 2, TRIANGLES)
+
+
+def test_e6_approach_is_scoped_to_bound_handle_geometry() -> None:
+    delegate = CandidateGenerator(((),))
+    provider = E6ApproachGraspPoseGenerator(
+        delegate, frozenset({geometry_key(VERTICES, TRIANGLES)})
+    )
+    provider.get_best_grasp_poses(
+        mesh_vertices=VERTICES,
+        mesh_triangles=TRIANGLES,
+        obj_poses=torch.eye(4).unsqueeze(0),
+        approach_direction=torch.tensor([[0.0, -1.0, 0.0]]),
+    )
+    torch.testing.assert_close(
+        delegate.best_directions[-1],
+        torch.tensor([[0.0, -math.sqrt(0.5), -math.sqrt(0.5)]]),
+    )
+
+    provider.get_best_grasp_poses(
+        mesh_vertices=VERTICES * 2,
+        mesh_triangles=TRIANGLES,
+        obj_poses=torch.eye(4).unsqueeze(0),
+        approach_direction=torch.tensor([[0.0, -1.0, 0.0]]),
+    )
+    torch.testing.assert_close(
+        delegate.best_directions[-1], torch.tensor([[0.0, -1.0, 0.0]])
+    )

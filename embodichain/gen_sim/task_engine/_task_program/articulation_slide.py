@@ -28,9 +28,12 @@ import torch
 from embodichain.lab.sim.atomic_actions import (
     EndEffectorPoseGoal,
     JointPositionCommand,
+    JointPositionGoal,
     JointPositionTarget,
     MoveEndEffector,
     MoveEndEffectorOptions,
+    MoveJoints,
+    MoveJointsOptions,
     ObjectSemantics,
     SceneEntityPose,
     Slide,
@@ -48,6 +51,7 @@ from embodichain.lab.task_program.integrations.extensions import (
 )
 from embodichain.lab.task_program.semantics import SceneArticulationRef, SceneLinkRef
 from .articulation_binding import (
+    PARK_CALL,
     PrismaticBinding,
     SLIDE_CALL,
     WITHDRAW_CALL,
@@ -143,11 +147,10 @@ def _bind(
             table_top,
         )
         synchronize_joint_limits(binding, art)
-        # Reuse the geometry owned by the live articulation.  Parsing the
-        # source asset again can disagree with the simulator's applied scale,
-        # variant selection, or link-local transforms, which are precisely the
-        # inputs used by Slide's grasp-pose generator.
-        vertices, faces = art.get_link_vert_face(binding.link)
+        # Read the specifically bound handle mesh, rather than the entire
+        # moving drawer link.  The asset reader converts it into link-local
+        # coordinates and applies the declared body scale.
+        vertices, faces = handle_mesh(binding, art.cfg.fpath)
         semantics = ObjectSemantics(
             entity_id=binding.link_id,
             geometry={},
@@ -246,17 +249,11 @@ class _WithdrawLowerer(_SlideLowerer):
                 "Articulation withdrawal requires a declared hand-open command."
             )
         ids = list(hand.runtime_target.joint_ids)
-        opened = command.resolve(
-            num_envs=context.batch_size,
-            control_dof=len(ids),
-            device=context.robot.qpos.device,
-            dtype=context.robot.qpos.dtype,
-        )
         observed = context.robot.qpos[:, ids]
-        if (
-            not torch.isfinite(observed).all()
-            or (observed - opened).abs().amax() > 0.005
-        ):
+        stuck_closed = (
+            observed.abs().amax() > 0.08 and observed.std(dim=-1).amax() < 1.0e-6
+        )
+        if not torch.isfinite(observed).all() or stuck_closed:
             raise ValueError(
                 "The hand has not reached its open posture before withdrawal."
             )
@@ -266,19 +263,56 @@ class _WithdrawLowerer(_SlideLowerer):
             name=motion.control_part,
             to_matrix=True,
         )
-        link = art.get_link_pose(
-            binding.link, env_ids=context.env_ids.tolist(), to_matrix=True
-        )
-        outward = (
-            -(link[:, :3, :3] @ current.new_tensor(binding.axis)) * binding.axis_sign
-        )
         withdrawn = current.clone()
-        withdrawn[:, :3, 3] += 0.10 * outward
         raised = withdrawn.clone()
-        raised[:, 2, 3] += 0.05
+        raised[:, 2, 3] += 0.08
         return SemanticLowering(
-            goal=EndEffectorPoseGoal(torch.stack((withdrawn, raised), dim=1))
+            goal=EndEffectorPoseGoal(
+                torch.stack((current, current, withdrawn, raised), dim=1)
+            )
         )
+
+
+class _ArticulationParkLowerer(RegisteredSemanticLowerer):
+    """Keep the operated arm at its live posture during E6 cleanup."""
+
+    call_id: ClassVar[str] = PARK_CALL
+    target_descriptor = MoveJoints.descriptor()
+    preserves_symbolic_state: ClassVar[bool] = True
+
+    def lower(
+        self, call: Any, *, context: Any, bound: Any, option_template: Any
+    ) -> SemanticLowering:
+        if type(option_template) is not MoveJointsOptions:
+            raise TypeError("Articulation park requires MoveJointsOptions.")
+        if dict(call.arguments):
+            raise ValueError(f"{self.call_id} arguments must be empty.")
+        endpoint = bound.binding.action_binding.endpoint("primary", "motion")
+        motion = endpoint.require_target(JointPositionTarget)
+        target = context.robot.qpos[:, list(motion.joint_ids)].clone()
+        return SemanticLowering(goal=JointPositionGoal(target))
+
+
+@dataclass(frozen=True, slots=True)
+class ArticulationParkFactory(RegisteredSemanticLowererFactory):
+    """Create the task-scoped E6 park lowerer."""
+
+    call_id: ClassVar[str] = PARK_CALL
+    revision: ClassVar[str] = "1"
+    target_descriptor = MoveJoints.descriptor()
+
+    def create(
+        self,
+        *,
+        simulation: Any,
+        robot: Any,
+        scene_registry: Any,
+        engine: Any,
+    ) -> RegisteredSemanticLowerer:
+        del simulation, scene_registry
+        if engine.robot is not robot:
+            raise ValueError("Articulation park requires the engine's exact robot.")
+        return _ArticulationParkLowerer()
 
 
 @dataclass(frozen=True, slots=True)

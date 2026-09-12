@@ -214,12 +214,12 @@ skill_profile:
         approach_deviation_angle: 0.3490658503988659
         approach_direction_samples: 4
         max_candidates: 500
-        opening_margin: 0.02
+        opening_margin: 0.003
         point_sample_density: 0.012
         filter_ground_collision: false
         model:
           model_id: robotiq_arg2f_140
-          min_opening_width: 0.01
+          min_opening_width: 0.002
           max_opening_width: 0.15
           finger_length: 0.13
           finger_width: 0.03
@@ -231,12 +231,12 @@ skill_profile:
         approach_deviation_angle: 0.3490658503988659
         approach_direction_samples: 4
         max_candidates: 500
-        opening_margin: 0.02
+        opening_margin: 0.003
         point_sample_density: 0.012
         filter_ground_collision: false
         model:
           model_id: robotiq_arg2f_140
-          min_opening_width: 0.01
+          min_opening_width: 0.002
           max_opening_width: 0.15
           finger_length: 0.13
           finger_width: 0.03

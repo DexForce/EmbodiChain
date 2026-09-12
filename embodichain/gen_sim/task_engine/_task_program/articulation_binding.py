@@ -30,6 +30,7 @@ __all__: list[str] = []
 
 SLIDE_CALL = "gen_sim.articulation_slide"
 WITHDRAW_CALL = "gen_sim.articulation_withdraw"
+PARK_CALL = "gen_sim.articulation_park"
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,7 +279,7 @@ def recipe(object_id: str, state: str, arm: str) -> list[dict[str, Any]]:
     ] + [
         {
             "kind": "registered",
-            "call_id": "simulation.park",
+            "call_id": PARK_CALL,
             "arguments": {},
             "resources": {"primary": arm},
         }
