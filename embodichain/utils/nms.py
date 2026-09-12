@@ -21,6 +21,7 @@ import math
 import numpy as np
 import torch
 
+from embodichain.utils import logger
 from embodichain.utils.math import quat_from_matrix
 
 __all__ = ["pose_nms", "pose_nms_indices"]
@@ -42,51 +43,55 @@ def _poses_to_components(poses: torch.Tensor) -> tuple[torch.Tensor, torch.Tenso
     return positions, quaternions
 
 
-def _close_block(
+def _reference_block_rows(num_poses: int, chunk_size: int) -> int:
+    """Bound reference-block rows so a block holds ~``chunk_size**2`` entries."""
+    return max(1, min(chunk_size, chunk_size * chunk_size // max(1, num_poses)))
+
+
+def _close_tile(
     ref_positions: torch.Tensor,
     ref_quaternions: torch.Tensor,
-    positions: torch.Tensor,
-    quaternions: torch.Tensor,
+    tile_positions: torch.Tensor,
+    tile_quaternions: torch.Tensor,
     rotation_cosine_threshold: float,
     distance_threshold_squared: float,
     rotation_always_close: bool,
-    chunk_size: int,
 ) -> torch.Tensor:
-    """Compute one (refs x all) tile row of the pairwise closeness matrix.
+    """Compute one bounded ``(R, T)`` tile of the pairwise closeness matrix.
 
     For unit xyzw quaternions, the real component of
     ``inverse(q_reference) * q_target`` is their dot product. Its absolute
     value gives the shortest relative rotation while treating ``q`` and ``-q``
     equally. Translation closeness compares the squared Euclidean distance.
+    The arithmetic uses explicit per-component multiplies and left-to-right
+    additions — the exact association of the previous scalar implementation —
+    so decisions are identical across CPU and CUDA backends.
 
     Args:
         ref_positions: Reference positions with shape ``(R, 3)``.
         ref_quaternions: Reference quaternions with shape ``(R, 4)``.
-        positions: All positions with shape ``(N, 3)``.
-        quaternions: All quaternions with shape ``(N, 4)``.
+        tile_positions: Target-tile positions with shape ``(T, 3)``.
+        tile_quaternions: Target-tile quaternions with shape ``(T, 4)``.
         rotation_cosine_threshold: ``cos(angle_th / 2)`` decision value.
         distance_threshold_squared: Squared translation threshold.
         rotation_always_close: Whether rotation is trivially satisfied.
-        chunk_size: Maximum target-tile width processed per step.
 
     Returns:
-        Boolean closeness rows with shape ``(R, N)``.
+        Boolean closeness tile with shape ``(R, T)``.
     """
-    num_refs = ref_positions.shape[0]
-    num_poses = positions.shape[0]
-    close = torch.empty(num_refs, num_poses, dtype=torch.bool, device=positions.device)
-    for target_offset in range(0, num_poses, chunk_size):
-        target_end = min(target_offset + chunk_size, num_poses)
-        diff = ref_positions[:, None, :] - positions[None, target_offset:target_end, :]
-        tile_close = diff.pow(2).sum(dim=-1) < distance_threshold_squared
-        if not rotation_always_close:
-            dots = (
-                ref_quaternions[:, None, :]
-                * quaternions[None, target_offset:target_end, :]
-            ).sum(dim=-1)
-            tile_close &= dots.abs() > rotation_cosine_threshold
-        close[:, target_offset:target_end] = tile_close
-    return close
+    dx = tile_positions[None, :, 0] - ref_positions[:, None, 0]
+    dy = tile_positions[None, :, 1] - ref_positions[:, None, 1]
+    dz = tile_positions[None, :, 2] - ref_positions[:, None, 2]
+    tile_close = dx * dx + dy * dy + dz * dz < distance_threshold_squared
+    if not rotation_always_close:
+        dots = (
+            ref_quaternions[:, None, 0] * tile_quaternions[None, :, 0]
+            + ref_quaternions[:, None, 1] * tile_quaternions[None, :, 1]
+            + ref_quaternions[:, None, 2] * tile_quaternions[None, :, 2]
+            + ref_quaternions[:, None, 3] * tile_quaternions[None, :, 3]
+        )
+        tile_close &= dots.abs() > rotation_cosine_threshold
+    return tile_close
 
 
 def _count_close_poses(
@@ -97,25 +102,43 @@ def _count_close_poses(
     rotation_always_close: bool,
     chunk_size: int,
 ) -> torch.Tensor:
-    """Count close neighbors using bounded pairwise tiles."""
+    """Count close neighbors, accumulating per bounded pairwise tile.
+
+    Counts are summed tile by tile, so no ``(rows, num_poses)`` matrix is ever
+    materialized and peak memory stays bounded by ``chunk_size ** 2`` entries.
+    """
     num_poses = positions.shape[0]
     close_counts = torch.zeros(num_poses, dtype=torch.int64, device=positions.device)
     for reference_offset in range(0, num_poses, chunk_size):
         reference_end = min(reference_offset + chunk_size, num_poses)
-        block = _close_block(
-            positions[reference_offset:reference_end],
-            quaternions[reference_offset:reference_end],
-            positions,
-            quaternions,
-            rotation_cosine_threshold,
-            distance_threshold_squared,
-            rotation_always_close,
-            chunk_size,
+        ref_positions = positions[reference_offset:reference_end]
+        ref_quaternions = quaternions[reference_offset:reference_end]
+        block_counts = torch.zeros(
+            reference_end - reference_offset,
+            dtype=torch.int64,
+            device=positions.device,
         )
-        # A pose is not its own neighbor.
-        rows = torch.arange(reference_end - reference_offset, device=positions.device)
-        block[rows, rows + reference_offset] = False
-        close_counts[reference_offset:reference_end] = block.sum(dim=1)
+        for target_offset in range(0, num_poses, chunk_size):
+            target_end = min(target_offset + chunk_size, num_poses)
+            tile = _close_tile(
+                ref_positions,
+                ref_quaternions,
+                positions[target_offset:target_end],
+                quaternions[target_offset:target_end],
+                rotation_cosine_threshold,
+                distance_threshold_squared,
+                rotation_always_close,
+            )
+            # A pose is not its own neighbor: clear the diagonal overlap.
+            overlap_start = max(reference_offset, target_offset)
+            overlap_end = min(reference_end, target_end)
+            if overlap_start < overlap_end:
+                diagonal = torch.arange(
+                    overlap_start, overlap_end, device=positions.device
+                )
+                tile[diagonal - reference_offset, diagonal - target_offset] = False
+            block_counts += tile.sum(dim=1)
+        close_counts[reference_offset:reference_end] = block_counts
     return close_counts
 
 
@@ -140,11 +163,14 @@ def _greedy_keep_indices(
     ordered_positions = positions[visit_order].contiguous()
     ordered_quaternions = quaternions[visit_order].contiguous()
 
+    # Keep every closeness block bounded to roughly chunk_size**2 entries even
+    # when there are far more poses than one target tile.
+    reference_block_rows = _reference_block_rows(num_poses, chunk_size)
     suppressed = np.zeros(num_poses, dtype=np.bool_)
     keep_ordered_indices: list[int] = []
 
-    for reference_offset in range(0, num_poses, chunk_size):
-        reference_end = min(reference_offset + chunk_size, num_poses)
+    for reference_offset in range(0, num_poses, reference_block_rows):
+        reference_end = min(reference_offset + reference_block_rows, num_poses)
         alive_local = np.flatnonzero(~suppressed[reference_offset:reference_end])
         if alive_local.size == 0:
             continue
@@ -152,16 +178,25 @@ def _greedy_keep_indices(
         alive_torch = torch.as_tensor(
             alive_ordered, dtype=torch.long, device=positions.device
         )
-        block = _close_block(
-            ordered_positions[alive_torch],
-            ordered_quaternions[alive_torch],
-            ordered_positions,
-            ordered_quaternions,
-            rotation_cosine_threshold,
-            distance_threshold_squared,
-            rotation_always_close,
-            chunk_size,
+        ref_positions = ordered_positions[alive_torch]
+        ref_quaternions = ordered_quaternions[alive_torch]
+        block = torch.empty(
+            alive_torch.numel(),
+            num_poses,
+            dtype=torch.bool,
+            device=positions.device,
         )
+        for target_offset in range(0, num_poses, chunk_size):
+            target_end = min(target_offset + chunk_size, num_poses)
+            block[:, target_offset:target_end] = _close_tile(
+                ref_positions,
+                ref_quaternions,
+                ordered_positions[target_offset:target_end],
+                ordered_quaternions[target_offset:target_end],
+                rotation_cosine_threshold,
+                distance_threshold_squared,
+                rotation_always_close,
+            )
         # A pose never suppresses itself.
         rows = torch.arange(alive_torch.numel(), device=positions.device)
         block[rows, alive_torch] = False
@@ -229,43 +264,53 @@ def pose_nms_indices(
     if angle_th <= 0.0 or dist_th <= 0.0:
         return torch.arange(num_poses, dtype=torch.long, device=poses.device)
 
-    positions, quaternions = _poses_to_components(poses)
-    # The pairwise threshold math is elementwise float32 with fixed reduction
-    # order, so offloading it to CUDA produces the same decisions as the CPU
-    # path. Indices are returned on the input device either way.
-    if poses.device.type == "cpu" and torch.cuda.is_available():
-        positions = positions.cuda()
-        quaternions = quaternions.cuda()
+    base_positions, base_quaternions = _poses_to_components(poses)
     rotation_always_close = angle_th > math.pi
     rotation_cosine_threshold = (
         math.cos(0.5 * float(angle_th)) if not rotation_always_close else 0.0
     )
     distance_threshold_squared = float(dist_th * dist_th)
 
-    if preserve_order:
-        visit_order = torch.arange(num_poses, dtype=torch.long, device=poses.device)
-    else:
-        close_counts = _count_close_poses(
+    def _select_indices(
+        positions: torch.Tensor, quaternions: torch.Tensor
+    ) -> torch.Tensor:
+        if preserve_order:
+            visit_order = torch.arange(num_poses, dtype=torch.long, device=poses.device)
+        else:
+            close_counts = _count_close_poses(
+                positions,
+                quaternions,
+                rotation_cosine_threshold,
+                distance_threshold_squared,
+                rotation_always_close,
+                chunk_size,
+            ).to(poses.device)
+            tie_breaker = torch.arange(num_poses, dtype=torch.long, device=poses.device)
+            visit_priority = close_counts * (num_poses + 1) + tie_breaker
+            visit_order = torch.argsort(visit_priority)
+        return _greedy_keep_indices(
             positions,
             quaternions,
+            visit_order.to(positions.device),
             rotation_cosine_threshold,
             distance_threshold_squared,
             rotation_always_close,
             chunk_size,
         ).to(poses.device)
-        tie_breaker = torch.arange(num_poses, dtype=torch.long, device=poses.device)
-        visit_priority = close_counts * (num_poses + 1) + tie_breaker
-        visit_order = torch.argsort(visit_priority)
 
-    return _greedy_keep_indices(
-        positions,
-        quaternions,
-        visit_order.to(positions.device),
-        rotation_cosine_threshold,
-        distance_threshold_squared,
-        rotation_always_close,
-        chunk_size,
-    ).to(poses.device)
+    # The pairwise threshold math is elementwise float32 with explicit
+    # component association, so offloading it to CUDA produces the same
+    # decisions as the CPU path. Indices return on the input device, and any
+    # CUDA failure (initialization, memory pressure) falls back to the CPU
+    # path that previously served these requests.
+    if poses.device.type == "cpu" and torch.cuda.is_available():
+        try:
+            return _select_indices(base_positions.cuda(), base_quaternions.cuda())
+        except RuntimeError as error:
+            logger.log_warning(
+                f"pose_nms CUDA offload failed ({error}); falling back to CPU."
+            )
+    return _select_indices(base_positions, base_quaternions)
 
 
 def pose_nms(
