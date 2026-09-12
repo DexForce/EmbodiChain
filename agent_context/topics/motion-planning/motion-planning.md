@@ -69,7 +69,8 @@ Focused augmentation tests live under `tests/sim/motion/expansion/`.
 ## Choose the owning layer
 
 - `BasePlanner` and `PlanState` / `PlanResult` define planning interfaces.
-- `ToppraPlanner` owns time parameterization; `CuroboPlanner` owns collision-aware planning.
+- `ToppraPlanner` and `TrapezoidalPlanner` own joint-path time parameterization;
+  `CuroboPlanner` owns collision-aware planning.
 - `MotionGenerator` composes motion commands and trajectory helpers; `NeuralPlanner` is experimental.
 - [Planner details](planner-details.md) cover process/memory behavior, registration and validation.
 - [Collision worlds](collision-worlds.md) cover snapshots, pose updates, provenance and cache boundaries.
@@ -198,7 +199,8 @@ retains compatibility aliases; compute does not import simulation modules.
 
 `embodichain.compute.trajectory` owns pure interpolation, path resampling,
 time-domain differentiation/resampling, and keyframe-based warping. `interpolate_with_distance` retains keyframes;
-`resample_with_distance` treats interior points as optional path samples.
+`resample_with_distance` treats interior points as optional path samples and
+falls back to pure Torch when the Warp runtime cannot launch.
 MotionGenerator and atomic trajectory helpers import the compute API directly.
 `lab.sim.utility.action_utils` retains solver-dependent pose/IK adaptation and
 re-exports pure functions for compatibility. Warp implementations live in

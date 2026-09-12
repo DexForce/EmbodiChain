@@ -488,6 +488,10 @@ class MotionGenerator:
         (``"motion_gen"``) or deterministic waypoint IK followed by joint-space
         interpolation (``"ik_interp"``). Joint targets fall back to interpolation
         when the configured backend cannot consume :class:`MoveType.JOINT_MOVE`.
+        Joint-only planners that own sparse waypoints may retain every converted
+        waypoint when quantity sampling is requested. For automatically resolved
+        trapezoidal options, the requested count is then treated as a lower bound;
+        an explicitly supplied planner option remains authoritative.
 
         Args:
             target_states: Batched planner waypoints.
@@ -546,8 +550,8 @@ class MotionGenerator:
         move_type = target_states[0].move_type
         uses_sparse_joint_waypoints = (
             len(move_types) == 1
-            and move_type == MoveType.JOINT_MOVE
-            and self.planner.uses_sparse_joint_waypoints
+            and move_type is MoveType.JOINT_MOVE
+            and getattr(self.planner, "uses_sparse_joint_waypoints", False) is True
         )
         should_preinterpolate = (
             len(move_types) == 1
@@ -646,12 +650,26 @@ class MotionGenerator:
                 ValueError,
             )
 
+        explicit_plan_options = options.plan_opts is not None
         plan_opts = self.resolve_plan_options(
             options.plan_opts,
             sample_count=options.sample_count,
             velocity_limit=options.velocity_limit,
             acceleration_limit=options.acceleration_limit,
         )
+        if (
+            should_preinterpolate
+            and not explicit_plan_options
+            and isinstance(plan_opts, TrapezoidalPlanOptions)
+            and plan_opts.sample_method is TrajectorySampleMethod.QUANTITY
+            and int(plan_opts.sample_interval) < len(target_plan_states)
+        ):
+            # Trapezoidal quantity sampling retains every supplied waypoint.
+            # Cartesian targets may have been converted to a denser IK path.
+            # For backend-neutral defaults, make the requested count a safe
+            # lower bound instead of rejecting an otherwise valid path. An
+            # explicit TrapezoidalPlanOptions remains caller-authoritative.
+            plan_opts.sample_interval = len(target_plan_states)
         plan_opts = self.planner.with_motion_context(
             plan_opts,
             start_qpos=options.start_qpos,

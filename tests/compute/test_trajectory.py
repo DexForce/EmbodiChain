@@ -105,6 +105,22 @@ def test_resample_with_distance_allows_path_downsampling() -> None:
     assert torch.equal(result, expected)
 
 
+def test_resample_with_distance_falls_back_when_warp_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = torch.tensor([[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]])
+
+    def fail_from_torch(_trajectory: torch.Tensor) -> None:
+        raise RuntimeError("Warp runtime unavailable")
+
+    monkeypatch.setattr(wp, "from_torch", fail_from_torch)
+
+    result = resample_with_distance(path, interp_num=3, device="cpu")
+
+    expected = torch.tensor([[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]])
+    assert torch.equal(result, expected)
+
+
 @pytest.mark.parametrize(
     "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
 )

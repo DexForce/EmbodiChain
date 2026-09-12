@@ -129,7 +129,10 @@ def main() -> None:
     obj = create_pick_object(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
-    motion_gen = create_curobo_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "trapezoidal"),
+    )
     engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
         scene_entities=(obj,),

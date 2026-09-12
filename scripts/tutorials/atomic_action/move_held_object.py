@@ -118,7 +118,10 @@ def main() -> None:
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot)
     obj = create_pick_object(sim)
-    motion_gen = create_curobo_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "trapezoidal"),
+    )
     hand_open, hand_close = get_hand_open_close_qpos(robot)
 
     engine = create_simulation_atomic_action_engine(

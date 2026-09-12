@@ -230,17 +230,19 @@ class BasePlanner(ABC):
     uses_sparse_joint_waypoints: bool = False
     """Whether joint targets are sparse waypoints owned by the planner.
 
-    When ``True``, :class:`MotionGenerator` bypasses its generic joint-space
-    interpolation and prepends ``start_qpos`` as the first waypoint. This lets
-    the planner own both path timing and derivative generation.
+    When ``True``, :class:`~embodichain.lab.sim.motion.motion_generator.MotionGenerator`
+    prepends the observed ``start_qpos`` before dispatching a joint target. This
+    lets the planner own both path timing and derivative generation without
+    making every caller materialize the current state as a waypoint.
     """
 
     preserve_plan_samples: bool = False
     """Whether callers must retain this planner's returned sample points exactly.
 
     When ``True``, :class:`MotionGenerator` returns the planner's trajectory
-    without resampling, preserving collision-checked samples. When ``False``
-    (the default), the generator may normalize the trajectory to a requested
+    without resampling, preserving planner-owned samples and derivatives
+    (including collision-checked samples where applicable). When ``False`` (the
+    default), the generator may normalize the trajectory to a requested
     waypoint count.
     """
 

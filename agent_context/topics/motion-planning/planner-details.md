@@ -38,6 +38,11 @@ waypoints, with optional quintic corner blending. `TIME` sampling pads shorter
 batch rows at their exact final position with zero velocity and acceleration,
 starting at each row's actual endpoint. Padding has zero arrival intervals.
 
+When dispatched through `MotionGenerator`, `TrapezoidalPlanner` owns sparse
+joint-goal timing: the facade prepends the observed `start_qpos` when the
+caller supplies one and preserves the planner's native samples and
+derivatives.
+
 With `stop_at_waypoints=False`, straight runs are compressed using normalized
 edge directions and a cosine tolerance relative to the first edge of each
 retained run. Small waypoint spacing does not change the angular test, and

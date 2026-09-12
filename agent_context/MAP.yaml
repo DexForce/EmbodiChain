@@ -144,7 +144,7 @@ topics:
   aliases: [motion planning, trajectory planning, trajectory playback, fixed-cadence trajectory playback, motion expansion,
     trajectory expansion, trajectory augmentation, fixed scene trajectory augmentation, 轨迹播放, 轨迹扩增, 运动规划,
     轨迹规划]
-  keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, CuroboPlanner, NeuralPlanner,
+  keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
     expansion, GenerationSession, TrajectoryAugmentationCfg, CandidateTrajectoryBatch,
     collision world, compute trajectory, trajectory resampling, trajectory warping, retime_to_control_grid,
     JointTrajectoryPlaybackCfg, play_joint_trajectory]

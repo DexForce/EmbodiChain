@@ -5,7 +5,7 @@ Motion Generator
 
 .. currentmodule:: embodichain.lab.sim.motion.motion_generator
 
-The ``MotionGenerator`` class in EmbodiChain provides a unified and extensible interface for robot trajectory planning. It supports time-optimal trajectory generation (currently via TOPPRA), joint/Cartesian interpolation, and is designed for easy integration with RL, imitation learning, and classical control scenarios.
+The ``MotionGenerator`` class in EmbodiChain provides a unified and extensible interface for robot trajectory planning. It supports time-optimal trajectory generation via TOPPRA, deterministic trapezoidal joint-space timing, joint/Cartesian interpolation, and is designed for easy integration with RL, imitation learning, and classical control scenarios.
 
 Key Features
 ------------
@@ -193,7 +193,8 @@ API Reference
 Notes & Best Practices
 ~~~~~~~~~~~~~~~~~~~~~~
 
-- TOPPRA and NeuralPlanner do not maintain a collision world. Select the optional
+- TOPPRA, TrapezoidalPlanner, and NeuralPlanner do not maintain a collision
+  world. Select the optional
   cuRobo V2 backend for collision-aware planning and exact joint-trajectory
   collision validation; see :doc:`/overview/sim/motion/planners/curobo_planner`.
 - Planning inputs and outputs use environment-batched PyTorch tensors.
