@@ -74,7 +74,6 @@ def parse_arguments() -> argparse.Namespace:
     parser = create_tutorial_argument_parser(
         "Pick up a cube and place it at a target pose.",
         features=("grasp_sampling", "visualize_axes"),
-        default_planner="curobo",
     )
     return parser.parse_args()
 
@@ -128,7 +127,7 @@ def main() -> None:
     obj = create_pick_object(sim)
     motion_gen = create_curobo_motion_generator(
         robot,
-        planner=getattr(args, "planner", "curobo"),
+        planner=getattr(args, "planner", "trapezoidal"),
     )
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)

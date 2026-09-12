@@ -175,11 +175,12 @@ It selects the non-neural backend used to construct its
      - Behavior and availability
    * - ``toppra``
      - :class:`~embodichain.lab.sim.motion.planners.ToppraPlanner`
-     - Time-optimal joint-space timing. This remains the default for tutorials
-       that previously used TOPPRA.
+     - Time-optimal joint-space timing. Select this explicitly when comparing
+       against the trapezoidal default.
    * - ``trapezoidal``
      - :class:`~embodichain.lab.sim.motion.planners.TrapezoidalPlanner`
-     - Deterministic trapezoidal joint-space timing. Cartesian targets are
+     - Deterministic trapezoidal joint-space timing and the default for atomic
+       action tutorials. Cartesian targets are
        converted through the shared IK/interpolation path before planning;
        quantity sampling retains every converted waypoint. When options are
        resolved from the backend-neutral request, ``MotionGenerator`` treats
@@ -190,18 +191,20 @@ It selects the non-neural backend used to construct its
    * - ``curobo``
      - :class:`~embodichain.lab.sim.motion.planners.CuroboPlanner`
      - CUDA-backed Cartesian/joint planning with collision-world support when
-       the tutorial supplies one. This remains the default for the tutorials
-       that previously used cuRobo.
+       the tutorial supplies one. Select this explicitly when CUDA-backed
+       collision-aware planning is needed.
 
 ``NeuralPlanner`` is intentionally not a choice here: it requires a
 tutorial-specific ONNX model and frame configuration rather than being a
 drop-in backend for these examples. For example, the same pose tutorial can
 be run with each supported backend as follows:
 
+Unless noted below, omitting ``--planner`` selects ``trapezoidal``.
+
 .. code-block:: bash
 
+   python scripts/tutorials/atomic_action/move_end_effector.py --device cpu
    python scripts/tutorials/atomic_action/move_end_effector.py --device cpu --planner toppra
-   python scripts/tutorials/atomic_action/move_end_effector.py --device cpu --planner trapezoidal
    python scripts/tutorials/atomic_action/move_end_effector.py --device cuda --planner curobo
 
 The selector does not override a skill's explicit motion contract. In

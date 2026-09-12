@@ -729,6 +729,18 @@ def test_tutorial_motion_generator_factory_rejects_neural_backend() -> None:
         )  # type: ignore[arg-type]
 
 
+def test_tutorial_motion_generator_factory_defaults_to_trapezoidal() -> None:
+    robot = MagicMock(uid="tutorial_robot")
+
+    with patch(
+        "scripts.tutorials.atomic_action.tutorial_utils.MotionGenerator"
+    ) as motion_generator_cls:
+        create_tutorial_motion_generator(robot)
+
+    cfg = motion_generator_cls.call_args.kwargs["cfg"]
+    assert cfg.planner_cfg.planner_type == "trapezoidal"
+
+
 def test_shared_robot_selection_keeps_ur5_default_and_accepts_all_variants() -> None:
     parser = create_tutorial_argument_parser("test parser")
     default_args = parser.parse_args([])
@@ -741,7 +753,7 @@ def test_shared_robot_selection_keeps_ur5_default_and_accepts_all_variants() -> 
     assert default_args.robot == "ur5"
     assert franka_args.robot == "franka"
     assert ur10_args.robot == "ur10"
-    assert default_args.planner == "toppra"
+    assert default_args.planner == "trapezoidal"
     assert trapezoidal_args.planner == "trapezoidal"
 
 
@@ -790,6 +802,10 @@ def test_all_atomic_action_tutorials_accept_both_robot_choices(
 
     assert default_args.robot == "ur5"
     assert franka_args.robot == "franka"
+    expected_planner = (
+        "curobo" if module_name == "dynamic_obstacle_recovery" else "trapezoidal"
+    )
+    assert default_args.planner == expected_planner
     assert trapezoidal_args.planner == "trapezoidal"
 
 
@@ -914,6 +930,7 @@ def test_pour_tutorial_uses_configured_pickup_and_local_rotation_axis() -> None:
     assert module.POUR_INTERNAL_AXIS == (1.0, 0.0, 0.0)
     pick_policy = module._create_pick_motion_policy()
     assert pick_policy.sample_count == module.PICK_SAMPLE_INTERVAL
+    assert isinstance(pick_policy.plan_opts, module.TrapezoidalPlanOptions)
     assert pick_policy.plan_opts.sample_method is module.TrajectorySampleMethod.QUANTITY
     assert pick_policy.plan_opts.sample_interval == module.PICK_MOTION_SAMPLE_COUNT
 

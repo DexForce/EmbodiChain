@@ -94,7 +94,9 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _create_pick_motion_policy(planner: TutorialPlanner = "toppra") -> MotionPolicy:
+def _create_pick_motion_policy(
+    planner: TutorialPlanner = "trapezoidal",
+) -> MotionPolicy:
     """Create a planner-specific PickUp policy with a fixed motion sample count."""
     if planner == "toppra":
         plan_opts = ToppraPlanOptions(
@@ -130,7 +132,7 @@ def main() -> None:
     )
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
-    planner = getattr(args, "planner", "toppra")
+    planner = getattr(args, "planner", "trapezoidal")
     motion_gen = create_toppra_motion_generator(robot, planner=planner)
 
     engine = create_simulation_atomic_action_engine(

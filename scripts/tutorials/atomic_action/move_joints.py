@@ -55,7 +55,6 @@ def parse_arguments() -> argparse.Namespace:
     parser = create_tutorial_argument_parser(
         "Demonstrate MoveJoints with named and explicit qpos targets.",
         features=("visualize_axes",),
-        default_planner="curobo",
     )
     return parser.parse_args()
 
@@ -67,7 +66,7 @@ def main() -> None:
     robot = add_tutorial_robot(sim, args.robot)
     motion_gen = create_curobo_motion_generator(
         robot,
-        planner=getattr(args, "planner", "curobo"),
+        planner=getattr(args, "planner", "trapezoidal"),
     )
 
     home = robot.get_qpos(name="arm")[0].clone()

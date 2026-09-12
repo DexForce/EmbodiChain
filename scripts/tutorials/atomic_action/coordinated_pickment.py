@@ -386,7 +386,7 @@ def run_coordinated_pickment_demo(
     left_to_right_arm_direction = compute_left_to_right_arm_direction(robot, sim.device)
     motion_gen = create_toppra_motion_generator(
         robot,
-        planner=getattr(args, "planner", "toppra"),
+        planner=getattr(args, "planner", "trapezoidal"),
     )
 
     hand_close_qpos = (

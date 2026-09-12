@@ -552,7 +552,7 @@ def run_coordinated_placement_demo(
     pan_semantics = create_manual_object_semantics(pan, PAN_LABEL)
     motion_gen = create_toppra_motion_generator(
         robot,
-        planner=getattr(args, "planner", "toppra"),
+        planner=getattr(args, "planner", "trapezoidal"),
     )
 
     right_open, right_close = get_hand_open_close_qpos(

@@ -74,7 +74,6 @@ def parse_arguments() -> argparse.Namespace:
     parser = create_tutorial_argument_parser(
         "Pick up a paper cup and move it by object pose.",
         features=("grasp_sampling", "visualize_axes"),
-        default_planner="curobo",
     )
     return parser.parse_args()
 
@@ -121,7 +120,7 @@ def main() -> None:
     obj = create_pick_object(sim)
     motion_gen = create_curobo_motion_generator(
         robot,
-        planner=getattr(args, "planner", "curobo"),
+        planner=getattr(args, "planner", "trapezoidal"),
     )
     hand_open, hand_close = get_hand_open_close_qpos(robot)
 

@@ -136,7 +136,7 @@ def create_tutorial_argument_parser(
     features: Collection[TutorialCliFeature] = (),
     default_device: str | None = None,
     default_renderer: str | None = None,
-    default_planner: TutorialPlanner = "toppra",
+    default_planner: TutorialPlanner = "trapezoidal",
 ) -> argparse.ArgumentParser:
     """Create a launcher parser with the shared atomic-tutorial switches.
 
@@ -145,7 +145,8 @@ def create_tutorial_argument_parser(
         features: Optional groups of tutorial-specific shared arguments.
         default_device: Optional device override for the launcher arguments.
         default_renderer: Optional renderer override for the launcher arguments.
-        default_planner: Planner selected when ``--planner`` is omitted.
+        default_planner: Planner selected when ``--planner`` is omitted. The
+            shared default is deterministic ``trapezoidal`` timing.
 
     Returns:
         The configured argument parser.
@@ -354,7 +355,7 @@ def add_tutorial_robot(
 
 def create_tutorial_motion_generator(
     robot: Robot,
-    planner: TutorialPlanner = "toppra",
+    planner: TutorialPlanner = "trapezoidal",
 ) -> MotionGenerator:
     """Create a selected non-neural motion generator for a tutorial robot.
 

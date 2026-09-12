@@ -193,7 +193,7 @@ def main() -> None:
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     motion_gen = create_toppra_motion_generator(
         robot,
-        planner=getattr(args, "planner", "toppra"),
+        planner=getattr(args, "planner", "trapezoidal"),
     )
     semantics = create_drawer_semantics(drawer)
     affordance = semantics.affordance

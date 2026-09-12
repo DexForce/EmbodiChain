@@ -152,7 +152,7 @@ def main() -> None:
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
     motion_gen = create_toppra_motion_generator(
         robot,
-        planner=getattr(args, "planner", "toppra"),
+        planner=getattr(args, "planner", "trapezoidal"),
     )
 
     engine = create_simulation_atomic_action_engine(

@@ -1064,8 +1064,10 @@ python scripts/tutorials/atomic_action/hand_over.py --headless --auto_play --dev
 ```
 
 The scripts share a `--planner` selector for the non-neural backends
-(`toppra`, `trapezoidal`, or `curobo`). See {doc}`/tutorial/atomic_actions` for
-backend-specific caveats and examples.
+(`toppra`, `trapezoidal`, or `curobo`); `trapezoidal` is the default. See
+{doc}`/tutorial/atomic_actions` for backend-specific caveats and examples.
+The dynamic-obstacle recovery example remains cuRobo-only because it updates a
+live collision world.
 
 See {doc}`/tutorial/atomic_actions` for engine setup, static compilation,
 closed-loop execution, effect verification, and custom-action guidance.

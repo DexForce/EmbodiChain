@@ -67,7 +67,7 @@ def main() -> None:
     engine = AtomicActionEngine(
         motion_generator=create_toppra_motion_generator(
             robot,
-            planner=getattr(args, "planner", "toppra"),
+            planner=getattr(args, "planner", "trapezoidal"),
         )
     )
 
