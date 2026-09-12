@@ -427,9 +427,14 @@ def test_lowerers_keep_exact_joint_goal_and_require_open_hand_for_withdrawal(
     call = RegisteredSemanticCall(
         call_id=WITHDRAW_CALL, arguments={"object": "drawer", "state": "open"}
     )
-    withdraw.lower(
+    withdrawal = withdraw.lower(
         call, context=context, bound=bound, option_template=MoveEndEffectorOptions()
     )
+    assert withdrawal.goal.xpos.shape == (1, 3, 4, 4)
+    torch.testing.assert_close(
+        withdrawal.goal.xpos[0, 1, 2, 3], torch.tensor(0.12)
+    )
+    assert torch.linalg.vector_norm(withdrawal.goal.xpos[0, 2, :2, 3]) > 0.09
     context.robot.qpos[:, 6:] = 0.1
     with pytest.raises(ValueError, match="open posture"):
         withdraw.lower(

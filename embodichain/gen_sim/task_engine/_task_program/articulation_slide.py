@@ -35,6 +35,7 @@ from embodichain.lab.sim.atomic_actions import (
     MoveJoints,
     MoveJointsOptions,
     ObjectSemantics,
+    PARK_COMMAND,
     SceneEntityPose,
     Slide,
     SlideAffordance,
@@ -263,18 +264,25 @@ class _WithdrawLowerer(_SlideLowerer):
             name=motion.control_part,
             to_matrix=True,
         )
-        withdrawn = current.clone()
-        raised = withdrawn.clone()
-        raised[:, 2, 3] += 0.08
+        link = art.get_link_pose(
+            binding.link, env_ids=context.env_ids.tolist(), to_matrix=True
+        )
+        outward = (
+            -(link[:, :3, :3] @ current.new_tensor(binding.axis)) * binding.axis_sign
+        )
+        raised = current.clone()
+        raised[:, 2, 3] += 0.12
+        withdrawn = raised.clone()
+        withdrawn[:, :3, 3] += 0.10 * outward
         return SemanticLowering(
             goal=EndEffectorPoseGoal(
-                torch.stack((current, current, withdrawn, raised), dim=1)
+                torch.stack((current, raised, withdrawn), dim=1)
             )
         )
 
 
 class _ArticulationParkLowerer(RegisteredSemanticLowerer):
-    """Keep the operated arm at its live posture during E6 cleanup."""
+    """Return the operated arm to its configured home posture after E6."""
 
     call_id: ClassVar[str] = PARK_CALL
     target_descriptor = MoveJoints.descriptor()
@@ -287,10 +295,8 @@ class _ArticulationParkLowerer(RegisteredSemanticLowerer):
             raise TypeError("Articulation park requires MoveJointsOptions.")
         if dict(call.arguments):
             raise ValueError(f"{self.call_id} arguments must be empty.")
-        endpoint = bound.binding.action_binding.endpoint("primary", "motion")
-        motion = endpoint.require_target(JointPositionTarget)
-        target = context.robot.qpos[:, list(motion.joint_ids)].clone()
-        return SemanticLowering(goal=JointPositionGoal(target))
+        del context, bound
+        return SemanticLowering(goal=JointPositionGoal(PARK_COMMAND))
 
 
 @dataclass(frozen=True, slots=True)
