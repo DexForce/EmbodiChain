@@ -1,0 +1,392 @@
+version = 1
+
+# The AST walk is a bounded hint.  Deeper integration boundaries are covered
+# by the explicit topic contracts below, while an unknown source still falls
+# back to a full PR plan.
+reverse_import_depth = 4
+
+# Small package/import checks remain useful for every executable PR.  The
+# selector adds these files to partial plans and the runner filters them by
+# resource marker.
+always = [
+  "tests/test_main.py",
+  "tests/test_release_metadata.py",
+  "tests/compute/test_imports.py",
+]
+
+# These files affect the test harness, packaging, or CI policy itself.  A
+# change selects every non-slow test for the PR; scheduled full runs also cover
+# the slow matrix.
+full_pr_if = [
+  "conftest.py",
+  "tests/conftest.py",
+  "tests/**/conftest.py",
+  "tests/**/helpers.py",
+  "tests/helpers.py",
+  "pyproject.toml",
+  "setup.py",
+  "MANIFEST.in",
+  "VERSION",
+  "embodichain/VERSION",
+  ".github/**",
+  ".ci/**",
+  "scripts/ci/**",
+  "agent_context/MAP.yaml",
+]
+
+[topics."simulation-system"]
+tests = [
+  "tests/sim/test_sim_manager.py",
+  "tests/sim/test_sim_manager_cfg.py",
+  "tests/sim/objects/**",
+  "tests/sim/spawn/**",
+]
+contracts = [
+  "tests/sim/test_sim_manager_cfg.py",
+  "tests/sim/test_backend_parity.py",
+]
+
+[topics."env-framework"]
+tests = [
+  "tests/gym/envs/**",
+  "tests/gym/utils/**",
+  "tests/lab/scripts/test_run_env.py",
+]
+contracts = [
+  "tests/gym/envs/test_embodied_env.py",
+  "tests/gym/envs/test_env_seed.py",
+]
+
+[topics."manager-functor"]
+tests = ["tests/gym/envs/managers/**"]
+contracts = [
+  "tests/gym/envs/managers/test_action_manager.py",
+  "tests/gym/envs/managers/test_observation_functors.py",
+]
+
+[topics."ik-solvers"]
+tests = [
+  "tests/sim/motion/solvers/**",
+  "tests/compute/test_kernels.py",
+]
+contracts = [
+  "tests/sim/motion/solvers/test_base_solver.py",
+  "tests/sim/motion/solvers/test_analytic_batching.py",
+]
+
+[topics."robot-system"]
+tests = [
+  "tests/sim/objects/test_robot.py",
+  "tests/sim/objects/test_robot_cfg.py",
+  "tests/sim/robots/**",
+]
+contracts = [
+  "tests/sim/objects/test_robot_cfg.py",
+  "tests/sim/robots/test_entrypoints.py",
+]
+
+[topics."sensor-system"]
+tests = [
+  "tests/sim/sensors/**",
+  "tests/visualization/test_cfg.py",
+]
+contracts = [
+  "tests/sim/sensors/test_attachment.py",
+  "tests/sim/sensors/test_contact.py",
+]
+
+[topics."sim-visualization"]
+tests = ["tests/visualization/**", "tests/sim/objects/test_gizmo.py"]
+contracts = [
+  "tests/visualization/test_protocol.py",
+  "tests/visualization/test_runtime.py",
+]
+
+[topics."motion-planning"]
+tests = [
+  "tests/sim/motion/planners/**",
+  "tests/sim/motion/expansion/**",
+  "tests/sim/motion/test_execution.py",
+  "tests/compute/test_trajectory*.py",
+]
+contracts = [
+  "tests/sim/motion/test_motion_generator.py",
+  "tests/sim/motion/test_motion_generator_batched.py",
+]
+
+[topics."rl-learning"]
+tests = ["tests/learning/**"]
+contracts = [
+  "tests/learning/test_routing.py",
+  "tests/learning/test_runtime.py",
+]
+
+[topics."differentiable-env"]
+tests = [
+  "tests/learning/test_differentiable_env.py",
+  "tests/learning/test_differentiable_collector.py",
+  "tests/gym/envs/test_differentiable_embodied_env.py",
+]
+contracts = ["tests/learning/test_apg.py"]
+
+[topics."configclass-pattern"]
+tests = [
+  "tests/utils/test_configclass.py",
+  "tests/utils/test_config_paths.py",
+  "tests/sim/test_cfg.py",
+]
+contracts = ["tests/utils/test_configclass.py"]
+
+[topics."randomization"]
+tests = [
+  "tests/gym/envs/managers/test_randomize_*.py",
+  "tests/gym/envs/managers/test_event_*.py",
+  "tests/gym/envs/test_env_seed.py",
+]
+contracts = ["tests/gym/envs/managers/test_event_manager_seed.py"]
+
+[topics."atomic-actions"]
+tests = ["tests/sim/atomic_actions/**"]
+contracts = [
+  "tests/sim/atomic_actions/test_core.py",
+  "tests/sim/atomic_actions/test_engine.py",
+]
+
+[topics."task-programs"]
+tests = [
+  "tests/lab/task_program/**",
+  "tests/gym/envs/task_program/**",
+  "tests/test_task_program_package_data.py",
+]
+contracts = [
+  "tests/lab/task_program/test_program_compiler.py",
+  "tests/gym/envs/task_program/test_bridge.py",
+]
+
+[topics."gen-sim"]
+tests = ["tests/gen_sim/**"]
+contracts = ["tests/gen_sim/test_gen_sim_env.py"]
+
+[topics."data-assets"]
+tests = ["tests/data/**", "tests/utils/test_config_paths.py"]
+contracts = ["tests/data/test_dataset.py"]
+
+[topics."data-pipeline"]
+tests = ["tests/data_pipeline/**", "tests/gym/envs/managers/test_dataset_*.py"]
+contracts = ["tests/data_pipeline/test_online_data.py"]
+
+[topics."robot-workspace"]
+tests = ["tests/sim/motion/workspace/**"]
+contracts = ["tests/sim/motion/workspace/test_analyzer.py"]
+
+# Exact leaf mappings avoid expanding an entire topic for high-frequency,
+# pure-Python changes.  Resource hints cover tests whose GPU use is not visible
+# in their file name or marker.
+[[rules]]
+id = "pose-nms"
+paths = ["embodichain/utils/nms.py"]
+tests = [
+  "tests/utils/test_nms.py",
+  "tests/toolkits/test_parallel_jaw_grasp_pose_generator.py",
+  "tests/toolkits/test_pg_grasp.py",
+]
+resource_hints = ["gpu"]
+risk = "medium"
+include_reverse = true
+
+[[rules]]
+id = "shared-config"
+paths = [
+  "embodichain/utils/configclass.py",
+  "embodichain/utils/string.py",
+  "embodichain/utils/device_utils.py",
+]
+mode = "full-pr"
+
+[[rules]]
+id = "sim-lifecycle"
+paths = [
+  "embodichain/lab/sim/sim_manager.py",
+  "embodichain/lab/sim/physics/**",
+]
+mode = "full-pr"
+
+[[rules]]
+id = "sim-config"
+paths = ["embodichain/lab/sim/cfg/**"]
+tests = ["tests/sim/test_cfg.py", "tests/sim/test_sim_manager_cfg.py"]
+resource_hints = ["sim", "gpu"]
+risk = "high"
+
+[[rules]]
+id = "sim-objects"
+paths = ["embodichain/lab/sim/objects/**"]
+tests = [
+  "tests/sim/objects/**",
+  "tests/sim/spawn/**",
+]
+resource_hints = ["sim"]
+risk = "medium"
+
+[[rules]]
+id = "sim-sensors"
+paths = ["embodichain/lab/sim/sensors/**"]
+tests = ["tests/sim/sensors/**"]
+resource_hints = ["sim", "gpu"]
+risk = "medium"
+
+[[rules]]
+id = "motion-solvers"
+paths = [
+  "embodichain/lab/sim/motion/solvers/**",
+  "embodichain/compute/kinematics/**",
+]
+tests = [
+  "tests/sim/motion/solvers/**",
+  "tests/compute/test_kernels.py",
+  "tests/sim/objects/test_robot.py",
+]
+resource_hints = ["sim"]
+risk = "medium"
+
+[[rules]]
+id = "motion-planners"
+paths = [
+  "embodichain/lab/sim/motion/planners/**",
+  "embodichain/lab/sim/motion/motion_generator.py",
+  "embodichain/lab/sim/motion/execution.py",
+  "embodichain/lab/sim/motion/expansion/**",
+  "embodichain/compute/trajectory/**",
+]
+tests = [
+  "tests/sim/motion/planners/**",
+  "tests/sim/motion/expansion/**",
+  "tests/sim/motion/test_motion_generator.py",
+  "tests/sim/motion/test_motion_generator_batched.py",
+  "tests/compute/test_trajectory*.py",
+]
+resource_hints = ["sim"]
+risk = "medium"
+
+[[rules]]
+id = "robot-system"
+paths = [
+  "embodichain/lab/sim/robots/**",
+  "embodichain/lab/sim/objects/robot.py",
+]
+tests = [
+  "tests/sim/robots/**",
+  "tests/sim/objects/test_robot*.py",
+  "tests/sim/motion/solvers/**",
+  "tests/sim/motion/workspace/**",
+]
+resource_hints = ["sim", "gpu"]
+risk = "medium"
+
+[[rules]]
+id = "manager-functors"
+paths = ["embodichain/lab/gym/envs/managers/**"]
+tests = ["tests/gym/envs/managers/**"]
+risk = "medium"
+
+[[rules]]
+id = "environment-framework"
+paths = [
+  "embodichain/lab/gym/envs/base_env.py",
+  "embodichain/lab/gym/envs/embodied_env.py",
+  "embodichain/lab/gym/envs/differentiable_env.py",
+  "embodichain/lab/gym/envs/expert_trajectory.py",
+  "embodichain/lab/gym/envs/demo.py",
+  "embodichain/lab/gym/envs/settling.py",
+  "embodichain/lab/gym/utils/**",
+  "embodichain/lab/scripts/run_env.py",
+  "embodichain/cli/**",
+]
+tests = [
+  "tests/gym/envs/**",
+  "tests/gym/utils/**",
+  "tests/lab/scripts/test_run_env.py",
+  "tests/test_main.py",
+]
+resource_hints = ["sim"]
+risk = "medium"
+
+[[rules]]
+id = "task-program"
+paths = [
+  "embodichain/lab/task_program/**",
+  "embodichain/lab/gym/envs/task_program/**",
+  "embodichain_tasks/**",
+]
+tests = [
+  "tests/lab/task_program/**",
+  "tests/gym/envs/task_program/**",
+  "tests/test_task_program_package_data.py",
+]
+resource_hints = ["sim", "gpu"]
+risk = "medium"
+
+[[rules]]
+id = "atomic-actions"
+paths = ["embodichain/lab/sim/atomic_actions/**"]
+tests = ["tests/sim/atomic_actions/**"]
+resource_hints = ["sim"]
+risk = "medium"
+
+[[rules]]
+id = "learning"
+paths = ["embodichain/learning/rl/**"]
+tests = ["tests/learning/**"]
+resource_hints = ["gpu", "sim"]
+risk = "medium"
+
+[[rules]]
+id = "gen-sim"
+paths = ["embodichain/gen_sim/**"]
+tests = ["tests/gen_sim/**"]
+resource_hints = ["gensim"]
+risk = "medium"
+
+[[rules]]
+id = "data-assets"
+paths = ["embodichain/data/**"]
+tests = ["tests/data/**"]
+risk = "low"
+
+[[rules]]
+id = "data-pipeline"
+paths = ["embodichain/data_pipeline/**"]
+tests = ["tests/data_pipeline/**"]
+risk = "low"
+
+[[rules]]
+id = "visualization"
+paths = [
+  "embodichain/lab/visualization/**",
+  "embodichain/lab/sim/objects/gizmo.py",
+]
+tests = ["tests/visualization/**", "tests/sim/objects/test_gizmo.py"]
+resource_hints = ["sim", "gpu"]
+risk = "medium"
+
+[[rules]]
+id = "workspace"
+paths = [
+  "embodichain/lab/sim/motion/workspace/**",
+  "embodichain/cli/workspace_cache.py",
+]
+tests = ["tests/sim/motion/workspace/**"]
+resource_hints = ["sim"]
+risk = "medium"
+
+[[rules]]
+id = "benchmark-scripts"
+paths = ["scripts/benchmark/**"]
+tests = ["tests/benchmark/**"]
+risk = "low"
+
+[[rules]]
+id = "context-map"
+paths = ["agent_context/**"]
+tests = ["tests/test_agent_context_map.py", "tests/test_agent_context_tools.py"]
+risk = "low"

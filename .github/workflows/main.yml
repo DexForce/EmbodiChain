@@ -7,6 +7,18 @@ on:
       - 'v*'
   pull_request:
     branches: [main, 'release/**']
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Test selection mode for a manual run'
+        required: true
+        default: full
+        type: choice
+        options:
+          - partial
+          - full
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -53,11 +65,139 @@ jobs:
               - 'embodichain/**'
               - 'embodichain_tasks/**'
               - 'examples/**'
-              - 'scripts/**'
               - 'README.md'
               - 'pyproject.toml'
               - 'setup.py'
               - 'VERSION'
+
+  test_plan:
+    name: Build test plan
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      needs_tests: ${{ steps.plan.outputs.needs_tests }}
+      needs_docs: ${{ steps.plan.outputs.needs_docs }}
+      needs_hardware: ${{ steps.plan.outputs.needs_hardware }}
+      needs_gensim: ${{ steps.plan.outputs.needs_gensim }}
+      needs_curobo: ${{ steps.plan.outputs.needs_curobo }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install planner dependencies
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check pytest
+          python -m pip install --disable-pip-version-check pyyaml || \
+            echo 'PyYAML is unavailable; the manifest-only fallback remains enabled.'
+      - name: Validate impact analyzer
+        run: python -m pytest -q tests/ci
+      - name: Build changed-test plan
+        id: plan
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_MODE: ${{ inputs.test_mode || 'full' }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            if [[ -z "${PR_BASE}" ]] || ! git cat-file -e "${PR_BASE}^{commit}" 2>/dev/null; then
+              python scripts/ci/select_tests.py \
+                --repo-root "${GITHUB_WORKSPACE}" \
+                --full \
+                --output test-plan.json
+            else
+              head_sha="${PR_HEAD}"
+              if ! git cat-file -e "${head_sha}^{commit}" 2>/dev/null; then
+                head_sha=HEAD
+              fi
+              python scripts/ci/select_tests.py \
+                --repo-root "${GITHUB_WORKSPACE}" \
+                --base "${PR_BASE}" \
+                --head "${head_sha}" \
+                --output test-plan.json
+            fi
+          elif [[ "${EVENT_NAME}" == "workflow_dispatch" && "${MANUAL_MODE}" == "partial" ]]; then
+            base_sha="$(git merge-base "origin/${DEFAULT_BRANCH}" HEAD 2>/dev/null || true)"
+            if [[ -n "${base_sha}" ]]; then
+              python scripts/ci/select_tests.py \
+                --repo-root "${GITHUB_WORKSPACE}" \
+                --base "${base_sha}" \
+                --head HEAD \
+                --output test-plan.json
+            else
+              python scripts/ci/select_tests.py \
+                --repo-root "${GITHUB_WORKSPACE}" \
+                --full \
+                --output test-plan.json
+            fi
+          else
+            python scripts/ci/select_tests.py \
+              --repo-root "${GITHUB_WORKSPACE}" \
+              --full \
+              --output test-plan.json
+          fi
+
+          python - <<'PY' >> "${GITHUB_OUTPUT}"
+          import json
+          from pathlib import Path
+
+          plan = json.loads(Path("test-plan.json").read_text(encoding="utf-8"))
+          lanes = plan.get("lanes", {})
+          mode = str(plan.get("mode", "full-pr"))
+          hardware = mode in {"full", "full-pr"} or any(
+              lane in lanes for lane in ("sim", "distributed", "gpu")
+          )
+          print(f"mode={mode}")
+          print(f"needs_tests={str(mode != 'docs-only').lower()}")
+          print(f"needs_docs={str('docs' in lanes).lower()}")
+          print(f"needs_hardware={str(hardware).lower()}")
+          install = plan.get("install", {})
+          print(f"needs_gensim={str(bool(install.get('gensim'))).lower()}")
+          print(f"needs_curobo={str(bool(install.get('curobo'))).lower()}")
+          PY
+      - name: Upload test plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-plan
+          path: test-plan.json
+          if-no-files-found: error
+      - name: Publish test plan summary
+        shell: bash
+        run: |
+          python - <<'PY' >> "${GITHUB_STEP_SUMMARY}"
+          import json
+          from pathlib import Path
+
+          plan = json.loads(Path("test-plan.json").read_text(encoding="utf-8"))
+          lanes = plan.get("lanes", {})
+          print("## Test impact plan")
+          print()
+          print(f"- Mode: `{plan.get('mode')}`")
+          print(f"- Risk: `{plan.get('risk')}`")
+          print(f"- Changed paths: {len(plan.get('changed', []))}")
+          print(f"- Selectors: {len(plan.get('selectors', []))}")
+          hardware = plan.get("mode") in {"full", "full-pr"} or any(
+              lane in lanes for lane in ("sim", "distributed", "gpu")
+          )
+          print(f"- Hardware lanes: `{str(hardware).lower()}`")
+          print(f"- Fallback: `{plan.get('fallback_reason') or 'none'}`")
+          print()
+          print("| Lane | Selectors |")
+          print("| --- | ---: |")
+          for lane, selectors in lanes.items():
+              print(f"| {lane} | {len(selectors)} |")
+          PY
 
   build:
     if: ${{ !startsWith(github.ref, 'refs/tags/v') && needs.docs-changes.outputs.required == 'true' }}
@@ -144,58 +284,135 @@ jobs:
           path: ${{ github.workspace }}/docs/build/html
 
   test:
-    if: github.event_name == 'pull_request'
-    needs: lint
+    if: >-
+      (github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch') &&
+      needs.test_plan.outputs.needs_tests == 'true'
+    needs: [lint, test_plan]
     runs-on: Linux
     env:
       NVIDIA_DRIVER_CAPABILITIES: all
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DISABLE_REQUIRE: 1
+      HF_ENDPOINT: https://hf-mirror.com
+      PIP_CACHE_DIR: /cache/pip
+      NEEDS_GENSIM: ${{ needs.test_plan.outputs.needs_gensim }}
+      NEEDS_CUROBO: ${{ needs.test_plan.outputs.needs_curobo }}
     container: *container_template
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/activate-conda
+      - name: Download test plan
+        uses: actions/download-artifact@v4
+        with:
+          name: test-plan
+          path: .
       - name: Install test package
+        shell: bash -l {0}
         run: |
-          pip install -e ".[gensim]" \
-            "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
+          source activate py311
+          set -euo pipefail
+          if [[ "${NEEDS_GENSIM}" == "true" ]]; then
+            package='.[gensim]'
+          else
+            package='.'
+          fi
+          pip install -e "${package}" \
             --extra-index-url http://pyp.open3dv.site:2345/simple/ \
             --trusted-host pyp.open3dv.site \
             --extra-index-url https://download.blender.org/pypi/
+          if [[ "${NEEDS_CUROBO}" == "true" ]]; then
+            pip install \
+              "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
+              --extra-index-url http://pyp.open3dv.site:2345/simple/ \
+              --trusted-host pyp.open3dv.site \
+              --extra-index-url https://download.blender.org/pypi/
+          fi
           pip install pytest-xdist
 
       - name: Verify Scene Engine gensim installation
+        if: env.NEEDS_GENSIM == 'true'
         run: |
           python -c "import matplotlib, numpy, open3d, requests, scipy, shapely, trimesh; from PIL import Image; import embodichain.gen_sim.scene_engine.pipeline.generate"
 
-      - name: Run default tests
+      - name: Run selected tests
+        shell: bash -l {0}
         run: |
-          echo "Documentation tests"
-          export HF_ENDPOINT=https://hf-mirror.com
-          pytest tests/docs -q --confcutdir=tests/docs
+          source activate py311
+          python scripts/ci/run_test_plan.py \
+            --plan test-plan.json \
+            --repo-root "${GITHUB_WORKSPACE}" \
+            --lane fast \
+            --lane sim \
+            --lane distributed \
+            --lane gpu
 
-          echo "Non-simulation tests (four workers, CUDA available for native imports)"
-          pytest tests --ignore=tests/docs \
-            -m "not requires_sim and not gpu" -n 4 --dist loadgroup
+  test_docs:
+    name: Documentation tests
+    if: >-
+      (github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch') &&
+      needs.test_plan.outputs.needs_docs == 'true'
+    needs: [lint, test_plan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install docs test dependencies
+        run: python -m pip install --disable-pip-version-check pytest
+      - name: Download test plan
+        uses: actions/download-artifact@v4
+        with:
+          name: test-plan
+          path: .
+      - name: Run documentation tests
+        run: python scripts/ci/run_test_plan.py --plan test-plan.json --repo-root "${GITHUB_WORKSPACE}" --lane docs
 
-      - name: Run real-simulation tests serially
+  test_gate:
+    name: Test gate
+    if: >-
+      always() &&
+      (github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch')
+    needs: [lint, test_plan, test, test_docs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate selected test result
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          PLAN_RESULT: ${{ needs.test_plan.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          DOCS_RESULT: ${{ needs.test_docs.result }}
+          DOCS_NEEDED: ${{ needs.test_plan.outputs.needs_docs }}
+          TESTS_NEEDED: ${{ needs.test_plan.outputs.needs_tests }}
+        shell: bash
         run: |
-          echo "Real-simulation tests (one process, GPU tests excluded)"
-          export HF_ENDPOINT=https://hf-mirror.com
-          pytest tests --ignore=tests/docs -m "requires_sim and not gpu"
-
-      - name: Run distributed GPU tests in isolation
-        run: |
-          echo "Distributed GPU tests (isolated CUDA process tree)"
-          export HF_ENDPOINT=https://hf-mirror.com
-          pytest tests/learning/test_rl_distributed.py --run-gpu -m gpu
-
-      - name: Run remaining GPU tests serially
-        run: |
-          echo "Dedicated GPU test suite"
-          export HF_ENDPOINT=https://hf-mirror.com
-          pytest tests --ignore=tests/docs \
-            --ignore=tests/learning/test_rl_distributed.py --run-gpu -m gpu
+          set -euo pipefail
+          if [[ "${LINT_RESULT}" != "success" ]]; then
+            echo "lint result: ${LINT_RESULT}"
+            exit 1
+          fi
+          if [[ "${PLAN_RESULT}" != "success" ]]; then
+            echo "test-plan result: ${PLAN_RESULT}"
+            exit 1
+          fi
+          if [[ "${DOCS_NEEDED}" == "true" && "${DOCS_RESULT}" != "success" ]]; then
+            echo "documentation test result: ${DOCS_RESULT}"
+            exit 1
+          fi
+          if [[ "${TESTS_NEEDED}" == "true" && "${TEST_RESULT}" != "success" ]]; then
+            echo "selected test result: ${TEST_RESULT}"
+            exit 1
+          fi
+          if [[ "${TESTS_NEEDED}" != "true" && "${TEST_RESULT}" != "skipped" ]]; then
+            echo "unexpected selected test result: ${TEST_RESULT}"
+            exit 1
+          fi
 
   release-build:
     if: startsWith(github.ref, 'refs/tags/v')
