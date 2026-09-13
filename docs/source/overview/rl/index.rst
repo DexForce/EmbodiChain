@@ -79,6 +79,7 @@ See also
     config.md
     train_script.md
     multi_gpu.md
+    ../../guides/rlinf
 
 See Also
 --------
