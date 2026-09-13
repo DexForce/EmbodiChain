@@ -35,7 +35,7 @@ from embodichain.lab.sim.sim_manager import SimulationManager
 
 NUM_ARM_JOINTS = 7
 NUM_WAYPOINTS = 8
-OBS_DIM = 300
+OBS_DIM = 285
 
 
 def _create_fake_onnx_model(tmp_path) -> str:
@@ -106,6 +106,11 @@ def test_neural_planner_is_registered():
     assert NeuralPlanner.supported_move_types == frozenset(
         {MoveType.EEF_MOVE, MoveType.JOINT_MOVE}
     )
+
+
+def test_neural_planner_observation_width_matches_k5_nmg_export():
+    assert neural_planner_module._waypoint_obs_dim(5, use_relative_obs=True) == 186
+    assert neural_planner_module._waypoint_obs_dim(5, use_relative_obs=False) == 116
 
 
 def test_neural_planner_generate_with_fake_onnx_model(tmp_path, monkeypatch):
@@ -290,7 +295,7 @@ def test_neural_planner_disables_grad_for_all_fk_calls(tmp_path, monkeypatch):
     assert not any(grad_states)
 
 
-def test_neural_planner_builds_unified_300d_cartesian_observation(
+def test_neural_planner_builds_unified_285d_cartesian_observation(
     tmp_path, monkeypatch
 ):
     model_path = _create_fake_onnx_model(tmp_path)
@@ -332,7 +337,7 @@ def test_neural_planner_builds_unified_300d_cartesian_observation(
         torch.zeros(1, 7),
     )
 
-    assert obs.shape == (1, 300)
+    assert obs.shape == (1, 285)
     # Unified layout semantic blocks: active, valid, pos, rot, joint masks.
     semantic_start = 7 + 7 + 8 * (3 + 4 + 7)
     expected_active = torch.zeros_like(valid)
@@ -497,12 +502,11 @@ def test_neural_planner_builds_joint_constraint_observation(tmp_path, monkeypatc
 
     semantic_start = 7 + 7 + 8 * (3 + 4 + 7)
     relative_start = semantic_start + 5 * 8 + 7
-    waypoint_type_start = relative_start + 7 + 8 * (3 + 4 + 7)
+    joint_error_start = relative_start + 8 * (3 + 4)
     assert torch.equal(joint_mask[:, 0], torch.ones(1))
     assert torch.count_nonzero(pos_mask) == 0
     assert torch.count_nonzero(rot_mask) == 0
-    assert torch.allclose(obs[:, relative_start : relative_start + 7], target)
-    assert obs[0, waypoint_type_start].item() == pytest.approx(2.0)
+    assert torch.allclose(obs[:, joint_error_start : joint_error_start + 7], target)
 
 
 def test_neural_planner_parses_ordered_pose_then_joint_sequence(tmp_path, monkeypatch):

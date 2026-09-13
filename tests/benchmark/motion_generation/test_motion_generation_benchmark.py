@@ -484,6 +484,65 @@ def test_nmg_model_revision_is_derived_from_runtime_model_path():
     assert adapter.metadata.model_revision == "unified-k3"
 
 
+def test_nmg_over_capacity_case_is_explicitly_unsupported_without_truncation():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+
+    adapter = NmgOnnxAdapter(
+        PlannerSpecCfg(
+            id="nmg",
+            adapter="nmg_onnx",
+            role="candidate",
+            config={"num_waypoints": 5},
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+    over_capacity = replace(
+        _case(),
+        num_waypoints=6,
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).repeat(1, 6, 1, 1),
+        reference_qpos=torch.zeros(1, 6, 7),
+    )
+
+    supported, reason = adapter.supports_case(over_capacity)
+
+    assert supported is False
+    assert reason is not None
+    assert "at most 5" in reason
+    assert "not truncated or split" in reason
+
+
+def test_nmg_case_budget_is_thirty_steps_per_waypoint():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+
+    adapter = NmgOnnxAdapter(
+        PlannerSpecCfg(
+            id="nmg",
+            adapter="nmg_onnx",
+            role="candidate",
+            config={"num_waypoints": 5, "steps_per_waypoint": 30, "max_steps": 150},
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+
+    assert adapter._case_max_steps(replace(_case(), num_waypoints=1)) == 30
+    assert adapter._case_max_steps(replace(_case(), num_waypoints=3)) == 90
+    assert adapter._case_max_steps(replace(_case(), num_waypoints=5)) == 150
+
+
 def test_seed_override_applies_to_atomic_tracks():
     suite = load_suite("atomic_franka_pgi_curobo_randomized")
 

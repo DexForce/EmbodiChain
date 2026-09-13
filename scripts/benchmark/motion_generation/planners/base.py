@@ -81,6 +81,11 @@ class PlannerAdapter(ABC):
         """Return whether this adapter can run in the current process."""
         return True, None
 
+    def supports_case(self, case: BenchmarkCase) -> tuple[bool, str | None]:
+        """Return whether one manifest case is representable without mutation."""
+        del case
+        return True, None
+
     @abstractmethod
     def build(self) -> None:
         """Construct the underlying planner without preparing lazy backends."""

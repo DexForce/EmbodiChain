@@ -389,7 +389,22 @@ class BenchmarkRunner:
         adapter = create_planner_adapter(spec, context)
         metadata = adapter.metadata
         self.metadata.setdefault(metadata.algorithm_id, metadata)
-        first_case = cases[0]
+        supported_cases = []
+        for case in cases:
+            supported, reason = adapter.supports_case(case)
+            if supported:
+                supported_cases.append(case)
+                continue
+            self._record_unavailable(
+                writer,
+                metadata,
+                case,
+                reason or "case is outside planner capacity",
+                failure_code="unsupported_capacity",
+            )
+        if not supported_cases:
+            return
+        first_case = supported_cases[0]
         missing = sorted(required_capabilities - adapter.capabilities)
         if missing:
             self._record_unavailable(
@@ -464,7 +479,7 @@ class BenchmarkRunner:
                 TrialPhase.COLD,
                 repeat=-1,
             )
-            for case in cases:
+            for case in supported_cases:
                 for warmup_index in range(self.suite.protocol.warmup_trials):
                     self._run_plan_call(
                         writer,

@@ -93,9 +93,9 @@ class _OnnxPolicy:
 def _waypoint_obs_dim(num_waypoints: int, use_relative_obs: bool) -> int:
     """Return the unified NMG constraint-observation width."""
     n = int(num_waypoints)
-    dim = 7 + 7 + n * (3 + 4 + 7 + 5) + 7 + n
+    dim = 7 + 7 + n * (3 + 4 + 7 + 5) + 7
     if use_relative_obs:
-        dim += 7 + n * (3 + 4 + 7)
+        dim += n * (3 + 4 + 7)
     return dim
 
 
@@ -598,34 +598,7 @@ class NeuralPlanner(BasePlanner):
             last_action,
         ]
         if self._use_relative_obs:
-            idx = torch.arange(b, device=self.device)
-            active_pos = pos_block[idx, active_idx_clamped]
-            active_quat = quat_block[idx, active_idx_clamped]
-            active_joint = joint_block[idx, active_idx_clamped]
             inv_eef = _quat_inverse_xyzw(ee_pose[:, 3:7])
-            active_rel_quat = _quat_mul_xyzw(active_quat, inv_eef)
-            if getattr(self, "_canonicalize_quat_obs", False):
-                active_rel_quat = _canonicalize_quat_xyzw(active_rel_quat)
-            active_pos_mask = pos_mask[idx, active_idx_clamped].unsqueeze(-1)
-            active_rot_mask = rot_mask[idx, active_idx_clamped].unsqueeze(-1)
-            active_rel_quat = torch.where(
-                active_rot_mask > 0.5,
-                active_rel_quat,
-                identity.view(1, 4),
-            )
-            active_cart_rel = torch.cat(
-                [
-                    (active_pos - ee_pose[:, :3]) * active_pos_mask,
-                    active_rel_quat,
-                ],
-                dim=-1,
-            )
-            active_rel = torch.where(
-                (joint_mask[idx, active_idx_clamped] > 0.5).unsqueeze(-1),
-                active_joint - joint_pos,
-                active_cart_rel,
-            )
-            obs_parts.append(active_rel)
             rel_pos = (pos_block - ee_pose[:, None, :3]) * pos_mask.unsqueeze(-1)
             rel_quat = _quat_mul_xyzw(
                 quat_block,
@@ -646,23 +619,6 @@ class NeuralPlanner(BasePlanner):
                     joint_err.reshape(b, self._num_waypoints * self._action_dim),
                 ]
             )
-        waypoint_type = torch.zeros(
-            b,
-            self._num_waypoints,
-            dtype=joint_pos.dtype,
-            device=self.device,
-        )
-        waypoint_type = torch.where(
-            (valid_mask > 0.5) & (rot_mask < 0.5),
-            torch.ones_like(waypoint_type),
-            waypoint_type,
-        )
-        waypoint_type = torch.where(
-            joint_mask > 0.5,
-            torch.full_like(waypoint_type, 2.0),
-            waypoint_type,
-        )
-        obs_parts.append(waypoint_type)
         obs = torch.cat(obs_parts, dim=-1)
         if obs.shape[-1] != self._obs_dim:
             raise ValueError(
