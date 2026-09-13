@@ -28,7 +28,11 @@ from typing import Any
 
 from embodichain.gen_sim.task_engine.orchestration.grounding import (
     GroundingCaller,
+    ground_articulation_parts,
     ground_scene_references,
+)
+from embodichain.gen_sim.task_engine._task_program.articulation_binding import (
+    discover_prismatic_parts,
 )
 from embodichain.gen_sim.task_engine.orchestration.scene_inventory import (
     SceneInventory,
@@ -82,6 +86,56 @@ __all__ = [
     "SceneAdapter",
     "SceneAdapterProtocolError",
 ]
+
+
+def _discover_part_catalogs(
+    prepared: PreparedScene,
+) -> dict[str, tuple[dict[str, Any], ...]]:
+    catalogs: dict[str, tuple[dict[str, Any], ...]] = {}
+    for config in prepared.articulations:
+        try:
+            parts = discover_prismatic_parts(dict(config))
+        except (KeyError, TypeError, ValueError):
+            continue
+        catalogs[str(config["uid"])] = tuple(part.payload() for part in parts)
+    return catalogs
+
+
+def _augment_grounding_objects(
+    scene_objects: Sequence[Mapping[str, Any]],
+    part_catalogs: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Expose catalog parts as synthetic semantic candidates for grounding."""
+    result = [deepcopy(dict(item)) for item in scene_objects]
+    by_uid = {
+        str(item.get("runtime_uid", item.get("uid", ""))): item for item in result
+    }
+    for articulation_id, parts in part_catalogs.items():
+        parent = by_uid.get(articulation_id)
+        if parent is None:
+            continue
+        for part in parts:
+            part_id = str(part["part_id"])
+            result.append(
+                {
+                    "runtime_uid": f"{articulation_id}::{part_id}",
+                    "uid": f"{articulation_id}::{part_id}",
+                    "role": "articulation",
+                    "category": "articulation_part",
+                    "name": str(part.get("link", part.get("joint", "part"))),
+                    "description": (
+                        f"prismatic part {part.get('link', '')} of "
+                        f"{parent.get('name', articulation_id)}"
+                    ),
+                    "attributes": {
+                        "articulation_id": articulation_id,
+                        "part_id": part_id,
+                        "joint": str(part.get("joint", "")),
+                    },
+                    "init_pos": list(parent.get("init_pos", (0.0, 0.0, 0.0))),
+                }
+            )
+    return result
 
 
 Adjudicator = Callable[..., Mapping[str, Any]]
@@ -234,6 +288,14 @@ class SceneAdapter:
             prepared.planner_objects,
             robot_profile=source_ref.robot_profile,
         )
+        part_catalogs = _discover_part_catalogs(prepared)
+        grounding_objects = _augment_grounding_objects(
+            prepared.planner_objects, part_catalogs
+        )
+        grounding_inventory = SceneInventory(
+            grounding_objects,
+            robot_profile=source_ref.robot_profile,
+        )
         resolved_source = resolve_source_scene(source_ref.path)
         manifest = _build_manifest(
             prepared,
@@ -259,11 +321,12 @@ class SceneAdapter:
             instruction,
             candidates,
             manifest=manifest,
-            inventory=inventory,
-            scene_objects=prepared.planner_objects,
+            inventory=grounding_inventory,
+            scene_objects=grounding_objects,
             grounding_caller=grounding_caller,
             adjudicator=adjudicator,
             force_most_likely=force_most_likely,
+            part_catalogs=part_catalogs,
         )
         return SceneAdaptation(
             scene_manifest=manifest,
@@ -336,6 +399,7 @@ class SceneAdapter:
         grounding_caller: GroundingCaller | None,
         adjudicator: Adjudicator | None,
         force_most_likely: bool,
+        part_catalogs: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
     ) -> CandidateSelection:
         invoke = grounding_caller or self.grounding_caller
         use_default_adjudicator = invoke is None
@@ -345,7 +409,9 @@ class SceneAdapter:
         if choose is None and use_default_adjudicator:
             choose = _default_adjudicator(model=self.model)
         audits: list[dict[str, Any]] = []
-        bindings_by_candidate: dict[str, dict[str, tuple[str, ...]]] = {}
+        bindings_by_candidate: dict[
+            str, tuple[dict[str, tuple[str, ...]], dict[str, str]]
+        ] = {}
         for candidate in candidates:
             audit, bindings = _ground_candidate(
                 candidate,
@@ -355,6 +421,7 @@ class SceneAdapter:
                 model=self.model,
                 caller=invoke,
                 force_most_likely=force_most_likely,
+                part_catalogs=part_catalogs,
             )
             audits.append(audit)
             if bindings is not None:
@@ -394,10 +461,13 @@ class SceneAdapter:
                     "reference_bindings": {
                         key: list(value) for key, value in sorted(raw_bindings.items())
                     },
-                    "role_bindings": {},
+                    "role_bindings": dict(part_bindings),
                 }
             )
-            for candidate_id, raw_bindings in bindings_by_candidate.items()
+            for candidate_id, (
+                raw_bindings,
+                part_bindings,
+            ) in bindings_by_candidate.items()
         }
         role_bindings = None if selected_id is None else candidate_bindings[selected_id]
         return CandidateSelection(
@@ -502,7 +572,8 @@ def _ground_candidate(
     model: str | None,
     caller: GroundingCaller,
     force_most_likely: bool,
-) -> tuple[dict[str, Any], dict[str, tuple[str, ...]] | None]:
+    part_catalogs: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
+) -> tuple[dict[str, Any], tuple[dict[str, tuple[str, ...]], dict[str, str]] | None]:
     responses: list[Any] = []
 
     def audited_caller(**kwargs: Any) -> Mapping[str, Any]:
@@ -551,6 +622,42 @@ def _ground_candidate(
         ) from exc
 
     raw_bindings = result.bindings
+    part_bindings: dict[str, str] = {}
+    synthetic_parts = {
+        f"{articulation_id}::{part['part_id']}": (articulation_id, str(part["part_id"]))
+        for articulation_id, parts in (part_catalogs or {}).items()
+        for part in parts
+    }
+    normalized_bindings: dict[str, tuple[str, ...]] = {}
+    for reference_id, uids in raw_bindings.items():
+        normalized: list[str] = []
+        for uid in uids:
+            parent_part = synthetic_parts.get(uid)
+            if parent_part is None:
+                normalized.append(uid)
+            else:
+                parent_uid, part_id = parent_part
+                normalized.append(parent_uid)
+                part_bindings[reference_id] = part_id
+        normalized_bindings[reference_id] = tuple(normalized)
+    raw_bindings = normalized_bindings
+    if part_catalogs:
+        try:
+            part_bindings = ground_articulation_parts(
+                instruction,
+                candidate["draft"],
+                raw_bindings,
+                part_catalogs,
+                model,
+                caller,
+                force_most_likely=force_most_likely,
+                preselected=part_bindings,
+            )
+        except (TypeError, ValueError) as exc:
+            return (
+                _candidate_audit(candidate, "unresolved", [], [str(exc)]),
+                None,
+            )
     response_by_id = _response_bindings(responses[-1], candidate=candidate)
     self_reference_reasons = _self_reference_reasons(candidate["draft"], raw_bindings)
     reference_audits = []
@@ -586,7 +693,9 @@ def _ground_candidate(
                 "reference_id": reference_id,
                 "status": ("incompatible" if compatibility_reasons else "resolved"),
                 "confidence": float(response["confidence"]),
-                "candidate_uids": list(response["uids"]),
+                "candidate_uids": [
+                    synthetic_parts.get(uid, (uid, ""))[0] for uid in response["uids"]
+                ],
                 "selected_uids": ([] if compatibility_reasons else list(uids)),
                 "reasons": audit_reasons,
             }
@@ -600,8 +709,9 @@ def _ground_candidate(
             _candidate_audit(candidate, "incompatible", reference_audits, reasons),
             None,
         )
-    return _candidate_audit(candidate, "resolved", reference_audits, []), dict(
-        raw_bindings
+    return _candidate_audit(candidate, "resolved", reference_audits, []), (
+        dict(raw_bindings),
+        part_bindings,
     )
 
 

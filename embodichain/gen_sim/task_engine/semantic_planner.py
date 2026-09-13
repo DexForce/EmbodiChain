@@ -463,7 +463,22 @@ class SemanticTaskPlanner:
                     if requested in {"auto", "none"}
                     else _resource(requested, field="required_arm")
                 )
-                calls = recipe(object_id, str(step["target_state"]), resource)
+                part_id = bindings["role_bindings"].get(f"{step_id}.object")
+                if part_id is None:
+                    selector = step.get("object", {})
+                    source_step = (
+                        selector.get("step_id")
+                        if isinstance(selector, Mapping)
+                        else None
+                    )
+                    if source_step:
+                        part_id = bindings["role_bindings"].get(f"{source_step}.object")
+                calls = recipe(
+                    object_id,
+                    str(step["target_state"]),
+                    resource,
+                    part_id=part_id,
+                )
             else:
                 raise UnsupportedSemanticCapabilityError(
                     f"Task type {task_type!r} has no phase-one Semantic Call route."

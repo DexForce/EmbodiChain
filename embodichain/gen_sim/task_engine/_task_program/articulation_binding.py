@@ -26,7 +26,11 @@ from typing import Any
 
 import numpy as np
 
-__all__: list[str] = []
+__all__ = [
+    "ArticulationPartCandidate",
+    "discover_prismatic_parts",
+    "inspect_prismatic_part",
+]
 
 SLIDE_CALL = "gen_sim.articulation_slide"
 WITHDRAW_CALL = "gen_sim.articulation_withdraw"
@@ -44,6 +48,7 @@ class PrismaticBinding:
     scale: float
     axis: tuple[float, float, float]
     limits: tuple[float, float]
+    part_id: str = ""
 
     def __post_init__(self) -> None:
         for name in ("object_id", "joint", "link", "parent", "handle_path"):
@@ -54,6 +59,10 @@ class PrismaticBinding:
             raise ValueError(
                 "Prismatic binding requires distinct bodies and an absolute handle path."
             )
+        if self.part_id and (
+            not self.part_id.startswith("part_") or "/" in self.part_id
+        ):
+            raise ValueError("Prismatic part_id must be a stable local identifier.")
         if (
             type(self.source_sha256) is not str
             or len(self.source_sha256) != 64
@@ -116,13 +125,66 @@ class PrismaticBinding:
         )
 
     def payload(self) -> dict[str, Any]:
-        return asdict(self)
+        value = asdict(self)
+        if not self.part_id:
+            value.pop("part_id")
+        return value
 
     @classmethod
     def decode(cls, value: object) -> PrismaticBinding:
-        if type(value) is not dict or set(value) != {f.name for f in fields(cls)}:
+        allowed = {f.name for f in fields(cls)}
+        legacy = allowed - {"part_id"}
+        if type(value) is not dict or (set(value) != legacy and set(value) != allowed):
             raise ValueError("Prismatic binding requires exactly its declared fields.")
         return cls(**value)
+
+
+@dataclass(frozen=True, slots=True)
+class ArticulationPartCandidate:
+    """Deterministic, execution-free description of one prismatic part."""
+
+    part_id: str
+    joint_path: str
+    joint: str
+    parent_path: str
+    parent: str
+    link_path: str
+    link: str
+    handle_paths: tuple[str, ...]
+    axis: tuple[float, float, float]
+    limits: tuple[float, float]
+
+    def __post_init__(self) -> None:
+        if not self.part_id or not self.joint_path or not self.link_path:
+            raise ValueError("Articulation part identity must be non-empty.")
+        if not self.handle_paths:
+            raise ValueError(
+                "Articulation part requires at least one handle candidate."
+            )
+        if len(set(self.handle_paths)) != len(self.handle_paths):
+            raise ValueError("Articulation part handle paths must be unique.")
+        if len(self.axis) != 3 or not np.isfinite(self.axis).all():
+            raise ValueError("Articulation part axis must be finite and 3D.")
+        if not np.isclose(np.linalg.norm(self.axis), 1.0, atol=1e-6):
+            raise ValueError("Articulation part axis must be unit length.")
+        if len(self.limits) != 2 or not np.isfinite(self.limits).all():
+            raise ValueError("Articulation part limits must be finite and 2D.")
+        if self.limits[0] >= self.limits[1]:
+            raise ValueError("Articulation part limits must be increasing.")
+
+    def payload(self) -> dict[str, Any]:
+        return {
+            "part_id": self.part_id,
+            "joint_path": self.joint_path,
+            "joint": self.joint,
+            "parent_path": self.parent_path,
+            "parent": self.parent,
+            "link_path": self.link_path,
+            "link": self.link,
+            "handle_paths": list(self.handle_paths),
+            "axis": [float(value) for value in self.axis],
+            "limits": [float(value) for value in self.limits],
+        }
 
 
 def _stage(path: str | Path) -> Any:
@@ -143,8 +205,15 @@ def _stage(path: str | Path) -> Any:
     return stage
 
 
-def inspect_prismatic(config: dict[str, Any]) -> PrismaticBinding:
-    """Require one explicit mechanism; never select an arbitrary joint or mesh."""
+def discover_prismatic_parts(
+    config: dict[str, Any],
+) -> tuple[ArticulationPartCandidate, ...]:
+    """Discover every enabled prismatic part without selecting one for execution.
+
+    The result is intentionally a catalog candidate.  Handle selection and
+    runtime binding remain separate so that natural-language grounding cannot
+    bypass deterministic USD validation.
+    """
     from pxr import Gf, UsdGeom, UsdPhysics
 
     if config.get("fix_base") is not True:
@@ -158,69 +227,128 @@ def inspect_prismatic(config: dict[str, Any]) -> PrismaticBinding:
     ):
         raise ValueError("GenSim E6 requires positive uniform body_scale.")
     stage = _stage(config["fpath"])
-    joints = [
-        p
-        for p in stage.Traverse()
-        if p.IsA(UsdPhysics.Joint)
-        and not p.IsA(UsdPhysics.FixedJoint)
-        and UsdPhysics.Joint(p).GetJointEnabledAttr().Get() is not False
-    ]
-    if len(joints) != 1 or not joints[0].IsA(UsdPhysics.PrismaticJoint):
-        raise ValueError("GenSim E6 requires exactly one enabled prismatic joint.")
-    joint = UsdPhysics.PrismaticJoint(joints[0])
-    parents, children = (
-        joint.GetBody0Rel().GetTargets(),
-        joint.GetBody1Rel().GetTargets(),
-    )
-    if len(parents) != 1 or len(children) != 1:
-        raise ValueError("GenSim E6 requires an explicit parent and moving body.")
-    parent, body = stage.GetPrimAtPath(parents[0]), stage.GetPrimAtPath(children[0])
-    if not parent.HasAPI(UsdPhysics.RigidBodyAPI) or not body.HasAPI(
-        UsdPhysics.RigidBodyAPI
-    ):
-        raise ValueError("GenSim E6 joint bodies must be rigid bodies.")
-    for selected in (parent, body, joints[0]):
-        if sum(p.GetName() == selected.GetName() for p in stage.Traverse()) != 1:
-            raise ValueError(
-                "GenSim E6 native body and joint names must be unambiguous."
-            )
-    handles = [
-        p
-        for p in stage.Traverse()
-        if p.GetPath().HasPrefix(children[0])
-        and p.IsA(UsdGeom.Mesh)
-        and p.HasAPI(UsdPhysics.CollisionAPI)
-        and UsdPhysics.CollisionAPI(p).GetCollisionEnabledAttr().Get()
-        and any(token in p.GetName().lower() for token in ("handle", "grip", "pull"))
-        and not any(
-            token in p.GetName().lower()
-            for token in ("mount", "support", "post", "leg")
+    source_hash = hashlib.sha256(Path(config["fpath"]).read_bytes()).hexdigest()
+    candidates: list[ArticulationPartCandidate] = []
+    for prim in stage.Traverse():
+        if not prim.IsA(UsdPhysics.PrismaticJoint):
+            continue
+        joint = UsdPhysics.PrismaticJoint(prim)
+        if UsdPhysics.Joint(prim).GetJointEnabledAttr().Get() is False:
+            continue
+        parents, children = (
+            joint.GetBody0Rel().GetTargets(),
+            joint.GetBody1Rel().GetTargets(),
         )
-    ]
-    if len(handles) != 1:
-        raise ValueError("GenSim E6 requires one unambiguous handle collision mesh.")
-    axis = np.eye(3)[{"X": 0, "Y": 1, "Z": 2}[str(joint.GetAxisAttr().Get())]]
-    q = joint.GetLocalRot1Attr().Get()
-    axis = (
-        np.asarray(Gf.Matrix3d(Gf.Quatd(q.GetReal(), Gf.Vec3d(q.GetImaginary())))).T
-        @ axis
-    )
+        if len(parents) != 1 or len(children) != 1:
+            raise ValueError(
+                f"Prismatic joint {prim.GetPath()} requires one parent and child."
+            )
+        parent = stage.GetPrimAtPath(parents[0])
+        body = stage.GetPrimAtPath(children[0])
+        if not parent.HasAPI(UsdPhysics.RigidBodyAPI) or not body.HasAPI(
+            UsdPhysics.RigidBodyAPI
+        ):
+            raise ValueError(
+                f"Prismatic joint {prim.GetPath()} bodies must be rigid bodies."
+            )
+        handles = tuple(
+            str(p.GetPath())
+            for p in stage.Traverse()
+            if p.GetPath().HasPrefix(children[0])
+            and p.IsA(UsdGeom.Mesh)
+            and p.HasAPI(UsdPhysics.CollisionAPI)
+            and UsdPhysics.CollisionAPI(p).GetCollisionEnabledAttr().Get()
+            and any(
+                token in p.GetName().lower() for token in ("handle", "grip", "pull")
+            )
+            and not any(
+                token in p.GetName().lower()
+                for token in ("mount", "support", "post", "leg", "plate")
+            )
+        )
+        axis = np.eye(3)[{"X": 0, "Y": 1, "Z": 2}[str(joint.GetAxisAttr().Get())]]
+        q = joint.GetLocalRot1Attr().Get()
+        axis = (
+            np.asarray(Gf.Matrix3d(Gf.Quatd(q.GetReal(), Gf.Vec3d(q.GetImaginary())))).T
+            @ axis
+        )
+        joint_path = str(prim.GetPath())
+        link_path = str(children[0])
+        part_id = (
+            "part_"
+            + hashlib.sha256(
+                f"{source_hash}:{joint_path}:{link_path}".encode("utf-8")
+            ).hexdigest()[:16]
+        )
+        candidates.append(
+            ArticulationPartCandidate(
+                part_id=part_id,
+                joint_path=joint_path,
+                joint=prim.GetName(),
+                parent_path=str(parents[0]),
+                parent=parent.GetName(),
+                link_path=link_path,
+                link=body.GetName(),
+                handle_paths=handles,
+                axis=tuple(axis),
+                limits=tuple(
+                    float(v) * scale[0]
+                    for v in (
+                        joint.GetLowerLimitAttr().Get(),
+                        joint.GetUpperLimitAttr().Get(),
+                    )
+                ),
+            )
+        )
+    if not candidates:
+        raise ValueError("GenSim E6 requires at least one enabled prismatic joint.")
+    return tuple(sorted(candidates, key=lambda item: item.part_id))
+
+
+def _binding_from_candidate(
+    config: dict[str, Any],
+    candidate: ArticulationPartCandidate,
+    *,
+    include_part_id: bool = True,
+) -> PrismaticBinding:
+    if len(candidate.handle_paths) != 1:
+        raise ValueError(
+            f"GenSim E6 part {candidate.part_id!r} requires one unambiguous handle."
+        )
+    scale = float(np.asarray(config.get("body_scale", (1.0, 1.0, 1.0)))[0])
+    source_sha256 = hashlib.sha256(Path(config["fpath"]).read_bytes()).hexdigest()
     binding = PrismaticBinding(
         object_id=str(config["uid"]),
-        joint=joints[0].GetName(),
-        link=body.GetName(),
-        parent=parent.GetName(),
-        handle_path=str(handles[0].GetPath()),
-        source_sha256=hashlib.sha256(Path(config["fpath"]).read_bytes()).hexdigest(),
-        scale=float(scale[0]),
-        axis=tuple(axis),
-        limits=tuple(
-            float(v) * scale[0]
-            for v in (joint.GetLowerLimitAttr().Get(), joint.GetUpperLimitAttr().Get())
-        ),
+        joint=candidate.joint,
+        link=candidate.link,
+        parent=candidate.parent,
+        handle_path=candidate.handle_paths[0],
+        source_sha256=source_sha256,
+        scale=scale,
+        axis=candidate.axis,
+        limits=candidate.limits,
+        part_id=candidate.part_id if include_part_id else "",
     )
     handle_mesh(binding, config["fpath"])
     return binding
+
+
+def inspect_prismatic(config: dict[str, Any]) -> PrismaticBinding:
+    """Require one explicit mechanism; never select an arbitrary joint or mesh."""
+    parts = discover_prismatic_parts(config)
+    if len(parts) != 1:
+        raise ValueError("GenSim E6 requires exactly one enabled prismatic joint.")
+    return _binding_from_candidate(config, parts[0], include_part_id=False)
+
+
+def inspect_prismatic_part(config: dict[str, Any], part_id: str) -> PrismaticBinding:
+    """Resolve one catalog part into an executable binding."""
+    matches = [
+        part for part in discover_prismatic_parts(config) if part.part_id == part_id
+    ]
+    if len(matches) != 1:
+        raise ValueError(f"Unknown GenSim E6 part {part_id!r}.")
+    return _binding_from_candidate(config, matches[0])
 
 
 def handle_mesh(
@@ -265,14 +393,19 @@ def handle_mesh(
     return vertices, np.asarray(faces)
 
 
-def recipe(object_id: str, state: str, arm: str) -> list[dict[str, Any]]:
+def recipe(
+    object_id: str, state: str, arm: str, part_id: str | None = None
+) -> list[dict[str, Any]]:
     if state not in {"open", "closed"} or arm not in {"left", "right"}:
         raise ValueError("GenSim E6 requires an open/closed target and one arm.")
+    arguments = {"object": object_id, "state": state}
+    if part_id is not None:
+        arguments["part"] = part_id
     return [
         {
             "kind": "registered",
             "call_id": call_id,
-            "arguments": {"object": object_id, "state": state},
+            "arguments": arguments,
             "resources": {"primary": arm},
         }
         for call_id in (SLIDE_CALL, WITHDRAW_CALL)
@@ -301,11 +434,12 @@ def graph_bindings(graph: dict, scene: Any) -> dict[str, PrismaticBinding]:
             raise ValueError("E6 requires the complete Slide/withdraw/Park recipe.")
         call = sequence[0]["call"]
         args = call.get("arguments", {})
-        if set(args) != {"object", "state"}:
-            raise ValueError("E6 requires an exact object and state declaration.")
+        if set(args) not in ({"object", "state"}, {"object", "state", "part"}):
+            raise ValueError("E6 requires object/state and an optional part.")
+        part_id = args.get("part")
         arm = call.get("resources", {}).get("primary")
         if [node["call"] for node in sequence] != recipe(
-            args["object"], args["state"], arm
+            args["object"], args["state"], arm, part_id
         ):
             raise ValueError("E6 requires the complete Slide/withdraw/Park recipe.")
         if [node["role"] for node in sequence] != ["primary", "cleanup", "cleanup"]:
@@ -322,9 +456,14 @@ def graph_bindings(graph: dict, scene: Any) -> dict[str, PrismaticBinding]:
             raise ValueError(
                 f"E6 articulation {uid!r} is absent from the prepared scene."
             )
-        if uid not in result:
-            result[uid] = inspect_prismatic(configs[uid])
-            validate_placement(result[uid], configs[uid], scene.table_top_z)
+        result_key = uid if part_id is None else f"{uid}::{part_id}"
+        if result_key not in result:
+            result[result_key] = (
+                inspect_prismatic_part(configs[uid], part_id)
+                if part_id is not None
+                else inspect_prismatic(configs[uid])
+            )
+            validate_placement(result[result_key], configs[uid], scene.table_top_z)
     return result
 
 

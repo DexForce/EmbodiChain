@@ -526,7 +526,12 @@ def _program_payload(
         if group["task_type"] == "E6":
             first = next(n for n in graph["nodes"] if n["id"] == group["node_ids"][0])
             args = first["call"]["arguments"]
-            binding = articulation_bindings[args["object"]]
+            key = (
+                args["object"]
+                if "part" not in args
+                else f"{args['object']}::{args['part']}"
+            )
+            binding = articulation_bindings[key]
             target, tolerance = binding.target(args["state"]), binding.tolerance(
                 args["state"]
             )
@@ -865,7 +870,12 @@ def _integration_payload(
         }:
             if (
                 node["task_type"] != "E6"
-                or call["arguments"]["object"] not in articulation_bindings
+                or (
+                    call["arguments"]["object"]
+                    if "part" not in call["arguments"]
+                    else f"{call['arguments']['object']}::{call['arguments']['part']}"
+                )
+                not in articulation_bindings
             ):
                 raise ValueError("Articulation calls require an inspected E6 recipe.")
         elif call["kind"] == "registered":
@@ -964,7 +974,7 @@ def _integration_payload(
             "rigid_objects": rigid_bindings,
             "articulations": [
                 {"entity_id": uid, "simulation_uid": uid}
-                for uid in articulation_bindings
+                for uid in sorted({b.object_id for b in articulation_bindings.values()})
             ],
             "links": [
                 {

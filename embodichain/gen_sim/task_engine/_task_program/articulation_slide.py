@@ -58,15 +58,24 @@ from .articulation_binding import (
     WITHDRAW_CALL,
     handle_mesh,
     inspect_prismatic,
+    inspect_prismatic_part,
     validate_placement,
 )
 
 __all__: list[str] = []
 
 
+def _binding_key(binding: PrismaticBinding) -> str:
+    return (
+        binding.object_id
+        if not binding.part_id
+        else f"{binding.object_id}::{binding.part_id}"
+    )
+
+
 def synchronize_joint_limits(binding: PrismaticBinding, art: Any) -> None:
     """Validate native ownership and refresh only the stale public limit cache."""
-    if art is None or art.joint_names != [binding.joint]:
+    if art is None or binding.joint not in art.joint_names:
         raise ValueError(
             "Native prismatic joint identity differs from its declaration."
         )
@@ -83,17 +92,29 @@ def synchronize_joint_limits(binding: PrismaticBinding, art: Any) -> None:
         )
     if joint.joint_limits is None:
         raise ValueError("Native prismatic joint limits are unavailable.")
+    joint_index = art.joint_names.index(binding.joint)
     cached_limits = art.get_qpos_limits()
-    native_limits = cached_limits.new_tensor([[joint.joint_limits]])
-    if not torch.allclose(
-        native_limits,
-        cached_limits.new_tensor([[binding.limits]]),
-        atol=1e-6,
-        rtol=1e-5,
+    selected_limits = cached_limits[:, joint_index, :]
+    native_pair = selected_limits.new_tensor(joint.joint_limits)
+    declared_pair = selected_limits.new_tensor(binding.limits)
+    unscaled_pair = declared_pair / binding.scale
+    native_is_unscaled = bool(binding.part_id) and torch.allclose(
+        native_pair, unscaled_pair, atol=1e-6, rtol=1e-5
+    )
+    if (
+        not torch.allclose(native_pair, declared_pair, atol=1e-6, rtol=1e-5)
+        and not native_is_unscaled
     ):
         raise ValueError(
-            "Native prismatic limits differ from the scaled asset binding."
+            "Native prismatic limits differ from the scaled asset binding: "
+            f"native={native_pair.detach().cpu().tolist()}, "
+            f"declared={declared_pair.detach().cpu().tolist()}."
         )
+    native_limits = cached_limits.clone()
+    if native_is_unscaled:
+        native_limits[:, joint_index, :] = declared_pair
+    else:
+        native_limits[:, joint_index, :] = native_pair
     if not torch.allclose(cached_limits, native_limits, atol=1e-6, rtol=1e-5):
         # Reapply the already-active native limits to refresh the pre-scale cache.
         art.set_qpos_limits(native_limits)
@@ -125,15 +146,18 @@ def _bind(
         art = simulation.get_articulation(binding.object_id)
         if art is None:
             raise ValueError("Declared prismatic articulation is absent.")
-        checked = inspect_prismatic(
-            {
-                "uid": binding.object_id,
-                "fpath": art.cfg.fpath,
-                "fix_base": art.cfg.fix_base,
-                "body_scale": art.cfg.body_scale,
-            }
+        config = {
+            "uid": binding.object_id,
+            "fpath": art.cfg.fpath,
+            "fix_base": art.cfg.fix_base,
+            "body_scale": art.cfg.body_scale,
+        }
+        checked = (
+            inspect_prismatic_part(config, binding.part_id)
+            if binding.part_id
+            else inspect_prismatic(config)
         )
-        if checked != binding or art.joint_names != [binding.joint]:
+        if checked != binding or binding.joint not in art.joint_names:
             raise ValueError(
                 "Prismatic asset identity or native joint binding changed."
             )
@@ -168,7 +192,7 @@ def _bind(
                 joint_limits=binding.limits,
             ),
         )
-        result[binding.object_id] = (binding, semantics, art)
+        result[_binding_key(binding)] = (binding, semantics, art)
     return result
 
 
@@ -182,11 +206,18 @@ class _SlideLowerer(RegisteredSemanticLowerer):
 
     def _selection(self, call: Any, context: Any, bound: Any) -> tuple:
         args = dict(call.arguments)
-        if set(args) != {"object", "state"} or args["object"] not in self.bindings:
+        if set(args) not in ({"object", "state"}, {"object", "state", "part"}):
             raise ValueError(
-                "Articulation calls require an exact declared object and state."
+                "Articulation calls require object/state and an optional part."
             )
-        binding, semantics, art = self.bindings[args["object"]]
+        key = (
+            args["object"]
+            if "part" not in args
+            else f"{args['object']}::{args['part']}"
+        )
+        if key not in self.bindings:
+            raise ValueError("Articulation call references an undeclared part.")
+        binding, semantics, art = self.bindings[key]
         target = binding.target(args["state"])
         endpoint = bound.binding.action_binding.endpoint("primary", "motion")
         held = context.task.get_held_object(endpoint.task_state_key)
@@ -275,9 +306,7 @@ class _WithdrawLowerer(_SlideLowerer):
         withdrawn = raised.clone()
         withdrawn[:, :3, 3] += 0.10 * outward
         return SemanticLowering(
-            goal=EndEffectorPoseGoal(
-                torch.stack((current, raised, withdrawn), dim=1)
-            )
+            goal=EndEffectorPoseGoal(torch.stack((current, raised, withdrawn), dim=1))
         )
 
 
@@ -337,7 +366,7 @@ class ArticulationSlideFactory(RegisteredSemanticLowererFactory):
             raise ValueError(
                 "Articulation factories require immutable prismatic bindings."
             )
-        if len({b.object_id for b in self.bindings}) != len(self.bindings):
+        if len({_binding_key(b) for b in self.bindings}) != len(self.bindings):
             raise ValueError(
                 "Articulation bindings must have unique object identities."
             )
@@ -369,7 +398,8 @@ class ArticulationWithdrawFactory(ArticulationSlideFactory):
 
 def preset_id(binding: PrismaticBinding, state: str) -> str:
     binding.target(state)
-    return f"gen_sim.articulation.{binding.object_id}.{state}"
+    suffix = f".{binding.part_id}" if binding.part_id else ""
+    return f"gen_sim.articulation.{binding.object_id}{suffix}.{state}"
 
 
 class ArticulationStabilityPort:

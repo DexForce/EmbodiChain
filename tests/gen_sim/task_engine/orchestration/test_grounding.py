@@ -22,6 +22,7 @@ import json
 import pytest
 
 from embodichain.gen_sim.task_engine.orchestration.grounding import (
+    ground_articulation_parts,
     ground_scene_references,
 )
 from embodichain.gen_sim.task_engine.orchestration.scene_inventory import SceneInventory
@@ -337,3 +338,44 @@ def test_grounding_accepts_a_nonempty_all_binding() -> None:
     result = _run(intent, lambda **_kwargs: response)
 
     assert result.bindings["move.object"] == ("cutting_board", "salt_shaker")
+
+
+def test_part_grounding_selects_only_catalog_ids() -> None:
+    intent = {
+        "steps": [
+            {
+                "id": "slide",
+                "task_type": "E6",
+                "object": _selector("right drawer"),
+            }
+        ]
+    }
+    catalogs = {
+        "drawer_unit": [
+            {"part_id": "part_left", "joint": "left_slide", "link": "left_drawer"},
+            {"part_id": "part_right", "joint": "right_slide", "link": "right_drawer"},
+        ]
+    }
+
+    def caller(**kwargs):
+        assert "part_right" in kwargs["prompt"]
+        return {
+            "bindings": [
+                {
+                    "reference_id": "slide.object",
+                    "status": "resolved",
+                    "part_id": "part_right",
+                    "confidence": 0.95,
+                }
+            ]
+        }
+
+    result = ground_articulation_parts(
+        "open the right drawer",
+        intent,
+        {"slide.object": ["drawer_unit"]},
+        catalogs,
+        "test-model",
+        caller,
+    )
+    assert result == {"slide.object": "part_right"}

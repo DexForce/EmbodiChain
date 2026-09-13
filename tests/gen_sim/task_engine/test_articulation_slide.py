@@ -42,6 +42,7 @@ from embodichain.gen_sim.task_engine._task_program.articulation_binding import (
     PrismaticBinding,
     SLIDE_CALL,
     WITHDRAW_CALL,
+    discover_prismatic_parts,
     inspect_prismatic,
 )
 from embodichain.gen_sim.task_engine._task_program.articulation_slide import (
@@ -168,6 +169,109 @@ def _graph(scene: PreparedScene, states: tuple[str, ...] = ("open",)) -> dict:
         "role_bindings": {},
     }
     return SemanticTaskPlanner().plan(candidate, bindings, scene.planner_objects)
+
+
+def test_discover_prismatic_parts_returns_all_enabled_parts(
+    scene: PreparedScene,
+) -> None:
+    stage = Usd.Stage.Open(scene.articulations[0]["fpath"])
+    right = UsdGeom.Xform.Define(stage, "/fixture/right_drawer")
+    UsdPhysics.RigidBodyAPI.Apply(right.GetPrim())
+    mesh = UsdGeom.Mesh.Define(stage, "/fixture/right_drawer/right_handle")
+    shape = trimesh.creation.box(extents=(0.15, 0.04, 0.04))
+    mesh.CreatePointsAttr(shape.vertices.tolist())
+    mesh.CreateFaceVertexCountsAttr([3] * len(shape.faces))
+    mesh.CreateFaceVertexIndicesAttr(shape.faces.flatten().tolist())
+    UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
+    joint = UsdPhysics.PrismaticJoint.Define(stage, "/fixture/right_slide")
+    joint.CreateBody0Rel().SetTargets(["/fixture/cabinet"])
+    joint.CreateBody1Rel().SetTargets(["/fixture/right_drawer"])
+    joint.CreateAxisAttr("Y")
+    joint.CreateLowerLimitAttr(-0.2)
+    joint.CreateUpperLimitAttr(0.0)
+    stage.GetRootLayer().Save()
+
+    parts = discover_prismatic_parts(scene.articulations[0])
+    assert len(parts) == 2
+    assert {part.joint for part in parts} == {"slide", "right_slide"}
+    assert all(part.part_id.startswith("part_") for part in parts)
+    assert all(len(part.handle_paths) == 1 for part in parts)
+
+
+def test_multi_part_bundle_keeps_distinct_bindings(
+    scene: PreparedScene, tmp_path: Path
+) -> None:
+    stage = Usd.Stage.Open(scene.articulations[0]["fpath"])
+    right = UsdGeom.Xform.Define(stage, "/fixture/right_drawer")
+    UsdPhysics.RigidBodyAPI.Apply(right.GetPrim())
+    mesh = UsdGeom.Mesh.Define(stage, "/fixture/right_drawer/right_handle")
+    shape = trimesh.creation.box(extents=(0.15, 0.04, 0.04))
+    mesh.CreatePointsAttr(shape.vertices.tolist())
+    mesh.CreateFaceVertexCountsAttr([3] * len(shape.faces))
+    mesh.CreateFaceVertexIndicesAttr(shape.faces.flatten().tolist())
+    UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
+    joint = UsdPhysics.PrismaticJoint.Define(stage, "/fixture/right_slide")
+    joint.CreateBody0Rel().SetTargets(["/fixture/cabinet"])
+    joint.CreateBody1Rel().SetTargets(["/fixture/right_drawer"])
+    joint.CreateAxisAttr("Y")
+    joint.CreateLowerLimitAttr(-0.2)
+    joint.CreateUpperLimitAttr(0.0)
+    stage.GetRootLayer().Save()
+    parts = discover_prismatic_parts(scene.articulations[0])
+    part_ids = {part.joint: part.part_id for part in parts}
+    empty = {
+        "kind": "none",
+        "reference": "",
+        "step_id": "",
+        "quantifier": "one",
+        "count": 0,
+    }
+    steps = [
+        {
+            **deepcopy(_INTENT_FIELD_DEFAULTS),
+            "id": "step_01",
+            "task_type": "E6",
+            "object": {**empty, "kind": "scene_ref", "reference": "drawer"},
+            "target": empty,
+            "required_arm": "right_arm",
+            "target_state": "open",
+            "depends_on": [],
+        },
+        {
+            **deepcopy(_INTENT_FIELD_DEFAULTS),
+            "id": "step_02",
+            "task_type": "E6",
+            "object": {**empty, "kind": "scene_ref", "reference": "drawer"},
+            "target": empty,
+            "required_arm": "left_arm",
+            "target_state": "closed",
+            "depends_on": ["step_01"],
+        },
+    ]
+    candidate = TaskAgent(caller=lambda **kw: {"steps": steps}).generate(
+        "multi", "operate both drawers", candidate_count=1
+    )["candidates"][0]
+    bindings = {
+        "schema_version": ROLE_BINDINGS_SCHEMA,
+        "task_id": "multi",
+        "candidate_id": candidate["candidate_id"],
+        "reference_bindings": {
+            "step_01.object": ["drawer"],
+            "step_02.object": ["drawer"],
+        },
+        "role_bindings": {
+            "step_01.object": part_ids["slide"],
+            "step_02.object": part_ids["right_slide"],
+        },
+    }
+    graph = SemanticTaskPlanner().plan(candidate, bindings, scene.planner_objects)
+    _, paths = generate_task_program_bundle(
+        graph, scene, tmp_path / "multi_bundle", robot_profile="dual_franka"
+    )
+    integration = load_config(paths.integration)
+    assert len(integration["scene_binding"]["links"]) == 2
+    lowerers = integration["runtime_services"]["registered_semantic_lowerers"]
+    assert len(lowerers[0]["bindings"]) == 2
 
 
 @pytest.mark.parametrize("states", [("open",), ("closed",), ("open", "closed")])
@@ -431,9 +535,7 @@ def test_lowerers_keep_exact_joint_goal_and_require_open_hand_for_withdrawal(
         call, context=context, bound=bound, option_template=MoveEndEffectorOptions()
     )
     assert withdrawal.goal.xpos.shape == (1, 3, 4, 4)
-    torch.testing.assert_close(
-        withdrawal.goal.xpos[0, 1, 2, 3], torch.tensor(0.12)
-    )
+    torch.testing.assert_close(withdrawal.goal.xpos[0, 1, 2, 3], torch.tensor(0.12))
     assert torch.linalg.vector_norm(withdrawal.goal.xpos[0, 2, :2, 3]) > 0.09
     context.robot.qpos[:, 6:] = 0.1
     with pytest.raises(ValueError, match="open posture"):
