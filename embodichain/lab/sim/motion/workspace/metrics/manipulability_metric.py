@@ -166,5 +166,16 @@ class ManipulabilityMetric(BaseMetric):
         Returns:
             Condition numbers, shape (N,).
         """
-        tensor = torch.as_tensor(np.asarray(jacobians), dtype=torch.float64)
-        return condition_number(tensor).cpu().numpy()
+        try:
+            tensor = torch.as_tensor(np.asarray(jacobians), dtype=torch.float64)
+            return condition_number(tensor).cpu().numpy()
+        except RuntimeError:
+            # Preserve the pre-existing degradation: if batched SVD fails,
+            # fall back to per-matrix computation with inf on failure.
+            condition_numbers = np.zeros(len(jacobians))
+            for i, J in enumerate(jacobians):
+                try:
+                    condition_numbers[i] = np.linalg.cond(J)
+                except np.linalg.LinAlgError:
+                    condition_numbers[i] = np.inf
+            return condition_numbers
