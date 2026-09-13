@@ -16,7 +16,12 @@
 
 from typing import Dict, Any
 import numpy as np
+import torch
 from embodichain.utils import logger
+from embodichain.compute.kinematics import (
+    condition_number,
+    yoshikawa_manipulability,
+)
 from embodichain.lab.sim.motion.workspace.metrics.base_metric import (
     BaseMetric,
 )
@@ -70,12 +75,18 @@ class ManipulabilityMetric(BaseMetric):
                 - std_manipulability: Standard deviation
                 - min_manipulability: Minimum value
                 - max_manipulability: Maximum value
+                - num_valid_points: Count of points above ``jacobian_threshold``
                 - mean_condition: Average condition number (if isotropy enabled
-                  and Jacobians were provided)
+                  and Jacobians/condition numbers were provided)
 
             Without ``jacobians`` or ``manipulability_scores`` an empty dict is
             returned: true manipulability cannot be derived from Cartesian
             points alone, and fabricated statistics are worse than none.
+
+            When no point passes ``jacobian_threshold`` (all singular, or the
+            threshold exceeds every score), ``num_valid_points`` is ``0`` and
+            the manipulability statistics are ``NaN`` rather than a fabricated
+            ``0.0`` that would masquerade as one valid point.
         """
         points = self._to_numpy(workspace_points)
 
@@ -85,6 +96,7 @@ class ManipulabilityMetric(BaseMetric):
                 "std_manipulability": 0.0,
                 "min_manipulability": 0.0,
                 "max_manipulability": 0.0,
+                "num_valid_points": 0,
             }
 
         if manipulability_scores is not None:
@@ -102,7 +114,17 @@ class ManipulabilityMetric(BaseMetric):
         valid_mask = manipulability_scores >= self.config.jacobian_threshold
         valid_scores = manipulability_scores[valid_mask]
         if len(valid_scores) == 0:
-            valid_scores = np.array([0.0])
+            # No point cleared the threshold. Report a true zero count with
+            # NaN statistics instead of substituting a single 0.0 score, which
+            # previously reported num_valid_points == 1 for an empty set.
+            self.results = {
+                "mean_manipulability": float("nan"),
+                "std_manipulability": float("nan"),
+                "min_manipulability": float("nan"),
+                "max_manipulability": float("nan"),
+                "num_valid_points": 0,
+            }
+            return self.results
 
         self.results = {
             "mean_manipulability": float(valid_scores.mean()),
@@ -124,7 +146,7 @@ class ManipulabilityMetric(BaseMetric):
         return self.results
 
     def _compute_manipulability_index(self, jacobians: np.ndarray) -> np.ndarray:
-        """Compute Yoshikawa manipulability index with batched operations.
+        """Yoshikawa index via the shared compute helper, numpy in/out.
 
         Args:
             jacobians: Jacobian matrices, shape (N, rows, cols).
@@ -132,17 +154,11 @@ class ManipulabilityMetric(BaseMetric):
         Returns:
             Manipulability indices, shape (N,).
         """
-        # Batch matrix multiply: J @ J^T for all samples
-        JJT = np.matmul(jacobians, np.swapaxes(jacobians, -2, -1))
-
-        # Batch determinant
-        dets = np.linalg.det(JJT)
-
-        # sqrt(max(0, det))
-        return np.sqrt(np.maximum(dets, 0.0))
+        tensor = torch.as_tensor(np.asarray(jacobians), dtype=torch.float64)
+        return yoshikawa_manipulability(tensor).cpu().numpy()
 
     def _compute_condition_numbers(self, jacobians: np.ndarray) -> np.ndarray:
-        """Compute condition numbers of Jacobian matrices with batched SVD.
+        """Condition numbers via the shared compute helper, numpy in/out.
 
         Args:
             jacobians: Jacobian matrices, shape (N, rows, cols).
@@ -150,20 +166,5 @@ class ManipulabilityMetric(BaseMetric):
         Returns:
             Condition numbers, shape (N,).
         """
-        try:
-            _, singular_values, _ = np.linalg.svd(jacobians, full_matrices=False)
-            # Condition number = max singular value / min singular value
-            max_sv = singular_values[:, 0]
-            min_sv = singular_values[:, -1]
-            # Avoid division by zero
-            min_sv = np.maximum(min_sv, 1e-15)
-            return max_sv / min_sv
-        except np.linalg.LinAlgError:
-            # Fallback to per-matrix computation if batch SVD fails
-            condition_numbers = np.zeros(len(jacobians))
-            for i, J in enumerate(jacobians):
-                try:
-                    condition_numbers[i] = np.linalg.cond(J)
-                except np.linalg.LinAlgError:
-                    condition_numbers[i] = np.inf
-            return condition_numbers
+        tensor = torch.as_tensor(np.asarray(jacobians), dtype=torch.float64)
+        return condition_number(tensor).cpu().numpy()

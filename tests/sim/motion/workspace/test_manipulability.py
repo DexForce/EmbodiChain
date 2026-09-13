@@ -78,6 +78,26 @@ class TestManipulabilityMetricUnit:
         )
         assert abs(out["mean_condition"] - 4.0) < 1e-9
 
+    def test_all_below_threshold_reports_zero_valid_points(self):
+        """No score clears the threshold: count must be 0, not a fake 1."""
+        from embodichain.lab.sim.motion.workspace.configs.metric_config import (
+            ManipulabilityConfig,
+        )
+
+        metric = ManipulabilityMetric(ManipulabilityConfig(jacobian_threshold=1.0))
+        out = metric.compute(
+            np.zeros((4, 3)), manipulability_scores=np.array([0.1, 0.2, 0.0, 0.3])
+        )
+        assert out["num_valid_points"] == 0
+        assert np.isnan(out["mean_manipulability"])
+        assert np.isnan(out["min_manipulability"])
+
+    def test_all_zero_scores_report_zero_valid_points(self):
+        metric = ManipulabilityMetric()
+        out = metric.compute(np.zeros((3, 3)), manipulability_scores=np.zeros(3))
+        assert out["num_valid_points"] == 0
+        assert np.isnan(out["mean_manipulability"])
+
 
 class TestAnalyzerManipulability:
     """End-to-end score plumbing on the library CobotMagic robot."""

@@ -47,6 +47,10 @@ from embodichain.lab.sim.motion.workspace.configs import (
     MetricConfig,
     MetricType,
 )
+from embodichain.compute.kinematics import (
+    condition_number,
+    yoshikawa_manipulability,
+)
 from embodichain.lab.sim.motion.workspace.metrics.manipulability_metric import (
     ManipulabilityMetric,
 )
@@ -2065,13 +2069,9 @@ class WorkspaceAnalyzer:
                     device=solver.device,
                 )
                 jac = solver.get_jacobian(chunk)
-                jjt = jac @ jac.transpose(1, 2)
-                scores.append(torch.sqrt(torch.clamp(torch.det(jjt), min=0.0)))
+                scores.append(yoshikawa_manipulability(jac))
                 if want_isotropy:
-                    singulars = torch.linalg.svdvals(jac)
-                    conditions.append(
-                        singulars[:, 0] / torch.clamp(singulars[:, -1], min=1e-15)
-                    )
+                    conditions.append(condition_number(jac))
         return (
             torch.cat(scores).to(self.device),
             torch.cat(conditions).to(self.device) if conditions else None,
