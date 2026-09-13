@@ -8,6 +8,9 @@
    True})` invokes `DatasetManager.apply("save", env_ids)` before the relevant rows are
    cleared. `finalize()` is a storage barrier only; it never commits a live rollout
    implicitly.
+   Expert actions follow the environment's stored-action schema: active qpos by
+   default, or flat `[qpos, qvel]` with matching feature names and metadata when
+   position-velocity mode is enabled. The policy action space is not resized.
 2. Recorder construction requires `1 / env.step_dt` to be an exact integer FPS. Non-integral
    simulation rates fail early.
 3. `_save_episodes()` slices only valid lengths. Segment-fragment mode creates independent

@@ -125,13 +125,13 @@ class _AbsolutePoseTarget:
     """Tensor-free absolute pose stored in a fingerprinted declaration."""
 
     position: tuple[float, float, float]
-    quaternion_wxyz: tuple[float, float, float, float]
+    quaternion_xyzw: tuple[float, float, float, float]
 
     def __post_init__(self) -> None:
         object.__setattr__(
             self, "position", _point(self.position, field_name="position")
         )
-        quaternion = self.quaternion_wxyz
+        quaternion = self.quaternion_xyzw
         if (
             type(quaternion) is not tuple
             or len(quaternion) != 4
@@ -142,12 +142,12 @@ class _AbsolutePoseTarget:
                 for value in quaternion
             )
         ):
-            raise ValueError("quaternion_wxyz must contain four finite real values.")
+            raise ValueError("quaternion_xyzw must contain four finite real values.")
         norm = math.hypot(*quaternion)
         if norm <= 1.0e-8:
-            raise ValueError("quaternion_wxyz must be non-zero.")
+            raise ValueError("quaternion_xyzw must be non-zero.")
         object.__setattr__(
-            self, "quaternion_wxyz", tuple(value / norm for value in quaternion)
+            self, "quaternion_xyzw", tuple(value / norm for value in quaternion)
         )
 
     def snapshot(self) -> _AbsolutePoseTarget:
@@ -156,7 +156,7 @@ class _AbsolutePoseTarget:
 
     def to_matrix(self) -> torch.Tensor:
         """Create an independently owned runtime pose."""
-        return SemanticPose(self.position, self.quaternion_wxyz).to_matrix()
+        return SemanticPose(self.position, self.quaternion_xyzw).to_matrix()
 
 
 def _configured_goal_pose(
@@ -489,7 +489,7 @@ class _MoveHeldObjectLowerer(RegisteredSemanticLowerer):
         return (
             SemanticObjectTarget(
                 pose=(
-                    SemanticPose(route.pose.position, route.pose.quaternion_wxyz)
+                    SemanticPose(route.pose.position, route.pose.quaternion_xyzw)
                     if type(route.pose) is _AbsolutePoseTarget
                     else _configured_goal_pose(route.pose)
                 )

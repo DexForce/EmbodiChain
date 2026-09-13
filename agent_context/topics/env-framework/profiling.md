@@ -70,3 +70,23 @@ minus measured children). It is also flushed automatically in `close()` **before
 parent; the first `warmup_steps` samples are discarded.
 
 ---
+
+## Startup information table
+
+`BaseEnv._setup_scene()` constructs `SimulationManager` with
+`defer_startup_summary=True`, preserving the requested headless state while the
+scene is assembled. `_log_initialization_summary()` reuses the shared
+`sim/_startup_summary.py` simulation and scene rows, then adds seed, control
+timing, episode limit, robot identity, metadata, and manager counts.
+`EmbodiedEnv` keeps its later initialization-complete boundary so all managers
+are available. Each environment emits the tables once and consumes the
+simulation-owned startup and scene snapshots.
+
+`SimulationManagerCfg.startup_summary` accepts `compact`, `full`, and `off`.
+Compact and full keep manager status/counts in the main table and append a
+separate **Functor Details** table in configured execution order. Full also
+shows qualified callable paths and parameters; large containers, tensors, and
+arbitrary objects get bounded descriptions without evaluating functors or
+transferring tensor data. `off` disables both tables. Gym JSON/YAML accepts
+top-level `startup_summary` and `dexsim_startup_info` and forwards them through
+`config_to_cfg()`.

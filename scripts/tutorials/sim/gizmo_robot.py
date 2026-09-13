@@ -13,21 +13,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Control a UR10 end effector with a Gizmo and manual physics stepping."""
+"""Control a UR10 end effector with a Gizmo and explicit physics stepping."""
 
 from __future__ import annotations
 
 import time
+import argparse
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create a simulation scene with SimulationManager"
+    )
+    add_sim_args_to_parser(parser)
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
 import torch
 import numpy as np
-import argparse
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import GizmoCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     RobotCfg,
     URDFCfg,
     JointDrivePropertiesCfg,
@@ -38,15 +55,13 @@ from embodichain.data import get_data_path
 from embodichain.utils import logger
 
 
-def main():
+def main(args: argparse.Namespace | None = None) -> None:
     """Main function to create and run the simulation scene."""
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="Create a simulation scene with SimulationManager"
-    )
-    add_env_launcher_args_to_parser(parser)
-    args = parser.parse_args()
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
 
     # Configure the simulation
     sim_cfg = SimulationManagerCfg(
@@ -54,8 +69,9 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
         robot_ik_gizmo=GizmoCfg(ik_start_enabled=True),
     )
@@ -83,7 +99,8 @@ def main():
                 dt=0.1,
             )
         },
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={"Joint[1-6]": 1e4},
             damping={"Joint[1-6]": 1e3},
         ),
@@ -98,6 +115,8 @@ def main():
         dtype=torch.float32,
         device=sim.device,
     )
+
+    sim.prepare()
     joint_ids = robot.get_joint_ids("arm")
     robot.set_qpos(qpos=initial_qpos, joint_ids=joint_ids, target=False)
     robot.set_qpos(qpos=initial_qpos, joint_ids=joint_ids)
@@ -159,4 +178,4 @@ def run_simulation(sim: SimulationManager) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

@@ -75,7 +75,7 @@ def _decode_goal_pose(
         path=path,
         required=frozenset({"kind"}),
         optional=frozenset(
-            {"position", "quaternion_wxyz", "entity_id", "relative_pose"}
+            {"position", "quaternion_xyzw", "entity_id", "relative_pose"}
         ),
     )
     kind = _identifier(common["kind"], path=f"{path}.kind")
@@ -83,15 +83,15 @@ def _decode_goal_pose(
         config = _mapping(
             value,
             path=path,
-            required=frozenset({"kind", "position", "quaternion_wxyz"}),
+            required=frozenset({"kind", "position", "quaternion_xyzw"}),
         )
         return _AbsolutePoseTarget(
             _finite_tuple(
                 config["position"], path=f"{path}.position", expected_length=3
             ),
             _finite_tuple(
-                config["quaternion_wxyz"],
-                path=f"{path}.quaternion_wxyz",
+                config["quaternion_xyzw"],
+                path=f"{path}.quaternion_xyzw",
                 expected_length=4,
             ),
         )

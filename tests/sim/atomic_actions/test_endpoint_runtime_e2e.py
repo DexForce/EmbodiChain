@@ -128,6 +128,7 @@ class _Provider:
             task=task_state,
             scene=SceneSnapshot(timestamp=timestamp, version=0),
             env_ids=self.env_ids,
+            control_dt=0.01,
         )
 
 

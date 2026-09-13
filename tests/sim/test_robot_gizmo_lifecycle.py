@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import numpy as np
 import pytest
@@ -138,11 +138,13 @@ def managed_robot(monkeypatch: pytest.MonkeyPatch):
         "_rigid_objects",
         "_rigid_object_groups",
         "_articulations",
-        "_soft_objects",
-        "_cloth_objects",
+        "_deformable_objects",
         "_sensors",
     ):
         setattr(sim, registry, {})
+    sim._spawn_scene = MagicMock()
+    sim._spawn_scene.__contains__.side_effect = lambda uid: uid in sim._robots
+    sim._spawn_scene.builder.is_finalized = False
     sim.process_pick_commands = Mock(return_value=0)
     sim.process_visualization_commands = Mock(return_value=0)
 
@@ -323,7 +325,9 @@ def test_robot_removal_cleans_native_controls_and_allows_same_uid_again(
     assert not sim._window.controls
     assert sim._world.env.remove_gizmo.call_count == 2
     assert sim._world.env.remove_dummy_node.call_count == 2
-    robot.destroy.assert_called_once()
+    sim._spawn_scene.remove.assert_called_once_with("robot")
+    assert "robot" not in sim._robots
+    robot.destroy.assert_not_called()
     sim._robots["robot"] = _Robot()
     sim._world.key_down = False
     sim.update_gizmos()

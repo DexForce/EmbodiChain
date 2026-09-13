@@ -35,18 +35,21 @@ from embodichain.lab.visualization.protocol import (
 )
 
 
-def test_pose_conversion_preserves_embodichain_wxyz_order() -> None:
-    pose = np.array([1.0, 2.0, 3.0, 2.0, 0.0, 0.0, 0.0], dtype=np.float32)
+def test_pose_conversion_converts_embodichain_xyzw_to_protocol_wxyz() -> None:
+    pose = np.array([1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 4.0], dtype=np.float32)
 
     position, wxyz = pose_to_position_wxyz(pose)
 
     np.testing.assert_allclose(position, [1.0, 2.0, 3.0])
-    np.testing.assert_allclose(wxyz, [1.0, 0.0, 0.0, 0.0])
+    np.testing.assert_allclose(
+        wxyz,
+        np.array([4.0, 1.0, 2.0, 3.0]) / np.sqrt(30.0),
+    )
 
 
 def test_pose_conversion_accepts_batch_of_four_pose_vectors() -> None:
     poses = np.tile(
-        np.array([[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]], dtype=np.float32),
+        np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]], dtype=np.float32),
         (4, 1),
     )
 

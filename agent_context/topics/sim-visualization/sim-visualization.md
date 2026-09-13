@@ -48,6 +48,12 @@ The simulation owns physics and assets. Scene export is read-only. When
 `allow_commands=True`, Viser Gizmo callbacks enqueue pose commands that
 `SimulationManager` later applies on the simulation thread.
 
+`SimulationManager` may start the Viser server during its own construction,
+before a standalone caller has declared any assets. That empty visualization
+startup must not call `prepare()` or finalize the Spawn scene. The caller's
+first asset-bearing `prepare()` remains the initial topology commit; the next
+capture observes the topology revision and republishes the manifest.
+
 All DexSim and Torch reads happen in `SceneExporter` on the simulation thread.
 Protocol objects make detached CPU copies before crossing into the runtime.
 Viser creation and every Viser handle mutation must happen on the single
@@ -71,6 +77,11 @@ this invariant.
   dynamic vertex shapes match the published manifest.
 - Topology changes require a new manifest; pose-only changes require only a
   frame.
+- Starting Viser with empty asset registries must not finalize Spawn. Initial
+  scene materialization belongs to the first `prepare()` after declaration.
+- Newton articulation export combines every render mesh belonging to a link
+  and offsets face indices into the concatenated vertex array. Links without
+  render meshes export empty geometry without querying mesh zero.
 - Sampling rates are wall-clock limits, not simulation-time guarantees.
 - Bind to loopback by default. Viser has no EmbodiChain authentication layer;
   use SSH forwarding or an authenticated gateway for remote access.
@@ -82,9 +93,10 @@ this invariant.
 | `Visualization env_ids ... outside simulation range` | Selected IDs do not exist in the configured arenas. Validate them against `SimulationManager.num_envs`. |
 | Startup timeout or address-in-use error | The Viser worker did not become ready or the configured port is occupied. Select another port and inspect `visualization_health.worker_error`. |
 | Asset added after startup is missing | Step once, call `refresh_visualization()`, or mark topology dirty if the change bypassed manager APIs. |
+| Newton Viser shows only the grid after declaring a robot | Check that Viser startup did not finalize an empty Spawn scene before asset declaration and that link poses remain finite after the first update. |
+| A Newton articulation link is missing geometry or emits `mesh_id 0 out of range` | Export all render-body mesh segments and treat a zero-mesh link as empty geometry. Do not use the single-mesh articulation helper for Newton render bodies. |
 | Browser stops updating after an exporter/backend exception | `capture_visualization_safely()` latches the first error to protect simulation. Inspect health/logs, then stop and restart after fixing the cause. |
-| Soft body looks inflated or loses cavities | The surface is a collision-vertex convex hull, not the render topology. |
-| Cloth construction raises a mapping error | Render vertices do not match the welded physical rest vertices within tolerance. |
+| Replicated soft body fails with a render-vertex-count mismatch | DexSim produced clone render topology different from the source. Use one environment or a compatible mesh until replication preserves the topology. |
 | Camera frustum exists but preview is blank | Color capture is disabled, no image has been captured yet, or the selected camera/environment is hidden. |
 | Stereo/contact sensor is absent | Current camera export accepts only `sensor_type == "Camera"`; non-mesh sensors are not exported. |
 | Browser lags or upload cost is high | Reduce scene/image/deformable FPS, select fewer environments, or lower point-cloud limits. |

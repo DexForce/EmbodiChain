@@ -249,7 +249,7 @@ class SemanticTaskPlanner:
                             "position": [
                                 float(value) for value in objects[object_id]["init_pos"]
                             ],
-                            "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                            "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
                         }
                     ],
                 }
@@ -878,7 +878,7 @@ def _upright_targets(step_id: str, position: list[float]) -> dict[str, Any]:
         f"{step_id}_{suffix}": {
             "kind": "cyclic_pose",
             "values": [
-                {"position": list(position), "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0]}
+                {"position": list(position), "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0]}
             ],
         }
         for suffix in ("upright_target", "upright_staging_target")

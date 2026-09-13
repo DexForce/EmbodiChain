@@ -16,8 +16,10 @@
 
 """cuRobo V2 collision-aware planning through the atomic-action interface.
 
-The demo creates one or more copies of the selected robot and a kinematic
-cuboid represented in both DexSim and cuRobo. With multiple environments, each
+The demo creates one or more copies of the selected robot and an Open3D box
+mesh stored in a temporary file. Its DexSim collision mesh is reduced to a
+convex hull and converted into a cuRobo ESDF voxel obstacle. With multiple
+environments, each
 obstacle receives a small reproducible XY/yaw perturbation and cuRobo allocates
 an independent collision world for each environment. The demo then executes a
 batched ``MoveEndEffector`` action through :class:`AtomicActionEngine`, replays
@@ -29,6 +31,7 @@ Run from the repository root::
     python examples/sim/motion/planners/curobo_planner.py --headless
     python examples/sim/motion/planners/curobo_planner.py --headless --num_envs 4
     python examples/sim/motion/planners/curobo_planner.py --headless --device cuda:1
+    python examples/sim/motion/planners/curobo_planner.py --headless --physics newton
 
 Requirements: an NVIDIA CUDA device and the CUDA-matched cuRobo V2 source
 package installed in the active environment. Installation instructions:
@@ -39,73 +42,39 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 import time
 from pathlib import Path
 
-import torch
-
-# Prefer the in-repo source over any installed (possibly stale) embodichain
-# package, so this example exercises the current code. The demo relies on the
-# cuRobo adapter's URDF-based robot-YAML auto-generation, which lives in the
-# source tree and may not be present in an older installed copy.
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.visualization import (
-    VisualizationCfg,
-    visualization_cfg_from_args,
+from embodichain.cli.sim import (
+    add_sim_args_to_parser,
+    add_seed_arg_to_parser,
+    resolve_seed,
 )
-from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
-    AtomicActionEngine,
-    EndEffectorPoseGoal,
-    MotionPolicy,
-)
-from embodichain.data import get_data_path
-from embodichain.lab.sim.cfg import RenderCfg, RigidBodyAttributesCfg
-from embodichain.lab.sim.objects import RigidObjectCfg, Robot, RigidObject
-from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
-from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
-    CuroboPlanOptions,
-    CuroboPlannerCfg,
-    CuroboWorldCfg,
-)
-import numpy as np
-from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg, DexforceW1Cfg
-from embodichain.lab.sim.shapes import CubeCfg
-
-__all__ = ["main"]
-
 
 DEFAULT_RECORD_FPS = 20
-DEFAULT_RECORD_MAX_MEMORY = 2048
+
 DEFAULT_MAX_ATTEMPTS = 2
+
 DEFAULT_OBSTACLE_XY_PERTURBATION = 0.02
+
 DEFAULT_OBSTACLE_YAW_PERTURBATION_DEG = 5.0
+
 DEFAULT_RANDOM_SEED = 0
-DEFAULT_RECORD_LOOK_AT = (
-    (1.8, -1.8, 1.35),
-    (0.35, 0.10, 0.40),
-    (0.0, 0.0, 1.0),
-)
-CUROBO_INSTALL_URL = (
-    "https://nvlabs.github.io/curobo/latest/getting-started/installation.html"
-)
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse the interactive/headless playback and recording controls."""
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
     parser = argparse.ArgumentParser(
         description="Run cuRobo V2 through EmbodiChain AtomicActionEngine."
     )
-    add_env_launcher_args_to_parser(parser)
-    # This standalone example does not merge a gym config after parsing, so
-    # override the launcher's ``None`` sentinel with a concrete single-world
-    # default.
-    parser.set_defaults(arena_space=2.0, num_envs=1)
+    add_sim_args_to_parser(parser)
+    # cuRobo requires CUDA independently of the selected physics backend.
+    parser.set_defaults(device="cuda", arena_space=2.0, num_envs=1)
     # Backward-compatible aliases used by older versions of this example.
     parser.add_argument(
         "--step-repeat",
@@ -169,11 +138,10 @@ def parse_args() -> argparse.Namespace:
             "num_envs > 1."
         ),
     )
-    parser.add_argument(
-        "--seed",
-        type=int,
+    add_seed_arg_to_parser(
+        parser,
         default=DEFAULT_RANDOM_SEED,
-        help="Random seed used for per-environment obstacle perturbations.",
+        scope="multi-environment obstacle perturbations (not cuRobo solver sampling)",
     )
     parser.add_argument(
         "--cuda-graph",
@@ -185,7 +153,67 @@ def parse_args() -> argparse.Namespace:
             "--no-cuda-graph to disable)."
         ),
     )
-    return parser.parse_args()
+    return parser
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse the interactive/headless playback and recording controls."""
+    parser = build_parser()
+    return parser.parse_args() if argv is None else parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = parse_args()
+
+
+import torch
+
+# Prefer the in-repo source over any installed (possibly stale) embodichain
+# package, so this example exercises the current code. The demo relies on the
+# cuRobo adapter's URDF-based robot-YAML auto-generation, which lives in the
+# source tree and may not be present in an older installed copy.
+
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import (
+    VisualizationCfg,
+    visualization_cfg_from_args,
+)
+from embodichain.lab.sim.atomic_actions import (
+    ActionInvocation,
+    AtomicActionEngine,
+    EndEffectorPoseGoal,
+    MotionPolicy,
+)
+from embodichain.data import get_data_path
+from embodichain.lab.sim.cfg import (
+    RenderCfg,
+    RigidBodyPhysicsCfg,
+    physics_cfg_for_backend,
+)
+from embodichain.lab.sim.objects import RigidObjectCfg, Robot, RigidObject
+from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
+from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
+    CuroboPlanOptions,
+    CuroboPlannerCfg,
+    CuroboWorldCfg,
+)
+import numpy as np
+from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg, DexforceW1Cfg
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
+
+__all__ = ["main"]
+
+
+DEFAULT_RECORD_MAX_MEMORY = 2048
+DEFAULT_RECORD_LOOK_AT = (
+    (1.8, -1.8, 1.35),
+    (0.35, 0.10, 0.40),
+    (0.0, 0.0, 1.0),
+)
+CUROBO_INSTALL_URL = (
+    "https://nvlabs.github.io/curobo/latest/getting-started/installation.html"
+)
 
 
 def _resolve_device(device: str, gpu_id: int) -> str:
@@ -243,8 +271,9 @@ def _build_scene(
     arena_space: float = 2.0,
     gpu_id: int = 0,
     visualization: VisualizationCfg | None = None,
+    physics: str = "default",
 ) -> tuple[SimulationManager, Robot, RigidObject, torch.Tensor, str]:
-    """Create the batched robot scene with an identical cuboid in each arena."""
+    """Create the batched robot scene with an identical box mesh in each arena."""
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
@@ -253,6 +282,7 @@ def _build_scene(
             arena_space=arena_space,
             gpu_id=gpu_id,
             render_cfg=RenderCfg(renderer=renderer),
+            physics_cfg=physics_cfg_for_backend(physics),
             visualization=visualization or VisualizationCfg(),
         )
     )
@@ -321,7 +351,7 @@ def _build_scene(
                             "LEFT_HAND_PINKY",
                         ],
                     },
-                    "drive_pros": {
+                    "joint_drive_props": {
                         "stiffness": {"LEFT_[A-Z|_]+[0-9]?": 1e2},
                         "damping": {"LEFT_[A-Z|_]+[0-9]?": 1e1},
                         "max_effort": {"LEFT_[A-Z|_]+[0-9]?": 1e3},
@@ -457,27 +487,72 @@ def _build_scene(
     if robot is None:
         raise RuntimeError(f"Failed to add robot '{robot_type}' to the cuRobo demo.")
     target_xpos = _resolve_batched_target(target_xpos, robot.num_instances)
+    # This object is also exported into the cuRobo collision world below via
+    # CuroboWorldCfg.rigid_objects, so the simulator and planner share geometry
+    # automatically (no hand-authored collision YAML to keep in sync).
+    demo_block_mesh_path = _create_temporary_box_mesh(demo_block_size)
+    try:
+        demo_block = sim.add_rigid_object(
+            cfg=RigidObjectCfg(
+                uid="demo_block",
+                shape=MeshCfg(fpath=str(demo_block_mesh_path)),
+                attrs=RigidBodyPhysicsCfg(),
+                body_type="kinematic",
+                init_pos=demo_block_position,
+                init_rot=(0.0, 0.0, 0.0),
+            )
+        )
+    finally:
+        demo_block_mesh_path.unlink(missing_ok=True)
+    sim.prepare()
+
     if robot_type == "w1":
         # Keep the W1-specific IK diagnostic batched so it remains useful when
         # checking solver and cuRobo reachability across multiple environments.
         is_success, ik_qpos = robot.compute_ik(pose=target_xpos, name=control_part)
         print(f"robot compute ik success: {is_success}, ik_qpos: {ik_qpos}")
 
-    # This object is also exported into the cuRobo collision world below via
-    # CuroboWorldCfg.rigid_objects, so the simulator and planner share geometry
-    # automatically (no hand-authored collision YAML to keep in sync).
-    demo_block = sim.add_rigid_object(
-        cfg=RigidObjectCfg(
-            uid="demo_block",
-            shape=CubeCfg(size=demo_block_size),
-            attrs=RigidBodyAttributesCfg(),
-            body_type="kinematic",
-            init_pos=demo_block_position,
-            init_rot=(0.0, 0.0, 0.0),
-        )
-    )
-
     return sim, robot, demo_block, target_xpos, control_part
+
+
+def _create_temporary_box_mesh(size: list[float]) -> Path:
+    """Write a centered Open3D box mesh to a temporary OBJ file.
+
+    Args:
+        size: Box dimensions in metres as ``[length, width, height]``.
+
+    Returns:
+        Path to the generated temporary mesh. The caller owns its deletion.
+
+    Raises:
+        ValueError: If ``size`` does not contain three positive finite values.
+        RuntimeError: If Open3D cannot write the temporary mesh.
+    """
+    dimensions = np.asarray(size, dtype=np.float64)
+    if dimensions.shape != (3,) or not np.isfinite(dimensions).all():
+        raise ValueError("Box mesh size must contain three finite dimensions.")
+    if np.any(dimensions <= 0.0):
+        raise ValueError("Box mesh dimensions must be positive.")
+
+    import open3d as o3d
+
+    mesh = o3d.geometry.TriangleMesh.create_box(
+        width=float(dimensions[0]),
+        height=float(dimensions[1]),
+        depth=float(dimensions[2]),
+    )
+    mesh.translate((-0.5 * dimensions).tolist())
+    mesh.compute_vertex_normals()
+    with tempfile.NamedTemporaryFile(
+        prefix="embodichain_curobo_box_",
+        suffix=".obj",
+        delete=False,
+    ) as temporary_file:
+        mesh_path = Path(temporary_file.name)
+    if not o3d.io.write_triangle_mesh(str(mesh_path), mesh):
+        mesh_path.unlink(missing_ok=True)
+        raise RuntimeError(f"Open3D failed to write temporary box mesh {mesh_path}.")
+    return mesh_path
 
 
 def _resolve_batched_target(target: torch.Tensor, num_envs: int) -> torch.Tensor:
@@ -662,9 +737,11 @@ def _final_tcp_errors(
     )
 
 
-def main() -> None:
+def main(args: argparse.Namespace | None = None) -> None:
     """Plan and replay one batched collision-aware end-effector action."""
-    args = parse_args()
+    args = parse_args() if args is None else args
+    args.seed = resolve_seed(args.seed)
+    print(f"[INFO]: Obstacle seed: {args.seed}", flush=True)
     if args.step_repeat < 1:
         raise ValueError("--step-repeat must be at least 1.")
     if args.hold_steps < 0:
@@ -697,9 +774,8 @@ def main() -> None:
             args.arena_space,
             effective_gpu_id,
             visualization_cfg_from_args(args),
+            physics=args.physics,
         )
-        if sim.is_use_gpu_physics:
-            sim.init_gpu_physics()
 
         obstacles = [demo_block]
         obstacle_poses = _perturb_obstacles(
@@ -710,6 +786,9 @@ def main() -> None:
             seed=args.seed,
         )
         use_independent_worlds = args.num_envs > 1
+        visualize_robot_collision_models = (
+            not args.headless and not use_independent_worlds
+        )
         if use_independent_worlds:
             for name, poses in obstacle_poses.items():
                 yaw_deg = torch.rad2deg(torch.atan2(poses[:, 1, 0], poses[:, 0, 0]))
@@ -733,7 +812,6 @@ def main() -> None:
                     robot_uid=robot.uid,
                     world=CuroboWorldCfg(
                         rigid_objects=obstacles,
-                        obstacle_representation="cuboid",
                         dynamic_obstacle_names=(
                             [obstacle.uid for obstacle in obstacles]
                             if use_independent_worlds
@@ -747,6 +825,11 @@ def main() -> None:
                 )
             )
         )
+        if visualize_robot_collision_models:
+            # This overlays the exact cached robot spheres and obstacle ESDF
+            # surface used by cuRobo in the DexSim window. Press Enter in the
+            # terminal to remove the overlay and continue planner creation.
+            motion_generator.planner.visualize_robot_collision_models(control_part)
         engine = AtomicActionEngine(motion_generator)
         binding = engine.bind_control_parts(
             "move_end_effector",
@@ -845,9 +928,11 @@ def main() -> None:
             if sim.is_window_recording():
                 sim.stop_window_record()
                 sim.wait_window_record_saves()
-            sim.destroy()
-            SimulationManager.flush_cleanup_queue()
+            sim.destroy(exit_process=False)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main(_cli_args)
+    finally:
+        SimulationManager.flush_cleanup_queue()

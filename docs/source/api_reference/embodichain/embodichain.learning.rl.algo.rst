@@ -33,6 +33,7 @@ policy, while :func:`compute_gae` provides generalized advantage estimation.
       build_algo
       get_registered_algo_names
       compute_gae
+      complete_discounted_return
       segmented_discounted_return
 
 .. automodule:: embodichain.learning.rl.algo

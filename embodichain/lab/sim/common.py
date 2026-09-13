@@ -66,8 +66,6 @@ class BatchEntity(ABC):
         self._entities = entities
         self.device = device
 
-        self.reset()
-
     def __str__(self) -> str:
         return f"{self.__class__}: managing {self.num_instances} {self._entities[0].__class__} objects | uid: {self.uid} | device: {self.device}"
 

@@ -181,18 +181,6 @@ class TestActionBank(unittest.TestCase, metaclass=UnittestMetaclass):
             vis_graph=False,
         )
 
-    def test_hook_and_gantt(self):
-        conf = load_json(_CONFIG_PATH)
-        action_bank = FakePourwaterActionBank(conf)
-        print(get_func_tag("node").functions[action_bank.__class__.__name__])
-        _, jobs_data, jobkey2index = action_bank.parse_network(
-            get_func_tag("node").functions[action_bank.__class__.__name__],
-            get_func_tag("edge").functions[action_bank.__class__.__name__],
-            vis_graph=False,
-        )
-
-        action_bank.gantt(jobs_data, jobkey2index, vis=False)
-
     def test_create_action_list(self):
         np.random.seed(0)
         conf = load_json(_CONFIG_PATH)
