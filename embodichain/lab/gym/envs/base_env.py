@@ -1019,7 +1019,9 @@ class BaseEnv(gym.Env):
                 self._initialize_episode(reset_ids, **options)
             self._elapsed_steps[reset_ids] = 0
 
-            self.sim.sync_render_state()
+            sync_render_state = getattr(self.sim, "sync_render_state", None)
+            if callable(sync_render_state):
+                sync_render_state()
             self.sim.capture_visualization_safely(force=True)
 
             with self._profiler.section("get_obs"):

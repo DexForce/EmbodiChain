@@ -51,7 +51,6 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
 from embodichain.lab.sim.motion.planners import CuroboPlannerCfg, CuroboWorldCfg
 from embodichain.lab.sim.motion.expansion import (
@@ -151,7 +150,6 @@ def run_free_motion(
             cfg=RigidObjectCfg(
                 uid="ground_proxy",
                 shape=CubeCfg(size=(1000.0, 1000.0, 100.0)),
-                attrs=RigidBodyAttributesCfg(),
                 body_type="kinematic",
                 init_pos=(0.0, 0.0, -50.001),
             )

@@ -57,7 +57,11 @@ from embodichain.lab.sim.atomic_actions import (
     PickUpOptions,
     create_simulation_atomic_action_engine,
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+from embodichain.lab.sim.cfg import (
+    MassPropertiesCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
+)
 from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.motion.expansion import (
     TrajectoryPhase,
@@ -188,8 +192,11 @@ def _prepare_cube_scene(
                 ),
             ),
             init_pos=(-0.42, -0.08, 0.325),
-            attrs=RigidBodyAttributesCfg(
-                mass=0.05, dynamic_friction=0.97, static_friction=0.99
+            attrs=RigidBodyPhysicsCfg(
+                mass_props=MassPropertiesCfg(mass=0.05),
+                material_props=RigidBodyMaterialCfg(
+                    dynamic_friction=0.97, static_friction=0.99
+                ),
             ),
         )
     )

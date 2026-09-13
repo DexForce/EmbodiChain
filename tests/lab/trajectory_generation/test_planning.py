@@ -45,7 +45,7 @@ def test_real_curobo_free_path_and_dynamic_obstacle_with_cpu_physics():
     """Exercise the actual joint-bound, self, and world checker on one Panda."""
     pytest.importorskip("curobo")
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+    from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg
     from embodichain.lab.sim.motion.motion_generator import MotionGenCfg
     from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
         CuroboPlannerCfg,
@@ -72,7 +72,7 @@ def test_real_curobo_free_path_and_dynamic_obstacle_with_cpu_physics():
             cfg=RigidObjectCfg(
                 uid="path_obstacle",
                 shape=CubeCfg(size=(0.3, 0.3, 0.3)),
-                attrs=RigidBodyAttributesCfg(),
+                attrs=RigidBodyPhysicsCfg(),
                 body_type="kinematic",
                 init_pos=(3.0, 0.0, 1.0),
             )
