@@ -37,12 +37,16 @@ __all__ = [
     "compute_waypoint_errors",
     "get_pose_err",
     "make_failure_outcomes",
+    "match_ordered_joint_waypoints",
     "match_ordered_waypoints",
 ]
 
 
 def _pose_error_matrices(
-    waypoints: torch.Tensor, trajectory_poses: torch.Tensor
+    waypoints: torch.Tensor,
+    trajectory_poses: torch.Tensor,
+    *,
+    rotation_symmetry: str | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return waypoint-by-sample translation and geodesic rotation errors."""
     waypoints = torch.as_tensor(waypoints, dtype=torch.float64)
@@ -57,10 +61,31 @@ def _pose_error_matrices(
     relative = waypoint_rot.transpose(-1, -2) @ trajectory_rot
     trace = torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1)
     rotation_error = torch.arccos(torch.clamp((trace - 1.0) * 0.5, -1.0, 1.0))
+    if rotation_symmetry == "half_turn_about_z":
+        symmetric_rot = waypoint_rot.clone()
+        symmetric_rot[..., :2] = -symmetric_rot[..., :2]
+        symmetric_relative = symmetric_rot.transpose(-1, -2) @ trajectory_rot
+        symmetric_trace = torch.diagonal(symmetric_relative, dim1=-2, dim2=-1).sum(
+            dim=-1
+        )
+        symmetric_error = torch.arccos(
+            torch.clamp((symmetric_trace - 1.0) * 0.5, -1.0, 1.0)
+        )
+        rotation_error = torch.minimum(rotation_error, symmetric_error)
+    elif rotation_symmetry is not None:
+        raise ValueError(
+            "rotation_symmetry must be None or 'half_turn_about_z', "
+            f"got {rotation_symmetry!r}."
+        )
     return pos_error, rotation_error
 
 
-def get_pose_err(matrix_a: torch.Tensor, matrix_b: torch.Tensor) -> tuple[float, float]:
+def get_pose_err(
+    matrix_a: torch.Tensor,
+    matrix_b: torch.Tensor,
+    *,
+    rotation_symmetry: str | None = None,
+) -> tuple[float, float]:
     """Return translation (m) and geodesic rotation (rad) pose errors."""
     tensor_a = torch.as_tensor(matrix_a, dtype=torch.float64)
     tensor_b = torch.as_tensor(matrix_b, dtype=torch.float64, device=tensor_a.device)
@@ -72,6 +97,24 @@ def get_pose_err(matrix_a: torch.Tensor, matrix_b: torch.Tensor) -> tuple[float,
     relative = tensor_a[:, :3, :3].transpose(-1, -2) @ tensor_b[:, :3, :3]
     trace = torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1)
     rotation = torch.arccos(torch.clamp((trace - 1.0) * 0.5, -1.0, 1.0))
+    if rotation_symmetry == "half_turn_about_z":
+        symmetric_b = tensor_b.clone()
+        symmetric_b[:, :3, :2] = -symmetric_b[:, :3, :2]
+        symmetric_relative = (
+            tensor_a[:, :3, :3].transpose(-1, -2) @ symmetric_b[:, :3, :3]
+        )
+        symmetric_trace = torch.diagonal(symmetric_relative, dim1=-2, dim2=-1).sum(
+            dim=-1
+        )
+        symmetric_rotation = torch.arccos(
+            torch.clamp((symmetric_trace - 1.0) * 0.5, -1.0, 1.0)
+        )
+        rotation = torch.minimum(rotation, symmetric_rotation)
+    elif rotation_symmetry is not None:
+        raise ValueError(
+            "rotation_symmetry must be None or 'half_turn_about_z', "
+            f"got {rotation_symmetry!r}."
+        )
     return float(translation.mean().item()), float(rotation.mean().item())
 
 
@@ -81,6 +124,7 @@ def match_ordered_waypoints(
     *,
     position_threshold_m: float,
     rotation_threshold_rad: float,
+    rotation_symmetry: str | None = None,
 ) -> dict[str, object]:
     """Evaluate ordered arrival and threshold-constrained waypoint errors.
 
@@ -99,9 +143,17 @@ def match_ordered_waypoints(
             "arrival_indices": [],
             "position_errors_m": [],
             "rotation_errors_rad": [],
+            "min_position_errors_m": [],
+            "min_rotation_errors_rad": [],
+            "min_rotation_errors_at_position_rad": [],
+            "min_position_errors_at_orientation_m": [],
         }
 
-    pos_error, rot_error = _pose_error_matrices(waypoints, trajectory_poses)
+    pos_error, rot_error = _pose_error_matrices(
+        waypoints,
+        trajectory_poses,
+        rotation_symmetry=rotation_symmetry,
+    )
     arrival_indices: list[int] = []
     next_sample = 0
     for waypoint_index in range(waypoints.shape[0]):
@@ -126,12 +178,104 @@ def match_ordered_waypoints(
     ]
     completed = len(arrival_indices)
     total = int(waypoints.shape[0])
+    min_rotation_at_position: list[float | None] = []
+    min_position_at_orientation: list[float | None] = []
+    for waypoint_index in range(total):
+        position_hits = pos_error[waypoint_index] <= position_threshold_m
+        rotation_hits = rot_error[waypoint_index] <= rotation_threshold_rad
+        min_rotation_at_position.append(
+            float(rot_error[waypoint_index, position_hits].min().item())
+            if bool(position_hits.any().item())
+            else None
+        )
+        min_position_at_orientation.append(
+            float(pos_error[waypoint_index, rotation_hits].min().item())
+            if bool(rotation_hits.any().item())
+            else None
+        )
     return {
         "ordered_waypoints_reached": completed == total,
         "completed_waypoint_ratio": completed / max(total, 1),
         "arrival_indices": arrival_indices,
         "position_errors_m": position_errors,
         "rotation_errors_rad": rotation_errors,
+        "min_position_errors_m": [
+            float(value) for value in pos_error.min(dim=1).values.tolist()
+        ],
+        "min_rotation_errors_rad": [
+            float(value) for value in rot_error.min(dim=1).values.tolist()
+        ],
+        "min_rotation_errors_at_position_rad": min_rotation_at_position,
+        "min_position_errors_at_orientation_m": min_position_at_orientation,
+    }
+
+
+def match_ordered_joint_waypoints(
+    trajectory_qpos: torch.Tensor,
+    waypoints_qpos: torch.Tensor,
+    *,
+    joint_threshold_rad: float,
+) -> dict[str, object]:
+    """Evaluate ordered joint-waypoint arrival with an L-infinity threshold.
+
+    Each waypoint must be reached after the previous arrival by one trajectory
+    sample whose maximum absolute per-joint error is within the task threshold.
+    The function mirrors :func:`match_ordered_waypoints` while retaining joint
+    task semantics instead of projecting the targets through FK.
+    """
+    trajectory_qpos = torch.as_tensor(trajectory_qpos, dtype=torch.float64)
+    waypoints_qpos = torch.as_tensor(
+        waypoints_qpos,
+        dtype=torch.float64,
+        device=trajectory_qpos.device,
+    )
+    if not math.isfinite(joint_threshold_rad) or joint_threshold_rad <= 0.0:
+        raise ValueError("joint_threshold_rad must be finite and positive.")
+    if trajectory_qpos.ndim != 2 or waypoints_qpos.ndim != 2:
+        raise ValueError("Joint trajectories and waypoints must both be 2D.")
+    if trajectory_qpos.shape[-1] != waypoints_qpos.shape[-1]:
+        raise ValueError(
+            "Joint trajectories and waypoints must have the same trailing DoF."
+        )
+    if trajectory_qpos.shape[0] == 0 or waypoints_qpos.shape[0] == 0:
+        return {
+            "ordered_waypoints_reached": False,
+            "completed_waypoint_ratio": 0.0,
+            "arrival_indices": [],
+            "joint_errors_rad": [],
+            "min_joint_errors_rad": [],
+        }
+
+    joint_error = torch.amax(
+        torch.abs(waypoints_qpos[:, None, :] - trajectory_qpos[None, :, :]),
+        dim=-1,
+    )
+    arrival_indices: list[int] = []
+    next_sample = 0
+    for waypoint_index in range(waypoints_qpos.shape[0]):
+        valid = torch.nonzero(
+            joint_error[waypoint_index, next_sample:] <= joint_threshold_rad,
+            as_tuple=False,
+        ).flatten()
+        if valid.numel() == 0:
+            break
+        sample_index = next_sample + int(valid[0].item())
+        arrival_indices.append(sample_index)
+        next_sample = sample_index + 1
+
+    completed = len(arrival_indices)
+    total = int(waypoints_qpos.shape[0])
+    return {
+        "ordered_waypoints_reached": completed == total,
+        "completed_waypoint_ratio": completed / max(total, 1),
+        "arrival_indices": arrival_indices,
+        "joint_errors_rad": [
+            float(joint_error[index, sample].item())
+            for index, sample in enumerate(arrival_indices)
+        ],
+        "min_joint_errors_rad": [
+            float(value) for value in joint_error.min(dim=1).values.tolist()
+        ],
     }
 
 
@@ -141,6 +285,7 @@ def compute_waypoint_errors(
     *,
     position_threshold_m: float = 0.01,
     rotation_threshold_rad: float = 0.1,
+    rotation_symmetry: str | None = None,
 ) -> dict[str, float]:
     """Return ordered, same-sample waypoint errors for one trajectory."""
     if isinstance(trajectory_poses, list):
@@ -156,6 +301,7 @@ def compute_waypoint_errors(
         waypoints,
         position_threshold_m=position_threshold_m,
         rotation_threshold_rad=rotation_threshold_rad,
+        rotation_symmetry=rotation_symmetry,
     )
     pos_mm = [float(value) * 1000.0 for value in matched["position_errors_m"]]
     rot_deg = [
@@ -351,31 +497,52 @@ def compute_case_outcomes(
         name=control_part,
         to_matrix=True,
     )
+    native_pose_batch = robot.compute_batch_fk(
+        qpos=positions,
+        name=control_part,
+        to_matrix=True,
+    )
     outcomes: list[CaseOutcome] = []
     for env_index in range(case.batch_size):
         native_qpos = positions[env_index]
         finite = finite_paths[env_index]
         if finite:
             validation_qpos = validation_qpos_batch[env_index]
-            poses = validation_pose_batch[env_index]
+            validation_poses = validation_pose_batch[env_index]
+            # Keep the benchmark's established, sample-count-normalized
+            # trajectory for all success and path metrics.  Native planner
+            # samples are retained below only for rollout diagnostics.
+            poses = validation_poses
+            native_poses = native_pose_batch[env_index]
         else:
             validation_qpos = torch.empty(
                 (0, positions.shape[-1]), device=robot.device, dtype=positions.dtype
             )
+            validation_poses = torch.empty(
+                (0, 4, 4), device=robot.device, dtype=positions.dtype
+            )
             poses = torch.empty((0, 4, 4), device=robot.device, dtype=positions.dtype)
+            native_poses = torch.empty(
+                (0, 4, 4), device=robot.device, dtype=positions.dtype
+            )
 
         waypoints = case.target_waypoints[env_index]
-        matching = match_ordered_waypoints(
+        rotation_symmetry = case.case_parameters.get("waypoint_rotation_symmetry")
+        if rotation_symmetry is not None and not isinstance(rotation_symmetry, str):
+            raise TypeError("waypoint_rotation_symmetry must be a string or None.")
+        cartesian_matching = match_ordered_waypoints(
             poses,
             waypoints,
             position_threshold_m=position_threshold_m,
             rotation_threshold_rad=rotation_threshold_rad,
+            rotation_symmetry=rotation_symmetry,
         )
         pos_errors_mm = [
-            float(value) * 1000.0 for value in matching["position_errors_m"]
+            float(value) * 1000.0 for value in cartesian_matching["position_errors_m"]
         ]
         rot_errors_deg = [
-            float(value) * 180.0 / math.pi for value in matching["rotation_errors_rad"]
+            float(value) * 180.0 / math.pi
+            for value in cartesian_matching["rotation_errors_rad"]
         ]
         if finite:
             joint_violation, normalized_violation = _joint_limit_metrics(
@@ -385,7 +552,25 @@ def compute_case_outcomes(
             )
         else:
             joint_violation, normalized_violation = False, None
-        ordered = bool(matching["ordered_waypoints_reached"])
+        validity_space = case.case_parameters.get(
+            "motion_validity", "ordered_cartesian_waypoints"
+        )
+        if validity_space == "ordered_joint_waypoints":
+            threshold = case.case_parameters.get("joint_threshold_rad")
+            if not isinstance(threshold, (int, float)):
+                raise TypeError(
+                    "ordered_joint_waypoints requires numeric joint_threshold_rad."
+                )
+            semantic_matching = match_ordered_joint_waypoints(
+                validation_qpos,
+                case.reference_qpos[env_index],
+                joint_threshold_rad=float(threshold),
+            )
+        elif validity_space == "ordered_cartesian_waypoints":
+            semantic_matching = cartesian_matching
+        else:
+            raise ValueError(f"Unknown motion_validity mode {validity_space!r}.")
+        ordered = bool(semantic_matching["ordered_waypoints_reached"])
         planner_ok = bool(planning_success[env_index].item())
         # ``PlanResult.success`` is retained as a planner-stage outcome, but it
         # is not external ground truth.  A trajectory can therefore be motion
@@ -393,13 +578,30 @@ def compute_case_outcomes(
         motion_valid = finite and ordered and not joint_violation
 
         if poses.shape[0] > 0:
-            final_pos_m, final_rot_rad = get_pose_err(poses[-1], waypoints[-1])
+            final_pos_m, final_rot_rad = get_pose_err(
+                poses[-1],
+                waypoints[-1],
+                rotation_symmetry=rotation_symmetry,
+            )
+            all_pos_error, all_rot_error = _pose_error_matrices(
+                waypoints,
+                native_poses,
+                rotation_symmetry=rotation_symmetry,
+            )
+            min_pos_m = float(all_pos_error[-1].min().item())
+            min_rot_rad = float(all_rot_error[-1].min().item())
             joint_length, cartesian_length, efficiency = _path_metrics(
-                validation_qpos, poses, waypoints
+                validation_qpos, validation_poses, waypoints
+            )
+            trajectory_moved = bool(
+                torch.linalg.vector_norm(native_qpos - native_qpos[:1], dim=-1).max()
+                > 1.0e-6
             )
         else:
             final_pos_m = final_rot_rad = None
+            min_pos_m = min_rot_rad = None
             joint_length = cartesian_length = efficiency = None
+            trajectory_moved = False
 
         if not finite:
             failure_code = "non_finite_trajectory"
@@ -418,7 +620,9 @@ def compute_case_outcomes(
                 finite=finite,
                 ordered_waypoints_reached=ordered,
                 motion_valid=motion_valid,
-                completed_waypoint_ratio=float(matching["completed_waypoint_ratio"]),
+                completed_waypoint_ratio=float(
+                    semantic_matching["completed_waypoint_ratio"]
+                ),
                 final_translation_err_mm=(
                     final_pos_m * 1000.0 if final_pos_m is not None else None
                 ),
@@ -454,6 +658,33 @@ def compute_case_outcomes(
                 path_efficiency=efficiency,
                 failure_code=failure_code,
                 planner_failure_code=planner_failure_code,
+                min_translation_err_mm=(
+                    min_pos_m * 1000.0 if min_pos_m is not None else None
+                ),
+                min_rotation_err_deg=(
+                    min_rot_rad * 180.0 / math.pi if min_rot_rad is not None else None
+                ),
+                trajectory_moved=trajectory_moved,
+                waypoint_min_translation_err_mm=tuple(
+                    float(value) * 1000.0
+                    for value in cartesian_matching["min_position_errors_m"]
+                ),
+                waypoint_min_rotation_err_deg=tuple(
+                    float(value) * 180.0 / math.pi
+                    for value in cartesian_matching["min_rotation_errors_rad"]
+                ),
+                waypoint_min_rotation_err_deg_at_position=tuple(
+                    None if value is None else float(value) * 180.0 / math.pi
+                    for value in cartesian_matching[
+                        "min_rotation_errors_at_position_rad"
+                    ]
+                ),
+                waypoint_min_translation_err_mm_at_orientation=tuple(
+                    None if value is None else float(value) * 1000.0
+                    for value in cartesian_matching[
+                        "min_position_errors_at_orientation_m"
+                    ]
+                ),
             )
         )
     return tuple(outcomes)

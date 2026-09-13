@@ -71,6 +71,27 @@ a physical effect.
 - [Planning and execution](execution.md): invocation resolution, control grid, row-local recovery and verification.
 - [Articulation geometry](articulation-geometry.md): topology/mesh ownership and directional affordance contracts.
 
+The `scripts/tutorials/atomic_action/place.py` tutorial configures a
+task-scoped Newton contact candidate on the cube and gripper collision links
+before `SimulationManager.prepare()`. Shared tutorial helpers also author
+`condim=4` on gripper/contact links and grasped objects before preparation.
+Newton manipulation overlays use `ke=4e4`, `kd=4e2`,
+`torsional_friction=0.1`, and `rolling_friction=0.01` on the gripper and
+directly manipulated object contact surfaces. `condim=4` activates the
+torsional term in MuJoCo-Warp; the rolling coefficient is retained for
+solvers/`condim=6` that support it.
+The profile was selected from Newton's native-contact examples and a fixed-
+seed Default comparison; it improves contact force-closure in the replay but
+does not promise identical open-loop Place behavior, whose attachment,
+mimic-joint, and release timing semantics remain backend-sensitive.
+The values are intentionally scoped and are not world defaults. Other surfaces
+keep their source contact dimension. Replay does not rewrite MuJoCo model
+arrays after CUDA Graph capture; contact storage is allocated for the authored
+dimensions. The packaged PGI/Franka embodiment and
+repeated-pick/open-drawer environment components carry the same Newton-only
+overlays, while their declared Default backend continues to consume only the
+portable fields.
+
 ## Semantic integration boundary
 
 `semantics` contains:

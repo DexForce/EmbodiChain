@@ -21,6 +21,15 @@ import typing
 import numpy as np
 import torch
 
+if __name__ == "__main__" and not __package__:
+    # Support running this example by file path from an uninstalled source tree.
+    import sys
+    from pathlib import Path
+
+    # Replace the script directory so its ``types.py`` cannot shadow the
+    # standard-library ``types`` module in compiler subprocesses.
+    sys.path[0] = str(Path(__file__).resolve().parents[5])
+
 from typing import TYPE_CHECKING, Dict
 
 from embodichain.lab.sim.robots.dexforce_w1.types import (
@@ -39,9 +48,12 @@ from embodichain.lab.sim.robots.dexforce_w1.hand_specs import (
 )
 from embodichain.lab.sim.robots.dexforce_w1.specs import get_w1_version_spec
 from embodichain.lab.sim.cfg import (
+    ArticulationRootPropertiesCfg,
+    CollisionPropertiesCfg,
     RobotCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.utils import configclass
@@ -164,7 +176,7 @@ class DexforceW1Cfg(RobotCfg):
 
         Reads ``version``/``with_default_eef`` from ``init_dict``,
         sets them on ``self``, then populates ``urdf_cfg``, ``control_parts``,
-        ``solver_cfg``, ``drive_pros`` and ``attrs``.
+        ``solver_cfg``, ``joint_drive_props`` and ``attrs``.
         """
         init_dict = init_dict or {}
         self.version = DexforceW1Version.parse(
@@ -272,28 +284,38 @@ class DexforceW1Cfg(RobotCfg):
             "damping": {ARM_JOINTS: 1e3, BODY_JOINTS: 1e4, HEAD_JOINTS: 1e3},
             "max_effort": {ARM_JOINTS: 1e5, BODY_JOINTS: 1e10, HEAD_JOINTS: 1e5},
         }
-        drive_pros = JointDrivePropertiesCfg(**joint_params)
+        joint_drive_props = JointDrivePropertiesCfg(
+            drive_type="force",
+            **joint_params,
+        )
 
         if with_default_eef:
             eef_joint_names = DEFAULT_EEF_HAND_JOINT_NAMES
-            drive_pros.stiffness.update(
+            joint_drive_props.stiffness.update(
                 {eef_joint_names: DEFAULT_EEF_JOINT_DRIVE_PARAMS["stiffness"]}
             )
-            drive_pros.damping.update(
+            joint_drive_props.damping.update(
                 {eef_joint_names: DEFAULT_EEF_JOINT_DRIVE_PARAMS["damping"]}
             )
-            drive_pros.max_effort.update(
+            joint_drive_props.max_effort.update(
                 {eef_joint_names: DEFAULT_EEF_JOINT_DRIVE_PARAMS["max_effort"]}
             )
 
         return {
-            "min_position_iters": 32,
-            "min_velocity_iters": 8,
-            "drive_pros": drive_pros,
-            "attrs": RigidBodyAttributesCfg(
-                static_friction=0.95,
-                dynamic_friction=0.9,
-                contact_offset=0.001,
+            "joint_drive_props": joint_drive_props,
+            "root_props": ArticulationRootPropertiesCfg(
+                min_position_iters=32,
+                min_velocity_iters=8,
+            ),
+            "attrs": RigidBodyPhysicsCfg(
+                collision_props=CollisionPropertiesCfg(
+                    contact_offset=0.001,
+                    rest_offset=0.0,
+                ),
+                material_props=RigidBodyMaterialCfg(
+                    static_friction=0.95,
+                    dynamic_friction=0.9,
+                ),
             ),
         }
 
@@ -329,17 +351,43 @@ class DexforceW1Cfg(RobotCfg):
 
 
 if __name__ == "__main__":
-    # Example usage
-    import numpy as np
+    import argparse
 
     np.set_printoptions(precision=5, suppress=True)
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.sim.cfg import physics_cfg_for_backend
 
-    config = SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=4)
+    parser = argparse.ArgumentParser(description="Launch the Dexforce W1 robot")
+    parser.add_argument(
+        "--physics",
+        choices=("default", "newton"),
+        default="newton",
+        help="Physics backend to launch (default: newton).",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Runtime device override; otherwise the selected backend default is used.",
+    )
+    args = parser.parse_args()
+
+    config = SimulationManagerCfg(
+        headless=True,
+        device=args.device,
+        num_envs=4,
+        physics_cfg=physics_cfg_for_backend(args.physics),
+    )
     sim = SimulationManager(config)
 
     cfg = DexforceW1Cfg.from_dict({"uid": "dexforce_w1", "version": "v021"})
 
     robot = sim.add_robot(cfg=cfg)
+    sim.prepare()
     sim.update(step=1)
-    print("DexforceW1 robot added to the simulation.")
+    print("DexforceW1 robot added to the simulation.", flush=True)
+    sim.open_window()
+    from IPython import embed
+
+    embed()  # noqa: E702
+    sim.destroy()

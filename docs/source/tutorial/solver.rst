@@ -38,7 +38,9 @@ Typical Usage
 
 .. code-block:: python
 
-   srs_cfg = SrsSolverCfg(
+   from embodichain.lab.sim.motion.solvers import SRSSolverCfg
+
+   srs_cfg = SRSSolverCfg(
        urdf_path="/path/to/robot.urdf",
        joint_names=[
            "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
@@ -52,15 +54,20 @@ Typical Usage
 
 .. code-block:: python
 
+   import torch
+
    robot_cfg.solver_cfg = srs_cfg
-   robot = Robot(cfg=robot_cfg, entities=[], device="cpu")
+   robot = Robot(cfg=robot_cfg, device=torch.device("cpu"))
 
 **Step 3: Use FK/IK/Jacobian**
 
 .. code-block:: python
 
-   qpos = [0.0, -1.57, 1.57, 0.0, 1.57, 0.0]
-   ee_pose = robot.compute_fk(qpos)
+   import numpy as np
+   import torch
+
+   qpos = torch.tensor([[0.0, -1.57, 1.57, 0.0, 1.57, 0.0]])
+   ee_pose = robot.compute_fk(qpos=qpos, name="arm", to_matrix=True)
 
    target_pose = np.array([
        [0, -1, 0, 0.5],
@@ -68,8 +75,10 @@ Typical Usage
        [0,  0, 1, 0.3],
        [0,  0, 0, 1.0]
    ])
-   success, qpos_sol = robot.compute_ik(target_pose, joint_seed=qpos)
-   J = robot.get_solver().get_jacobian(qpos)
+   success, qpos_sol = robot.compute_ik(
+       target_pose, joint_seed=qpos, name="arm"
+   )
+   J = robot.get_solver("arm").get_jacobian(qpos)
 
 
 **Note**
@@ -94,7 +103,7 @@ API Reference
        def get_jacobian(self, qpos, locations=None, jac_type="full") -> torch.Tensor:
            """Compute the Jacobian matrix for the given joint positions."""
 
-- **set_ik_nearst_weight**: Set weights for IK nearest neighbor search.
+- **set_ik_nearest_weight**: Set weights for IK nearest-neighbor search.
 - **set_qpos_limits / get_qpos_limits**: Set or get joint position limits.
 - **set_tcp / get_tcp**: Set or get the tool center point (TCP) transformation.
 

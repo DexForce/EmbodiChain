@@ -45,4 +45,4 @@ runtime_services:
   handover_pose_providers:
     - kind: configured_pose
       final_position: [0.0, -0.2, 0.6]
-      final_quaternion_wxyz: [0.7071067812, 0.7071067812, 0.0, 0.0]
+      final_quaternion_xyzw: [0.7071067812, 0.0, 0.0, 0.7071067812]

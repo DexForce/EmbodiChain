@@ -23,15 +23,31 @@ from __future__ import annotations
 
 import argparse
 import sys
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Attach and detach two cubes via a fixed rigid constraint"
+    )
+    add_sim_args_to_parser(parser)
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
     RigidConstraintCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
     RenderCfg,
+    physics_cfg_for_backend,
 )
 from embodichain.lab.sim.shapes import CubeCfg
 
@@ -43,15 +59,13 @@ PRINT_EVERY = 20
 PHASE_STEPS = 120
 
 
-def main():
+def main(args: argparse.Namespace | None = None) -> None:
     """Main function to create and run the constraint tutorial scene."""
 
     # Parse command line arguments (adds --headless, --num_envs, --device, ...).
-    parser = argparse.ArgumentParser(
-        description="Attach and detach two cubes via a fixed rigid constraint"
-    )
-    add_env_launcher_args_to_parser(parser)
-    args = parser.parse_args()
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
 
     # The simulation teardown (``SimulationManager.destroy``) calls ``os._exit``,
     # which skips flushing Python's stdout buffer. Line-buffer stdout so every
@@ -64,21 +78,26 @@ def main():
         height=1080,
         headless=args.headless,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
         num_envs=args.num_envs,
         arena_space=3.0,
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
 
     sim = SimulationManager(sim_cfg)
 
     # Shared physics attributes for the two cubes.
-    physics_attrs = RigidBodyAttributesCfg(
-        mass=0.2,
-        dynamic_friction=0.5,
-        static_friction=0.5,
-        restitution=0.1,
+    physics_attrs = RigidBodyPhysicsCfg.from_dict(
+        {
+            "mass_props": {"mass": 0.2},
+            "material_props": {
+                "dynamic_friction": 0.5,
+                "static_friction": 0.5,
+                "restitution": 0.1,
+            },
+        }
     )
 
     # Add two dynamic cubes to the scene. cube_a starts higher than cube_b so
@@ -101,8 +120,7 @@ def main():
         )
     )
 
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    sim.prepare()
 
     print("[INFO]: Scene setup complete with two cubes (cube_a, cube_b).")
 
@@ -181,4 +199,4 @@ def _run_phase(sim, cube_a, cube_b, attached: bool) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

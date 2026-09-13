@@ -13,7 +13,7 @@ Every robot config subclasses :class:`~embodichain.lab.sim.cfg.RobotCfg` and
 overrides two hooks:
 
 - ``_build_defaults(self, init_dict=None)`` — populate ``urdf_cfg``,
-  ``control_parts``, ``solver_cfg``, ``drive_pros`` and ``attrs`` from variant
+  ``control_parts``, ``solver_cfg``, ``joint_drive_props`` and ``attrs`` from variant
   fields read out of ``init_dict``.
 - ``build_pk_serial_chain(self, device=...)`` — return a
   ``{control_part: pk.SerialChain}`` mapping, reading the PK URDF from a single
@@ -34,7 +34,7 @@ Checklist
 1. **Prepare the URDF** — place the URDF (+ meshes) in the assets directory.
 2. **Override** ``_build_defaults(self, init_dict=None)`` — set variant fields from
    ``init_dict``, then populate ``urdf_cfg`` / ``control_parts`` / ``solver_cfg`` /
-   ``drive_pros`` / ``attrs``.
+   ``joint_drive_props`` / ``attrs``.
 3. **Define control parts** — group joints into logical sets (e.g. ``arm``, ``gripper``).
 4. **Configure the IK solver** — ``OPWSolverCfg`` (6-DOF), ``SRSSolverCfg`` (7-DOF),
    or a generic ``SolverCfg``.
@@ -68,9 +68,9 @@ Key parameters
 +---------------------+----------------------------------+----------------------------------+
 | ``solver_cfg``      | Dict[str, SolverCfg]             | IK solver configurations         |
 +---------------------+----------------------------------+----------------------------------+
-| ``drive_pros``      | JointDrivePropertiesCfg          | Joint stiffness, damping, force  |
+| ``joint_drive_props``      | JointDrivePropertiesCfg          | Joint drive, limits, friction    |
 +---------------------+----------------------------------+----------------------------------+
-| ``attrs``           | RigidBodyAttributesCfg           | Rigid-body physics attributes    |
+| ``attrs``           | RigidBodyPhysicsCfg               | Grouped rigid-body physics       |
 +---------------------+----------------------------------+----------------------------------+
 | variant fields      | enum / str / bool                | Optional subclass fields         |
 |                     |                                  | (e.g. ``version``)               |

@@ -29,6 +29,10 @@ if TYPE_CHECKING:
 
 from embodichain.lab.sim.utility.solver_utils import create_pk_serial_chain
 
+from ._buffers import _IKBuffers
+
+__all__ = ["BaseSolver", "SolverCfg"]
+
 
 @configclass
 class SolverCfg:
@@ -155,6 +159,8 @@ class BaseSolver(metaclass=ABCMeta):
         else:
             self.device = device
 
+        self._ik_buffers = _IKBuffers(self.device)
+
         self.urdf_path = cfg.urdf_path
 
         self.joint_names = cfg.joint_names
@@ -218,6 +224,57 @@ class BaseSolver(metaclass=ABCMeta):
 
         self._init_qpos_limits()
 
+    def prepare_buffers(self, max_batch: int) -> None:
+        """Reserve reusable analytic IK scratch capacity.
+
+        Args:
+            max_batch: Maximum flattened target count, including IK seeds.
+                Storage is allocated lazily by analytic backends and grows when
+                necessary. Returned FK/IK tensors remain owned by the caller.
+        """
+        self._ik_buffers.reserve(max_batch)
+
+    def get_fk_batch(self, qpos: torch.Tensor) -> torch.Tensor:
+        """Compute chain-root FK while preserving arbitrary leading batch axes.
+
+        Args:
+            qpos: Joint positions with shape ``(..., dof)`` on the solver device.
+
+        Returns:
+            TCP transforms with shape ``(..., 4, 4)``.
+        """
+        if qpos.ndim < 2 or qpos.shape[-1] != self.dof:
+            raise ValueError(f"Expected batched qpos ending in {self.dof} joints")
+        shape = qpos.shape[:-1]
+        return self.get_fk(qpos.reshape(-1, self.dof)).reshape(*shape, 4, 4)
+
+    def get_ik_batch(
+        self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute nearest-solution IK with a uniform batch result contract.
+
+        Args:
+            target_xpos: Chain-root TCP transforms with shape ``(..., 4, 4)``.
+            qpos_seed: Optional seeds with matching leading axes and ``dof`` joints.
+
+        Returns:
+            Boolean success ``(...)`` and joint positions ``(..., dof)``. No
+            candidate axis is exposed; concrete ``get_ik`` APIs stay unchanged.
+        """
+        if target_xpos.ndim < 3 or target_xpos.shape[-2:] != (4, 4):
+            raise ValueError("Expected batched target poses ending in (4, 4)")
+        shape = target_xpos.shape[:-2]
+        if qpos_seed is not None:
+            if qpos_seed.shape != (*shape, self.dof):
+                raise ValueError("Joint seed batch axes must match target poses")
+            qpos_seed = qpos_seed.reshape(-1, self.dof)
+        success, qpos = self.get_ik(
+            target_xpos=target_xpos.reshape(-1, 4, 4),
+            qpos_seed=qpos_seed,
+            return_all_solutions=False,
+        )
+        return success.bool().reshape(shape), qpos.reshape(*shape, self.dof)
+
     def set_ik_nearest_weight(
         self, ik_weight: np.ndarray, joint_ids: np.ndarray | None = None
     ) -> bool:
@@ -275,6 +332,31 @@ class BaseSolver(metaclass=ABCMeta):
             np.ndarray: A numpy array representing the nearest weights for inverse kinematics.
         """
         return self.ik_nearest_weight
+
+    def get_default_qpos_seed(self) -> torch.Tensor:
+        """Get the feasibility-safe default IK seed: the joint-range midpoint.
+
+        A zero configuration violates the joint limits of some robots (for
+        example Franka FR3, whose joints 4 and 6 exclude zero), which wastes a
+        multi-start slot, biases nearest-solution selection toward the limits,
+        and can start iterative solvers from an infeasible configuration. The
+        midpoint is inside the limits by construction and maximises the
+        distance to both bounds.
+
+        Returns:
+            torch.Tensor: Default joint seed with shape (dof,) on the solver
+            device.
+
+        Raises:
+            ValueError: If the solver joint limits are not initialized.
+        """
+        if self.lower_qpos_limits is None or self.upper_qpos_limits is None:
+            logger.log_error(
+                "Cannot derive a default qpos seed: solver joint limits are "
+                "not initialized.",
+                ValueError,
+            )
+        return (self.lower_qpos_limits + self.upper_qpos_limits) / 2
 
     def _init_qpos_limits(self):
         self.lower_qpos_limits = None
@@ -428,6 +510,39 @@ class BaseSolver(metaclass=ABCMeta):
             ValueError: If the TCP position has not been set.
         """
         return self.tcp_xpos
+
+    @property
+    def supports_continuous_batch_ik(self) -> bool:
+        """Whether all-candidate IK and temporally continuous selection are supported.
+
+        Supporting solvers return candidate validity shaped (M, K) and joint
+        positions shaped (M, K, DOF) from ``get_ik(return_all_solutions=True)``.
+        They must also implement :meth:`_select_continuous_ik_path`.
+        """
+        return False
+
+    def _select_continuous_ik_path(
+        self,
+        candidate_qpos: torch.Tensor,
+        candidate_valid: torch.Tensor,
+        qpos_seed: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Select a joint path from solver-specific candidate branches.
+
+        Args:
+            candidate_qpos: Candidates shaped (B, N, K, DOF).
+            candidate_valid: Boolean candidate validity shaped (B, N, K).
+            qpos_seed: Initial path seeds shaped (B, DOF).
+
+        Returns:
+            Per-sample validity (B, N) and selected positions (B, N, DOF).
+
+        Raises:
+            NotImplementedError: If continuous selection is unsupported.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support continuous batch IK."
+        )
 
     @abstractmethod
     def get_ik(

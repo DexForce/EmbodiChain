@@ -34,7 +34,8 @@ def set_projective_uv(self: RenderBody, proj_direct: np.ndarray | None = None) -
         return
     n_vert_list = []
     verts = np.empty((0, 3), dtype=np.float32)
-    faces = np.empty((0, 3), dtype=np.int32)
+    face_chunks = []
+    vertex_offset = 0
     # gather all vertices
     for i in range(n_mesh):
         mesh_verts = self.get_vertices(mesh_id=i)
@@ -42,14 +43,19 @@ def set_projective_uv(self: RenderBody, proj_direct: np.ndarray | None = None) -
         verts = np.vstack((verts, mesh_verts))
 
         mesh_faces = self.get_triangles(mesh_id=i)
-        faces = np.vstack((faces, mesh_faces))
-    if (verts.shape[0] == 0) or (faces.shape[0] == 0):
+        mesh_faces = np.asarray(mesh_faces, dtype=np.int32).reshape(-1, 3)
+        face_chunks.append(mesh_faces + vertex_offset)
+        vertex_offset += mesh_verts.shape[0]
+    if (verts.shape[0] == 0) or not face_chunks:
         return
+    faces = np.vstack(face_chunks)
     # project uv for all vertices
     mesh_o3dt = o3d.t.geometry.TriangleMesh()
     mesh_o3dt.vertex.positions = o3d.core.Tensor(verts, dtype=o3d.core.Dtype.Float32)
     mesh_o3dt.triangle.indices = o3d.core.Tensor(faces, dtype=o3d.core.Dtype.Int32)
     is_success, vert_uvs = get_mesh_auto_uv(mesh_o3dt, proj_direct)
+    if not is_success:
+        return
 
     # set uv mapping for each mesh
     start_idx = 0

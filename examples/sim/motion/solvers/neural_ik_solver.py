@@ -94,12 +94,12 @@ def main() -> None:
     np.set_printoptions(precision=5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
 
-    sim_device = _resolve_device(args.device)
+    device = _resolve_device(args.device)
     num_envs = args.num_envs
 
     config = SimulationManagerCfg(
         headless=True,
-        sim_device=sim_device,
+        device=device,
         num_envs=num_envs,
         arena_space=2.0,
         visualization=visualization_cfg_from_args(args),
@@ -128,6 +128,7 @@ def main() -> None:
     )
 
     robot: Robot = sim.add_robot(cfg=cfg)
+    sim.prepare()
 
     sim.open_window()
 
@@ -182,7 +183,7 @@ def main() -> None:
     ik_success_flags: list[torch.Tensor] = []
 
     print(
-        f"\nRunning {num_steps} batch IK steps: num_envs={num_envs}, device='{sim_device}' ..."
+        f"\nRunning {num_steps} batch IK steps: num_envs={num_envs}, device='{device}' ..."
     )
     ik_compute_begin = time.time()
     for step in range(num_steps):

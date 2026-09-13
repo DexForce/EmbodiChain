@@ -33,6 +33,7 @@ import os
 import sys
 import threading
 import unittest
+from types import SimpleNamespace
 from queue import Empty
 from unittest.mock import MagicMock
 
@@ -56,6 +57,7 @@ from embodichain.data_pipeline.datasets import (
 from embodichain.data_pipeline.engine.data import (
     OnlineDataEngine,
     OnlineDataEngineCfg,
+    _apply_worker_simulation_overrides,
 )
 
 # ---------------------------------------------------------------------------
@@ -75,6 +77,39 @@ LAB_PACKAGE_NAME = "embodichain.lab"
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.no_sim
+def test_worker_overrides_preserve_newton_device_default() -> None:
+    """Worker rendering overrides must not replace Newton's typed config."""
+    from embodichain.lab.sim import SimulationManagerCfg
+    from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+
+    sim_cfg = SimulationManagerCfg(
+        physics_cfg=NewtonPhysicsCfg(num_substeps=3),
+    )
+
+    _apply_worker_simulation_overrides(
+        sim_cfg,
+        {"headless": True, "renderer": "hybrid", "gpu_id": 0},
+    )
+
+    assert isinstance(sim_cfg.physics_cfg, NewtonPhysicsCfg)
+    assert sim_cfg.device == "cuda:0"
+    assert sim_cfg.physics_cfg.num_substeps == 3
+
+
+@pytest.mark.no_sim
+def test_worker_overrides_apply_explicit_device() -> None:
+    """An authored worker device remains an explicit runtime override."""
+    from embodichain.lab.sim import SimulationManagerCfg
+    from embodichain.lab.sim.cfg import NewtonPhysicsCfg
+
+    sim_cfg = SimulationManagerCfg(physics_cfg=NewtonPhysicsCfg())
+
+    _apply_worker_simulation_overrides(sim_cfg, {"device": "cpu"})
+
+    assert sim_cfg.device == "cpu"
 
 
 def _make_fake_engine(
@@ -253,6 +288,78 @@ class TestOnlineDataEngine:
         forwarded = self.engine._receive_worker_error()
         assert isinstance(forwarded, ValueError)
         assert str(forwarded) == "planner failed"
+
+    def test_worker_registers_tasks_before_creating_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A forkserver worker registers task environments before gym.make."""
+        import gymnasium as gym
+
+        from embodichain.lab.gym.utils import gym_utils, registration
+
+        task_packages_registered = False
+
+        def discover_task_packages() -> list[str]:
+            nonlocal task_packages_registered
+            task_packages_registered = True
+            return ["embodichain_tasks"]
+
+        env = MagicMock()
+        env_cfg = SimpleNamespace(
+            filter_dataset_saving=False,
+            init_rollout_buffer=True,
+            max_episode_steps=None,
+            sim_cfg=SimpleNamespace(
+                headless=False,
+                render_cfg=SimpleNamespace(renderer=None),
+                gpu_id=None,
+                device=None,
+            ),
+            num_envs=1,
+        )
+
+        def make_environment(*, id: str, cfg: object) -> MagicMock:
+            assert id == "SimpleTask-v1"
+            assert cfg is env_cfg
+            assert task_packages_registered
+            return env
+
+        monkeypatch.setattr(
+            registration, "discover_task_packages", discover_task_packages
+        )
+        monkeypatch.setattr(
+            gym_utils, "config_to_cfg", lambda *_args, **_kwargs: env_cfg
+        )
+        monkeypatch.setattr(gym_utils, "get_manager_modules", lambda: [])
+        monkeypatch.setattr(gym, "make", make_environment)
+
+        context = mp.get_context("forkserver")
+        fill_signal = context.Event()
+        close_signal = context.Event()
+        fill_signal.set()
+        close_signal.set()
+        error_buffer = context.Array("B", engine_module._ERROR_BUFFER_SIZE)
+        error_length = context.Value("i", 0)
+
+        engine_module._run_sim_worker(
+            OnlineDataEngineCfg(
+                gym_config={"id": "SimpleTask-v1", "num_envs": 1},
+            ),
+            TensorDict({}, batch_size=[1, 1]),
+            context.Array("i", [0, 1]),
+            fill_signal,
+            context.Event(),
+            close_signal,
+            error_buffer,
+            error_length,
+            context.Event(),
+            context.Value(
+                "i", engine_module._STATE_TO_CODE[OnlineDataEngineState.STARTING]
+            ),
+            [False],
+        )
+
+        env.close.assert_called_once_with()
 
     def test_start_transitions_through_starting_to_ready(self) -> None:
         """A successful initial fill publishes the explicit lifecycle states."""
@@ -888,37 +995,32 @@ class TestOnlineDataset:
             self.CHUNK_SIZE,
         ], "Batch mode should yield a batch of chunks"
 
-    def test_transform_applied(self) -> None:
-        """Transform callable is invoked and its result is returned."""
-        sentinel = {"called": False}
-
-        def my_transform(td: TensorDict) -> TensorDict:
-            sentinel["called"] = True
-            return td
-
-        dataset = OnlineDataset(
-            self.engine, chunk_size=self.CHUNK_SIZE, transform=my_transform
+    @pytest.mark.parametrize("batch_size", [None, 4], ids=["item", "batch"])
+    def test_transform_result_is_returned_once(self, batch_size: int | None) -> None:
+        """Each yielded item or batch uses the transform's independent result."""
+        expected_shape = (
+            [self.CHUNK_SIZE] if batch_size is None else [batch_size, self.CHUNK_SIZE]
         )
-        next(iter(dataset))
-        assert sentinel["called"], "transform should have been called"
-
-    def test_transform_modifies_output(self) -> None:
-        """Transform result is what the caller receives, not the raw sample."""
-        SCALE = 99.0
-
-        def scale_rewards(td: TensorDict) -> TensorDict:
-            td["rewards"] = td["rewards"] * SCALE
-            return td
-
-        dataset = OnlineDataset(
-            self.engine, chunk_size=self.CHUNK_SIZE, transform=scale_rewards
+        transformed = TensorDict(
+            {"transformed_rewards": torch.ones(expected_shape)},
+            batch_size=expected_shape,
         )
+        transform = MagicMock(return_value=transformed)
+        dataset = OnlineDataset(
+            self.engine,
+            chunk_size=self.CHUNK_SIZE,
+            batch_size=batch_size,
+            transform=transform,
+        )
+
         sample = next(iter(dataset))
-        # Rewards should now be on the order of SCALE * original values.
-        # Original rewards are standard-normal, so max abs should be >> 1 unless scaled.
-        assert (
-            sample["rewards"].abs().max().item() > 1.0
-        ), "scaled rewards should have large absolute values"
+
+        transform.assert_called_once()
+        raw_sample = transform.call_args.args[0]
+        assert list(raw_sample.batch_size) == expected_shape
+        assert "rewards" in raw_sample
+        assert raw_sample is not transformed
+        assert sample is transformed
 
     def test_sampling_mode_is_forwarded_to_engine(self) -> None:
         """OnlineDataset exposes segment-aware engine sampling."""

@@ -138,10 +138,10 @@ def is_pose_flip(
 ):
     pose = np.asarray(pose)
     ref_pose = np.asarray(ref_pose)
-    axis_idx = axis_idx(axis_str)
-    if axis_idx is None:
+    axis_id = axis_idx(axis_str)
+    if axis_id is None:
         log_error(f'Axis {axis_str} is not among ["x", "y", "z"]')
-    relative_angle = np.abs(np.arccos(pose[:3, axis_idx].dot(ref_pose[:3, axis_idx])))
+    relative_angle = np.abs(np.arccos(pose[:3, axis_id].dot(ref_pose[:3, axis_id])))
     valid_ret = relative_angle > np.pi / 2
 
     if return_inverse:

@@ -54,6 +54,7 @@ class TestMotionStrategyReachEquivalence:
                 }
             )
         )
+        sim.prepare()
         mg = MotionGenerator(
             MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=self.ROBOT_UID))
         )

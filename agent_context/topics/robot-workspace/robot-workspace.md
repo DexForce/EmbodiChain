@@ -10,7 +10,7 @@ Paths below are relative to `embodichain/lab/sim/` unless qualified.
 
 | Request | Owner |
 |---|---|
-| Offline analysis | `workspace/analyzer.py`: `WorkspaceAnalyzer`, `WorkspaceAnalysisConfig` |
+| Offline analysis | `workspace/analyzer.py`: `WorkspaceAnalyzer`, `WorkspaceAnalyzerConfig` |
 | Result-cache identity and persistence | `workspace/caches/results_cache.py`: `ResultsCache` |
 | Cache loading / point or voxel sampling | `workspace/runtime.py`: `RobotWorkspace`, `WorkspaceSample` |
 | Runtime binding config | `workspace/cfg.py`: `RobotWorkspaceCfg`; `cfg.py`: `RobotCfg.workspace_cfg` |

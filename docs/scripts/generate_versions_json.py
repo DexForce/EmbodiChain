@@ -20,16 +20,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from pathlib import Path
 
+from packaging.version import InvalidVersion, Version
 
-def parse_version(tag: str) -> tuple[int, int, int]:
-    """Parse a version tag like 'v1.2.3' into a tuple (1, 2, 3)."""
-    match = re.match(r"^v(\d+)\.(\d+)\.(\d+)$", tag)
-    if not match:
-        return (0, 0, 0)
-    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+def parse_version(tag: str) -> Version:
+    """Parse release tags, including PEP 440 post-release suffixes."""
+    try:
+        return Version(tag)
+    except InvalidVersion:
+        return Version("0")
 
 
 def main() -> None:
@@ -62,7 +63,7 @@ def main() -> None:
 
     versions: list[dict[str, str]] = []
 
-    # Collect tag versions (vX.Y.Z directories), sorted newest-first
+    # Collect tag versions (including vX.Y.Z.postN directories), sorted newest-first
     tag_dirs = sorted(
         [d for d in html_dir.glob("v*") if d.is_dir()],
         key=lambda d: parse_version(d.name),

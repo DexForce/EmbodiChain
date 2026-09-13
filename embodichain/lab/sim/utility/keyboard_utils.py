@@ -220,8 +220,7 @@ def run_keyboard_control_for_camera(
                 quaternion = rot.as_quat()
                 log_info("Current Camera pose:")
                 log_info(f"Translation: {translation}")
-                quat_wxyz = [quaternion[3], quaternion[0], quaternion[1], quaternion[2]]
-                log_info(f"Quaternion (w, x, y, z): {quat_wxyz}")
+                log_info(f"Quaternion (x, y, z, w): {quaternion.tolist()}")
 
                 rotation_euler = rot.as_euler("xyz", degrees=True)
                 log_info(f"Rotation (XYZ Euler, degrees): {rotation_euler}")

@@ -292,7 +292,6 @@ registry = SceneRegistry.from_simulation(
 
 world = CuroboWorldCfg(
     rigid_objects=registry.collision_geometry_by_id(),
-    obstacle_representation="cuboid",
     dynamic_obstacle_names=list(registry.dynamic_collision_entity_ids),
     multi_env=True,
 )
