@@ -163,7 +163,7 @@ class DifferentiableEnv(EmbodiedEnv):
         """Adapt the task action hook to :class:`NewtonStepFunc`."""
         env = self
 
-        def _inner(action_wp: Any, tape: Any, *_: Any) -> None:
-            env._apply_action_kernel(action_wp, tape=tape)
+        def _inner(action_wp: Any, tape: Any, *state_wps: Any) -> None:
+            env._apply_action_kernel(action_wp, *state_wps, tape=tape)
 
         return _inner

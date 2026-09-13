@@ -52,6 +52,16 @@ def _square_reward_kernel(
     reward[0] = state[0] * state[0]
 
 
+@wp.kernel
+def _recurrent_state_kernel(
+    action: wp.array(dtype=wp.float32),
+    state: wp.array(dtype=wp.float32),
+    next_state: wp.array(dtype=wp.float32),
+) -> None:
+    """Advance one scalar functional state."""
+    next_state[0] = state[0] + 2.0 * action[0]
+
+
 def _bridge_state(*, is_newton_backend: bool = True) -> dict[str, Any]:
     """Build a one-dimensional kinematics bridge input on CPU."""
     state_wp = wp.zeros(1, dtype=wp.float32, device="cpu", requires_grad=True)
@@ -188,6 +198,54 @@ def test_kinematic_bridge_propagates_reward_gradient_to_action() -> None:
 
     assert action.grad is not None
     assert torch.allclose(action.grad, torch.tensor([4.0]))
+
+
+def test_kinematic_bridge_propagates_functional_state_gradient() -> None:
+    """Recurrent state inputs retain a complete gradient across bridge calls."""
+    next_state_wp = wp.zeros(1, dtype=wp.float32, device="cpu", requires_grad=True)
+    reward_wp = wp.zeros(1, dtype=wp.float32, device="cpu", requires_grad=True)
+
+    def _apply_action(action_wp: Any, tape: Any, state_wp: Any) -> None:
+        del tape
+        wp.launch(
+            _recurrent_state_kernel,
+            dim=1,
+            inputs=[action_wp, state_wp, next_state_wp],
+            device="cpu",
+        )
+
+    def _read_outputs(final_state: Any) -> dict[str, Any]:
+        wp.launch(
+            _square_reward_kernel,
+            dim=1,
+            inputs=[final_state, reward_wp],
+            device="cpu",
+        )
+        return {
+            "next_state": wp.to_torch(final_state),
+            "reward": wp.to_torch(reward_wp),
+            "_order": ("next_state", "reward"),
+            "_grad_track": {
+                "next_state": next_state_wp,
+                "reward": reward_wp,
+            },
+        }
+
+    sim_state = {
+        "manager": SimpleNamespace(is_newton_backend=True),
+        "action_kernel": _apply_action,
+        "kernel_args": (),
+        "step_fn": lambda: next_state_wp,
+        "obs_reward_fn": _read_outputs,
+    }
+    action = torch.tensor([0.5], requires_grad=True)
+    state = torch.tensor([1.0], requires_grad=True)
+
+    _, reward = NewtonStepFunc.apply(action, sim_state, state)
+    reward.sum().backward()
+
+    assert torch.allclose(action.grad, torch.tensor([8.0]))
+    assert torch.allclose(state.grad, torch.tensor([4.0]))
 
 
 def test_kinematic_bridge_no_grad_call_releases_tape_synchronously() -> None:

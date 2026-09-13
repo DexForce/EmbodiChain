@@ -18,7 +18,7 @@ The resolution path is:
       → _apply_action_kernel(action_wp, tape)
       → _make_kinematic_step_fn()()
       → _read_outputs(final_state)
-      → Warp tape backward → action.grad
+      → Warp tape backward → action.grad and optional functional-state grads
 
 ## Invariants
 
@@ -33,6 +33,11 @@ The resolution path is:
 - Newton gradient configuration still selects the semi-implicit solver, but
   `DifferentiableEnv` never advances it.
 - Gradient mode disables Newton CUDA graph capture.
+- `NewtonStepFunc.apply(action, sim_state, *state_tensors)` accepts optional
+  functional state tensors. They are appended to the action-kernel arguments
+  as Warp arrays and receive gradients in backward, which lets downstream
+  tasks retain a complete recurrent closed-loop graph without storing tensors
+  in the metadata-only `sim_state` mapping.
 
 ## Subclass contract
 
