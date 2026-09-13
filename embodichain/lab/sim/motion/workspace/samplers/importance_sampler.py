@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import numpy as np
 import torch
 from typing import Callable, Union, TYPE_CHECKING
@@ -91,7 +93,7 @@ class ImportanceSampler(BaseSampler):
                 f"Invalid method '{method}'. Use 'rejection' or 'transform'."
             )
 
-    def sample(
+    def _sample_from_bounds(
         self, bounds: torch.Tensor | np.ndarray, num_samples: int
     ) -> torch.Tensor:
         """Generate importance-weighted samples within the given bounds.
@@ -157,7 +159,12 @@ class ImportanceSampler(BaseSampler):
             num_needed = num_samples - len(accepted_samples)
             num_candidates_batch = max(num_needed * self.num_candidates, 100)
 
-            candidates = torch.rand(num_candidates_batch, n_dims, device=self.device)
+            candidates = torch.rand(
+                num_candidates_batch,
+                n_dims,
+                device=self.device,
+                generator=self.generator,
+            )
             candidates = self._scale_samples(candidates, bounds)
 
             # Compute weights
@@ -179,7 +186,9 @@ class ImportanceSampler(BaseSampler):
                 weights_normalized = torch.ones_like(weights)
 
             # Rejection sampling
-            accept_probs = torch.rand(num_candidates_batch, device=self.device)
+            accept_probs = torch.rand(
+                num_candidates_batch, device=self.device, generator=self.generator
+            )
             accepted_mask = accept_probs < weights_normalized
 
             accepted_batch = candidates[accepted_mask]
@@ -218,7 +227,9 @@ class ImportanceSampler(BaseSampler):
 
         # Generate candidate samples
         num_candidates_total = num_samples * self.num_candidates
-        candidates = torch.rand(num_candidates_total, n_dims, device=self.device)
+        candidates = torch.rand(
+            num_candidates_total, n_dims, device=self.device, generator=self.generator
+        )
         candidates = self._scale_samples(candidates, bounds)
 
         # Compute weights
@@ -244,12 +255,16 @@ class ImportanceSampler(BaseSampler):
 
         # Sample indices according to probabilities
         try:
-            indices = torch.multinomial(probabilities, num_samples, replacement=False)
+            indices = torch.multinomial(
+                probabilities, num_samples, replacement=False, generator=self.generator
+            )
         except RuntimeError:
             # If probabilities are problematic, add small epsilon
             probabilities = probabilities + 1e-10
             probabilities = probabilities / probabilities.sum()
-            indices = torch.multinomial(probabilities, num_samples, replacement=False)
+            indices = torch.multinomial(
+                probabilities, num_samples, replacement=False, generator=self.generator
+            )
 
         selected_samples = candidates[indices]
 

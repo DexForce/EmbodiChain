@@ -55,7 +55,7 @@ simulation:
     - 0.0
     - 0.0
     - 0.0
-  drive_pros:
+  joint_drive_props:
     stiffness:
       left_arm: 10000.0
       right_arm: 10000.0

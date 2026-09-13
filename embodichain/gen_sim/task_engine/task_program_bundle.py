@@ -257,6 +257,10 @@ def generate_task_program_bundle(
             ),
             "num_envs": 1,
             "arena_space": 2.5,
+            # Gym configs own the physics backend explicitly.  Generated
+            # bundles retain the calibrated DexSim/Default path that the
+            # legacy scene attributes and CCD setting were authored for.
+            "physics": "default",
             "physics_config": {"enable_ccd": True},
             "env": {
                 "sim_steps_per_control": 4,
@@ -1109,11 +1113,15 @@ def _integration_payload(
                         -0.08,
                         _handover_position_z(scene.table_top_z),
                     ],
-                    "final_quaternion_wxyz": [
-                        0.7071067812,
+                    # Task Program poses use EmbodiChain's public ``xyzw``
+                    # quaternion order.  The former generated bundle wrote
+                    # this 90-degree x rotation as ``wxyz``; keep the same
+                    # orientation while crossing into the configured service.
+                    "final_quaternion_xyzw": [
                         0.7071067812,
                         0.0,
                         0.0,
+                        0.7071067812,
                     ],
                 }
             ],
@@ -1647,8 +1655,8 @@ def _single_target_pose(
         not isinstance(pose, dict)
         or not isinstance(pose.get("position"), list)
         or len(pose["position"]) != 3
-        or not isinstance(pose.get("quaternion_wxyz"), list)
-        or len(pose["quaternion_wxyz"]) != 4
+        or not isinstance(pose.get("quaternion_xyzw"), list)
+        or len(pose["quaternion_xyzw"]) != 4
     ):
         raise ValueError(f"Generated target {target_id!r} has an invalid pose.")
     return pose
@@ -1792,7 +1800,7 @@ def _refine_upright_targets(
         position[2] = table_top + clearance - local_minimum
         if target_id.endswith("_upright_staging_target"):
             position[2] += _UPRIGHT_STAGING_CLEARANCE
-        values[0]["quaternion_wxyz"] = _upright_target_quaternion(
+        values[0]["quaternion_xyzw"] = _upright_target_quaternion(
             source,
             axis,
             world_yaw=(math.pi if resource == "right" else 0.0),

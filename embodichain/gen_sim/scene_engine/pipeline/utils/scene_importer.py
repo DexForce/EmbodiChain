@@ -327,7 +327,9 @@ class SceneExportImporter:
             support_optimization_rect_xy=support_optimization_rect_xy,
             physics=ObjectPhysics(
                 body_type=str(entry.get("body_type", "dynamic")),  # type: ignore[arg-type]
-                attrs=self._physics_attrs(entry.get("attrs", {"mass": 1.0})),
+                attrs=self._physics_attrs(
+                    entry.get("attrs", {"mass_props": {"mass": 1.0}})
+                ),
                 max_convex_hull_num=max(1, int(entry.get("max_convex_hull_num", 32))),
             ),
         )
@@ -485,16 +487,14 @@ class SceneExportImporter:
         ]
 
     @staticmethod
-    def _physics_attrs(value: object) -> dict[str, float | int]:
+    def _physics_attrs(value: object) -> dict[str, object]:
         """Validate exported physics attributes."""
         if not isinstance(value, dict) or not value:
             raise ValueError("Scene object attrs must be a non-empty object.")
-        attrs: dict[str, float | int] = {}
-        for key, item in value.items():
-            if not isinstance(key, str) or not isinstance(item, (float, int)):
-                raise ValueError("Scene object attrs must map strings to numbers.")
-            attrs[key] = item
-        return attrs
+        from embodichain.lab.sim.cfg.rigid import _rigid_body_physics_from_dict
+
+        _rigid_body_physics_from_dict(value)
+        return dict(value)
 
 
 def import_scene_from_output_root(output_root: str | Path) -> Scene:

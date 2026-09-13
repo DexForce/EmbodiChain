@@ -21,7 +21,10 @@ from __future__ import annotations
 import torch
 
 from embodichain.lab.sim.motion.planners import MoveType, PlanResult, PlanState
-from embodichain.compute.trajectory import interpolate_with_distance
+from embodichain.compute.trajectory import (
+    interpolate_with_distance,
+    retime_to_control_grid,
+)
 
 from .plans import TimedTrajectory, normalize_success_mask
 
@@ -320,8 +323,9 @@ def to_full_robot_trajectory(
     base_qpos: torch.Tensor,
     joint_ids: list[int],
     env_ids: torch.Tensor,
+    control_dt: float,
 ) -> tuple[torch.Tensor, TimedTrajectory]:
-    """Embed a controlled-joint plan into a timed full-robot trajectory."""
+    """Retime and embed a controlled-joint plan into a full-robot trajectory."""
     positions = result.positions
     if positions is None or positions.dim() != 3:
         raise ValueError("PlanResult.positions must have shape (B, N, control_dof).")
@@ -329,6 +333,13 @@ def to_full_robot_trajectory(
         raise ValueError("PlanResult and base_qpos batch sizes must match.")
     if positions.shape[2] != len(joint_ids):
         raise ValueError("PlanResult controlled DoF does not match joint_ids.")
+    if result.dt is None:
+        raise ValueError("PlanResult must include explicit dt.")
+    positions, velocities, dt, _ = retime_to_control_grid(
+        positions,
+        result.dt,
+        control_dt,
+    )
     full_positions = base_qpos.unsqueeze(1).expand(-1, positions.shape[1], -1).clone()
     full_positions[:, :, joint_ids] = positions
 
@@ -339,14 +350,12 @@ def to_full_robot_trajectory(
         full[:, :, joint_ids] = value
         return full
 
-    if result.dt is None:
-        raise ValueError("PlanResult must include explicit dt.")
     timed = TimedTrajectory.from_positions(
         full_positions,
         env_ids=env_ids,
-        velocities=embed_derivative(result.velocities),
-        accelerations=embed_derivative(result.accelerations),
-        dt=result.dt,
+        velocities=embed_derivative(velocities),
+        accelerations=None,
+        dt=dt,
     )
     success = normalize_success_mask(
         result.success,

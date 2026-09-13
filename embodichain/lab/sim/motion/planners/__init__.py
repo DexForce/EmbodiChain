@@ -16,9 +16,9 @@
 
 """Motion planning stack.
 
-``BasePlanner`` trajectory planners (TOPPRA, neural, cuRobo) produce joint
-trajectories from waypoints. Motion generation composes these backends in
-``embodichain.lab.sim.motion.motion_generator``.
+``BasePlanner`` trajectory planners (TOPPRA, trapezoidal, neural, and cuRobo)
+produce joint trajectories from waypoints. Motion generation composes these
+backends in ``embodichain.lab.sim.motion.motion_generator``.
 """
 
 from __future__ import annotations
@@ -26,6 +26,9 @@ from __future__ import annotations
 from .utils import *
 from .base_planner import *
 from .toppra_planner import *
+from .trapezoidal_planner import *
+from .bezier import *
+from .se3 import *
 from .neural_planner import *
 from .curobo.curobo_yaml import *
 from .curobo.curobo_planner import *

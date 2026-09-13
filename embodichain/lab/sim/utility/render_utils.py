@@ -47,7 +47,8 @@ def select_default_renderer(gpu_id: int = 0) -> str:
         gpu_id: The CUDA device index to query for selecting the renderer.
 
     Returns:
-        The resolved renderer name, one of ``"hybrid"``, ``"fast-rt"``, or ``"rt"``.
+        The resolved renderer name, one of ``"hybrid"``, ``"fast-rt"``, or
+        ``"rt"``.
     """
     from embodichain.lab.sim import cfg
 
@@ -56,7 +57,7 @@ def select_default_renderer(gpu_id: int = 0) -> str:
         return cfg.DEFAULT_RENDERER
 
     if not torch.cuda.is_available():
-        logger.log_info("No CUDA device available; defaulting renderer to 'hybrid'.")
+        logger.log_debug("No CUDA device available; defaulting renderer to 'hybrid'.")
         return "hybrid"
 
     try:
@@ -70,18 +71,18 @@ def select_default_renderer(gpu_id: int = 0) -> str:
 
     upper_name = device_name.upper()
     if any(keyword in upper_name for keyword in _FAST_RT_GPU_KEYWORDS):
-        logger.log_info(
+        logger.log_debug(
             f"Detected datacenter GPU '{device_name}'; selecting 'fast-rt' renderer."
         )
         return "fast-rt"
 
     if "RTX" in upper_name:
-        logger.log_info(
+        logger.log_debug(
             f"Detected RTX GPU '{device_name}'; selecting 'hybrid' renderer."
         )
         return "hybrid"
 
-    logger.log_info(
+    logger.log_debug(
         f"Unrecognized GPU '{device_name}'; defaulting renderer to 'hybrid'."
     )
     return "hybrid"

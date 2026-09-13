@@ -266,7 +266,7 @@ def test_transport_decoder_rejects_old_alternative_pose_declarations() -> None:
     pose = {
         "kind": "pose",
         "position": [0.1, 0.2, 0.8],
-        "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
     }
     with pytest.raises(ValueError, match="alternatives"):
         decode_task_lowerer(

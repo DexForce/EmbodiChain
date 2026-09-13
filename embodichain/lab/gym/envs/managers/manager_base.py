@@ -436,14 +436,6 @@ class ManagerBase(ABC):
                     raise ValueError(
                         f"Error while parsing '{functor_name}:{key_path}'. {e}"
                     )
-                # log the entity for checking later
-                msg = f"[{functor_cfg.__class__.__name__}:{functor_name}] Found entity '{value.uid}'."
-                if value.joint_ids is not None:
-                    msg += f"\n\tJoint names: {value.joint_names} [{value.joint_ids}]"
-                if value.body_ids is not None:
-                    msg += f"\n\tBody names: {value.body_names} [{value.body_ids}]"
-                # print the information
-                print(f"[INFO]: {msg}")
                 return value
             if isinstance(value, list):  # recursively resolve the list
                 return [

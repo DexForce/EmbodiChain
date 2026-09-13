@@ -31,7 +31,8 @@ def grid_sample_qpos_from_limits(
     steps_per_joint: int = 4,
     device=None,
     max_samples: int = 4096,
-    safe_margin: float = 5 / 180 * np.pi,  # 5 degrees in radians
+    # Keep boundary samples away from numerically ill-conditioned OPW poses.
+    safe_margin: float = 20 / 180 * np.pi,  # 20 degrees in radians
 ) -> torch.Tensor:
     """Generate grid samples for qpos from qpos_limits.
 
@@ -70,8 +71,8 @@ def grid_sample_qpos_from_limits(
 class BaseSolverTest:
     sim = None  # Define as a class attribute
 
-    def setup_simulation(self, sim_device):
-        config = SimulationManagerCfg(headless=True, sim_device=sim_device)
+    def setup_simulation(self, device):
+        config = SimulationManagerCfg(headless=True, device=device)
         self.sim = SimulationManager(config)
 
         cfg_dict = {
@@ -125,6 +126,7 @@ class BaseSolverTest:
         }
 
         self.robot: Robot = self.sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
+        self.sim.prepare()
 
     @pytest.mark.parametrize("arm_name", ["left_arm", "right_arm"])
     def test_ik(self, arm_name: str):
@@ -144,29 +146,28 @@ class BaseSolverTest:
             qpos=sample_qpos, name=arm_name, to_matrix=False
         )
 
-        res, ik_qpos = self.robot.compute_batch_ik(
+        matrix_success, ik_qpos = self.robot.compute_batch_ik(
             pose=fk_xpos, joint_seed=sample_qpos, name=arm_name
         )
 
-        res, ik_qpos_xyzquat = self.robot.compute_batch_ik(
+        xyzquat_success, ik_qpos_xyzquat = self.robot.compute_batch_ik(
             pose=fk_xpos_xyzquat, joint_seed=sample_qpos, name=arm_name
         )
 
-        assert torch.allclose(
-            ik_qpos, ik_qpos_xyzquat, atol=1e-4, rtol=1e-4
-        ), "IK results do not match for different pose formats"
-
-        ik_xpos = self.robot.compute_batch_fk(
+        assert torch.equal(matrix_success, xyzquat_success)
+        assert matrix_success.all()
+        matrix_ik_xpos = self.robot.compute_batch_fk(
+            qpos=ik_qpos, name=arm_name, to_matrix=True
+        )
+        xyzquat_ik_xpos = self.robot.compute_batch_fk(
             qpos=ik_qpos_xyzquat, name=arm_name, to_matrix=True
         )
-
         assert torch.allclose(
-            sample_qpos, ik_qpos, atol=5e-3, rtol=5e-3
-        ), f"FK and IK qpos do not match for {arm_name}"
-
+            fk_xpos, matrix_ik_xpos, atol=5e-3, rtol=5e-3
+        ), f"Matrix-pose IK does not reconstruct FK for {arm_name}"
         assert torch.allclose(
-            fk_xpos, ik_xpos, atol=5e-3, rtol=5e-3
-        ), f"FK and IK xpos do not match for {arm_name}"
+            fk_xpos, xyzquat_ik_xpos, atol=5e-3, rtol=5e-3
+        ), f"XYZ-quaternion IK does not reconstruct FK for {arm_name}"
         # test for failed xpos
         invalid_pose = torch.tensor(
             [
@@ -186,6 +187,31 @@ class BaseSolverTest:
         dof = ik_qpos.shape[-1]
         assert res[0] == False
         assert ik_qpos.shape == (1, dof)
+
+    @pytest.mark.parametrize("arm_name", ["left_arm", "right_arm"])
+    def test_continuous_batch_ik_reconstructs_fk_path(self, arm_name: str):
+        """Continuous batch IK preserves a branch across an OPW pose path."""
+        qpos_limits = self.robot.get_qpos_limits(name=arm_name)
+        qpos = grid_sample_qpos_from_limits(
+            qpos_limits, steps_per_joint=2, device=self.robot.device, max_samples=1
+        )
+        qpos_path = qpos[None].expand(1, 3, -1).contiguous()
+        target_path = self.robot.compute_batch_fk(
+            qpos=qpos_path, name=arm_name, to_matrix=True
+        )
+
+        success, solved_path = self.robot.compute_batch_ik(
+            pose=target_path,
+            joint_seed=qpos,
+            name=arm_name,
+            continuous=True,
+        )
+
+        assert success.all()
+        reconstructed = self.robot.compute_batch_fk(
+            qpos=solved_path, name=arm_name, to_matrix=True
+        )
+        assert torch.allclose(target_path, reconstructed, atol=5e-3, rtol=5e-3)
 
     def teardown_method(self):
         """Clean up resources after each test method."""

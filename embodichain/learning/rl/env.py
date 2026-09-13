@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol, TypeAlias, runtime_checkable
 
 import torch
@@ -27,17 +28,62 @@ from tensordict import TensorDict
 
 __all__ = [
     "DifferentiableObservation",
+    "DifferentiableRolloutSpec",
     "DifferentiableVecEnv",
     "LearningVecEnv",
     "build_learning_env",
     "get_registered_learning_env_names",
     "register_learning_env",
+    "ScheduledDifferentiableVecEnv",
+    "stratified_rollout_value",
 ]
 
 DifferentiableObservation: TypeAlias = torch.Tensor | TensorDict
 LearningEnvFactory: TypeAlias = Callable[..., "LearningVecEnv"]
 
 _LEARNING_ENV_REGISTRY: dict[str, LearningEnvFactory] = {}
+
+
+@dataclass(frozen=True)
+class DifferentiableRolloutSpec:
+    """Describe one independent complete rollout used for a gradient microbatch.
+
+    Args:
+        num_steps: Full rollout horizon. The trainer must not detach or truncate it.
+        objective_scale: Per-environment or scalar multiplier applied to returns.
+        metadata: Scalar labels recorded with training metrics.
+    """
+
+    num_steps: int
+    objective_scale: float | torch.Tensor = 1.0
+    metadata: Mapping[str, float] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if isinstance(self.num_steps, bool) or int(self.num_steps) != self.num_steps:
+            raise TypeError("num_steps must be a positive integer.")
+        if self.num_steps <= 0:
+            raise ValueError("num_steps must be a positive integer.")
+
+
+def stratified_rollout_value(index: int, minimum: int, maximum: int) -> int:
+    """Cycle uniformly through an integer range and rotate each cycle's order.
+
+    Args:
+        index: Zero-based rollout index.
+        minimum: Inclusive minimum scheduled value.
+        maximum: Inclusive maximum scheduled value.
+
+    Returns:
+        Scheduled integer for ``index``.
+
+    Raises:
+        ValueError: If the inclusive range is empty.
+    """
+    count = int(maximum) - int(minimum) + 1
+    if count < 1:
+        raise ValueError("minimum must be less than or equal to maximum.")
+    cycle, position = divmod(int(index), count)
+    return int(minimum) + ((position + cycle) % count)
 
 
 @runtime_checkable
@@ -85,6 +131,31 @@ class DifferentiableVecEnv(LearningVecEnv, Protocol):
 
     def detach_state(self) -> DifferentiableObservation:
         """Detach internal state and return its current detached observation."""
+        ...
+
+
+@runtime_checkable
+class ScheduledDifferentiableVecEnv(DifferentiableVecEnv, Protocol):
+    """Differentiable env that schedules variable independent rollouts.
+
+    The trainer calls :meth:`prepare_differentiable_rollout` immediately before
+    resetting the environment. Implementations may select task difficulty for
+    the next reset, such as an ordered-waypoint count, and must return the full
+    horizon and objective scaling for that selection.
+    """
+
+    def prepare_differentiable_rollout(
+        self,
+        rollout_index: int,
+    ) -> DifferentiableRolloutSpec:
+        """Configure the next reset and return its complete-rollout contract.
+
+        Args:
+            rollout_index: Zero-based independent-rollout index.
+
+        Returns:
+            Full horizon, objective scaling, and optional metric metadata.
+        """
         ...
 
 

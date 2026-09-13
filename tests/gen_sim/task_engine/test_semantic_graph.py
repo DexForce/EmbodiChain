@@ -510,7 +510,7 @@ def test_upright_target_uses_the_normalized_mesh_origin_offset(tmp_path: Path) -
                 "values": [
                     {
                         "position": [0.1, 0.2, 0.85],
-                        "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
                     }
                 ],
             },
@@ -519,7 +519,7 @@ def test_upright_target_uses_the_normalized_mesh_origin_offset(tmp_path: Path) -
                 "values": [
                     {
                         "position": [0.1, 0.2, 0.85],
-                        "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
                     }
                 ],
             },
@@ -717,7 +717,7 @@ def test_task_pick_directions_are_declared_per_policy_not_injected_by_lowerers()
         name: {
             "kind": "cyclic_pose",
             "values": [
-                {"position": [0.0, 0.0, 0.9], "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0]}
+                {"position": [0.0, 0.0, 0.9], "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0]}
             ],
         }
         for name in ("one", "two")
@@ -893,7 +893,7 @@ def test_explicit_orientation_bundle_uses_shared_preflight_and_terminal_post(
                 "values": [
                     {
                         "position": [0.1, -0.2, 1.05],
-                        "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
                     }
                 ],
             }
@@ -1071,7 +1071,7 @@ def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
             "values": [
                 {
                     "position": [0.1, -0.2, 0.85],
-                    "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                    "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
                 }
             ],
         }

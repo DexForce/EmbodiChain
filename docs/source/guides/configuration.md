@@ -34,12 +34,12 @@ EmbodiChain configs form a nested hierarchy:
 EmbodiedEnvCfg
 ├── sim_cfg: SimulationManagerCfg
 │   ├── render_cfg: RenderCfg
-│   ├── physics_config: PhysicsCfg
-│   ├── gpu_memory_config: GPUMemoryCfg
+│   ├── physics_cfg: DefaultPhysicsCfg | NewtonPhysicsCfg
+│   │   └── gpu_memory: GPUMemoryCfg  # Default backend only
 │   └── visualization: VisualizationCfg
 ├── robot: RobotCfg
 │   ├── urdf_cfg: URDFCfg
-│   ├── drive_pros: JointDrivePropertiesCfg
+│   ├── joint_drive_props: JointDrivePropertiesCfg
 │   └── solver_cfg: Dict[str, SolverCfg]
 ├── sensor: List[SensorCfg]
 ├── events: EventCfg
@@ -152,6 +152,8 @@ When a training config references a gym config (via `trainer.gym_config`), the n
     "num_envs": 4,
     "max_episodes": 100,
     "max_episode_steps": 600,
+    "physics": "default",
+    "device": "cpu",
     "physics_config": {
         "gravity": [0.0, 0.0, -9.81],
         "bounce_threshold": 2.0,
@@ -194,8 +196,8 @@ When a training config references a gym config (via `trainer.gym_config`), the n
             "height": 540,
             "width": 960
         }
-    ],
-    "env": {
+     ],
+     "env": {
         "control_parts": ["arm"],
         "actions": {
             "delta_qpos": {
@@ -247,6 +249,67 @@ When a training config references a gym config (via `trainer.gym_config`), the n
 }
 ```
 
+Every runnable Gym configuration explicitly owns one `physics` backend:
+`"default"` or `"newton"`. Its optional flat `physics_config` mapping is
+decoded strictly against that backend, so Default-only fields cannot silently
+leak into a Newton configuration (and vice versa). The launcher cannot switch a
+file-owned backend with `--physics`; select a different runnable configuration
+when the backend should change.
+
+`device` is optional. If omitted, the backend config keeps its own default
+(`cpu` for Default and `cuda:0` for Newton). An explicitly configured device,
+or an explicit `run-env --device ...` override, is applied to both the
+environment tensors and the selected physics backend. In particular,
+`--device cpu` is not ignored for Newton.
+
+#### Paired physics configurations
+
+The following are **physics fragments**, not complete runnable task files.
+Apply each fragment to a separate copy of the same inline deployment, retaining
+its required `id`, `env`, robot/embodiment, and scene declarations. Retune any
+backend-specific asset fields and validate the final configuration on its
+selected backend.
+
+Default fragment:
+
+```yaml
+physics: default
+device: cuda:0
+physics_config:
+  physics_dt: 0.01
+  gravity: [0.0, 0.0, -9.81]
+  bounce_threshold: 2.0
+  enable_ccd: false
+```
+
+Newton fragment for a rigid articulated scene:
+
+```yaml
+physics: newton
+device: cuda:0
+physics_config:
+  physics_dt: 0.01
+  gravity: [0.0, 0.0, -9.81]
+  num_substeps: 10
+  solver_cfg:
+    solver_type: mujoco_warp
+  use_cuda_graph: true
+```
+
+Omit `solver_cfg` to let Newton's AutoSolver select from the complete scene at
+`prepare()`. For componentized tasks, place these backend declarations in
+separate physical environment files, such as `env.default.yaml` and
+`env.newton.yaml`, and point each deployment's `environment.component` at the
+appropriate file. Do not repeat `physics` or `physics_config` in those
+deployments. Keep the control period equal when comparing the two tasks.
+
+| Entry point | Backend selection | Backend parameters |
+| :--- | :--- | :--- |
+| Python `SimulationManagerCfg` | Concrete `physics_cfg` type | Fields of `DefaultPhysicsCfg` or `NewtonPhysicsCfg`. |
+| Inline runnable Gym file | Required `physics` | Flat `physics_config`, decoded against that backend. |
+| Componentized deployment | Selected environment component's `physics` | The same environment component owns `physics_config`. |
+| Launcher `--physics` | Confirms the file-owned value | Cannot convert a task to a different backend. |
+
 The `visualization` section is optional and defaults to
 `{"backend": "none"}`. Setting `"backend": "viser"` starts browser
 visualization when the environment constructs its `SimulationManager`. The
@@ -279,13 +342,15 @@ layout separates a reusable environment from runnable deployment choices:
     └── program.yaml
 ```
 
-The pure `env.yaml` component owns physical scene entities and ordinary Gym
-values. It requires `environment_id`, `simulation`, and `env`, may include run
-controls such as `max_episode_steps`, and contains no runnable `id`, robot,
-sensor, or Task Program selection:
+The pure `env.yaml` component owns the physics backend, physical scene entities,
+and ordinary Gym values. It requires `environment_id`, `physics`, `simulation`,
+and `env`, may include `physics_config` and run controls such as
+`max_episode_steps`, and contains no runnable `id`, robot, sensor, or Task
+Program selection:
 
 ```yaml
 environment_id: repeated_pick_place
+physics: default
 max_episode_steps: 1200
 simulation:
   rigid_object:
@@ -327,6 +392,11 @@ same environment and embodiment components while omitting `task_program`, so
 neither reusable component is coupled to an expert-authoring method. See the
 [Task Program tutorial](../tutorial/task_program.rst) for a complete runnable
 composition.
+
+When `environment.component` is selected, that component exclusively owns
+`physics` and `physics_config`; do not repeat either field in the runnable
+deployment. This keeps backend choice next to the physical scene whose fields
+it validates.
 
 ### Robot Preset Configs
 

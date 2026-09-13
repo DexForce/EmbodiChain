@@ -140,13 +140,14 @@ class TestToppraPlanBatched:
         from embodichain.lab.sim.robots import CobotMagicCfg
 
         sim = SimulationManager(
-            SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=2)
+            SimulationManagerCfg(headless=True, device="cpu", num_envs=2)
         )
         robot = sim.add_robot(
             cfg=CobotMagicCfg.from_dict(
                 {"uid": "t", "init_pos": [0, 0, 0.7775], "init_qpos": [0.0] * 16}
             )
         )
+        sim.prepare()
         planner = ToppraPlanner(ToppraPlannerCfg(robot_uid="t", max_workers=1))
         return planner, sim
 
@@ -253,13 +254,14 @@ class TestToppraPlanBatched:
         from embodichain.lab.sim.robots import CobotMagicCfg
 
         sim = SimulationManager(
-            SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=3)
+            SimulationManagerCfg(headless=True, device="cpu", num_envs=3)
         )
         sim.add_robot(
             cfg=CobotMagicCfg.from_dict(
                 {"uid": "p", "init_pos": [0, 0, 0.7775], "init_qpos": [0.0] * 16}
             )
         )
+        sim.prepare()
         planner = ToppraPlanner(
             ToppraPlannerCfg(robot_uid="p", max_workers=2, mp_context=mp_context)
         )
@@ -315,7 +317,7 @@ class TestToppraPlanBatched:
         from embodichain.lab.sim.robots import CobotMagicCfg
 
         sim = SimulationManager(
-            SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=3)
+            SimulationManagerCfg(headless=True, device="cpu", num_envs=3)
         )
         sim.add_robot(
             cfg=CobotMagicCfg.from_dict(
@@ -326,6 +328,7 @@ class TestToppraPlanBatched:
                 }
             )
         )
+        sim.prepare()
         planner = ToppraPlanner(
             ToppraPlannerCfg(
                 robot_uid="close_reap", max_workers=2, mp_context=mp_context
@@ -384,13 +387,14 @@ class TestToppraNumericalRegression:
         from embodichain.lab.sim.robots import CobotMagicCfg
 
         sim = SimulationManager(
-            SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=4)
+            SimulationManagerCfg(headless=True, device="cpu", num_envs=4)
         )
         sim.add_robot(
             cfg=CobotMagicCfg.from_dict(
                 {"uid": "r", "init_pos": [0, 0, 0.7775], "init_qpos": [0.0] * 16}
             )
         )
+        sim.prepare()
         planner = ToppraPlanner(ToppraPlannerCfg(robot_uid="r", max_workers=1))
         try:
             B, dofs = 4, 6

@@ -33,7 +33,7 @@ if not torch.cuda.is_available():
     pytest.skip("cuRobo V2 requires CUDA", allow_module_level=True)
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg  # noqa: E402
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg  # noqa: E402
+from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg  # noqa: E402
 from embodichain.lab.sim.objects import RigidObjectCfg  # noqa: E402
 from embodichain.lab.sim.robots import FrankaPandaCfg  # noqa: E402
 from embodichain.lab.sim.shapes import CubeCfg  # noqa: E402
@@ -68,12 +68,13 @@ def _make_franka_curobo_engine():
         cfg=RigidObjectCfg(
             uid="demo_block",
             shape=CubeCfg(size=DEMO_BLOCK_DIMS),
-            attrs=RigidBodyAttributesCfg(),
-            body_type="kinematic",
+            attrs=RigidBodyPhysicsCfg(),
+            body_type="static",
             init_pos=DEMO_BLOCK_POS,
             init_rot=[0.0, 0.0, 0.0],
         )
     )
+    sim.prepare()
     mg = MotionGenerator(
         MotionGenCfg(
             planner_cfg=CuroboPlannerCfg(
@@ -139,7 +140,8 @@ def test_atomic_move_end_effector_uses_curobo_v2():
                         sample_count=SAMPLE_INTERVAL,
                     ),
                 ),
-            )
+            ),
+            context=engine.initial_context(control_dt=sim.sim_config.physics_dt),
         )
         plan = result.action_plans[0]
         assert plan.joint_trajectory is not None
@@ -148,9 +150,16 @@ def test_atomic_move_end_effector_uses_curobo_v2():
         assert result.plan_success.shape == (1,)
         assert bool(result.plan_success.item())
         assert trajectory.shape[2] == robot.dof
-        # Default preserve_plan_samples=False resamples cuRobo's raw samples to
-        # the action's sample_interval waypoint count.
-        assert trajectory.shape[1] == SAMPLE_INTERVAL
+        # Atomic trajectories use the execution grid, so their sample count
+        # depends on the planner duration rather than the requested count.
+        assert trajectory.shape[1] > 1
+        assert torch.count_nonzero(plan.joint_trajectory.dt[:, 0]) == 0
+        torch.testing.assert_close(
+            plan.joint_trajectory.dt[:, 1:],
+            torch.full_like(plan.joint_trajectory.dt[:, 1:], sim.sim_config.physics_dt),
+        )
+        assert plan.joint_trajectory.velocities is not None
+        assert torch.count_nonzero(plan.joint_trajectory.velocities[:, -1]) == 0
         _play_trajectory(sim, robot, trajectory)
         assert _position_error(robot, target) < POS_TOL
     finally:

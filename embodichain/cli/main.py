@@ -85,6 +85,11 @@ COMMANDS = (
         help="Train an RL agent from a JSON or YAML config.",
     ),
     Command(
+        name="eval-policy",
+        target="embodichain.learning.rl.policy_evaluation.cli:cli",
+        help="Evaluate a trained policy in headless or viewer mode.",
+    ),
+    Command(
         name="annotate-grasp",
         target="embodichain.toolkits.graspkit.scripts.annotate_grasp:cli",
         help="Interactively annotate a grasp region on a mesh.",

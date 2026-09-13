@@ -183,7 +183,7 @@ def test_pose_rejects_zero_quaternion() -> None:
     with pytest.raises(ValueError, match="non-zero magnitude"):
         PoseCfg(
             position=(0.0, 0.0, 0.0),
-            quaternion_wxyz=(0.0, 0.0, 0.0, 0.0),
+            quaternion_xyzw=(0.0, 0.0, 0.0, 0.0),
         )
 
 

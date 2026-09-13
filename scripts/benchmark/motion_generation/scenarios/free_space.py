@@ -199,6 +199,7 @@ def _build_case(
         start_qpos=start_qpos,
         target_waypoints=target_waypoints,
         reference_qpos=reference_qpos,
+        robot_id=suite.robot.id,
     )
 
 

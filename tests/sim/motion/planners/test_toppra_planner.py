@@ -36,7 +36,7 @@ class TestToppraPlanner:
         cls = type(self)
         if hasattr(cls, "sim"):
             return
-        cls.sim_config = SimulationManagerCfg(headless=True, sim_device="cpu")
+        cls.sim_config = SimulationManagerCfg(headless=True, device="cpu")
         cls.sim = SimulationManager(cls.sim_config)
 
         cfg_dict = {
@@ -45,6 +45,7 @@ class TestToppraPlanner:
             "init_qpos": [0.0] * 16,
         }
         cls.robot = cls.sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
+        cls.sim.prepare()
 
     def setup_method(self):
         self.setup_simulation()
@@ -71,7 +72,8 @@ class TestToppraPlanner:
     def test_initialization(self):
         assert self.planner.device == torch.device("cpu")
 
-    def test_plan_basic(self):
+    def test_trivial_trajectory(self) -> None:
+        """A single-environment hold has zero duration and needs no worker pool."""
         target_states = [
             PlanState.single(qpos=torch.zeros(6)),
             PlanState.single(qpos=torch.zeros(6)),
@@ -87,44 +89,14 @@ class TestToppraPlanner:
         assert result.positions is not None
         assert result.velocities is not None
         assert result.accelerations is not None
-        assert result.positions.shape[0] == 1
-
-        # Check constraints
-        is_satisfied = self.planner.is_satisfied_constraint(
-            result.velocities, result.accelerations, opts.constraints
-        )
-        assert is_satisfied is True
-
-    def test_trivial_trajectory(self):
-        target_states = [
-            PlanState.single(qpos=torch.zeros(6)),
-            PlanState.single(qpos=torch.zeros(6)),
-        ]
-
-        opts = ToppraPlanOptions(
-            sample_method=TrajectorySampleMethod.TIME,
-            sample_interval=0.1,
-            constraints={"velocity": 1.0, "acceleration": 2.0},
-        )
-        result = self.planner.plan(target_states, options=opts)
-        assert result.success.all().item()
         assert result.positions.shape == (1, 2, 6)
         assert result.duration.item() == 0.0
-
-    def test_single_env_does_not_spawn_pool(self):
-        # Single-env plans must stay inline and never create a ProcessPoolExecutor.
-        target_states = [
-            PlanState.single(qpos=torch.zeros(6)),
-            PlanState.single(qpos=torch.zeros(6)),
-        ]
-
-        opts = ToppraPlanOptions(
-            sample_method=TrajectorySampleMethod.TIME,
-            sample_interval=0.1,
-            constraints={"velocity": 1.0, "acceleration": 2.0},
+        assert (
+            self.planner.is_satisfied_constraint(
+                result.velocities, result.accelerations, opts.constraints
+            )
+            is True
         )
-        result = self.planner.plan(target_states, options=opts)
-        assert result.success.all().item()
         assert self.planner._pool is None
 
 
