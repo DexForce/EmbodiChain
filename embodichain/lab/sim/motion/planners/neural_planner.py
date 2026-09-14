@@ -67,6 +67,7 @@ class _WaypointObservationLayout:
     num_waypoints: int
     num_controlled_joints: int
     use_relative_obs: bool
+    canonicalize_quat_obs: bool = True
 
     def __post_init__(self) -> None:
         if self.num_waypoints < 1 or self.num_controlled_joints < 1:
@@ -120,6 +121,7 @@ class _WaypointObservationLayout:
         """Return the NMG-compatible fingerprint for this concrete layout."""
         payload = {
             "blocks": self.block_widths,
+            "canonicalize_quat_obs": bool(self.canonicalize_quat_obs),
             "dtype": _WAYPOINT_OBSERVATION_DTYPE,
             "layout": _WAYPOINT_OBSERVATION_LAYOUT,
             "mask_semantics": _MASK_SEMANTICS,
@@ -141,6 +143,7 @@ class _WaypointObservationLayout:
             "nmg.num_waypoints": str(int(self.num_waypoints)),
             "nmg.num_controlled_joints": str(int(self.num_controlled_joints)),
             "nmg.use_relative_obs": str(bool(self.use_relative_obs)).lower(),
+            "nmg.canonicalize_quat_obs": str(bool(self.canonicalize_quat_obs)).lower(),
             "nmg.quaternion_order": _WAYPOINT_OBSERVATION_QUATERNION_ORDER,
         }
 
@@ -403,6 +406,7 @@ class NeuralPlanner(BasePlanner):
             self._num_waypoints,
             self._action_dim,
             self._use_relative_obs,
+            self._canonicalize_quat_obs,
         )
         self._policy_frame_from_world = self._as_transform(
             self.cfg.policy_frame_from_world, "policy_frame_from_world"
@@ -419,9 +423,7 @@ class NeuralPlanner(BasePlanner):
         self._validate_observation_metadata(self._policy.observation_metadata)
 
     def _validate_observation_metadata(self, metadata: Mapping[str, str]) -> None:
-        """Validate metadata from current exports while accepting legacy models."""
-        if "nmg.observation_layout" not in metadata:
-            return
+        """Require an exact observation contract from the NMG export."""
         expected = self._observation_layout.onnx_metadata
         mismatches = {
             key: (metadata.get(key), value)
@@ -785,6 +787,7 @@ class NeuralPlanner(BasePlanner):
                 self._num_waypoints,
                 self._action_dim,
                 self._use_relative_obs,
+                getattr(self, "_canonicalize_quat_obs", False),
             ),
         )
         obs = layout.concatenate(obs_blocks)

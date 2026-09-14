@@ -38,9 +38,9 @@ NUM_WAYPOINTS = 5
 OBS_DIM = 186
 NMG_OBSERVATION_CAPACITY_WIDTHS = {1: 54, 3: 120, 5: 186}
 NMG_OBSERVATION_FINGERPRINTS = {
-    1: "f835f0acb21ed65ade6da7a23092f0f73ebd94da2ebcdae7c3c79bd6d6917f77",
-    3: "b002c8f2167af36e95daf6ae38723189903776dc43c6a958696bdc7ed918e105",
-    5: "b5124743bf423a2e7cb4f6bab83c2c179598d2ed595d41015c0280292bac53b6",
+    1: "0b10a1de1989e6b0c447e0a5914181edb48592371785fb2a8d951771a2b0c245",
+    3: "84d7eb95ff9f2e389570f299fb161d4bff6b82540b88110e3738f6e347be9f89",
+    5: "485fe689029c9802095b01660c2856df15af97eadc5621e07dbfe6fb58b7703b",
 }
 NMG_OBSERVATION_BLOCKS = (
     "joint",
@@ -70,7 +70,9 @@ def _create_fake_onnx_model(tmp_path) -> str:
 class FakeOnnxPolicy:
     obs_dim = OBS_DIM
     fixed_batch_size = 1
-    observation_metadata = {}
+    observation_metadata = neural_planner_module._WaypointObservationLayout(
+        NUM_WAYPOINTS, NUM_ARM_JOINTS, True, True
+    ).onnx_metadata
 
     def __init__(self, path, providers=None):
         self.path = path
@@ -216,10 +218,34 @@ def test_neural_planner_rejects_mismatched_observation_metadata(tmp_path, monkey
             **neural_planner_module._WaypointObservationLayout(
                 5, 7, True
             ).onnx_metadata,
-            "nmg.quaternion_order": "wxyz",
+            "nmg.canonicalize_quat_obs": "false",
         }
 
     monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", MismatchedMetadataPolicy)
+
+    with pytest.raises(ValueError, match="observation layout metadata mismatch"):
+        NeuralPlanner(
+            NeuralPlannerCfg(
+                robot_uid="fake_robot",
+                onnx_model_path=model_path,
+                control_part="main_arm",
+            )
+        )
+
+
+def test_neural_planner_rejects_missing_observation_metadata(tmp_path, monkeypatch):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+
+    class MissingMetadataPolicy(FakeOnnxPolicy):
+        observation_metadata = {}
+
+    monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", MissingMetadataPolicy)
 
     with pytest.raises(ValueError, match="observation layout metadata mismatch"):
         NeuralPlanner(
