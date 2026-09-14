@@ -543,6 +543,56 @@ def test_nmg_case_budget_is_thirty_steps_per_waypoint():
     assert adapter._case_max_steps(replace(_case(), num_waypoints=5)) == 150
 
 
+def test_nmg_joint_case_uses_joint_constraint_waypoints():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+
+    adapter = NmgOnnxAdapter(
+        PlannerSpecCfg(
+            id="nmg",
+            adapter="nmg_onnx",
+            role="candidate",
+            config={"num_waypoints": 5},
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+    expected = Mock()
+    adapter.motion_generator = Mock()
+    adapter.motion_generator.generate.return_value = expected
+    joint_targets = torch.tensor(
+        [[[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], [0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]]]
+    )
+    joint_case = replace(
+        _case(),
+        num_waypoints=2,
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).repeat(1, 2, 1, 1),
+        reference_qpos=joint_targets,
+        case_parameters={"motion_validity": "ordered_joint_waypoints"},
+    )
+
+    supported, reason = adapter.supports_case(joint_case)
+    result = adapter.plan(joint_case)
+
+    assert supported is True
+    assert reason is None
+    assert result is expected
+    targets = adapter.motion_generator.generate.call_args.args[0]
+    assert [target.move_type for target in targets] == [
+        MoveType.JOINT_MOVE,
+        MoveType.JOINT_MOVE,
+    ]
+    assert targets[0].xpos is None
+    assert targets[1].xpos is None
+    assert torch.equal(targets[0].qpos, joint_targets[:, 0])
+    assert torch.equal(targets[1].qpos, joint_targets[:, 1])
+
+
 def test_seed_override_applies_to_atomic_tracks():
     suite = load_suite("atomic_franka_pgi_curobo_randomized")
 

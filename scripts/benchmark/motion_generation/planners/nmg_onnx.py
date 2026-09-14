@@ -27,6 +27,7 @@ from embodichain.lab.sim.motion.motion_generator import (
     MotionGenerator,
 )
 from embodichain.lab.sim.motion.planners import (
+    MoveType,
     NeuralPlanOptions,
     NeuralPlannerCfg,
     PlanResult,
@@ -131,13 +132,23 @@ class NmgOnnxAdapter(PlannerAdapter):
         self.motion_generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
 
     def plan(self, case: BenchmarkCase) -> PlanResult:
-        """Plan all ordered Cartesian constraints in one closed-loop rollout."""
+        """Plan all ordered constraints in one closed-loop rollout."""
         if self.motion_generator is None:
             raise RuntimeError("NMG adapter must be built before plan().")
-        targets = [
-            PlanState.from_xpos(case.target_waypoints[:, index])
-            for index in range(case.num_waypoints)
-        ]
+        if case.case_parameters.get("motion_validity") == "ordered_joint_waypoints":
+            targets = [
+                PlanState.from_qpos(
+                    case.reference_qpos[:, index], move_type=MoveType.JOINT_MOVE
+                )
+                for index in range(case.num_waypoints)
+            ]
+        else:
+            targets = [
+                PlanState.from_xpos(
+                    case.target_waypoints[:, index], move_type=MoveType.EEF_MOVE
+                )
+                for index in range(case.num_waypoints)
+            ]
         return self.motion_generator.generate(
             targets,
             MotionGenOptions(
