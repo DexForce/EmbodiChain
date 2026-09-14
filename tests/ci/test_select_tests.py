@@ -694,7 +694,7 @@ def test_partial_commands_run_only_impacted_slow_selectors() -> None:
         "-n",
         "4",
         "--dist",
-        "loadgroup",
+        "load",
     ]
 
 

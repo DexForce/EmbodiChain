@@ -185,11 +185,12 @@ def build_commands(
                 _lane_expression(slow_lane, include_slow),
             ]
             if lane == "fast":
-                # Slow CPU cases are independent and can use the same xdist
-                # grouping as the regular fast lane.  This keeps an impacted
-                # slow matrix from serialising the entire CI job.
+                # Slow CPU selectors are independent by contract.  ``load``
+                # distributes parametrized nodes from one module as well;
+                # ``loadgroup`` would put the whole module on one worker and
+                # leave a large reference matrix effectively serial.
                 slow_command.extend(
-                    ("--ignore=tests/docs", "-n", "4", "--dist", "loadgroup")
+                    ("--ignore=tests/docs", "-n", "4", "--dist", "load")
                 )
             elif lane == "sim":
                 slow_command.append("--ignore=tests/docs")
