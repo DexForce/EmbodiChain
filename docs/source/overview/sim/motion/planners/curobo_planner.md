@@ -427,4 +427,4 @@ Headless runs
 automatically record this fixed offscreen camera view to an MP4. Set an explicit
 destination with `--record-save-path outputs/videos/curobo_demo.mp4`, adjust
 the rate with `--record-fps`, or pass `--disable-record` to skip recording. See
-[MotionGenerator](motion_generator.md) for the common planner interface.
+[MotionGenerator](../motion_generator.md) for the common planner interface.

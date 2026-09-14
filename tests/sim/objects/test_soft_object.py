@@ -19,32 +19,22 @@ from __future__ import annotations
 import os
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
-    RenderCfg,
-    SoftbodyVoxelAttributesCfg,
-    SoftbodyPhysicalAttributesCfg,
+    NewtonPhysicsCfg,
+    VolumeDeformableMeshingCfg,
+    VolumeDeformablePhysicsCfg,
 )
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.objects import (
-    SoftBodyData,
-    SoftObject,
-    SoftObjectCfg,
+    DeformableObject,
+    DeformableObjectData,
+    VolumeDeformableObject,
+    VolumeDeformableObjectCfg,
 )
 from embodichain.data import get_data_path
 import pytest
 import torch
 
 COW_PATH = get_data_path("Cow/cow2.obj")
-
-
-def test_degenerate_soft_body_surface_is_empty() -> None:
-    """Degenerate collision geometry does not prevent visualization startup."""
-    data = object.__new__(SoftBodyData)
-    data.device = torch.device("cpu")
-    data._rest_position_buffer = torch.zeros((1, 3, 4), dtype=torch.float32)
-
-    triangles = data.collision_surface_triangles
-
-    assert triangles.shape == (0, 3)
 
 
 class BaseSoftObjectTest:
@@ -54,9 +44,14 @@ class BaseSoftObjectTest:
             height=1080,
             headless=True,
             physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-            sim_device="cuda",
-            num_envs=4,
+            device="cuda",
+            # DexSim 0.5 currently changes the cow render topology while
+            # cloning it; keep the functional volume test single-instance.
+            num_envs=1,
             arena_space=3.0,
+            physics_cfg=NewtonPhysicsCfg(
+                solver_cfg={"solver_type": "vbd"},
+            ),
         )
 
         # Create the simulation instance
@@ -64,33 +59,30 @@ class BaseSoftObjectTest:
 
         assert os.path.isfile(COW_PATH)
 
-        # Enable manual physics update for precise control
-        self.num_envs = 4
+        self.num_envs = 1
 
         # add softbody to the scene
-        self.cow: SoftObject = self.sim.add_soft_object(
-            cfg=SoftObjectCfg(
+        self.cow: VolumeDeformableObject = self.sim.add_deformable_object(
+            cfg=VolumeDeformableObjectCfg(
                 uid="cow",
                 shape=MeshCfg(
                     fpath=get_data_path("Cow/cow2.obj"),
                 ),
                 init_pos=[0.0, 0.0, 3.0],
-                voxel_attr=SoftbodyVoxelAttributesCfg(
+                meshing=VolumeDeformableMeshingCfg(
                     simulation_mesh_resolution=8,
-                    maximal_edge_length=0.5,
                 ),
-                physical_attr=SoftbodyPhysicalAttributesCfg(
+                attrs=VolumeDeformablePhysicsCfg(
                     youngs=1e6,
                     poissons=0.45,
                     density=100,
-                    dynamic_friction=0.1,
-                    min_position_iters=30,
+                    elasticity_damping=0.1,
                 ),
             ),
         )
+        self.sim.prepare()
 
     def test_run_simulation(self):
-        self.sim.init_gpu_physics()
         for _ in range(100):
             self.sim.update(step=1)
         self.cow.reset()
@@ -99,19 +91,62 @@ class BaseSoftObjectTest:
 
     def test_get_deformable_mesh_geometry(self):
         """Test current collision vertices and matching surface triangles."""
-        self.sim.init_gpu_physics()
-        vertices = self.cow.get_current_collision_vertices()
+        vertices = self.cow.data.nodal_pos_w
         triangles = self.cow.get_collision_surface_triangles(env_ids=[0])
 
         assert vertices.ndim == 3 and vertices.shape[0] == self.sim.num_envs
         assert triangles.ndim == 3 and triangles.shape[0] == 1
         assert int(triangles.max()) < vertices.shape[1]
 
+    def test_set_local_pose_updates_selected_particle_batch(self):
+        """Setting one instance pose writes only its packed simulation nodes."""
+        before = self.cow.data.nodal_pos_w
+        translation = torch.tensor([0.5, 0.0, 0.0], device=self.cow.device)
+        pose = torch.eye(
+            4,
+            dtype=torch.float32,
+            device=self.cow.device,
+        ).unsqueeze(0)
+        pose[:, :3, 3] = (
+            torch.as_tensor(
+                self.cow.cfg.init_pos,
+                dtype=torch.float32,
+                device=self.cow.device,
+            )
+            + translation
+        )
+
+        self.cow.set_local_pose(pose, env_ids=[0])
+        after = self.cow.data.nodal_pos_w
+
+        torch.testing.assert_close(after[0], before[0] + translation)
+        torch.testing.assert_close(after[1:], before[1:])
+
+    def test_unified_deformable_contract(self):
+        assert isinstance(self.cow, DeformableObject)
+        assert isinstance(self.cow, VolumeDeformableObject)
+        assert self.cow.deformable_type == "volume"
+        assert self.sim.get_deformable_object("cow") is self.cow
+        assert self.sim.get_deformable_object_uid_list() == ["cow"]
+
+        assert type(self.cow.data) is DeformableObjectData
+        positions = self.cow.data.nodal_pos_w
+        velocities = self.cow.data.nodal_vel_w
+        state = self.cow.data.nodal_state_w
+        default_state = self.cow.data.default_nodal_state_w
+        assert positions.shape[-1] == 3
+        assert velocities.shape == positions.shape
+        assert state.shape == (*positions.shape[:-1], 6)
+        assert default_state.shape == state.shape
+        render_vertices = self.cow.get_surface_vertices()
+        render_triangles = self.cow.get_surface_triangles(env_ids=[0])
+        assert render_vertices.shape[0] == self.sim.num_envs
+        assert int(render_triangles.max()) < render_vertices.shape[1]
+
     def test_remove(self):
-        self.sim.remove_asset(self.cow.uid)
-        assert (
-            self.cow.uid not in self.sim._soft_objects
-        ), "Cow UID still present after removal"
+        with pytest.raises(NotImplementedError, match="pending removal"):
+            self.sim.remove_asset(self.cow.uid)
+        assert self.sim.get_deformable_object(self.cow.uid) is self.cow
 
     def teardown_method(self):
         """Clean up resources after each test method."""

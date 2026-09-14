@@ -46,6 +46,9 @@ class BasePlannerCfg:
 
     planner_type: str = "base"
 
+    sim_instance_id: int = 0
+    """ID of the SimulationManager that owns ``robot_uid``. Defaults to 0."""
+
 
 @configclass
 class PlanOptions:
@@ -210,7 +213,9 @@ class BasePlanner(ABC):
         if cfg.robot_uid is MISSING:
             logger.log_error("robot_uid is required in planner config", ValueError)
 
-        self.robot = SimulationManager.get_instance().get_robot(cfg.robot_uid)
+        self.robot = SimulationManager.get_instance(cfg.sim_instance_id).get_robot(
+            cfg.robot_uid
+        )
         if self.robot is None:
             logger.log_error(f"Robot {cfg.robot_uid} not found", ValueError)
 
@@ -224,12 +229,25 @@ class BasePlanner(ABC):
     waypoints for a joint-only backend.
     """
 
+    supports_heterogeneous_waypoints: bool = False
+    """Whether one plan may contain an ordered mixture of movement types."""
+
+    uses_sparse_joint_waypoints: bool = False
+    """Whether joint targets are sparse waypoints owned by the planner.
+
+    When ``True``, :class:`~embodichain.lab.sim.motion.motion_generator.MotionGenerator`
+    prepends the observed ``start_qpos`` before dispatching a joint target. This
+    lets the planner own both path timing and derivative generation without
+    making every caller materialize the current state as a waypoint.
+    """
+
     preserve_plan_samples: bool = False
     """Whether callers must retain this planner's returned sample points exactly.
 
     When ``True``, :class:`MotionGenerator` returns the planner's trajectory
-    without resampling, preserving collision-checked samples. When ``False``
-    (the default), the generator may normalize the trajectory to a requested
+    without resampling, preserving planner-owned samples and derivatives
+    (including collision-checked samples where applicable). When ``False`` (the
+    default), the generator may normalize the trajectory to a requested
     waypoint count.
     """
 

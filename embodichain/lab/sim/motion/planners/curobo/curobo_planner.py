@@ -42,10 +42,12 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import torch
+
+from embodichain.compute.trajectory import differentiate_positions
 import yaml
 
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import pose_inv, quat_from_matrix
+from embodichain.utils.math import pose_inv, quat_from_matrix, quat_xyzw_to_wxyz
 
 from embodichain.lab.sim.motion.planners.base_planner import (
     BasePlanner,
@@ -518,7 +520,7 @@ def _matrix_to_position_quaternion(
     # so materialize them at the adapter boundary rather than relying on a
     # caller-specific layout.
     position = matrix[:, :3, 3].contiguous()
-    quaternion = quat_from_matrix(matrix[:, :3, :3]).contiguous()  # wxyz
+    quaternion = quat_xyzw_to_wxyz(quat_from_matrix(matrix[:, :3, :3])).contiguous()
     return position, quaternion
 
 
@@ -741,6 +743,9 @@ def _require_curobo(log_level: str = "error") -> "Any":
     _configure_curobo_logging(log_level)
     # cuRobo 0.8 references ``wp.torch.*``, which Warp >= 1.13 relocated.
     _ensure_warp_torch_compat()
+    matmul_precision = torch.get_float32_matmul_precision()
+    matmul_allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+    cudnn_allow_tf32 = torch.backends.cudnn.allow_tf32
     try:
         planner_mod = importlib.import_module("curobo.motion_planner")
         batch_mod = importlib.import_module("curobo.batch_motion_planner")
@@ -756,6 +761,13 @@ def _require_curobo(log_level: str = "error") -> "Any":
             "or replace `cu12` with `cu13` for CUDA 13.x. "
             f"See {_CUROBO_INSTALL_URL} for details."
         ) from exc
+    finally:
+        # cuRobo imports enable TF32 process-wide. Preserve the caller's
+        # numerical policy so unrelated FK/IK retains its requested precision.
+        torch.backends.cuda.matmul.allow_tf32 = matmul_allow_tf32
+        torch.backends.cudnn.allow_tf32 = cudnn_allow_tf32
+        # Restore this last: writing allow_tf32 also changes "medium" to "high".
+        torch.set_float32_matmul_precision(matmul_precision)
     return SimpleNamespace(
         MotionPlanner=planner_mod.MotionPlanner,
         MotionPlannerCfg=planner_mod.MotionPlannerCfg,
@@ -1954,6 +1966,8 @@ class CuroboPlanner(BasePlanner):
         )
         per_env_samples: list[list[torch.Tensor]] = [[] for _ in range(B)]
         per_env_dt: list[list[torch.Tensor]] = [[] for _ in range(B)]
+        per_env_velocities: list[list[torch.Tensor | None]] = [[] for _ in range(B)]
+        per_env_accelerations: list[list[torch.Tensor | None]] = [[] for _ in range(B)]
         alive = torch.ones(B, dtype=torch.bool, device=self._curobo_device)
         current = start.clone()
 
@@ -1980,7 +1994,14 @@ class CuroboPlanner(BasePlanner):
                 )
                 with capture_mode, torch.cuda.device(self._curobo_device):
                     v2_result = backend.planner.plan_pose(
-                        goal, current_state, max_attempts=max_attempts
+                        goal,
+                        current_state,
+                        max_attempts=max_attempts,
+                        # Match MotionPlanner's scalar default. BatchMotionPlanner
+                        # otherwise starts with PRM at attempt zero and can feed
+                        # zero-filled seeds to individual rows whose graph query
+                        # failed. Try the native direct seed first, then PRM.
+                        enable_graph_attempt=1,
                     )
                 logger.log_info(
                     f"cuRobo plan_pose segment {seg_idx} cost time: "
@@ -2002,8 +2023,20 @@ class CuroboPlanner(BasePlanner):
                     else nullcontext()
                 )
                 with capture_mode, torch.cuda.device(self._curobo_device):
+                    # cuRobo 0.8's BatchMotionPlanner zero-fills PRM seeds for
+                    # individual batch rows whose graph query fails.  If any
+                    # sibling row found a graph path, that partially invalid
+                    # seed tensor is still forwarded to TrajOpt and can turn a
+                    # trivial direct c-space move into a false per-row failure.
+                    # The native c-space solver already constructs direct
+                    # start-to-goal seeds.  Match MotionPlanner's direct-first
+                    # policy for both scalar and batched solves, then allow PRM
+                    # seeds to help on later attempts.
                     v2_result = backend.planner.plan_cspace(
-                        goal_state, current_state, max_attempts=max_attempts
+                        goal_state,
+                        current_state,
+                        max_attempts=max_attempts,
+                        enable_graph_attempt=1,
                     )
                 logger.log_info(
                     f"cuRobo plan_cspace segment {seg_idx} cost time: "
@@ -2023,13 +2056,18 @@ class CuroboPlanner(BasePlanner):
                     B, dtype=torch.bool, device=self._curobo_device
                 )
                 seg_positions = current.unsqueeze(1)
+                seg_velocities = seg_accelerations = None
                 seg_dt = torch.zeros(
                     B, 1, dtype=torch.float32, device=self._curobo_device
                 )
             else:
-                seg_success, seg_positions, seg_dt = self._extract_segment(
-                    v2_result, backend
-                )
+                (
+                    seg_success,
+                    seg_positions,
+                    seg_dt,
+                    seg_velocities,
+                    seg_accelerations,
+                ) = self._extract_segment(v2_result, backend)
             seg_success = seg_success.to(self._curobo_device) & alive
             if v2_result is not None and self.cfg.max_planning_time is not None:
                 total_time = self._extract_total_time(v2_result, B)
@@ -2048,11 +2086,33 @@ class CuroboPlanner(BasePlanner):
                 else:
                     per_env_samples[b].append(seg_positions[b, -1:])
                     per_env_dt[b].append(seg_dt[b, -1:])
+                selected = (
+                    slice(None)
+                    if seg_idx == 0
+                    else (slice(1, None) if alive[b] else slice(-1, None))
+                )
+                per_env_velocities[b].append(
+                    None if seg_velocities is None else seg_velocities[b, selected]
+                )
+                per_env_accelerations[b].append(
+                    None
+                    if seg_accelerations is None
+                    else seg_accelerations[b, selected]
+                )
                 if seg_success[b]:
                     current[b] = seg_positions[b, -1]
             alive = seg_success
 
-        return self._assemble_result(per_env_samples, per_env_dt, start, alive, B, D)
+        return self._assemble_result(
+            per_env_samples,
+            per_env_dt,
+            start,
+            alive,
+            B,
+            D,
+            per_env_velocities=per_env_velocities,
+            per_env_accelerations=per_env_accelerations,
+        )
 
     def _validate_segment_batch(
         self, target: PlanState, start_batch_size: int, segment_index: int
@@ -2081,10 +2141,14 @@ class CuroboPlanner(BasePlanner):
                 ValueError,
             )
 
-    def _extract_segment(
-        self, v2_result: "Any", backend: "_CuroboBackend"
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Extract ``(success, positions, dt)`` for one V2 planning result.
+    def _extract_segment(self, v2_result: "Any", backend: "_CuroboBackend") -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor | None,
+        torch.Tensor | None,
+    ]:
+        """Extract ``(success, positions, dt, velocities, accelerations)`` for one V2 planning result.
 
         ``positions`` is ``(B, T, controlled_dof)`` in simulator control-part
         order, trimmed to each env's last valid timestep and padded to a
@@ -2105,14 +2169,23 @@ class CuroboPlanner(BasePlanner):
             last_tstep = last_tstep.squeeze(-1)
 
         B, T, D = position.shape
+        # Despite its name, cuRobo 0.8's ``interpolated_last_tstep`` is the
+        # exclusive slice end (the number of valid samples), not the final
+        # zero-based index.  Its own ``get_interpolated_plan`` passes the value
+        # directly to ``trajectory[..., :end]``.  Adding one here used to pull
+        # the first padding element into every segment; that padding can be NaN
+        # for otherwise successful batch rows and made MotionGenerator reject
+        # the complete batch as non-finite.
+        #
         # Compute the per-env valid length once. This scalar extraction is the
         # only synchronization needed before rectangular trajectory assembly.
-        max_len = max(int((last_tstep + 1).max().item()), 1)
-        cap = min(max_len, T)
-        lengths = (last_tstep + 1).clamp(min=1, max=cap).long().to(self._curobo_device)
+        lengths = last_tstep.to(device=self._curobo_device, dtype=torch.long).clamp(
+            min=1, max=T
+        )
+        max_len = int(lengths.max().item())
         # A single gather both trims to each env's length and pads by repeating
         # the last valid sample: src[b, t] = t if t < length[b] else length[b] - 1.
-        # cap <= T guarantees src < T, so the gather never indexes out of bounds.
+        # max_len <= T guarantees src < T, so gather stays in bounds.
         position = position.float().to(self._curobo_device)
         arange = torch.arange(max_len, device=self._curobo_device)
         src = torch.where(
@@ -2124,7 +2197,33 @@ class CuroboPlanner(BasePlanner):
 
         seg_positions = self._map_curobo_to_sim(full, traj.joint_names, backend)
         seg_dt = self._extract_dt(traj, lengths, max_len, B)
-        return success, seg_positions, seg_dt
+
+        def extract_derivative(name: str) -> torch.Tensor | None:
+            value = getattr(traj, name, None)
+            if value is None:
+                return None
+            value = torch.as_tensor(
+                value, device=self._curobo_device, dtype=torch.float32
+            )
+            if value.dim() == 4:
+                value = value[:, 0]
+            if value.shape != position.shape:
+                raise ValueError(f"cuRobo {name} must match position shape.")
+            value = value.gather(1, src.unsqueeze(-1).expand(-1, -1, D))
+            mapped = self._map_curobo_to_sim(value, traj.joint_names, backend)
+            valid = (arange[None, :] < lengths[:, None]) & success[:, None]
+            mapped = mapped.masked_fill(~valid.unsqueeze(-1), 0.0)
+            if not torch.isfinite(mapped).all():
+                raise ValueError(f"cuRobo {name} must be finite on successful samples.")
+            return mapped
+
+        return (
+            success,
+            seg_positions,
+            seg_dt,
+            extract_derivative("velocity"),
+            extract_derivative("acceleration"),
+        )
 
     def _map_curobo_to_sim(
         self,
@@ -2236,6 +2335,9 @@ class CuroboPlanner(BasePlanner):
         alive: torch.Tensor,
         B: int,
         D: int,
+        *,
+        per_env_velocities: list[list[torch.Tensor | None]] | None = None,
+        per_env_accelerations: list[list[torch.Tensor | None]] | None = None,
     ) -> PlanResult:
         """Concatenate per-env segment samples into a rectangular PlanResult."""
         # One D2H sync for the whole batch (was B per-env `if alive[b]:` syncs,
@@ -2265,9 +2367,42 @@ class CuroboPlanner(BasePlanner):
             else:
                 positions[b, :1] = start[b]
                 positions[b, 1:] = start[b]
+
+        def assemble_derivative(
+            parts: list[list[torch.Tensor | None]] | None,
+            fallback: torch.Tensor | None = None,
+        ) -> torch.Tensor | None:
+            if parts is None:
+                return fallback
+            value = (
+                torch.zeros_like(positions) if fallback is None else fallback.clone()
+            )
+            for b in range(B):
+                if not alive_list[b]:
+                    continue
+                offset = 0
+                for samples, derivative in zip(per_env_samples[b], parts[b]):
+                    length = samples.shape[0]
+                    if derivative is None:
+                        if fallback is None:
+                            return None
+                    else:
+                        value[b, offset : offset + length] = derivative
+                    offset += length
+            return value
+
+        velocities = assemble_derivative(
+            per_env_velocities, differentiate_positions(positions, dt)
+        )
+        assert velocities is not None
+        accelerations = assemble_derivative(per_env_accelerations)
         return PlanResult(
             success=alive.to(self.device),
             positions=positions.to(self.device),
+            velocities=velocities.to(self.device),
+            accelerations=(
+                None if accelerations is None else accelerations.to(self.device)
+            ),
             dt=dt.to(self.device),
         )
 

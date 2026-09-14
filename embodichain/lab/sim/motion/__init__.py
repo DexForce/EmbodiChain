@@ -32,6 +32,7 @@ __all__ = [
     "workspace",
     "expansion",
     "motion_generator",
+    "execution",
 ]
 
 

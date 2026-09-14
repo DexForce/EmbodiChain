@@ -11,7 +11,7 @@
 |---|---|
 | `embodichain/lab/sim/motion/solvers/__init__.py` | Public re-exports for all solver classes and configs |
 | `embodichain/lab/sim/motion/solvers/base_solver.py` | `BaseSolver` ABC + `SolverCfg` base config |
-| `embodichain/lab/sim/cfg.py` | `RobotCfg.solver_cfg` — where solver config is wired into a robot |
+| `embodichain/lab/sim/cfg/robot.py` | `RobotCfg.solver_cfg` — where solver config is wired into a robot |
 | `embodichain/lab/sim/motion/solvers/qpos_seed_sampler.py` | `QposSeedSampler` — random joint-seed generation |
 | `embodichain/lab/sim/motion/solvers/null_space_posture_task.py` | `NullSpacePostureTask` — Pink null-space posture objective |
 | `embodichain/lab/sim/utility/solver_utils.py` | Helpers: `create_pk_serial_chain`, `build_reduced_pinocchio_robot`, `validate_iteration_params`, `compute_pinocchio_fk` |
@@ -85,6 +85,14 @@ Dict factory: `SolverCfg.from_dict(dict) → SolverCfg` resolves `class_type` dy
 | `set_qpos_limits` / `get_qpos_limits` | limits as list/Tensor | Set/get per-joint limits |
 | `update_with_robot_limit` | `(robot_qpos_limits: Tensor[DOF,2])` | Clamp solver limits to robot limits |
 | `set_ik_nearest_weight` / `get_ik_nearest_weight` | per-joint weights | Controls nearest-solution ranking |
+| `supports_continuous_batch_ik` | `bool` property | Defaults to false; opt-in requires all-candidate IK and continuous selection |
+| `_select_continuous_ik_path` | `(candidates, validity, seed) → (validity, path)` | Protected typed hook; default raises `NotImplementedError` |
+
+The continuous capability uses candidates `(B, N, K, DOF)`, validity
+`(B, N, K)`, and initial seeds `(B, DOF)`, returning validity `(B, N)` and
+positions `(B, N, DOF)`. `K` belongs to the solver. Robot checks support before
+pose-frame conversion or `get_ik(return_all_solutions=True)` and raises
+`ValueError` for unsupported continuous requests. Ordinary batch IK is unchanged.
 
 ---
 
@@ -145,3 +153,22 @@ repeated representatives when no shifted value fits the joint limits.
 
 Validate kernel import/compilation with `tests/compute/test_imports.py` and
 solver behavior with the corresponding `tests/sim/motion/solvers/` tests.
+
+## Batch adapters and analytic scratch memory
+
+`BaseSolver.get_fk_batch()` and `get_ik_batch()` flatten and restore arbitrary
+leading batch axes in the chain-root frame. Nearest IK returns a boolean success
+mask with the leading shape and qpos with a final `dof` axis; existing concrete
+`get_fk`/`get_ik` signatures remain available. Robot owns local-arena/root frame
+conversion and broadcasts root transforms without materializing per-target copies.
+
+UR's all-solutions path and OPW reuse internal candidate buffers through
+`solvers/_buffers.py`. UR's single-solution path keeps its own compact outputs
+and bounded ambiguity-fallback buffers, without allocating the full-batch cache.
+`prepare_buffers(max_batch)` reserves a high-water capacity; allocation is lazy
+and later larger calls grow it. Public results remain independent of subsequent
+calls, including `return_all_solutions=True`. Calls are serialized by a lock and
+CUDA events; Warp kernels use the current Torch stream. Buffer storage is released
+with the solver. UR's all-solutions path retains all 512 periodic candidates;
+OPW retains eight candidates. OPW packs live joint limits in one host
+transfer per call, so limit updates do not require cache invalidation.

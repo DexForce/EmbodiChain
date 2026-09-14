@@ -19,6 +19,10 @@ generic checklist or report an unproven concern as a finding.
 - **Architect** — Protect subsystem ownership, layering, dependency direction,
   public API and configuration contracts, extension boundaries, and viable
   evolution paths.
+- **Public API / developer experience engineer** — Review public import paths,
+  signatures, defaults, configuration schemas, CLI behavior, task discovery,
+  error messages, documentation examples, migration paths, and installed-wheel
+  usability from an external user's perspective.
 - **High-performance computing expert** — Identify reachable hot-path
   regressions in algorithmic complexity, batching/vectorization, allocation
   and memory layout, CPU/GPU transfers or synchronization, parallel or
@@ -36,6 +40,20 @@ generic checklist or report an unproven concern as a finding.
   semantic contracts, tool and action interfaces, planning/execution/
   verification loops, recovery and cancellation, observability, and safe
   autonomy.
+- **Security and trust-boundary engineer** — Inspect user-controlled
+  configuration and Task Programs, file paths, subprocesses, native or plugin
+  boundaries, credentials, package loading, and CI permissions for unsafe
+  execution, data exposure, privilege escalation, or fail-open behavior.
+
+### Role selection
+
+Select perspectives from the changed files and their contract neighbors; do
+not apply every role as a generic checklist. Read
+[references/reviewer-perspectives.md](references/reviewer-perspectives.md) when
+the change touches public APIs, untrusted inputs, long-running operations, or
+test and release boundaries. Keep the evidence standard unchanged: a role may
+raise a finding only when a reachable scenario, violated contract, and concrete
+impact are established.
 
 ## Review contract
 

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import math
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -36,7 +37,7 @@ import yaml
 from dexsim.types import RigidBodyShape
 
 from embodichain.lab.sim.objects import CollisionShapeDesc
-from embodichain.lab.sim.motion.planners import CuroboPlannerCfg
+from embodichain.lab.sim.motion.planners import CuroboPlannerCfg, PlanState
 from embodichain.lab.sim.motion.planners.curobo import curobo_yaml
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     CuroboPlanOptions,
@@ -52,6 +53,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     _validate_dynamic_obstacles,
 )
 from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
+    _curobo_pose_to_components,
     _convex_hull_to_voxel_entry,
     _parse_mimic_joint_names,
     _world_collision_sphere_data,
@@ -62,6 +64,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
     visualize_curobo_world_collision_model,
 )
 from embodichain.lab.sim.motion.planners.utils import MoveType
+from embodichain.utils.math import matrix_from_quat, quat_xyzw_to_wxyz
 
 _SIM_ROBOT_UID = "curobo_franka_inprocess_test"
 _SIM_CONTROL_PART = "arm"
@@ -120,9 +123,9 @@ def _restore_torch_precision_settings():
 
     yield
 
-    torch.set_float32_matmul_precision(matmul_precision)
     torch.backends.cuda.matmul.allow_tf32 = matmul_allow_tf32
     torch.backends.cudnn.allow_tf32 = cudnn_allow_tf32
+    torch.set_float32_matmul_precision(matmul_precision)
 
 
 def _raise_module_not_found(*args, **kwargs):
@@ -138,9 +141,14 @@ def test_public_config_imports_without_curobo():
 
 def test_matrix_to_position_quaternion_uses_wxyz():
     matrix = torch.eye(4).unsqueeze(0)
+    xyzw = torch.tensor([[1.0, 2.0, 3.0, 4.0]]) / math.sqrt(30.0)
+    matrix[:, :3, :3] = matrix_from_quat(xyzw)
     position, quaternion = _matrix_to_position_quaternion(matrix)
     assert torch.equal(position, torch.zeros(1, 3))
-    assert torch.equal(quaternion, torch.tensor([[1.0, 0.0, 0.0, 0.0]]))
+    torch.testing.assert_close(
+        quaternion,
+        torch.tensor([[4.0, 1.0, 2.0, 3.0]]) / math.sqrt(30.0),
+    )
     assert position.is_contiguous()
     assert quaternion.is_contiguous()
 
@@ -154,6 +162,71 @@ def test_missing_curobo_is_actionable(monkeypatch):
     monkeypatch.setattr(importlib, "import_module", _raise_module_not_found)
     with pytest.raises(ImportError, match=r"cu12.*cu13"):
         _require_curobo()
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("precision", ["highest", "high", "medium"])
+@pytest.mark.parametrize(
+    "failure_module",
+    [
+        None,
+        "curobo.motion_planner",
+        "curobo.batch_motion_planner",
+        "curobo.collision_checking",
+        "curobo.types",
+        "curobo.scene",
+    ],
+)
+def test_curobo_import_preserves_caller_precision(
+    monkeypatch: pytest.MonkeyPatch, precision: str, failure_module: str | None
+) -> None:
+    original_precision = torch.get_float32_matmul_precision()
+    original_matmul = torch.backends.cuda.matmul.allow_tf32
+    original_cudnn = torch.backends.cudnn.allow_tf32
+    facade = SimpleNamespace(
+        **{
+            name: object()
+            for name in (
+                "MotionPlanner",
+                "MotionPlannerCfg",
+                "BatchMotionPlanner",
+                "RobotCollisionChecker",
+                "RobotCollisionCheckerCfg",
+                "JointState",
+                "Pose",
+                "GoalToolPose",
+                "DeviceCfg",
+                "Scene",
+            )
+        }
+    )
+
+    def import_backend(name: str):
+        torch.set_float32_matmul_precision(
+            "high" if precision == "highest" else "highest"
+        )
+        torch.backends.cudnn.allow_tf32 = True
+        if name == failure_module:
+            raise ModuleNotFoundError("cuRobo dependency unavailable")
+        return facade
+
+    try:
+        torch.set_float32_matmul_precision(precision)
+        torch.backends.cudnn.allow_tf32 = False
+        expected_matmul = torch.backends.cuda.matmul.allow_tf32
+        monkeypatch.setattr(importlib, "import_module", import_backend)
+        if failure_module is None:
+            assert _require_curobo().MotionPlanner is facade.MotionPlanner
+        else:
+            with pytest.raises(ImportError, match="cuRobo V2"):
+                _require_curobo()
+        assert torch.get_float32_matmul_precision() == precision
+        assert torch.backends.cuda.matmul.allow_tf32 == expected_matmul
+        assert torch.backends.cudnn.allow_tf32 is False
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = original_matmul
+        torch.backends.cudnn.allow_tf32 = original_cudnn
+        torch.set_float32_matmul_precision(original_precision)
 
 
 def test_unknown_dynamic_obstacle_is_rejected():
@@ -194,6 +267,170 @@ def test_curobo_planner_cfg_defaults():
     assert cfg.sim_base_to_curobo_base is None
     assert not hasattr(cfg, "robot_profiles")
     assert not hasattr(cfg.world, "world_config_path")
+
+
+@pytest.mark.parametrize(
+    ("batch_size", "max_attempts"),
+    [(1, None), (8, 3)],
+)
+def test_cspace_planning_uses_direct_seed_before_graph_seed(
+    monkeypatch, batch_size, max_attempts
+):
+    """Use the same direct-first c-space policy for scalar and batched plans."""
+    calls = []
+
+    class _FakeV2Planner:
+        def plan_cspace(self, goal, current, **kwargs):
+            del goal, current
+            calls.append(kwargs)
+            return None
+
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = SimpleNamespace(
+        max_attempts=5,
+        max_planning_time=None,
+        cuda_graph_capture_error_mode="thread_local",
+    )
+    planner.device = torch.device("cpu")
+    planner._curobo_device = torch.device("cpu")
+    monkeypatch.setattr(torch.cuda, "device", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(
+        planner,
+        "_to_curobo_joint_state",
+        lambda _qpos, _backend: object(),
+    )
+    monkeypatch.setattr(
+        planner,
+        "_to_curobo_joint_goal",
+        lambda _qpos, _backend: object(),
+    )
+    backend = SimpleNamespace(
+        planner=_FakeV2Planner(),
+        use_cuda_graph=False,
+    )
+    start = torch.zeros(batch_size, 7)
+    target = PlanState.from_qpos(
+        torch.full((batch_size, 7), 0.1),
+        move_type=MoveType.JOINT_MOVE,
+    )
+
+    result = planner._plan_segments(
+        [target],
+        start,
+        {MoveType.JOINT_MOVE: backend},
+        CuroboPlanOptions(max_attempts=max_attempts),
+    )
+
+    assert result.success.tolist() == [False] * batch_size
+    assert calls == [
+        {
+            "max_attempts": 5 if max_attempts is None else max_attempts,
+            "enable_graph_attempt": 1,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("batch_size", "max_attempts"),
+    [(1, None), (8, 3)],
+)
+def test_pose_planning_uses_direct_seed_before_graph_seed(
+    monkeypatch, batch_size, max_attempts
+):
+    """Keep scalar and batched pose planning on the same seed schedule."""
+    calls = []
+
+    class _FakeV2Planner:
+        def plan_pose(self, goal, current, **kwargs):
+            del goal, current
+            calls.append(kwargs)
+            return None
+
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = SimpleNamespace(
+        max_attempts=5,
+        max_planning_time=None,
+        cuda_graph_capture_error_mode="thread_local",
+    )
+    planner.device = torch.device("cpu")
+    planner._curobo_device = torch.device("cpu")
+    monkeypatch.setattr(torch.cuda, "device", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(
+        planner,
+        "_to_curobo_joint_state",
+        lambda _qpos, _backend: object(),
+    )
+    monkeypatch.setattr(
+        planner,
+        "_to_curobo_pose_goal",
+        lambda _xpos, _backend, _base_inv: object(),
+    )
+    backend = SimpleNamespace(
+        planner=_FakeV2Planner(),
+        use_cuda_graph=False,
+    )
+    start = torch.zeros(batch_size, 7)
+    target = PlanState.from_xpos(
+        torch.eye(4).unsqueeze(0).expand(batch_size, -1, -1).clone(),
+        move_type=MoveType.EEF_MOVE,
+    )
+
+    result = planner._plan_segments(
+        [target],
+        start,
+        {MoveType.EEF_MOVE: backend},
+        CuroboPlanOptions(max_attempts=max_attempts),
+    )
+
+    assert result.success.tolist() == [False] * batch_size
+    assert calls == [
+        {
+            "max_attempts": 5 if max_attempts is None else max_attempts,
+            "enable_graph_attempt": 1,
+        }
+    ]
+
+
+def test_extract_segment_uses_curobo_exclusive_last_tstep(monkeypatch):
+    """Do not admit cuRobo padding beyond each trajectory's slice end."""
+    planner = object.__new__(CuroboPlanner)
+    planner._curobo_device = torch.device("cpu")
+    planner.cfg = SimpleNamespace(interpolation_dt=0.025)
+    monkeypatch.setattr(
+        planner,
+        "_map_curobo_to_sim",
+        lambda positions, _joint_names, _backend: positions,
+    )
+
+    positions = torch.tensor(
+        [
+            [[0.0], [1.0], [2.0], [math.nan], [math.nan], [math.nan]],
+            [[10.0], [11.0], [12.0], [13.0], [14.0], [math.nan]],
+        ]
+    )
+    result = SimpleNamespace(
+        success=torch.tensor([[True], [True]]),
+        interpolated_last_tstep=torch.tensor([[3], [5]]),
+        interpolated_trajectory=SimpleNamespace(
+            position=positions,
+            dt=torch.tensor([[0.1], [0.2]]),
+            joint_names=["joint"],
+        ),
+    )
+
+    success, extracted, dt, velocities, accelerations = planner._extract_segment(
+        result, SimpleNamespace()
+    )
+
+    assert success.tolist() == [True, True]
+    assert extracted.shape == (2, 5, 1)
+    assert torch.isfinite(extracted).all()
+    assert extracted[0, :, 0].tolist() == [0.0, 1.0, 2.0, 2.0, 2.0]
+    assert extracted[1, :, 0].tolist() == [10.0, 11.0, 12.0, 13.0, 14.0]
+    assert dt[0].tolist() == pytest.approx([0.0, 0.1, 0.1, 0.0, 0.0])
+    assert dt[1].tolist() == pytest.approx([0.0, 0.2, 0.2, 0.2, 0.2])
+    assert velocities is None
+    assert accelerations is None
 
 
 @pytest.mark.parametrize(
@@ -745,6 +982,25 @@ def _identity_pose(
     translation: tuple[float, float, float] = (0.45, 0.0, 0.18),
 ) -> torch.Tensor:
     return torch.tensor(
+        [*translation, 0.0, 0.0, 0.0, 1.0],
+        dtype=torch.float32,
+    )
+
+
+def _identity_pose_matrix(
+    translation: tuple[float, float, float] = (0.45, 0.0, 0.18),
+) -> torch.Tensor:
+    """Return an EmbodiChain homogeneous pose in ``xyz + xyzw`` semantics."""
+    pose = torch.eye(4, dtype=torch.float32)
+    pose[:3, 3] = torch.tensor(translation, dtype=torch.float32)
+    return pose
+
+
+def _identity_curobo_pose(
+    translation: tuple[float, float, float] = (0.45, 0.0, 0.18),
+) -> torch.Tensor:
+    """Return the same identity pose serialized as cuRobo ``xyz+wxyz``."""
+    return torch.tensor(
         [*translation, 1.0, 0.0, 0.0, 0.0],
         dtype=torch.float32,
     )
@@ -810,19 +1066,24 @@ def _track_convex_hull_preprocessing(monkeypatch, calls=None):
 def test_voxel_entry_computes_convex_hull_before_signed_distance(monkeypatch):
     calls = []
     _track_convex_hull_preprocessing(monkeypatch, calls)
+    quaternion_xyzw = torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32)
+    quaternion_xyzw /= torch.linalg.vector_norm(quaternion_xyzw)
+    pose_matrix = _identity_pose_matrix()
+    pose_matrix[:3, :3] = matrix_from_quat(quaternion_xyzw.unsqueeze(0))[0]
 
     name, fields = _convex_hull_to_voxel_entry(
         "block",
         _unit_cube_vertices(),
         _cube_faces(),
-        _identity_pose(),
+        pose_matrix,
         voxel_size=0.25,
         voxel_padding=0.25,
     )
 
     assert len(calls) == 1
     assert name == "block"
-    assert fields["pose"] == pytest.approx(_identity_pose().tolist())
+    expected_pose = torch.cat((pose_matrix[:3, 3], quat_xyzw_to_wxyz(quaternion_xyzw)))
+    assert fields["pose"] == pytest.approx(expected_pose.tolist())
     assert fields["dims"] == pytest.approx([1.5, 1.5, 1.5])
     assert tuple(fields["feature_tensor"].shape) == (6, 6, 6)
     assert fields["feature_tensor"].amin() < 0.0
@@ -843,7 +1104,7 @@ def test_voxel_entry_preserves_homogeneous_object_pose(monkeypatch):
         voxel_padding=0.0,
     )
 
-    assert fields["pose"] == pytest.approx(_identity_pose().tolist())
+    assert fields["pose"] == pytest.approx(_identity_curobo_pose().tolist())
 
 
 @pytest.mark.parametrize(
@@ -856,9 +1117,21 @@ def test_voxel_entry_rejects_invalid_settings(voxel_size, voxel_padding, match):
             "block",
             _unit_cube_vertices(),
             _cube_faces(),
-            _identity_pose(),
+            _identity_pose_matrix(),
             voxel_size=voxel_size,
             voxel_padding=voxel_padding,
+        )
+
+
+def test_voxel_entry_rejects_7d_pose_to_keep_convention_unambiguous():
+    with pytest.raises(ValueError, match="pose_matrix.*4, 4"):
+        _convex_hull_to_voxel_entry(
+            "block",
+            _unit_cube_vertices(),
+            _cube_faces(),
+            _identity_curobo_pose(),
+            voxel_size=0.25,
+            voxel_padding=0.25,
         )
 
 
@@ -1064,6 +1337,20 @@ def test_mixed_collision_visualization_supports_cuboid():
 
     assert centers.shape == (8, 3)
     assert radii.shape == (8,)
+
+
+def test_curobo_world_pose_is_converted_from_wxyz_before_visualization():
+    """cuRobo serialized poses must cross back to EmbodiChain math exactly once."""
+    quaternion_xyzw = torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32)
+    quaternion_xyzw /= torch.linalg.vector_norm(quaternion_xyzw)
+    expected_rotation = matrix_from_quat(quaternion_xyzw)
+    position = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32)
+    serialized_pose = torch.cat((position, quat_xyzw_to_wxyz(quaternion_xyzw)))
+
+    decoded_position, decoded_rotation = _curobo_pose_to_components(serialized_pose)
+
+    torch.testing.assert_close(decoded_position, position)
+    torch.testing.assert_close(decoded_rotation, expected_rotation)
 
 
 def test_world_scene_object_override_can_force_voxel(monkeypatch):
@@ -1516,7 +1803,7 @@ def test_generated_physical_mesh_loads_as_voxel_in_curobo_scene_cfg(monkeypatch)
 
 def _build_curobo_scene(sim_device: str = "cuda") -> tuple[object, object, object]:
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+    from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg
     from embodichain.lab.sim.objects import RigidObjectCfg
     from embodichain.lab.sim.robots import FrankaPandaCfg
     from embodichain.lab.sim.shapes import CubeCfg
@@ -1537,12 +1824,13 @@ def _build_curobo_scene(sim_device: str = "cuda") -> tuple[object, object, objec
         cfg=RigidObjectCfg(
             uid="block",
             shape=CubeCfg(size=_SIM_BLOCK_DIMS),
-            attrs=RigidBodyAttributesCfg(),
-            body_type="kinematic",
+            attrs=RigidBodyPhysicsCfg(),
+            body_type="static",
             init_pos=_SIM_BLOCK_POS,
             init_rot=(0.0, 0.0, 0.0),
         )
     )
+    sim.prepare()
     return sim, robot, block
 
 
@@ -1614,7 +1902,8 @@ def test_curobo_reuses_non_graph_backend():
                     binding,
                     MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
-            )
+            ),
+            context=engine.initial_context(control_dt=0.1),
         )
         success = result.plan_success
         trajectory = result.trajectory.positions
@@ -1633,7 +1922,8 @@ def test_curobo_reuses_non_graph_backend():
                     binding,
                     MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
-            )
+            ),
+            context=engine.initial_context(control_dt=0.1),
         )
         success = result.plan_success
         assert bool(success.item()), "second plan failed"
@@ -1671,7 +1961,8 @@ def test_curobo_uses_accelerator_with_cpu_physics():
                     binding,
                     MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
-            )
+            ),
+            context=engine.initial_context(control_dt=0.1),
         )
         success = result.plan_success
         trajectory = result.trajectory.positions
@@ -1686,3 +1977,95 @@ def test_curobo_uses_accelerator_with_cpu_physics():
     finally:
         sim.destroy()
         SimulationManager.flush_cleanup_queue()
+
+
+def test_curobo_assembly_generates_missing_velocities_and_zeros_failed_rows() -> None:
+    planner = object.__new__(CuroboPlanner)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    result = planner._assemble_result(
+        [[torch.tensor([[0.0], [1.0], [2.0]])], []],
+        [[torch.tensor([0.0, 0.5, 0.5])], []],
+        torch.tensor([[0.0], [3.0]]),
+        torch.tensor([True, False]),
+        2,
+        1,
+    )
+    assert result.velocities is not None
+    torch.testing.assert_close(result.velocities[0], torch.full((3, 1), 2.0))
+    assert torch.count_nonzero(result.velocities[1]) == 0
+
+
+def test_curobo_extraction_maps_native_derivatives_and_clears_padding() -> None:
+    planner = object.__new__(CuroboPlanner)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    backend = SimpleNamespace(
+        curobo_joint_names_sig=None,
+        curobo_to_sim_col_idx=None,
+        sim_joint_names=["b", "a"],
+        profile=SimpleNamespace(sim_to_curobo_joint_names={"a": "a", "b": "b"}),
+    )
+    position = torch.arange(12.0).reshape(2, 3, 2)
+    velocity = position + 10
+    result = SimpleNamespace(
+        success=torch.tensor([True, True]),
+        interpolated_last_tstep=torch.tensor([3, 2]),
+        interpolated_trajectory=SimpleNamespace(
+            position=position,
+            velocity=velocity,
+            acceleration=velocity + 10,
+            joint_names=["a", "b"],
+            dt=torch.tensor([[0.1], [0.2]]),
+        ),
+    )
+    _, positions, dt, velocities, accelerations = planner._extract_segment(
+        result, backend
+    )
+    torch.testing.assert_close(velocities[0], velocity[0, :, [1, 0]])
+    torch.testing.assert_close(accelerations[0], (velocity + 10)[0, :, [1, 0]])
+    assert torch.count_nonzero(velocities[1, 2:]) == 0
+    assert torch.count_nonzero(accelerations[1, 2:]) == 0
+    assert dt[1, 2] == 0
+
+
+def test_curobo_assembly_preserves_native_rows_when_a_peer_has_no_derivatives() -> None:
+    planner = object.__new__(CuroboPlanner)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    q = torch.tensor([[0.0], [1.0], [2.0]])
+    dt = torch.tensor([0.0, 0.5, 0.5])
+    result = planner._assemble_result(
+        [[q], [q]],
+        [[dt], [dt]],
+        torch.zeros(2, 1),
+        torch.ones(2, dtype=torch.bool),
+        2,
+        1,
+        per_env_velocities=[[torch.full_like(q, 0.7)], [None]],
+    )
+    torch.testing.assert_close(result.velocities[0], torch.full_like(q, 0.7))
+    torch.testing.assert_close(result.velocities[1], torch.full_like(q, 2.0))
+
+
+def test_curobo_failed_native_derivatives_do_not_poison_successful_peers() -> None:
+    planner = object.__new__(CuroboPlanner)
+    planner.device = planner._curobo_device = torch.device("cpu")
+    backend = SimpleNamespace(
+        curobo_joint_names_sig=None,
+        curobo_to_sim_col_idx=None,
+        sim_joint_names=["a"],
+        profile=SimpleNamespace(sim_to_curobo_joint_names={"a": "a"}),
+    )
+    velocities = torch.tensor([[[0.0], [1.0]], [[float("nan")], [float("nan")]]])
+    result = SimpleNamespace(
+        success=torch.tensor([True, False]),
+        interpolated_last_tstep=torch.tensor([2, 2]),
+        interpolated_trajectory=SimpleNamespace(
+            position=torch.zeros(2, 2, 1),
+            velocity=velocities,
+            acceleration=None,
+            joint_names=["a"],
+            dt=torch.tensor([[0.1], [0.1]]),
+        ),
+    )
+    _, _, _, actual, _ = planner._extract_segment(result, backend)
+    torch.testing.assert_close(actual[0], velocities[0])
+    assert torch.count_nonzero(actual[1]) == 0

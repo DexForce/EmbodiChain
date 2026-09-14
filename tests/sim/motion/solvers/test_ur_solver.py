@@ -30,7 +30,6 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
     RobotCfg,
     LightCfg,
-    RigidBodyAttributesCfg,
     RigidObjectCfg,
     URDFCfg,
 )
@@ -379,6 +378,9 @@ def test_ur_nearest_avoids_full_candidate_buffers(
     assert qpos.shape == joints.shape
     # Even the smallest full-candidate buffer contains N * 512 scalar values.
     assert all(size < len(joints) * 512 for size in allocation_sizes)
+    # Main's reusable buffers allocate through Torch instead of wp.empty.
+    # Single-solution calls must not lazily allocate that full-candidate cache.
+    assert not solver._ik_buffers.arrays
 
 
 @pytest.mark.no_sim
@@ -467,8 +469,8 @@ def grid_sample_qpos_from_limits(
 class BaseSolverTest:
     sim = None  # Define as a class attribute
 
-    def setup_simulation(self, sim_device):
-        config = SimulationManagerCfg(headless=True, sim_device=sim_device)
+    def setup_simulation(self, device):
+        config = SimulationManagerCfg(headless=True, device=device)
         self.sim = SimulationManager(config)
 
         ur10_urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
@@ -482,7 +484,7 @@ class BaseSolverTest:
                     {"component_type": "hand", "urdf_path": gripper_urdf_path},
                 ]
             ),
-            drive_pros=JointDrivePropertiesCfg(
+            joint_drive_props=JointDrivePropertiesCfg(
                 stiffness={"Joint[0-9]": 1e4, "FINGER[1-2]": 1e3},
                 damping={"Joint[0-9]": 1e3, "FINGER[1-2]": 1e2},
                 max_effort={"Joint[0-9]": 1e5, "FINGER[1-2]": 1e4},
@@ -516,6 +518,7 @@ class BaseSolverTest:
             init_pos=(0, 0, 0),
         )
         self.robot: Robot = self.sim.add_robot(cfg=cfg)
+        self.sim.prepare()
 
     def test_ik(self):
         # Test inverse kinematics (IK) with a 1x4x4 homogeneous matrix pose and a joint_seed
@@ -533,28 +536,28 @@ class BaseSolverTest:
             qpos=sample_qpos, name=arm_name, to_matrix=False
         )
 
-        res, ik_qpos = self.robot.compute_batch_ik(
+        matrix_success, ik_qpos = self.robot.compute_batch_ik(
             pose=fk_xpos, joint_seed=sample_qpos, name=arm_name
         )
 
-        res, ik_qpos_xyzquat = self.robot.compute_batch_ik(
+        xyzquat_success, ik_qpos_xyzquat = self.robot.compute_batch_ik(
             pose=fk_xpos_xyzquat, joint_seed=sample_qpos, name=arm_name
         )
 
-        assert torch.allclose(
-            ik_qpos, ik_qpos_xyzquat, atol=5e-3, rtol=5e-3
-        ), "IK results do not match for different pose formats"
-
-        ik_xpos = self.robot.compute_batch_fk(
+        assert torch.equal(matrix_success, xyzquat_success)
+        assert matrix_success.all()
+        matrix_ik_xpos = self.robot.compute_batch_fk(
+            qpos=ik_qpos, name=arm_name, to_matrix=True
+        )
+        xyzquat_ik_xpos = self.robot.compute_batch_fk(
             qpos=ik_qpos_xyzquat, name=arm_name, to_matrix=True
         )
         assert torch.allclose(
-            sample_qpos, ik_qpos, atol=5e-3, rtol=5e-3
-        ), f"FK and IK qpos do not match for {arm_name}"
-
+            fk_xpos, matrix_ik_xpos, atol=5e-3, rtol=5e-3
+        ), f"Matrix-pose IK does not reconstruct FK for {arm_name}"
         assert torch.allclose(
-            fk_xpos, ik_xpos, atol=5e-3, rtol=5e-3
-        ), f"FK and IK xpos do not match for {arm_name}"
+            fk_xpos, xyzquat_ik_xpos, atol=5e-3, rtol=5e-3
+        ), f"XYZ-quaternion IK does not reconstruct FK for {arm_name}"
         # test for failed xpos
         invalid_pose = torch.tensor(
             [

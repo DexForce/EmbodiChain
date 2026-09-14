@@ -19,16 +19,20 @@ Overview
 
 The `embodichain` project provides a unified interface for robot trajectory planning, supporting both joint space and Cartesian space interpolation. The main planners include:
 
-- **MotionGenerator**: A unified trajectory planning interface that supports joint/Cartesian interpolation, automatic constraint handling, flexible planner selection, and backend-specific collision-aware planning.
 - **ToppraPlanner**: A time-optimal trajectory planner based on the TOPPRA library, supporting joint trajectory generation under velocity and acceleration constraints.
+- **TrapezoidalPlanner**: A natively batched joint planner with trapezoidal or
+  jerk-limited Double-S timing and Torch/Warp backends.
 - **NeuralPlanner** (experimental): A learning-based EEF waypoint planner for Franka Panda.
 - **CuroboPlanner** (optional): A cuRobo V2 backend that plans on CUDA and supports either CPU or CUDA physics simulation for collision-aware single-arm Cartesian and joint-space planning.
 - **TrajectorySampleMethod**: An enumeration for trajectory sampling strategies, supporting sampling by time, quantity, or distance.
 
 These tools can be used to generate smooth and dynamically feasible robot trajectories. Install NVIDIA's CUDA-matched cuRobo source package separately when collision-aware planning against an explicit cuRobo world is required.
 
-Use NeuralPlanner (experimental) when you have a trained APG checkpoint and need
-learned EEF waypoint rollout on Franka Panda.
+Use NeuralPlanner (experimental) when you have a standalone NMG ONNX policy and
+need learned EEF waypoint rollout on Franka Panda.
+
+The parent-level :doc:`MotionGenerator <../motion_generator>` coordinates
+these backends and exposes the common interface used by Atomic Skills.
 
 See also
 --------
@@ -37,7 +41,7 @@ See also
     :maxdepth: 1
 
     toppra_planner.md
+    trapezoidal_planner.md
     neural_planner.md
     curobo_planner.md
     trajectory_sample_method.md
-    motion_generator.md

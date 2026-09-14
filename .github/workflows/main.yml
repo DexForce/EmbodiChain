@@ -12,8 +12,56 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Code Style check
+        run: |
+          echo "Workspace: ${GITHUB_WORKSPACE}"
+          ls
+          pip install black==26.3.1
+          black --check --diff --color ./
+          if [ $? -ne 0 ]; then
+            echo "Code style check failed, please run [black ./] before commit!"
+            exit 1
+          fi
+
+      - name: Public API docs check
+        run: python docs/scripts/check_api_docs.py
+
+  docs-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      required: ${{ steps.filter.outputs.docs }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            docs:
+              - 'docs/**'
+              - 'embodichain/**'
+              - 'embodichain_tasks/**'
+              - 'examples/**'
+              - 'scripts/**'
+              - 'README.md'
+              - 'pyproject.toml'
+              - 'setup.py'
+              - 'VERSION'
+
+  build:
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') && needs.docs-changes.outputs.required == 'true' }}
+    needs: [lint, docs-changes]
     runs-on: Linux
     env:
       NVIDIA_DRIVER_CAPABILITIES: all
@@ -33,41 +81,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/activate-conda
-      - name: Code Style check
-        run: |
-          echo "Workspace: ${GITHUB_WORKSPACE}"
-          ls
-          pip install black==26.3.1
-          black --check --diff --color ./
-          if [ $? -ne 0 ]; then
-            echo "Code style check failed, please run [black ./] before commit!"
-            exit 1
-          fi
-
-      - name: Public API docs check
-        run: python docs/scripts/check_api_docs.py
-
-  build:
-    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
-    needs: lint
-    runs-on: Linux
-    env:
-      NVIDIA_DRIVER_CAPABILITIES: all
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DISABLE_REQUIRE: 1
-    container: *container_template
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/activate-conda
-
-      - name: Cache Python dependencies
-        id: cache-pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-docs-${{ hashFiles('docs/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-docs-
 
       # Restore the full multi-version site from the last successful build.
       # The key never matches exactly (run_id is unique), so restore-keys is

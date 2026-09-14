@@ -3,95 +3,82 @@
 ```{currentmodule} embodichain.lab.sim
 ```
 
-The {class}`~objects.SoftObject` class represents deformable entities (e.g. sponges, soft robotics) in EmbodiChain. Unlike rigid bodies, soft objects are defined by vertices and meshes rather than a single rigid pose.
+{class}`~objects.VolumeDeformableObject` represents batched Newton volumetric
+particle sets. Volume deformables
+require the Newton backend on CUDA and a particle-capable solver.
+
+See {doc}`sim_manager/physics/newton` for solver selection, mixed rigid/deformable scene
+limitations, and the requirement to declare deformables before preparation.
 
 ## Configuration
 
-Configured via {class}`~cfg.SoftObjectCfg`.
+{class}`~cfg.VolumeDeformableObjectCfg` separates physical parameters under
+`attrs` from mesh generation under `meshing`.
 
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `voxel_attr` | `SoftbodyVoxelAttributesCfg` | `...` | Voxelization attributes. |
-| `physical_attr` | `SoftbodyPhysicalAttributesCfg` | `...` | Physical attributes. |
-| `shape` | `MeshCfg` | `MeshCfg()` | Mesh configuration. |
+| Field | Default | Meaning |
+| :--- | :--- | :--- |
+| `attrs.density` | `1000.0` | Volume density in kg/m³. |
+| `attrs.youngs` | `1e6` | Young's modulus in Pa. |
+| `attrs.poissons` | `0.45` | Poisson's ratio in (-1, 0.5). |
+| `attrs.elasticity_damping` | `0.0` | Volumetric damping. |
+| `attrs.surface_props` | Seven zero coefficients | Optional Newton surface forces. |
+| `attrs.add_surface_edges` | `True` | Create surface bending-edge constraints. |
+| `meshing.triangle_remesh_resolution` | `8` | Source surface remeshing resolution. |
+| `meshing.triangle_simplify_target` | `0` | Target proxy face count; zero disables simplification. |
+| `meshing.simulation_mesh_resolution` | `8` | Voxel resolution for the tetrahedral mesh. |
+| `meshing.voxel_num_relaxation_iters` | `5` | Tetrahedral-mesh relaxation iterations. |
+| `meshing.voxel_rel_min_tet_volume` | `0.05` | Relative minimum tetrahedral volume. |
+| `meshing.voxel_surface_dist_ratio` | `0.2` | Surface distance as a voxel-size ratio. |
+| `meshing.embedding_impl` | `dexsim_exact_cpu` | Render-to-volume binding implementation. |
 
-### Soft Body Attributes
-
-Soft bodies require both voxelization and physical attributes.
-
-**Voxel Attributes ({class}`~cfg.SoftbodyVoxelAttributesCfg`)**
-
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `triangle_remesh_resolution` | `int` | `8` | Resolution to remesh the softbody mesh before building physics collision mesh. |
-| `triangle_simplify_target` | `int` | `0` | Simplify mesh faces to target value. |
-| `simulation_mesh_resolution` | `int` | `8` | Resolution to build simulation voxelize textra mesh. |
-| `simulation_mesh_output_obj` | `bool` | `False` | Whether to output the simulation mesh as an obj file for debugging. |
-
-**Physical Attributes ({class}`~cfg.SoftbodyPhysicalAttributesCfg`)**
-
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `youngs` | `float` | `1e6` | Young's modulus (higher = stiffer). |
-| `poissons` | `float` | `0.45` | Poisson's ratio (higher = closer to incompressible). |
-| `dynamic_friction` | `float` | `0.0` | Dynamic friction coefficient. |
-| `elasticity_damping` | `float` | `0.0` | Elasticity damping factor. |
-| `material_model` | `SoftBodyMaterialModel` | `CO_ROTATIONAL` | Material constitutive model. |
-| `enable_kinematic` | `bool` | `False` | If True, (partially) kinematic behavior is enabled. |
-| `enable_ccd` | `bool` | `False` | Enable continuous collision detection. |
-| `enable_self_collision` | `bool` | `False` | Enable self-collision handling. |
-| `mass` | `float` | `-1.0` | Total mass. If negative, density is used. |
-| `density` | `float` | `1000.0` | Material density in kg/m^3. |
-
-For a runnable example, see the {doc}`Soft Body Simulation </tutorial/create_softbody>` tutorial.
-
-
-### Setup & Initialization
+`attrs.surface_props` uses the same
+{class}`~cfg.SurfaceElementPropertiesCfg` as cloth. Volume defaults are
+zero rather than cloth's `None`; explicitly omitted coefficients in a partial
+surface group also resolve to zero for volume descriptors.
 
 ```python
-import torch
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.objects import SoftObject, SoftObjectCfg
-
-# 1. Initialize Simulation
-device = "cuda" if torch.cuda.is_available() else "cpu"
-sim_cfg = SimulationManagerCfg(sim_device=device)
-sim = SimulationManager(sim_config=sim_cfg)
-
-# 2. Configure Soft Object
-soft_cfg = SoftObjectCfg(
-    fpath="assets/objects/sponge.msh", # Example asset path
-    init_pos=(0, 0, 0.5),
-    init_rot=(0, 0, 0)
+from embodichain.lab.sim.cfg import (
+    VolumeDeformableObjectCfg,
+    VolumeDeformablePhysicsCfg,
+    VolumeDeformableMeshingCfg,
 )
+from embodichain.lab.sim.shapes import MeshCfg
 
-# 3. Spawn Soft Object
-# Note: Assuming the method in SimulationManager is 'add_soft_object'
-soft_object: SoftObject = sim.add_soft_object(cfg=soft_cfg)
-
-# 4. Initialize Physics
-sim.reset_objects_state()
+cfg = VolumeDeformableObjectCfg(
+    uid="soft_body",
+    shape=MeshCfg(fpath="body.obj"),
+    attrs=VolumeDeformablePhysicsCfg(
+        youngs=1e5, poissons=0.4, density=75.0,
+    ),
+    meshing=VolumeDeformableMeshingCfg(simulation_mesh_resolution=12),
+)
 ```
+
+Add this configuration through `sim.add_deformable_object(cfg)` and call
+`sim.prepare()` before reading object data. For a runnable example, see
+{doc}`Soft Body Simulation </tutorial/create_softbody>`.
+
 ### Soft Object Class
-#### Vertex Data (Observation)
-For soft objects, the state is represented by the positions and velocities of its vertices, rather than a single root pose.
+#### Nodal State
 
-| Method | Return Shape | Description |
+After `sim.prepare()`, read simulation nodes through `object.data`. Each state
+property returns an independent tensor snapshot.
+
+| Property | Shape | Description |
 | :--- | :--- | :--- |
-| `get_current_collision_vertices()` | `(N, V_col, 3)` | Current positions of collision mesh vertices. |
-| `get_current_sim_vertices()` | `(N, V_sim, 3)` | Current positions of simulation mesh vertices (nodes). |
-| `get_current_sim_vertex_velocities()` | `(N, V_sim, 3)` | Current velocities of simulation vertices. |
-| `get_rest_collision_vertices()` | `(N, V_col, 3)` | Rest (initial) positions of collision vertices. |
-| `get_rest_sim_vertices()` | `(N, V_sim, 3)` | Rest (initial) positions of simulation vertices. |
+| `data.nodal_pos_w` | `(N, V, 3)` | Current simulation-node positions in world coordinates. |
+| `data.nodal_vel_w` | `(N, V, 3)` | Current simulation-node velocities in world coordinates. |
+| `data.default_nodal_state_w` | `(N, V, 6)` | Positions and velocities captured at Spawn binding. |
 
-> Note: N is the number of environments/instances, V_col is the number of collision vertices, and V_sim is the number of simulation vertices.
+`N` is the number of instances; `V` is `data.n_nodes`. Render vertices are
+separate and are read through `get_surface_vertices()`.
 
 ```python
 # Example: Accessing vertex data
-sim_verts = soft_object.get_current_sim_vertices()
+sim_verts = soft_object.data.nodal_pos_w
 print(f"Simulation Vertices Shape: {sim_verts.shape}")
 
-velocities = soft_object.get_current_sim_vertex_velocities()
+velocities = soft_object.data.nodal_vel_w
 print(f"Vertex Velocities: {velocities}")
 ```
 
@@ -118,7 +105,7 @@ You can set the global pose of a soft object (which transforms all its vertices)
 
 ```python
 # Reset or Move the Soft Object
-target_pose = torch.tensor([[0, 0, 1.0, 1, 0, 0, 0]], device=device) # (x, y, z, qw, qx, qy, qz)
+target_pose = torch.tensor([[0, 0, 1.0, 0, 0, 0, 1]], device=device) # (x, y, z, qx, qy, qz, qw)
 soft_object.set_local_pose(target_pose)
 
 # Important: Step simulation to apply changes

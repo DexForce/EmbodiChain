@@ -28,6 +28,7 @@ from embodichain.compute.kinematics._warp.ur import (
     ur_ik_nearest_kernel,
 )
 import math
+from ._buffers import _with_ik_buffers
 from embodichain.utils.device_utils import standardize_device_string
 
 __all__ = ["URSolverCfg", "URSolver"]
@@ -136,7 +137,11 @@ class URSolver(BaseSolver):
         self._tcp_inv = np.eye(4, dtype=float)
         self._tcp_inv[:3, :3] = self.tcp_xpos[:3, :3].T
         self._tcp_inv[:3, 3] = -self._tcp_inv[:3, :3] @ self.tcp_xpos[:3, 3]
+        self._tcp_inv_tensor = torch.tensor(
+            self._tcp_inv, dtype=torch.float32, device=self.device
+        )
 
+    @_with_ik_buffers
     def get_ik(
         self,
         target_xpos: torch.Tensor,
@@ -169,7 +174,7 @@ class URSolver(BaseSolver):
             target_xpos_batch = target_xpos[None, :, :]
         else:
             target_xpos_batch = target_xpos
-        tcp_inv = torch.tensor(self._tcp_inv, dtype=torch.float32, device=self.device)
+        tcp_inv = self._tcp_inv_tensor
         target_xpos_batch = target_xpos_batch @ tcp_inv[None, :, :]
         n_sample = target_xpos_batch.shape[0]
 
@@ -264,8 +269,10 @@ class URSolver(BaseSolver):
                 best_valid[rows] = validity[local_rows, nearest]
             return best_valid, best_qpos
 
-        all_qpos_wp = wp.zeros(n_sample * N_SOL * DOF, dtype=float, device=wp_device)
-        all_ik_valid_wp = wp.zeros(n_sample * N_SOL, dtype=int, device=wp_device)
+        all_qpos_wp = self._ik_buffers.zeros(
+            "qpos", n_sample, N_SOL * DOF, torch.float32
+        )
+        all_ik_valid_wp = self._ik_buffers.zeros("valid", n_sample, N_SOL, torch.int32)
         wp.launch(
             kernel=ur_ik_kernel,
             dim=(n_sample,),
@@ -291,7 +298,8 @@ class URSolver(BaseSolver):
             .to(device=device)
         )
 
-        return all_solutions_validity, all_solutions
+        # Copy reusable scratch storage before releasing the buffer borrow.
+        return all_solutions_validity.clone(), all_solutions.clone()
 
     @staticmethod
     def dh_matrix(theta_i, d_i, a_i, alpha_i):

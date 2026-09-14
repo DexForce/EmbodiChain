@@ -22,26 +22,54 @@ in a simulated environment using the SimulationManager and grasp planning utilit
 from __future__ import annotations
 
 import argparse
-import numpy as np
 import time
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create and simulate a robot in SimulationManager"
+    )
+    add_sim_args_to_parser(parser)
+    return parser
+
+
+def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
+    """
+    Parse command-line arguments to configure the simulation.
+
+    Returns:
+        argparse.Namespace: Parsed arguments including number of environments and rendering options.
+    """
+    parser = build_parser()
+    return parser.parse_args() if argv is None else parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = parse_arguments()
+
+
+import numpy as np
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.compute.trajectory import interpolate_with_distance
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.lab.sim.motion.solvers import URSolverCfg
 from embodichain.data import get_data_path
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     JointDrivePropertiesCfg,
     RobotCfg,
     LightCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
     RigidObjectCfg,
     URDFCfg,
 )
@@ -51,20 +79,6 @@ from embodichain.toolkits.graspkit.pg_grasp import (
     GraspAnnotationCfg,
     ParallelJawGraspCollisionCfg,
 )
-
-
-def parse_arguments():
-    """
-    Parse command-line arguments to configure the simulation.
-
-    Returns:
-        argparse.Namespace: Parsed arguments including number of environments and rendering options.
-    """
-    parser = argparse.ArgumentParser(
-        description="Create and simulate a robot in SimulationManager"
-    )
-    add_env_launcher_args_to_parser(parser)
-    return parser.parse_args()
 
 
 def initialize_simulation(args) -> SimulationManager:
@@ -79,8 +93,9 @@ def initialize_simulation(args) -> SimulationManager:
     """
     config = SimulationManagerCfg(
         headless=True,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         physics_dt=1.0 / 100.0,
         arena_space=2.5,
         visualization=visualization_cfg_from_args(args),
@@ -121,7 +136,7 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]) -> Robot:
                 {"component_type": "hand", "urdf_path": gripper_urdf_path},
             ]
         ),
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             stiffness={"Joint[0-9]": 1e4, "FINGER[1-2]": 1e3},
             damping={"Joint[0-9]": 1e3, "FINGER[1-2]": 1e2},
             max_effort={"Joint[0-9]": 1e5, "FINGER[1-2]": 1e4},
@@ -153,14 +168,18 @@ def create_obj(sim: SimulationManager):
         uid="table",
         shape=MeshCfg(
             fpath=get_data_path("BakeTextureObj/hdr_color_mesh.ply"),
+            collision=MeshCollisionCfg(
+                approximation="convex_decomposition",
+                max_hulls=16,
+                acd_method="coacd",
+            ),
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=0.01,
-            dynamic_friction=0.97,
-            static_friction=0.99,
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {
+                "mass_props": {"mass": 0.01},
+                "material_props": {"dynamic_friction": 0.97, "static_friction": 0.99},
+            }
         ),
-        max_convex_hull_num=16,
-        acd_method="vhacd",
         init_pos=[0.55, 0.0, 0.08],
         init_rot=[0.0, 0.0, 0.0],
     )
@@ -218,10 +237,11 @@ def get_grasp_traj(sim: SimulationManager, robot: Robot, grasp_xpos: torch.Tenso
 if __name__ == "__main__":
     import time
 
-    args = parse_arguments()
+    args = _cli_args
     sim = initialize_simulation(args)
     robot = create_robot(sim, position=[0.0, 0.0, 0.0])
     obj = create_obj(sim)
+    sim.prepare()
 
     # get mug grasp pose
     if not args.headless:

@@ -22,7 +22,7 @@ Drawing markers and capturing visualization do not advance physics; interactive
 loops call `SimulationManager.update(step=1)` to process Gizmos and step the world.
 
 Manager add methods mark topology dirty for rigid objects, rigid-object groups,
-soft bodies, cloth, robots, articulations, and `Camera` sensors. Supported
+volume/surface deformables, robots, articulations, and `Camera` sensors. Supported
 `remove_asset()` branches do the same. The next simulation update refreshes the
 browser automatically. Use `refresh_visualization()` when the refresh must
 happen before another physics step. Code that changes mesh topology outside
@@ -37,12 +37,14 @@ frames.
 
 Mesh geometry is identified by a SHA-256 hash of local vertices and faces.
 Static nodes sharing geometry are sent through one Viser batched-mesh handle.
-Normal frames update only positions, `wxyz` quaternions, and visibility.
+Normal frames update only positions, Viser-native `wxyz` quaternions, and visibility.
 Identifiers are URL-escaped before becoming Viser path components.
 
-EmbodiChain pose vectors use `(x, y, z, qw, qx, qy, qz)`. The protocol uses
-normalized `wxyz` quaternions. `pose_to_position_wxyz()` is the conversion
-boundary and also accepts homogeneous `(..., 4, 4)` matrices.
+EmbodiChain pose vectors use `(x, y, z, qx, qy, qz, qw)`. The visualization
+protocol follows Viser and stores normalized `wxyz` quaternions.
+`pose_to_position_wxyz()` converts EmbodiChain `xyz + xyzw` pose vectors at
+that boundary and also accepts homogeneous `(..., 4, 4)` matrices. Protocol
+fields already named `wxyz` remain protocol-native.
 
 Arena offsets are added to rigid, robot, articulation, and camera poses.
 Deformable vertices are stored relative to the corresponding arena node.
@@ -55,8 +57,8 @@ Deformable vertices are stored relative to the corresponding arena node.
 | `RigidObjectGroup` | One node and pose per constituent object |
 | `Robot` | One mesh node per non-empty link |
 | `Articulation` | One mesh node per non-empty link |
-| `SoftObject` | Live collision vertices with a cached convex-hull surface |
-| `ClothObject` | Live physical vertices with render triangles mapped onto the welded physical vertex buffer |
+| `VolumeDeformableObject` | Live Newton render-surface vertices and triangles |
+| `SurfaceDeformableObject` | Live Newton render-surface vertices and triangles |
 | `Camera` | Frustum plus optional low-frequency RGB preview |
 | Default ground | 1000 m × 1000 m XY grid, 1 m cells, 10 m sections |
 | `SceneOverlays` | Frames, targets, trajectories, and point clouds |
@@ -84,16 +86,22 @@ slow rendering or clients cannot accumulate an image backlog.
 
 ## Deformables
 
-Soft bodies and cloth require GPU physics. Their live vertices are sampled at
-`soft_body_fps`, independently from `scene_fps`.
+Volume and surface deformables require the Newton backend, CUDA, and a
+particle-capable solver. Their live vertices are sampled at `soft_body_fps`,
+independently from `scene_fps`. `SceneExporter` reads the manager's single
+deformable registry through `get_surface_vertices()` and
+`get_surface_triangles()`; it does not branch on legacy buffer APIs. The facade
+returns world-frame render vertices, and the exporter subtracts the arena
+offset before publishing below the arena node.
 
-- DexSim does not expose soft-body collision triangle connectivity.
-  `SoftBodyData.collision_surface_triangles` therefore caches a SciPy
-  `ConvexHull` over rest collision vertices. The preview follows deformation
-  but cannot preserve concave render detail.
-- Cloth maps all render-mesh triangles onto DexSim's welded rest-vertex buffer
-  with `cKDTree`. Construction raises `RuntimeError` if the mapping distance
-  exceeds the scale-relative tolerance.
+- Both kinds publish the live render surface from DexSim 0.5 typed Newton
+  particle-set handles. Visualization does no convex-hull reconstruction or
+  nearest-neighbor welding.
+- A volume deformable separately exposes its tetrahedral collision surface via
+  `get_collision_surface_triangles()`; visualization intentionally uses render
+  topology.
+- Spawn binding requires identical render vertex/triangle counts across
+  replicated instances. A clone topology mismatch fails during preparation.
 - Viser does not update mesh vertices in place. `ViserBackend` removes and
   recreates a deformable mesh handle only when a dynamic vertex sample arrives.
   Pose-only frames reuse the current handle.
@@ -122,7 +130,11 @@ simulation thread. Both robot paths use Newton IK by default or, with
 joint motion; TCP overrides adapt targets without changing the shared solver.
 
 Viser click picking runs on the visualization worker via the existing GUI
-event queue. A manifest invalidates cached pick poses until its matching frame
+event queue. The worker registers the global scene pointer callback only while
+**Enable click-to-pick Gizmo** is checked, and removes it when unchecked. Viser
+captures camera drags while that callback is registered, so inactive picking
+must leave the callback unregistered to preserve orbit and pan controls.
+A manifest invalidates cached pick poses until its matching frame
 arrives; stale clicks are dropped. The manager validates `PickCommand` run and
 revision before attaching a gizmo and tracks picker ownership independently
 from explicitly created gizmos. Clearing selection releases only the picker

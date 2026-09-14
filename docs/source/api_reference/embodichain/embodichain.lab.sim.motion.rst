@@ -11,6 +11,7 @@ capability from its owning subpackage:
 
    from embodichain.lab.sim.motion.solvers import SolverCfg
    from embodichain.lab.sim.motion.motion_generator import MotionGenerator, MotionGenCfg
+   from embodichain.lab.sim.motion.execution import play_joint_trajectory
    from embodichain.lab.sim.motion.workspace import RobotWorkspaceCfg
    from embodichain.lab.sim.motion.expansion import TrajectoryTemplate
 
@@ -22,10 +23,11 @@ use solver and workspace contracts without ``motion`` also initializing the
 planner layer. Normal ``lab`` and ``sim`` package initialization still applies.
 
 Solvers own FK, IK, and differential kinematics; planners turn targets into
-paths and timed trajectories; workspace provides offline reachability analysis
+paths and timed trajectories; execution maps timed joint paths onto a fixed
+standalone simulation cadence; workspace provides offline reachability analysis
 and runtime cache queries; trajectory augmentation owns candidate variation,
-coverage, and generation accounting. Physical rollout, reset, task validation,
-and dataset persistence belong to explicit host integrations.
+coverage, and generation accounting. Environment rollout, reset, task
+validation, and dataset persistence belong to explicit host integrations.
 
 .. currentmodule:: embodichain.lab.sim.motion
 
@@ -33,6 +35,7 @@ and dataset persistence belong to explicit host integrations.
    :nosignatures:
 
    motion_generator
+   execution
    solvers
    planners
    workspace
@@ -42,6 +45,7 @@ and dataset persistence belong to explicit host integrations.
    :maxdepth: 1
 
    embodichain.lab.sim.motion.motion_generator
+   embodichain.lab.sim.motion.execution
    embodichain.lab.sim.motion.solvers
    embodichain.lab.sim.motion.planners
    embodichain.lab.sim.motion.workspace

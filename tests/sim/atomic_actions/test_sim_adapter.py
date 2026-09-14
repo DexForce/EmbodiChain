@@ -187,7 +187,9 @@ def test_simulation_adapter_writes_disjoint_joint_endpoints_independently() -> N
     assert arm_call.kwargs == {"joint_ids": [0, 2], "env_ids": [0, 1]}
     assert torch.equal(tool_call.args[0], torch.tensor([[2.0], [5.0]]))
     assert tool_call.kwargs == {"joint_ids": [1], "env_ids": [0, 1]}
-    robot.set_qvel.assert_not_called()
+    assert robot.set_qvel.call_count == 2
+    for call in robot.set_qvel.call_args_list:
+        assert torch.count_nonzero(call.args[0]) == 0
 
 
 def test_simulation_adapter_neutralizes_inactive_rows_without_velocity_payload() -> (
@@ -213,7 +215,7 @@ def test_simulation_adapter_neutralizes_inactive_rows_without_velocity_payload()
     assert acknowledgement.accepted
     assert torch.equal(
         robot.set_qvel.call_args.args[0],
-        torch.tensor([[0.1, 0.3], [0.0, 0.0]]),
+        torch.zeros(BATCH_SIZE, 2),
     )
     assert robot.set_qvel.call_args.kwargs == {
         "joint_ids": [0, 2],
@@ -588,3 +590,20 @@ def test_simulation_adapter_rejects_changed_environment_identity() -> None:
     assert acknowledgement.status is CommandAckStatus.REJECTED
     assert "env_ids" in acknowledgement.message
     robot.set_qpos.assert_not_called()
+
+
+@pytest.mark.parametrize("active_rows", [[True, True], [True, False]])
+def test_velocity_targets_use_existing_robot_setters(active_rows: list[bool]) -> None:
+    simulation, robot = _simulation_and_robot()
+    # Existing robots expose target setters without a capability-query API.
+    del robot.get_position_velocity_target_support
+    adapter = SimulationExecutionAdapter(simulation, robot)
+    active_mask = torch.tensor(active_rows)
+    command = _command(active_mask=active_mask)
+
+    acknowledgement = adapter.send(command, timeout=1.0)
+
+    assert acknowledgement.accepted
+    expected = command.commands[0].payload.velocities.clone()
+    expected[~active_mask] = 0.0
+    torch.testing.assert_close(robot.set_qvel.call_args.args[0], expected)
