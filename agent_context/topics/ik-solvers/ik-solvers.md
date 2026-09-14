@@ -134,8 +134,12 @@ solver interfaces. The compute kernels do not import simulation modules.
 `URSolver.get_ik(return_all_solutions=False)` uses `ur_ik_nearest_kernel` to
 generate, validate and select the seed-weighted nearest candidate in local
 storage, returning joints `(N, 6)` and validity `(N,)`. It retains the eight
-analytical branches and 64 periodic combinations per branch without writing
-the full candidate tensor. `return_all_solutions=True` uses `ur_ik_kernel` and
+analytical branches and 64 periodic combinations per branch. The kernel flags
+nearby competing distances for legacy `torch.norm` / `argmin` selection in
+chunks of at most 128 targets, preserving backend rounding and candidate order
+at branch bisectors. Ordinary targets avoid the full candidate tensor; even an
+all-ambiguous batch uses bounded candidate buffers. The ambiguity margin routes
+the fallback and never decides a tie. `return_all_solutions=True` uses `ur_ik_kernel` and
 preserves the ordered joints `(N, 512, 6)` and validity `(N, 512)`, including
 repeated representatives when no shifted value fits the joint limits.
 

@@ -155,9 +155,12 @@ def _measure(
         gpu_delta = torch.cuda.memory_allocated(device) - gpu_before
         gpu_peak = torch.cuda.max_memory_allocated(device) - gpu_before
     median = statistics.median(elapsed)
-    # Current kernels allocate six float32 joints and one int32 validity per
-    # output. Torch conversion shares joints but allocates boolean validity.
+    # Primary output buffers only. The single kernel also emits an int32
+    # ambiguity flag; bounded fallback candidate buffers are excluded here.
+    # Torch conversion shares joints but allocates boolean validity.
     warp_bytes = count * (1 if mode == "single" else 512) * (6 * 4 + 4)
+    if mode == "single":
+        warp_bytes += count * 4
     return {
         "sample_size": count,
         "impl": mode,
@@ -334,9 +337,10 @@ def run_all_benchmarks() -> None:
             "Memory uses MiB. cpu_delta_mb is process RSS delta. gpu_delta_mb and "
             "peak_gpu_mb are measured PyTorch allocation increases for a separate "
             "warmed call; they exclude Warp allocations and are zero on CPU.",
-            "warp_output_payload_mb is the logical payload of direct Warp output "
-            "buffers (6 float32 joints plus int32 validity per candidate), on the "
-            "selected device. It excludes allocator overhead and temporary/register "
+            "warp_output_payload_mb is the logical payload of primary Warp output "
+            "buffers (6 float32 joints plus int32 validity per candidate, plus an "
+            "int32 ambiguity flag per target in single mode). It excludes bounded "
+            "legacy-fallback buffers, allocator overhead and temporary/register "
             "storage. These columns do not measure total peak device memory.",
             "Targets are DH-generated reachable UR5 poses with limits ±2π, independent "
             "random seeds, and nonuniform weights. FK metrics check one valid "

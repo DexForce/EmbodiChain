@@ -180,6 +180,121 @@ def test_ur_nearest_zero_weights_keep_first_valid_candidate_on_ties() -> None:
 
 
 @pytest.mark.no_sim
+def test_ur_nearest_nonzero_distance_rounding_regression() -> None:
+    """The reported bisector selected branch 384 instead of legacy branch 256."""
+    solver = _make_analytic_ur_solver()
+    pose = torch.tensor(
+        [
+            [
+                [
+                    0.11713490635156631,
+                    0.8637253642082214,
+                    -0.49016112089157104,
+                    0.061536163091659546,
+                ],
+                [
+                    -0.34352806210517883,
+                    -0.4278513193130493,
+                    -0.8360213041305542,
+                    -0.12725721299648285,
+                ],
+                [
+                    -0.9318088889122009,
+                    0.2663114070892334,
+                    0.24659760296344757,
+                    0.7414405345916748,
+                ],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        ],
+        dtype=torch.float32,
+    )
+    seed = torch.tensor(
+        [
+            [
+                0.6716036796569824,
+                -2.2640819549560547,
+                1.3243775367736816,
+                -0.8974207639694214,
+                0.0,
+                0.3734279274940491,
+            ]
+        ],
+        dtype=torch.float32,
+    )
+    # Include both sides of the boundary, where treating near-equality as a tie
+    # would incorrectly retain the earlier branch on one side.
+    seeds = seed.repeat(3, 1)
+    seeds[:, 4] += torch.tensor([-1e-6, 0.0, 1e-6])
+    _, selected, all_valid, all_qpos = _assert_nearest_matches_all_solutions(
+        solver, pose.repeat(3, 1, 1), seeds
+    )
+    distances = torch.norm(all_qpos - seeds[:, None], dim=-1)
+    distances[~all_valid] = float("inf")
+    assert (distances[:, [256, 384]] > 2.0).all()
+    assert distances[0, 256] != distances[0, 384]
+    assert distances[2, 256] != distances[2, 384]
+    assert (selected[0] - selected[2]).abs().max() > 3.0
+    # Compare against the actual backend reduction, without assuming all CPU
+    # architectures or PyTorch builds round these two norms identically.
+    expected = all_qpos[torch.arange(3), distances.argmin(dim=1)]
+    torch.testing.assert_close(selected, expected, rtol=0.0, atol=0.0)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "device,seed_dtype,weights,count",
+    [
+        ("cpu", torch.float32, None, 128),
+        ("cpu", torch.float64, [0.75, 0.25, -2.0, 4.0, 0.5, 1.5], 16),
+        pytest.param("cuda:0", torch.float32, None, 8, marks=pytest.mark.gpu),
+        pytest.param(
+            "cuda:0",
+            torch.float64,
+            [0.75, 0.25, -2.0, 4.0, 0.5, 1.5],
+            8,
+            marks=pytest.mark.gpu,
+        ),
+    ],
+)
+def test_ur_nearest_branch_bisectors_match_legacy(
+    device: str,
+    seed_dtype: torch.dtype,
+    weights: list[float] | None,
+    count: int,
+) -> None:
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        pytest.skip("CUDA is not available")
+    solver = _make_analytic_ur_solver(device=device, weights=weights)
+    poses = _ur_dh_poses(solver, _sample_ur_joints(count))
+    _, candidates = solver.get_ik(poses, return_all_solutions=True)
+    branches = candidates[:, ::64].to(seed_dtype)
+    pairs = torch.combinations(torch.arange(8, device=solver.device))
+    left, right = branches[:, pairs[:, 0]], branches[:, pairs[:, 1]]
+    midpoint = (left + right) * 0.5
+    # 128 * 28 = 3,584 branch midpoints, plus the adjacent representable seeds
+    # on either side. Nonuniform weights retain midpoint equidistance.
+    seeds = torch.stack(
+        [torch.nextafter(midpoint, left), midpoint, torch.nextafter(midpoint, right)],
+        dim=2,
+    ).reshape(-1, 6)
+    targets = poses[:, None, None].expand(-1, len(pairs), 3, -1, -1).reshape(-1, 4, 4)
+    valid, _, all_valid, all_qpos = _assert_nearest_matches_all_solutions(
+        solver, targets, seeds
+    )
+    assert valid.all()
+    distances = torch.norm(
+        solver.ik_nearest_weight * (all_qpos - seeds[:, None]), dim=-1
+    )
+    distances[~all_valid] = float("inf")
+    nearest = distances.sort(dim=1).values[:, :2]
+    gap = nearest[:, 1] - nearest[:, 0]
+    nonzero = nearest[:, 0] > 0.0
+    assert (nonzero & (gap == 0.0)).any(), "Exercise nonzero exact ties"
+    assert (nonzero & (gap > 0.0) & (gap < 1e-5)).any(), "Exercise near ties"
+
+
+@pytest.mark.no_sim
 @pytest.mark.parametrize("seed_value", [float("nan"), float("inf"), 1e30])
 def test_ur_nearest_preserves_nonfinite_distance_selection(seed_value: float) -> None:
     joints = torch.tensor([[0.4, -1.1, 1.3, -0.7, 0.8, 0.2]])
@@ -264,6 +379,32 @@ def test_ur_nearest_avoids_full_candidate_buffers(
     assert qpos.shape == joints.shape
     # Even the smallest full-candidate buffer contains N * 512 scalar values.
     assert all(size < len(joints) * 512 for size in allocation_sizes)
+
+
+@pytest.mark.no_sim
+def test_ur_nearest_ambiguous_selection_bounds_candidate_allocations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    solver = _make_analytic_ur_solver(weights=[0.0] * 6)
+    # Every target needs tie selection; exceed the 128-target fallback chunk.
+    joints = _sample_ur_joints(257)
+    poses = _ur_dh_poses(solver, joints)
+    all_valid, all_qpos = solver.get_ik(poses, return_all_solutions=True)
+    allocate = wp.empty
+    allocation_sizes = []
+
+    def record_allocation(*args, **kwargs):
+        array = allocate(*args, **kwargs)
+        allocation_sizes.append(array.size)
+        return array
+
+    monkeypatch.setattr(wp, "empty", record_allocation)
+    valid, qpos = solver.get_ik(poses, joints[:1])
+    first = all_valid.to(torch.int32).argmax(dim=1)
+    torch.testing.assert_close(valid, all_valid[torch.arange(len(joints)), first])
+    torch.testing.assert_close(qpos, all_qpos[torch.arange(len(joints)), first])
+    assert allocation_sizes.count(128 * 512 * 6) == 2
+    assert max(allocation_sizes) <= 128 * 512 * 6
 
 
 @pytest.mark.no_sim

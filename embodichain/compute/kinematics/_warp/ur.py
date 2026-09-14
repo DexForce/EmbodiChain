@@ -529,6 +529,7 @@ def ur_ik_nearest_kernel(
     joint_weights: wp.array(dtype=Any),
     qpos: wp.array(dtype=float, ndim=2),
     ik_valid: wp.array(dtype=int),
+    selection_ambiguous: wp.array(dtype=int),
 ):
     """Generate, validate and select one UR solution per target in local storage.
 
@@ -541,17 +542,21 @@ def ur_ik_nearest_kernel(
         joint_weights: Six weights, with the same dtype as the seeds.
         qpos: Output joint values, shape ``(N, 6)``.
         ik_valid: Output validity flags, shape ``(N,)``.
+        selection_ambiguous: Output flags requesting legacy distance selection,
+            shape ``(N,)``.
 
     Candidates follow the all-solutions kernel's branch and periodic order.
-    Strict improvement retains the first equal-distance candidate. When all
-    candidates are invalid, the first candidate is returned with a false flag,
-    matching the previous masked ``torch.norm`` / ``argmin`` selection.
+    Scalar Warp norms can round differently from PyTorch reductions. Nearby
+    competitors are flagged for bounded legacy selection by the caller; the
+    comparison margin must not itself be used to break ties. When all candidates
+    are invalid, the first candidate is returned with a false flag.
     """
     i = wp.tid()
     theta, target_pose = _ur_ik_branches(xpos, params, i)
     best_q = wp_vec6f()
     best_valid = int(0)
     best_distance = qpos_seed.dtype(wp.inf)
+    second_distance = qpos_seed.dtype(wp.inf)
     tol = float(1e-9)
 
     for j in range(8):
@@ -584,16 +589,37 @@ def ur_ik_nearest_kernel(
             if j == 0 and k == 0:
                 best_q = candidate
                 best_valid = valid
-            # Retain the norm (including its rounding) for equal-distance ties.
             distance = wp.sqrt(squared_distance)
             if valid != 0 and (
                 distance < best_distance
                 or (wp.isnan(distance) and not wp.isnan(best_distance))
             ):
+                second_distance = best_distance
                 best_distance = distance
                 best_q = candidate
                 best_valid = valid
+            elif valid != 0 and distance < second_distance:
+                # Repeated periodic representatives have identical distances
+                # under either reduction and need no compatibility fallback.
+                different = int(0)
+                for t in range(6):
+                    if candidate[t] != best_q[t]:
+                        different = int(1)
+                if different != 0:
+                    second_distance = distance
 
     for t in range(6):
         qpos[i, t] = best_q[t]
     ik_valid[i] = best_valid
+    # Both kernels generate float32 candidates, including for float64 seeds.
+    # Allow 32 float32 epsilons for the six weighted terms, their accumulation,
+    # square root and candidate rounding. This only routes ambiguous targets;
+    # the original PyTorch reduction determines their actual ordering.
+    margin = qpos_seed.dtype(3.814697265625e-6) * wp.max(
+        qpos_seed.dtype(1.0), wp.abs(best_distance)
+    )
+    selection_ambiguous[i] = int(
+        wp.isfinite(best_distance)
+        and wp.isfinite(second_distance)
+        and second_distance - best_distance <= margin
+    )

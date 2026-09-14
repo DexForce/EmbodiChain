@@ -151,8 +151,9 @@ class URSolver(BaseSolver):
             qpos_seed (torch.Tensor): Current joint positions, shape (n_sample, 6)
                 or (1, 6). Defaults to the joint-limit midpoint.
             return_all_solutions (bool, optional): Whether to return all 512
-                candidates. False selects the nearest valid candidate inside
-                the Warp kernel without allocating the full candidate tensor.
+                candidates. False uses a fused Warp selection, with bounded
+                legacy selection for distances close enough to be affected by
+                floating-point rounding.
             **kwargs: Additional keyword arguments for future extensions.
 
         Returns:
@@ -206,6 +207,7 @@ class URSolver(BaseSolver):
             ).contiguous()
             best_qpos_wp = wp.empty((n_sample, DOF), dtype=float, device=wp_device)
             best_valid_wp = wp.empty(n_sample, dtype=int, device=wp_device)
+            ambiguous_wp = wp.empty(n_sample, dtype=int, device=wp_device)
             wp.launch(
                 kernel=ur_ik_nearest_kernel,
                 dim=n_sample,
@@ -217,10 +219,50 @@ class URSolver(BaseSolver):
                     wp.from_torch(seed),
                     wp.from_torch(weights),
                 ],
-                outputs=[best_qpos_wp, best_valid_wp],
+                outputs=[best_qpos_wp, best_valid_wp, ambiguous_wp],
                 device=wp_device,
             )
-            return wp.to_torch(best_valid_wp).bool(), wp.to_torch(best_qpos_wp)
+            best_valid = wp.to_torch(best_valid_wp).bool()
+            best_qpos = wp.to_torch(best_qpos_wp)
+            ambiguous = wp.to_torch(ambiguous_wp).nonzero(as_tuple=True)[0]
+            legacy_seed = qpos_seed.to(device=device).expand(n_sample, DOF)
+            # Do not approximate ties with an epsilon: even a one-ULP difference
+            # in the legacy norm can choose another analytical branch. Reuse
+            # the original candidates and reduction for ambiguous targets only.
+            # Cap each candidate buffer at 128 * 512 * 6 floats (1.5 MiB), even
+            # when every target is on a branch bisector.
+            for rows in ambiguous.split(128):
+                count = rows.numel()
+                if count == 0:
+                    continue
+                candidates_wp = wp.empty(
+                    count * N_SOL * DOF, dtype=float, device=wp_device
+                )
+                validity_wp = wp.empty(count * N_SOL, dtype=int, device=wp_device)
+                wp.launch(
+                    kernel=ur_ik_kernel,
+                    dim=count,
+                    inputs=[
+                        wp.from_torch(target_xpos_batch[rows].reshape(-1)),
+                        self._ur_params,
+                        lower_qpos_limits_wp,
+                        upper_qpos_limits_wp,
+                    ],
+                    outputs=[candidates_wp, validity_wp],
+                    device=wp_device,
+                )
+                candidates = wp.to_torch(candidates_wp).view(count, N_SOL, DOF)
+                validity = wp.to_torch(validity_wp).view(count, N_SOL).bool()
+                distances = torch.norm(
+                    self.ik_nearest_weight * (candidates - legacy_seed[rows, None, :]),
+                    dim=-1,
+                )
+                distances[~validity] = float("inf")
+                nearest = distances.argmin(dim=1)
+                local_rows = torch.arange(count, device=device)
+                best_qpos[rows] = candidates[local_rows, nearest]
+                best_valid[rows] = validity[local_rows, nearest]
+            return best_valid, best_qpos
 
         all_qpos_wp = wp.zeros(n_sample * N_SOL * DOF, dtype=float, device=wp_device)
         all_ik_valid_wp = wp.zeros(n_sample * N_SOL, dtype=int, device=wp_device)
