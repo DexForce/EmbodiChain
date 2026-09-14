@@ -462,7 +462,7 @@ class BenchmarkRunner:
                     metadata,
                     first_case,
                     TrialPhase.PREPARE,
-                    lambda: adapter.prepare(first_case),
+                    lambda: adapter.prepare_cases(supported_cases),
                 )
                 if prepare_error is not None:
                     return

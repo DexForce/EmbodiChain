@@ -130,6 +130,21 @@ class CuroboAdapter(PlannerAdapter):
             move_type=self._case_move_type(case),
         )
 
+    def prepare_cases(self, cases: list[BenchmarkCase]) -> dict[str, object]:
+        """Prepare every distinct batch-size and planning-mode backend."""
+        if not cases:
+            raise ValueError("prepare_cases requires at least one supported case.")
+        prepared = []
+        seen = set()
+        for case in cases:
+            move_type = self._case_move_type(case)
+            key = (case.batch_size, move_type)
+            if key in seen:
+                continue
+            seen.add(key)
+            prepared.append(self.prepare(case))
+        return {"backends": prepared}
+
     def plan(self, case: BenchmarkCase) -> PlanResult:
         """Plan all ordered Cartesian or joint waypoints in one call."""
         if self.motion_generator is None:

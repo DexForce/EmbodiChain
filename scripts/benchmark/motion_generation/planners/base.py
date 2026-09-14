@@ -121,6 +121,12 @@ class PlannerAdapter(ABC):
         """Prepare a lazy backend, or return ``None`` when not applicable."""
         return None
 
+    def prepare_cases(self, cases: list[BenchmarkCase]) -> dict[str, object] | None:
+        """Prepare all backend variants required by a supported case set."""
+        if not cases:
+            raise ValueError("prepare_cases requires at least one supported case.")
+        return self.prepare(cases[0])
+
     @property
     def motion_policy_planner(self) -> str:
         """Return the backend name pinned into Atomic Action motion policies."""

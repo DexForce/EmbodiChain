@@ -642,6 +642,31 @@ def test_curobo_prepares_joint_backend_for_joint_waypoint_case():
     )
 
 
+def test_curobo_prepares_every_required_planning_mode_once():
+    adapter = _curobo_adapter()
+    joint_case, _ = _joint_waypoint_case()
+    cartesian_case = replace(
+        _case(),
+        case_parameters={"motion_validity": "ordered_cartesian_waypoints"},
+    )
+    duplicate_cartesian_case = replace(cartesian_case, case_id="cartesian-duplicate")
+
+    metadata = adapter.prepare_cases(
+        [cartesian_case, duplicate_cartesian_case, joint_case]
+    )
+
+    calls = adapter.motion_generator.planner.prepare_backend.call_args_list
+    assert [call.kwargs["move_type"] for call in calls] == [
+        MoveType.EEF_MOVE,
+        MoveType.JOINT_MOVE,
+    ]
+    assert [call.kwargs["batch_size"] for call in calls] == [
+        cartesian_case.batch_size,
+        joint_case.batch_size,
+    ]
+    assert len(metadata["backends"]) == 2
+
+
 def test_curobo_joint_case_uses_reference_joint_waypoints():
     adapter = _curobo_adapter()
     case, joint_targets = _joint_waypoint_case()
@@ -2066,10 +2091,17 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
     )
     from scripts.benchmark.motion_generation.runner import BenchmarkRunner
 
+    prepared_case_sets: list[tuple[str, ...]] = []
+
     class _CapableFake(PlannerAdapter):
         capabilities = frozenset({"eef_waypoint", "batched", "empty_world"})
+        separate_prepare = True
 
         def build(self) -> None:
+            return None
+
+        def prepare_cases(self, cases: list[BenchmarkCase]) -> dict[str, object] | None:
+            prepared_case_sets.append(tuple(case.case_id for case in cases))
             return None
 
         def plan(self, case: BenchmarkCase) -> PlanResult:
@@ -2178,6 +2210,8 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
         required = frozenset({"eef_waypoint", "batched", "empty_world"})
         for spec in specs:
             runner._run_adapter(writer, sim, robot, spec, [case], required)
+
+        assert prepared_case_sets == [(case.case_id,)]
 
         phases = {
             (r.algorithm_id, r.phase, r.status, r.failure_code) for r in runner.records
