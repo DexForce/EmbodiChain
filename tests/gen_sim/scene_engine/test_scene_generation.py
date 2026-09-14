@@ -382,6 +382,30 @@ def test_articulated_usdcs_use_visible_rgba_in_scene_order(
     assert static_mug.articulated_usdc_path is None
 
 
+def test_rubiks_cube_is_excluded_from_articulation_generation(tmp_path: Path) -> None:
+    class FakeClient:
+        def generate_articulated_usdc(self, **_: object) -> Path:
+            raise AssertionError("Rubik cube must not be submitted")
+
+    cube = SceneObject(
+        id="puzzle_cube_001",
+        kind="asset",
+        category="puzzle_cube",
+        name="colorful Rubik cube",
+        description="3x3 puzzle cube with colored facelets",
+        is_articulated=True,
+        visible_rgba_path=str(tmp_path / "cube.png"),
+    )
+    _generate_articulated_usdcs(
+        scene=Scene(objects=[cube]),
+        output_root=tmp_path / "articulated_geometry",
+        coarse_scales_y_up_by_id={},
+        articulated_generation_client=FakeClient(),  # type: ignore[arg-type]
+    )
+    assert cube.is_articulated is False
+    assert cube.articulated_usdc_path is None
+
+
 def test_articulated_usdc_canonicalization_moves_bottom_center_to_origin(
     tmp_path: Path,
 ) -> None:
