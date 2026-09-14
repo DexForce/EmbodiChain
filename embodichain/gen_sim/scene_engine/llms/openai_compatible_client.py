@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import base64
+from http.client import IncompleteRead
 import json
 from pathlib import Path
 from typing import Any
@@ -104,7 +105,7 @@ class OpenAICompatibleVLM:
                 )
             except URLError as exc:
                 last_error = RuntimeError(f"VLM request failed: {exc.reason}")
-            except (TimeoutError, OSError) as exc:
+            except (IncompleteRead, TimeoutError, OSError) as exc:
                 last_error = RuntimeError(f"VLM request failed: {exc}")
             except (json.JSONDecodeError, ValueError):
                 last_error = RuntimeError("VLM API returned a malformed response.")

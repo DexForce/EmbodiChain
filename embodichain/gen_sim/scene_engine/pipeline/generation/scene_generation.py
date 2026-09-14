@@ -354,9 +354,17 @@ def _generate_articulated_usdcs(
     articulated_generation_client: ArticulatedGenerationClient | None,
 ) -> None:
     """Generate and persist one articulation USDC for every articulated object."""
-    articulated_objects = [
-        scene_object for scene_object in scene.objects if scene_object.is_articulated
-    ]
+    articulated_objects = []
+    for scene_object in scene.objects:
+        if _is_rubiks_cube(scene_object):
+            # The current articulation service cannot represent a Rubik cube's
+            # coupled six-layer mechanism faithfully; keep it as a rigid asset.
+            scene_object.is_articulated = False
+            scene_object.articulated_usdc_path = None
+            scene_object.articulated_usdc_scale = None
+            continue
+        if scene_object.is_articulated:
+            articulated_objects.append(scene_object)
     if not articulated_objects:
         return
     if articulated_generation_client is None:
@@ -406,6 +414,17 @@ def _generate_articulated_usdcs(
         # USDC is y-up like GLB; SimulationManager performs the shared z-up conversion.
         scene_object.articulated_usdc_scale = list(coarse_scale_y_up)
         log_info(f"Created articulated USDC: {scene_object.id!r}.")
+
+
+def _is_rubiks_cube(scene_object: SceneObject) -> bool:
+    """Return whether an object is a Rubik-style cube excluded from generation."""
+    text = " ".join(
+        (scene_object.category, scene_object.name, scene_object.description)
+    ).lower()
+    return any(
+        token in text
+        for token in ("rubik", "rubik's", "rubiks", "puzzle_cube", "puzzle cube")
+    )
 
 
 def _update_scene_final_y_up_layout_and_z_up_centers(

@@ -51,6 +51,45 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils im
 
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 _CATEGORY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+# Segmentation models are less reliable for compound object names than their
+# visual nouns; aliases improve recall without changing semantic IDs.
+_SEGMENTATION_PROMPT_ALIASES: dict[str, tuple[str, ...]] = {
+    "service_bell": ("bell", "desk bell", "call bell"),
+    "call_bell": ("bell", "desk bell", "service bell"),
+    "desk_bell": ("bell", "service bell", "call bell"),
+    "placemat": ("blue placemat", "table mat"),
+    "folder": ("placemat", "blue placemat", "table mat"),
+    "mat": ("placemat", "blue placemat", "table mat"),
+    "button_device": ("button", "push button", "emergency stop button"),
+    "push_button": ("button", "push button", "emergency stop button"),
+    "hot_plate": ("hot plate", "electric hot plate", "cooktop"),
+    "electric_hot_plate": ("hot plate", "electric hot plate", "cooktop"),
+    "button_box": ("button", "push button", "button box"),
+    "sheet": ("sheet of paper", "paper sheet", "blue placemat"),
+    "paper_cup": ("cup", "paper cup", "disposable cup"),
+    "drawer": ("drawer", "cabinet drawer", "storage drawer"),
+    "laptop": ("square device", "gray tablet", "electronic panel"),
+}
+_FORCED_ARTICULATION_CATEGORIES = {
+    "bell",
+    "service_bell",
+    "desk_bell",
+    "call_bell",
+    "button",
+    "push_button",
+    "button_box",
+    "game_button",
+    "button_device",
+    "emergency_stop_button",
+    "switch",
+    "switch_box",
+    "knob",
+    "control_panel",
+    "knob_panel",
+    "hot_plate",
+    "electric_hot_plate",
+    "dimmer_switch",
+}
 _VISIBLE_RGBA_IMAGE_SIZE = (512, 512)
 _SYSTEM_PROMPT = """You inspect one tabletop-scene image.
 Identify the main table and every visible, physically distinct object that should
@@ -415,6 +454,7 @@ def _analyze_image_objects(
         )
         try:
             analyzed_scene = _parse_image_object_analysis_response(response_text)
+            _force_known_movable_objects_articulated(analyzed_scene)
             validate_scene_understanding(analyzed_scene)
         except ValueError as exc:
             last_validation_error = exc
@@ -428,6 +468,13 @@ def _analyze_image_objects(
         "VLM returned invalid image-object analysis JSON after "
         f"{json_max_attempts} attempts: {last_validation_error}"
     ) from last_validation_error
+
+
+def _force_known_movable_objects_articulated(scene: Scene) -> None:
+    """Promote known interactive object categories before generation dispatch."""
+    for scene_object in scene.assets:
+        if scene_object.category in _FORCED_ARTICULATION_CATEGORIES:
+            scene_object.is_articulated = True
 
 
 def _parse_image_object_analysis_response(response_text: str) -> Scene:
@@ -819,7 +866,11 @@ def _segment_assets(
         mask_rles: list[dict[str, Any]] = []
         # Use categories and names as segmentation prompt.
         # Use category to segment first, then use each assets' name to segment.
-        prompts = [category, *dict.fromkeys(asset.name for asset in assets)]
+        prompts = [
+            category,
+            *dict.fromkeys(asset.name for asset in assets),
+            *_SEGMENTATION_PROMPT_ALIASES.get(category, ()),
+        ]
         for prompt in prompts:
             mask_rles.extend(
                 image_segmentation_client.segment_single_object(
