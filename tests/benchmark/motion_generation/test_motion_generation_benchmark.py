@@ -593,6 +593,75 @@ def test_nmg_joint_case_uses_joint_constraint_waypoints():
     assert torch.equal(targets[1].qpos, joint_targets[:, 1])
 
 
+def _curobo_adapter():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.curobo import CuroboAdapter
+
+    adapter = CuroboAdapter(
+        PlannerSpecCfg(
+            id="curobo",
+            adapter="curobo",
+            role="primary_baseline",
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+    adapter.motion_generator = Mock()
+    return adapter
+
+
+def _joint_waypoint_case() -> tuple[BenchmarkCase, torch.Tensor]:
+    joint_targets = torch.tensor(
+        [[[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], [0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]]]
+    )
+    case = replace(
+        _case(),
+        num_waypoints=2,
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).repeat(1, 2, 1, 1),
+        reference_qpos=joint_targets,
+        case_parameters={"motion_validity": "ordered_joint_waypoints"},
+    )
+    return case, joint_targets
+
+
+def test_curobo_prepares_joint_backend_for_joint_waypoint_case():
+    adapter = _curobo_adapter()
+    case, _ = _joint_waypoint_case()
+
+    adapter.prepare(case)
+
+    adapter.motion_generator.planner.prepare_backend.assert_called_once_with(
+        control_part="arm",
+        batch_size=case.batch_size,
+        move_type=MoveType.JOINT_MOVE,
+    )
+
+
+def test_curobo_joint_case_uses_reference_joint_waypoints():
+    adapter = _curobo_adapter()
+    case, joint_targets = _joint_waypoint_case()
+    expected = Mock()
+    adapter.motion_generator.generate.return_value = expected
+
+    result = adapter.plan(case)
+
+    assert result is expected
+    targets = adapter.motion_generator.generate.call_args.args[0]
+    assert [target.move_type for target in targets] == [
+        MoveType.JOINT_MOVE,
+        MoveType.JOINT_MOVE,
+    ]
+    assert targets[0].xpos is None
+    assert targets[1].xpos is None
+    assert torch.equal(targets[0].qpos, joint_targets[:, 0])
+    assert torch.equal(targets[1].qpos, joint_targets[:, 1])
+
+
 def test_nmg_rejects_unknown_motion_validity():
     from scripts.benchmark.motion_generation.config import PlannerSpecCfg
     from scripts.benchmark.motion_generation.planners.base import PlannerContext

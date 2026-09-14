@@ -178,7 +178,7 @@ def test_environment_action_hook_receives_no_state_by_default() -> None:
     tape = object()
     calls: list[tuple[object, object]] = []
 
-    def _apply_action(action: object, tape: object) -> None:
+    def _apply_action(action: object, *, tape: object) -> None:
         calls.append((action, tape))
 
     env._apply_action_kernel = _apply_action

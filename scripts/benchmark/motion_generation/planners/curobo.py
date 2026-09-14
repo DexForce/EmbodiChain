@@ -107,25 +107,48 @@ class CuroboAdapter(PlannerAdapter):
         )
         self.motion_generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
 
+    @staticmethod
+    def _case_move_type(case: BenchmarkCase) -> MoveType:
+        """Return the planner move type required by a supported case."""
+        validity = case.case_parameters.get(
+            "motion_validity", "ordered_cartesian_waypoints"
+        )
+        if validity == "ordered_cartesian_waypoints":
+            return MoveType.EEF_MOVE
+        if validity == "ordered_joint_waypoints":
+            return MoveType.JOINT_MOVE
+        raise ValueError(f"Unsupported motion_validity mode {validity!r}.")
+
     def prepare(self, case: BenchmarkCase) -> dict[str, object]:
-        """Materialize and warm the EEF backend without consuming a real case."""
+        """Materialize and warm the backend required by the benchmark case."""
         if self.motion_generator is None:
             raise RuntimeError("cuRobo adapter must be built before prepare().")
         planner = self.motion_generator.planner
         return planner.prepare_backend(
             control_part=self.context.control_part,
             batch_size=case.batch_size,
-            move_type=MoveType.EEF_MOVE,
+            move_type=self._case_move_type(case),
         )
 
     def plan(self, case: BenchmarkCase) -> PlanResult:
-        """Plan all ordered EEF waypoints in one MotionGenerator call."""
+        """Plan all ordered Cartesian or joint waypoints in one call."""
         if self.motion_generator is None:
             raise RuntimeError("cuRobo adapter must be built before plan().")
-        targets = [
-            PlanState.from_xpos(case.target_waypoints[:, index])
-            for index in range(case.num_waypoints)
-        ]
+        move_type = self._case_move_type(case)
+        if move_type is MoveType.JOINT_MOVE:
+            targets = [
+                PlanState.from_qpos(
+                    case.reference_qpos[:, index], move_type=MoveType.JOINT_MOVE
+                )
+                for index in range(case.num_waypoints)
+            ]
+        else:
+            targets = [
+                PlanState.from_xpos(
+                    case.target_waypoints[:, index], move_type=MoveType.EEF_MOVE
+                )
+                for index in range(case.num_waypoints)
+            ]
         return self.motion_generator.generate(
             targets,
             MotionGenOptions(
