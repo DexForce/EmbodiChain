@@ -23,12 +23,14 @@ import json
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Sequence
 
 __all__ = ["build_commands", "main", "run_plan"]
 
 _LANE_ORDER = ("docs", "fast", "sim", "distributed", "gpu")
+_SLOW_LANE_PREFIX = "slow-"
 _DISTRIBUTED_TEST = "tests/learning/test_rl_distributed.py"
 _PLAN_MODES = {"partial", "docs-only", "full-pr", "full"}
 
@@ -61,12 +63,17 @@ def _safe_selector(value: Any) -> str:
 
 
 def _lane_expression(lane: str, include_slow: bool) -> str:
-    slow = "" if include_slow else "not slow and "
-    if lane == "fast":
+    is_slow_lane = lane.startswith(_SLOW_LANE_PREFIX)
+    base_lane = lane.removeprefix(_SLOW_LANE_PREFIX) if is_slow_lane else lane
+    if is_slow_lane:
+        slow = "slow and "
+    else:
+        slow = "" if include_slow else "not slow and "
+    if base_lane == "fast":
         return f"{slow}not requires_sim and not gpu"
-    if lane == "sim":
+    if base_lane == "sim":
         return f"{slow}requires_sim and not gpu"
-    if lane in {"distributed", "gpu"}:
+    if base_lane in {"distributed", "gpu"}:
         return f"{slow}gpu"
     raise ValueError(f"unknown pytest lane: {lane}")
 
@@ -96,10 +103,21 @@ def build_commands(
     raw_lane_map = plan.get("lanes", {})
     if not isinstance(raw_lane_map, dict):
         raise RuntimeError("test plan is missing lane selectors")
+    raw_slow_lane_map = plan.get("slow_lanes", {})
+    if not isinstance(raw_slow_lane_map, dict):
+        raise RuntimeError("test plan slow lane selectors must be a mapping")
     unknown_lanes = set(raw_lane_map) - set(_LANE_ORDER)
     if unknown_lanes:
         raise RuntimeError(
             f"unsupported test plan lanes: {sorted(str(lane) for lane in unknown_lanes)!r}"
+        )
+    unknown_slow_lanes = set(raw_slow_lane_map) - {
+        f"{_SLOW_LANE_PREFIX}{lane}" for lane in _LANE_ORDER
+    }
+    if unknown_slow_lanes:
+        raise RuntimeError(
+            "unsupported slow test plan lanes: "
+            f"{sorted(str(lane) for lane in unknown_slow_lanes)!r}"
         )
     commands: list[tuple[str, list[str]]] = []
     for lane in selected_lanes:
@@ -109,36 +127,72 @@ def build_commands(
         if not isinstance(raw_selectors, list):
             raise RuntimeError(f"lane {lane!r} selectors must be a list")
         selectors = [_safe_selector(value) for value in raw_selectors]
-        if not selectors:
-            continue
-        base = [executable, "-m", "pytest"]
-        if lane == "docs":
-            command = [
-                *base,
-                *selectors,
-                "-q",
-                "--confcutdir=tests/docs",
-            ]
-            if include_slow:
-                # Override the repository's default ``-m not slow`` so a
-                # forced full run really includes every documentation test.
-                command.extend(("-m", "slow or not slow"))
-            commands.append((lane, command))
-            continue
+        if selectors:
+            base = [executable, "-m", "pytest", "--durations=20"]
+            if lane == "docs":
+                command = [
+                    *base,
+                    *selectors,
+                    "-q",
+                    "--confcutdir=tests/docs",
+                    "-m",
+                    "slow or not slow" if include_slow else "not slow",
+                ]
+                commands.append((lane, command))
+            else:
+                marker = _lane_expression(lane, include_slow)
+                command = [*base, *selectors, "-m", marker]
+                if lane == "fast":
+                    command.extend(
+                        ("--ignore=tests/docs", "-n", "4", "--dist", "loadgroup")
+                    )
+                elif lane == "sim":
+                    command.append("--ignore=tests/docs")
+                elif lane == "distributed":
+                    command.extend(("--run-gpu", "--ignore=tests/docs"))
+                elif lane == "gpu":
+                    command.extend(
+                        (
+                            "--run-gpu",
+                            "--ignore=tests/docs",
+                            f"--ignore={_DISTRIBUTED_TEST}",
+                        )
+                    )
+                commands.append((lane, command))
 
-        marker = _lane_expression(lane, include_slow)
-        command = [*base, *selectors, "-m", marker]
-        if lane == "fast":
-            command.extend(("--ignore=tests/docs", "-n", "4", "--dist", "loadgroup"))
-        elif lane == "sim":
-            command.append("--ignore=tests/docs")
-        elif lane == "distributed":
-            command.extend(("--run-gpu", "--ignore=tests/docs"))
-        elif lane == "gpu":
-            command.extend(
-                ("--run-gpu", "--ignore=tests/docs", f"--ignore={_DISTRIBUTED_TEST}")
-            )
-        commands.append((lane, command))
+        if include_slow:
+            continue
+        slow_lane = f"{_SLOW_LANE_PREFIX}{lane}"
+        raw_slow_selectors = raw_slow_lane_map.get(slow_lane, [])
+        if not isinstance(raw_slow_selectors, list):
+            raise RuntimeError(f"lane {slow_lane!r} selectors must be a list")
+        slow_selectors = [_safe_selector(value) for value in raw_slow_selectors]
+        if not slow_selectors:
+            continue
+        slow_base = [executable, "-m", "pytest", "--durations=20", *slow_selectors]
+        if lane == "docs":
+            slow_command = [*slow_base, "-q", "--confcutdir=tests/docs", "-m", "slow"]
+        else:
+            slow_command = [
+                *slow_base,
+                "-m",
+                _lane_expression(slow_lane, include_slow),
+            ]
+            if lane == "fast":
+                slow_command.extend(("--ignore=tests/docs",))
+            elif lane == "sim":
+                slow_command.append("--ignore=tests/docs")
+            elif lane == "distributed":
+                slow_command.extend(("--run-gpu", "--ignore=tests/docs"))
+            elif lane == "gpu":
+                slow_command.extend(
+                    (
+                        "--run-gpu",
+                        "--ignore=tests/docs",
+                        f"--ignore={_DISTRIBUTED_TEST}",
+                    )
+                )
+        commands.append((slow_lane, slow_command))
     return commands
 
 
@@ -171,9 +225,15 @@ def run_plan(
         print(f"\n[CI] {lane}: {shlex.join(command)}", flush=True)
         if dry_run:
             continue
+        started = time.monotonic()
         result = subprocess.run(command, cwd=repository_root, check=False)
+        elapsed = time.monotonic() - started
+        print(
+            f"[CI] {lane}: completed in {elapsed:.1f}s (exit {result.returncode}).",
+            flush=True,
+        )
         if result.returncode == 5:
-            if lane == "docs":
+            if lane in {"docs", "slow-docs"}:
                 print("[CI] docs: no documentation tests were collected.")
                 return result.returncode
             print(f"[CI] {lane}: no tests matched its marker expression; continuing.")

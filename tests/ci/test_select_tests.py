@@ -264,7 +264,7 @@ def test_deleted_test_falls_back_to_full_pr(tmp_path: Path) -> None:
     assert "deleted test path" in (plan.fallback_reason or "")
 
 
-def test_changed_slow_test_requests_full_mode(tmp_path: Path) -> None:
+def test_changed_slow_test_gets_a_narrow_slow_lane(tmp_path: Path) -> None:
     _write(
         tmp_path,
         "tests/test_slow.py",
@@ -276,8 +276,88 @@ def test_changed_slow_test_requests_full_mode(tmp_path: Path) -> None:
         _manifest(),
     )
 
-    assert plan.mode == "full"
-    assert plan.fallback_reason == "changed slow test requires a full run"
+    assert plan.mode == "partial"
+    assert plan.slow_lanes == {"slow-fast": ["tests/test_slow.py"]}
+
+
+def test_changed_slow_file_keeps_cpu_and_gpu_cases(tmp_path: Path) -> None:
+    selector = "tests/test_mixed.py"
+    _write(
+        tmp_path,
+        selector,
+        "import pytest\n"
+        "@pytest.mark.slow\ndef test_cpu(): pass\n"
+        "@pytest.mark.slow\n@pytest.mark.gpu\ndef test_gpu(): pass\n",
+    )
+
+    plan = build_plan(tmp_path, [ChangedPath(selector)], _manifest())
+    commands = dict(build_commands(plan.to_dict()))
+
+    assert plan.mode == "partial"
+    assert plan.slow_lanes == {"slow-fast": [selector], "slow-gpu": [selector]}
+    assert "slow and not requires_sim and not gpu" in commands["slow-fast"]
+    assert "slow and gpu" in commands["slow-gpu"]
+    assert "--run-gpu" in commands["slow-gpu"]
+
+
+def test_non_slow_gpu_marker_does_not_create_slow_gpu_lane(tmp_path: Path) -> None:
+    selector = "tests/test_cpu_slow.py"
+    _write(
+        tmp_path,
+        selector,
+        "import pytest\n"
+        "@pytest.mark.slow\ndef test_cpu(): pass\n"
+        "@pytest.mark.gpu\ndef test_gpu_smoke(): pass\n",
+    )
+
+    plan = build_plan(tmp_path, [ChangedPath(selector)], _manifest())
+
+    assert plan.slow_lanes == {"slow-fast": [selector]}
+
+
+def test_parameter_level_slow_marker_gets_a_slow_lane(tmp_path: Path) -> None:
+    selector = "tests/test_parameter_slow.py"
+    _write(
+        tmp_path,
+        selector,
+        "import pytest\n"
+        "@pytest.mark.parametrize('value', [pytest.param(1, marks=pytest.mark.slow)])\n"
+        "def test_parameter(value): pass\n",
+    )
+
+    plan = build_plan(tmp_path, [ChangedPath(selector)], _manifest())
+
+    assert plan.slow_lanes == {"slow-fast": [selector]}
+
+
+def test_sim_gpu_slow_case_skips_irrelevant_fast_lane(tmp_path: Path) -> None:
+    selector = "tests/sim/test_sim_slow.py"
+    _write(
+        tmp_path,
+        selector,
+        "import pytest\n"
+        "@pytest.mark.slow\n@pytest.mark.requires_sim\n@pytest.mark.gpu\n"
+        "def test_sim_gpu(): pass\n",
+    )
+
+    plan = build_plan(tmp_path, [ChangedPath(selector)], _manifest())
+
+    assert plan.slow_lanes == {"slow-gpu": [selector]}
+
+
+def test_changed_slow_docs_test_stays_in_docs_lane(tmp_path: Path) -> None:
+    selector = "tests/docs/test_slow.py"
+    _write(
+        tmp_path, selector, "import pytest\n@pytest.mark.slow\ndef test_slow(): pass\n"
+    )
+
+    plan = build_plan(tmp_path, [ChangedPath(selector)], _manifest())
+    commands = dict(build_commands(plan.to_dict(), lanes=["docs"]))
+
+    assert plan.mode == "docs-only"
+    assert plan.slow_lanes == {"slow-docs": [selector]}
+    assert "--confcutdir=tests/docs" in commands["slow-docs"]
+    assert commands["slow-docs"][-2:] == ["-m", "slow"]
 
 
 def test_slow_marker_in_fixture_text_does_not_force_full(tmp_path: Path) -> None:
@@ -296,7 +376,7 @@ def test_slow_marker_in_fixture_text_does_not_force_full(tmp_path: Path) -> None
     assert plan.mode == "partial"
 
 
-def test_changed_slow_test_keeps_full_mode_with_global_change(tmp_path: Path) -> None:
+def test_changed_slow_test_keeps_full_pr_with_global_change(tmp_path: Path) -> None:
     _write(
         tmp_path,
         "tests/test_slow.py",
@@ -309,7 +389,8 @@ def test_changed_slow_test_keeps_full_mode_with_global_change(tmp_path: Path) ->
         _manifest(full_pr_if=["pyproject.toml"]),
     )
 
-    assert plan.mode == "full"
+    assert plan.mode == "full-pr"
+    assert plan.slow_lanes == {"slow-fast": ["tests/test_slow.py"]}
 
 
 def test_docs_only_plan_has_no_hardware_lanes(tmp_path: Path) -> None:
@@ -528,6 +609,7 @@ def test_force_full_includes_slow_lanes(tmp_path: Path) -> None:
     )
 
     assert plan.mode == "full"
+    assert plan.slow_lanes == {}
     commands = dict(build_commands(plan.to_dict()))
     assert "not slow" not in commands["fast"]
     assert "not slow" not in commands["sim"]
@@ -550,6 +632,35 @@ def test_partial_commands_keep_resource_boundaries() -> None:
     assert "not slow and gpu" in commands["gpu"]
     assert "--run-gpu" in commands["gpu"]
     assert "-n" in commands["fast"]
+
+
+def test_partial_commands_run_only_impacted_slow_selectors() -> None:
+    plan = {
+        "version": 1,
+        "mode": "full-pr",
+        "lanes": {"fast": ["tests"]},
+        "slow_lanes": {"slow-fast": ["tests/utils/test_nms.py"]},
+    }
+
+    commands = dict(build_commands(plan))
+
+    assert "not slow" in " ".join(commands["fast"])
+    assert "slow and not requires_sim and not gpu" in " ".join(commands["slow-fast"])
+    assert "tests/utils/test_nms.py" in commands["slow-fast"]
+
+
+def test_slow_lane_can_run_without_a_regular_selector() -> None:
+    plan = {
+        "version": 1,
+        "mode": "partial",
+        "lanes": {},
+        "slow_lanes": {"slow-gpu": ["tests/sim/test_slow_gpu.py"]},
+    }
+
+    commands = dict(build_commands(plan, lanes=["gpu"]))
+
+    assert "slow and gpu" in " ".join(commands["slow-gpu"])
+    assert "--run-gpu" in commands["slow-gpu"]
 
 
 def test_runner_rejects_selectors_outside_tests() -> None:
@@ -591,3 +702,21 @@ def test_runner_distinguishes_empty_optional_lane_from_docs(
 
     assert run_test_plan.run_plan(plan, root=tmp_path, lanes=["sim"]) == 0
     assert run_test_plan.run_plan(plan, root=tmp_path, lanes=["docs"]) == 5
+
+    slow_plan = {
+        "version": 1,
+        "mode": "partial",
+        "selectors": ["tests/test_sample.py"],
+        "lanes": {"gpu": ["tests/test_sample.py"]},
+        "slow_lanes": {"slow-gpu": ["tests/test_sample.py"]},
+    }
+    assert run_test_plan.run_plan(slow_plan, root=tmp_path, lanes=["gpu"]) == 0
+
+    slow_docs_plan = {
+        "version": 1,
+        "mode": "docs-only",
+        "selectors": ["tests/docs"],
+        "lanes": {},
+        "slow_lanes": {"slow-docs": ["tests/docs/test_sample.py"]},
+    }
+    assert run_test_plan.run_plan(slow_docs_plan, root=tmp_path, lanes=["docs"]) == 5

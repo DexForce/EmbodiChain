@@ -114,6 +114,7 @@ class TestPlan:
     changed: list[dict[str, Any]] = field(default_factory=list)
     selectors: list[str] = field(default_factory=list)
     lanes: dict[str, list[str]] = field(default_factory=dict)
+    slow_lanes: dict[str, list[str]] = field(default_factory=dict)
     reasons: dict[str, list[str]] = field(default_factory=dict)
     resource_hints: list[str] = field(default_factory=list)
     install: dict[str, bool] = field(default_factory=dict)
@@ -132,6 +133,7 @@ class TestPlan:
             "changed": self.changed,
             "selectors": self.selectors,
             "lanes": self.lanes,
+            "slow_lanes": self.slow_lanes,
             "reasons": self.reasons,
             "resource_hints": self.resource_hints,
             "install": self.install,
@@ -755,7 +757,138 @@ def _selector_has_slow_marker(root: Path, selector: str) -> bool:
                         _is_slow_marker(value) for value in ast.walk(node.value)
                     ):
                         return True
+            elif isinstance(node, ast.Call) and any(
+                _is_slow_marker(value) for value in ast.walk(node)
+            ):
+                # This covers parameter-level marks such as
+                # ``pytest.param(..., marks=pytest.mark.slow)`` without
+                # treating a string mentioning the marker as executable.
+                return True
     return False
+
+
+def _marker_name(node: ast.AST) -> str | None:
+    """Return a pytest marker name for a marker expression."""
+    if isinstance(node, ast.Call):
+        node = node.func
+    if not isinstance(node, ast.Attribute):
+        return None
+    if isinstance(node.value, ast.Attribute) and node.value.attr == "mark":
+        return node.attr
+    if isinstance(node.value, ast.Name) and node.value.id == "mark":
+        return node.attr
+    return None
+
+
+def _assignment_marker_names(node: ast.AST) -> set[str]:
+    """Extract marker names from a ``pytestmark`` assignment value."""
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        names: set[str] = set()
+        for element in node.elts:
+            names.update(_assignment_marker_names(element))
+        return names
+    marker = _marker_name(node)
+    return {marker} if marker else set()
+
+
+def _slow_resource_hints(root: Path, selector: str) -> set[str]:
+    """Infer resources from markers attached to slow nodes only.
+
+    File-level hints are conservative for ordinary lanes, but using every
+    marker in a file for a slow lane can create an empty GPU command when a
+    separate non-slow test happens to use CUDA.  Walk decorators and inherited
+    module/class markers so the slow lane follows the actual slow node.
+    """
+    normalized = _normalize_path(selector)
+    candidate = root / normalized
+    if candidate.is_file():
+        paths = [candidate]
+    elif candidate.is_dir():
+        paths = [path for path in candidate.rglob("*.py") if _is_test_file(path)]
+    else:
+        return _test_hints(root, selector)
+
+    path_lower = normalized.lower()
+    path_sim = normalized in {"tests/sim", "tests/gym/envs", "tests/lab/task_program"}
+    path_sim |= normalized.startswith(
+        ("tests/sim/", "tests/gym/envs/", "tests/lab/task_program/")
+    )
+    path_distributed = "test_rl_distributed.py" in normalized
+    path_gpu = any(token in path_lower for token in ("cuda", "gpu"))
+    resources: set[str] = set()
+    saw_slow = False
+
+    def visit(node: ast.AST, inherited: set[str]) -> None:
+        nonlocal saw_slow
+        active = set(inherited)
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            for decorator in node.decorator_list:
+                active.update(
+                    marker
+                    for expression in ast.walk(decorator)
+                    if (marker := _marker_name(expression)) is not None
+                )
+            for statement in node.body:
+                if isinstance(statement, (ast.Assign, ast.AnnAssign)):
+                    targets = (
+                        statement.targets
+                        if isinstance(statement, ast.Assign)
+                        else [statement.target]
+                    )
+                    if any(
+                        isinstance(target, ast.Name) and target.id == "pytestmark"
+                        for target in targets
+                    ):
+                        active.update(_assignment_marker_names(statement.value))
+
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+            "slow" in active
+        ):
+            saw_slow = True
+            node_resources: set[str] = set()
+            if "distributed" in active or path_distributed:
+                node_resources.add("distributed")
+            elif "gpu" in active or path_gpu:
+                node_resources.add("gpu")
+            elif "requires_sim" in active or "sim" in active or path_sim:
+                node_resources.add("sim")
+            if not node_resources.intersection({"gpu", "sim", "distributed"}):
+                node_resources.add("fast")
+            resources.update(node_resources)
+            return
+
+        if isinstance(node, ast.ClassDef):
+            for child in node.body:
+                visit(child, active)
+            return
+        for child in ast.iter_child_nodes(node):
+            visit(child, active)
+
+    for path in paths:
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, SyntaxError, UnicodeError):
+            # An incomplete AST is evidence for the conservative file-level
+            # classification; pytest will report the syntax/collection error.
+            return _test_hints(root, selector)
+        module_markers: set[str] = set()
+        for statement in tree.body:
+            if isinstance(statement, (ast.Assign, ast.AnnAssign)):
+                targets = (
+                    statement.targets
+                    if isinstance(statement, ast.Assign)
+                    else [statement.target]
+                )
+                if any(
+                    isinstance(target, ast.Name) and target.id == "pytestmark"
+                    for target in targets
+                ):
+                    module_markers.update(_assignment_marker_names(statement.value))
+        visit(tree, module_markers)
+
+    if not saw_slow:
+        return _test_hints(root, selector)
+    return resources or {"fast"}
 
 
 def _lane_selectors(
@@ -785,6 +918,30 @@ def _lane_selectors(
             if lane in hints:
                 lanes[lane].add(selector)
     return {lane: sorted(values) for lane, values in lanes.items() if values}
+
+
+def _slow_lane_selectors(root: Path, selectors: Sequence[str]) -> dict[str, list[str]]:
+    """Assign explicitly impacted slow selectors to isolated resource lanes.
+
+    Normal PR lanes exclude ``slow``.  A changed slow test therefore needs a
+    second, narrow command so the test is still exercised without promoting an
+    otherwise local change to the repository-wide slow suite.
+    """
+    lanes: dict[str, set[str]] = defaultdict(set)
+    for selector in selectors:
+        if _patterns_match(selector, ("tests/docs/**", "tests/docs")):
+            lanes["slow-docs"].add(selector)
+            continue
+        hints = _slow_resource_hints(root, selector)
+        if "fast" in hints:
+            lanes["slow-fast"].add(selector)
+        if "sim" in hints:
+            lanes["slow-sim"].add(selector)
+        if "distributed" in hints:
+            lanes["slow-distributed"].add(selector)
+        if "gpu" in hints:
+            lanes["slow-gpu"].add(selector)
+    return {lane: sorted(values) for lane, values in sorted(lanes.items()) if values}
 
 
 def _install_requirements(
@@ -820,6 +977,7 @@ def _full_plan(
     risk: str = "high",
     topics: Sequence[str] = (),
     graph_warnings: Sequence[str] = (),
+    slow_selectors: Sequence[str] = (),
 ) -> TestPlan:
     return TestPlan(
         mode=mode,
@@ -829,6 +987,7 @@ def _full_plan(
         changed=[change.__dict__ for change in changed],
         selectors=["tests"],
         lanes=_lane_selectors(root, ["tests"], None, mode),
+        slow_lanes=_slow_lane_selectors(root, slow_selectors) if mode != "full" else {},
         reasons={"*": [reason]},
         resource_hints=["sim", "gpu"],
         install={"gensim": True, "curobo": True},
@@ -895,43 +1054,48 @@ def build_plan(
     map_data = map_data or _load_map(repository_root / DEFAULT_MAP)
     direct_topic_ids = _map_topics(map_data, changed)
     topic_ids = list(direct_topic_ids)
-    slow_test_changed = any(
-        _selector_has_slow_marker(repository_root, path)
-        for change in changed
-        for path in change.paths
-        if _is_test_path(path)
+    slow_selectors = sorted(
+        {
+            _normalize_path(path)
+            for change in changed
+            for path in change.paths
+            if _is_test_path(path) and _selector_has_slow_marker(repository_root, path)
+        }
     )
 
     for change in changed:
         if any(_is_global_path(path, manifest) for path in change.paths):
             return _full_plan(
                 repository_root,
-                mode="full" if slow_test_changed else "full-pr",
+                mode="full-pr",
                 base_sha=base_sha,
                 head_sha=head_sha,
                 changed=changed,
                 reason=f"global-risk path: {change.path}",
                 topics=topic_ids,
+                slow_selectors=slow_selectors,
             )
         if change.status in {"D"} and not _is_test_path(change.path):
             return _full_plan(
                 repository_root,
-                mode="full" if slow_test_changed else "full-pr",
+                mode="full-pr",
                 base_sha=base_sha,
                 head_sha=head_sha,
                 changed=changed,
                 reason=f"deleted source path: {change.path}",
                 topics=topic_ids,
+                slow_selectors=slow_selectors,
             )
         if change.status in {"D"} and _is_test_path(change.path):
             return _full_plan(
                 repository_root,
-                mode="full" if slow_test_changed else "full-pr",
+                mode="full-pr",
                 base_sha=base_sha,
                 head_sha=head_sha,
                 changed=changed,
                 reason=f"deleted test path: {change.path}",
                 topics=topic_ids,
+                slow_selectors=slow_selectors,
             )
 
     docs_changed = any(
@@ -949,17 +1113,6 @@ def build_plan(
         for change in changed
         for path in change.paths
     )
-    if slow_test_changed:
-        return _full_plan(
-            repository_root,
-            mode="full",
-            base_sha=base_sha,
-            head_sha=head_sha,
-            changed=changed,
-            reason="changed slow test requires a full run",
-            risk="high",
-            topics=topic_ids,
-        )
     if docs_changed and not source_changed and not test_changed:
         docs_selectors = ["tests/docs"]
         return TestPlan(
@@ -970,6 +1123,7 @@ def build_plan(
             changed=[change.__dict__ for change in changed],
             selectors=docs_selectors,
             lanes={"docs": docs_selectors},
+            slow_lanes=_slow_lane_selectors(repository_root, slow_selectors),
             reasons={"tests/docs": ["documentation-only change"]},
             resource_hints=[],
             install={"gensim": False, "curobo": False},
@@ -1030,6 +1184,7 @@ def build_plan(
                 changed=changed,
                 reason=f"rule:{rule_id}",
                 topics=topic_ids,
+                slow_selectors=slow_selectors,
             )
         rule_has_tests = False
         for selector in (
@@ -1054,6 +1209,7 @@ def build_plan(
                 changed=changed,
                 reason=f"rule:{rule_id} has no runnable test selector",
                 topics=topic_ids,
+                slow_selectors=slow_selectors,
             )
 
     fallback_paths = source_paths - rule_covered_paths
@@ -1069,6 +1225,7 @@ def build_plan(
                 changed=changed,
                 reason=f"source path has no impact rule or topic: {path}",
                 topics=topic_ids,
+                slow_selectors=slow_selectors,
             )
         path_has_mapping = False
         for topic_id in path_topics:
@@ -1093,6 +1250,7 @@ def build_plan(
                 changed=changed,
                 reason=f"source topic has no runnable test mapping: {path}",
                 topics=topic_ids,
+                slow_selectors=slow_selectors,
             )
         fallback_topic_ids.extend(path_topics)
     fallback_topic_ids = list(dict.fromkeys(fallback_topic_ids))
@@ -1160,6 +1318,7 @@ def build_plan(
                 reason="reverse-import reaches shared test fixture",
                 topics=topic_ids,
                 graph_warnings=graph_warnings,
+                slow_selectors=slow_selectors,
             )
         for selector in sorted(impacted_paths):
             _add_selector(
@@ -1176,6 +1335,7 @@ def build_plan(
             reason="impact analysis produced no test selector",
             topics=topic_ids,
             graph_warnings=graph_warnings,
+            slow_selectors=slow_selectors,
         )
 
     if graph_warnings and source_changed:
@@ -1214,6 +1374,11 @@ def build_plan(
         changed=[change.__dict__ for change in changed],
         selectors=sorted(selectors),
         lanes=lanes,
+        slow_lanes=(
+            _slow_lane_selectors(repository_root, slow_selectors)
+            if mode != "full"
+            else {}
+        ),
         reasons={key: sorted(value) for key, value in sorted(reasons.items())},
         resource_hints=sorted(resource_hints),
         install=install,

@@ -166,12 +166,19 @@ jobs:
           plan = json.loads(Path("test-plan.json").read_text(encoding="utf-8"))
           lanes = plan.get("lanes", {})
           mode = str(plan.get("mode", "full-pr"))
+          slow_lanes = plan.get("slow_lanes", {})
+          if not isinstance(slow_lanes, dict):
+              slow_lanes = {}
+          all_lanes = {**lanes, **slow_lanes}
           hardware = mode in {"full", "full-pr"} or any(
-              lane in lanes for lane in ("sim", "distributed", "gpu")
+              lane.removeprefix("slow-") in {"sim", "distributed", "gpu"}
+              for lane in all_lanes
           )
           print(f"mode={mode}")
           print(f"needs_tests={str(mode != 'docs-only').lower()}")
-          print(f"needs_docs={str('docs' in lanes).lower()}")
+          print(
+              f"needs_docs={str(any(lane.endswith('docs') for lane in all_lanes)).lower()}"
+          )
           print(f"needs_hardware={str(hardware).lower()}")
           install = plan.get("install", {})
           print(f"needs_gensim={str(bool(install.get('gensim'))).lower()}")
@@ -192,6 +199,10 @@ jobs:
 
           plan = json.loads(Path("test-plan.json").read_text(encoding="utf-8"))
           lanes = plan.get("lanes", {})
+          slow_lanes = plan.get("slow_lanes", {})
+          if not isinstance(slow_lanes, dict):
+              slow_lanes = {}
+          all_lanes = {**lanes, **slow_lanes}
           print("## Test impact plan")
           print()
           print(f"- Mode: `{plan.get('mode')}`")
@@ -199,14 +210,15 @@ jobs:
           print(f"- Changed paths: {len(plan.get('changed', []))}")
           print(f"- Selectors: {len(plan.get('selectors', []))}")
           hardware = plan.get("mode") in {"full", "full-pr"} or any(
-              lane in lanes for lane in ("sim", "distributed", "gpu")
+              lane.removeprefix("slow-") in {"sim", "distributed", "gpu"}
+              for lane in all_lanes
           )
           print(f"- Hardware lanes: `{str(hardware).lower()}`")
           print(f"- Fallback: `{plan.get('fallback_reason') or 'none'}`")
           print()
           print("| Lane | Selectors |")
           print("| --- | ---: |")
-          for lane, selectors in lanes.items():
+          for lane, selectors in all_lanes.items():
               print(f"| {lane} | {len(selectors)} |")
           PY
 

@@ -141,10 +141,14 @@ Coverage.py 的 `contexts_by_lineno()` 可读取每行对应的上下文。
 - `full-pr`：全部非 slow 测试；slow 用例由定时或手动 `full` 运行覆盖。
 - `full`：包含 slow 的全量测试，供定时、发布或人工强制执行。
 
-修改本身带有 `slow` 标记的测试文件会直接请求 `full`，确保变更的慢测试不会因
-partial lane 的 `not slow` 过滤而静默跳过。源码影响到的慢测试仍由 nightly/full
-覆盖；后续引入 node id 级覆盖率关系后，再将这类用例拆成资源隔离的 impacted-slow
-lane。
+修改本身带有 `slow` 标记的测试文件不会静默跳过：计划会把它加入
+`slow-docs`、`slow-fast`、`slow-sim`、`slow-gpu` 或 `slow-distributed` 的窄 lane，并保留
+普通 lane 的 `not slow` 过滤。这样只运行受影响文件中的 slow 节点；完整 slow
+矩阵仍由 nightly 或手动 `full` 覆盖。一个文件可能同时含有 CPU 和 GPU slow
+节点，因此计划允许同一 selector 出现在多个 slow lane，由 marker 负责最终分流。
+资源判定会沿 AST 继承模块、类和参数化 decorator 的 marker；文件里只有非 slow
+GPU 用例时不会凭文件名额外创建 `slow-gpu` 命令。AST 无法解析时保守回退到文件级
+hint，并让 pytest 的收集错误使 lane 失败。
 
 每个源码修改必须命中测试规则、依赖证据或 full 兜底，并在计划中解释。
 选择器、规则或 workflow 自身的修改强制扩大验证范围，防止修改选择策略后静默
@@ -163,10 +167,14 @@ lane。
 | sim | `not slow and requires_sim and not gpu`，一个进程 |
 | distributed GPU | 独立进程树，`--run-gpu`，仅计划选中的 distributed 测试 |
 | GPU | `not slow and gpu`，`--run-gpu`，一个进程，排除 distributed 组 |
-| impacted slow / full | 当前由 changed-slow 的 `full` 回退或完整计划运行；后续再拆分资源 lane |
+| impacted slow | 只运行计划中列出的 slow selector，按资源拆分为 `slow-*` lane |
+| full | 所有资源组取消 `not slow` 过滤，运行完整 slow 矩阵 |
 
 marker 表达式显式包含 `not slow`；当前 workflow 显式传入 `-m`，不能仅依赖
 `pyproject.toml` 的默认 addopts 来控制 slow。
+
+每个 lane 输出总耗时和 pytest 最慢的 20 个节点，便于区分依赖安装、测试收集、
+场景初始化和测试执行带来的开销。
 同一测试同时有 `requires_sim` 和 `gpu` 时进入 GPU 组，各组 node 集合保持互斥。
 
 runner 把选中的路径或 node id 作为 subprocess 参数列表传给 pytest，避免 shell
@@ -230,7 +238,9 @@ mode = "full-pr"
 ```
 
 生成的 `test-plan.json` 至少包含 diff 范围、模式、测试 selector、原因和兜底原因；
-规则中的 glob 会在计划阶段展开成 pytest 可直接接收的路径。
+规则中的 glob 会在计划阶段展开成 pytest 可直接接收的路径。`slow_lanes` 只列出
+受影响的慢测试 selector；普通 `lanes` 继续排除 slow，runner 会为对应资源补充
+`slow-*` 命令。
 第一版不把测试耗时作为选择条件；后续可从 JUnit 数据加入仅用于报告和排程的估计，
 不能用它删除必跑测试。
 
@@ -246,6 +256,9 @@ mode = "full-pr"
     "tests/toolkits/test_parallel_jaw_grasp_pose_generator.py",
     "tests/toolkits/test_pg_grasp.py"
   ],
+  "slow_lanes": {
+    "slow-fast": ["tests/utils/test_nms.py"]
+  },
   "resource_hints": ["gpu"],
   "reasons": {
     "tests/utils/test_nms.py": ["rule:pose-nms", "direct-import"],
@@ -318,3 +331,32 @@ partial 计划仍保留 fast、sim、distributed 和 GPU 的资源隔离，无�
 
 这套机制主要减少 PR 的测试执行；main 的 docs build 仍需分别优化。先用实际
 shadow 回放数据校准每类修改的收益，避免用测试数量代替总耗时。
+
+## 实际 CI 失败与耗时复核（2026-09-14）
+
+[运行 34802512532](https://github.com/DexForce/EmbodiChain/actions/runs/34802512532)
+的 test job 用时约 108 分钟，主要开销如下：
+
+| 阶段 | 耗时 | 结果 |
+| --- | ---: | --- |
+| 安装包、gensim 和 cuRobo | 约 23 分钟 | 完成 |
+| fast | 13 分 35 秒 | 4505 passed，1 skipped |
+| sim | 45 分 19 秒 | 354 passed，4 skipped |
+| distributed | 24 秒 | 1 passed |
+| GPU | 23 分 56 秒 | 171 passed，1 failed，3 skipped |
+
+在 test job 开始前还等待 runner 约 108 分钟；排队时间与测试执行时间应分别统计。
+这次计划为 `full`：全局 CI 文件触发扩大验证，而修改的 NMS 文件带有 slow
+marker 又把 `full-pr` 升级成了含全部 slow 测试的 `full`。修正后这类 PR 保留
+`full-pr`，额外只运行修改文件的 `slow-*` lane。
+
+唯一失败节点是 `test_default_scoops_and_retains_ice[2]`，最终保留的冰块数为零。
+pytest fixture 提前初始化 DexSim 时没有指定 CPU worker 数，原生使用自动 worker
+配置（该配置在 CI 进程中解析为高并发）；`SimulationManagerCfg` 默认是 1，后
+创建的 world 配置不能重新配置进程级 engine。
+统一 fixture 为 1 worker 后，本地同一 scoop 文件的 8 个测试通过，包含三个
+slow 随机种子；非 slow 模拟器组 327 个测试也全部通过，耗时 24 分 26 秒。
+非 slow GPU 组另外 162 个测试通过、3 个跳过，耗时 16 分 23 秒。
+上一轮远端同组耗时 45 分 19 秒，机器和依赖缓存不同，不能作为严格基准，但
+足以说明自动 worker 设置是本次模拟器耗时的重要因素。完整远端耗时改善仍需以
+新一轮 CI 为准。
