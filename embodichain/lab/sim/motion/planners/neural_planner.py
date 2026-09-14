@@ -15,8 +15,11 @@
 # ----------------------------------------------------------------------------
 from __future__ import annotations
 
-from dataclasses import MISSING
+from dataclasses import MISSING, dataclass
+import hashlib
+import json
 from pathlib import Path
+from typing import Mapping
 import numpy as np
 import torch
 
@@ -36,6 +39,141 @@ __all__ = [
     "NeuralPlannerCfg",
     "NeuralPlanOptions",
 ]
+
+
+_WAYPOINT_OBSERVATION_LAYOUT = "unified_constraint_tokens"
+_WAYPOINT_OBSERVATION_DTYPE = "float32"
+_WAYPOINT_OBSERVATION_QUATERNION_ORDER = "xyzw"
+
+_MASK_SEMANTICS = {
+    "active_onehot": "one_at_clamped_active_waypoint",
+    "valid_mask": "one_for_episode_waypoints_zero_for_padding",
+    "pos_mask": "one_when_position_is_constrained",
+    "rot_mask": "one_when_orientation_is_constrained",
+    "joint_mask": "one_when_joint_position_is_constrained",
+}
+_MASKED_VALUE_SEMANTICS = {
+    "position": "zero",
+    "quaternion": "identity_xyzw",
+    "joint": "zero",
+    "relative_quaternion": "target_times_inverse_eef_xyzw",
+}
+
+
+@dataclass(frozen=True)
+class _WaypointObservationLayout:
+    """Concrete NMG observation layout derived from planner configuration."""
+
+    num_waypoints: int
+    num_controlled_joints: int
+    use_relative_obs: bool
+    canonicalize_quat_obs: bool = True
+
+    def __post_init__(self) -> None:
+        if self.num_waypoints < 1 or self.num_controlled_joints < 1:
+            raise ValueError("num_waypoints and num_controlled_joints must be positive")
+
+    @property
+    def block_widths(self) -> tuple[tuple[str, int], ...]:
+        """Return ordered block names and widths for this policy capacity."""
+        n = int(self.num_waypoints)
+        j = int(self.num_controlled_joints)
+        widths = [
+            ("joint", j),
+            ("eef", 7),
+            ("waypoint_pos", 3 * n),
+            ("waypoint_quat", 4 * n),
+            ("waypoint_joint", j * n),
+            ("active_onehot", n),
+            ("valid_mask", n),
+            ("pos_mask", n),
+            ("rot_mask", n),
+            ("joint_mask", n),
+            ("last_action", j),
+        ]
+        if self.use_relative_obs:
+            widths.extend(
+                [
+                    ("waypoint_rel_pos", 3 * n),
+                    ("waypoint_rel_quat", 4 * n),
+                    ("waypoint_joint_err", j * n),
+                ]
+            )
+        return tuple(widths)
+
+    @property
+    def slices(self) -> dict[str, slice]:
+        """Return a named slice for every flat observation block."""
+        result = {}
+        cursor = 0
+        for name, width in self.block_widths:
+            result[name] = slice(cursor, cursor + width)
+            cursor += width
+        return result
+
+    @property
+    def dim(self) -> int:
+        """Return the flat observation width."""
+        return sum(width for _, width in self.block_widths)
+
+    @property
+    def fingerprint(self) -> str:
+        """Return the NMG-compatible fingerprint for this concrete layout."""
+        payload = {
+            "blocks": self.block_widths,
+            "canonicalize_quat_obs": bool(self.canonicalize_quat_obs),
+            "dtype": _WAYPOINT_OBSERVATION_DTYPE,
+            "layout": _WAYPOINT_OBSERVATION_LAYOUT,
+            "mask_semantics": _MASK_SEMANTICS,
+            "masked_value_semantics": _MASKED_VALUE_SEMANTICS,
+            "num_controlled_joints": int(self.num_controlled_joints),
+            "num_waypoints": int(self.num_waypoints),
+            "quaternion_order": _WAYPOINT_OBSERVATION_QUATERNION_ORDER,
+            "use_relative_obs": bool(self.use_relative_obs),
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        return hashlib.sha256(encoded).hexdigest()
+
+    @property
+    def onnx_metadata(self) -> dict[str, str]:
+        """Return metadata expected from an NMG ONNX export."""
+        return {
+            "nmg.observation_layout": _WAYPOINT_OBSERVATION_LAYOUT,
+            "nmg.observation_fingerprint": self.fingerprint,
+            "nmg.num_waypoints": str(int(self.num_waypoints)),
+            "nmg.num_controlled_joints": str(int(self.num_controlled_joints)),
+            "nmg.use_relative_obs": str(bool(self.use_relative_obs)).lower(),
+            "nmg.canonicalize_quat_obs": str(bool(self.canonicalize_quat_obs)).lower(),
+            "nmg.quaternion_order": _WAYPOINT_OBSERVATION_QUATERNION_ORDER,
+        }
+
+    def concatenate(self, blocks: Mapping[str, torch.Tensor]) -> torch.Tensor:
+        """Validate and concatenate named observation blocks in contract order."""
+        expected_names = tuple(name for name, _ in self.block_widths)
+        if set(blocks) != set(expected_names):
+            missing = sorted(set(expected_names) - set(blocks))
+            extra = sorted(set(blocks) - set(expected_names))
+            raise ValueError(
+                f"Observation blocks do not match layout; missing={missing}, extra={extra}."
+            )
+        values = []
+        batch_size = None
+        for name, width in self.block_widths:
+            value = blocks[name]
+            if value.ndim != 2 or value.shape[-1] != width:
+                raise ValueError(
+                    f"Observation block {name!r} must have shape [batch, {width}], "
+                    f"got {tuple(value.shape)}."
+                )
+            if batch_size is None:
+                batch_size = value.shape[0]
+            elif value.shape[0] != batch_size:
+                raise ValueError(
+                    f"Observation block {name!r} has batch size {value.shape[0]}, "
+                    f"expected {batch_size}."
+                )
+            values.append(value)
+        return torch.cat(values, dim=-1)
 
 
 class _OnnxPolicy:
@@ -75,6 +213,9 @@ class _OnnxPolicy:
                 f"Expected ONNX output shape [batch, 7], got {output_shape}."
             )
         self.obs_dim = int(input_shape[1])
+        self.observation_metadata = dict(
+            self.session.get_modelmeta().custom_metadata_map
+        )
         self.fixed_batch_size = (
             int(input_shape[0]) if isinstance(input_shape[0], int) else None
         )
@@ -92,11 +233,7 @@ class _OnnxPolicy:
 
 def _waypoint_obs_dim(num_waypoints: int, use_relative_obs: bool) -> int:
     """Return the unified NMG constraint-observation width."""
-    n = int(num_waypoints)
-    dim = 7 + 7 + n * (3 + 4 + 7 + 5) + 7 + n
-    if use_relative_obs:
-        dim += 7 + n * (3 + 4 + 7)
-    return dim
+    return _WaypointObservationLayout(int(num_waypoints), 7, bool(use_relative_obs)).dim
 
 
 def _quat_inverse_xyzw(q: torch.Tensor) -> torch.Tensor:
@@ -143,7 +280,7 @@ class NeuralPlannerCfg(BasePlannerCfg):
     num_arm_joints: int = 7
     """Number of arm joints controlled by the APG policy."""
 
-    num_waypoints: int = 8
+    num_waypoints: int = 5
     """Number of constraint slots encoded by the ONNX policy."""
 
     use_relative_obs: bool = True
@@ -265,20 +402,40 @@ class NeuralPlanner(BasePlanner):
         self._intermediate_orientation = bool(self.cfg.intermediate_orientation)
         self._policy = _OnnxPolicy(model_path, self.cfg.onnx_providers)
         self._obs_dim = self._policy.obs_dim
+        self._observation_layout = _WaypointObservationLayout(
+            self._num_waypoints,
+            self._action_dim,
+            self._use_relative_obs,
+            self._canonicalize_quat_obs,
+        )
         self._policy_frame_from_world = self._as_transform(
             self.cfg.policy_frame_from_world, "policy_frame_from_world"
         )
         self._runtime_tcp_from_policy_tcp = self._as_transform(
             self.cfg.runtime_tcp_from_policy_tcp, "runtime_tcp_from_policy_tcp"
         )
-        expected_obs_dim = _waypoint_obs_dim(
-            self._num_waypoints, self._use_relative_obs
-        )
+        expected_obs_dim = self._observation_layout.dim
         if self._obs_dim != expected_obs_dim:
             raise ValueError(
                 f"ONNX input has obs dim {self._obs_dim}, but the configured "
                 f"unified constraint layout requires {expected_obs_dim}."
             )
+        self._validate_observation_metadata(self._policy.observation_metadata)
+
+    def _validate_observation_metadata(self, metadata: Mapping[str, str]) -> None:
+        """Require an exact observation contract from the NMG export."""
+        expected = self._observation_layout.onnx_metadata
+        mismatches = {
+            key: (metadata.get(key), value)
+            for key, value in expected.items()
+            if metadata.get(key) != value
+        }
+        if mismatches:
+            details = ", ".join(
+                f"{key}={actual!r} (expected {wanted!r})"
+                for key, (actual, wanted) in mismatches.items()
+            )
+            raise ValueError(f"ONNX observation layout metadata mismatch: {details}.")
 
     def _as_transform(self, value: list[list[float]] | None, name: str) -> torch.Tensor:
         """Convert an optional homogeneous-transform config to a device tensor."""
@@ -584,48 +741,23 @@ class NeuralPlanner(BasePlanner):
             waypoint_quat,
             identity.view(1, 1, 4),
         )
-        obs_parts = [
-            joint_pos,
-            ee_pose,
-            pos_block.reshape(b, self._num_waypoints * 3),
-            quat_block.reshape(b, self._num_waypoints * 4),
-            joint_block.reshape(b, self._num_waypoints * self._action_dim),
-            active_onehot,
-            valid_mask,
-            pos_mask,
-            rot_mask,
-            joint_mask,
-            last_action,
-        ]
+        obs_blocks = {
+            "joint": joint_pos,
+            "eef": ee_pose,
+            "waypoint_pos": pos_block.reshape(b, self._num_waypoints * 3),
+            "waypoint_quat": quat_block.reshape(b, self._num_waypoints * 4),
+            "waypoint_joint": joint_block.reshape(
+                b, self._num_waypoints * self._action_dim
+            ),
+            "active_onehot": active_onehot,
+            "valid_mask": valid_mask,
+            "pos_mask": pos_mask,
+            "rot_mask": rot_mask,
+            "joint_mask": joint_mask,
+            "last_action": last_action,
+        }
         if self._use_relative_obs:
-            idx = torch.arange(b, device=self.device)
-            active_pos = pos_block[idx, active_idx_clamped]
-            active_quat = quat_block[idx, active_idx_clamped]
-            active_joint = joint_block[idx, active_idx_clamped]
             inv_eef = _quat_inverse_xyzw(ee_pose[:, 3:7])
-            active_rel_quat = _quat_mul_xyzw(active_quat, inv_eef)
-            if getattr(self, "_canonicalize_quat_obs", False):
-                active_rel_quat = _canonicalize_quat_xyzw(active_rel_quat)
-            active_pos_mask = pos_mask[idx, active_idx_clamped].unsqueeze(-1)
-            active_rot_mask = rot_mask[idx, active_idx_clamped].unsqueeze(-1)
-            active_rel_quat = torch.where(
-                active_rot_mask > 0.5,
-                active_rel_quat,
-                identity.view(1, 4),
-            )
-            active_cart_rel = torch.cat(
-                [
-                    (active_pos - ee_pose[:, :3]) * active_pos_mask,
-                    active_rel_quat,
-                ],
-                dim=-1,
-            )
-            active_rel = torch.where(
-                (joint_mask[idx, active_idx_clamped] > 0.5).unsqueeze(-1),
-                active_joint - joint_pos,
-                active_cart_rel,
-            )
-            obs_parts.append(active_rel)
             rel_pos = (pos_block - ee_pose[:, None, :3]) * pos_mask.unsqueeze(-1)
             rel_quat = _quat_mul_xyzw(
                 quat_block,
@@ -639,31 +771,26 @@ class NeuralPlanner(BasePlanner):
                 identity.view(1, 1, 4),
             )
             joint_err = (joint_block - joint_pos[:, None]) * joint_mask.unsqueeze(-1)
-            obs_parts.extend(
-                [
-                    rel_pos.reshape(b, self._num_waypoints * 3),
-                    rel_quat.reshape(b, self._num_waypoints * 4),
-                    joint_err.reshape(b, self._num_waypoints * self._action_dim),
-                ]
+            obs_blocks.update(
+                {
+                    "waypoint_rel_pos": rel_pos.reshape(b, self._num_waypoints * 3),
+                    "waypoint_rel_quat": rel_quat.reshape(b, self._num_waypoints * 4),
+                    "waypoint_joint_err": joint_err.reshape(
+                        b, self._num_waypoints * self._action_dim
+                    ),
+                }
             )
-        waypoint_type = torch.zeros(
-            b,
-            self._num_waypoints,
-            dtype=joint_pos.dtype,
-            device=self.device,
+        layout = getattr(
+            self,
+            "_observation_layout",
+            _WaypointObservationLayout(
+                self._num_waypoints,
+                self._action_dim,
+                self._use_relative_obs,
+                getattr(self, "_canonicalize_quat_obs", False),
+            ),
         )
-        waypoint_type = torch.where(
-            (valid_mask > 0.5) & (rot_mask < 0.5),
-            torch.ones_like(waypoint_type),
-            waypoint_type,
-        )
-        waypoint_type = torch.where(
-            joint_mask > 0.5,
-            torch.full_like(waypoint_type, 2.0),
-            waypoint_type,
-        )
-        obs_parts.append(waypoint_type)
-        obs = torch.cat(obs_parts, dim=-1)
+        obs = layout.concatenate(obs_blocks)
         if obs.shape[-1] != self._obs_dim:
             raise ValueError(
                 f"Built obs dim {obs.shape[-1]}, expected {self._obs_dim}."

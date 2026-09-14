@@ -84,7 +84,8 @@ class NewtonStepFunc(torch.autograd.Function):
     Forward records the action kernel, named kinematics callback, and output
     kernels inside one Warp tape. It does not create contacts, call a Newton
     solver, or advance simulation time. Backward seeds the tracked Warp output
-    arrays from PyTorch gradients and returns the resulting action gradient.
+    arrays from PyTorch gradients and returns the resulting action and optional
+    functional-state gradients.
 
     ``sim_state`` must contain:
 
@@ -101,9 +102,19 @@ class NewtonStepFunc(torch.autograd.Function):
     """
 
     @classmethod
-    def apply(cls, action_torch: torch.Tensor, sim_state: dict[str, Any]) -> Any:
-        """Capture ambient grad mode before PyTorch enters ``forward``."""
-        return super().apply(action_torch, sim_state, torch.is_grad_enabled())
+    def apply(
+        cls,
+        action_torch: torch.Tensor,
+        sim_state: dict[str, Any],
+        *state_tensors: torch.Tensor,
+    ) -> Any:
+        """Capture grad mode and bridge optional recurrent functional state."""
+        return super().apply(
+            action_torch,
+            sim_state,
+            torch.is_grad_enabled(),
+            *state_tensors,
+        )
 
     @staticmethod
     def forward(
@@ -111,6 +122,7 @@ class NewtonStepFunc(torch.autograd.Function):
         action_torch: torch.Tensor,
         sim_state: dict[str, Any],
         outer_grad_enabled: bool,
+        *state_tensors: torch.Tensor,
     ) -> tuple[torch.Tensor, ...]:
         """Record one kinematics step and materialize its torch outputs."""
         _validate_manager(sim_state["manager"])
@@ -121,7 +133,14 @@ class NewtonStepFunc(torch.autograd.Function):
         if not callable(step_fn):
             raise TypeError("Differentiable kinematics require a callable step_fn.")
 
+        for index, tensor in enumerate(state_tensors):
+            if not isinstance(tensor, torch.Tensor):
+                raise TypeError(
+                    "NewtonStepFunc functional state inputs must be torch.Tensor, "
+                    f"got {type(tensor).__name__} at index {index}."
+                )
         ctx.saved_action_shape = action_torch.shape
+        ctx.saved_state_shapes = tuple(tensor.shape for tensor in state_tensors)
         action_flat = action_torch.detach().clone().reshape(-1).contiguous()
         needs_action_grad = bool(outer_grad_enabled and ctx.needs_input_grad[0])
         action_wp = wp.from_torch(
@@ -129,12 +148,25 @@ class NewtonStepFunc(torch.autograd.Function):
             dtype=wp.float32,
             requires_grad=needs_action_grad,
         )
+        state_wps = []
+        state_needs_grad = []
+        for index, tensor in enumerate(state_tensors):
+            needs_grad = bool(outer_grad_enabled and ctx.needs_input_grad[index + 3])
+            state_wps.append(
+                wp.from_torch(
+                    tensor.detach().clone().reshape(-1).contiguous(),
+                    dtype=wp.float32,
+                    requires_grad=needs_grad,
+                )
+            )
+            state_needs_grad.append(needs_grad)
+        retains_tape_for_backward = needs_action_grad or any(state_needs_grad)
 
         tape = None
         try:
             tape = wp.Tape()
             with tape:
-                action_kernel(action_wp, tape, *kernel_args)
+                action_kernel(action_wp, tape, *kernel_args, *state_wps)
                 final_state = step_fn()
                 outputs = obs_reward_fn(final_state)
                 outputs_order = tuple(outputs["_order"])
@@ -144,12 +176,14 @@ class NewtonStepFunc(torch.autograd.Function):
             _abort_forward(tape)
             raise
 
-        if not needs_action_grad:
+        if not retains_tape_for_backward:
             _reset_tape(tape)
             return output_values
 
         ctx.tape = tape
         ctx.action_wp = action_wp
+        ctx.state_wps = tuple(state_wps)
+        ctx.state_needs_grad = tuple(state_needs_grad)
         ctx.outputs_order = outputs_order
         ctx.outputs_grad_track = outputs_grad_track
         ctx._bridge_released = False
@@ -159,7 +193,7 @@ class NewtonStepFunc(torch.autograd.Function):
     def backward(
         ctx: Any,
         *grad_outputs: torch.Tensor | None,
-    ) -> tuple[torch.Tensor | None, None, None]:
+    ) -> tuple[torch.Tensor | None, ...]:
         """Run Warp reverse mode and return the bridged action gradient."""
         if getattr(ctx, "_bridge_released", False):
             raise RuntimeError(
@@ -168,6 +202,7 @@ class NewtonStepFunc(torch.autograd.Function):
             )
 
         action_grad = None
+        state_grads: list[torch.Tensor | None] = []
         try:
             for name, grad_t in zip(ctx.outputs_order, grad_outputs):
                 wp_arr = ctx.outputs_grad_track.get(name)
@@ -179,19 +214,33 @@ class NewtonStepFunc(torch.autograd.Function):
                     wp_arr.grad,
                     wp.from_torch(
                         grad_t.detach().clone().contiguous(),
-                        dtype=wp.float32,
+                        dtype=wp_arr.dtype,
                     ),
                 )
             ctx.tape.backward()
             action_wp_grad = getattr(ctx.action_wp, "grad", None)
             if action_wp_grad is not None:
                 action_grad = wp.to_torch(action_wp_grad).clone()
+            for state_wp, needs_grad in zip(
+                ctx.state_wps,
+                ctx.state_needs_grad,
+            ):
+                state_wp_grad = getattr(state_wp, "grad", None)
+                if needs_grad and state_wp_grad is not None:
+                    state_grads.append(wp.to_torch(state_wp_grad).clone())
+                else:
+                    state_grads.append(None)
         finally:
             try:
                 _reset_tape(ctx.tape)
             finally:
                 ctx._bridge_released = True
 
-        if action_grad is None:
-            return None, None, None
-        return action_grad.reshape(ctx.saved_action_shape), None, None
+        shaped_action_grad = (
+            None if action_grad is None else action_grad.reshape(ctx.saved_action_shape)
+        )
+        shaped_state_grads = tuple(
+            None if grad is None else grad.reshape(shape)
+            for grad, shape in zip(state_grads, ctx.saved_state_shapes)
+        )
+        return shaped_action_grad, None, None, *shaped_state_grads
