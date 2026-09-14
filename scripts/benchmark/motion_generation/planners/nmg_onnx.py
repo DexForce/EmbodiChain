@@ -84,7 +84,10 @@ class NmgOnnxAdapter(PlannerAdapter):
         return True, None
 
     def supports_case(self, case: BenchmarkCase) -> tuple[bool, str | None]:
-        """Reject sequences beyond the exported policy capacity explicitly."""
+        """Reject unsupported modalities or sequences beyond policy capacity."""
+        supported, reason = super().supports_case(case)
+        if not supported:
+            return supported, reason
         capacity = int(self.spec.config.get("num_waypoints", 5))
         if case.num_waypoints > capacity:
             return (
@@ -135,20 +138,25 @@ class NmgOnnxAdapter(PlannerAdapter):
         """Plan all ordered constraints in one closed-loop rollout."""
         if self.motion_generator is None:
             raise RuntimeError("NMG adapter must be built before plan().")
-        if case.case_parameters.get("motion_validity") == "ordered_joint_waypoints":
+        motion_validity = case.case_parameters.get(
+            "motion_validity", "ordered_cartesian_waypoints"
+        )
+        if motion_validity == "ordered_joint_waypoints":
             targets = [
                 PlanState.from_qpos(
                     case.reference_qpos[:, index], move_type=MoveType.JOINT_MOVE
                 )
                 for index in range(case.num_waypoints)
             ]
-        else:
+        elif motion_validity == "ordered_cartesian_waypoints":
             targets = [
                 PlanState.from_xpos(
                     case.target_waypoints[:, index], move_type=MoveType.EEF_MOVE
                 )
                 for index in range(case.num_waypoints)
             ]
+        else:
+            raise ValueError(f"Unsupported motion_validity mode {motion_validity!r}.")
         return self.motion_generator.generate(
             targets,
             MotionGenOptions(

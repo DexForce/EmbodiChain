@@ -349,6 +349,15 @@ def test_kinematic_bridge_requires_a_named_step_callback() -> None:
         NewtonStepFunc.apply(torch.zeros(1), sim_state)
 
 
+def test_kinematic_bridge_rejects_non_tensor_functional_state() -> None:
+    """Functional-state validation fails before tensor metadata is accessed."""
+    with pytest.raises(
+        TypeError,
+        match="functional state inputs must be torch.Tensor, got str at index 0",
+    ):
+        NewtonStepFunc.apply(torch.zeros(1), _bridge_state(), "not-a-tensor")
+
+
 def test_tape_context_rejects_default_backend() -> None:
     """Expert tape composition remains Newton-only."""
     manager = SimpleNamespace(is_newton_backend=False)

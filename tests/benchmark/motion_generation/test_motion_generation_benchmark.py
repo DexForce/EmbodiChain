@@ -593,6 +593,39 @@ def test_nmg_joint_case_uses_joint_constraint_waypoints():
     assert torch.equal(targets[1].qpos, joint_targets[:, 1])
 
 
+def test_nmg_rejects_unknown_motion_validity():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+
+    adapter = NmgOnnxAdapter(
+        PlannerSpecCfg(
+            id="nmg",
+            adapter="nmg_onnx",
+            role="candidate",
+            config={"num_waypoints": 5},
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+    unknown_case = replace(
+        _case(),
+        case_parameters={"motion_validity": "unknown_waypoint_space"},
+    )
+
+    supported, reason = adapter.supports_case(unknown_case)
+
+    assert supported is False
+    assert reason == "unsupported motion_validity mode 'unknown_waypoint_space'"
+    adapter.motion_generator = Mock()
+    with pytest.raises(ValueError, match="Unsupported motion_validity mode"):
+        adapter.plan(unknown_case)
+
+
 def test_seed_override_applies_to_atomic_tracks():
     suite = load_suite("atomic_franka_pgi_curobo_randomized")
 
@@ -1160,6 +1193,26 @@ def test_nmg_precision_rejects_non_positive_values(override):
 
     with pytest.raises(ValueError, match="NMG"):
         _apply_overrides(suite, **override)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("num_waypoints", 0),
+        ("steps_per_waypoint", -1),
+        ("max_steps", 0),
+        ("max_steps", 1.5),
+        ("steps_per_waypoint", True),
+    ],
+)
+def test_nmg_rollout_budgets_must_be_positive_integers(field, value):
+    suite = load_suite("smoke")
+    nmg = next(spec for spec in suite.planners if spec.adapter == "nmg_onnx")
+    nmg.id = "renamed_nmg_candidate"
+    nmg.config[field] = value
+
+    with pytest.raises((TypeError, ValueError), match=rf"NMG {field}"):
+        suite.validate_benchmark()
 
 
 class _FrankaLimitRobot(_MetricRobot):
@@ -2101,6 +2154,27 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
         assert capable["overall_success_rate"] == pytest.approx(1.0)
         assert incapable["eligible"] is False
         assert any("missing required capabilities" in note for note in runner.notes)
+
+        joint_case = replace(
+            case,
+            case_id="joint-case",
+            case_parameters={"motion_validity": "ordered_joint_waypoints"},
+        )
+        runner._run_adapter(
+            writer,
+            sim,
+            robot,
+            specs[1],
+            [joint_case],
+            frozenset(),
+        )
+        joint_records = [
+            record for record in runner.records if record.case_id == joint_case.case_id
+        ]
+        assert any(
+            record.failure_code == "unsupported_capability" for record in joint_records
+        )
+        assert not any(record.phase is TrialPhase.CONSTRUCT for record in joint_records)
     finally:
         for name in names:
             unregister_planner_adapter(name)

@@ -133,6 +133,12 @@ class NewtonStepFunc(torch.autograd.Function):
         if not callable(step_fn):
             raise TypeError("Differentiable kinematics require a callable step_fn.")
 
+        for index, tensor in enumerate(state_tensors):
+            if not isinstance(tensor, torch.Tensor):
+                raise TypeError(
+                    "NewtonStepFunc functional state inputs must be torch.Tensor, "
+                    f"got {type(tensor).__name__} at index {index}."
+                )
         ctx.saved_action_shape = action_torch.shape
         ctx.saved_state_shapes = tuple(tensor.shape for tensor in state_tensors)
         action_flat = action_torch.detach().clone().reshape(-1).contiguous()
@@ -145,11 +151,6 @@ class NewtonStepFunc(torch.autograd.Function):
         state_wps = []
         state_needs_grad = []
         for index, tensor in enumerate(state_tensors):
-            if not isinstance(tensor, torch.Tensor):
-                raise TypeError(
-                    "NewtonStepFunc functional state inputs must be torch.Tensor, "
-                    f"got {type(tensor).__name__} at index {index}."
-                )
             needs_grad = bool(outer_grad_enabled and ctx.needs_input_grad[index + 3])
             state_wps.append(
                 wp.from_torch(

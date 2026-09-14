@@ -35,6 +35,26 @@ if TYPE_CHECKING:
 
 __all__ = ["PlannerAdapter", "PlannerContext"]
 
+_MOTION_VALIDITY_CAPABILITIES = {
+    "ordered_cartesian_waypoints": "eef_waypoint",
+    "ordered_joint_waypoints": "joint_waypoint",
+}
+
+
+def _case_motion_capability(
+    case: BenchmarkCase,
+) -> tuple[str | None, str | None]:
+    """Resolve the planner capability required by one benchmark case."""
+    validity = case.case_parameters.get(
+        "motion_validity", "ordered_cartesian_waypoints"
+    )
+    if not isinstance(validity, str):
+        return None, f"unsupported motion_validity mode {validity!r}"
+    capability = _MOTION_VALIDITY_CAPABILITIES.get(validity)
+    if capability is None:
+        return None, f"unsupported motion_validity mode {validity!r}"
+    return capability, None
+
 
 @dataclass(frozen=True)
 class PlannerContext:
@@ -83,7 +103,14 @@ class PlannerAdapter(ABC):
 
     def supports_case(self, case: BenchmarkCase) -> tuple[bool, str | None]:
         """Return whether one manifest case is representable without mutation."""
-        del case
+        capability, reason = _case_motion_capability(case)
+        if capability is None:
+            return False, reason
+        if capability not in self.capabilities:
+            return (
+                False,
+                f"case requires planner capability {capability!r}",
+            )
         return True, None
 
     @abstractmethod

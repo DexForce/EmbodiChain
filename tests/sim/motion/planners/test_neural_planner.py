@@ -36,6 +36,24 @@ from embodichain.lab.sim.sim_manager import SimulationManager
 NUM_ARM_JOINTS = 7
 NUM_WAYPOINTS = 5
 OBS_DIM = 186
+NMG_OBSERVATION_CAPACITY_WIDTHS = {1: 54, 3: 120, 5: 186}
+NMG_OBSERVATION_BLOCKS = (
+    "joint",
+    "eef",
+    "waypoint_pos",
+    "waypoint_quat",
+    "waypoint_joint",
+    "active_onehot",
+    "valid_mask",
+    "pos_mask",
+    "rot_mask",
+    "joint_mask",
+    "last_action",
+    "waypoint_rel_pos",
+    "waypoint_rel_quat",
+    "waypoint_joint_err",
+)
+_REAL_ONNX_POLICY = neural_planner_module._OnnxPolicy
 
 
 def _create_fake_onnx_model(tmp_path) -> str:
@@ -108,10 +126,67 @@ def test_neural_planner_is_registered():
     )
 
 
-def test_neural_planner_observation_width_matches_k5_nmg_export():
+@pytest.mark.parametrize(
+    ("capacity", "expected_width"),
+    NMG_OBSERVATION_CAPACITY_WIDTHS.items(),
+)
+def test_neural_planner_observation_width_matches_nmg_contract(
+    capacity: int,
+    expected_width: int,
+):
+    assert neural_planner_module._waypoint_obs_dim(capacity, True) == expected_width
+
+
+def test_neural_planner_default_observation_width_matches_k5_nmg_export():
     assert NeuralPlannerCfg().num_waypoints == NUM_WAYPOINTS
     assert neural_planner_module._waypoint_obs_dim(5, use_relative_obs=True) == 186
     assert neural_planner_module._waypoint_obs_dim(5, use_relative_obs=False) == 116
+
+
+def test_neural_onnx_policy_preserves_distinct_dynamic_batch_rows(tmp_path):
+    """The ONNX consumer keeps numerical parity for batch one and batch three."""
+    onnx = pytest.importorskip("onnx")
+    pytest.importorskip("onnxruntime")
+    weight = torch.zeros(OBS_DIM, NUM_ARM_JOINTS, dtype=torch.float32)
+    weight[:NUM_ARM_JOINTS] = torch.eye(NUM_ARM_JOINTS)
+    graph = onnx.helper.make_graph(
+        [onnx.helper.make_node("MatMul", ["obs", "weight"], ["action"])],
+        "nmg-dynamic-batch-contract",
+        [
+            onnx.helper.make_tensor_value_info(
+                "obs", onnx.TensorProto.FLOAT, ["batch", OBS_DIM]
+            )
+        ],
+        [
+            onnx.helper.make_tensor_value_info(
+                "action", onnx.TensorProto.FLOAT, ["batch", NUM_ARM_JOINTS]
+            )
+        ],
+        [onnx.numpy_helper.from_array(weight.numpy(), name="weight")],
+    )
+    model = onnx.helper.make_model(
+        graph,
+        opset_imports=[onnx.helper.make_opsetid("", 17)],
+    )
+    model.ir_version = 10
+    model_path = tmp_path / "dynamic_batch_contract.onnx"
+    onnx.save(model, model_path)
+    policy = _REAL_ONNX_POLICY(model_path)
+    observation = torch.zeros(3, OBS_DIM)
+    observation[:, :NUM_ARM_JOINTS] = torch.tensor(
+        [
+            [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+            [2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0],
+            [-1.0, -2.0, -3.0, -4.0, -5.0, -6.0, -7.0],
+        ]
+    )
+
+    batch_one = policy(observation[:1])
+    batch_three = policy(observation)
+
+    torch.testing.assert_close(batch_one, observation[:1, :NUM_ARM_JOINTS])
+    torch.testing.assert_close(batch_three, observation[:, :NUM_ARM_JOINTS])
+    torch.testing.assert_close(batch_three[:1], batch_one)
 
 
 def test_neural_planner_generate_with_fake_onnx_model(tmp_path, monkeypatch):
@@ -311,17 +386,24 @@ def test_neural_planner_builds_unified_k5_cartesian_observation(tmp_path, monkey
             control_part="main_arm",
         )
     )
-    joint = torch.zeros(1, 7)
+    joint = torch.arange(7, dtype=torch.float32).unsqueeze(0) / 10.0
     eef = torch.tensor([[0.1, 0.2, 0.3, 0.0, 0.0, 0.0, 1.0]])
-    waypoint_pos = torch.zeros(1, NUM_WAYPOINTS, 3)
+    waypoint_pos = torch.arange(NUM_WAYPOINTS * 3, dtype=torch.float32).reshape(
+        1, NUM_WAYPOINTS, 3
+    )
     waypoint_quat = torch.zeros(1, NUM_WAYPOINTS, 4)
     waypoint_quat[..., 3] = 1.0
-    waypoint_joint = torch.zeros(1, NUM_WAYPOINTS, 7)
+    waypoint_quat[:, 0] = torch.tensor([0.1, 0.2, 0.3, 0.9])
+    waypoint_joint = torch.arange(NUM_WAYPOINTS * 7, dtype=torch.float32).reshape(
+        1, NUM_WAYPOINTS, 7
+    )
     valid = torch.zeros(1, NUM_WAYPOINTS)
     valid[:, :2] = 1.0
     pos_mask = valid.clone()
     rot_mask = valid.clone()
     joint_mask = torch.zeros_like(valid)
+    active_idx = torch.zeros(1, dtype=torch.long)
+    last_action = torch.arange(7, dtype=torch.float32).unsqueeze(0) / 20.0
     obs = planner._build_obs(
         joint,
         eef,
@@ -332,20 +414,41 @@ def test_neural_planner_builds_unified_k5_cartesian_observation(tmp_path, monkey
         pos_mask,
         rot_mask,
         joint_mask,
-        torch.zeros(1, dtype=torch.long),
-        torch.zeros(1, 7),
+        active_idx,
+        last_action,
+    )
+
+    expected_active = torch.zeros_like(valid)
+    expected_active[:, 0] = 1.0
+    pos_block = waypoint_pos * pos_mask.unsqueeze(-1)
+    identity = torch.tensor([0.0, 0.0, 0.0, 1.0]).reshape(1, 1, 4)
+    quat_block = torch.where(rot_mask.unsqueeze(-1) > 0.5, waypoint_quat, identity)
+    joint_block = torch.zeros_like(waypoint_joint)
+    rel_pos = (pos_block - eef[:, None, :3]) * pos_mask.unsqueeze(-1)
+    rel_quat = quat_block
+    joint_err = torch.zeros_like(waypoint_joint)
+    contract_blocks = {
+        "joint": joint,
+        "eef": eef,
+        "waypoint_pos": pos_block.flatten(1),
+        "waypoint_quat": quat_block.flatten(1),
+        "waypoint_joint": joint_block.flatten(1),
+        "active_onehot": expected_active,
+        "valid_mask": valid,
+        "pos_mask": pos_mask,
+        "rot_mask": rot_mask,
+        "joint_mask": joint_mask,
+        "last_action": last_action,
+        "waypoint_rel_pos": rel_pos.flatten(1),
+        "waypoint_rel_quat": rel_quat.flatten(1),
+        "waypoint_joint_err": joint_err.flatten(1),
+    }
+    expected = torch.cat(
+        [contract_blocks[name] for name in NMG_OBSERVATION_BLOCKS], dim=-1
     )
 
     assert obs.shape == (1, OBS_DIM)
-    # Unified layout semantic blocks: active, valid, pos, rot, joint masks.
-    semantic_start = 7 + 7 + NUM_WAYPOINTS * (3 + 4 + 7)
-    expected_active = torch.zeros_like(valid)
-    expected_active[:, 0] = 1.0
-    for block, expected in enumerate(
-        (expected_active, valid, valid, valid, torch.zeros_like(valid))
-    ):
-        start = semantic_start + block * NUM_WAYPOINTS
-        assert torch.equal(obs[:, start : start + NUM_WAYPOINTS], expected)
+    torch.testing.assert_close(obs, expected)
 
 
 def test_neural_planner_preserves_xyzw_for_pose_targets(tmp_path, monkeypatch):

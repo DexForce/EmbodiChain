@@ -46,7 +46,11 @@ from .models import (
     TrialPhase,
     TrialRecord,
 )
-from .planners.base import PlannerAdapter, PlannerContext
+from .planners.base import (
+    PlannerAdapter,
+    PlannerContext,
+    _case_motion_capability,
+)
 from .registry import (
     create_planner_adapter,
     create_robot_provider,
@@ -391,6 +395,20 @@ class BenchmarkRunner:
         self.metadata.setdefault(metadata.algorithm_id, metadata)
         supported_cases = []
         for case in cases:
+            motion_capability, modality_reason = _case_motion_capability(case)
+            if (
+                motion_capability is None
+                or motion_capability not in adapter.capabilities
+            ):
+                self._record_unavailable(
+                    writer,
+                    metadata,
+                    case,
+                    modality_reason
+                    or f"case requires planner capability {motion_capability!r}",
+                    failure_code="unsupported_capability",
+                )
+                continue
             supported, reason = adapter.supports_case(case)
             if supported:
                 supported_cases.append(case)
