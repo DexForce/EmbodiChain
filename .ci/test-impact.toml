@@ -172,7 +172,11 @@ tests = ["tests/data/**", "tests/utils/test_config_paths.py"]
 contracts = ["tests/data/test_dataset.py"]
 
 [topics."data-pipeline"]
-tests = ["tests/data_pipeline/**", "tests/gym/envs/managers/test_dataset_*.py"]
+tests = [
+  "tests/data_pipeline/**",
+  "tests/gym/envs/managers/test_dataset_functors.py",
+  "tests/gym/envs/managers/test_dataset_*.py",
+]
 contracts = ["tests/data_pipeline/test_online_data.py"]
 
 [topics."robot-workspace"]
@@ -358,6 +362,10 @@ id = "data-pipeline"
 paths = ["embodichain/data_pipeline/**"]
 tests = [
   "tests/data_pipeline/**",
+  # Depth-video decoders are consumed by the dataset functor integration
+  # test. Keep this leaf explicit so a broad source rule cannot hide that
+  # reverse consumer behind the data_pipeline test directory.
+  "tests/gym/envs/managers/test_dataset_functors.py",
   "tests/gym/envs/managers/test_dataset_*.py",
 ]
 risk = "low"

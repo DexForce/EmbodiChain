@@ -634,6 +634,48 @@ def test_partial_commands_keep_resource_boundaries() -> None:
     assert "-n" in commands["fast"]
 
 
+def test_default_lane_order_runs_gpu_before_simulation() -> None:
+    plan = {
+        "version": 1,
+        "mode": "partial",
+        "lanes": {
+            "sim": ["tests/sim/test_sample.py"],
+            "distributed": ["tests/learning/test_rl_distributed.py"],
+            "gpu": ["tests/utils/test_nms.py"],
+        },
+    }
+
+    commands = build_commands(plan)
+
+    assert [lane for lane, _command in commands] == [
+        "distributed",
+        "gpu",
+        "sim",
+    ]
+
+
+def test_impacted_slow_lanes_run_after_regular_resource_lanes() -> None:
+    plan = {
+        "version": 1,
+        "mode": "full-pr",
+        "lanes": {
+            "fast": ["tests"],
+            "gpu": ["tests"],
+            "sim": ["tests"],
+        },
+        "slow_lanes": {"slow-fast": ["tests/utils/test_nms.py"]},
+    }
+
+    commands = build_commands(plan)
+
+    assert [lane for lane, _command in commands] == [
+        "fast",
+        "gpu",
+        "sim",
+        "slow-fast",
+    ]
+
+
 def test_partial_commands_run_only_impacted_slow_selectors() -> None:
     plan = {
         "version": 1,
@@ -647,6 +689,13 @@ def test_partial_commands_run_only_impacted_slow_selectors() -> None:
     assert "not slow" in " ".join(commands["fast"])
     assert "slow and not requires_sim and not gpu" in " ".join(commands["slow-fast"])
     assert "tests/utils/test_nms.py" in commands["slow-fast"]
+    assert commands["slow-fast"][-5:] == [
+        "--ignore=tests/docs",
+        "-n",
+        "4",
+        "--dist",
+        "loadgroup",
+    ]
 
 
 def test_slow_lane_can_run_without_a_regular_selector() -> None:

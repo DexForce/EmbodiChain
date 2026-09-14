@@ -363,13 +363,16 @@ jobs:
         shell: bash -l {0}
         run: |
           source activate py311
+          # Run GPU processes before the long DexSim lane.  Native Vulkan/CUDA
+          # teardown can briefly retain allocations after the sim subprocess;
+          # this order prevents the GPU lane from inheriting that pressure.
           python scripts/ci/run_test_plan.py \
             --plan test-plan.json \
             --repo-root "${GITHUB_WORKSPACE}" \
             --lane fast \
-            --lane sim \
             --lane distributed \
-            --lane gpu
+            --lane gpu \
+            --lane sim
 
   test_docs:
     name: Documentation tests

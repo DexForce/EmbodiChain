@@ -167,7 +167,7 @@ hint，并让 pytest 的收集错误使 lane 失败。
 | sim | `not slow and requires_sim and not gpu`，一个进程 |
 | distributed GPU | 独立进程树，`--run-gpu`，仅计划选中的 distributed 测试 |
 | GPU | `not slow and gpu`，`--run-gpu`，一个进程，排除 distributed 组 |
-| impacted slow | 只运行计划中列出的 slow selector，按资源拆分为 `slow-*` lane |
+| impacted slow | 只运行计划中列出的 slow selector，按资源拆分为 `slow-*` lane；`slow-fast` 与普通 fast 一样使用 4 个 xdist worker |
 | full | 所有资源组取消 `not slow` 过滤，运行完整 slow 矩阵 |
 
 marker 表达式显式包含 `not slow`；当前 workflow 显式传入 `-m`，不能仅依赖
@@ -176,6 +176,12 @@ marker 表达式显式包含 `not slow`；当前 workflow 显式传入 `-m`，�
 每个 lane 输出总耗时和 pytest 最慢的 20 个节点，便于区分依赖安装、测试收集、
 场景初始化和测试执行带来的开销。
 同一测试同时有 `requires_sim` 和 `gpu` 时进入 GPU 组，各组 node 集合保持互斥。
+
+测试 runner 默认先执行 fast、distributed、GPU，再执行 sim，所有普通资源 lane
+完成后才执行受影响的 slow lane。DexSim 的原生 Vulkan/CUDA 清理可能在 pytest
+子进程退出后短暂保留分配，先完成 GPU lane 可以避免长时间 sim lane 的残留资源使
+GPU 初始化失败；把 slow lane 放到最后也避免 CPU slow 测试导入的原生上下文影响后续
+资源组。sim 仍保持单进程以保护原生场景所有权。
 
 runner 把选中的路径或 node id 作为 subprocess 参数列表传给 pytest，避免 shell
 拼接。只收集候选测试，随后由当前 conftest 完成动态分类。第一版可以让各组对

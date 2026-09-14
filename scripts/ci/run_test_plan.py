@@ -29,7 +29,12 @@ from typing import Any, Sequence
 
 __all__ = ["build_commands", "main", "run_plan"]
 
-_LANE_ORDER = ("docs", "fast", "sim", "distributed", "gpu")
+# Run GPU-backed lanes before the long simulation lane.  DexSim owns native
+# Vulkan/CUDA resources that can outlive a pytest process briefly; keeping the
+# GPU process ahead of that teardown avoids starting it against a fragmented
+# device heap.  The workflow passes an explicit order as well, while this
+# default keeps local plan execution safe.
+_LANE_ORDER = ("docs", "fast", "distributed", "gpu", "sim")
 _SLOW_LANE_PREFIX = "slow-"
 _DISTRIBUTED_TEST = "tests/learning/test_rl_distributed.py"
 _PLAN_MODES = {"partial", "docs-only", "full-pr", "full"}
@@ -120,6 +125,7 @@ def build_commands(
             f"{sorted(str(lane) for lane in unknown_slow_lanes)!r}"
         )
     commands: list[tuple[str, list[str]]] = []
+    slow_commands: list[tuple[str, list[str]]] = []
     for lane in selected_lanes:
         if lane not in _LANE_ORDER:
             raise ValueError(f"unknown pytest lane: {lane}")
@@ -179,7 +185,12 @@ def build_commands(
                 _lane_expression(slow_lane, include_slow),
             ]
             if lane == "fast":
-                slow_command.extend(("--ignore=tests/docs",))
+                # Slow CPU cases are independent and can use the same xdist
+                # grouping as the regular fast lane.  This keeps an impacted
+                # slow matrix from serialising the entire CI job.
+                slow_command.extend(
+                    ("--ignore=tests/docs", "-n", "4", "--dist", "loadgroup")
+                )
             elif lane == "sim":
                 slow_command.append("--ignore=tests/docs")
             elif lane == "distributed":
@@ -192,8 +203,15 @@ def build_commands(
                         f"--ignore={_DISTRIBUTED_TEST}",
                     )
                 )
-        commands.append((slow_lane, slow_command))
-    return commands
+        slow_commands.append((slow_lane, slow_command))
+
+    # Keep all regular resource lanes together.  An impacted CPU slow test may
+    # import a CUDA-backed package even when its marker is CPU-only; running it
+    # between the GPU and simulation lanes can retain a native context long
+    # enough to make the next lane fail during allocation.  Slow lanes are
+    # independent coverage and can safely run after the regular lanes, when no
+    # later resource lane needs a clean device.
+    return [*commands, *slow_commands]
 
 
 def run_plan(
