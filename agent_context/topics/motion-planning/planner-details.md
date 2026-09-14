@@ -69,7 +69,7 @@ not advance physics; multiple environments require identical timing rows.
 
 Closed-loop waypoint planner using a standalone NMG ONNX policy.
 
-- Model: `NeuralPlannerCfg.onnx_model_path`; requires the `nmg` optional dependency.
+- Model: `NeuralPlannerCfg.onnx_model_path`; install the `policy-deploy` extra for ONNX Runtime.
 - Use via `MotionGenerator` with `planner_type="neural"` and `plan_opts=NeuralPlanOptions(...)`
 - Input: batched `EEF_MOVE` and `JOINT_MOVE` states, including mixed waypoint lists.
 - Native rollout samples are preserved even when not all waypoints converge;

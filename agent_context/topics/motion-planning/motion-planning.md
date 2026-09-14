@@ -87,7 +87,8 @@ Focused augmentation tests live under `tests/sim/motion/expansion/`.
 ### NeuralPlanner / NMG
 
 `NeuralPlanner` rolls out a standalone NMG ONNX policy whose graph includes
-raw-observation normalization. Install the `nmg` optional dependency, set
+raw-observation normalization. Install the `policy-deploy` optional dependency
+(`onnxruntime-gpu`, shared with DexSim Motion Policy Kit consumers), set
 `NeuralPlannerCfg.onnx_model_path`, and invoke it through `MotionGenerator`
 with `NeuralPlanOptions`. `EEF_MOVE` inputs use batched `(B, 4, 4)` poses;
 dynamic-batch exports roll out all environments together. When the runtime
