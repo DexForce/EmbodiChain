@@ -84,3 +84,8 @@ documentation. CI runs this same checker after style checks and before tests.
    :maxdepth: 1
 
    public_api
+
+.. toctree::
+   :maxdepth: 1
+
+   fep_solver

@@ -42,6 +42,7 @@ path for performance.
 
 | Solver | Algorithm | When to use | Key dependencies |
 |---|---|---|---|
+| **FEPSolver** | Numerical FEP configuration search (7R, including offsets) | Seeded correction, sign-constrained branches, eight-branch search and seventh-joint seed scanning | `torch`, `pytorch_kinematics` |
 | **SRSSolver** | SRS analytical IK (7-DOF, elbow-sampling) | DexForce W1 arms; fast GPU-batched analytical solve via Warp kernels | `warp` |
 | **OPWSolver** | OPW analytical IK (6-DOF) | 6-DOF industrial arms with OPW kinematic structure | `warp`, `polars` |
 | **PytorchSolver** | Iterative damped-least-squares via `pytorch_kinematics` | General-purpose GPU solver; good default for arbitrary URDFs | `pytorch_kinematics` |
@@ -157,3 +158,48 @@ CUDA events; Warp kernels use the current Torch stream. Buffer storage is releas
 with the solver. UR retains all 512 periodic candidates and the existing nearest
 selection; OPW retains eight candidates. OPW packs live joint limits in one host
 transfer per call, so limit updates do not require cache invalidation.
+
+## FEP numerical configuration search
+
+`solvers/fep_solver.py` owns `FEPSolverCfg` and `FEPSolver`; pure numerical
+correction and wrapped-distance helpers live in
+`embodichain/compute/kinematics/_fep.py`. The fused kernel lives in
+`embodichain/compute/kinematics/_warp/fep.py`; `solvers/_fep_warp.py` packs the
+serial chain's fixed frames and owns the model tensors. The reference is HolisticMotion's
+FEP facade at commit `ef044f52`, whose current methods use numerical IK.
+FEP requires exactly seven revolute joints in chain order. Fixed link offsets
+are supported without an analytical geometry model.
+
+`solve_method` accepts `seeded_numerical` (default), `compatibility` (same
+policy), `configuration`, `all_configurations`, and `nearest_redundancy`.
+A configuration contains the signs of joints 2/4/6 and a joint-7 seed angle;
+the angle is not locked during correction. Redundancy search stops at the
+first successful sampling radius and ranks the two directions by wrapped
+weighted distance. Eight numerical branch searches do not guarantee all roots.
+
+Nearest output is `(N,)` validity and `(N, 7)` joints. All-candidate output is
+`(N, K)` validity and `(N, K, 7)` joints, with K=8 for `all_configurations`
+and K=1 otherwise. Invalid slots contain the clamped input seed. Acceptance
+uses separate FK position/rotation tolerances, defaulting to 1e-5 m/rad.
+TCP updates and current joint limits apply on every call. `backend="auto"`
+uses Torch on CPU and fused Warp on CUDA; `torch`/`warp` explicitly select
+the correction backend at construction. Public FK verifies native candidates
+against the configured tolerances. Candidates failing that check retry Torch
+from the original seed. Geometry is packed once; construct a new solver after
+editing its chain. Native launches follow the current Torch stream, record
+input lifetimes and return caller-owned results;
+continuous batch path selection is not advertised. Validate with
+`tests/sim/motion/solvers/test_fep_solver.py` and the unified benchmark's
+`--solvers fep` entry; add `--fep-backends torch warp` for a same-fixture
+backend comparison, including the optional native CPU path.
+
+The Torch path batches all four backtracking scales, reuses the selected FK residual and
+compacts unconverged rows once per iteration. A row with no improving update
+stops as unsuccessful rather than consuming its remaining iteration budget.
+`batch_size=None` selects 256 targets on CPU or up to 16,384 candidate seeds
+on CUDA, dividing that CUDA budget by eight for configuration enumeration.
+An explicit positive integer retains the target-per-chunk override.
+The Warp path runs the complete bounded numerical iteration per candidate in
+one kernel. Its stricter internal stopping tolerance leaves float32 rounding
+margin; public FK verification remains authoritative even when that internal
+criterion was not reached. Both backends use the same four-scale search policy.

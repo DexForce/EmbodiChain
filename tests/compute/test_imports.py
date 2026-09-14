@@ -30,6 +30,14 @@ import warp as wp
     [
         ("embodichain.compute", ["warp", "torch", "embodichain.lab"]),
         (
+            "embodichain.compute.kinematics._fep",
+            ["embodichain.lab", "dexsim", "pytorch_kinematics"],
+        ),
+        (
+            "embodichain.compute.kinematics._warp.fep",
+            ["embodichain.lab", "dexsim", "pytorch_kinematics"],
+        ),
+        (
             "embodichain.compute.geometry._warp.convex_query",
             [
                 "embodichain.lab",

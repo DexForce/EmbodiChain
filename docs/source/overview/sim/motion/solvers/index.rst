@@ -98,3 +98,8 @@ See also
     srs_solver.md
     ur_solver.md
     neural_ik_solver.md
+
+.. toctree::
+    :maxdepth: 1
+
+    fep_solver.md

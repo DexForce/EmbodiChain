@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Unified benchmark for OPW, UR, and Pytorch kinematic solvers.
+"""Unified benchmark for OPW, UR, FEP, and Pytorch kinematic solvers.
 
 Measures IK wall-clock latency, pose accuracy, success rate, and memory usage
 across OPW (Warp CUDA vs CPU), UR analytic (Warp CPU vs CUDA), and the
@@ -41,6 +41,7 @@ from embodichain.lab.sim.motion.solvers.pytorch_solver import (
     PytorchSolverCfg,
 )
 from embodichain.lab.sim.motion.solvers.ur_solver import URSolver, URSolverCfg
+from embodichain.lab.sim.motion.solvers.fep_solver import FEPSolver, FEPSolverCfg
 
 OPW_LOWER_LIMITS = [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944]
 OPW_UPPER_LIMITS = [2.618, 3.14159, 0.0, 1.745, 1.22, 2.0944]
@@ -64,7 +65,7 @@ UR_TCP = [
 ]
 
 SAMPLE_SIZES = [100, 1000, 10000]
-SUPPORTED_SOLVERS = ("opw", "pytorch", "ur")
+SUPPORTED_SOLVERS = ("opw", "pytorch", "ur", "fep")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -79,9 +80,16 @@ def _parse_args() -> argparse.Namespace:
         choices=(*SUPPORTED_SOLVERS, "all"),
         default=["all"],
         help=(
-            "Solvers to benchmark. Use one or more of: opw, pytorch, ur, all. "
+            "Solvers to benchmark. Use one or more of: opw, pytorch, ur, fep, all. "
             "Default: all"
         ),
+    )
+    parser.add_argument(
+        "--fep-backends",
+        nargs="+",
+        choices=("auto", "torch", "warp"),
+        default=["auto"],
+        help="FEP correction backends to compare on identical fixtures.",
     )
     return parser.parse_args()
 
@@ -875,8 +883,117 @@ def benchmark_ur_solver() -> tuple[list[dict[str, object]], list[dict[str, objec
     return perf_rows, metric_rows
 
 
-def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
-    """Run unified OPW + UR + Pytorch kinematic solver benchmarks."""
+def _init_fep_solver(device: torch.device, backend: str = "auto") -> FEPSolver:
+    """Build a local offset 7R fixture; no asset download or simulator needed."""
+    import pytorch_kinematics as pk
+
+    axes = ("0 0 1", "0 1 0", "1 0 0", "0 1 0", "1 0 0", "0 1 0", "1 0 0")
+    links = "".join(f'<link name="link{i}"/>' for i in range(8))
+    joints = "".join(f"""<joint name="joint{i}" type="revolute">
+        <parent link="link{i}"/><child link="link{i + 1}"/>
+        <origin xyz="{0.02 if i % 2 else 0} 0 {0.1 if i else 0}"/>
+        <axis xyz="{axis}"/>
+        <limit lower="-2" upper="2" velocity="1" effort="1"/>
+        </joint>""" for i, axis in enumerate(axes))
+    chain = pk.build_serial_chain_from_urdf(
+        f'<robot name="offset_7r">{links}{joints}</robot>', "link7"
+    ).to(device=device)
+    return FEPSolverCfg(backend=backend).init_solver(
+        device=device, pk_serial_chain=chain
+    )
+
+
+def _timed_fep_ik_call(
+    solver: FEPSolver,
+    fk_xpos: torch.Tensor,
+    qpos_seed: torch.Tensor,
+) -> tuple[float, dict[str, float], float, torch.Tensor, torch.Tensor]:
+    """Measure warmed FEP correction with synchronized timing and memory."""
+    solver.get_ik(fk_xpos, qpos_seed)
+    _sync_cuda()
+    _reset_peak_gpu_memory()
+    before = _memory_snapshot()
+    start = time.perf_counter()
+    for _ in range(2):
+        success, joints = solver.get_ik(fk_xpos, qpos_seed)
+    _sync_cuda()
+    elapsed = (time.perf_counter() - start) / 2
+    after = _memory_snapshot()
+    delta = {key: after[key] - before[key] for key in before}
+    return elapsed, delta, _peak_gpu_memory_mb(), success, joints
+
+
+def benchmark_fep_solver(
+    backends: list[str] | None = None,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Measure local seeded FEP correction on a synthetic offset 7R chain."""
+    from scipy.spatial.transform import Rotation
+
+    backends = list(dict.fromkeys(backends or ["auto"]))
+    perf_rows: list[dict[str, object]] = []
+    metric_rows: list[dict[str, object]] = []
+    devices = [torch.device("cpu")]
+    if torch.cuda.is_available():
+        devices.append(torch.device("cuda"))
+    print("\n=== FEP numerical solver: offset 7R, seeds perturbed by <= 0.03 rad ===")
+    generator = torch.Generator().manual_seed(7)
+    fixtures = []
+    for count in SAMPLE_SIZES:
+        qpos = torch.rand(count, 7, generator=generator) * 2.4 - 1.2
+        seed = qpos + (torch.rand(count, 7, generator=generator) - 0.5) * 0.06
+        fixtures.append((qpos, seed))
+    for device, backend in ((d, b) for d in devices for b in backends):
+        solver = _init_fep_solver(device, backend)
+        for qpos_cpu, seed_cpu in fixtures:
+            target = solver.get_fk(qpos_cpu.to(device))
+            elapsed, memory, peak, success, joints = _timed_fep_ik_call(
+                solver, target, seed_cpu.to(device)
+            )
+            # Project float32 FK rotations before measuring small angles;
+            # trace/acos alone has a rounding floor above FEP's tolerance.
+            expected = target.cpu().numpy().astype(np.float64)
+            actual = solver.get_fk(joints).cpu().numpy().astype(np.float64)
+            translation = np.linalg.norm(expected[:, :3, 3] - actual[:, :3, 3], axis=-1)
+            rotation = (
+                Rotation.from_matrix(actual[:, :3, :3]).inv()
+                * Rotation.from_matrix(expected[:, :3, :3])
+            ).magnitude()
+            common = {
+                "sample_size": len(qpos_cpu),
+                "impl": (
+                    f"fep_{device.type}"
+                    if backend == "auto"
+                    else f"fep_{backend}_{device.type}"
+                ),
+                "component": "fep_seeded_ik",
+            }
+            perf_rows.append(
+                {
+                    **common,
+                    "cost_time_ms": f"{elapsed * 1000:.6f}",
+                    "cpu_delta_mb": f"{memory['cpu_mb']:.6f}",
+                    "gpu_delta_mb": f"{memory['gpu_mb']:.6f}",
+                    "peak_gpu_mb": f"{peak:.6f}",
+                }
+            )
+            metric_rows.append(
+                {
+                    **common,
+                    "success_rate": f"{success.float().mean().item():.6f}",
+                    "translation_err_mm": f"{translation.mean().item() * 1000:.6f}",
+                    "rotation_err_deg": f"{rotation.mean().item() * 180 / np.pi:.6f}",
+                }
+            )
+            print(
+                f"  {device.type}/{backend} n={len(qpos_cpu):>7d}: {elapsed * 1000:.2f} ms, success={success.float().mean().item():.2%}, CPU Δ={memory['cpu_mb']:+.1f} MB, GPU Δ={memory['gpu_mb']:+.1f} MB, peak GPU={peak:.1f} MB"
+            )
+    return perf_rows, metric_rows
+
+
+def run_all_benchmarks(
+    selected_solvers: list[str] | None = None, fep_backends: list[str] | None = None
+) -> None:
+    """Run unified OPW + UR + FEP + Pytorch kinematic solver benchmarks."""
     solvers_to_run = _normalize_selected_solvers(selected_solvers)
 
     print("=" * 60)
@@ -892,6 +1009,8 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
     )
     print("- Pytorch solver: UR10 URDF-based PytorchSolver with " "UR10 joint limits.")
     print("- UR solver: analytic UR10 IK via URSolverCfg with UR10 DH parameters.")
+    if "fep" in solvers_to_run:
+        print("- FEP solver: numerical correction on a synthetic offset 7R chain.")
 
     perf_rows: list[dict[str, object]] = []
     metric_rows: list[dict[str, object]] = []
@@ -910,6 +1029,11 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
         ur_perf_rows, ur_metric_rows = benchmark_ur_solver()
         perf_rows.extend(ur_perf_rows)
         metric_rows.extend(ur_metric_rows)
+
+    if "fep" in solvers_to_run:
+        fep_perf_rows, fep_metric_rows = benchmark_fep_solver(fep_backends)
+        perf_rows.extend(fep_perf_rows)
+        metric_rows.extend(fep_metric_rows)
 
     leaderboard_rows = _build_leaderboard_rows(metric_rows)
 
@@ -930,6 +1054,13 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
         ]
         + (
             [
+                "FEP uses a synthetic offset 7R chain and nearby perturbed seeds; its success rate measures local numerical correction, not global reachability or analytical branch completeness."
+            ]
+            if "fep" in solvers_to_run
+            else []
+        )
+        + (
+            [
                 "OPW and Pytorch solvers use different initialization paths and different lower/upper joint limits."
             ]
             if solvers_to_run == set(SUPPORTED_SOLVERS)
@@ -941,4 +1072,4 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     args = _parse_args()
-    run_all_benchmarks(selected_solvers=args.solvers)
+    run_all_benchmarks(selected_solvers=args.solvers, fep_backends=args.fep_backends)
