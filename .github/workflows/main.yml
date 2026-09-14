@@ -32,8 +32,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
       - name: Code Style check
@@ -55,7 +55,7 @@ jobs:
     outputs:
       required: ${{ steps.filter.outputs.docs }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
@@ -85,10 +85,10 @@ jobs:
       needs_gensim: ${{ steps.plan.outputs.needs_gensim }}
       needs_curobo: ${{ steps.plan.outputs.needs_curobo }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
       - name: Install planner dependencies
@@ -117,15 +117,26 @@ jobs:
                 --full \
                 --output test-plan.json
             else
-              head_sha="${PR_HEAD}"
-              if ! git cat-file -e "${head_sha}^{commit}" 2>/dev/null; then
+              head_sha="${PR_HEAD:-HEAD}"
+              if [[ -z "${PR_HEAD}" ]] || ! git cat-file -e "${head_sha}^{commit}" 2>/dev/null; then
                 head_sha=HEAD
               fi
-              python scripts/ci/select_tests.py \
-                --repo-root "${GITHUB_WORKSPACE}" \
-                --base "${PR_BASE}" \
-                --head "${head_sha}" \
-                --output test-plan.json
+              # The event base can contain commits added to the target branch
+              # after the PR diverged.  Diff from the common ancestor so the
+              # plan describes this PR's changes only.
+              merge_base="$(git merge-base "${PR_BASE}" "${head_sha}" 2>/dev/null || true)"
+              if [[ -z "${merge_base}" ]]; then
+                python scripts/ci/select_tests.py \
+                  --repo-root "${GITHUB_WORKSPACE}" \
+                  --full \
+                  --output test-plan.json
+              else
+                python scripts/ci/select_tests.py \
+                  --repo-root "${GITHUB_WORKSPACE}" \
+                  --base "${merge_base}" \
+                  --head "${head_sha}" \
+                  --output test-plan.json
+              fi
             fi
           elif [[ "${EVENT_NAME}" == "workflow_dispatch" && "${MANUAL_MODE}" == "partial" ]]; then
             base_sha="$(git merge-base "origin/${DEFAULT_BRANCH}" HEAD 2>/dev/null || true)"
@@ -167,7 +178,7 @@ jobs:
           print(f"needs_curobo={str(bool(install.get('curobo'))).lower()}")
           PY
       - name: Upload test plan
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-plan
           path: test-plan.json
@@ -219,7 +230,7 @@ jobs:
         - "/usr/share/nvidia:/usr/share/nvidia"
       options: --memory 100g --gpus device=0 --shm-size 53687091200
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: ./.github/actions/activate-conda
 
       # Restore the full multi-version site from the last successful build.
@@ -227,7 +238,7 @@ jobs:
       # always used to pick up the most recently saved full site.
       - name: Restore full multi-version docs site
         if: github.event_name == 'push'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: docs/build/html
           key: docs-full-site-${{ github.repository }}-${{ github.run_id }}
@@ -271,14 +282,14 @@ jobs:
       # Default-branch cache only (tag-scoped caches are not visible on main).
       - name: Save full multi-version docs site
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: docs/build/html
           key: docs-full-site-${{ github.repository }}-${{ github.run_id }}
 
       - name: Upload docs site artifact
         if: github.event_name == 'push'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: docs-site
           path: ${{ github.workspace }}/docs/build/html
@@ -301,10 +312,10 @@ jobs:
       NEEDS_CUROBO: ${{ needs.test_plan.outputs.needs_curobo }}
     container: *container_template
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: ./.github/actions/activate-conda
       - name: Download test plan
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: test-plan
           path: .
@@ -358,14 +369,14 @@ jobs:
     needs: [lint, test_plan]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
       - name: Install docs test dependencies
         run: python -m pip install --disable-pip-version-check pytest
       - name: Download test plan
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: test-plan
           path: .
@@ -421,9 +432,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
 
@@ -520,7 +531,7 @@ jobs:
           PY
 
       - name: Upload validated distributions
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: python-distributions
           path: dist/

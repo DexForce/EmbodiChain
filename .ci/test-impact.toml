@@ -356,7 +356,10 @@ risk = "low"
 [[rules]]
 id = "data-pipeline"
 paths = ["embodichain/data_pipeline/**"]
-tests = ["tests/data_pipeline/**"]
+tests = [
+  "tests/data_pipeline/**",
+  "tests/gym/envs/managers/test_dataset_*.py",
+]
 risk = "low"
 
 [[rules]]

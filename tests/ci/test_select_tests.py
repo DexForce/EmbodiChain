@@ -71,6 +71,27 @@ def test_repository_manifest_selectors_resolve() -> None:
     assert not missing, f"unresolved impact selectors: {missing}"
 
 
+def test_data_pipeline_rule_covers_dataset_functor_consumer() -> None:
+    root = Path(__file__).resolve().parents[2]
+    manifest = load_manifest(root / ".ci/test-impact.toml")
+    rule = next(rule for rule in manifest["rules"] if rule.get("id") == "data-pipeline")
+
+    assert any(
+        path_matches(
+            "tests/gym/envs/managers/test_dataset_functors.py",
+            pattern,
+        )
+        for pattern in rule["tests"]
+    )
+    plan = build_plan(
+        root,
+        [ChangedPath("embodichain/data_pipeline/depth_video/codec.py")],
+        manifest,
+        map_data={},
+    )
+    assert "tests/gym/envs/managers/test_dataset_functors.py" in plan.selectors
+
+
 def test_manifest_rejects_partial_rule_without_tests(tmp_path: Path) -> None:
     path = tmp_path / "test-impact.toml"
     path.write_text(
