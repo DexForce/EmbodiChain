@@ -171,8 +171,8 @@ def test_environment_builds_only_a_kinematic_bridge_state() -> None:
     assert "differentiable_step_mode" not in DifferentiableEnv.__dict__
 
 
-def test_environment_action_hook_receives_only_action_and_tape() -> None:
-    """The bridge adapter never supplies a Newton control buffer."""
+def test_environment_action_hook_receives_no_state_by_default() -> None:
+    """The default bridge adapter supplies only action and keyword tape."""
     env = _bare_env()
     action_wp = object()
     tape = object()
@@ -246,6 +246,77 @@ def test_kinematic_bridge_propagates_functional_state_gradient() -> None:
 
     assert torch.allclose(action.grad, torch.tensor([8.0]))
     assert torch.allclose(state.grad, torch.tensor([4.0]))
+
+
+def test_environment_step_propagates_functional_state_gradient() -> None:
+    """The public environment step preserves a two-step recurrent graph."""
+    wp.init()
+    env = _bare_env()
+    state = torch.tensor([1.0], requires_grad=True)
+    env.functional_state = state
+    env._next_state_wp = None
+
+    env._functional_state_tensors = lambda: (env.functional_state,)
+
+    def _apply_action(action_wp: Any, state_wp: Any, *, tape: Any) -> None:
+        del tape
+        env._next_state_wp = wp.zeros(
+            1,
+            dtype=wp.float32,
+            device="cpu",
+            requires_grad=True,
+        )
+        wp.launch(
+            _recurrent_state_kernel,
+            dim=1,
+            inputs=[action_wp, state_wp, env._next_state_wp],
+            device="cpu",
+        )
+
+    def _read_outputs(final_state: Any) -> dict[str, Any]:
+        reward_wp = wp.zeros(
+            1,
+            dtype=wp.float32,
+            device="cpu",
+            requires_grad=True,
+        )
+        wp.launch(
+            _square_reward_kernel,
+            dim=1,
+            inputs=[final_state, reward_wp],
+            device="cpu",
+        )
+        next_state = wp.to_torch(final_state)
+        env.functional_state = next_state
+        return {
+            "obs": next_state,
+            "reward": wp.to_torch(reward_wp),
+            "terminated": torch.zeros(1, dtype=torch.bool),
+            "truncated": torch.zeros(1, dtype=torch.bool),
+            "_order": ("obs", "reward", "terminated", "truncated"),
+            "_grad_track": {
+                "obs": final_state,
+                "reward": reward_wp,
+                "terminated": None,
+                "truncated": None,
+            },
+        }
+
+    env._apply_action_kernel = _apply_action
+    env._make_kinematic_step_fn = lambda: (lambda: env._next_state_wp)
+    env._read_outputs = _read_outputs
+    first_action = torch.tensor([0.5], requires_grad=True)
+    second_action = torch.tensor([0.5], requires_grad=True)
+
+    env.step(first_action)
+    _, reward, terminated, truncated, _ = env.step(second_action)
+    reward.sum().backward()
+
+    assert not terminated.any()
+    assert not truncated.any()
+    assert torch.allclose(first_action.grad, torch.tensor([12.0]))
+    assert torch.allclose(second_action.grad, torch.tensor([12.0]))
+    assert torch.allclose(state.grad, torch.tensor([6.0]))
 
 
 def test_kinematic_bridge_no_grad_call_releases_tape_synchronously() -> None:

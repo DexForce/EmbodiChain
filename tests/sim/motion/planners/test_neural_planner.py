@@ -34,8 +34,8 @@ from embodichain.lab.sim.motion.planners.neural_planner import NeuralPlanOptions
 from embodichain.lab.sim.sim_manager import SimulationManager
 
 NUM_ARM_JOINTS = 7
-NUM_WAYPOINTS = 8
-OBS_DIM = 285
+NUM_WAYPOINTS = 5
+OBS_DIM = 186
 
 
 def _create_fake_onnx_model(tmp_path) -> str:
@@ -109,6 +109,7 @@ def test_neural_planner_is_registered():
 
 
 def test_neural_planner_observation_width_matches_k5_nmg_export():
+    assert NeuralPlannerCfg().num_waypoints == NUM_WAYPOINTS
     assert neural_planner_module._waypoint_obs_dim(5, use_relative_obs=True) == 186
     assert neural_planner_module._waypoint_obs_dim(5, use_relative_obs=False) == 116
 
@@ -295,9 +296,7 @@ def test_neural_planner_disables_grad_for_all_fk_calls(tmp_path, monkeypatch):
     assert not any(grad_states)
 
 
-def test_neural_planner_builds_unified_285d_cartesian_observation(
-    tmp_path, monkeypatch
-):
+def test_neural_planner_builds_unified_k5_cartesian_observation(tmp_path, monkeypatch):
     model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
@@ -314,11 +313,11 @@ def test_neural_planner_builds_unified_285d_cartesian_observation(
     )
     joint = torch.zeros(1, 7)
     eef = torch.tensor([[0.1, 0.2, 0.3, 0.0, 0.0, 0.0, 1.0]])
-    waypoint_pos = torch.zeros(1, 8, 3)
-    waypoint_quat = torch.zeros(1, 8, 4)
+    waypoint_pos = torch.zeros(1, NUM_WAYPOINTS, 3)
+    waypoint_quat = torch.zeros(1, NUM_WAYPOINTS, 4)
     waypoint_quat[..., 3] = 1.0
-    waypoint_joint = torch.zeros(1, 8, 7)
-    valid = torch.zeros(1, 8)
+    waypoint_joint = torch.zeros(1, NUM_WAYPOINTS, 7)
+    valid = torch.zeros(1, NUM_WAYPOINTS)
     valid[:, :2] = 1.0
     pos_mask = valid.clone()
     rot_mask = valid.clone()
@@ -337,16 +336,16 @@ def test_neural_planner_builds_unified_285d_cartesian_observation(
         torch.zeros(1, 7),
     )
 
-    assert obs.shape == (1, 285)
+    assert obs.shape == (1, OBS_DIM)
     # Unified layout semantic blocks: active, valid, pos, rot, joint masks.
-    semantic_start = 7 + 7 + 8 * (3 + 4 + 7)
+    semantic_start = 7 + 7 + NUM_WAYPOINTS * (3 + 4 + 7)
     expected_active = torch.zeros_like(valid)
     expected_active[:, 0] = 1.0
-    assert torch.equal(obs[:, semantic_start : semantic_start + 8], expected_active)
-    assert torch.equal(obs[:, semantic_start + 8 : semantic_start + 16], valid)
-    assert torch.equal(obs[:, semantic_start + 16 : semantic_start + 24], valid)
-    assert torch.equal(obs[:, semantic_start + 24 : semantic_start + 32], valid)
-    assert torch.count_nonzero(obs[:, semantic_start + 32 : semantic_start + 40]) == 0
+    for block, expected in enumerate(
+        (expected_active, valid, valid, valid, torch.zeros_like(valid))
+    ):
+        start = semantic_start + block * NUM_WAYPOINTS
+        assert torch.equal(obs[:, start : start + NUM_WAYPOINTS], expected)
 
 
 def test_neural_planner_preserves_xyzw_for_pose_targets(tmp_path, monkeypatch):
@@ -500,9 +499,9 @@ def test_neural_planner_builds_joint_constraint_observation(tmp_path, monkeypatc
         torch.zeros(1, 7),
     )
 
-    semantic_start = 7 + 7 + 8 * (3 + 4 + 7)
-    relative_start = semantic_start + 5 * 8 + 7
-    joint_error_start = relative_start + 8 * (3 + 4)
+    semantic_start = 7 + 7 + NUM_WAYPOINTS * (3 + 4 + 7)
+    relative_start = semantic_start + 5 * NUM_WAYPOINTS + 7
+    joint_error_start = relative_start + NUM_WAYPOINTS * (3 + 4)
     assert torch.equal(joint_mask[:, 0], torch.ones(1))
     assert torch.count_nonzero(pos_mask) == 0
     assert torch.count_nonzero(rot_mask) == 0

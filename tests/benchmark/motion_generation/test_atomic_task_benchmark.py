@@ -327,8 +327,7 @@ def test_randomized_atomic_suite_covers_six_skills_with_fixed_seed_sweep():
     assert track.config["articulations"][0]["id"] == "microwave"
     press = next(item for item in track.config["skills"] if item["id"] == "press")
     assert {
-        key: press[key]
-        for key in ("articulation", "target_link", "target_joint")
+        key: press[key] for key in ("articulation", "target_link", "target_joint")
     } == {
         "articulation": "microwave",
         "target_link": "button_cap",

@@ -143,7 +143,7 @@ class NeuralPlannerCfg(BasePlannerCfg):
     num_arm_joints: int = 7
     """Number of arm joints controlled by the APG policy."""
 
-    num_waypoints: int = 8
+    num_waypoints: int = 5
     """Number of constraint slots encoded by the ONNX policy."""
 
     use_relative_obs: bool = True

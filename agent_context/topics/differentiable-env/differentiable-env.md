@@ -14,8 +14,9 @@ Warp tape.
 The resolution path is:
 
     DifferentiableEnv.step(action)
-      → NewtonStepFunc.apply(action, sim_state)
-      → _apply_action_kernel(action_wp, tape)
+      → _functional_state_tensors()
+      → NewtonStepFunc.apply(action, sim_state, *state_tensors)
+      → _apply_action_kernel(action_wp, *state_wps, tape=tape)
       → _make_kinematic_step_fn()()
       → _read_outputs(final_state)
       → Warp tape backward → action.grad and optional functional-state grads
@@ -38,13 +39,20 @@ The resolution path is:
   as Warp arrays and receive gradients in backward, which lets downstream
   tasks retain a complete recurrent closed-loop graph without storing tensors
   in the metadata-only `sim_state` mapping.
+- `DifferentiableEnv.step(action)` obtains those tensors from
+  `_functional_state_tensors()` and forwards them through the same bridge.
 
 ## Subclass contract
 
-Task authors implement three hooks:
+Task authors implement three required hooks and may override one state hook:
 
-- `_apply_action_kernel(action_wp, tape)` launches Warp work that maps the
-  PyTorch action bridge array into task-owned kinematic state.
+- `_functional_state_tensors()` optionally returns recurrent PyTorch state in
+  the order expected by the action hook. The default returns an empty tuple.
+  `_read_outputs` must expose a next-state tensor through `_order` and
+  `_grad_track` before retaining that same tensor for the following step.
+- `_apply_action_kernel(action_wp, *state_wps, tape=tape)` launches Warp work
+  that maps the PyTorch action and functional-state bridge arrays into
+  task-owned kinematic state. `tape` is keyword-only.
 - `_make_kinematic_step_fn()` returns a zero-argument callback such as
   `newton.eval_fk(...)`. The callback returns the state consumed by the output
   hook.
@@ -62,7 +70,8 @@ Action, kinematics, and gradient-producing output kernels must execute while
 the Warp tape is open. Each tracked output names its backing Warp array in
 `_grad_track`; an output mapped to `None` does not seed Warp backward.
 
-A grad-tracked terminal step returns the terminal observation and exposes
+A terminal step tracked through either the action or functional state returns
+the terminal observation and exposes
 `requires_reset_after_backward` plus `deferred_reset_ids` in `info`. Reset
 those rows only after backward. A no-grad terminal step resets them
 synchronously.

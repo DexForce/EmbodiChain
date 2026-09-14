@@ -90,8 +90,10 @@ Focused augmentation tests live under `tests/sim/motion/expansion/`.
 raw-observation normalization. Install the `nmg` optional dependency, set
 `NeuralPlannerCfg.onnx_model_path`, and invoke it through `MotionGenerator`
 with `NeuralPlanOptions`. `EEF_MOVE` inputs use batched `(B, 4, 4)` poses;
-dynamic-batch exports roll out all environments together. When the runtime
-robot base or TCP differs from training, configure
+dynamic-batch exports roll out all environments together. The default policy
+capacity is five waypoint slots, matching the official K=1–5 NMG export and
+benchmark adapter; set `num_waypoints` explicitly for another exported layout.
+When the runtime robot base or TCP differs from training, configure
 `policy_frame_from_world` and `runtime_tcp_from_policy_tcp` explicitly.
 NeuralPlanner target and FK quaternions remain EmbodiChain `xyzw` throughout
 the observation and convergence paths; `quat_from_matrix()` must not be
