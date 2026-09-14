@@ -37,6 +37,11 @@ NUM_ARM_JOINTS = 7
 NUM_WAYPOINTS = 5
 OBS_DIM = 186
 NMG_OBSERVATION_CAPACITY_WIDTHS = {1: 54, 3: 120, 5: 186}
+NMG_OBSERVATION_FINGERPRINTS = {
+    1: "f835f0acb21ed65ade6da7a23092f0f73ebd94da2ebcdae7c3c79bd6d6917f77",
+    3: "b002c8f2167af36e95daf6ae38723189903776dc43c6a958696bdc7ed918e105",
+    5: "b5124743bf423a2e7cb4f6bab83c2c179598d2ed595d41015c0280292bac53b6",
+}
 NMG_OBSERVATION_BLOCKS = (
     "joint",
     "eef",
@@ -65,6 +70,7 @@ def _create_fake_onnx_model(tmp_path) -> str:
 class FakeOnnxPolicy:
     obs_dim = OBS_DIM
     fixed_batch_size = 1
+    observation_metadata = {}
 
     def __init__(self, path, providers=None):
         self.path = path
@@ -134,7 +140,11 @@ def test_neural_planner_observation_width_matches_nmg_contract(
     capacity: int,
     expected_width: int,
 ):
-    assert neural_planner_module._waypoint_obs_dim(capacity, True) == expected_width
+    layout = neural_planner_module._WaypointObservationLayout(capacity, 7, True)
+
+    assert layout.dim == expected_width
+    assert layout.fingerprint == NMG_OBSERVATION_FINGERPRINTS[capacity]
+    assert tuple(name for name, _ in layout.block_widths) == NMG_OBSERVATION_BLOCKS
 
 
 def test_neural_planner_default_observation_width_matches_k5_nmg_export():
@@ -168,6 +178,8 @@ def test_neural_onnx_policy_preserves_distinct_dynamic_batch_rows(tmp_path):
         graph,
         opset_imports=[onnx.helper.make_opsetid("", 17)],
     )
+    layout = neural_planner_module._WaypointObservationLayout(5, 7, True)
+    onnx.helper.set_model_props(model, layout.onnx_metadata)
     model.ir_version = 10
     model_path = tmp_path / "dynamic_batch_contract.onnx"
     onnx.save(model, model_path)
@@ -187,6 +199,36 @@ def test_neural_onnx_policy_preserves_distinct_dynamic_batch_rows(tmp_path):
     torch.testing.assert_close(batch_one, observation[:1, :NUM_ARM_JOINTS])
     torch.testing.assert_close(batch_three, observation[:, :NUM_ARM_JOINTS])
     torch.testing.assert_close(batch_three[:1], batch_one)
+    assert policy.observation_metadata == layout.onnx_metadata
+
+
+def test_neural_planner_rejects_mismatched_observation_metadata(tmp_path, monkeypatch):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+
+    class MismatchedMetadataPolicy(FakeOnnxPolicy):
+        observation_metadata = {
+            **neural_planner_module._WaypointObservationLayout(
+                5, 7, True
+            ).onnx_metadata,
+            "nmg.quaternion_order": "wxyz",
+        }
+
+    monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", MismatchedMetadataPolicy)
+
+    with pytest.raises(ValueError, match="observation layout metadata mismatch"):
+        NeuralPlanner(
+            NeuralPlannerCfg(
+                robot_uid="fake_robot",
+                onnx_model_path=model_path,
+                control_part="main_arm",
+            )
+        )
 
 
 def test_neural_planner_generate_with_fake_onnx_model(tmp_path, monkeypatch):
