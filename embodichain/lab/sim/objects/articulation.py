@@ -2605,6 +2605,32 @@ class Articulation(BatchEntity):
             link_idx = self.link_names.index(link_name)
             return self.user_ids[local_env_ids, link_idx]
 
+    def set_root_velocity(
+        self,
+        velocity: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Set root-link linear and angular velocity in world coordinates.
+
+        Args:
+            velocity: Selected root velocities with shape ``(N, 6)``; linear
+                velocity precedes angular velocity.
+            env_ids: Selected environment rows, or all rows when omitted.
+
+        Raises:
+            ValueError: The input shape does not match the selected rows.
+        """
+        ids = self._resolve_env_ids(env_ids)
+        velocity = torch.as_tensor(velocity, dtype=torch.float32, device=self.device)
+        if velocity.ndim == 1:
+            velocity = velocity.unsqueeze(0)
+        expected = (len(ids), 6)
+        if tuple(velocity.shape) != expected:
+            raise ValueError(
+                f"Root velocity must have shape {expected}, got {tuple(velocity.shape)}."
+            )
+        self._data.articulation_view.apply_root_velocity(velocity, ids)
+
     def clear_dynamics(self, env_ids: Sequence[int] | None = None) -> None:
         """Clear the dynamics of the articulation.
 

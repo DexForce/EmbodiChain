@@ -76,6 +76,11 @@ qvel.
 
 ## Lifecycle and boundaries
 
+`EmbodiedEnv._setup_robot()` creates an instance-owned `active_joint_ids` list
+on each setup, preserving control-part order or copying explicit configured
+IDs. Repeated setup and other environment instances cannot append to that list.
+The isolation cases are in `tests/gym/envs/test_embodied_env_joint_setup.py`.
+
 Construction seeds before scene setup, constructs the robot and sensors, then
 initializes simulation state and configured managers. An explicit effective
 seed on reset also reaches the event manager; scoped randomization behavior is

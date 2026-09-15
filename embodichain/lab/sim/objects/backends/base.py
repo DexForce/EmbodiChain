@@ -359,6 +359,18 @@ class ArticulationViewBase(ABC):
         ...
 
     @abstractmethod
+    def apply_root_velocity(
+        self, velocity: torch.Tensor, env_ids: Sequence[int] | torch.Tensor
+    ) -> None:
+        """Apply world-frame root linear and angular velocities.
+
+        Args:
+            velocity: Selected root velocities with shape ``(N, 6)``.
+            env_ids: Environment rows in the same order as ``velocity``.
+        """
+        ...
+
+    @abstractmethod
     def apply_qpos(
         self,
         qpos: torch.Tensor,

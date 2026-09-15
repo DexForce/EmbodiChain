@@ -610,6 +610,27 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
             (7,),
         )
 
+    def apply_root_velocity(
+        self, velocity: torch.Tensor, env_ids: Sequence[int] | torch.Tensor
+    ) -> None:
+        """Write selected root velocities through the existing Scene batch.
+
+        Args:
+            velocity: World-frame linear and angular velocities, shape ``(N, 6)``.
+            env_ids: Environment rows in the same order as ``velocity``.
+        """
+        rows = self._select_rows(env_ids)
+        expected_shape = (len(rows), 6)
+        if tuple(velocity.shape) != expected_shape:
+            raise ValueError(
+                f"Expected selected data shape {expected_shape}, got "
+                f"{tuple(velocity.shape)}."
+            )
+        if len(rows):
+            batch = self.batch.select(rows)
+            _checked_batch_call(batch, "apply_root_linear_velocity", velocity[:, :3])
+            _checked_batch_call(batch, "apply_root_angular_velocity", velocity[:, 3:])
+
     def _joint_columns(
         self, joint_ids: Sequence[int] | torch.Tensor | None
     ) -> torch.Tensor:

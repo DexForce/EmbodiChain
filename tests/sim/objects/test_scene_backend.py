@@ -93,6 +93,8 @@ def test_scene_views_match_installed_dexsim_batch_surface() -> None:
     articulation_methods = {
         "select",
         "apply_root_pose",
+        "apply_root_linear_velocity",
+        "apply_root_angular_velocity",
         "fetch_root_pose",
         "fetch_root_linear_velocity",
         "fetch_root_angular_velocity",
@@ -864,3 +866,58 @@ def test_scene_rigid_collision_filter_delegates_to_batch() -> None:
     view.fetch_collision_filter(actual)
 
     assert torch.equal(actual, expected)
+
+
+@pytest.mark.parametrize("env_ids", [[1], torch.tensor([1])], ids=["list", "tensor"])
+def test_root_velocity_writes_preserve_unselected_rows(
+    env_ids: list[int] | torch.Tensor,
+) -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(SimpleNamespace(), batch, torch.device("cpu"))
+    velocity = torch.tensor([[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]])
+    view.apply_root_velocity(velocity, env_ids=env_ids)
+    assert batch.selections == [(1,)]
+    torch.testing.assert_close(batch.root_linear_velocity[1:2], velocity[:, :3])
+    torch.testing.assert_close(batch.root_angular_velocity[1:2], velocity[:, 3:])
+    torch.testing.assert_close(
+        batch.root_linear_velocity[0], torch.tensor([1.0, 2.0, 3.0])
+    )
+    torch.testing.assert_close(
+        batch.root_angular_velocity[0], torch.tensor([7.0, 8.0, 9.0])
+    )
+
+
+def test_root_velocity_writes_follow_reordered_selection() -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(SimpleNamespace(), batch, torch.device("cpu"))
+    velocity = torch.arange(12, dtype=torch.float32).reshape(2, 6)
+    view.apply_root_velocity(velocity, env_ids=[1, 0])
+    assert batch.selections == [(1, 0)]
+    torch.testing.assert_close(batch.root_linear_velocity[[1, 0]], velocity[:, :3])
+    torch.testing.assert_close(batch.root_angular_velocity[[1, 0]], velocity[:, 3:])
+
+
+def test_empty_root_velocity_selection_leaves_velocities_unchanged() -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(SimpleNamespace(), batch, torch.device("cpu"))
+    linear_before = batch.root_linear_velocity.clone()
+    angular_before = batch.root_angular_velocity.clone()
+    view.apply_root_velocity(torch.empty((0, 6)), env_ids=[])
+    assert batch.selections == []
+    torch.testing.assert_close(batch.root_linear_velocity, linear_before)
+    torch.testing.assert_close(batch.root_angular_velocity, angular_before)
+
+
+@pytest.mark.parametrize("shape", [(2, 6), (1, 5), (1, 7)])
+def test_root_velocity_view_rejects_shape_before_writing(
+    shape: tuple[int, int],
+) -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(SimpleNamespace(), batch, torch.device("cpu"))
+    linear_before = batch.root_linear_velocity.clone()
+    angular_before = batch.root_angular_velocity.clone()
+    with pytest.raises(ValueError, match="Expected selected data shape"):
+        view.apply_root_velocity(torch.zeros(shape), env_ids=[1])
+    assert batch.selections == []
+    torch.testing.assert_close(batch.root_linear_velocity, linear_before)
+    torch.testing.assert_close(batch.root_angular_velocity, angular_before)
