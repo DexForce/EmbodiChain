@@ -16,11 +16,11 @@
 
 from __future__ import annotations
 
-from dataclasses import field
+from dataclasses import MISSING, field
 
 from embodichain.utils import configclass
 
-__all__ = ["VisualizationCfg", "ViserServerCfg"]
+__all__ = ["PreviewGroupCfg", "VisualizationCfg", "ViserServerCfg"]
 
 
 @configclass
@@ -48,6 +48,67 @@ class ViserServerCfg:
             raise ValueError("port must be between 1 and 65535.")
         if not self.label:
             raise ValueError("label must not be empty.")
+
+
+@configclass
+class PreviewGroupCfg:
+    """Register one translucent preview copy of a simulated articulation.
+
+    A preview group adds extra scene nodes that reuse the link meshes of an
+    existing robot or articulation but keep independent poses supplied by the
+    caller, one :class:`~embodichain.lab.visualization.protocol.PreviewNodeUpdate`
+    per captured frame. Registering a group never reads or writes joint state,
+    so a preview is free of simulation side effects.
+
+    Args:
+        group_id: Unique identifier of the preview group. Preview node IDs and
+            scene paths are derived from it.
+        articulation_uid: UID of the robot or articulation whose link meshes
+            are reused.
+        source_kind: Registry owning ``articulation_uid``; either ``"robot"``
+            or ``"articulation"``.
+        env_id: Environment instance the preview meshes are drawn in. It must
+            be one of the visualized environments.
+        link_names: Source links included in the preview. ``None`` selects
+            every source link that has renderable geometry.
+        opacity: Constant transparency of the preview meshes in ``(0, 1]``.
+        color: RGB tint for the preview meshes. ``None`` reuses the source
+            geometry entries verbatim, which shares one batched mesh (and its
+            color) with the real links instead of uploading a tinted copy.
+        visible: Whether preview nodes are visible before the first pose
+            update arrives. Preview groups stay hidden by default.
+    """
+
+    group_id: str = MISSING
+    articulation_uid: str = MISSING
+    source_kind: str = "robot"
+    env_id: int = 0
+    link_names: list[str] | None = None
+    opacity: float = 0.35
+    color: tuple[int, int, int] | None = (120, 190, 255)
+    visible: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate the preview group selection and appearance."""
+        if self.source_kind not in {"robot", "articulation"}:
+            raise ValueError(
+                "source_kind must be either 'robot' or 'articulation'; "
+                f"received {self.source_kind!r}."
+            )
+        if self.env_id < 0:
+            raise ValueError("env_id must be non-negative.")
+        if not 0.0 < self.opacity <= 1.0:
+            raise ValueError("opacity must be greater than zero and at most one.")
+        if self.link_names is not None:
+            if not self.link_names:
+                raise ValueError("link_names must contain at least one link name.")
+            if len(set(self.link_names)) != len(self.link_names):
+                raise ValueError("link_names must not contain duplicates.")
+        if self.color is not None:
+            if len(self.color) != 3 or any(
+                component < 0 or component > 255 for component in self.color
+            ):
+                raise ValueError("color must be an RGB triple with values in [0, 255].")
 
 
 @configclass

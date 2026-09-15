@@ -86,6 +86,28 @@ expose the PhysX soft-body collision topology, so the soft-body preview uses
 a convex-hull surface over the live collision vertices. It follows deformation
 but intentionally omits concave render-mesh details.
 
+## Skill-sequence authoring
+
+`skill_sequencer.py` builds on the same runtime and adds the browser authoring
+panel: click a target, stack `move_end_effector` / `pick_up` / `place` cards,
+compile them into one trajectory, scrub a translucent preview, and execute.
+
+```bash
+python scripts/tutorials/visualization/skill_sequencer.py --viser
+```
+
+Execution is driven one slice per browser frame, so the card markers advance
+`running` -> `succeeded` live instead of jumping at the end. For an automated
+self-check that drives the whole chain without a browser and asserts its
+invariants:
+
+```bash
+python scripts/tutorials/visualization/skill_sequencer.py --headless_smoke
+```
+
+See `docs/source/overview/sim/skill_sequencer.md` for the panel reference,
+the five card states, and the current limitations.
+
 ## Remote access
 
 Keep Viser bound to loopback on a server and forward it through SSH:

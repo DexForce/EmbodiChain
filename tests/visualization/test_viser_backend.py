@@ -1257,3 +1257,59 @@ def test_viser_backend_disambiguates_compact_joint_labels() -> None:
         "arm-0": "arm [0] (°)",
         "arm-1": "arm [1] (°)",
     }
+
+
+def test_viser_backend_multiplies_node_opacity_into_batched_opacities() -> None:
+    """Translucent preview nodes stay translucent through visibility toggles."""
+    server = _Server()
+    backend = ViserBackend(ViserServerCfg(port=8765), server_factory=lambda **_: server)
+    geometry = MeshGeometry(
+        geometry_id="sha256:preview",
+        vertices=np.array(
+            [[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.1, 0.0]],
+            dtype=np.float32,
+        ),
+        faces=np.array([[0, 1, 2]], dtype=np.uint32),
+    )
+    nodes = (
+        SceneNode(
+            node_id="env:0/rigid:cube",
+            path="/envs/0/rigid_objects/cube",
+            parent_id="env:0",
+            env_id=0,
+            kind="rigid_object",
+            geometry_id=geometry.geometry_id,
+        ),
+        SceneNode(
+            node_id="preview:ghost/link:tool",
+            path="/previews/ghost/links/tool",
+            parent_id="preview:ghost",
+            env_id=0,
+            kind="preview_link",
+            geometry_id=geometry.geometry_id,
+            visible=False,
+            opacity=0.25,
+        ),
+    )
+    manifest = SceneManifest("run", 1, nodes, (geometry,))
+
+    backend.start()
+    backend.publish_manifest(manifest)
+    handle = server.scene.mesh_handles[0]
+    np.testing.assert_allclose(handle.batched_opacities, [1.0, 0.0])
+
+    frame = SceneFrame(
+        run_id="run",
+        scene_revision=1,
+        sequence=1,
+        sim_step=1,
+        sim_time=0.01,
+        node_ids=tuple(node.node_id for node in nodes),
+        positions=np.zeros((2, 3), dtype=np.float32),
+        wxyz=np.tile(np.array([[1.0, 0.0, 0.0, 0.0]], dtype=np.float32), (2, 1)),
+        visible=np.array([True, True], dtype=np.bool_),
+    )
+    assert backend.publish_frame(frame)
+
+    np.testing.assert_allclose(handle.batched_opacities, [1.0, 0.25])
+    backend.stop()

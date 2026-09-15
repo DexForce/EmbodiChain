@@ -22,7 +22,8 @@
 from __future__ import annotations
 
 from .cli import add_viser_args_to_parser, visualization_cfg_from_args
-from .cfg import VisualizationCfg, ViserServerCfg
+from .cfg import PreviewGroupCfg, VisualizationCfg, ViserServerCfg
+from .panels import PanelBuildContext, PanelEventSink, PanelSpec
 from .protocol import (
     CameraImage,
     CameraImageFrame,
@@ -37,8 +38,10 @@ from .protocol import (
     JointControlSpec,
     JointControlState,
     MeshGeometry,
+    PanelCommand,
     PickCommand,
     PointCloudOverlay,
+    PreviewNodeUpdate,
     SceneFrame,
     SceneManifest,
     SceneNode,
@@ -51,6 +54,7 @@ from .runtime import (
     GizmoCommandQueue,
     JointControlCommandQueue,
     LatestFrameQueue,
+    PanelCommandQueue,
     RuntimeHealth,
     RuntimeStats,
     VisualizationRuntime,
@@ -76,8 +80,15 @@ __all__ = [
     "JointControlState",
     "LatestFrameQueue",
     "MeshGeometry",
+    "PanelBuildContext",
+    "PanelCommand",
+    "PanelCommandQueue",
+    "PanelEventSink",
+    "PanelSpec",
     "PickCommand",
     "PointCloudOverlay",
+    "PreviewGroupCfg",
+    "PreviewNodeUpdate",
     "RuntimeHealth",
     "RuntimeStats",
     "SceneExporter",

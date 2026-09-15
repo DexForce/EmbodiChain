@@ -139,6 +139,8 @@ Choosing Where to Start
 - Use :doc:`sim_sensor` when adding camera, stereo, or contact observations.
 - Use :doc:`viser_visualization` when inspecting a headless or remote scene in
   a browser.
+- Use :doc:`skill_sequencer` when an Atomic Skill sequence should be authored,
+  previewed, and run from that browser scene.
 - Use :doc:`motion/index` for the shared robot motion package and its boundaries.
 - Use :doc:`motion/solvers/index` when a robot needs FK, IK, or velocity-level
   kinematics.
@@ -175,5 +177,6 @@ See Also
    sim_assets.md
    sim_sensor.md
    viser_visualization.md
+   skill_sequencer.md
    motion/index
    atomic_actions/index

@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import functools
 import queue
 import threading
 from collections import defaultdict
@@ -25,6 +26,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..cfg import ViserServerCfg
+from ..panels import PanelBuildContext, PanelSpec
 from ..picker import ScenePicker
 from ..protocol import (
     CameraImageFrame,
@@ -37,6 +39,7 @@ from ..protocol import (
     JointControlSpec,
     JointControlState,
     MeshGeometry,
+    PanelCommand,
     PickCommand,
     PointCloudOverlay,
     SceneFrame,
@@ -58,6 +61,8 @@ class _MeshBatch:
     frame_indices: np.ndarray
     env_ids: np.ndarray
     frame_visible: np.ndarray
+    node_opacities: np.ndarray
+    """Constant per-instance transparency from the manifest, ones by default."""
 
 
 @dataclass
@@ -184,6 +189,11 @@ class ViserBackend(VisualizationBackend):
         }
         self._gui_events: queue.SimpleQueue[_GuiEvent] = queue.SimpleQueue()
         self._gizmo_events: queue.SimpleQueue[_GizmoEvent] = queue.SimpleQueue()
+        self._panels: dict[str, PanelSpec] = {}
+        self._panel_states: dict[str, object] = {}
+        self._panel_containers: dict[str, object] = {}
+        self._panel_built: set[str] = set()
+        self._panel_sequence = 0
 
     @property
     def endpoint(self) -> str | None:
@@ -265,6 +275,10 @@ class ViserBackend(VisualizationBackend):
         self._camera_preview_folder = None
         self._camera_preview_group_folders.clear()
         self._camera_image_handles.clear()
+        # ``gui.reset()`` already destroyed every custom panel control, so the
+        # cached containers must be forgotten without removing them again.
+        self._panel_containers.clear()
+        self._panel_built.clear()
         self._server.gui.add_markdown(
             f"**Run:** `{manifest.run_id}`  \n**Scene revision:** {manifest.scene_revision}"
         )
@@ -376,6 +390,129 @@ class ViserBackend(VisualizationBackend):
                             value=bool(event.target.value),
                         )
                     )
+
+    # ------------------------------------------------------------------
+    # Custom side panels
+    # ------------------------------------------------------------------
+
+    def register_panel(self, spec: PanelSpec) -> None:
+        """Register or replace one custom side panel.
+
+        The panel is built immediately when a scene manifest is already
+        published, and rebuilt after every later manifest because publishing a
+        manifest resets the browser GUI.
+
+        Args:
+            spec: Panel build and state callbacks.
+        """
+        self._assert_update_thread()
+        if not isinstance(spec, PanelSpec):
+            raise TypeError("register_panel expects a PanelSpec.")
+        if spec.panel_id in self._panels:
+            self._remove_panel_container(spec.panel_id)
+        self._panels[spec.panel_id] = spec
+        if self._server is not None and self._run_id is not None:
+            self._build_panel(spec)
+
+    def unregister_panel(self, panel_id: str) -> None:
+        """Remove one custom side panel and, when owned, its container.
+
+        Args:
+            panel_id: Identifier used at registration time.
+        """
+        self._assert_update_thread()
+        self._panels.pop(panel_id, None)
+        self._panel_states.pop(panel_id, None)
+        self._panel_built.discard(panel_id)
+        self._remove_panel_container(panel_id)
+
+    def publish_panel_state(self, panel_id: str, state: object) -> None:
+        """Push one immutable state object into a registered custom panel.
+
+        Args:
+            panel_id: Identifier used at registration time.
+            state: Immutable payload handed to the panel's state callback.
+        """
+        self._assert_update_thread()
+        spec = self._panels.get(panel_id)
+        if spec is None:
+            return
+        self._panel_states[panel_id] = state
+        if spec.apply_state is not None and panel_id in self._panel_built:
+            spec.apply_state(state)
+
+    def _remove_panel_container(self, panel_id: str) -> None:
+        """Remove the backend-owned folder of one panel, if it has one."""
+        container = self._panel_containers.pop(panel_id, None)
+        if container is not None:
+            container.remove()
+
+    def _panel_build_context(self, spec: PanelSpec) -> PanelBuildContext:
+        """Build the neutral context handed to one panel's build callback."""
+        return PanelBuildContext(
+            gui=self._server.gui,
+            emit=functools.partial(self._emit_panel_event, spec.panel_id),
+            client_id=self._event_client_id,
+            run_id=str(self._run_id),
+            scene_revision=self._scene_revision,
+            allow_commands=self.allow_commands,
+        )
+
+    def _emit_panel_event(
+        self,
+        panel_id: str,
+        value: object,
+        *,
+        event: object | None = None,
+    ) -> None:
+        """Queue one panel interaction from a browser callback thread."""
+        client_id = None if event is None else self._event_client_id(event)
+        self._gui_events.put(_GuiEvent("panel", (panel_id, client_id, value)))
+
+    def _build_panel(self, spec: PanelSpec) -> None:
+        """Create one panel's controls and replay its latest known state."""
+        context = self._panel_build_context(spec)
+        if spec.title is None:
+            spec.build(context)
+        else:
+            container = self._server.gui.add_folder(
+                spec.title,
+                expand_by_default=True,
+            )
+            self._panel_containers[spec.panel_id] = container
+            with container:
+                spec.build(context)
+        self._panel_built.add(spec.panel_id)
+        state = self._panel_states.get(spec.panel_id)
+        if state is not None and spec.apply_state is not None:
+            spec.apply_state(state)
+
+    def _build_panels(self) -> None:
+        """Rebuild every registered panel in registration order."""
+        for spec in tuple(self._panels.values()):
+            self._build_panel(spec)
+
+    def _publish_panel_command(
+        self,
+        panel_id: str,
+        client_id: str | None,
+        value: object,
+    ) -> None:
+        """Forward one panel interaction to the simulation thread."""
+        sink = getattr(self, "_panel_command_sink", None)
+        if sink is None or self._run_id is None or panel_id not in self._panels:
+            return
+        self._panel_sequence += 1
+        sink(
+            PanelCommand(
+                run_id=self._run_id,
+                scene_revision=self._scene_revision,
+                sequence=self._panel_sequence,
+                panel_id=panel_id,
+                client_id=client_id or "unknown",
+                value=value,
+            )
+        )
 
     @staticmethod
     def _event_client_id(event: object) -> str | None:
@@ -1168,7 +1305,10 @@ class ViserBackend(VisualizationBackend):
                     batched_positions=np.zeros((count, 3), dtype=np.float32),
                     batched_colors=geometry.color,
                     batched_opacities=np.asarray(
-                        [1.0 if node.visible else 0.0 for node in nodes],
+                        [
+                            (1.0 if node.visible else 0.0) * node.opacity
+                            for node in nodes
+                        ],
                         dtype=np.float32,
                     ),
                     side="double",
@@ -1179,6 +1319,7 @@ class ViserBackend(VisualizationBackend):
                     frame_indices=np.empty((0,), dtype=np.int64),
                     env_ids=np.empty((0,), dtype=np.int64),
                     frame_visible=np.empty((0,), dtype=np.bool_),
+                    node_opacities=np.empty((0,), dtype=np.float32),
                 )
                 self._mesh_batches[geometry_id] = batch
             batch.node_ids = tuple(node.node_id for node in nodes)
@@ -1189,6 +1330,9 @@ class ViserBackend(VisualizationBackend):
             batch.env_ids = np.asarray([node.env_id for node in nodes], dtype=np.int64)
             batch.frame_visible = np.asarray(
                 [node.visible for node in nodes], dtype=np.bool_
+            )
+            batch.node_opacities = np.asarray(
+                [node.opacity for node in nodes], dtype=np.float32
             )
             batch.handle.batched_wxyzs = np.tile(
                 np.array([[1.0, 0.0, 0.0, 0.0]], dtype=np.float32),
@@ -1269,6 +1413,7 @@ class ViserBackend(VisualizationBackend):
         self._run_id = manifest.run_id
         self._scene_revision = manifest.scene_revision
         self._register_visibility_controls(manifest)
+        self._build_panels()
         for batch in self._mesh_batches.values():
             self._apply_mesh_visibility(batch)
         for dynamic_mesh in self._dynamic_meshes.values():
@@ -1290,6 +1435,12 @@ class ViserBackend(VisualizationBackend):
                 run_id, revision, click = event.value
                 if (run_id, revision) == (self._run_id, self._scene_revision):
                     self._handle_pick_click(click)
+                continue
+            if event.category == "panel":
+                # Custom panels own their handles; scene visibility is
+                # unaffected, so no scene-wide refresh is required here.
+                panel_id, client_id, value = event.value
+                self._publish_panel_command(str(panel_id), client_id, value)
                 continue
             if event.category == "environment":
                 env_id, visible = event.value
@@ -1394,7 +1545,7 @@ class ViserBackend(VisualizationBackend):
         )
         batch.handle.batched_opacities = (batch.frame_visible & env_visible).astype(
             np.float32
-        )
+        ) * batch.node_opacities
 
     def _apply_dynamic_mesh_visibility(self, dynamic_mesh: _DynamicMesh) -> None:
         dynamic_mesh.handle.visible = (
@@ -1720,6 +1871,11 @@ class ViserBackend(VisualizationBackend):
         self._camera_image_handles.clear()
         self._overlay_handles.clear()
         self._overlay_base_visibility.clear()
+        # Panel registrations survive a restart; only their dead browser
+        # handles are dropped so the next manifest rebuilds them.
+        self._panel_containers.clear()
+        self._panel_built.clear()
+        self._panel_sequence = 0
         while True:
             try:
                 self._gizmo_events.get_nowait()
