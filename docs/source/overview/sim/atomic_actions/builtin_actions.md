@@ -468,6 +468,31 @@ deprecated entity-only fallback. For canonical snapshot grounding and moving
 target recovery, see
 `scripts/tutorials/atomic_action/moving_target_recovery.py`.
 
+### Picking articulated targets
+
+`PickUp` accepts an {class}`~embodichain.lab.sim.objects.Articulation` wherever
+it accepts a rigid object: the scene provider only reads `uid` and
+`get_local_pose()`. Two constraints apply to articulated targets.
+
+`Articulation` exposes no `get_vertices()` or `get_triangles()`, so
+{class}`~embodichain.lab.sim.atomic_actions.AntipodalAffordance` sampling is
+unavailable. Supply `GraspGoal.grasp_xpos` or `PickUpOptions.fixed_object_to_eef`
+instead.
+
+{class}`~embodichain.lab.sim.cfg.ArticulationCfg` fixes roots to the world by
+default, which suits drawers and doors but welds a graspable target in place.
+Set `root_props=ArticulationRootPropertiesCfg(fixed_base=False)`. Left at the
+default, `plan_success` still reports success and the whole trajectory replays
+while the object never moves, so verify the target pose rather than the plan.
+
+`scripts/tutorials/atomic_action/pickup_rubiks_cube.py` demonstrates both on a
+Rubik's cube whose `top_turn` joint is locked with a stiff position drive so the
+two layers grasp as one body.
+
+<p align="center">
+<img src="../../../_static/atomic_actions/pickup_rubiks_cube.gif" alt="PickUp on an articulated Rubik's cube" width="480" style="max-width: 100%;" />
+</p>
+
 (builtin-axis-align)=
 
 ## `AxisAlign`
