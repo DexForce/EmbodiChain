@@ -24,6 +24,7 @@ class VisualizationType(Enum):
     VOXEL = "voxel"
     SPHERE = "sphere"
     AXIS = "axis"
+    MANIPULABILITY = "manipulability"
     # MESH = "mesh"
     # HEATMAP = "heatmap"
 
@@ -43,7 +44,9 @@ class VisualizationConfig:
     - VOXEL: Volumetric voxel grid representation for occupancy mapping
     - SPHERE: Smooth sphere rendering for publication-quality figures
     - AXIS: Coordinate frame visualization for poses and transformations
-    
+    - MANIPULABILITY: Reachable points colored by Yoshikawa manipulability,
+      with a color bar and visually distinct unreachable points
+
     Examples:
         vis_type = VisualizationType.SPHERE
         vis_type = "point_cloud"
