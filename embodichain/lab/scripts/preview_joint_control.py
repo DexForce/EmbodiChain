@@ -176,8 +176,8 @@ class ArticulationPreviewController:
         bindings: list[_JointBinding] = []
         for joint_id in active_joint_ids:
             joint_name = joint_names[joint_id]
-            joint_info = entity.get_joint_info(joint_name)
-            joint_type = _joint_type_name(joint_info.joint_type)
+            joint_desc = entity.get_joint_desc(joint_name)
+            joint_type = _joint_type_name(joint_desc.joint_type)
             if joint_type not in _SUPPORTED_JOINT_TYPES:
                 logger.log_warning(
                     f"Skipping joint {uid!r}/{joint_name!r}: joint type "

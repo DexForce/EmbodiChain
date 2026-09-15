@@ -36,7 +36,7 @@ class _Entity:
             "slide": SimpleNamespace(name="PRISMATIC"),
         }
 
-    def get_joint_info(self, joint_name: str) -> SimpleNamespace:
+    def get_joint_desc(self, joint_name: str) -> SimpleNamespace:
         self.requested_joint_names.append(joint_name)
         return SimpleNamespace(joint_type=self._joint_types[joint_name])
 
