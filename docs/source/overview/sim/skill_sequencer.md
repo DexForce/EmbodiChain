@@ -145,6 +145,7 @@ bridge = AuthoringBridge(
 bridge.register()
 
 while running:
+    bridge.drain_picks()  # must precede sim.update(); see the note below
     if not bridge.execution_active:
         sim.update(step=1)
     preview.advance()
@@ -158,12 +159,23 @@ while running:
     )
 ```
 
+```{important}
+{class}`AuthoringBridge` and {class}`~embodichain.lab.sim.SimulationManager`
+share one browser pick queue. Every `sim.update()` call drains it through
+`update_gizmos()` → `process_pick_commands()`, so a bridge that runs afterwards
+never observes a click-pick and *Picked entity* stays empty. When the simulation manager's Gizmo/pick handling is also active,
+the bridge must take the picks first: call {meth}`AuthoringBridge.drain_picks`
+before `sim.update()`, or move the whole {meth}`AuthoringBridge.update` call
+ahead of it. {meth}`AuthoringBridge.update` still drains picks itself, so a
+loop that does not step a simulation manager needs no extra call.
+```
+
 | Object | Thread | Responsibility |
 |---|---|---|
 | {class}`AuthoringSession` | simulation | Owns the cards, compiles them through the atomic-action engine, and executes the result. Never touches Viser. |
 | {class}`SequencePreview` | simulation | Playback cursor over the compiled trajectory; produces preview-node poses and the path overlay. |
 | {class}`SkillSequencePanel` | visualization worker | Renders an immutable {class}`PanelViewState` into browser controls and emits immutable command values. |
-| {class}`AuthoringBridge` | simulation | Drains click-picks and panel commands, applies them, and publishes the new view state. Turns every failure into a status string instead of raising. |
+| {class}`AuthoringBridge` | simulation | Drains its own panel's commands and the click-picks, applies them, and publishes the new view state. Drops browser input stamped with a stale `run_id` or `scene_revision`, and turns every failure into a status string instead of raising. |
 | {class}`StepwiseExecution` | simulation | Replays a compiled sequence under host-loop control so the browser keeps updating while the robot moves. |
 
 ## Keeping the browser responsive during execution

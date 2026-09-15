@@ -324,9 +324,20 @@ class _Runtime:
     def publish_panel_state(self, panel_id: str, state: object) -> None:
         self.published.append((panel_id, state))
 
-    def drain_panel_commands(self) -> tuple[PanelCommand, ...]:
-        commands = tuple(self.panel_commands)
-        self.panel_commands.clear()
+    def drain_panel_commands(
+        self,
+        panel_id: str | None = None,
+    ) -> tuple[PanelCommand, ...]:
+        commands = tuple(
+            command
+            for command in self.panel_commands
+            if panel_id is None or command.panel_id == panel_id
+        )
+        self.panel_commands = [
+            command
+            for command in self.panel_commands
+            if panel_id is not None and command.panel_id != panel_id
+        ]
         return commands
 
     def drain_pick_commands(self) -> tuple[object, ...]:

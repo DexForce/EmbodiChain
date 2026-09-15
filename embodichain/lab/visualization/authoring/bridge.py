@@ -27,7 +27,16 @@ the panel.
 
 The bridge is the only object allowed to mutate the session on behalf of the
 browser. It converts every failure into a status string instead of raising, so
-one invalid browser request can never abort a simulation loop.
+one invalid browser request can never abort a simulation loop. Browser input
+stamped with a stale ``run_id`` or ``scene_revision`` is dropped, so a click
+queued before a scene refresh can never be applied to a new topology.
+
+The click-pick queue is shared with
+:meth:`~embodichain.lab.sim.SimulationManager.process_pick_commands`, which
+:meth:`~embodichain.lab.sim.SimulationManager.update` runs on every step. A host
+loop whose simulation manager also has Gizmo picking enabled must therefore call
+:meth:`AuthoringBridge.drain_picks` **before** ``sim.update()``; otherwise the
+simulation manager consumes every pick and the panel's selection stays empty.
 
 By default an :class:`~embodichain.lab.visualization.authoring.protocol.ExecuteSequence`
 command is applied through the session's blocking
@@ -92,7 +101,9 @@ class AuthoringBridge:
         process_picks: Whether the bridge drains browser click-picks to track
             the selected entity. Disable it when another consumer, for example
             :meth:`~embodichain.lab.sim.SimulationManager.process_pick_commands`,
-            already drains that queue.
+            already drains that queue. When both consume picks, the host loop
+            must call :meth:`drain_picks` before ``sim.update()``, which drains
+            the same queue through its Gizmo processing.
         pickable_kinds: Asset kinds accepted as skill targets.
         stepwise_execution: Whether an ``ExecuteSequence`` command starts a
             host-driven :class:`StepwiseExecution` instead of blocking inside
@@ -203,18 +214,78 @@ class AuthoringBridge:
         host-driven execution is active the call also advances it by
         ``execution_steps_per_update`` simulation updates.
 
+        Commands stamped with a stale ``run_id`` or ``scene_revision`` are
+        discarded, so a click queued before a
+        :meth:`~embodichain.lab.visualization.VisualizationRuntime.refresh_scene`
+        cannot be applied against a different scene topology.
+
+        The browser pick queue is shared with
+        :meth:`~embodichain.lab.sim.SimulationManager.process_pick_commands`,
+        which :meth:`~embodichain.lab.sim.SimulationManager.update` calls on
+        every step. When the simulation manager also processes picks, call
+        :meth:`drain_picks` before ``sim.update()`` or the browser selection
+        never reaches this bridge.
+
         Returns:
             The view state published to the panel.
         """
-        self._drain_picks()
+        self.drain_picks()
         applied = False
-        for command in self._runtime.drain_panel_commands():
+        exporter = self._runtime.exporter
+        for command in self._runtime.drain_panel_commands(self._panel.panel_id):
             if command.panel_id != self._panel.panel_id:
+                continue
+            if (
+                command.run_id != exporter.run_id
+                or command.scene_revision != exporter.scene_revision
+            ):
                 continue
             self._apply(command.value)
             applied = True
         self._advance_execution(keep_status=applied)
         return self.publish()
+
+    def drain_picks(self) -> str | None:
+        """Consume queued browser click-picks and track the newest selection.
+
+        :meth:`update` already calls this. Call it separately, **before**
+        :meth:`~embodichain.lab.sim.SimulationManager.update`, whenever the
+        simulation manager processes picks too: its per-step
+        :meth:`~embodichain.lab.sim.SimulationManager.process_pick_commands`
+        drains the same runtime queue, so a bridge running after it would never
+        observe a browser selection. The call is cheap and idempotent when the
+        queue is empty, and does nothing when ``process_picks`` is disabled.
+
+        Picks stamped with a stale ``run_id`` or ``scene_revision`` are
+        discarded, and picks resolving to a kind outside ``pickable_kinds``
+        only update the status line.
+
+        Returns:
+            The selected entity UID after the drain, or ``None`` when nothing
+            is selected.
+        """
+        if not self._process_picks:
+            return self._selected_entity_uid
+        exporter = self._runtime.exporter
+        for command in self._runtime.drain_pick_commands():
+            if (
+                command.run_id != exporter.run_id
+                or command.scene_revision != exporter.scene_revision
+            ):
+                continue
+            if command.node_id is None:
+                self._selected_entity_uid = None
+                continue
+            resolved = exporter.resolve_node_target(command.node_id)
+            if resolved is None:
+                continue
+            uid, kind = resolved
+            if kind not in self._pickable_kinds:
+                self._status = f"Picked {kind} {uid!r} cannot be a skill target."
+                continue
+            self._selected_entity_uid = uid
+            self._status = f"Picked entity {uid!r}."
+        return self._selected_entity_uid
 
     def publish(self, *, force: bool = False) -> PanelViewState:
         """Rebuild the view state and publish it when it changed.
@@ -246,30 +317,6 @@ class AuthoringBridge:
             selected_entity_uid=self._selected_entity_uid,
             status=self._status,
         )
-
-    def _drain_picks(self) -> None:
-        """Track the newest browser click-pick as the selected entity."""
-        if not self._process_picks:
-            return
-        exporter = self._runtime.exporter
-        for command in self._runtime.drain_pick_commands():
-            if (
-                command.run_id != exporter.run_id
-                or command.scene_revision != exporter.scene_revision
-            ):
-                continue
-            if command.node_id is None:
-                self._selected_entity_uid = None
-                continue
-            resolved = exporter.resolve_node_target(command.node_id)
-            if resolved is None:
-                continue
-            uid, kind = resolved
-            if kind not in self._pickable_kinds:
-                self._status = f"Picked {kind} {uid!r} cannot be a skill target."
-                continue
-            self._selected_entity_uid = uid
-            self._status = f"Picked entity {uid!r}."
 
     def _apply(self, value: object) -> None:
         """Apply one panel command value on the simulation thread."""

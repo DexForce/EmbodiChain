@@ -420,6 +420,10 @@ def run_interactive(
     physics_dt = float(sim.sim_config.physics_dt)
     try:
         while True:
+            # SimulationManager.update() drains the shared browser pick queue
+            # through its Gizmo processing, so the bridge must take the picks
+            # first or the panel never sees a click-pick.
+            bridge.drain_picks()
             # A stepwise execution owns the simulation clock while it runs, so
             # the host loop must not step physics a second time.
             if not bridge.execution_active:

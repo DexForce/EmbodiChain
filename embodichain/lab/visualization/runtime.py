@@ -223,29 +223,55 @@ class PanelCommandQueue:
     """Bounded arrival-order queue for custom panel interactions.
 
     Panel values are discrete user intents, so unlike drag updates they are
-    never coalesced. When the queue is full the oldest command is dropped.
+    never coalesced. Commands are stored in one sub-queue per ``panel_id``, so
+    a consumer draining its own panel can never swallow the commands another
+    panel's consumer has not read yet. ``maxsize`` bounds each sub-queue
+    independently and drops that panel's oldest command when it is full.
     """
 
     def __init__(self, maxsize: int = 256) -> None:
         if maxsize <= 0:
             raise ValueError("maxsize must be greater than zero.")
         self._maxsize = maxsize
-        self._commands: deque[PanelCommand] = deque()
+        self._commands: dict[str, deque[tuple[int, PanelCommand]]] = {}
+        self._arrivals = 0
         self._lock = threading.Lock()
 
     def put(self, command: PanelCommand) -> None:
         """Enqueue a command without blocking the visualization thread."""
         with self._lock:
-            if len(self._commands) >= self._maxsize:
-                self._commands.popleft()
-            self._commands.append(command)
+            commands = self._commands.get(command.panel_id)
+            if commands is None:
+                commands = deque()
+                self._commands[command.panel_id] = commands
+            if len(commands) >= self._maxsize:
+                commands.popleft()
+            self._arrivals += 1
+            commands.append((self._arrivals, command))
 
-    def drain(self) -> tuple[PanelCommand, ...]:
-        """Return and clear all queued commands in arrival order."""
+    def drain(self, panel_id: str | None = None) -> tuple[PanelCommand, ...]:
+        """Return and clear queued commands in arrival order.
+
+        Args:
+            panel_id: Panel whose commands are drained. ``None``, the default,
+                drains every panel and merges the result back into the global
+                arrival order.
+
+        Returns:
+            The drained commands, oldest first.
+        """
         with self._lock:
-            commands = tuple(self._commands)
+            if panel_id is not None:
+                commands = self._commands.pop(panel_id, None)
+                if not commands:
+                    return ()
+                return tuple(command for _, command in commands)
+            pending = sorted(
+                (entry for entries in self._commands.values() for entry in entries),
+                key=lambda entry: entry[0],
+            )
             self._commands.clear()
-        return commands
+        return tuple(command for _, command in pending)
 
     def clear(self) -> None:
         """Discard all queued commands."""
@@ -429,11 +455,24 @@ class VisualizationRuntime:
         if self.cfg.allow_commands:
             self._panel_commands.put(command)
 
-    def drain_panel_commands(self) -> tuple[PanelCommand, ...]:
-        """Drain custom panel interactions for simulation-thread processing."""
+    def drain_panel_commands(
+        self,
+        panel_id: str | None = None,
+    ) -> tuple[PanelCommand, ...]:
+        """Drain custom panel interactions for simulation-thread processing.
+
+        Args:
+            panel_id: Panel whose commands are drained. ``None``, the default,
+                drains every registered panel in arrival order. Pass the
+                identifier whenever several consumers share one runtime, so a
+                consumer cannot swallow commands addressed to another panel.
+
+        Returns:
+            The drained commands, oldest first.
+        """
         if not self.cfg.allow_commands:
             return ()
-        return self._panel_commands.drain()
+        return self._panel_commands.drain(panel_id)
 
     def register_panel(self, spec: PanelSpec) -> None:
         """Register one custom side panel on the visualization backend.

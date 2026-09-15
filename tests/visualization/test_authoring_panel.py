@@ -65,6 +65,18 @@ PREVIEW_LENGTH = 24
 PREVIEW_CURSOR = 7
 
 
+def _queued_panel_command(panel_id: str, sequence: int) -> PanelCommand:
+    """Build one panel command carrying its arrival index as the value."""
+    return PanelCommand(
+        run_id="run",
+        scene_revision=0,
+        sequence=sequence,
+        panel_id=panel_id,
+        client_id="client",
+        value=sequence,
+    )
+
+
 # ----------------------------------------------------------------------------
 # Browser-free fakes
 # ----------------------------------------------------------------------------
@@ -708,6 +720,26 @@ class TestBackendPanelRegistry:
         assert [command.value for command in drained] == [1, 2]
         assert queue.drain() == ()
 
+    def test_panel_command_queue_drains_one_panel_without_swallowing_others(
+        self,
+    ) -> None:
+        queue = PanelCommandQueue()
+        for index, panel_id in enumerate(("left", "right", "left", "right")):
+            queue.put(_queued_panel_command(panel_id, index))
+
+        assert [command.value for command in queue.drain("left")] == [0, 2]
+        assert queue.drain("left") == ()
+        assert [command.value for command in queue.drain("right")] == [1, 3]
+
+    def test_panel_command_queue_drains_every_panel_in_arrival_order(self) -> None:
+        queue = PanelCommandQueue()
+        for index, panel_id in enumerate(("left", "right", "left", "right")):
+            queue.put(_queued_panel_command(panel_id, index))
+
+        assert [command.value for command in queue.drain()] == [0, 1, 2, 3]
+        assert queue.drain() == ()
+        assert queue.drain("left") == ()
+
     def test_panel_command_rejects_mutable_payloads(self) -> None:
         with pytest.raises(TypeError, match="immutable"):
             PanelCommand(
@@ -898,9 +930,20 @@ class _Runtime:
     def publish_panel_state(self, panel_id: str, state: object) -> None:
         self.published.append((panel_id, state))
 
-    def drain_panel_commands(self) -> tuple[PanelCommand, ...]:
-        commands = tuple(self.panel_commands)
-        self.panel_commands.clear()
+    def drain_panel_commands(
+        self,
+        panel_id: str | None = None,
+    ) -> tuple[PanelCommand, ...]:
+        if panel_id is None:
+            commands = tuple(self.panel_commands)
+            self.panel_commands.clear()
+            return commands
+        commands = tuple(
+            command for command in self.panel_commands if command.panel_id == panel_id
+        )
+        self.panel_commands = [
+            command for command in self.panel_commands if command.panel_id != panel_id
+        ]
         return commands
 
     def drain_pick_commands(self) -> tuple[object, ...]:
@@ -908,11 +951,22 @@ class _Runtime:
         self.pick_commands.clear()
         return commands
 
-    def queue(self, value: object, panel_id: str = "skill_sequence") -> None:
+    def sim_update(self) -> None:
+        """Mimic ``SimulationManager.update`` draining the shared pick queue."""
+        self.pick_commands.clear()
+
+    def queue(
+        self,
+        value: object,
+        panel_id: str = "skill_sequence",
+        *,
+        run_id: str = "run",
+        scene_revision: int = 1,
+    ) -> None:
         self.panel_commands.append(
             PanelCommand(
-                run_id="run",
-                scene_revision=1,
+                run_id=run_id,
+                scene_revision=scene_revision,
                 sequence=len(self.panel_commands) + 1,
                 panel_id=panel_id,
                 client_id="client",
@@ -1056,6 +1110,21 @@ class TestAuthoringBridge:
 
         assert session.cards == ()
 
+    def test_stale_panel_commands_are_dropped(self) -> None:
+        bridge, session, runtime = _bridge()
+        bridge.register()
+
+        runtime.queue(AddCard(skill_id="place", card_id="old"), scene_revision=99)
+        runtime.queue(AddCard(skill_id="place", card_id="other_run"), run_id="stale")
+        bridge.update()
+
+        assert session.cards == ()
+
+        runtime.queue(AddCard(skill_id="place", card_id="fresh"))
+        bridge.update()
+
+        assert [card.card_id for card in session.cards] == ["fresh"]
+
     def test_unknown_command_values_are_reported(self) -> None:
         bridge, _, runtime = _bridge()
         bridge.register()
@@ -1124,6 +1193,80 @@ class TestAuthoringBridge:
         view = bridge.update()
 
         assert view.selected_entity_uid is None
+
+    def test_picks_reach_the_bridge_when_drained_before_sim_update(self) -> None:
+        """A host loop stepping a simulation must drain picks first.
+
+        ``SimulationManager.update`` drains the same runtime pick queue through
+        its Gizmo processing, so a bridge running after it observes nothing.
+        """
+        exporter = _Exporter({"env:0/rigid:cube": ("cube", "rigid")})
+        runtime = _Runtime(exporter)
+        bridge, _, _ = _bridge(runtime)
+        bridge.register()
+
+        # Tutorial ordering: drain_picks() -> sim.update() -> bridge.update().
+        runtime.pick_commands.append(_pick("env:0/rigid:cube"))
+        bridge.drain_picks()
+        runtime.sim_update()
+
+        assert bridge.update().selected_entity_uid == "cube"
+
+        # The reversed ordering is exactly what the tutorial must not do.
+        late_runtime = _Runtime(_Exporter({"env:0/rigid:cube": ("cube", "rigid")}))
+        late_bridge, _, _ = _bridge(late_runtime)
+        late_bridge.register()
+
+        late_runtime.pick_commands.append(_pick("env:0/rigid:cube"))
+        late_runtime.sim_update()
+
+        assert late_bridge.update().selected_entity_uid is None
+
+    def test_bridges_sharing_a_runtime_keep_their_own_commands(self) -> None:
+        backend = _RecordingBackend()
+        runtime = VisualizationRuntime(
+            _ManifestExporter(),
+            VisualizationCfg(backend="viser", allow_commands=True),
+            backend=backend,
+        )
+        bridges: dict[str, tuple[AuthoringBridge, AuthoringSession]] = {}
+        for panel_id in ("left", "right"):
+            session = AuthoringSession(
+                robot=SimpleNamespace(),
+                engine=SimpleNamespace(),
+                sim=SimpleNamespace(),
+                control_parts={"motion": "arm", "grasp": "hand"},
+            )
+            bridge = AuthoringBridge(
+                session,
+                runtime,
+                SkillSequencePanel(SkillSequencePanelCfg(panel_id=panel_id)),
+            )
+            bridge.register()
+            bridges[panel_id] = (bridge, session)
+        for sequence, (panel_id, card_id) in enumerate((("left", "a"), ("right", "b"))):
+            backend._panel_command_sink(
+                PanelCommand(
+                    run_id="run",
+                    scene_revision=0,
+                    sequence=sequence,
+                    panel_id=panel_id,
+                    client_id="client",
+                    value=AddCard(skill_id="pick_up", card_id=card_id),
+                )
+            )
+
+        left_bridge, left_session = bridges["left"]
+        right_bridge, right_session = bridges["right"]
+        left_bridge.update()
+
+        assert [card.card_id for card in left_session.cards] == ["a"]
+        assert right_session.cards == ()
+
+        right_bridge.update()
+
+        assert [card.card_id for card in right_session.cards] == ["b"]
+        assert [card.card_id for card in left_session.cards] == ["a"]
 
     def test_picks_can_be_left_to_another_consumer(self) -> None:
         exporter = _Exporter({"env:0/rigid:cube": ("cube", "rigid")})

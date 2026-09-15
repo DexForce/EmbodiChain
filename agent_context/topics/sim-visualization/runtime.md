@@ -184,11 +184,14 @@ published state is replayed.
 The backend stays neutral: it hands `build` a `PanelBuildContext` (GUI
 namespace, `emit` sink, event-to-client resolver, run identity, and
 `allow_commands`) and forwards whatever immutable value the panel emits through
-the existing GUI event queue as a `PanelCommand`. The simulation thread drains
-them with `drain_panel_commands()` (empty unless `allow_commands=True`) and
-pushes new state with `publish_panel_state(panel_id, state)`, which keeps only
-the newest state per panel. Registering nothing leaves browser behavior
-bit-for-bit unchanged.
+the existing GUI event queue as a `PanelCommand`. `PanelCommandQueue` stores one
+bounded sub-queue per `panel_id`. The simulation thread drains them with
+`drain_panel_commands(panel_id=None)` (empty unless `allow_commands=True`):
+passing an identifier drains only that panel, so consumers sharing one runtime
+cannot swallow each other's commands, while the default drains every panel
+merged back into global arrival order. New state is pushed with
+`publish_panel_state(panel_id, state)`, which keeps only the newest state per
+panel. Registering nothing leaves browser behavior bit-for-bit unchanged.
 
 `authoring.SkillSequencePanel` is the first consumer. It renders an immutable
 `PanelViewState` (sequence snapshot, preview playback state, picked entity,
@@ -197,11 +200,18 @@ values with marker glyphs, and emits authoring commands plus the
 `TogglePreviewPlayback` / `SeekPreview` / `StepPreview` playback family. It
 never calls a session write method. `authoring.AuthoringBridge` closes the loop
 on the simulation thread: once per iteration `update()` drains click-picks into
-the selected entity, routes panel commands through
+the selected entity, drains only its own panel's commands, routes them through
 `AuthoringSession.handle_command()` or the preview driver, converts failures
-into a status string, and republishes the view state when it changed. Viser
-sliders have no mutable range, so the panel rebuilds its seek slider whenever
-the compiled length changes and ignores server-side value echoes.
+into a status string, and republishes the view state when it changed. Picks and
+panel commands stamped with a stale `run_id` or `scene_revision` are dropped, so
+input queued before a `refresh_scene()` is never applied to the new topology.
+The pick queue is shared with `SimulationManager.process_pick_commands()`, which
+every `sim.update()` runs through `update_gizmos()`; a host loop that steps a
+simulation manager with picking enabled must therefore call the public
+`AuthoringBridge.drain_picks()` before `sim.update()` or the panel never sees a
+selection. Viser sliders have no mutable range, so the panel rebuilds its seek
+slider whenever the compiled length changes and ignores server-side value
+echoes.
 
 `AuthoringSession.execute()` blocks until the whole trajectory is replayed, so
 a browser sees nothing until it returns. `execute_stepwise()` is the additive,
