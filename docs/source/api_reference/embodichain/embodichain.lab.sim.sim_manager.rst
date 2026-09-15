@@ -29,6 +29,11 @@ not write drive targets. Set this field to ``None`` to opt out or select
 prevents automatic recreation. ``GizmoCfg(ik_start_enabled=True)`` activates
 native IK on the first update with an open window, as used by the robot tutorial.
 
+``simulation_time`` reports seconds successfully advanced through ``update``
+since manager construction. Collection hosts can use differences of this clock
+for observation timestamps. Direct backend steps outside the manager, including
+some object preparation setters, are not included.
+
 .. rubric:: Classes
 
 .. autosummary::

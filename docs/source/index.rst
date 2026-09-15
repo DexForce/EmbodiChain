@@ -37,6 +37,7 @@ Table of Contents
    overview/sim/index
    overview/task_program/index
    overview/gym/index
+   overview/trajectory_generation
    overview/rl/index
 
 .. toctree::

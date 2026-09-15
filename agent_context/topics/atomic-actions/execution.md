@@ -47,6 +47,16 @@ implementation `_plan(request, context)` hook.
 - `ExecutionRunner` drives that session against observation, command, and clock
   ports without blocking `step()`.
 
+For selected trajectory candidates, `engine.start(...,
+initial_plan_provider=provider)` materializes the first invocation's initial
+`ActionPlan` from the newly resolved request and current `PlanningContext`.
+The framework still binds collision options, authorizes command destinations,
+checks plan identities and scene revisions, and installs tracking and phase
+gates. The provider is consumed only during session construction; subsequent
+invocations and recovery use the registered skill planner. Rebuild the plan,
+binding-dependent effects, and session after reset instead of retaining runtime
+state from a previous rollout.
+
 ## PlanningContext invariants
 
 `PlanningContext` carries robot observation, scene snapshot, symbolic
@@ -89,6 +99,11 @@ Held-object guards and phase-effect gates are observational:
 
 Pick gates attachment before lift. Place gates detachment before retract.
 HandOver owns independent source/destination transfer boundaries.
+
+PickUp's ragged grasp sampling uses an explicit candidate mask. Empty rows and
+padding carry a safe current FK pose and cannot win selection; an entirely
+empty batch fails without candidate IK. Failed or non-finite IK outputs retain
+the preceding valid seed before later pickup stages are screened.
 
 ## Row-local state
 

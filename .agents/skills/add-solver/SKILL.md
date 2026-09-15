@@ -37,6 +37,10 @@ Plus two registration edits:
 - Add the docs page to the toctree in
   `docs/source/overview/sim/motion/solvers/index.rst`.
 
+Keep solver exports in the solver subpackage. The `motion` parent resolves
+subpackages lazily; do not add eager planner or workspace analyzer imports to
+the Robot initialization path.
+
 ## Steps
 
 ### 1. Gather Solver Requirements

@@ -29,6 +29,7 @@ bundles official tasks as the **`embodichain_tasks`** import package.
 | Simulation world, objects, sensors, solvers, planning | `embodichain/lab/sim/` |
 | Gym environments and manager functors | `embodichain/lab/gym/` |
 | Task Program language, semantics, compiler, runtime and integrations | `embodichain/lab/task_program/` |
+| Fixed-scene trajectory host, rollout and persistence | `embodichain/lab/trajectory_generation/` |
 | Browser visualization | `embodichain/lab/visualization/` |
 | RL algorithms, policies, collectors and trainers | `embodichain/learning/rl/` |
 | Real-device controllers / standalone tools | `embodichain/lab/devices/`, `embodichain/toolkits/` |

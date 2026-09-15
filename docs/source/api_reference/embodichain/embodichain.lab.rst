@@ -10,7 +10,8 @@ The ``lab`` package is EmbodiChain's robotics laboratory. It owns the
 provider-independent Task Program language (including its Semantic Call
 contracts), the simulation core (``sim``), the Gymnasium-compatible
 environment framework (``gym``), real-device controllers (``devices``), and
-browser visualization (``visualization``).
+browser visualization (``visualization``), and fixed-scene generation host
+integration (``trajectory_generation``).
 
 .. rubric:: Submodules
 
@@ -21,6 +22,15 @@ browser visualization (``visualization``).
    gym
    sim
    visualization
+   trajectory_generation
+
+Trajectory Generation
+---------------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.trajectory_generation
 
 Browser Visualization
 ---------------------

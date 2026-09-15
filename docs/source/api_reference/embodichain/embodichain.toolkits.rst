@@ -1,8 +1,9 @@
 embodichain.toolkits
 ====================
 
-The :mod:`embodichain.toolkits` package contains asset-preparation and
-manipulation utilities that can be used independently of the simulation loop.
+The :mod:`embodichain.toolkits` package contains standalone asset-preparation
+and manipulation utilities. Robot motion capabilities are documented under
+:mod:`embodichain.lab.sim.motion`.
 
 .. automodule:: embodichain.toolkits
 
