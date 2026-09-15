@@ -1855,6 +1855,12 @@ class WorkspaceAnalyzer:
                 and self.config.reference_pose is not None
             ):
                 common_kwargs["reference_pose"] = self.config.reference_pose
+        elif vis_type == VisualizationType.MANIPULABILITY:
+            # The manipulability visualizer colors by score, not reachability,
+            # so it needs the scores (and the mask that lines the compact
+            # reachable-only score vector up with the drawn points).
+            common_kwargs["scores"] = self.manipulability_scores
+            common_kwargs["reachable_mask"] = getattr(self, "reachability_mask", None)
         # For other visualization types (MESH, HEATMAP), use only common arguments
 
         return factory.create_visualizer(viz_type=vis_type, **common_kwargs)
