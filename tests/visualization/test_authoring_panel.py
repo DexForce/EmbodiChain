@@ -740,6 +740,35 @@ class TestBackendPanelRegistry:
         assert queue.drain() == ()
         assert queue.drain("left") == ()
 
+    def test_panel_command_queue_discards_one_panel(self) -> None:
+        queue = PanelCommandQueue()
+        for index, panel_id in enumerate(("left", "right", "left")):
+            queue.put(_queued_panel_command(panel_id, index))
+
+        queue.discard("left")
+
+        assert queue.drain("left") == ()
+        # Discarding one panel must leave every other panel untouched.
+        assert [command.value for command in queue.drain("right")] == [1]
+
+    def test_unregistering_a_panel_drops_its_pending_commands(self) -> None:
+        """A panel reusing a retired identifier must not inherit its queue."""
+        backend = _RecordingBackend()
+        runtime = VisualizationRuntime(
+            _ManifestExporter(),
+            VisualizationCfg(backend="viser", allow_commands=True),
+            backend=backend,
+        )
+        runtime.register_panel(PanelSpec(panel_id="demo", build=lambda _ctx: None))
+        backend._panel_command_sink(_queued_panel_command("demo", 0))
+        runtime.unregister_panel("demo")
+
+        # A replacement panel registers under the same identifier within the
+        # same run and scene revision, so the run/revision guards cannot catch
+        # the predecessor's command.
+        runtime.register_panel(PanelSpec(panel_id="demo", build=lambda _ctx: None))
+        assert runtime.drain_panel_commands("demo") == ()
+
     def test_panel_command_rejects_mutable_payloads(self) -> None:
         with pytest.raises(TypeError, match="immutable"):
             PanelCommand(

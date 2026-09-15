@@ -273,6 +273,18 @@ class PanelCommandQueue:
             self._commands.clear()
         return tuple(command for _, command in pending)
 
+    def discard(self, panel_id: str) -> None:
+        """Drop every command queued for one panel.
+
+        Called when a panel is unregistered, so a later panel reusing the same
+        identifier cannot inherit interactions aimed at its predecessor.
+
+        Args:
+            panel_id: Panel whose pending commands are discarded.
+        """
+        with self._lock:
+            self._commands.pop(panel_id, None)
+
     def clear(self) -> None:
         """Discard all queued commands."""
         with self._lock:
@@ -492,6 +504,10 @@ class VisualizationRuntime:
     def unregister_panel(self, panel_id: str) -> None:
         """Remove one custom side panel from the visualization backend.
 
+        Pending state and pending commands for ``panel_id`` are discarded, so
+        a later panel registering under the same identifier starts clean
+        instead of inheriting its predecessor's queued interactions.
+
         Args:
             panel_id: Identifier used at registration time.
         """
@@ -499,6 +515,7 @@ class VisualizationRuntime:
             raise ValueError("panel_id must not be empty.")
         with self._panel_states_lock:
             self._panel_states.pop(panel_id, None)
+        self._panel_commands.discard(panel_id)
         self._panel_registrations.put_nowait((panel_id, None))
 
     def publish_panel_state(self, panel_id: str, state: object) -> None:
