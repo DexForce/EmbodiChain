@@ -25,11 +25,8 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.motion.solvers import URSolverCfg
 from embodichain.lab.sim.cfg import (
-    RenderCfg,
     JointDrivePropertiesCfg,
     RobotCfg,
-    LightCfg,
-    RigidObjectCfg,
     URDFCfg,
 )
 
@@ -74,38 +71,42 @@ def grid_sample_qpos_from_limits(
     return stacked
 
 
-# Base test class for OPWSolver
 class BaseSolverTest:
+    """Shared FK/IK contract for UR arms on CPU and CUDA."""
+
     sim = None  # Define as a class attribute
 
-    def setup_simulation(self, device):
+    def setup_simulation(self, device: str, ur_type: str = "ur10") -> None:
         config = SimulationManagerCfg(headless=True, device=device)
         self.sim = SimulationManager(config)
 
-        ur10_urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
+        ur_name = ur_type.upper()
+        urdf_path = get_data_path(f"UniversalRobots/{ur_name}/{ur_name}.urdf")
+        # UR5 uses lowercase joint names; UR10 uses Joint1..Joint6.
+        arm_joint_pattern = "joint[0-9]" if ur_type == "ur5" else "Joint[0-9]"
         gripper_urdf_path = get_data_path("DH_PGC_140_50_M/DH_PGC_140_50_M.urdf")
         # Configure the robot with its components and control properties
         cfg = RobotCfg(
-            uid="UR10",
+            uid=ur_name,
             urdf_cfg=URDFCfg(
                 components=[
-                    {"component_type": "arm", "urdf_path": ur10_urdf_path},
+                    {"component_type": "arm", "urdf_path": urdf_path},
                     {"component_type": "hand", "urdf_path": gripper_urdf_path},
                 ]
             ),
             joint_drive_props=JointDrivePropertiesCfg(
-                stiffness={"Joint[0-9]": 1e4, "FINGER[1-2]": 1e3},
-                damping={"Joint[0-9]": 1e3, "FINGER[1-2]": 1e2},
-                max_effort={"Joint[0-9]": 1e5, "FINGER[1-2]": 1e4},
+                stiffness={arm_joint_pattern: 1e4, "FINGER[1-2]": 1e3},
+                damping={arm_joint_pattern: 1e3, "FINGER[1-2]": 1e2},
+                max_effort={arm_joint_pattern: 1e5, "FINGER[1-2]": 1e4},
                 drive_type="force",
             ),
             control_parts={
-                "arm": ["Joint[0-9]"],
+                "arm": [arm_joint_pattern],
                 "hand": ["FINGER[1-2]"],
             },
             solver_cfg={
                 "arm": URSolverCfg(
-                    ur_type="ur10",
+                    ur_type=ur_type,
                     tcp=[
                         [0.0, 1.0, 0.0, 0.0],
                         [-1.0, 0.0, 0.0, 0.0],
@@ -201,6 +202,16 @@ class TestURSolverCUDA(BaseSolverTest):
 class TestURSolver(BaseSolverTest):
     def setup_method(self):
         self.setup_simulation("cpu")
+
+
+class TestUR5SolverCUDA(BaseSolverTest):
+    def setup_method(self) -> None:
+        self.setup_simulation("cuda", ur_type="ur5")
+
+
+class TestUR5Solver(BaseSolverTest):
+    def setup_method(self) -> None:
+        self.setup_simulation("cpu", ur_type="ur5")
 
 
 if __name__ == "__main__":
