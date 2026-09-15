@@ -106,6 +106,24 @@ def test_repository_manifest_maps_supported_scripts(
     assert expected_selector in plan.selectors
 
 
+def test_repository_manifest_maps_ik_tutorial_to_its_behavior_contracts() -> None:
+    root = Path(__file__).resolve().parents[2]
+    manifest = load_manifest(root / ".ci/test-impact.toml")
+
+    plan = build_plan(
+        root,
+        [ChangedPath("scripts/tutorials/sim/ik_manipulability_selection.py")],
+        manifest,
+        map_data={"topics": []},
+    )
+
+    assert plan.mode == "partial"
+    assert {
+        "tests/sim/motion/solvers/test_ik_manipulability_selection.py",
+        "tests/visualization/test_example_tutorial_coverage.py",
+    } <= set(plan.selectors)
+
+
 @pytest.mark.parametrize(
     "source_path",
     [
