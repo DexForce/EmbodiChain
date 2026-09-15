@@ -179,6 +179,10 @@ mouse wheel to zoom.
 
 ## External policy example
 
+For ONNX-backed Motion Profiles, install the shared
+[`policy-deploy` extra](../quick_start/install.md#optional-policy-deployment-policy-deploy)
+before evaluation.
+
 For an already-authored DexSim Policy Spec, prefer the native
 `dexsim policy validate` and `dexsim policy run` commands. EmbodiChain's
 `--profile` path is intended for provider code that constructs a Policy Spec

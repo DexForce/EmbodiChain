@@ -184,8 +184,8 @@ class _OnnxPolicy:
             import onnxruntime as ort
         except ImportError as exc:
             raise ImportError(
-                "NeuralPlanner requires onnxruntime. Install EmbodiChain with "
-                "the 'nmg' optional dependency."
+                "NeuralPlanner requires ONNX Runtime. Install it with "
+                "pip install 'embodichain[policy-deploy]'."
             ) from exc
 
         options = ort.SessionOptions()
