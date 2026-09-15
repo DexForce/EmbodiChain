@@ -142,6 +142,8 @@ class SolverCfg:
 
 
 class BaseSolver(metaclass=ABCMeta):
+    """Base interface shared by robot forward and inverse kinematics solvers."""
+
     def __init__(self, cfg: SolverCfg = None, device: str = None, **kwargs):
         r"""Initializes the kinematics solver with a robot model.
 
