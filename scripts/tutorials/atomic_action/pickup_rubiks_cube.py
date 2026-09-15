@@ -22,9 +22,11 @@ consequences drive this tutorial:
 
 * The USD parser rejects the asset as a rigid object, so it is spawned through
   :class:`~embodichain.lab.sim.cfg.ArticulationCfg`.
-* :class:`~embodichain.lab.sim.objects.Articulation` exposes no mesh accessors,
-  so antipodal grasp sampling is unavailable. The grasp pose is supplied
-  explicitly, reusing the robot's current end-effector orientation.
+* :class:`~embodichain.lab.sim.objects.Articulation` has no whole-body
+  ``get_vertices()``; grasp geometry is read per link with
+  ``get_link_vert_face()``, the same source
+  ``scripts/tutorials/atomic_action/slide.py`` uses for its handle affordance.
+  Grasps are then sampled by the shared parallel-jaw generator.
 
 The turn joint is locked with a stiff position drive so the cube behaves as a
 single rigid body while it is grasped and lifted.
@@ -44,7 +46,7 @@ import torch
 
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 from embodichain.lab.sim.atomic_actions import (
-    Affordance,
+    AntipodalAffordance,
     ControlPartCommandProfile,
     create_simulation_atomic_action_engine,
     GraspGoal,
@@ -58,6 +60,7 @@ from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_tutorial_robot,
     create_curobo_motion_generator,
+    create_parallel_jaw_grasp_pose_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -87,6 +90,14 @@ DEFAULT_ASSET_PATH = str(
     Path(EMBODICHAIN_DEFAULT_DATA_ROOT) / "RubiksCube" / "rubiks_cube_001.usdc"
 )
 TURN_JOINT = "top_turn"
+GRASP_LINK = "lower_two_layers"
+"""Link whose mesh feeds antipodal grasp sampling.
+
+``top_turn`` couples this body to ``top_layer``; it is held at zero, so the two
+layers move as one. The lower body carries two of the three layers and is the
+joint's parent, which makes its link frame the stable reference for grasping.
+"""
+
 LOCK_STIFFNESS = 1.0e4
 LOCK_DAMPING = 1.0e3
 
@@ -101,7 +112,7 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the Rubik's-cube PickUp tutorial."""
     parser = create_tutorial_argument_parser(
         "Demonstrate PickUp on an articulated Rubik's cube.",
-        features=("visualize_axes",),
+        features=("grasp_sampling", "visualize_axes"),
     )
     parser.add_argument(
         "--asset_path",
@@ -174,6 +185,38 @@ def create_pick_object(sim, asset_path: str) -> Articulation:
     return cube
 
 
+def create_link_antipodal_semantics(
+    cube: Articulation,
+    link_name: str,
+    *,
+    label: str,
+) -> ObjectSemantics:
+    """Describe an articulated target using one link's antipodal geometry.
+
+    ``create_antipodal_semantics`` reads ``get_vertices()`` and
+    ``get_triangles()``, which only rigid objects expose. Articulations publish
+    geometry per link instead, so grasp sampling names the link it should use.
+
+    Args:
+        cube: Spawned articulation that will be grasped.
+        link_name: Link whose mesh defines the graspable surface.
+        label: Human-readable object category.
+
+    Returns:
+        Object semantics carrying the link mesh on its affordance.
+    """
+    vertices, triangles = cube.get_link_vert_face(link_name)
+    return ObjectSemantics(
+        label=label,
+        geometry={},
+        affordance=AntipodalAffordance(
+            mesh_vertices=torch.as_tensor(vertices),
+            mesh_triangles=torch.as_tensor(triangles),
+        ),
+        entity_id=cube.uid,
+    )
+
+
 def cube_center_pose(cube: Articulation) -> torch.Tensor:
     """Return the cube's world center pose, compensating the authored offset.
 
@@ -215,22 +258,16 @@ def main() -> None:
                 grasp=hand_close,
             )
         },
+        grasp_pose_generators={
+            "hand": create_parallel_jaw_grasp_pose_generator(
+                n_sample=args.n_sample,
+                force_refresh=args.force_reannotate,
+            )
+        },
     )
-    semantics = ObjectSemantics(
-        label="rubiks_cube",
-        geometry={},
-        affordance=Affordance(),
-        entity_id=cube.uid,
-    )
-    center_pose = cube_center_pose(cube)
-    grasp_pose = robot.compute_fk(
-        qpos=robot.get_qpos()[:, robot.get_joint_ids(name="arm")],
-        name="arm",
-        to_matrix=True,
-    )
-    grasp_pose[:, :3, 3] = center_pose[:, :3, 3]
+    semantics = create_link_antipodal_semantics(cube, GRASP_LINK, label="rubiks_cube")
     if not args.no_vis_eef_axis:
-        draw_axis_marker(sim, "pickup_cube_axis", center_pose)
+        draw_axis_marker(sim, "pickup_cube_axis", cube_center_pose(cube))
     wait_for_user = prepare_tutorial_scene(
         sim, args, "Inspect the Rubik's cube, then press Enter to plan PickUp..."
     )
@@ -239,7 +276,7 @@ def main() -> None:
         (
             engine.make_invocation(
                 "pick_up",
-                GraspGoal(semantics, grasp_xpos=grasp_pose),
+                GraspGoal(semantics),
                 control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",
