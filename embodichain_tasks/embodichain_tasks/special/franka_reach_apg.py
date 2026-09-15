@@ -302,7 +302,7 @@ class FrankaReachApgEnv(DifferentiableEnv):
 
         return _step
 
-    def _apply_action_kernel(self, action_wp: Any, tape: Any) -> None:
+    def _apply_action_kernel(self, action_wp: Any, *, tape: Any) -> None:
         """Launch the action-to-control kernel inside the open tape.
 
         Writes ``new_joint_q = clamp(current_q + action * scale, lo, hi)``
