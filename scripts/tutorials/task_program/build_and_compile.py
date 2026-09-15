@@ -67,11 +67,11 @@ def build_program() -> TaskProgramCfg:
         values=(
             PoseCfg(
                 position=(0.40, -0.20, 0.10),
-                quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
+                quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
             ),
             PoseCfg(
                 position=(0.40, 0.20, 0.10),
-                quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
+                quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
             ),
         )
     )

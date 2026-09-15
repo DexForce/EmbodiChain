@@ -14,29 +14,57 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Regression tests for data-cache synchronization."""
+"""Regression tests for data-path resolution and cache synchronization."""
 
 from __future__ import annotations
 
 import multiprocessing as mp
 import time
+from pathlib import Path
 
 import pytest
 
+from embodichain.data import constants
+from embodichain.data import dataset as dataset_module
 from embodichain.data.dataset import _dataset_download_lock
 
 LOCK_HOLD_SECONDS = 0.2
 PROCESS_JOIN_TIMEOUT_SECONDS = 5.0
+PROCESS_START_TIMEOUT_SECONDS = 60.0
+
+
+@pytest.mark.no_sim
+def test_get_data_path_accepts_dataset_root_without_subpath(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bare dataset name resolves to the downloaded extraction root."""
+    extract_dir = tmp_path / "extract" / "SceneData"
+
+    class FakeDataset:
+        def __init__(self) -> None:
+            self.extract_dir = str(extract_dir)
+
+    def get_fake_data_class(dataset_name: str) -> type[FakeDataset]:
+        assert dataset_name == "SceneData"
+        return FakeDataset
+
+    monkeypatch.setattr(constants, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(dataset_module, "get_data_class", get_fake_data_class)
+
+    assert dataset_module.get_data_path("SceneData") == str(extract_dir)
 
 
 def _hold_dataset_download_lock(
     data_root: str,
     start_event,
+    ready_event,
     active_initializers,
     maximum_active_initializers,
 ) -> None:
     """Enter the same dataset lock and hold it long enough to detect overlap."""
-    start_event.wait()
+    ready_event.set()
+    if not start_event.wait(PROCESS_START_TIMEOUT_SECONDS):
+        raise TimeoutError("Dataset lock test start signal was not received.")
     with _dataset_download_lock(data_root, "ConcurrentDataset"):
         with active_initializers.get_lock():
             active_initializers.value += 1
@@ -59,6 +87,7 @@ def test_dataset_initialization_is_serialized_across_processes(tmp_path) -> None
     active_initializers = context.Value("i", 0)
     maximum_active_initializers = context.Value("i", 0)
     start_event = context.Event()
+    ready_events = [context.Event() for _ in range(2)]
 
     workers = [
         context.Process(
@@ -66,22 +95,31 @@ def test_dataset_initialization_is_serialized_across_processes(tmp_path) -> None
             args=(
                 str(tmp_path),
                 start_event,
+                ready_event,
                 active_initializers,
                 maximum_active_initializers,
             ),
         )
-        for _ in range(2)
+        for ready_event in ready_events
     ]
-    for worker in workers:
-        worker.start()
-    start_event.set()
-
+    started_workers = []
     try:
+        for worker in workers:
+            worker.start()
+            started_workers.append(worker)
+        # Spawn imports native dependencies before entering the worker. Give
+        # startup its own budget, then exercise contention with both ready.
+        deadline = time.monotonic() + PROCESS_START_TIMEOUT_SECONDS
+        for ready_event in ready_events:
+            assert ready_event.wait(
+                max(0.0, deadline - time.monotonic())
+            ), "Dataset lock worker did not finish startup."
+        start_event.set()
         for worker in workers:
             worker.join(PROCESS_JOIN_TIMEOUT_SECONDS)
     finally:
         start_event.set()
-        for worker in workers:
+        for worker in started_workers:
             if worker.is_alive():
                 worker.terminate()
             worker.join(PROCESS_JOIN_TIMEOUT_SECONDS)

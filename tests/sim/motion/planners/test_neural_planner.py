@@ -29,52 +29,64 @@ from embodichain.lab.sim.motion.planners import (
     NeuralPlannerCfg,
     PlanState,
 )
-from embodichain.lab.sim.motion.planners.neural_planner import (
-    NeuralPlanOptions,
-    _WaypointTransformerActor,
-)
+from embodichain.lab.sim.motion.planners import neural_planner as neural_planner_module
+from embodichain.lab.sim.motion.planners.neural_planner import NeuralPlanOptions
 from embodichain.lab.sim.sim_manager import SimulationManager
 
 NUM_ARM_JOINTS = 7
-NUM_WAYPOINTS = 3
-OBS_DIM = 28 + 9 * NUM_WAYPOINTS
-HIDDEN_DIM = 32
+NUM_WAYPOINTS = 5
+OBS_DIM = 186
+NMG_OBSERVATION_CAPACITY_WIDTHS = {1: 54, 3: 120, 5: 186}
+NMG_OBSERVATION_FINGERPRINTS = {
+    1: "0b10a1de1989e6b0c447e0a5914181edb48592371785fb2a8d951771a2b0c245",
+    3: "84d7eb95ff9f2e389570f299fb161d4bff6b82540b88110e3738f6e347be9f89",
+    5: "485fe689029c9802095b01660c2856df15af97eadc5621e07dbfe6fb58b7703b",
+}
+NMG_OBSERVATION_BLOCKS = (
+    "joint",
+    "eef",
+    "waypoint_pos",
+    "waypoint_quat",
+    "waypoint_joint",
+    "active_onehot",
+    "valid_mask",
+    "pos_mask",
+    "rot_mask",
+    "joint_mask",
+    "last_action",
+    "waypoint_rel_pos",
+    "waypoint_rel_quat",
+    "waypoint_joint_err",
+)
+_REAL_ONNX_POLICY = neural_planner_module._OnnxPolicy
 
 
-def _create_fake_checkpoint(tmp_path) -> str:
-    actor = _WaypointTransformerActor(
-        obs_dim=OBS_DIM,
-        action_dim=NUM_ARM_JOINTS,
-        num_waypoints=NUM_WAYPOINTS,
-        use_relative_obs=True,
-        hidden_dim=HIDDEN_DIM,
-        transformer_nhead=4,
-        transformer_num_layers=1,
-    )
-    checkpoint = {
-        "agent": {f"actor_mean.{k}": v for k, v in actor.state_dict().items()},
-        "obs_normalizer": {
-            "mean": torch.zeros(OBS_DIM),
-            "var": torch.ones(OBS_DIM),
-            "count": 1.0,
-        },
-        "args": {
-            "policy_arch": "transformer",
-            "hidden_dim": HIDDEN_DIM,
-            "transformer_nhead": 4,
-            "transformer_num_layers": 1,
-            "transformer_ff_dim": 0,
-            "waypoint_max": NUM_WAYPOINTS,
-            "waypoint_use_relative_obs": True,
-            "waypoint_intermediate_orientation": True,
-            "max_episode_steps": 3,
-            "waypoint_pos_threshold": 0.05,
-            "waypoint_rot_threshold": 0.3,
-        },
-    }
-    checkpoint_path = tmp_path / "fake_neural_planner.pt"
-    torch.save(checkpoint, checkpoint_path)
-    return str(checkpoint_path)
+def _create_fake_onnx_model(tmp_path) -> str:
+    model_path = tmp_path / "fake_neural_planner.onnx"
+    model_path.write_bytes(b"fake-onnx")
+    return str(model_path)
+
+
+class FakeOnnxPolicy:
+    obs_dim = OBS_DIM
+    fixed_batch_size = 1
+    observation_metadata = neural_planner_module._WaypointObservationLayout(
+        NUM_WAYPOINTS, NUM_ARM_JOINTS, True, True
+    ).onnx_metadata
+
+    def __init__(self, path, providers=None):
+        self.path = path
+        self.providers = providers
+        self.last_obs = None
+
+    def __call__(self, obs: torch.Tensor) -> torch.Tensor:
+        self.last_obs = obs.clone()
+        return torch.zeros(obs.shape[0], NUM_ARM_JOINTS, device=obs.device)
+
+
+@pytest.fixture(autouse=True)
+def _mock_onnx_policy(monkeypatch):
+    monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", FakeOnnxPolicy)
 
 
 class FakeRobot:
@@ -101,7 +113,7 @@ class FakeRobot:
         batch = qpos.shape[0] if qpos.dim() > 1 else 1
         if to_matrix:
             return torch.eye(4).repeat(batch, 1, 1)
-        return torch.tensor([[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]]).repeat(batch, 1)
+        return torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]).repeat(batch, 1)
 
 
 class FakeSimulationManager:
@@ -115,20 +127,150 @@ class FakeSimulationManager:
 def test_neural_planner_is_registered():
     assert MotionGenerator._support_planner_dict["neural"][0] is NeuralPlanner
     assert MotionGenerator._support_planner_dict["neural"][1] is NeuralPlannerCfg
+    assert NeuralPlanner.preserve_plan_samples is True
+    assert NeuralPlanner.preserve_failed_plan_positions is True
+    assert NeuralPlanner.supported_move_types == frozenset(
+        {MoveType.EEF_MOVE, MoveType.JOINT_MOVE}
+    )
 
 
-def test_neural_planner_generate_with_fake_checkpoint(tmp_path, monkeypatch):
-    checkpoint_path = _create_fake_checkpoint(tmp_path)
+@pytest.mark.parametrize(
+    ("capacity", "expected_width"),
+    NMG_OBSERVATION_CAPACITY_WIDTHS.items(),
+)
+def test_neural_planner_observation_width_matches_nmg_contract(
+    capacity: int,
+    expected_width: int,
+):
+    layout = neural_planner_module._WaypointObservationLayout(capacity, 7, True)
+
+    assert layout.dim == expected_width
+    assert layout.fingerprint == NMG_OBSERVATION_FINGERPRINTS[capacity]
+    assert tuple(name for name, _ in layout.block_widths) == NMG_OBSERVATION_BLOCKS
+
+
+def test_neural_planner_default_observation_width_matches_k5_nmg_export():
+    assert NeuralPlannerCfg().num_waypoints == NUM_WAYPOINTS
+    assert neural_planner_module._waypoint_obs_dim(5, use_relative_obs=True) == 186
+    assert neural_planner_module._waypoint_obs_dim(5, use_relative_obs=False) == 116
+
+
+def test_neural_onnx_policy_preserves_distinct_dynamic_batch_rows(tmp_path):
+    """The ONNX consumer keeps numerical parity for batch one and batch three."""
+    onnx = pytest.importorskip("onnx")
+    pytest.importorskip("onnxruntime")
+    weight = torch.zeros(OBS_DIM, NUM_ARM_JOINTS, dtype=torch.float32)
+    weight[:NUM_ARM_JOINTS] = torch.eye(NUM_ARM_JOINTS)
+    graph = onnx.helper.make_graph(
+        [onnx.helper.make_node("MatMul", ["obs", "weight"], ["action"])],
+        "nmg-dynamic-batch-contract",
+        [
+            onnx.helper.make_tensor_value_info(
+                "obs", onnx.TensorProto.FLOAT, ["batch", OBS_DIM]
+            )
+        ],
+        [
+            onnx.helper.make_tensor_value_info(
+                "action", onnx.TensorProto.FLOAT, ["batch", NUM_ARM_JOINTS]
+            )
+        ],
+        [onnx.numpy_helper.from_array(weight.numpy(), name="weight")],
+    )
+    model = onnx.helper.make_model(
+        graph,
+        opset_imports=[onnx.helper.make_opsetid("", 17)],
+    )
+    layout = neural_planner_module._WaypointObservationLayout(5, 7, True)
+    onnx.helper.set_model_props(model, layout.onnx_metadata)
+    model.ir_version = 10
+    model_path = tmp_path / "dynamic_batch_contract.onnx"
+    onnx.save(model, model_path)
+    policy = _REAL_ONNX_POLICY(model_path)
+    observation = torch.zeros(3, OBS_DIM)
+    observation[:, :NUM_ARM_JOINTS] = torch.tensor(
+        [
+            [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+            [2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0],
+            [-1.0, -2.0, -3.0, -4.0, -5.0, -6.0, -7.0],
+        ]
+    )
+
+    batch_one = policy(observation[:1])
+    batch_three = policy(observation)
+
+    torch.testing.assert_close(batch_one, observation[:1, :NUM_ARM_JOINTS])
+    torch.testing.assert_close(batch_three, observation[:, :NUM_ARM_JOINTS])
+    torch.testing.assert_close(batch_three[:1], batch_one)
+    assert policy.observation_metadata == layout.onnx_metadata
+
+
+def test_neural_planner_rejects_mismatched_observation_metadata(tmp_path, monkeypatch):
+    model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+
+    class MismatchedMetadataPolicy(FakeOnnxPolicy):
+        observation_metadata = {
+            **neural_planner_module._WaypointObservationLayout(
+                5, 7, True
+            ).onnx_metadata,
+            "nmg.canonicalize_quat_obs": "false",
+        }
+
+    monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", MismatchedMetadataPolicy)
+
+    with pytest.raises(ValueError, match="observation layout metadata mismatch"):
+        NeuralPlanner(
+            NeuralPlannerCfg(
+                robot_uid="fake_robot",
+                onnx_model_path=model_path,
+                control_part="main_arm",
+            )
+        )
+
+
+def test_neural_planner_rejects_missing_observation_metadata(tmp_path, monkeypatch):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+
+    class MissingMetadataPolicy(FakeOnnxPolicy):
+        observation_metadata = {}
+
+    monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", MissingMetadataPolicy)
+
+    with pytest.raises(ValueError, match="observation layout metadata mismatch"):
+        NeuralPlanner(
+            NeuralPlannerCfg(
+                robot_uid="fake_robot",
+                onnx_model_path=model_path,
+                control_part="main_arm",
+            )
+        )
+
+
+def test_neural_planner_generate_with_fake_onnx_model(tmp_path, monkeypatch):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
 
     motion_generator = MotionGenerator(
         cfg=MotionGenCfg(
             planner_cfg=NeuralPlannerCfg(
                 robot_uid="fake_robot",
-                checkpoint_path=checkpoint_path,
+                onnx_model_path=model_path,
                 control_part="main_arm",
             )
         )
@@ -154,17 +296,19 @@ def test_neural_planner_generate_with_fake_checkpoint(tmp_path, monkeypatch):
 
 
 def test_neural_planner_uses_plan_opts_start_qpos(tmp_path, monkeypatch):
-    checkpoint_path = _create_fake_checkpoint(tmp_path)
+    model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
 
     motion_generator = MotionGenerator(
         cfg=MotionGenCfg(
             planner_cfg=NeuralPlannerCfg(
                 robot_uid="fake_robot",
-                checkpoint_path=checkpoint_path,
+                onnx_model_path=model_path,
                 control_part="main_arm",
             )
         )
@@ -187,17 +331,19 @@ def test_neural_planner_uses_plan_opts_start_qpos(tmp_path, monkeypatch):
 
 
 def test_neural_planner_rejects_short_start_qpos(tmp_path, monkeypatch):
-    checkpoint_path = _create_fake_checkpoint(tmp_path)
+    model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
 
     motion_generator = MotionGenerator(
         cfg=MotionGenCfg(
             planner_cfg=NeuralPlannerCfg(
                 robot_uid="fake_robot",
-                checkpoint_path=checkpoint_path,
+                onnx_model_path=model_path,
                 control_part="main_arm",
             )
         )
@@ -218,17 +364,19 @@ def test_neural_planner_rejects_short_start_qpos(tmp_path, monkeypatch):
 
 
 def test_neural_planner_returns_velocities_and_accelerations(tmp_path, monkeypatch):
-    checkpoint_path = _create_fake_checkpoint(tmp_path)
+    model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
 
     motion_generator = MotionGenerator(
         cfg=MotionGenCfg(
             planner_cfg=NeuralPlannerCfg(
                 robot_uid="fake_robot",
-                checkpoint_path=checkpoint_path,
+                onnx_model_path=model_path,
                 control_part="main_arm",
             )
         )
@@ -252,6 +400,388 @@ def test_neural_planner_returns_velocities_and_accelerations(tmp_path, monkeypat
     assert result.accelerations.shape == result.positions.shape
     assert torch.isfinite(result.velocities).all()
     assert torch.isfinite(result.accelerations).all()
+
+
+def test_neural_planner_disables_grad_for_all_fk_calls(tmp_path, monkeypatch):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    grad_states = []
+    original_compute_fk = fake_sim.robot.compute_fk
+
+    def checked_compute_fk(*args, **kwargs):
+        grad_states.append(torch.is_grad_enabled())
+        return original_compute_fk(*args, **kwargs)
+
+    monkeypatch.setattr(fake_sim.robot, "compute_fk", checked_compute_fk)
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=model_path,
+            control_part="main_arm",
+        )
+    )
+
+    planner.plan(
+        [PlanState.single(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))],
+        NeuralPlanOptions(
+            control_part="main_arm",
+            start_qpos=torch.zeros(NUM_ARM_JOINTS),
+            max_steps=1,
+        ),
+    )
+
+    assert grad_states
+    assert not any(grad_states)
+
+
+def test_neural_planner_builds_unified_k5_cartesian_observation(tmp_path, monkeypatch):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=model_path,
+            control_part="main_arm",
+        )
+    )
+    joint = torch.arange(7, dtype=torch.float32).unsqueeze(0) / 10.0
+    eef = torch.tensor([[0.1, 0.2, 0.3, 0.0, 0.0, 0.0, 1.0]])
+    waypoint_pos = torch.arange(NUM_WAYPOINTS * 3, dtype=torch.float32).reshape(
+        1, NUM_WAYPOINTS, 3
+    )
+    waypoint_quat = torch.zeros(1, NUM_WAYPOINTS, 4)
+    waypoint_quat[..., 3] = 1.0
+    waypoint_quat[:, 0] = torch.tensor([0.1, 0.2, 0.3, 0.9])
+    waypoint_joint = torch.arange(NUM_WAYPOINTS * 7, dtype=torch.float32).reshape(
+        1, NUM_WAYPOINTS, 7
+    )
+    valid = torch.zeros(1, NUM_WAYPOINTS)
+    valid[:, :2] = 1.0
+    pos_mask = valid.clone()
+    rot_mask = valid.clone()
+    joint_mask = torch.zeros_like(valid)
+    active_idx = torch.zeros(1, dtype=torch.long)
+    last_action = torch.arange(7, dtype=torch.float32).unsqueeze(0) / 20.0
+    obs = planner._build_obs(
+        joint,
+        eef,
+        waypoint_pos,
+        waypoint_quat,
+        waypoint_joint,
+        valid,
+        pos_mask,
+        rot_mask,
+        joint_mask,
+        active_idx,
+        last_action,
+    )
+
+    expected_active = torch.zeros_like(valid)
+    expected_active[:, 0] = 1.0
+    pos_block = waypoint_pos * pos_mask.unsqueeze(-1)
+    identity = torch.tensor([0.0, 0.0, 0.0, 1.0]).reshape(1, 1, 4)
+    quat_block = torch.where(rot_mask.unsqueeze(-1) > 0.5, waypoint_quat, identity)
+    joint_block = torch.zeros_like(waypoint_joint)
+    rel_pos = (pos_block - eef[:, None, :3]) * pos_mask.unsqueeze(-1)
+    rel_quat = quat_block
+    joint_err = torch.zeros_like(waypoint_joint)
+    contract_blocks = {
+        "joint": joint,
+        "eef": eef,
+        "waypoint_pos": pos_block.flatten(1),
+        "waypoint_quat": quat_block.flatten(1),
+        "waypoint_joint": joint_block.flatten(1),
+        "active_onehot": expected_active,
+        "valid_mask": valid,
+        "pos_mask": pos_mask,
+        "rot_mask": rot_mask,
+        "joint_mask": joint_mask,
+        "last_action": last_action,
+        "waypoint_rel_pos": rel_pos.flatten(1),
+        "waypoint_rel_quat": rel_quat.flatten(1),
+        "waypoint_joint_err": joint_err.flatten(1),
+    }
+    expected = torch.cat(
+        [contract_blocks[name] for name in NMG_OBSERVATION_BLOCKS], dim=-1
+    )
+
+    assert obs.shape == (1, OBS_DIM)
+    torch.testing.assert_close(obs, expected)
+
+
+def test_neural_planner_preserves_xyzw_for_pose_targets(tmp_path, monkeypatch):
+    """Pose targets must not be reordered after ``quat_from_matrix``."""
+    from embodichain.utils.math import matrix_from_quat
+
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=model_path,
+            control_part="main_arm",
+        )
+    )
+
+    quaternion = torch.tensor([[1.0, 2.0, 3.0, 4.0]], dtype=torch.float32)
+    quaternion = quaternion / torch.linalg.vector_norm(quaternion, dim=-1, keepdim=True)
+    pose = torch.eye(4).unsqueeze(0)
+    pose[:, :3, :3] = matrix_from_quat(quaternion)
+
+    _, waypoint_quat, *_ = planner._parse_waypoints(
+        [PlanState.single(move_type=MoveType.EEF_MOVE, xpos=pose)]
+    )
+
+    torch.testing.assert_close(waypoint_quat[:, 0], quaternion)
+
+
+def test_neural_planner_fk_preserves_xyzw_for_asymmetric_rotation(
+    tmp_path, monkeypatch
+):
+    """FK observations use the public ``xyz + xyzw`` pose convention."""
+    from embodichain.utils.math import matrix_from_quat
+
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=model_path,
+            control_part="main_arm",
+        )
+    )
+
+    quaternion = torch.tensor([[1.0, 2.0, 3.0, 4.0]], dtype=torch.float32)
+    quaternion = quaternion / torch.linalg.vector_norm(quaternion, dim=-1, keepdim=True)
+    pose = torch.eye(4).unsqueeze(0)
+    pose[:, :3, :3] = matrix_from_quat(quaternion)
+    planner._fk_matrix = lambda qpos, control_part: pose.expand(qpos.shape[0], -1, -1)
+
+    fk_pose = planner._fk_pose_xyzw(torch.zeros(1, NUM_ARM_JOINTS), "main_arm")
+
+    torch.testing.assert_close(fk_pose[:, 3:7], quaternion)
+
+
+def test_neural_planner_reach_check_passes_xyzw_to_math(monkeypatch):
+    """The XYZW math API should receive planner quaternions unchanged."""
+    planner = NeuralPlanner.__new__(NeuralPlanner)
+    planner.device = torch.device("cpu")
+    planner._num_waypoints = 1
+    planner._pos_eps = 1.0e-6
+    planner._rot_eps = 1.0e-6
+    planner._joint_eps = 1.0e-6
+
+    ee_quaternion = torch.tensor([[1.0, 2.0, 3.0, 4.0]], dtype=torch.float32)
+    ee_quaternion = ee_quaternion / torch.linalg.vector_norm(
+        ee_quaternion, dim=-1, keepdim=True
+    )
+    captured: dict[str, torch.Tensor] = {}
+
+    def spy_quat_error(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
+        captured["q1"] = q1
+        captured["q2"] = q2
+        return torch.zeros(q1.shape[:-1], dtype=q1.dtype, device=q1.device)
+
+    monkeypatch.setattr(neural_planner_module, "quat_error_magnitude", spy_quat_error)
+    ee_pose = torch.cat((torch.zeros(1, 3), ee_quaternion), dim=-1)
+    waypoint_pos = torch.zeros(1, 1, 3)
+    waypoint_quat = ee_quaternion.unsqueeze(1).clone()
+    waypoint_joint = torch.zeros(1, 1, NUM_ARM_JOINTS)
+    mask = torch.ones(1, 1)
+    active_idx = torch.zeros(1, dtype=torch.long)
+
+    reached = planner._is_active_reached(
+        torch.zeros(1, NUM_ARM_JOINTS),
+        ee_pose,
+        waypoint_pos,
+        waypoint_quat,
+        waypoint_joint,
+        mask,
+        mask,
+        torch.zeros_like(mask),
+        active_idx,
+    )
+
+    assert reached.item()
+    torch.testing.assert_close(captured["q1"], ee_quaternion)
+    torch.testing.assert_close(captured["q2"], ee_quaternion)
+
+
+def test_neural_planner_builds_joint_constraint_observation(tmp_path, monkeypatch):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=model_path,
+            control_part="main_arm",
+        )
+    )
+    target = torch.tensor([[0.1, -0.2, 0.3, 0.0, 0.2, -0.1, 0.4]])
+    parsed = planner._parse_waypoints(
+        [PlanState.from_qpos(target, move_type=MoveType.JOINT_MOVE)]
+    )
+    (
+        waypoint_pos,
+        waypoint_quat,
+        waypoint_joint,
+        valid,
+        pos_mask,
+        rot_mask,
+        joint_mask,
+        _,
+    ) = parsed
+    obs = planner._build_obs(
+        torch.zeros(1, 7),
+        torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]),
+        waypoint_pos,
+        waypoint_quat,
+        waypoint_joint,
+        valid,
+        pos_mask,
+        rot_mask,
+        joint_mask,
+        torch.zeros(1, dtype=torch.long),
+        torch.zeros(1, 7),
+    )
+
+    semantic_start = 7 + 7 + NUM_WAYPOINTS * (3 + 4 + 7)
+    relative_start = semantic_start + 5 * NUM_WAYPOINTS + 7
+    joint_error_start = relative_start + NUM_WAYPOINTS * (3 + 4)
+    assert torch.equal(joint_mask[:, 0], torch.ones(1))
+    assert torch.count_nonzero(pos_mask) == 0
+    assert torch.count_nonzero(rot_mask) == 0
+    assert torch.allclose(obs[:, joint_error_start : joint_error_start + 7], target)
+
+
+def test_neural_planner_parses_ordered_pose_then_joint_sequence(tmp_path, monkeypatch):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=model_path,
+            control_part="main_arm",
+        )
+    )
+    pose = torch.eye(4).unsqueeze(0)
+    joint = torch.tensor([[0.1, -0.2, 0.3, 0.0, 0.2, -0.1, 0.4]])
+
+    (
+        _,
+        _,
+        parsed_joint,
+        valid,
+        pos_mask,
+        rot_mask,
+        joint_mask,
+        episode_k,
+    ) = planner._parse_waypoints(
+        [
+            PlanState.from_xpos(pose, move_type=MoveType.EEF_MOVE),
+            PlanState.from_qpos(joint, move_type=MoveType.JOINT_MOVE),
+        ]
+    )
+
+    assert episode_k == 2
+    assert torch.equal(valid[0, :2], torch.ones(2))
+    assert torch.equal(pos_mask[0, :2], torch.tensor([1.0, 0.0]))
+    assert torch.equal(rot_mask[0, :2], torch.tensor([1.0, 0.0]))
+    assert torch.equal(joint_mask[0, :2], torch.tensor([0.0, 1.0]))
+    assert torch.allclose(parsed_joint[0, 1], joint[0])
+
+
+def test_neural_planner_accepts_joint_move_goal(tmp_path, monkeypatch):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=model_path,
+            control_part="main_arm",
+        )
+    )
+
+    result = planner.plan(
+        [PlanState.from_qpos(torch.zeros(1, 7), move_type=MoveType.JOINT_MOVE)],
+        NeuralPlanOptions(
+            control_part="main_arm",
+            start_qpos=torch.zeros(NUM_ARM_JOINTS),
+            max_steps=1,
+        ),
+    )
+
+    assert result.success.all().item()
+
+
+def test_neural_planner_applies_policy_frame_and_tcp_transforms(tmp_path, monkeypatch):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    left = [
+        [-1.0, 0.0, 0.0, 0.0],
+        [0.0, -1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    right = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, -0.0466],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=model_path,
+            policy_frame_from_world=left,
+            runtime_tcp_from_policy_tcp=right,
+        )
+    )
+    pose = torch.eye(4).unsqueeze(0)
+    pose[:, :3, 3] = torch.tensor([[-0.5, 0.1, 0.4]])
+    transformed = planner._to_policy_frame(pose)
+
+    assert torch.allclose(transformed[0, :3, 3], torch.tensor([0.5, -0.1, 0.3534]))
 
 
 def test_neural_planner_finite_diff_helper():
@@ -284,17 +814,19 @@ def test_neural_planner_finite_diff_helper():
 
 
 def test_motion_generator_neural_propagates_motion_gen_options(tmp_path, monkeypatch):
-    checkpoint_path = _create_fake_checkpoint(tmp_path)
+    model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
 
     motion_generator = MotionGenerator(
         cfg=MotionGenCfg(
             planner_cfg=NeuralPlannerCfg(
                 robot_uid="fake_robot",
-                checkpoint_path=checkpoint_path,
+                onnx_model_path=model_path,
             )
         )
     )
@@ -314,17 +846,19 @@ def test_motion_generator_neural_propagates_motion_gen_options(tmp_path, monkeyp
 
 
 def test_motion_generator_neural_preserves_native_eef_targets(tmp_path, monkeypatch):
-    checkpoint_path = _create_fake_checkpoint(tmp_path)
+    model_path = _create_fake_onnx_model(tmp_path)
     fake_sim = FakeSimulationManager()
     monkeypatch.setattr(
-        SimulationManager, "get_instance", classmethod(lambda cls: fake_sim)
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
     )
 
     motion_generator = MotionGenerator(
         cfg=MotionGenCfg(
             planner_cfg=NeuralPlannerCfg(
                 robot_uid="fake_robot",
-                checkpoint_path=checkpoint_path,
+                onnx_model_path=model_path,
                 control_part="main_arm",
             )
         )
@@ -346,13 +880,65 @@ def test_motion_generator_neural_preserves_native_eef_targets(tmp_path, monkeypa
     assert options.is_interpolate is True
 
 
-def test_safe_torch_load_roundtrip(tmp_path):
-    checkpoint = {"agent": torch.tensor([1.0, 2.0, 3.0])}
-    path = tmp_path / "checkpoint.pt"
-    torch.save(checkpoint, path)
+def test_motion_generator_neural_preserves_failed_rollout_positions(
+    tmp_path, monkeypatch
+):
+    class MovingFakeOnnxPolicy(FakeOnnxPolicy):
+        def __call__(self, obs: torch.Tensor) -> torch.Tensor:
+            self.last_obs = obs.clone()
+            action = torch.zeros(obs.shape[0], NUM_ARM_JOINTS, device=obs.device)
+            action[:, 0] = 1.0
+            return action
 
-    from embodichain.lab.sim.motion.planners.neural_planner import _safe_torch_load
+    monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", MovingFakeOnnxPolicy)
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
 
-    loaded = _safe_torch_load(path, map_location=torch.device("cpu"))
-    assert "agent" in loaded
-    assert torch.equal(loaded["agent"], checkpoint["agent"])
+    motion_generator = MotionGenerator(
+        cfg=MotionGenCfg(
+            planner_cfg=NeuralPlannerCfg(
+                robot_uid="fake_robot",
+                onnx_model_path=model_path,
+                control_part="main_arm",
+                max_steps=2,
+            )
+        )
+    )
+    target = torch.eye(4)
+    target[0, 3] = 10.0
+
+    result = motion_generator.generate(
+        target_states=[PlanState.single(move_type=MoveType.EEF_MOVE, xpos=target)],
+        options=MotionGenOptions(
+            control_part="main_arm",
+            start_qpos=torch.zeros(NUM_ARM_JOINTS),
+        ),
+    )
+
+    assert not result.success.all().item()
+    assert result.positions is not None
+    assert result.positions[0, 1, 0] > result.positions[0, 0, 0]
+
+
+def test_neural_planner_rejects_pytorch_checkpoint(tmp_path, monkeypatch):
+    pytorch_checkpoint_path = tmp_path / "checkpoint.pt"
+    pytorch_checkpoint_path.write_bytes(b"not-an-onnx-model")
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+
+    with pytest.raises(ValueError, match="only accepts standalone .onnx"):
+        NeuralPlanner(
+            NeuralPlannerCfg(
+                robot_uid="fake_robot",
+                onnx_model_path=str(pytorch_checkpoint_path),
+            )
+        )

@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 import time
 from typing import NoReturn
 
@@ -64,8 +66,21 @@ class _UTCFormatter(logging.Formatter):
         return super().format(record)
 
 
+class _ConsoleHandler(logging.StreamHandler):
+    """Keep terminal colors out of redirected log files and NO_COLOR output."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        text = super().format(record)
+        if (
+            "NO_COLOR" in os.environ
+            or not getattr(self.stream, "isatty", lambda: False)()
+        ):
+            text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+        return text
+
+
 _DEFAULT_FORMATTER = _UTCFormatter(_LOG_FORMAT, datefmt=_DATE_FORMAT)
-_DEFAULT_HANDLER = logging.StreamHandler()
+_DEFAULT_HANDLER = _ConsoleHandler()
 _DEFAULT_HANDLER.setFormatter(_DEFAULT_FORMATTER)
 logging.basicConfig(level=logging.INFO, handlers=[_DEFAULT_HANDLER])
 

@@ -102,6 +102,7 @@ class TestQposSeedSelSampler:
             },
         }
         self.robot: Robot = self.sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+        self.sim.prepare()
         self.solver = self.robot.get_solver("left_arm")
         self.lower = self.solver.lower_qpos_limits
         self.upper = self.solver.upper_qpos_limits

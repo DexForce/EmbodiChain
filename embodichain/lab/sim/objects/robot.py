@@ -19,11 +19,10 @@ from __future__ import annotations
 import torch
 import numpy as np
 
-from typing import Dict, List, Literal, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, List, Literal, Sequence, Tuple
 from dataclasses import dataclass, field
 from tensordict import TensorDict
 
-from dexsim.engine import Articulation as _Articulation
 from embodichain.lab.sim.cfg import RobotCfg, RobotWorkspaceCfg
 from embodichain.lab.sim.motion.solvers import SolverCfg, BaseSolver
 from embodichain.lab.sim.objects import Articulation
@@ -38,6 +37,9 @@ from embodichain.utils.string import (
     resolve_matching_names_values,
 )
 from embodichain.utils import logger
+
+if TYPE_CHECKING:
+    from dexsim.scene import SpawnedArticulation
 
 
 @dataclass
@@ -71,12 +73,9 @@ class Robot(Articulation):
     def __init__(
         self,
         cfg: RobotCfg,
-        entities: List[_Articulation],
         device: torch.device = torch.device("cpu"),
     ) -> None:
-
-        self._entities = entities
-        self.cfg = cfg
+        """Create an unregistered robot facade."""
 
         # Initialize joint ids for control parts.
         self._joint_ids: Dict[str, List[int]] = {}
@@ -91,13 +90,7 @@ class Robot(Articulation):
         # cache I/O unless a task actually requests workspace sampling.
         self._workspaces: Dict[str, RobotWorkspace] = {}
 
-        if self.cfg.control_parts:
-            self._init_control_parts(self.cfg.control_parts)
-
-        super().__init__(cfg, entities, device)
-
-        if self.cfg.solver_cfg:
-            self.init_solver(self.cfg.solver_cfg)
+        super().__init__(cfg, device)
 
     def __str__(self) -> str:
         parent_str = super().__str__()
@@ -105,6 +98,26 @@ class Robot(Articulation):
             parent_str
             + f" | control_parts: {self.control_parts}, solvers: {self._solvers}"
         )
+
+    def attach_spawn_handles(
+        self,
+        entities: Sequence[SpawnedArticulation],
+    ) -> None:
+        """Store handles and expose robot metadata without creating Batch data.
+
+        Runtime Batch/Data initialization remains the responsibility of
+        ``bind_spawn()`` after Spawn finalization.
+        """
+        super().attach_spawn_handles(entities)
+        if self.cfg.control_parts:
+            self._init_control_parts(self.cfg.control_parts)
+
+    def _initialize_spawn_bound_extension(self) -> None:
+        """Initialize robot-specific runtime state after Scene binding."""
+        if self.cfg.control_parts:
+            self._init_control_parts(self.cfg.control_parts)
+        if self.cfg.solver_cfg:
+            self.init_solver(self.cfg.solver_cfg)
 
     @property
     def control_parts(self) -> Dict[str, List[str]] | None:
@@ -788,7 +801,9 @@ class Robot(Articulation):
                 of ``qpos`` for full-articulation FK.
 
         Returns:
-            torch.Tensor: The forward kinematics result with shape (num_envs, 7) or (num_envs, 4, 4) if `to_matrix` is True.
+            torch.Tensor: The forward-kinematics result with shape
+                ``(num_envs, 7)`` in ``(x, y, z, qx, qy, qz, qw)`` order, or
+                ``(num_envs, 4, 4)`` if ``to_matrix`` is True.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -858,7 +873,8 @@ class Robot(Articulation):
         The input pose should be in the local arena frame.
 
         Args:
-            pose (torch.Tensor): The end effector pose of the robot, (num_envs, 7) or (num_envs, 4, 4).
+            pose (torch.Tensor): The end-effector pose as ``(num_envs, 7)`` in
+                ``(x, y, z, qx, qy, qz, qw)`` order or ``(num_envs, 4, 4)``.
             joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (num_envs, dof).
                 If None, the zero joint positions will be used as the seed.
             name (str | None): The name of the control part to compute the IK for. If None, the default part is used.
@@ -942,7 +958,9 @@ class Robot(Articulation):
             to_matrix (bool): If True, returns the transformation in the form of a 4x4 matrix.
 
         Returns:
-            torch.Tensor: The forward kinematics result with shape (num_envs, batch, 7) or (num_envs, batch, 4, 4) if `to_matrix` is True.
+            torch.Tensor: The forward-kinematics result with shape
+                ``(num_envs, batch, 7)`` in ``xyz + xyzw`` order, or
+                ``(num_envs, batch, 4, 4)`` if ``to_matrix`` is True.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         if not self._solvers:
@@ -994,20 +1012,35 @@ class Robot(Articulation):
         joint_seed: torch.Tensor | np.ndarray | None,
         name: str,
         env_ids: Sequence[int] | None = None,
-    ):
-        """Compute the inverse kinematics of the robot given joint positions and optionally a specific part name.
-        The input pose should be in the local arena frame.
+        *,
+        continuous: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """Compute batched inverse kinematics for arena-frame poses.
+
+        When ``continuous`` is enabled, all analytic candidates are generated
+        in one solver call and the branch nearest to the previous path sample
+        is selected sequentially. The selected solver must support continuous
+        candidate selection.
 
         Args:
-            pose (torch.Tensor): The end effector pose of the robot, (num_envs, n_batch, 7) or (num_envs, n_batch, 4, 4).
-            joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (num_envs, n_batch, dof). If None, the zero joint positions will be used as the seed.
-            name (str | None): The name of the control part to compute the IK for. If None, the default part is used.
-            env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.
+            pose: End-effector poses shaped ``(B, N, 7)`` or
+                ``(B, N, 4, 4)`` in the local arena frame.
+            joint_seed: Independent seeds shaped ``(B, N, DOF)``. In
+                continuous mode, the initial path seed shaped ``(B, DOF)``.
+                Defaults to zero independent seeds when omitted.
+            name: Control part whose solver should be used.
+            env_ids: Optional environment indices. Defaults to all
+                environments.
+            continuous: Preserve one temporally continuous IK branch across
+                the ``N`` path samples. Defaults to ``False``.
 
         Returns:
-            Tuple[torch.Tensor, torch.Tensor]:
-                Success Tensor with shape (num_envs, n_batch)
-                Qpos Tensor with shape (num_envs, n_batch, dof).
+            Per-sample success shaped ``(B, N)`` and joint positions shaped
+            ``(B, N, DOF)``, or ``None`` when no solver is configured.
+
+        Raises:
+            ValueError: If an input shape is invalid or continuous selection
+                is unsupported by the configured solver.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -1017,38 +1050,49 @@ class Robot(Articulation):
                 f"The control part '{name}' does not have an associated solver. Please ensure that a valid control part with an available solver is provided."
             )
             return None
+        if continuous and not solver.supports_continuous_batch_ik:
+            raise ValueError(
+                f"Solver for {name!r} does not support continuous batch IK."
+            )
         pose = to_tensor(pose, device=self.device)
 
-        if pose.shape[0] != len(local_env_ids):
-            logger.log_error(
-                f"Pose batch size mismatch. Expected {len(local_env_ids)} but got {pose.shape[0]}."
+        batch_size = len(local_env_ids)
+        if pose.ndim not in {3, 4} or pose.shape[0] != batch_size:
+            raise ValueError(
+                f"pose must have shape ({batch_size}, N, 7) or "
+                f"({batch_size}, N, 4, 4)."
             )
 
         n_batch = pose.shape[1]
         n_dof = solver.dof
-        if joint_seed is None:
+        if continuous:
+            if joint_seed is None:
+                joint_seed_tensor = torch.zeros(
+                    (batch_size, n_dof),
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+            else:
+                joint_seed_tensor = to_tensor(joint_seed, device=self.device)
+            if joint_seed_tensor.shape != (batch_size, n_dof):
+                raise ValueError(
+                    f"joint_seed must have shape ({batch_size}, {n_dof}) "
+                    "when continuous=True."
+                )
+        elif joint_seed is None:
             joint_seed = torch.zeros(
-                (len(local_env_ids), n_batch, n_dof),
+                (batch_size, n_batch, n_dof),
                 dtype=torch.float32,
                 device=self.device,
             )
-
-        if joint_seed.shape[0] != len(local_env_ids):
-            logger.log_error(
-                f"Joint seed env size mismatch. Expected {len(local_env_ids)} but got {joint_seed.shape[0]}."
+        else:
+            joint_seed = to_tensor(joint_seed, device=self.device)
+        if not continuous and joint_seed.shape != (batch_size, n_batch, n_dof):
+            raise ValueError(
+                f"joint_seed must have shape ({batch_size}, {n_batch}, {n_dof})."
             )
 
-        if joint_seed.shape[1] != n_batch:
-            logger.log_error(
-                f"Joint seed batch size mismatch. Expected {n_batch} but got {joint_seed.shape[1]}."
-            )
-
-        if joint_seed.shape[-1] != n_dof:
-            logger.log_error(
-                f"Joint seed dof size mismatch. Expected {n_batch} but got {joint_seed.shape[-1]}."
-            )
-
-        if pose.shape[-1] == 7 and pose.dim() == 3:
+        if pose.shape[-1] == 7 and pose.ndim == 3:
             # Convert pose from (num_envs, n_batch, 7) to (num_envs * n_batch, 4, 4)
             pose_batch = pose.reshape(-1, 7)
             pos = pose_batch[:, :3]
@@ -1061,9 +1105,14 @@ class Robot(Articulation):
             )
             pose_batch[:, :3, :3] = rot
             pose_batch[:, :3, 3] = pos
-        else:
+        elif pose.shape[-2:] == (4, 4) and pose.ndim == 4:
             # Convert pose from (num_envs, n_batch, 4, 4) to (num_envs * n_batch, 4, 4)
             pose_batch = pose.reshape(-1, 4, 4)
+        else:
+            raise ValueError(
+                f"pose must have shape ({batch_size}, N, 7) or "
+                f"({batch_size}, N, 4, 4)."
+            )
 
         # get xpos from link root
         base_xpos_n_envs = self.get_link_pose(
@@ -1074,14 +1123,27 @@ class Robot(Articulation):
             base_inv_xpos_n_envs[:, None],
             pose_batch.reshape(len(local_env_ids), n_batch, 4, 4),
         )
-        return solver.get_ik_batch(
-            target_xpos=pose_batch,
-            qpos_seed=(
-                to_tensor(joint_seed, device=self.device)
-                if joint_seed is not None
-                else None
-            ),
+        if continuous:
+            candidate_valid, candidate_qpos = solver.get_ik(
+                target_xpos=pose_batch.reshape(-1, 4, 4),
+                qpos_seed=None,
+                return_all_solutions=True,
+            )
+            return solver._select_continuous_ik_path(
+                candidate_qpos.reshape(batch_size, n_batch, -1, n_dof),
+                candidate_valid.reshape(batch_size, n_batch, -1),
+                joint_seed_tensor,
+            )
+
+        joint_seed_batch = joint_seed.reshape(-1, n_dof)
+        ret, qpos_batch = solver.get_ik(
+            target_xpos=pose_batch.reshape(-1, 4, 4),
+            qpos_seed=joint_seed_batch,
+            return_all_solutions=False,
         )
+        ret = ret.reshape(batch_size, n_batch)
+        qpos = qpos_batch.reshape(batch_size, n_batch, n_dof)
+        return ret, qpos
 
     def _init_control_parts(self, control_parts: Dict[str, List[str]]) -> None:
         """Initialize the control parts of the robot.
@@ -1091,8 +1153,7 @@ class Robot(Articulation):
                 joint names or regular expressions that match joint names.
         """
         joint_name_to_ids = {
-            name: i
-            for i, name in enumerate(self._entities[0].get_actived_joint_names())
+            name: i for i, name in enumerate(self._state_joint_names())
         }
         for name, joint_names in control_parts.items():
             # convert joint_names which is a regular expression to a list of joint names
@@ -1128,12 +1189,16 @@ class Robot(Articulation):
         max_velocity: torch.Tensor | None = None,
         friction: torch.Tensor | None = None,
         armature: torch.Tensor | None = None,
-        drive_type: str = "force",
+        drive_type: str | None = "force",
         joint_ids: Sequence[int] | None = None,
         env_ids: Sequence[int] | None = None,
+        *,
+        target_mode: str | int | None = None,
     ) -> None:
         """Set the drive properties for the robot.
-           Different from Articulation, default drive type is 'force' instead of 'none'
+
+        With no explicit mode, robots retain their position+velocity force
+        drive default.
 
         Args:
             stiffness (torch.Tensor): The stiffness of the joint drive with shape (len(env_ids), len(joint_ids)).
@@ -1142,9 +1207,10 @@ class Robot(Articulation):
             max_velocity (torch.Tensor): The maximum velocity of the joint drive with shape (len(env_ids), len(joint_ids)).
             friction (torch.Tensor): The joint friction coefficient with shape (len(env_ids), len(joint_ids)).
             armature (torch.Tensor): The joint armature with shape (len(env_ids), len(joint_ids)).
-            drive_type (str, optional): The type of drive to apply. Defaults to "force".
+            drive_type: Drive type to apply. Defaults to ``"force"``.
             joint_ids (Sequence[int] | None, optional): The joint indices to apply the drive to. If None, applies to all joints. Defaults to None.
             env_ids (Sequence[int] | None, optional): The environment indices to apply the drive to. If None, applies to all environments. Defaults to None.
+            target_mode: Portable target mode name or integer value 0 through 4.
         """
         super().set_joint_drive(
             stiffness=stiffness,
@@ -1156,6 +1222,7 @@ class Robot(Articulation):
             drive_type=drive_type,
             joint_ids=joint_ids,
             env_ids=env_ids,
+            target_mode=target_mode,
         )
 
     def _set_default_joint_drive(self) -> None:
@@ -1163,7 +1230,7 @@ class Robot(Articulation):
         import numbers
         from embodichain.utils.string import resolve_matching_names_values
 
-        drive_props = [
+        joint_property_targets = [
             ("damping", self.default_joint_damping),
             ("stiffness", self.default_joint_stiffness),
             ("max_effort", self.default_joint_max_effort),
@@ -1172,8 +1239,8 @@ class Robot(Articulation):
             ("armature", self.default_joint_armature),
         ]
 
-        for prop_name, default_array in drive_props:
-            value = getattr(self.cfg.drive_pros, prop_name, None)
+        for prop_name, default_array in joint_property_targets:
+            value = getattr(self.cfg.joint_drive_props, prop_name, None)
             if value is None:
                 continue
             if isinstance(value, numbers.Number):
@@ -1213,11 +1280,19 @@ class Robot(Articulation):
                 except Exception as e:
                     logger.log_error(f"Failed to set {prop_name}: {e}")
 
-        drive_pros = self.cfg.drive_pros
-        if isinstance(drive_pros, dict):
-            drive_type = drive_pros.get("drive_type", "force")
+        joint_drive_props = self.cfg.joint_drive_props
+        if isinstance(joint_drive_props, dict):
+            drive_type = joint_drive_props.get("drive_type")
+            target_mode = joint_drive_props.get("target_mode")
         else:
-            drive_type = getattr(drive_pros, "drive_type", "force")
+            drive_type = getattr(joint_drive_props, "drive_type", None)
+            target_mode = getattr(joint_drive_props, "target_mode", None)
+        if isinstance(target_mode, dict):
+            logger.log_warning(
+                "Per-joint target_mode mappings require a Spawn-bound robot; "
+                "the retained raw-robot path preserves its current target modes."
+            )
+            target_mode = None
 
         # Apply drive parameters to all articulations in the batch
         self.set_joint_drive(
@@ -1228,6 +1303,7 @@ class Robot(Articulation):
             friction=self.default_joint_friction,
             armature=self.default_joint_armature,
             drive_type=drive_type,
+            target_mode=target_mode,
         )
 
     def _sync_solver_limits(self, name: str | None = None) -> None:
@@ -1388,21 +1464,29 @@ class Robot(Articulation):
         """
         control_group = ControlGroup()
         joint_id_list = []
+        state_joint_ids = {
+            name: index for index, name in enumerate(self._state_joint_names())
+        }
+        source_joint_ids = {
+            name: index
+            for index, name in enumerate(self._entities[0].get_actived_joint_names())
+        }
 
         for joint_name in joint_names:
-            if joint_name in self.joint_names:
-                joint_index = self.joint_names.index(joint_name)
-                joint_id_list.append(joint_index)
+            if joint_name in state_joint_ids and joint_name in source_joint_ids:
+                joint_id_list.append(state_joint_ids[joint_name])
                 control_group.joint_names.append(joint_name)
 
                 # Set root link for first joint
                 if len(control_group.link_names) == 0:
                     parent_names = self._entities[0].get_ancestral_link_names(
-                        joint_index
+                        source_joint_ids[joint_name]
                     )
                     control_group.link_names.extend(parent_names)
 
-                child_name = self._entities[0].get_child_link_name(joint_index)
+                child_name = self._entities[0].get_child_link_name(
+                    source_joint_ids[joint_name]
+                )
                 control_group.link_names.append(child_name)
 
         control_group.joint_ids = joint_id_list
@@ -1441,6 +1525,17 @@ class Robot(Articulation):
             ]
         )
         link_names = self.get_control_part_link_names(name=control_part)
+
+        if self.is_spawn_bound:
+            for env_idx in self._all_indices:
+                entity = self._entities[env_idx]
+                for link_name in link_names:
+                    self._spawn_result.set_physical_visible(
+                        (entity, link_name), rgba, visible
+                    )
+            for link_name in link_names:
+                self._has_collision_visible_node_dict[link_name] = True
+            return
 
         # create collision visible node if not exist
         if visible:

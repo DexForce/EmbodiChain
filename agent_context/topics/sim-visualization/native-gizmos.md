@@ -50,7 +50,7 @@ step ratio. CLI and task config loaders may override runtime fields before
 constructing the environment. Trace those overrides through the caller rather
 than changing a default in the manager blindly.
 
-Object-specific configuration belongs in `lab/sim/cfg.py` or the
+Object-specific configuration belongs in the relevant `lab/sim/cfg/` module or the
 corresponding robot/sensor module. Scene composition belongs in
 `EmbodiedEnv` or a task config, not in `SimulationManagerCfg`.
 

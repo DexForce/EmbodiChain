@@ -43,7 +43,17 @@ BatchEntity
 |---|---|---|---|---|
 | Camera | `CameraCfg` | `"Camera"` | color, depth, mask, normal, position | Single RGB-D camera; configurable intrinsics/extrinsics |
 | StereoCamera | `StereoCameraCfg` | `"StereoCamera"` | color/depth/mask/normal/position (left + right), disparity | Extends Camera; adds right camera with baseline transform |
-| ContactSensor | `ContactSensorCfg` | `"ContactSensor"` | contact data tensors | Collision detection between rigid bodies and articulation links; uses Warp kernels |
+| ContactSensor | `ContactSensorCfg` | `"ContactSensor"` | contact data tensors | Backend-neutral rigid/link contacts on Default and Newton; uses DexSim `ContactQuery` plus a Warp scatter kernel |
+
+### Backend support
+
+Camera and stereo-camera creation are backend-neutral render features and are
+supported with both Default and Newton physics. `ContactSensor` uses the shared
+DexSim Scene query on both backends. The manager checks
+`PhysicsBackend.supports_contact_sensor` before preparation and again after a
+Newton AutoSolver resolves. MuJoCo-Warp on CPU and DexUni are rejected because
+those runtime paths do not publish the required contact buffers/query; other
+Newton rigid solvers can expose geometry without impulse data.
 
 ## Sensor Configuration
 
@@ -54,7 +64,7 @@ Defines the sensor pose relative to its parent frame:
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `pos` | `Tuple[float, float, float]` | `(0, 0, 0)` | Position in parent frame |
-| `quat` | `Tuple[float, float, float, float]` | `(1, 0, 0, 0)` | Orientation as `(w, x, y, z)` quaternion |
+| `quat` | `Tuple[float, float, float, float]` | `(0, 0, 0, 1)` | Orientation as `(x, y, z, w)` quaternion |
 | `parent` | `str \| None` | `None` | Parent frame name (e.g. robot link); `None` = arena frame |
 
 The `transformation` property returns a `4×4 torch.Tensor` homogeneous matrix.
@@ -78,6 +88,21 @@ only Task Program deployments additionally require the component's semantic
 `embodiment.component` is absent.
 
 ## Camera System
+
+`Camera` and `StereoCamera` are created through
+`SimulationManager.add_sensor()`. The owning manager is passed explicitly so
+each camera resolves its World and ordered per-environment Arenas through that
+manager even when multiple simulation managers are active. The manager also
+owns semantic parent resolution and deferred attachment; cameras only attach
+to concrete per-environment render nodes and report attachment after that
+operation succeeds.
+
+Before committing a topology rebuild, `SimulationManager.prepare()` detaches
+parented camera views from their old render nodes. Cameras are owned outside
+Spawn, so Spawn's own camera retention cannot protect them when Newton removes
+and recreates robot skeletons. Stereo cameras detach both eyes. After binding
+the rebuilt scene, the manager resolves the new parents and reapplies camera
+extrinsics; preparation without a topology change leaves attachments intact.
 
 ### CameraCfg
 
@@ -154,13 +179,59 @@ Properties `left_to_right` and `right_to_left` return `4×4` transform tensors. 
 
 `ArticulationContactFilterCfg` specifies `articulation_uid` and `link_name_list` to filter which links report contacts.
 
+### Contact query lifecycle
+
+Create contact sensors through `SimulationManager.add_sensor()`. The manager
+crosses `prepare()` first and passes itself as the explicit owner. The sensor
+resolves every configured UID to per-Arena Spawn handles and creates one
+`spawn_result.create_contact_query(...)`:
+
+- `filter_need_both_actor=True` maps to `match="all"`; `False` maps to
+  `match="any"`.
+- `max_contacts_per_env` is passed as the query's per-Arena quota, while the
+  total query capacity remains `num_envs * max_contacts_per_env`. This keeps a
+  busy Arena from consuming every row before other Arenas are represented.
+- The query returns positions in each Arena frame and supplies an explicit
+  `env_ids` row for every contact. Environment assignment therefore works
+  when the selected actor is either actor 0 or actor 1 and when the other
+  actor is global.
+- Query targets and actor IDs survive Newton topology rebuilds by semantic
+  Spawn path/link identity.
+- `contact_capabilities` reports whether the backend supplies geometry,
+  normal impulse, and friction impulse. Newton MuJoCo-Warp provides all three;
+  other supported Newton rigid solvers may provide geometry only. DexUni does
+  not currently publish rigid contacts through `ContactQuery`.
+
+The existing TensorDict shape and field names remain stable. `user_ids` now
+contains backend-neutral contact actor IDs rather than PhysX render user IDs;
+resolve one with `ContactSensor.get_actor_info()`. `item_user_ids` contains the
+IDs selected by the sensor, and `filter_by_user_ids()` accepts those same IDs.
+Normals consistently point from `user_ids[..., 0]` toward
+`user_ids[..., 1]`. Force-capable backends preserve every backend-emitted row
+that passes the positive-impulse filter: Default CPU uses total impulse norm
+greater than `1e-7`, while Direct GPU and force-reporting Newton solvers use
+normal impulse greater than `1e-7`. Geometry-only Newton solvers retain all
+candidate rows with zero impulse. The sensor does not synthesize a common
+contact manifold; solver options such as MuJoCo-Warp's `enable_multiccd`
+control how many points the backend emits for a geometry pair. Several contact
+points and shape pairs may therefore map to the same actor pair. Only
+`is_valid` and the per-environment counts are reset on each update, so values
+in invalid fixed-buffer slots are unspecified.
+PhysX Direct GPU does not identify static counterparts in its raw contact
+buffer; those rows use actor ID `-1`. Monitor the dynamic/link side with
+`filter_need_both_actor=False` when contacts against arbitrary static geometry
+are required. Default CPU and Newton identify registered static shapes.
+
 ## Common Failure Modes
 
 - **`sensor_type` string mismatch** — `SensorCfg.from_dict()` looks up `sensor_type + "Cfg"` in the sensors module. A typo (e.g. `"camera"` instead of `"Camera"`) causes `AttributeError`.
 - **Depth not enabled** — `enable_depth` defaults to `False`. Accessing depth data without enabling it returns empty tensors.
-- **Invalid camera parent** — Missing or ambiguous registered links raise `ValueError`; missing per-arena links or render nodes raise `RuntimeError`. Parent nodes must resolve in every arena before attachment.
+- **Invalid camera parent** — `OffsetCfg.parent` must match a link in a Spawn-bound robot or articulation. Missing or ambiguous registered links raise `ValueError`; missing per-arena links or render nodes raise `RuntimeError` during attachment or `SimulationManager.prepare()`.
 - **Stereo baseline sign** — `left_to_right_pos` defines translation from left to right camera. Flipping the sign inverts the disparity.
 - **Contact sensor buffer overflow** — `max_contacts_per_env` caps the contact count. Exceeding it silently drops contacts; increase if the scene has dense collisions.
+- **Using native object user IDs with contact data** — `user_ids` is now a
+  query-local, backend-neutral actor identity. Use `get_actor_info()` or
+  `item_user_ids`, not `RigidObject.get_user_ids()`.
 - **View attribute flags** — `Camera.get_view_attrib()` computes `dr.ViewFlags` from enabled booleans. Adding a new data type requires both the `enable_*` flag and the corresponding `ViewFlags` bit.
 
 ## Contact computation ownership

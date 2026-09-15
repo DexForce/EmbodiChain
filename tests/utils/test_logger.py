@@ -157,3 +157,48 @@ def test_log_error_allows_custom_level_color():
         f"\033[95mERROR  {_RESET_COLOR} │ EmbodiChain │ "
         f"\033[95mTest message{_RESET_COLOR}"
     )
+
+
+def test_console_handler_strips_ansi_when_redirected(monkeypatch):
+    import io
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    handler_type = getattr(logger_module, "_ConsoleHandler", None)
+    assert handler_type is not None
+    stream = io.StringIO()
+    handler = handler_type(stream)
+    handler.setFormatter(logger_module._DEFAULT_FORMATTER)
+    record = logging.LogRecord(
+        "test",
+        logging.WARNING,
+        __file__,
+        1,
+        "\033[93mWARNING: keep this warning\033[0m",
+        (),
+        None,
+    )
+    handler.emit(record)
+    assert "keep this warning" in stream.getvalue()
+    assert "\033" not in stream.getvalue()
+
+
+def test_console_handler_honors_no_color_on_tty(monkeypatch):
+    import io
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    stream = Terminal()
+    handler = logger_module._ConsoleHandler(stream)
+    record = logging.LogRecord(
+        "test", logging.INFO, __file__, 1, "\033[92mREADY\033[0m", (), None
+    )
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    handler.emit(record)
+    assert "\033[92m" in stream.getvalue()
+    stream.truncate(0)
+    stream.seek(0)
+    monkeypatch.setenv("NO_COLOR", "1")
+    handler.emit(record)
+    assert stream.getvalue() == "READY\n"

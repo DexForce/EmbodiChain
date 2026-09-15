@@ -45,6 +45,16 @@ numerical (``Pinocchio``, ``Pink`` with null-space posture tasks,
 Base Solver
 -----------
 
+``Robot.compute_batch_ik(..., continuous=True)`` checks
+``BaseSolver.supports_continuous_batch_ik`` before generating any candidates.
+The capability defaults to ``False``; OPW opts in and implements the protected
+``_select_continuous_ik_path`` hook. Supporting solvers accept
+``get_ik(return_all_solutions=True)`` and return validity ``(M, K)`` and joint
+candidates ``(M, K, DOF)``. Selection consumes ``(B, N, K, DOF)`` candidates,
+``(B, N, K)`` validity, and an initial ``(B, DOF)`` seed, then returns
+``(B, N)`` validity and ``(B, N, DOF)`` joint positions. Other solvers retain
+ordinary batch IK and reject continuous requests before solving.
+
 .. autoclass:: SolverCfg
     :members:
     :exclude-members: __init__, copy, replace, to_dict, validate
@@ -128,6 +138,27 @@ SRS Solver
 
 UR Solver
 ---------
+
+``URSolverCfg`` selects the analytical DH parameters for UR3, UR5, UR10 and
+their e-series variants. ``URSolver.get_ik()`` returns validity flags followed
+by joint positions. By default, a dedicated Warp kernel selects the nearest
+valid candidate using the joint seed and per-joint weights, returning shapes
+``(N,)`` and ``(N, 6)`` without allocating the complete candidate tensor.
+
+With ``return_all_solutions=True``, the solver returns shapes ``(N, 512)`` and
+``(N, 512, 6)``. These candidates contain eight analytical branches expanded
+over 64 combinations of periodic joint representatives, with validity flags
+for FK agreement and joint limits. When no shifted representative fits a
+joint's limits, its base value is repeated.
+
+.. currentmodule:: embodichain.lab.sim.motion.solvers.ur_solver
+
+.. autosummary::
+
+    URSolverCfg
+    URSolver
+
+.. currentmodule:: embodichain.lab.sim.motion.solvers
 
 .. autoclass:: URSolverCfg
     :members:

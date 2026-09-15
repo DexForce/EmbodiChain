@@ -24,13 +24,28 @@ from unittest.mock import Mock
 import pytest
 import torch
 
+from embodichain.lab.sim.atomic_actions import (
+    AtomicActionEngine,
+    ControlPartCommandProfile,
+    GraspGoal,
+    HeldObjectPoseGoal,
+    MoveHeldObjectOptions,
+    PressGoal,
+    PressOptions,
+    SlideGoal,
+    SlideOptions,
+    TwistGoal,
+    TwistOptions,
+)
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import CuroboPlanner
 from embodichain.lab.sim.motion.planners.utils import MoveType, PlanResult
+from embodichain.toolkits.graspkit import GraspPoseGenerator
 from scripts.benchmark.motion_generation.aggregation import aggregate_results
 from scripts.benchmark.motion_generation.config import load_suite
 from scripts.benchmark.motion_generation.metrics.trajectory import (
     compute_case_outcomes,
     compute_waypoint_errors,
+    match_ordered_joint_waypoints,
     match_ordered_waypoints,
 )
 from scripts.benchmark.motion_generation import (
@@ -53,6 +68,12 @@ from scripts.benchmark.motion_generation.reporting import (
 )
 from scripts.benchmark.motion_generation.run_benchmark import (
     _apply_overrides,
+)
+from scripts.benchmark.motion_generation.scenarios.atomic_task import (
+    AtomicTaskScenario,
+    _FrozenArticulationGraspPoseGenerator,
+    _executed_final_pose_errors,
+    create_atomic_skill_provider,
 )
 
 
@@ -112,6 +133,100 @@ def test_ordered_waypoint_requires_position_and_rotation_at_same_sample():
 
     assert result["ordered_waypoints_reached"] is False
     assert result["arrival_indices"] == []
+
+
+def test_ordered_joint_waypoints_use_max_error_and_ordered_arrivals():
+    waypoints = torch.tensor([[0.1, 0.0], [0.2, -0.1]])
+    trajectory = torch.tensor(
+        [
+            [0.0, 0.0],
+            [0.195, -0.095],
+            [0.105, 0.005],
+            [0.195, -0.095],
+        ]
+    )
+
+    result = match_ordered_joint_waypoints(
+        trajectory,
+        waypoints,
+        joint_threshold_rad=0.01,
+    )
+
+    assert result["ordered_waypoints_reached"] is True
+    assert result["arrival_indices"] == [2, 3]
+    assert result["joint_errors_rad"] == pytest.approx([0.005, 0.005], abs=2.0e-8)
+
+
+def test_press_waypoint_validation_accepts_half_turn_about_z_symmetry():
+    target = torch.eye(4)
+    target[:3, 0] = -target[:3, 0]
+    target[:3, 1] = -target[:3, 1]
+    positions = torch.zeros(1, 2, 7)
+    strict_case = replace(
+        _case(),
+        scenario_id="press",
+        skill_id="press",
+        target_waypoints=target.reshape(1, 1, 4, 4),
+    )
+    symmetric_case = replace(
+        strict_case,
+        case_parameters={"waypoint_rotation_symmetry": "half_turn_about_z"},
+    )
+
+    strict = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        strict_case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )
+    symmetric = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        symmetric_case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )
+
+    assert strict[0].failure_code == "waypoint_miss"
+    assert symmetric[0].motion_valid is True
+    assert symmetric[0].final_rotation_err_deg == pytest.approx(0.0)
+
+
+def test_executed_final_pose_errors_accept_half_turn_about_eef_z_symmetry():
+    target = torch.eye(4)
+    symmetric_final = target.clone()
+    symmetric_final[:3, 0] = -symmetric_final[:3, 0]
+    symmetric_final[:3, 1] = -symmetric_final[:3, 1]
+    strict_case = replace(
+        _case(),
+        scenario_id="press",
+        skill_id="press",
+        target_waypoints=target.reshape(1, 1, 4, 4),
+    )
+    symmetric_case = replace(
+        strict_case,
+        case_parameters={"waypoint_rotation_symmetry": "half_turn_about_z"},
+    )
+
+    _, strict_rotation = _executed_final_pose_errors(
+        strict_case,
+        symmetric_final.unsqueeze(0),
+    )
+    translation, symmetric_rotation = _executed_final_pose_errors(
+        symmetric_case,
+        symmetric_final.unsqueeze(0),
+    )
+
+    assert translation.item() == pytest.approx(0.0)
+    assert strict_rotation.item() == pytest.approx(torch.pi)
+    assert symmetric_rotation.item() == pytest.approx(0.0)
 
 
 def test_waypoint_errors_use_threshold_greedy_arrivals():
@@ -241,6 +356,37 @@ def test_motion_valid_ignores_planner_reported_failure_in_outcomes_and_aggregate
     assert row["top_failure"] is None
 
 
+def test_joint_motion_validity_does_not_require_cartesian_waypoint_accuracy():
+    case = _case()
+    case.target_waypoints[0, 0, 0, 3] = 0.1
+    case.reference_qpos[0, 0, 0] = 0.1
+    case.case_parameters.update(
+        {
+            "motion_validity": "ordered_joint_waypoints",
+            "joint_threshold_rad": 0.02,
+        }
+    )
+    positions = torch.zeros(1, 2, 7)
+    positions[0, 1, 0] = 0.085
+
+    outcomes = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=0.001,
+        rotation_threshold_rad=0.001,
+        joint_limit_tolerance_rad=1.0e-5,
+    )
+
+    assert outcomes[0].ordered_waypoints_reached is True
+    assert outcomes[0].motion_valid is True
+    assert outcomes[0].completed_waypoint_ratio == pytest.approx(1.0)
+    assert outcomes[0].final_translation_err_mm == pytest.approx(15.0)
+    assert outcomes[0].waypoint_translation_err_mm_mean is None
+
+
 def test_missing_positions_and_joint_limit_violation_fail_motion_valid():
     case = _case()
     missing = compute_case_outcomes(
@@ -315,12 +461,852 @@ def test_nmg_precision_and_external_accuracy_are_independently_configurable():
     assert nmg.config["rot_eps"] == pytest.approx(0.20)
 
 
+def test_nmg_model_revision_is_derived_from_runtime_model_path():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+
+    adapter = NmgOnnxAdapter(
+        PlannerSpecCfg(
+            id="nmg",
+            adapter="nmg_onnx",
+            role="candidate",
+            config={"onnx_model_path": "/models/unified-k3.onnx"},
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+
+    assert adapter.metadata.model_revision == "unified-k3"
+
+
+def test_nmg_over_capacity_case_is_explicitly_unsupported_without_truncation():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+
+    adapter = NmgOnnxAdapter(
+        PlannerSpecCfg(
+            id="nmg",
+            adapter="nmg_onnx",
+            role="candidate",
+            config={"num_waypoints": 5},
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+    over_capacity = replace(
+        _case(),
+        num_waypoints=6,
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).repeat(1, 6, 1, 1),
+        reference_qpos=torch.zeros(1, 6, 7),
+    )
+
+    supported, reason = adapter.supports_case(over_capacity)
+
+    assert supported is False
+    assert reason is not None
+    assert "at most 5" in reason
+    assert "not truncated or split" in reason
+
+
+def test_nmg_case_budget_is_thirty_steps_per_waypoint():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+
+    adapter = NmgOnnxAdapter(
+        PlannerSpecCfg(
+            id="nmg",
+            adapter="nmg_onnx",
+            role="candidate",
+            config={"num_waypoints": 5, "steps_per_waypoint": 30, "max_steps": 150},
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+
+    assert adapter._case_max_steps(replace(_case(), num_waypoints=1)) == 30
+    assert adapter._case_max_steps(replace(_case(), num_waypoints=3)) == 90
+    assert adapter._case_max_steps(replace(_case(), num_waypoints=5)) == 150
+
+
+def test_nmg_joint_case_uses_joint_constraint_waypoints():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+
+    adapter = NmgOnnxAdapter(
+        PlannerSpecCfg(
+            id="nmg",
+            adapter="nmg_onnx",
+            role="candidate",
+            config={"num_waypoints": 5},
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+    expected = Mock()
+    adapter.motion_generator = Mock()
+    adapter.motion_generator.generate.return_value = expected
+    joint_targets = torch.tensor(
+        [[[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], [0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]]]
+    )
+    joint_case = replace(
+        _case(),
+        num_waypoints=2,
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).repeat(1, 2, 1, 1),
+        reference_qpos=joint_targets,
+        case_parameters={"motion_validity": "ordered_joint_waypoints"},
+    )
+
+    supported, reason = adapter.supports_case(joint_case)
+    result = adapter.plan(joint_case)
+
+    assert supported is True
+    assert reason is None
+    assert result is expected
+    targets = adapter.motion_generator.generate.call_args.args[0]
+    assert [target.move_type for target in targets] == [
+        MoveType.JOINT_MOVE,
+        MoveType.JOINT_MOVE,
+    ]
+    assert targets[0].xpos is None
+    assert targets[1].xpos is None
+    assert torch.equal(targets[0].qpos, joint_targets[:, 0])
+    assert torch.equal(targets[1].qpos, joint_targets[:, 1])
+
+
+def _curobo_adapter():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.curobo import CuroboAdapter
+
+    adapter = CuroboAdapter(
+        PlannerSpecCfg(
+            id="curobo",
+            adapter="curobo",
+            role="primary_baseline",
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+    adapter.motion_generator = Mock()
+    return adapter
+
+
+def _joint_waypoint_case() -> tuple[BenchmarkCase, torch.Tensor]:
+    joint_targets = torch.tensor(
+        [[[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], [0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]]]
+    )
+    case = replace(
+        _case(),
+        num_waypoints=2,
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).repeat(1, 2, 1, 1),
+        reference_qpos=joint_targets,
+        case_parameters={"motion_validity": "ordered_joint_waypoints"},
+    )
+    return case, joint_targets
+
+
+def test_curobo_prepares_joint_backend_for_joint_waypoint_case():
+    adapter = _curobo_adapter()
+    case, _ = _joint_waypoint_case()
+
+    adapter.prepare(case)
+
+    adapter.motion_generator.planner.prepare_backend.assert_called_once_with(
+        control_part="arm",
+        batch_size=case.batch_size,
+        move_type=MoveType.JOINT_MOVE,
+    )
+
+
+def test_curobo_prepares_every_required_planning_mode_once():
+    adapter = _curobo_adapter()
+    joint_case, _ = _joint_waypoint_case()
+    cartesian_case = replace(
+        _case(),
+        case_parameters={"motion_validity": "ordered_cartesian_waypoints"},
+    )
+    duplicate_cartesian_case = replace(cartesian_case, case_id="cartesian-duplicate")
+
+    metadata = adapter.prepare_cases(
+        [cartesian_case, duplicate_cartesian_case, joint_case]
+    )
+
+    calls = adapter.motion_generator.planner.prepare_backend.call_args_list
+    assert [call.kwargs["move_type"] for call in calls] == [
+        MoveType.EEF_MOVE,
+        MoveType.JOINT_MOVE,
+    ]
+    assert [call.kwargs["batch_size"] for call in calls] == [
+        cartesian_case.batch_size,
+        joint_case.batch_size,
+    ]
+    assert len(metadata["backends"]) == 2
+
+
+def test_curobo_joint_case_uses_reference_joint_waypoints():
+    adapter = _curobo_adapter()
+    case, joint_targets = _joint_waypoint_case()
+    expected = Mock()
+    adapter.motion_generator.generate.return_value = expected
+
+    result = adapter.plan(case)
+
+    assert result is expected
+    targets = adapter.motion_generator.generate.call_args.args[0]
+    assert [target.move_type for target in targets] == [
+        MoveType.JOINT_MOVE,
+        MoveType.JOINT_MOVE,
+    ]
+    assert targets[0].xpos is None
+    assert targets[1].xpos is None
+    assert torch.equal(targets[0].qpos, joint_targets[:, 0])
+    assert torch.equal(targets[1].qpos, joint_targets[:, 1])
+
+
+def test_nmg_rejects_unknown_motion_validity():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+
+    adapter = NmgOnnxAdapter(
+        PlannerSpecCfg(
+            id="nmg",
+            adapter="nmg_onnx",
+            role="candidate",
+            config={"num_waypoints": 5},
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+    unknown_case = replace(
+        _case(),
+        case_parameters={"motion_validity": "unknown_waypoint_space"},
+    )
+
+    supported, reason = adapter.supports_case(unknown_case)
+
+    assert supported is False
+    assert reason == "unsupported motion_validity mode 'unknown_waypoint_space'"
+    adapter.motion_generator = Mock()
+    with pytest.raises(ValueError, match="Unsupported motion_validity mode"):
+        adapter.plan(unknown_case)
+
+
+def test_seed_override_applies_to_atomic_tracks():
+    suite = load_suite("atomic_franka_pgi_curobo_randomized")
+
+    _apply_overrides(suite, seeds=[104])
+
+    assert suite.free_space.seeds == [104]
+    assert suite.enabled_tracks()[0].config["seeds"] == [104]
+
+
+def test_seed_override_adds_missing_atomic_track_seeds():
+    suite = load_suite("atomic_franka_pgi_curobo_randomized")
+    atomic_track = suite.enabled_tracks()[0]
+    atomic_track.config.pop("seeds", None)
+
+    _apply_overrides(suite, seeds=[104])
+
+    assert atomic_track.config["seeds"] == [104]
+
+
+def test_atomic_task_antipodal_grasp_uses_standalone_generator(monkeypatch):
+    from scripts.tutorials.atomic_action import tutorial_utils
+
+    vertices = torch.tensor(
+        [[-0.025, -0.025, -0.025], [0.025, 0.025, 0.025]],
+        dtype=torch.float32,
+    )
+    triangles = torch.tensor([[0, 1, 0]], dtype=torch.int64)
+    entity = Mock(uid="atomic_cube")
+    entity.get_vertices.return_value = [vertices]
+    entity.get_triangles.return_value = [triangles]
+    handle = Mock(object_id="cube", entity=entity)
+
+    candidate = torch.eye(4)
+    candidate[1, 1] = -1.0
+    candidate[2, 2] = -1.0
+    generator = Mock()
+    generator.get_valid_grasp_poses.return_value = [
+        (candidate.unsqueeze(0), torch.tensor([0.25]))
+    ]
+    generator_factory = Mock(return_value=generator)
+    monkeypatch.setattr(
+        tutorial_utils,
+        "create_parallel_jaw_grasp_pose_generator",
+        generator_factory,
+    )
+
+    scenario = AtomicTaskScenario()
+    scenario.robot = Mock(device=torch.device("cpu"))
+    scenario.robot.compute_ik.return_value = (
+        torch.tensor([True]),
+        torch.zeros(1, 7),
+    )
+    result = scenario.resolve_antipodal_grasp(
+        handle,
+        torch.eye(4).unsqueeze(0),
+        torch.tensor([0.0, 0.0, -1.0]),
+        seed=11,
+        start_qpos=torch.zeros(1, 7),
+        pre_grasp_distance=0.15,
+        lift_height=0.16,
+        n_sample=321,
+        max_candidates=8,
+        alignment_max_angle_deg=10.0,
+    )
+
+    generator_factory.assert_called_once_with(n_sample=321, force_refresh=False)
+    call = generator.get_valid_grasp_poses.call_args.kwargs
+    assert torch.equal(call["mesh_vertices"], vertices)
+    assert torch.equal(call["mesh_triangles"], triangles)
+    assert torch.equal(result, candidate.unsqueeze(0))
+
+
+def test_atomic_task_pickup_builds_engine_owned_endpoint_binding():
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 8
+    robot.control_parts = {"arm": object(), "hand": object()}
+    robot.get_qpos.return_value = torch.zeros(1, 8)
+    robot.get_qvel.return_value = torch.zeros(1, 8)
+    robot.get_joint_ids.side_effect = lambda name: (
+        list(range(7)) if name == "arm" else [7]
+    )
+    motion_generator = Mock(robot=robot, device=torch.device("cpu"))
+    motion_generator.planner.cfg.planner_type = "stub"
+    engine = AtomicActionEngine(
+        motion_generator,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=torch.zeros(1),
+                grasp=torch.ones(1),
+            )
+        },
+    )
+    entity = Mock(uid="atomic_cube")
+    scenario = AtomicTaskScenario()
+    scenario.robot = robot
+    scenario.control_part = "arm"
+    scenario.end_effector_part = "hand"
+    scenario._engine = engine
+    scenario._objects["cube"] = Mock(object_id="cube", entity=entity)
+    poses = torch.eye(4).reshape(1, 1, 4, 4).repeat(1, 3, 1, 1)
+    case = BenchmarkCase(
+        suite_version="test_v1",
+        track="atomic-task",
+        scenario_id="pick_up",
+        case_id="atomic-task:pick_up:cube:s11",
+        seed=11,
+        batch_size=1,
+        num_waypoints=3,
+        path_shape="approach_grasp_lift",
+        start_state_bin="pre_pick",
+        start_qpos=torch.zeros(1, 7),
+        target_waypoints=poses,
+        reference_qpos=torch.zeros(1, 3, 7),
+        skill_id="pick_up",
+        object_id="cube",
+        case_parameters={
+            "sample_count": 12,
+            "approach_direction": [0.0, 0.0, -1.0],
+            "pre_grasp_distance_m": 0.15,
+            "lift_height_m": 0.16,
+            "hand_interp_steps": 4,
+        },
+    )
+
+    invocation = create_atomic_skill_provider("pick_up").build_invocation(
+        scenario,
+        case,
+        Mock(motion_policy_planner="curobo"),
+    )
+
+    assert isinstance(invocation.goal, GraspGoal)
+    assert invocation.goal.semantics.entity_id == "atomic_cube"
+    assert invocation.binding.owner_id == engine.binding_owner_id
+    assert set(invocation.binding.endpoint_keys) == {
+        ("primary", "motion"),
+        ("primary", "grasp"),
+    }
+
+
+def test_atomic_task_prepare_planner_registers_benchmark_objects_in_scene():
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 7
+    robot.control_parts = {"arm": object()}
+    robot.get_qpos.return_value = torch.zeros(1, 7)
+    robot.get_qvel.return_value = torch.zeros(1, 7)
+    motion_generator = Mock(robot=robot, device=torch.device("cpu"))
+    motion_generator.planner.cfg.planner_type = "stub"
+    adapter = Mock()
+    adapter.require_motion_generator.return_value = motion_generator
+
+    object_pose = torch.eye(4).unsqueeze(0)
+    entity = Mock(uid="atomic_cube")
+    entity.get_local_pose.return_value = object_pose
+    scenario = AtomicTaskScenario()
+    scenario._objects["cube"] = Mock(object_id="cube", entity=entity)
+
+    scenario.prepare_planner(adapter, Mock())
+
+    scene = scenario.require_engine().initial_context().scene
+    assert tuple(scene.entities) == ("atomic_cube",)
+    assert torch.equal(scene.entities["atomic_cube"].pose, object_pose)
+
+
+def test_atomic_task_prepare_planner_installs_slide_grasp_service():
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 8
+    robot.control_parts = {"arm": object(), "hand": object()}
+    robot.get_qpos.return_value = torch.zeros(1, 8)
+    robot.get_qvel.return_value = torch.zeros(1, 8)
+    robot.get_joint_ids.side_effect = lambda name: (
+        list(range(7)) if name == "arm" else [7]
+    )
+    motion_generator = Mock(robot=robot, device=torch.device("cpu"))
+    motion_generator.planner.cfg.planner_type = "stub"
+    adapter = Mock()
+    adapter.require_motion_generator.return_value = motion_generator
+    scenario = AtomicTaskScenario()
+    scenario.end_effector_part = "hand"
+    scenario._gripper_open = torch.zeros(1)
+    scenario._gripper_grasp = torch.ones(1)
+    scenario._case_providers["slide-case"] = create_atomic_skill_provider("slide")
+    target_pose = torch.eye(4).unsqueeze(0)
+    grasp_pose = target_pose.clone()
+    grasp_pose[:, 0, 3] = 0.04
+    scenario._cases_by_id["slide-case"] = replace(
+        _case(),
+        scenario_id="slide",
+        case_id="slide-case",
+        skill_id="slide",
+        case_parameters={
+            "slide_target_pose": target_pose.tolist(),
+            "grasp_pose": grasp_pose.tolist(),
+        },
+    )
+
+    scenario.prepare_planner(adapter, Mock())
+
+    generator = scenario.require_engine().grasp_pose_generators["hand"]
+    assert isinstance(generator, GraspPoseGenerator)
+
+
+def test_frozen_articulation_grasp_generator_preserves_batch_shapes():
+    target_pose = torch.eye(4).unsqueeze(0)
+    grasp_pose = target_pose.clone()
+    grasp_pose[:, 0, 3] = 0.04
+    generator = _FrozenArticulationGraspPoseGenerator([(target_pose, grasp_pose)])
+    object_poses = torch.eye(4).repeat(2, 1, 1)
+    object_poses[:, 1, 3] = torch.tensor([0.1, 0.2])
+    mesh_vertices = torch.zeros(3, 3)
+    mesh_triangles = torch.tensor([[0, 1, 2]])
+
+    valid, resolved, costs = generator.get_best_grasp_poses(
+        mesh_vertices=mesh_vertices,
+        mesh_triangles=mesh_triangles,
+        obj_poses=object_poses,
+        approach_direction=torch.tensor([0.0, 0.0, 1.0]),
+    )
+    candidates = generator.get_valid_grasp_poses(
+        mesh_vertices=mesh_vertices,
+        mesh_triangles=mesh_triangles,
+        obj_poses=object_poses,
+        approach_direction=torch.tensor([0.0, 0.0, 1.0]),
+    )
+
+    assert valid.shape == (2,)
+    assert resolved.shape == (2, 4, 4)
+    assert costs.shape == (2,)
+    assert torch.allclose(resolved[:, 0, 3], torch.tensor([0.04, 0.04]))
+    assert torch.allclose(resolved[:, 1, 3], torch.tensor([0.1, 0.2]))
+    assert len(candidates) == 2
+    assert all(poses.shape == (1, 4, 4) for poses, _ in candidates)
+    assert all(cost.shape == (1,) for _, cost in candidates)
+
+
+def test_frozen_articulation_grasp_generator_replays_batched_manifest_rows():
+    batch_size = 3
+    target_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    target_pose[:, 0, 3] = torch.tensor([-0.82, -0.79, -0.85])
+    grasp_pose = target_pose.clone()
+    grasp_pose[:, 1, 3] += torch.tensor([0.01, 0.02, 0.03])
+    generator = _FrozenArticulationGraspPoseGenerator([(target_pose, grasp_pose)])
+    replay_target = target_pose.clone()
+    replay_target[:, 2, 3] += torch.tensor([0.04, -0.01, 0.02])
+
+    valid, resolved, costs = generator.get_best_grasp_poses(
+        mesh_vertices=torch.zeros(3, 3),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        obj_poses=replay_target,
+        approach_direction=torch.tensor([0.0, 0.0, 1.0]).repeat(batch_size, 1),
+    )
+
+    expected = replay_target.clone()
+    expected[:, 1, 3] += torch.tensor([0.01, 0.02, 0.03])
+    assert valid.tolist() == [True, True, True]
+    torch.testing.assert_close(resolved, expected)
+    torch.testing.assert_close(costs, torch.zeros(batch_size))
+
+
+def test_frozen_articulation_grasp_generator_rejects_ambiguous_cases():
+    target_pose = torch.eye(4).repeat(2, 1, 1)
+    first_grasp = target_pose.clone()
+    first_grasp[:, 0, 3] += 0.01
+    second_grasp = target_pose.clone()
+    second_grasp[:, 1, 3] += 0.02
+
+    with pytest.raises(ValueError, match="identical target batches"):
+        _FrozenArticulationGraspPoseGenerator(
+            [(target_pose, first_grasp), (target_pose, second_grasp)]
+        )
+
+
+def test_atomic_task_press_invocation_uses_articulated_target_manifest():
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 8
+    robot.control_parts = {"arm": object(), "hand": object()}
+    robot.get_qpos.return_value = torch.zeros(1, 8)
+    robot.get_qvel.return_value = torch.zeros(1, 8)
+    robot.get_joint_ids.side_effect = lambda name: (
+        list(range(7)) if name == "arm" else [7]
+    )
+    motion_generator = Mock(robot=robot, device=torch.device("cpu"))
+    motion_generator.planner.cfg.planner_type = "stub"
+    engine = AtomicActionEngine(
+        motion_generator,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=torch.zeros(1),
+                grasp=torch.ones(1),
+            )
+        },
+    )
+    scenario = AtomicTaskScenario()
+    scenario.robot = robot
+    scenario.control_part = "arm"
+    scenario.end_effector_part = "hand"
+    scenario._engine = engine
+    target_pose = torch.eye(4).unsqueeze(0)
+    case = BenchmarkCase(
+        suite_version="test_v1",
+        track="atomic-task",
+        scenario_id="press",
+        case_id="atomic-task:press:microwave_start_button:s11",
+        seed=11,
+        batch_size=1,
+        num_waypoints=4,
+        path_shape="approach_contact_press_retract",
+        start_state_bin="pre_action",
+        start_qpos=torch.zeros(1, 7),
+        target_waypoints=target_pose.unsqueeze(1).repeat(1, 4, 1, 1),
+        reference_qpos=torch.zeros(1, 4, 7),
+        skill_id="press",
+        object_id="microwave",
+        case_parameters={
+            "sample_count": 140,
+            "press_target_pose": target_pose.tolist(),
+            "press_axis": [0.0, 0.0, 1.0],
+            "press_position": [0.0, 0.0, 0.01],
+            "target_entity_id": "benchmark_microwave:button_cap",
+            "hand_interp_steps": 12,
+            "approach_distance_m": 0.12,
+            "press_distance_m": 0.03,
+        },
+    )
+
+    invocation = create_atomic_skill_provider("press").build_invocation(
+        scenario,
+        case,
+        Mock(),
+    )
+
+    assert isinstance(invocation.goal, PressGoal)
+    assert invocation.goal.semantics.entity_id == "benchmark_microwave:button_cap"
+    assert invocation.motion_policy.strategy == "motion_gen"
+    assert invocation.motion_policy.sample_count == 140
+    assert type(invocation.skill_options) is PressOptions
+    assert invocation.skill_options.hand_interp_steps == 12
+    assert invocation.skill_options.approach_distance == pytest.approx(0.12)
+    assert invocation.skill_options.press_distance == pytest.approx(0.03)
+
+
+def test_atomic_task_slide_invocation_uses_tutorial_options():
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 8
+    robot.control_parts = {"arm": object(), "hand": object()}
+    robot.get_qpos.return_value = torch.zeros(1, 8)
+    robot.get_qvel.return_value = torch.zeros(1, 8)
+    robot.get_joint_ids.side_effect = lambda name: (
+        list(range(7)) if name == "arm" else [7]
+    )
+    motion_generator = Mock(robot=robot, device=torch.device("cpu"))
+    motion_generator.planner.cfg.planner_type = "stub"
+    engine = AtomicActionEngine(
+        motion_generator,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=torch.zeros(1),
+                grasp=torch.ones(1),
+            )
+        },
+    )
+    scenario = AtomicTaskScenario()
+    scenario.robot = robot
+    scenario.control_part = "arm"
+    scenario.end_effector_part = "hand"
+    scenario._engine = engine
+    target_pose = torch.eye(4).unsqueeze(0)
+    case = BenchmarkCase(
+        suite_version="test_v1",
+        track="atomic-task",
+        scenario_id="slide",
+        case_id="atomic-task:slide:linear_pull:s11",
+        seed=11,
+        batch_size=1,
+        num_waypoints=3,
+        path_shape="approach_grasp_pull",
+        start_state_bin="pre_action",
+        start_qpos=torch.zeros(1, 7),
+        target_waypoints=target_pose.unsqueeze(1).repeat(1, 3, 1, 1),
+        reference_qpos=torch.zeros(1, 3, 7),
+        skill_id="slide",
+        object_id="drawer",
+        case_parameters={
+            "sample_count": 140,
+            "slide_target_pose": target_pose.tolist(),
+            "translation_axis": [0.0, 0.0, 1.0],
+            "mesh_vertices": [
+                [-0.01, -0.01, 0.0],
+                [0.01, -0.01, 0.0],
+                [0.0, 0.01, 0.0],
+            ],
+            "mesh_triangles": [[0, 1, 2]],
+            "grasp_pose": target_pose.tolist(),
+            "target_entity_id": "benchmark_drawer:large_handle_bar",
+            "direction": "pull",
+            "hand_interp_steps": 12,
+            "approach_distance_m": 0.10,
+            "translation_distance_m": 0.18,
+        },
+    )
+
+    invocation = create_atomic_skill_provider("slide").build_invocation(
+        scenario,
+        case,
+        Mock(),
+    )
+
+    assert isinstance(invocation.goal, SlideGoal)
+    assert invocation.goal.semantics.entity_id == "benchmark_drawer:large_handle_bar"
+    assert invocation.motion_policy.strategy == "motion_gen"
+    assert invocation.motion_policy.sample_count == 140
+    assert type(invocation.skill_options) is SlideOptions
+    assert invocation.skill_options.direction == "pull"
+    assert invocation.skill_options.hand_interp_steps == 12
+    assert invocation.skill_options.approach_distance == pytest.approx(0.10)
+    assert invocation.skill_options.translation_distance == pytest.approx(0.18)
+    assert set(invocation.binding.endpoint_keys) == {
+        ("primary", "motion"),
+        ("primary", "grasp"),
+    }
+
+
+def test_atomic_task_twist_invocation_uses_tutorial_options():
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 8
+    robot.control_parts = {"arm": object(), "hand": object()}
+    robot.get_qpos.return_value = torch.zeros(1, 8)
+    robot.get_qvel.return_value = torch.zeros(1, 8)
+    robot.get_joint_ids.side_effect = lambda name: (
+        list(range(7)) if name == "arm" else [7]
+    )
+    motion_generator = Mock(robot=robot, device=torch.device("cpu"))
+    motion_generator.planner.cfg.planner_type = "stub"
+    engine = AtomicActionEngine(
+        motion_generator,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=torch.zeros(1),
+                grasp=torch.ones(1),
+            )
+        },
+    )
+    scenario = AtomicTaskScenario()
+    scenario.robot = robot
+    scenario.control_part = "arm"
+    scenario.end_effector_part = "hand"
+    scenario._engine = engine
+    target_pose = torch.eye(4).unsqueeze(0)
+    case = BenchmarkCase(
+        suite_version="test_v1",
+        track="atomic-task",
+        scenario_id="twist",
+        case_id="atomic-task:twist:quarter_turn:s11",
+        seed=11,
+        batch_size=1,
+        num_waypoints=11,
+        path_shape="approach_grasp_twist_retract",
+        start_state_bin="pre_action",
+        start_qpos=torch.zeros(1, 7),
+        target_waypoints=target_pose.unsqueeze(1).repeat(1, 11, 1, 1),
+        reference_qpos=torch.zeros(1, 11, 7),
+        skill_id="twist",
+        object_id="microwave",
+        case_parameters={
+            "sample_count": 140,
+            "twist_target_pose": target_pose.tolist(),
+            "grasp_position": [0.0, 0.0, 0.0],
+            "axis_origin": [0.0, 0.0, 0.0],
+            "twist_axis": [0.0, 0.0, 1.0],
+            "target_entity_id": "benchmark_microwave:cap_1",
+            "hand_interp_steps": 12,
+            "twist_waypoint_count": 8,
+            "pre_grasp_distance_m": 0.12,
+            "twist_angle_rad": -0.7853981634,
+        },
+    )
+
+    invocation = create_atomic_skill_provider("twist").build_invocation(
+        scenario,
+        case,
+        Mock(),
+    )
+
+    assert isinstance(invocation.goal, TwistGoal)
+    assert invocation.goal.semantics.entity_id == "benchmark_microwave:cap_1"
+    assert invocation.motion_policy.strategy == "motion_gen"
+    assert invocation.motion_policy.sample_count == 140
+    assert type(invocation.skill_options) is TwistOptions
+    assert invocation.skill_options.hand_interp_steps == 12
+    assert invocation.skill_options.twist_waypoint_count == 8
+    assert invocation.skill_options.pre_grasp_distance == pytest.approx(0.12)
+    assert invocation.skill_options.twist_angle == pytest.approx(-0.7853981634)
+    assert set(invocation.binding.endpoint_keys) == {
+        ("primary", "motion"),
+        ("primary", "grasp"),
+    }
+
+
+def test_atomic_task_move_held_object_uses_current_options_contract():
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 8
+    robot.control_parts = {"arm": object(), "hand": object()}
+    robot.get_qpos.return_value = torch.zeros(1, 8)
+    robot.get_qvel.return_value = torch.zeros(1, 8)
+    robot.get_joint_ids.side_effect = lambda name: (
+        list(range(7)) if name == "arm" else [7]
+    )
+    motion_generator = Mock(robot=robot, device=torch.device("cpu"))
+    motion_generator.planner.cfg.planner_type = "stub"
+    engine = AtomicActionEngine(
+        motion_generator,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=torch.zeros(1),
+                grasp=torch.ones(1),
+            )
+        },
+    )
+    scenario = AtomicTaskScenario()
+    scenario.robot = robot
+    scenario.control_part = "arm"
+    scenario.end_effector_part = "hand"
+    scenario._engine = engine
+    target_object_pose = torch.eye(4).unsqueeze(0)
+    case = BenchmarkCase(
+        suite_version="test_v1",
+        track="atomic-task",
+        scenario_id="move_held_object",
+        case_id="atomic-task:move_held_object:cube:s11",
+        seed=11,
+        batch_size=1,
+        num_waypoints=1,
+        path_shape="held_object_transport",
+        start_state_bin="object_held",
+        start_qpos=torch.zeros(1, 7),
+        target_waypoints=target_object_pose.unsqueeze(1),
+        reference_qpos=torch.zeros(1, 1, 7),
+        skill_id="move_held_object",
+        object_id="cube",
+        case_parameters={
+            "sample_count": 12,
+            "target_object_pose": target_object_pose.tolist(),
+        },
+    )
+
+    invocation = create_atomic_skill_provider("move_held_object").build_invocation(
+        scenario,
+        case,
+        Mock(),
+    )
+
+    assert isinstance(invocation.goal, HeldObjectPoseGoal)
+    assert type(invocation.skill_options) is MoveHeldObjectOptions
+
+
 @pytest.mark.parametrize("override", [{"nmg_pos_eps": 0.0}, {"nmg_rot_eps": -0.1}])
 def test_nmg_precision_rejects_non_positive_values(override):
     suite = load_suite("smoke")
 
     with pytest.raises(ValueError, match="NMG"):
         _apply_overrides(suite, **override)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("num_waypoints", 0),
+        ("steps_per_waypoint", -1),
+        ("max_steps", 0),
+        ("max_steps", 1.5),
+        ("steps_per_waypoint", True),
+    ],
+)
+def test_nmg_rollout_budgets_must_be_positive_integers(field, value):
+    suite = load_suite("smoke")
+    nmg = next(spec for spec in suite.planners if spec.adapter == "nmg_onnx")
+    nmg.id = "renamed_nmg_candidate"
+    nmg.config[field] = value
+
+    with pytest.raises((TypeError, ValueError), match=rf"NMG {field}"):
+        suite.validate_benchmark()
 
 
 class _FrankaLimitRobot(_MetricRobot):
@@ -1105,10 +2091,17 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
     )
     from scripts.benchmark.motion_generation.runner import BenchmarkRunner
 
+    prepared_case_sets: list[tuple[str, ...]] = []
+
     class _CapableFake(PlannerAdapter):
         capabilities = frozenset({"eef_waypoint", "batched", "empty_world"})
+        separate_prepare = True
 
         def build(self) -> None:
+            return None
+
+        def prepare_cases(self, cases: list[BenchmarkCase]) -> dict[str, object] | None:
+            prepared_case_sets.append(tuple(case.case_id for case in cases))
             return None
 
         def plan(self, case: BenchmarkCase) -> PlanResult:
@@ -1218,6 +2211,8 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
         for spec in specs:
             runner._run_adapter(writer, sim, robot, spec, [case], required)
 
+        assert prepared_case_sets == [(case.case_id,)]
+
         phases = {
             (r.algorithm_id, r.phase, r.status, r.failure_code) for r in runner.records
         }
@@ -1262,6 +2257,27 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
         assert capable["overall_success_rate"] == pytest.approx(1.0)
         assert incapable["eligible"] is False
         assert any("missing required capabilities" in note for note in runner.notes)
+
+        joint_case = replace(
+            case,
+            case_id="joint-case",
+            case_parameters={"motion_validity": "ordered_joint_waypoints"},
+        )
+        runner._run_adapter(
+            writer,
+            sim,
+            robot,
+            specs[1],
+            [joint_case],
+            frozenset(),
+        )
+        joint_records = [
+            record for record in runner.records if record.case_id == joint_case.case_id
+        ]
+        assert any(
+            record.failure_code == "unsupported_capability" for record in joint_records
+        )
+        assert not any(record.phase is TrialPhase.CONSTRUCT for record in joint_records)
     finally:
         for name in names:
             unregister_planner_adapter(name)

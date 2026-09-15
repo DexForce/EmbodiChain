@@ -609,7 +609,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         )
         handover_pre_grasp = translate_pose_world(
             handover_grasp,
-            -handover_direction * options.pre_grasp_distance,
+            -handover_grasp[:, :3, 2] * options.pre_grasp_distance,
         )
         handover_object_to_eef = torch.bmm(pose_inv(object_pose), handover_grasp)
 
@@ -659,7 +659,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
 
         receive_pre_grasp = translate_pose_world(
             receive_grasp,
-            -receive_direction * options.pre_grasp_distance,
+            -receive_grasp[:, :3, 2] * options.pre_grasp_distance,
         )
         receive_object_to_eef = torch.bmm(
             pose_inv(middle_object_pose),
@@ -1156,7 +1156,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         start_position: torch.Tensor,
         target_position: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return TCP-to-target horizontal directions tilted down by 45 degrees.
+        """Return TCP-to-target horizontal directions tilted down by 30 degrees.
 
         The direction is valid only when the TCP and target have nonzero
         horizontal separation; callers report the corresponding semantic
@@ -1168,14 +1168,15 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         horizontal_unit = horizontal_delta / horizontal_norm.clamp_min(
             1.0e-6
         ).unsqueeze(1)
-        component = math.sqrt(0.5)
         direction = torch.zeros(
             (start_position.shape[0], 3),
             dtype=start_position.dtype,
             device=start_position.device,
         )
-        direction[:, :2] = horizontal_unit * component
-        direction[:, 2] = -component
+        horizontal_component = math.sin(math.pi / 3)
+        vertical_component = math.sin(math.pi / 6)
+        direction[:, :2] = horizontal_unit * horizontal_component
+        direction[:, 2] = -vertical_component
         return direction, valid
 
     @staticmethod

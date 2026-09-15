@@ -25,6 +25,13 @@ Keep these boundaries separate:
 reward, reset, and persistence. Final success is published only after every
 segment lifecycle completes normally.
 
+The environment-owned expert `joint_command_mode` is propagated through the
+simulation factory and adapter into `RuntimeCommandFrameEncoder`. Position mode
+retains the tensor qpos action. Position-velocity mode emits structured qpos and
+qvel targets, requires velocity-bearing joint payloads, and assigns zero qvel to
+idle, wait, inactive-row, and abort-safe holds. This changes neither Task Program
+language nor the policy action space.
+
 The bridge declares `progress_total_steps` only for deterministic open-loop
 Pick/Place segments with fixed interpolation samples and no recovery, runner
 holds, feedback settling, post-policies, or parallel execution. It links only

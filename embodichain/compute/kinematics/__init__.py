@@ -14,10 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Analytical kinematics computations.
+"""Kinematics computations and scalar motion profiles.
 
-Private Warp kernels implement OPW, SRS, and UR algorithms. Stateful solver
-interfaces and robot configuration remain in ``embodichain.lab.sim.motion.solvers``.
+Private Warp kernels implement OPW, SRS, UR, and trapezoidal/Double-S profiles.
+Stateful solver interfaces and robot configuration remain in
+``embodichain.lab.sim.motion.solvers``.
 Pure batched manipulability helpers live in :mod:`.manipulability`."""
 
 from __future__ import annotations

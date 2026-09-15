@@ -1,10 +1,11 @@
 Robot Motion
 ============
 
-The :mod:`embodichain.lab.sim.motion` package groups four related capabilities:
-kinematic solvers, trajectory planners, workspace analysis, and expert trajectory
-augmentation. Simulation objects and atomic actions use these capabilities to
-translate robot goals into executable motion.
+The :mod:`embodichain.lab.sim.motion` package groups the stateful motion
+generator with four related capabilities: kinematic solvers, trajectory
+planners, workspace analysis, and expert trajectory augmentation. Simulation
+objects and atomic actions use these capabilities to translate robot goals into
+executable motion.
 
 Choose the owning subpackage when importing an API. The ``motion`` parent loads
 its children on access and does not re-export their classes and functions;
@@ -14,8 +15,11 @@ public imports still use the normal ``lab`` and ``sim`` initialization path.
    :header-rows: 1
    :widths: 24 76
 
-   * - Subpackage
+   * - Area
      - Responsibility
+   * - ``motion.motion_generator``
+     - Stateful facade that resolves strategies and planners into normalized,
+       timed trajectories for direct callers and Atomic Skills.
    * - ``motion.solvers``
      - Forward, inverse, and differential kinematics.
    * - ``motion.planners``
@@ -60,6 +64,7 @@ Warp kinematics kernels remain at ``embodichain.utils.warp.kinematics``.
 .. toctree::
    :maxdepth: 1
 
+   motion_generator
    solvers/index
    planners/index
 
