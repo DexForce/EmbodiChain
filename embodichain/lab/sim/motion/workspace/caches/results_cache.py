@@ -71,6 +71,7 @@ _TENSOR_FIELDS = (
     "joint_configurations",
     "success_rates",
     "reachability_mask",
+    "manipulability_scores",
 )
 
 # Scalar/dict fields stored in meta.json (JSON-serializable form).
