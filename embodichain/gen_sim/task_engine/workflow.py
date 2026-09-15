@@ -182,8 +182,21 @@ class SubprocessActionExecutor:
                 f"returncode={completed.returncode}."
             )
         report = validate_execution_report(_read_json(report_path))
+        rejected_before_execution = (
+            report["status"] == "rejected"
+            and report["runtime_result"] is None
+            and all(
+                row["success"] is False
+                and row["terminal_reason"] == "initial_plan_rejected"
+                for row in report["environments"]
+            )
+        )
         trajectory_copy = _copy_trajectory_record(report, attempt_root)
-        if report["semantic_call_count"] > 0 and trajectory_copy is None:
+        if (
+            report["semantic_call_count"] > 0
+            and trajectory_copy is None
+            and not rejected_before_execution
+        ):
             raise RuntimeError(
                 "Task Program report did not expose a readable trajectory record."
             )
@@ -438,7 +451,7 @@ class TaskEngineWorkflow:
                     analysis,
                     candidate_set,
                     self.scene_adapter,
-                    force_most_likely=True,
+                    force_most_likely=False,
                 )
             except SceneAdapterProtocolError as exc:
                 state = fail_stage(
@@ -682,7 +695,7 @@ class TaskEngineWorkflow:
                         max_episodes=planning_cfg.max_episodes,
                         max_episode_steps=planning_cfg.max_episode_steps,
                         candidate_set=candidate_set,
-                        force_most_likely=True,
+                        force_most_likely=False,
                         final_inspection=final_inspection,
                         unbound_action_plan=unbound_plan,
                     )

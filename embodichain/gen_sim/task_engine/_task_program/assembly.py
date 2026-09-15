@@ -34,10 +34,91 @@ from ..contracts import canonical_hash
 from .stability import StabilityConstraint, TaskStabilityPort
 from .configured import compose_deployment
 from .grasp_filter import GRASP_FILTER_REVISION, install_grasp_filters
+from .motion import (
+    MOTION_VALIDATION_REVISION,
+    _joint_velocity_limits,
+    _velocity_diagnostics,
+    _velocity_validity,
+)
 
 __all__: list[str] = []
 
 ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v3"
+
+
+def probe_initial_plan(env: Any, deployment: Any, program: Any) -> dict[str, Any]:
+    """Plan the initial call without dispatching commands or committing effects."""
+    from embodichain.lab.sim.atomic_actions.state import TaskState
+
+    unwrapped = getattr(env, "unwrapped", env)
+    adapter = deployment.integration.adapter_factory.create_adapter(unwrapped)
+    compiled = adapter.compile(program)
+    analyses = compiled.preflight_analyses()
+    if not analyses or analyses[0].kind == "parallel_branch":
+        raise ValueError("Initial probe requires a non-empty sequential workflow.")
+    assembly = adapter.assemble_runtime(deployment.selection)
+    qpos = unwrapped.robot.get_qpos()
+    context = assembly.observation_provider.observe(
+        TaskState(batch_size=qpos.shape[0], device=qpos.device)
+    )
+    workflow = assembly.compiler.analyze(analyses[0].calls)
+    grounded = assembly.compiler.ground(workflow, 0, context)
+    plan = assembly.engine.plan(grounded.invocation, context)
+    final_velocity = _validate_final_plan_velocity(plan, unwrapped.robot)
+    return {
+        "scope": "initial_call",
+        "call_index": 0,
+        "analysis_call_count": len(workflow.calls),
+        "initial_downstream_target_count": len(
+            workflow.calls[0].downstream_object_targets
+        ),
+        "unplanned_call_indices": list(range(1, len(workflow.calls))),
+        "remaining_analysis_count": len(analyses) - 1,
+        "planned_grasp_candidates": _planned_grasp_candidates(plan),
+        "plan_success": (plan.plan_success & final_velocity["valid_mask"])
+        .detach()
+        .cpu()
+        .tolist(),
+        "final_command_velocity": {
+            "scope": "initial_call_full_robot_post_resampling",
+            "valid_mask": final_velocity["valid_mask"].detach().cpu().tolist(),
+            "diagnostics": final_velocity["diagnostics"],
+        },
+        "task_success": None,
+    }
+
+
+def _planned_grasp_candidates(plan: Any) -> list[dict[str, Any]]:
+    """Expose immutable planning proposals without claiming an acquired grasp."""
+    effects = getattr(plan, "expected_effects", None)
+    updates = getattr(effects, "held_object_updates", {})
+    return [
+        {
+            "evidence_scope": "proposal_only_not_observed_attachment",
+            "resource": resource,
+            "object_id": held.semantics.entity_id,
+            "object_to_eef": held.object_to_eef.detach().cpu().tolist(),
+            "grasp_xpos": held.grasp_xpos.detach().cpu().tolist(),
+        }
+        for resource, held in updates.items()
+        if held is not None
+    ]
+
+
+def _validate_final_plan_velocity(plan: Any, robot: Any) -> dict[str, Any]:
+    """Validate the final arm/hand samples, not only the planner's intermediate path."""
+    trajectory = plan.joint_trajectory
+    if trajectory is None:
+        if plan.plan_success.any():
+            raise ValueError("Initial plan requires final joint trajectory evidence.")
+        return {"valid_mask": plan.plan_success.clone(), "diagnostics": []}
+    limits = _joint_velocity_limits(robot, None).to(trajectory.positions)
+    return {
+        "valid_mask": _velocity_validity(trajectory.positions, trajectory.dt, limits),
+        "diagnostics": _velocity_diagnostics(
+            trajectory.positions, trajectory.dt, limits
+        ),
+    }
 
 
 class _TaskFactory(SimulationTaskProgramFactory):
@@ -74,12 +155,64 @@ class TaskAdapterFactory:
         """Return the exact shared adapter; no Session or Bridge is overridden."""
         self.registration.assert_unchanged()
         motion_factory = None
-        if self.cartesian_approaches:
+        if any(
+            preset.motion_policy.strategy == "motion_gen"
+            for preset in self.registration.robot_profile_binding.presets
+        ):
+            from embodichain.lab.sim.motion.motion_generator import (
+                MotionGenCfg,
+                MotionGenerator,
+            )
+            from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
+                CuroboPlannerCfg,
+                CuroboWorldCfg,
+            )
+            from embodichain.lab.task_program.semantics import SceneCollisionRole
+
+            bindings = self.registration.scene_binding.rigid_objects
+            obstacles = {
+                item.entity_id: environment.sim.get_rigid_object(item.simulation_uid)
+                for item in bindings
+                if item.collision_role is not SceneCollisionRole.NONE
+            }
+            dynamic = [
+                item.entity_id
+                for item in bindings
+                if item.collision_role is SceneCollisionRole.DYNAMIC
+            ]
+            if not obstacles or any(value is None for value in obstacles.values()):
+                raise ValueError(
+                    "GenSim motion_gen requires bound scene collision objects."
+                )
+            motion_factory = lambda: MotionGenerator(
+                MotionGenCfg(
+                    planner_cfg=CuroboPlannerCfg(
+                        robot_uid=environment.robot.uid,
+                        use_cuda_graph=False,
+                        world=CuroboWorldCfg(
+                            rigid_objects=obstacles,
+                            dynamic_obstacle_names=dynamic,
+                            obstacle_representation="mesh",
+                            # Unused cuboid caches can intercept named mesh updates
+                            # in cuRobo's obstacle-type dispatcher.
+                            collision_cache={
+                                "mesh": len(obstacles),
+                            },
+                        ),
+                    )
+                )
+            )
+        else:
             from embodichain.lab.sim.motion.motion_generator import MotionGenCfg
             from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
-            from .motion import ApproachMotionGenerator
+            from .motion import ApproachMotionGenerator, CheckedMotionGenerator
 
-            motion_factory = lambda: ApproachMotionGenerator(
+            generator_type = (
+                ApproachMotionGenerator
+                if self.cartesian_approaches
+                else CheckedMotionGenerator
+            )
+            motion_factory = lambda: generator_type(
                 MotionGenCfg(
                     planner_cfg=ToppraPlannerCfg(robot_uid=environment.robot.uid)
                 )
@@ -207,6 +340,7 @@ def load_deployment(
         {
             "adapter_contract": ADAPTER_CONTRACT,
             "grasp_filter_revision": GRASP_FILTER_REVISION,
+            "motion_validation_revision": MOTION_VALIDATION_REVISION,
             "core_integration": base.integration.integration_fingerprint,
             "registration": registration.fingerprint,
             "task_constraints": payload,

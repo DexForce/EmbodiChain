@@ -129,6 +129,10 @@ class GroundingResult:
     latency_seconds: float
 
 
+class _UnresolvedSceneReference(ValueError):
+    """Insufficient scene evidence cannot be repaired as malformed JSON."""
+
+
 def ground_scene_references(
     instruction: str,
     intent: Mapping[str, Any],
@@ -141,7 +145,8 @@ def ground_scene_references(
 
     The grounding model can only select stable UIDs from a redacted inventory.
     Its output does not add affordances, physical state, coordinates, or poses.
-    One failed local validation is repaired with one additional model call.
+    One failed format validation is repaired with one additional model call.
+    Explicitly ambiguous or missing references are rejected without retry.
 
     Args:
         instruction: Original user instruction for task-level context.
@@ -198,6 +203,8 @@ def ground_scene_references(
                 attempts=attempt + 1,
                 latency_seconds=perf_counter() - started,
             )
+        except _UnresolvedSceneReference:
+            raise
         except (TypeError, ValueError) as error:
             if attempt:
                 raise ValueError(
@@ -393,7 +400,7 @@ def _validate_response(
                 f"{context}.status must be resolved, ambiguous, or not_found."
             )
         if status != "resolved":
-            raise ValueError(
+            raise _UnresolvedSceneReference(
                 f"Grounding request {reference_id!r} was not resolved: {status}."
             )
         confidence = raw["confidence"]
@@ -426,6 +433,14 @@ def _validate_response(
             )
 
         request = request_by_id[reference_id]
+        # An exact runtime identity is stronger evidence than a model's label
+        # match. Never silently substitute another object for that identity.
+        reference = request["reference"]
+        if reference in inventory.by_uid and uids != (reference,):
+            raise _UnresolvedSceneReference(
+                f"Grounding request {reference_id!r} names exact UID "
+                f"{reference!r}, but selected {uids!r}."
+            )
         allowed = (
             {entity.uid for entity in inventory.interactive}
             if request["slot"] == "object"

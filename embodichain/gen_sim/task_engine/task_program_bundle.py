@@ -46,9 +46,9 @@ _EMBODIMENT_COMPONENTS: Final = {
 # target in the integration builder: the Atomic Action must execute the exact
 # grounded goal and must not silently clamp an unreachable caller request.
 _DUAL_FRANKA_COORDINATED_TRANSPORT_DISTANCE: Final = 0.14
-_DUAL_FRANKA_HANDOVER_CLEARANCE: Final = 0.193
+# This is a minimum: held-object handover never lowers the current object pose.
+_DUAL_FRANKA_HANDOVER_CLEARANCE: Final = 0.10
 _DUAL_FRANKA_TABLE_MOUNT_OFFSET: Final = 0.35
-_DUAL_FRANKA_PLACE_TCP_CLEARANCE: Final = 0.22
 _LATERAL_RELATION_DISTANCE: Final = 0.10
 _FRONT_RELATION_DISTANCE: Final = 0.18
 # Leave enough free space around a placed object's support reference for the
@@ -63,6 +63,8 @@ _RELATIVE_POSITION_TOLERANCE: Final = 0.05
 _AXIS_ALIGN_CALL_ID: Final = "simulation.axis_align"
 _COORDINATED_TRANSPORT_CALL_ID: Final = "simulation.coordinated_transport"
 _PARK_CALL_ID: Final = "simulation.park"
+_HANDOVER_SOURCE_PICK: Final = "gen_sim.pick.handover_source"
+_DEFAULT_PICK_LIFT_HEIGHT: Final = 0.16
 _PLACE_RELATIVE_CALL_ID: Final = "simulation.place_relative"
 _STACK_PLACE_CALL_ID: Final = "gen_sim.stack_place"
 _STACK_PICK_CALL_ID: Final = "gen_sim.stack_pick"
@@ -80,7 +82,7 @@ _POUR_CALL_ID: Final = "simulation.pour"
 _COORDINATED_HOLD_CALL_ID: Final = "simulation.coordinated_hold"
 
 
-_UPRIGHT_RELEASE_CLEARANCE: Final = 0.04
+_UPRIGHT_RELEASE_CLEARANCE: Final = 0.01
 
 _SLENDER_UPRIGHT_RELEASE_CLEARANCE: Final = 0.01
 
@@ -174,8 +176,20 @@ def generate_task_program_bundle(
     selected_graph = _refine_upright_targets(selected_graph, scene)
     selected_graph = _refine_coordinated_targets(selected_graph, scene)
     for node in selected_graph["nodes"]:
+        if node["task_type"] == "E4" and node["call"]["kind"] == "pick":
+            call = node["call"]
+            node["call"] = {
+                "kind": "registered",
+                "call_id": _HANDOVER_SOURCE_PICK,
+                "arguments": {
+                    "object": call["object"],
+                    "target": f"{node['task_instance_id']}_source_grasp",
+                },
+                "resources": deepcopy(call["resources"]),
+            }
         if node["call"].get("call_id") == _PICK_CALL_ID:
             node["call"]["call_id"] = f"gen_sim.pick.{node['task_instance_id']}"
+    selected_graph = _add_handover_staging(selected_graph, scene)
     paths = TaskProgramBundlePaths(
         root=root,
         deployment=root / "task_program_deployment.yaml",
@@ -200,14 +214,20 @@ def generate_task_program_bundle(
     )
     embodiment_payload = load_config(embodiment_source)
     _bind_embodiment_to_scene(embodiment_payload, table_top_z=scene.table_top_z)
+    _calibrate_task_gripper_opening(embodiment_payload)
     save_config(paths.embodiment, embodiment_payload)
     policy_payload = load_config(policy_source)
     policy_payload["tracking"]["consecutive_acceptances"] = 5
     policy_payload["tracking"]["terminal_settle_timeout"] = 3.0
-    if any(node["call"]["kind"] == "hand_over" for node in selected_graph["nodes"]):
-        # Preserve 44 frames each for transfer and receiver approach after the
-        # generated hand-close, hold, release-settle, and retreat allocations.
-        policy_payload["motion"]["sample_count"] = 180
+    if any(
+        node["call"]["kind"] == "hand_over" or node["task_type"] == "E2"
+        for node in selected_graph["nodes"]
+    ):
+        # Leave motion time for handover and upright staging without shrinking
+        # a larger configured budget. The velocity validator remains mandatory.
+        policy_payload["motion"]["sample_count"] = max(
+            180, policy_payload["motion"]["sample_count"]
+        )
     save_config(paths.execution_policy, policy_payload)
 
     program_id = _program_identifier(selected_graph["task_id"])
@@ -234,6 +254,7 @@ def generate_task_program_bundle(
             scene,
             program_id=program_id,
             scene_contract=scene_contract,
+            collision_world=policy_payload["motion"]["strategy"] == "motion_gen",
         ),
     )
     save_config(paths.scene, _scene_payload(scene, program_id=program_id))
@@ -464,6 +485,15 @@ def _task_stability_payload(
                     ],
                     "minimum_alignment": math.cos(math.pi / 18.0),
                 }
+            else:
+                route = routes[(object_id, reference_id, arguments["relation"])]
+                presets[f"gen_sim.{node['id']}.stable"] = {
+                    "kind": "placement",
+                    "entity": object_id,
+                    "reference": reference_id,
+                    "displacement": route["world_displacement"],
+                    "position_tolerance": _RELATIVE_POSITION_TOLERANCE,
+                }
         elif (
             call["call_id"] == _ALIGN_HELD_CALL_ID
             and node["task_type"] == "E4"
@@ -559,6 +589,33 @@ def _program_payload(
             if not policies and not validators:
                 continue
             if accepted is not terminal:
+                remaining = group["node_ids"][group["node_ids"].index(node_id) + 1 :]
+                cleanup_calls = [by_name[key]["steps"]["call"] for key in remaining]
+                placement = accepted["steps"]["call"]
+                if (
+                    (
+                        placement.get("kind") == "place"
+                        or placement.get("call_id")
+                        in {
+                            _PLACE_RELATIVE_CALL_ID,
+                            _STACK_PLACE_CALL_ID,
+                        }
+                    )
+                    and any(
+                        call.get("call_id") == _CLEAR_RELEASED_CALL_ID
+                        for call in cleanup_calls
+                    )
+                    and all(
+                        call.get("kind") == "registered"
+                        and call.get("call_id")
+                        in {_CLEAR_RELEASED_CALL_ID, _PARK_CALL_ID}
+                        for call in cleanup_calls
+                    )
+                ):
+                    # Release effects remain mandatory; final pose/stability
+                    # checks must not prevent the declared clearance sequence.
+                    policies = accepted.pop("post", [])
+                    validators = accepted.pop("validators", [])
                 # Cleanup is still physical work; it can invalidate placement.
                 terminal.setdefault("post", []).extend(deepcopy(policies))
                 terminal.setdefault("validators", []).extend(deepcopy(validators))
@@ -679,6 +736,7 @@ def _integration_payload(
     *,
     program_id: str,
     scene_contract: str,
+    collision_world: bool = False,
 ) -> dict[str, Any]:
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
     referenced_objects: set[str] = set()
@@ -689,6 +747,20 @@ def _integration_payload(
     move_held_routes: list[dict[str, Any]] = []
     upright_move_objects: set[str] = set()
     pick_routes: dict[str, list[dict[str, Any]]] = {}
+    default_pick_options = {
+        "kind": "pick_up",
+        "pick_object_part": "center",
+        "pre_grasp_distance": 0.15,
+        "lift_height": _DEFAULT_PICK_LIFT_HEIGHT,
+        "approach_alignment_max_angle": 0.10,
+        # Robotiq travels 0.7 rad with a 2 rad/s limit at 25 Hz; include
+        # enough intervals for closure, with the same budget as release.
+        "hand_interp_steps": 12,
+        "grasp_settle_steps": (
+            16 if any(n["call"]["kind"] == "hand_over" for n in graph["nodes"]) else 0
+        ),
+        "grasp_commit_fraction": 1.0,
+    }
     pick_options: dict[str, dict[str, Any]] = {}
     axis_align_objects: set[str] = set()
     pour_objects: set[str] = set()
@@ -736,6 +808,19 @@ def _integration_payload(
                 coordinated_hold_routes.append(route)
             else:
                 coordinated_routes.append(route)
+        elif call["kind"] == "registered" and call["call_id"] == _HANDOVER_SOURCE_PICK:
+            arguments = call["arguments"]
+            referenced_objects.add(str(arguments["object"]))
+            pick_routes.setdefault(_HANDOVER_SOURCE_PICK, []).append(
+                {
+                    "object_id": str(arguments["object"]),
+                    "target_id": str(arguments["target"]),
+                }
+            )
+            pick_options[_HANDOVER_SOURCE_PICK] = {
+                **default_pick_options,
+                "pick_object_part": "top",
+            }
         elif call["kind"] == "registered" and (
             call["call_id"] == _PICK_CALL_ID
             or call["call_id"].startswith("gen_sim.pick.")
@@ -770,6 +855,7 @@ def _integration_payload(
             )
             options = {
                 "kind": "pick_up",
+                "hand_interp_steps": default_pick_options["hand_interp_steps"],
                 "pre_grasp_distance": 0.08,
                 "grasp_settle_steps": 16,
                 "pick_object_part": "center",
@@ -869,6 +955,8 @@ def _integration_payload(
                 f"Unsupported generated registered call {call['call_id']!r}."
             )
 
+    if collision_world:
+        referenced_objects.update(scene_objects)
     rigid_bindings: list[dict[str, Any]] = []
     for entity_id in sorted(referenced_objects | {"table"}):
         source = scene_objects.get(entity_id)
@@ -927,6 +1015,17 @@ def _integration_payload(
                     "dynamic" if str(source["role"]) == "rigid_object" else "static"
                 ),
                 "semantic_type": str(source.get("category") or entity_id),
+                **(
+                    {
+                        "collision_role": (
+                            "dynamic"
+                            if str(source["role"]) == "rigid_object"
+                            else "static"
+                        )
+                    }
+                    if collision_world
+                    else {}
+                ),
                 "affordances": affordances,
             }
         )
@@ -970,23 +1069,7 @@ def _integration_payload(
                 "coordinated_pickment": {"left": "left", "right": "right"},
             },
             "action_options": {
-                "pick": {
-                    "kind": "pick_up",
-                    "pick_object_part": "center",
-                    "pre_grasp_distance": 0.15,
-                    "lift_height": 0.16,
-                    "approach_alignment_max_angle": 0.10,
-                    "hand_interp_steps": 5,
-                    "grasp_settle_steps": (
-                        16
-                        if any(
-                            node["call"]["kind"] == "hand_over"
-                            for node in graph["nodes"]
-                        )
-                        else 0
-                    ),
-                    "grasp_commit_fraction": 1.0,
-                },
+                "pick": default_pick_options,
                 "place": {
                     "kind": "place",
                     "hand_interp_steps": 12,
@@ -1003,7 +1086,7 @@ def _integration_payload(
                     "hold_steps": 8,
                     "retreat_steps": 36,
                     "retreat_distance": 0.10,
-                    "receive_pick_object_part": "bottom",
+                    "receive_pick_object_part": "center",
                     "release_at_target": False,
                     "arm_selection": "bound",
                 },
@@ -1015,10 +1098,6 @@ def _integration_payload(
                             "hand_interp_steps": 12,
                             "release_settle_steps": 60,
                             "lift_height": 0.10,
-                            "max_approach_retract_z": (
-                                float(scene.table_top_z)
-                                + _DUAL_FRANKA_PLACE_TCP_CLEARANCE
-                            ),
                             "cartesian_waypoint_count": 2,
                             "preserve_current_object_orientation": True,
                         }
@@ -1060,7 +1139,7 @@ def _integration_payload(
                             "kind": "axis_align",
                             "pre_grasp_distance": 0.15,
                             "lift_height": 0.16,
-                            "hand_interp_steps": 5,
+                            "hand_interp_steps": 12,
                             "grasp_settle_steps": 0,
                             "grasp_commit_fraction": 1.0,
                             "target_axis": [0.0, 0.0, 1.0],
@@ -1281,6 +1360,115 @@ def _task_settle_rigid_objects(
     return selected or rigid_objects
 
 
+def _add_handover_staging(graph: SemanticTaskGraph, scene: Any) -> SemanticTaskGraph:
+    """Propose a table-inward transfer using existing skills after a fresh E4 pick.
+
+    This is a geometric candidate, not a reachability certificate. Normal
+    planning and effect gates remain responsible for rejecting invalid motion.
+    Previously manipulated objects cannot use source-scene pose predictions.
+    """
+    from scipy.spatial.transform import Rotation
+
+    result = deepcopy(graph)
+    prior = []
+    for node in graph["nodes"]:
+        call = node["call"]
+        if call["kind"] != "hand_over" or not prior:
+            prior.append(node)
+            continue
+        pick = prior[-1]
+        pick_call = pick["call"]
+        object_id = call["object"]
+        eligible = (
+            node["task_type"] == "E4"
+            and pick["task_instance_id"] == node["task_instance_id"]
+            and pick_call.get("call_id") == _HANDOVER_SOURCE_PICK
+            and pick_call.get("arguments", {}).get("object") == object_id
+            and pick_call.get("resources", {}).get("primary")
+            == call["resources"]["source"]
+            and node["depends_on"] == [pick["id"]]
+            and not any(
+                earlier["call"].get(
+                    "object", earlier["call"].get("arguments", {}).get("object")
+                )
+                == object_id
+                for earlier in prior[:-1]
+            )
+        )
+        prior.append(node)
+        if not eligible:
+            continue
+        source = next(
+            item for item in scene.planner_objects if item["runtime_uid"] == object_id
+        )
+        table = next(item for item in scene.background if item["uid"] == "table")
+        if table.get("shape", {}).get("shape_type") == "Cube":
+            center = np.asarray(table["init_pos"], dtype=float)[:2]
+        else:
+            vertices = np.asarray(_mesh_vertices(table))
+            world = vertices @ Rotation.from_euler(
+                "XYZ", table.get("init_rot", [0.0, 0.0, 0.0]), degrees=True
+            ).as_matrix().T + np.asarray(table["init_pos"])
+            center = (world[:, :2].min(0) + world[:, :2].max(0)) * 0.5
+        position = np.asarray(source["init_pos"], dtype=float).copy()
+        position[:2] = (position[:2] + center) * 0.5
+        position[2] += _DEFAULT_PICK_LIFT_HEIGHT
+        quat = Rotation.from_euler(
+            "XYZ", source.get("init_rot", [0.0, 0.0, 0.0]), degrees=True
+        ).as_quat()
+        staging_id = f"{node['id']}__staging"
+        target_id = f"{staging_id}_target"
+        if target_id in result["targets"] or any(
+            item["id"] == staging_id for item in result["nodes"]
+        ):
+            raise ValueError(
+                "Generated handover staging identity collides with existing content."
+            )
+        result["targets"][target_id] = {
+            "kind": "cyclic_pose",
+            "values": [
+                {
+                    "position": position.tolist(),
+                    "quaternion_wxyz": [float(quat[3]), *quat[:3].tolist()],
+                }
+            ],
+        }
+        stage = deepcopy(node)
+        stage["id"] = staging_id
+        stage["call"] = {
+            "kind": "registered",
+            "call_id": _MOVE_HELD_OBJECT_CALL_ID,
+            "arguments": {"object": object_id, "target": target_id},
+            "resources": {"primary": call["resources"]["source"]},
+        }
+        index = next(
+            i for i, item in enumerate(result["nodes"]) if item["id"] == node["id"]
+        )
+        result["nodes"][index]["depends_on"] = [staging_id]
+        result["nodes"].insert(index, stage)
+        group = next(
+            item
+            for item in result["task_groups"]
+            if item["id"] == node["task_instance_id"]
+        )
+        group["node_ids"].insert(group["node_ids"].index(node["id"]), staging_id)
+    return validate_semantic_task_graph(result)
+
+
+def _calibrate_task_gripper_opening(embodiment: dict[str, Any]) -> None:
+    """Bound this deployment's grasp proposals by the mounted pad clearance."""
+    generators = embodiment["skill_profile"]["runtime_services"][
+        "grasp_pose_generators"
+    ]
+    for generator in generators.values():
+        model = generator["model"]
+        if model["model_id"] == "robotiq_arg2f_140":
+            # At the profile's zero-angle open command, the assembled URDF pad
+            # centers are 0.1360346 m apart, with 0.0075 m total pad thickness.
+            # Round the resulting 0.1285346 m free gap down, never up.
+            model["max_opening_width"] = min(float(model["max_opening_width"]), 0.128)
+
+
 def _bind_embodiment_to_scene(
     embodiment: dict[str, Any],
     *,
@@ -1351,6 +1539,11 @@ def _relative_place_route_payloads(
     routes: list[dict[str, Any]] = []
     for selector in sorted(selectors):
         object_id, reference_id, relation = selector
+        if reference_id == "table" and relation not in {"on", "above"}:
+            raise ValueError(
+                "A lateral table-relative placement has no supported landing surface. "
+                "Bind the named relation anchor, not the surrounding tabletop region."
+            )
         if selector in upright_targets:
             target = _single_target_pose(graph, upright_targets[selector])
             reference_position = _position(scene_objects[reference_id])

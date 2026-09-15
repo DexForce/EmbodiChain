@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from copy import deepcopy
 import math
 from typing import Any, ClassVar
 
@@ -34,6 +35,7 @@ from embodichain.lab.task_program.compiler.lowering import (
     SemanticLowering,
 )
 from embodichain.lab.task_program.semantics import (
+    GRASP_AFFORDANCE_CAPABILITY,
     RegisteredSemanticCall,
     SceneObjectRef,
     SemanticCallDescriptor,
@@ -50,17 +52,43 @@ def _clearance_poses(
     current: torch.Tensor,
     root: torch.Tensor,
     *,
-    height: float,
+    height: float | torch.Tensor,
     retreat: float,
 ) -> torch.Tensor:
     """First clear vertically, then move toward the owning arm's root."""
     raised = current.clone()
-    raised[:, 2, 3] = torch.clamp_min(raised[:, 2, 3], height)
+    raised[:, 2, 3] = torch.maximum(
+        raised[:, 2, 3], torch.as_tensor(height).to(current)
+    )
     direction = root[:, :2, 3] - current[:, :2, 3]
     direction = torch.nn.functional.normalize(direction, dim=-1)
     withdrawn = raised.clone()
     withdrawn[:, :2, 3] += retreat * direction
     return torch.stack((raised, withdrawn), dim=1)
+
+
+def _object_clearance_height(
+    current: torch.Tensor, object_pose: torch.Tensor, vertices: torch.Tensor, model: Any
+) -> torch.Tensor:
+    """Clear the object's top with the whole open parallel-jaw model envelope."""
+    half_open = model.max_opening_width / 2 + model.finger_thickness
+    corners = current.new_tensor(
+        [
+            [x, y, z]
+            for x in (-half_open, half_open)
+            for y in (-model.finger_width / 2, model.finger_width / 2)
+            for z in (
+                -model.finger_length / 2 - model.palm_depth,
+                model.finger_length / 2,
+            )
+        ]
+    )
+    gripper_low = (corners @ current[:, :3, :3].transpose(-1, -2))[:, :, 2].amin(1)
+    object_points = (
+        vertices.to(current) @ object_pose[:, :3, :3].transpose(-1, -2)
+        + object_pose[:, None, :3, 3]
+    )
+    return object_points[:, :, 2].amax(1) - gripper_low + 0.01
 
 
 class _ClearReleasedLowerer(RegisteredSemanticLowerer):
@@ -74,10 +102,14 @@ class _ClearReleasedLowerer(RegisteredSemanticLowerer):
         robot: Any,
         *,
         retreat_distance: float,
+        object_vertices: dict[str, torch.Tensor],
+        gripper_models: dict[str, Any],
     ) -> None:
         self._routes = {(obj, target): height for obj, target, height in routes}
         self._robot = robot
         self._retreat = retreat_distance
+        self._vertices = object_vertices
+        self._grippers = gripper_models
 
     def lower(
         self,
@@ -110,12 +142,28 @@ class _ClearReleasedLowerer(RegisteredSemanticLowerer):
             env_ids=context.env_ids.tolist(),
             to_matrix=True,
         ).to(current)
+        observed = context.scene.entities[arguments["object"]]
+        if observed.confidence <= 0 or not torch.isfinite(observed.pose).all():
+            raise ValueError(
+                "Released-hand clearance requires a finite observed object pose."
+            )
+        object_pose = observed.pose.to(current)
+        if object_pose.ndim == 2:
+            object_pose = object_pose.unsqueeze(0).expand(current.shape[0], -1, -1)
+        grasp = bound.binding.resources["primary"].endpoints["grasp"].runtime_target
+        height = _object_clearance_height(
+            current,
+            object_pose,
+            self._vertices[arguments["object"]],
+            self._grippers[grasp.target_id],
+        )
+        height = torch.clamp_min(height, self._routes[selector])
         return SemanticLowering(
             goal=EndEffectorPoseGoal(
                 _clearance_poses(
                     current,
                     root,
-                    height=self._routes[selector],
+                    height=height,
                     retreat=self._retreat,
                 )
             )
@@ -125,7 +173,7 @@ class _ClearReleasedLowerer(RegisteredSemanticLowerer):
 @dataclass(frozen=True, slots=True)
 class _ClearReleasedFactory:
     call_id: ClassVar[str] = CLEAR_RELEASED_CALL
-    revision: ClassVar[str] = "1"
+    revision: ClassVar[str] = "2"
     target_descriptor = MoveEndEffector.descriptor()
     routes: tuple[tuple[str, str, float], ...]
     retreat_distance: float = _DEFAULT_RETREAT_DISTANCE
@@ -135,10 +183,26 @@ class _ClearReleasedFactory:
     ) -> _ClearReleasedLowerer:
         if engine.robot is not robot:
             raise ValueError("Released-hand clearance must bind the factory's robot.")
+        vertices = {}
         for obj, _, _ in self.routes:
-            scene_registry.resolve(obj, expected_type=SceneObjectRef)
+            ref = scene_registry.resolve(obj, expected_type=SceneObjectRef)
+            affordance = scene_registry.resolve_affordance(
+                ref, capability=GRASP_AFFORDANCE_CAPABILITY
+            )
+            vertices[obj] = (
+                scene_registry.object_semantics(ref, affordance=affordance)
+                .affordance.mesh_vertices.detach()
+                .clone()
+            )
         return _ClearReleasedLowerer(
-            self.routes, robot, retreat_distance=self.retreat_distance
+            self.routes,
+            robot,
+            retreat_distance=self.retreat_distance,
+            object_vertices=vertices,
+            gripper_models={
+                key: deepcopy(value.gripper_model)
+                for key, value in engine.grasp_pose_generators.items()
+            },
         )
 
 

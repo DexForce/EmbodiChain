@@ -50,6 +50,24 @@ from embodichain.gen_sim.task_engine.semantic_planner import (
 _TEST_INSTRUCTION = "test-instruction"
 
 
+@pytest.mark.parametrize(
+    "source_y,target_y,expected",
+    [(-0.1, 0.3, "right"), (0.1, -0.3, "left"), (-0.2, -0.1, "left")],
+)
+def test_arm_preference_considers_both_placement_endpoints(
+    source_y: float, target_y: float, expected: str
+) -> None:
+    objects = {
+        "cup": {"init_pos": [0.0, source_y, 0.8]},
+        "pad": {"init_pos": [0.0, target_y, 0.7]},
+    }
+    planner = SemanticTaskPlanner()
+    assert planner._nearest_resource("cup", objects, target_id="pad") == expected
+    assert planner._nearest_resource("cup", objects, target_id="table") == (
+        "right" if source_y >= 0 else "left"
+    )
+
+
 def _selector(kind="none", *, step_id="", reference="", quantifier="one", count=0):
     return {
         "kind": kind,
@@ -89,6 +107,25 @@ def _result(step):
         latency_seconds=0.01,
         normalizations=(),
     )
+
+
+@pytest.mark.parametrize(
+    "reference", ["原处", "原位", "原来的位置", "original position"]
+)
+def test_e5_return_location_is_not_a_scene_object(reference: str) -> None:
+    step = _step(reference="tray")
+    step.update(
+        task_type="E5",
+        required_arm="none",
+        orientation_goal="none",
+        target=_selector("scene_ref", reference=reference),
+        relation="on",
+        terminal_behavior="place",
+    )
+    with pytest.raises(ValueError, match="return position is not a scene object"):
+        validate_instruction_intent({"steps": [step]})
+    step.update(target=_selector(), relation="none")
+    validate_instruction_intent({"steps": [step]})
 
 
 def test_task_agent_generates_concurrently_deduplicates_and_counts_votes():
@@ -645,7 +682,12 @@ def test_semantic_planner_keeps_directional_e1_targets_live(
     assert graph["targets"] == {}
 
 
-def test_semantic_planner_keeps_e1_support_relation_late_bound() -> None:
+@pytest.mark.parametrize(
+    "requested,expected", [("left_arm", "left"), ("auto", "right")]
+)
+def test_semantic_planner_keeps_e1_support_relation_late_bound(
+    requested: str, expected: str
+) -> None:
     """Place-on selects trusted scene geometry rather than a frozen pose."""
 
     def interpreter(_instruction, **_kwargs):
@@ -654,7 +696,7 @@ def test_semantic_planner_keeps_e1_support_relation_late_bound() -> None:
             task_type="E1",
             target=_selector("scene_ref", reference="can"),
             relation="on",
-            required_arm="left_arm",
+            required_arm=requested,
             orientation_goal="preserve",
         )
         return _result(step)
@@ -684,7 +726,7 @@ def test_semantic_planner_keeps_e1_support_relation_late_bound() -> None:
         "kind": "registered",
         "call_id": "simulation.place_relative",
         "arguments": {"object": "apple", "reference": "can", "relation": "on"},
-        "resources": {"primary": "left"},
+        "resources": {"primary": expected},
     }
 
 
@@ -882,6 +924,56 @@ def test_handover_continuation_does_not_pick_an_already_held_object() -> None:
     ]
 
 
+@pytest.mark.parametrize("source,destination", [("left", "right"), ("right", "left")])
+def test_handover_then_separate_placement_parks_both_free_arms(
+    source, destination
+) -> None:
+    transfer = _step(step_id="step_01", reference="can")
+    transfer.update(
+        task_type="E4",
+        required_arm="none",
+        transfer_arm=f"{source}_arm",
+        receive_arm=f"{destination}_arm",
+        orientation_goal="none",
+        terminal_behavior="hold",
+    )
+    place = _step(step_id="step_02", reference="can")
+    place.update(
+        task_type="E1",
+        required_arm=f"{destination}_arm",
+        orientation_goal="none",
+        target=_selector("scene_ref", reference="pad"),
+        relation="on",
+        depends_on=["step_01"],
+    )
+    parsed = _result(transfer)
+    parsed.intent["steps"].append(place)
+    candidate = TaskAgent(interpreter=lambda *a, **kw: parsed).generate(
+        "transfer_place", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    graph = SemanticTaskPlanner().plan(
+        candidate,
+        {
+            "schema_version": ROLE_BINDINGS_SCHEMA,
+            "task_id": "transfer_place",
+            "candidate_id": candidate["candidate_id"],
+            "role_bindings": {},
+            "reference_bindings": {
+                "step_01.object": ["can"],
+                "step_02.object": ["can"],
+                "step_02.target": ["pad"],
+            },
+        },
+        [
+            {"runtime_uid": "can", "init_pos": [0.0, -0.1, 0.8]},
+            {"runtime_uid": "pad", "init_pos": [0.0, 0.1, 0.7]},
+        ],
+    )
+    parks = [n for n in graph["nodes"] if n["call"].get("call_id") == "simulation.park"]
+    assert [n["call"]["resources"]["primary"] for n in parks] == [destination, source]
+    assert all(n["task_instance_id"] == "step_02" for n in parks)
+
+
 def test_semantic_planner_preserves_e4_terminal_place() -> None:
     """A handover-place task transfers and then releases at its requested relation."""
 
@@ -941,11 +1033,19 @@ def test_semantic_planner_preserves_e4_terminal_place() -> None:
 
 
 @pytest.mark.parametrize(
-    ("terminal_behavior", "call_id", "expected_displacement", "cleanup_count"),
+    (
+        "terminal_behavior",
+        "direction",
+        "call_id",
+        "expected_displacement",
+        "cleanup_count",
+    ),
     [
-        ("hold", "simulation.coordinated_hold", [0.0, 0.0, 0.14], 0),
+        ("hold", "up", "simulation.coordinated_hold", [0.0, 0.0, 0.14], 0),
+        ("place", "none", "simulation.coordinated_transport", [0.0, 0.0, 0.0], 2),
         (
             "place",
+            "front_right",
             "simulation.coordinated_transport",
             [-0.14 / 2**0.5, 0.14 / 2**0.5, 0.0],
             2,
@@ -954,6 +1054,7 @@ def test_semantic_planner_preserves_e4_terminal_place() -> None:
 )
 def test_semantic_planner_preserves_e5_direction_and_terminal_behavior(
     terminal_behavior: str,
+    direction: str,
     call_id: str,
     expected_displacement: list[float],
     cleanup_count: int,
@@ -964,7 +1065,7 @@ def test_semantic_planner_preserves_e5_direction_and_terminal_behavior(
             task_type="E5",
             required_arm="none",
             orientation_goal="none",
-            direction=("up" if terminal_behavior == "hold" else "front_right"),
+            direction=direction,
             terminal_behavior=terminal_behavior,
         )
         return _result(step)

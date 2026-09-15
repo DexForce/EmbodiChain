@@ -27,6 +27,7 @@ from embodichain.gen_sim.task_engine._task_program.grasp_filter import (
     TaskGraspPoseGenerator,
     accepted_candidates,
     geometry_key,
+    opening_envelope_mask,
 )
 from embodichain.toolkits.graspkit import (
     ParallelJawGraspPoseGenerator,
@@ -37,6 +38,39 @@ __all__: list[str] = []
 
 VERTICES = torch.tensor([[-0.02, 0.0, 0.0], [0.02, 0.0, 0.20], [0.0, 0.01, 0.10]])
 TRIANGLES = torch.tensor([[0, 1, 2]])
+
+
+def test_opening_envelope_rejects_wide_or_off_center_object() -> None:
+    vertices = torch.tensor([[-0.07, -0.02, 0.0], [0.07, 0.02, 0.0]])
+    poses = torch.eye(4).repeat(3, 1, 1)
+    poses[1, :3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    poses[2] = poses[1]
+    poses[2, 1, 3] = 0.05
+    assert opening_envelope_mask(vertices, poses, torch.eye(4), 0.128).tolist() == [
+        False,
+        True,
+        False,
+    ]
+    world = torch.eye(4)
+    world[:3, 3] = torch.tensor([2.0, -3.0, 0.5])
+    assert opening_envelope_mask(vertices, world @ poses, world, 0.128).tolist() == [
+        False,
+        True,
+        False,
+    ]
+
+
+def test_unconstrained_pick_still_checks_opening_envelope() -> None:
+    generator = TaskGraspPoseGenerator(CandidateGenerator(((0.1,),)), ())
+    rows = generator.get_valid_grasp_poses(
+        mesh_vertices=torch.tensor([[-0.08, 0.0, 0.0], [0.08, 0.0, 0.0]]),
+        mesh_triangles=torch.empty(0, 3, dtype=torch.long),
+        obj_poses=torch.eye(4).unsqueeze(0),
+        approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+    )
+    assert torch.isinf(rows[0][1]).all()
 
 
 class CandidateGenerator(ParallelJawGraspPoseGenerator):

@@ -607,6 +607,19 @@ def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
     elif task_type == "E5":
         direction = str(step["direction"])
         terminal = str(step["terminal_behavior"])
+        if target_kind == "scene_ref" and step["target"][
+            "reference"
+        ].strip().casefold() in {
+            "原处",
+            "原位",
+            "原来的位置",
+            "original position",
+            "original location",
+        }:
+            raise ValueError(
+                f"{context} E5 return position is not a scene object; use "
+                "target.kind=none, relation=none, direction=none, terminal_behavior=place."
+            )
         if terminal not in _TERMINAL_BEHAVIORS - {"none"}:
             raise ValueError(f"{context} E5 requires terminal_behavior hold/place.")
         if target_kind == "none":
@@ -687,6 +700,21 @@ def _instruction_prompt(instruction: str) -> str:
         "Use orientation_goal=none unless the instruction explicitly requests "
         "upright orientation or preserving the original orientation. Spatial "
         "placement and handover alone do not imply preserve. "
+        "For E1 and E4, an explicit request to keep a vessel upright, vertical, "
+        "or mouth-up requires orientation_goal=upright, including when the "
+        "receiver keeps holding it (terminal_behavior=hold). Do not discard "
+        "this orientation requirement because the core operation is handover. "
+        "If placement is a separate E1 step after a transfer, the preceding E4 "
+        "must use terminal_behavior=hold, target.kind=none and relation=none; "
+        "the E1 step owns the placement target and relation. Alternatively, a "
+        "single E4 with terminal_behavior=place must itself specify both target "
+        "and relation. Never emit terminal_behavior=place with an empty E4 target. "
+        "For relative placement, target.reference names the relation anchor, "
+        "not the whole destination region or its support surface. For example, "
+        "'on the tabletop beside the wooden block' selects 'wooden block' as "
+        "target.reference, not 'table' or 'the tabletop beside the wooden block'. "
+        "Use the table itself as target only for placement on the table without "
+        "another named relation anchor. "
         "Emptying, dumping, or pouring contents from one container into another "
         "is exactly one E3 step: object selects the source container, target "
         "selects the receiving container, and relation=above. Pickup and staging "
@@ -702,7 +730,10 @@ def _instruction_prompt(instruction: str) -> str:
         "Selector kind rules (these are not extra output fields):\n"
         f"{_instruction_selector_rules()}\n\n"
         "For E5, use target+relation for moving an object relative to another "
-        "object, or direction for a small robot-relative move. When a request "
+        "object. Returning the carried object to its original location uses "
+        "target.kind=none, relation=none, direction=none, terminal_behavior=place; "
+        "never emit 'original position' or '原处' as a scene_ref. Use direction "
+        "for a small robot-relative move. When a request "
         "combines lifting with a horizontal direction, preserve that horizontal "
         "direction: 'carry forward and keep raised' uses direction=front and "
         "terminal_behavior=hold. The hold recipe includes a raised terminal pose. "
