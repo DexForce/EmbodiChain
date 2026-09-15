@@ -29,6 +29,7 @@ from embodichain.gen_sim.task_engine._task_program.release_clearance import (
     _ClearReleasedFactory,
     _ClearReleasedLowerer,
     _clearance_poses,
+    _object_clearance_height,
 )
 from embodichain.lab.sim.atomic_actions import (
     EndEffectorPoseGoal,
@@ -66,7 +67,16 @@ def _binding():
     )
     return SimpleNamespace(
         binding=SimpleNamespace(
-            resources={"primary": SimpleNamespace(endpoints={"motion": endpoint})}
+            resources={
+                "primary": SimpleNamespace(
+                    endpoints={
+                        "motion": endpoint,
+                        "grasp": SimpleNamespace(
+                            runtime_target=SimpleNamespace(target_id="hand")
+                        ),
+                    }
+                )
+            }
         )
     )
 
@@ -74,7 +84,11 @@ def _binding():
 def test_clearance_rejects_a_live_attachment_before_kinematics() -> None:
     robot = Mock()
     lowerer = _ClearReleasedLowerer(
-        (("can", "safe", 1.2),), robot, retreat_distance=0.1
+        (("can", "safe", 1.2),),
+        robot,
+        retreat_distance=0.1,
+        object_vertices={"can": torch.zeros(1, 3)},
+        gripper_models={},
     )
     context = SimpleNamespace(
         task=SimpleNamespace(
@@ -106,12 +120,19 @@ def test_clearance_binds_one_shared_cartesian_goal_without_planning() -> None:
     robot.get_link_pose.return_value = root
     robot.cfg.solver_cfg = {"arm": SimpleNamespace(root_link_name="arm_root")}
     lowerer = _ClearReleasedLowerer(
-        (("can", "safe", 1.2),), robot, retreat_distance=0.1
+        (("can", "safe", 1.2),),
+        robot,
+        retreat_distance=0.1,
+        object_vertices={"can": torch.zeros(1, 3)},
+        gripper_models={"hand": _model()},
     )
     context = SimpleNamespace(
         task=SimpleNamespace(get_held_object=lambda key: None),
         robot=SimpleNamespace(qpos=torch.zeros(1, 2)),
         env_ids=torch.tensor([0]),
+        scene=SimpleNamespace(
+            entities={"can": SimpleNamespace(pose=current.clone(), confidence=1.0)}
+        ),
     )
     result = lowerer.lower(
         RegisteredSemanticCall(
@@ -144,3 +165,29 @@ def test_clearance_factory_requires_the_same_robot() -> None:
 def test_clearance_default_retreat_preserves_release_separation_margin() -> None:
     factory = _ClearReleasedFactory((("can", "safe", 1.2),))
     assert factory.retreat_distance == pytest.approx(_DEFAULT_RETREAT_DISTANCE)
+
+
+def _model():
+    return SimpleNamespace(
+        max_opening_width=0.14,
+        finger_thickness=0.01,
+        finger_width=0.03,
+        finger_length=0.13,
+        palm_depth=0.08,
+    )
+
+
+def test_clearance_height_accounts_for_object_top_and_gripper_orientation() -> None:
+    current = torch.eye(4).repeat(2, 1, 1)
+    current[:, 2, 3] = 0.895
+    current[1, 1, 1] = current[1, 2, 2] = -1
+    object_pose = torch.eye(4).repeat(2, 1, 1)
+    object_pose[:, 2, 3] = 0.682
+    vertices = torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.0, 0.222]])
+    height = _object_clearance_height(current, object_pose, vertices, _model())
+    torch.testing.assert_close(height, torch.tensor([1.059, 0.979]))
+    poses = _clearance_poses(
+        current, torch.eye(4).repeat(2, 1, 1), height=height, retreat=0.15
+    )
+    torch.testing.assert_close(poses[:, 0, :2, 3], current[:, :2, 3])
+    torch.testing.assert_close(poses[:, 0, 2, 3], height)

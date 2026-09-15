@@ -301,8 +301,57 @@ def test_grounding_repairs_one_invalid_uid_in_the_same_batch() -> None:
     ],
 )
 def test_grounding_fails_closed_after_one_repair(response: dict, error: str) -> None:
-    with pytest.raises(ValueError, match=f"after one repair.*{error}"):
+    expected = error if error == "was not resolved" else f"after one repair.*{error}"
+    with pytest.raises(ValueError, match=expected):
         _run(_intent(), lambda **_kwargs: deepcopy(response))
+
+
+@pytest.mark.parametrize("status", ["ambiguous", "not_found"])
+def test_unresolved_evidence_is_not_retried_into_a_guessed_binding(status: str) -> None:
+    calls = []
+
+    def caller(**kwargs):
+        calls.append(kwargs)
+        return {
+            "bindings": [
+                _binding("move.object", [], status=status, confidence=0.0),
+                _binding("move.target", ["table"]),
+            ]
+        }
+
+    with pytest.raises(ValueError, match="was not resolved"):
+        _run(_intent(), caller)
+    assert len(calls) == 1
+
+
+def test_exact_scene_identity_cannot_be_replaced_by_another_known_object() -> None:
+    calls = []
+
+    def caller(**kwargs):
+        calls.append(kwargs)
+        return {
+            "bindings": [
+                _binding("move.object", ["salt_shaker"]),
+                _binding("move.target", ["table"]),
+            ]
+        }
+
+    with pytest.raises(ValueError, match="names exact UID"):
+        _run(_intent(object_selector=_selector("cutting_board")), caller)
+    assert len(calls) == 1
+
+
+def test_exact_scene_identity_is_accepted_when_binding_matches() -> None:
+    result = _run(
+        _intent(object_selector=_selector("cutting_board")),
+        lambda **kwargs: {
+            "bindings": [
+                _binding("move.object", ["cutting_board"]),
+                _binding("move.target", ["table"]),
+            ]
+        },
+    )
+    assert result.bindings["move.object"] == ("cutting_board",)
 
 
 def test_grounding_enforces_count_and_accepts_an_open_world_set() -> None:

@@ -935,6 +935,68 @@ def test_run_all_cli_forwards_open_window(
     assert captured["open_window"] is True
 
 
+@pytest.mark.parametrize("visual_accepted", [True, False])
+def test_visual_gate_blocks_execution_and_preserves_audit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    visual_accepted: bool,
+) -> None:
+    from embodichain.gen_sim.task_engine.scene import visual_consistency
+
+    calls = []
+
+    class FakeWorkflow:
+        def __init__(self, **kwargs):
+            pass
+
+        def run(self, request, **kwargs):
+            calls.append(request)
+            output = Path(request["output_dir"])
+            assert not output.exists()
+            output.mkdir()
+            return SimpleNamespace(
+                status="prepared",
+                succeeded=False,
+                failure_class=None,
+                output_dir=output,
+                manifest_path=output / "run_manifest.json",
+                final_bundle=None,
+            )
+
+    monkeypatch.setattr(cli, "TaskEngineWorkflow", FakeWorkflow)
+    monkeypatch.setattr(cli, "SceneAdapter", lambda **kwargs: object())
+    monkeypatch.setattr(
+        visual_consistency,
+        "review_scene_image",
+        lambda *args: {"accepted": visual_accepted},
+    )
+    code = cli.main(
+        [
+            "prepare",
+            "--mode",
+            "scene",
+            "--task-id",
+            "task",
+            "--instruction",
+            "lift tray",
+            "--scene",
+            str(tmp_path / "scene"),
+            "--reference-image",
+            str(tmp_path / "image.png"),
+            "--output-root",
+            str(tmp_path / "runs"),
+        ]
+    )
+    assert code == (0 if visual_accepted else 2)
+    assert len(calls) == int(visual_accepted)
+    payload = json.loads(capsys.readouterr().out)
+    audit = json.loads(
+        (Path(payload["output_dir"]) / "visual_consistency.json").read_text()
+    )
+    assert audit["accepted"] is visual_accepted
+
+
 def test_prepare_cli_stops_before_simulator_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1114,6 +1176,40 @@ def test_run_cli_executes_an_existing_bundle(
     else:
         assert payload["video_paths"] == []
         assert output.err == "[Task Engine] No video files generated for this run.\n"
+
+
+@pytest.mark.parametrize("semantic_success", [{}, {"finish": False}, {"finish": True}])
+def test_run_cli_checks_bundle_semantic_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    semantic_success: dict,
+) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "success_spec.json").write_text(
+        json.dumps({"schema_version": "test", "terms": [{"step_id": "finish"}]}),
+        encoding="utf-8",
+    )
+
+    class Executor:
+        def __call__(self, *args, **kwargs):
+            return {
+                "status": "succeeded",
+                "environments": [
+                    {"success": True, "semantic_success": semantic_success}
+                ],
+            }
+
+    monkeypatch.setattr(cli, "SubprocessActionExecutor", Executor)
+    result = cli.main(
+        ["run", "--bundle", str(bundle), "--output-root", str(tmp_path / "runs")]
+    )
+    accepted = semantic_success.get("finish") is True
+    assert result == (0 if accepted else 2)
+    assert json.loads(capsys.readouterr().out)["status"] == (
+        "succeeded" if accepted else "failed"
+    )
 
 
 def test_video_listing_error_is_diagnostic_only(

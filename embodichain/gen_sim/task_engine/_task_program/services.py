@@ -17,7 +17,7 @@
 """Task-owned immutable route declarations and skill binding services."""
 
 from __future__ import annotations
-from dataclasses import dataclass, make_dataclass
+from dataclasses import dataclass, make_dataclass, replace
 import hashlib
 import math
 from typing import Any, ClassVar
@@ -62,9 +62,9 @@ from embodichain.lab.task_program.compiler.lowering import (
 )
 
 from embodichain.lab.task_program.integrations._configured_services import (
-    _CoordinatedTransportRoute,
+    _CoordinatedTransportRoute as _SharedCoordinatedTransportRoute,
     _RelativePlaceLowerer,
-    _coordinated_transport_route,
+    _coordinated_transport_route as _shared_coordinated_transport_route,
     _identifier,
     _pose,
     _world_displacement,
@@ -87,6 +87,33 @@ _COORDINATED_HOLD_CALL_ID = "simulation.coordinated_hold"
 
 
 _PICK_CALL_ID = "simulation.pick"
+
+
+@dataclass(frozen=True, slots=True)
+class _CoordinatedTransportRoute(_SharedCoordinatedTransportRoute):
+    """Allow a lift-and-return recipe with zero net object displacement."""
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.world_displacement) is tuple
+            and len(self.world_displacement) == 3
+            and all(
+                type(value) in (int, float) and value == 0
+                for value in self.world_displacement
+            )
+            and self.reference_entity_id is None
+            and self.relative_pose is None
+        ):
+            _identifier(self.object_id, field_name="object_id")
+            _identifier(self.target_id, field_name="target_id")
+            return
+        _SharedCoordinatedTransportRoute.__post_init__(self)
+
+
+def _coordinated_transport_route(value: Any, *, index: int) -> Any:
+    if type(value) is _CoordinatedTransportRoute:
+        return value
+    return _shared_coordinated_transport_route(value, index=index)
 
 
 def _point(
@@ -581,12 +608,52 @@ class _RelativePlaceRoute:
         return self.object_id, self.reference_entity_id, self.relation
 
 
+class _ObservedRelativePlaceLowerer(_RelativePlaceLowerer):
+    """Correct placement geometry without rebasing the release evidence."""
+
+    def __init__(self, routes: tuple[_RelativePlaceRoute, ...], robot: Any) -> None:
+        super().__init__(routes)
+        self._robot = robot
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+        option_template: ActionOptions,
+    ) -> SemanticLowering:
+        result = super().lower(
+            call, context=context, bound=bound, option_template=option_template
+        )
+        route = self._resolve_route(call)
+        object_pose = self._observed_pose(context, route.object_id)
+        motion = bound.binding.resources["primary"].endpoints["motion"].runtime_target
+        eef = self._robot.compute_fk(
+            qpos=context.robot.qpos[:, list(motion.joint_ids)],
+            name=motion.control_part,
+            env_ids=context.env_ids.tolist(),
+            to_matrix=True,
+        ).to(object_pose)
+        observed_grasp = torch.linalg.solve(object_pose, eef)
+        return replace(
+            result,
+            goal=replace(
+                result.goal,
+                xpos=replace(
+                    result.goal.xpos,
+                    relative_pose=observed_grasp,
+                ),
+            ),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
     """Create fresh relative-placement lowerers from canonical scene refs."""
 
     call_id: ClassVar[str] = _PLACE_RELATIVE_CALL_ID
-    revision: ClassVar[str] = "1"
+    revision: ClassVar[str] = "2"
     target_descriptor: ClassVar[SkillDescriptor] = Place.descriptor()
 
     routes: tuple[_RelativePlaceRoute, ...]
@@ -631,7 +698,7 @@ class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
                     world_displacement=route.world_displacement,
                 )
             )
-        return _RelativePlaceLowerer(tuple(routes))
+        return _ObservedRelativePlaceLowerer(tuple(routes), robot)
 
 
 class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):

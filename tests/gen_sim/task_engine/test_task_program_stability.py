@@ -36,6 +36,103 @@ from embodichain.lab.task_program.semantics import SceneObjectRef
 __all__: list[str] = []
 
 
+def test_cargo_envelope_tracks_rows_and_excludes_explicit_manipulation(
+    monkeypatch,
+) -> None:
+    import numpy as np
+    from embodichain.gen_sim.task_engine import task_program_bundle
+    from embodichain.gen_sim.task_engine._task_program.cargo import (
+        capture_cargo,
+        check_cargo,
+    )
+
+    tray = torch.eye(4).repeat(2, 1, 1)
+    cargo = tray.clone()
+    cargo[:, 2, 3] = 0.02
+    poses = {"tray": tray, "knife": cargo, "cup": cargo.clone()}
+    objects = {
+        uid: SimpleNamespace(get_local_pose=lambda uid=uid, **kw: poses[uid].clone())
+        for uid in poses
+    }
+
+    def mesh(cfg):
+        return (
+            np.array([[-0.2, -0.2, 0.0], [0.2, 0.2, 0.05]])
+            if cfg["uid"] == "tray"
+            else np.array([[-0.01, -0.01, 0.0], [0.01, 0.01, 0.01]])
+        )
+
+    monkeypatch.setattr(task_program_bundle, "_mesh_vertices", mesh)
+    scene = {"simulation": {"rigid_object": [{"uid": uid} for uid in poses]}}
+    graph = {
+        "nodes": [
+            {"task_type": "E5", "call": {"arguments": {"object": "tray"}}},
+            {"task_type": "E1", "call": {"object": "cup"}},
+        ]
+    }
+    guards = capture_cargo(
+        SimpleNamespace(sim=SimpleNamespace(get_rigid_object=objects.get)), scene, graph
+    )
+    assert [g.object_id for g in guards] == ["knife"]
+    assert check_cargo(guards, 2)["accepted_mask"] == [True, True]
+    cargo[1, 0, 3] = 0.3
+    report = check_cargo(guards, 2)
+    assert report["accepted_mask"] == [True, False]
+    assert report["contents"][0]["initial_mask"] == [True, True]
+
+
+def test_cargo_envelope_uses_full_mesh_and_carrier_frame() -> None:
+    from embodichain.gen_sim.task_engine._task_program.cargo import inside_envelope
+
+    carrier = torch.eye(4).repeat(2, 1, 1)
+    carrier[:, :2, :2] = torch.tensor([[0.0, -1.0], [1.0, 0.0]])
+    carrier[:, 0, 3] = 5.0
+    local = torch.eye(4).repeat(2, 1, 1)
+    local[:, 2, 3] = 0.02
+    local[1, 0, 3] = 0.19
+    vertices = torch.tensor([[-0.02, -0.02, 0.0], [0.02, 0.02, 0.01]])
+    bounds = torch.tensor([[-0.2, -0.2, 0.0], [0.2, 0.2, 0.05]])
+    assert inside_envelope(vertices, carrier @ local, carrier, bounds).tolist() == [
+        True,
+        False,
+    ]
+
+
+def test_cargo_trajectory_rejects_escape_and_return_but_ignores_unwritten_tail() -> (
+    None
+):
+    from embodichain.gen_sim.task_engine._task_program.cargo import (
+        CargoEnvelope,
+        check_cargo,
+    )
+
+    pose = torch.eye(4).repeat(2, 1, 1)
+    cargo_pose = pose.clone()
+    cargo_pose[:, 2, 3] = 0.02
+    guard = CargoEnvelope(
+        "tray",
+        "knife",
+        SimpleNamespace(get_local_pose=lambda **kw: pose),
+        SimpleNamespace(get_local_pose=lambda **kw: cargo_pose),
+        torch.tensor([[-0.01, -0.01, 0.0], [0.01, 0.01, 0.01]]),
+        torch.tensor([[-0.2, -0.2, 0.0], [0.2, 0.2, 0.05]]),
+        torch.tensor([True, True]),
+    )
+    carrier = torch.tensor([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]).repeat(2, 3, 1)
+    cargo = carrier.clone()
+    cargo[:, :, 2] = 0.02
+    cargo[:, 1, 0] = 0.3
+    trajectory = {
+        "rigid_objects": {"tray": {"pose": carrier}, "knife": {"pose": cargo}}
+    }
+    report = check_cargo([guard], 2, trajectory=trajectory, step_counts=[3, 1])
+    assert report["accepted_mask"] == [False, True]
+    assert report["contents"][0]["first_failed_frames"] == [1, None]
+    assert check_cargo([guard], 2)["accepted_mask"] == [True, True]
+    with pytest.raises(ValueError, match="frame range"):
+        check_cargo([guard], 2, trajectory=trajectory, step_counts=[0, 1])
+
+
 def _local_port(
     cfg: StabilityConstraint,
     pose: torch.Tensor,
@@ -150,18 +247,24 @@ def test_placement_requires_a_target_not_only_a_stationary_object() -> None:
         StabilityConstraint(entity="tray", kind="placement")
 
 
-def test_placement_rejects_a_stable_but_wrong_destination_per_environment() -> None:
+@pytest.mark.parametrize("relative", [False, True])
+def test_placement_rejects_a_stable_but_wrong_destination_per_environment(
+    relative: bool,
+) -> None:
     pose = torch.eye(4).repeat(2, 1, 1)
     pose[1, 0, 3] = 0.10
     port, policy, segment = _local_port(
         StabilityConstraint(
             entity="tray",
             kind="placement",
-            target_position=(0.0, 0.0, 0.0),
+            target_position=None if relative else (0.0, 0.0, 0.0),
+            reference="block" if relative else None,
+            displacement=(0.0, 0.0, 0.0) if relative else None,
             duration=0.08,
             timeout=0.12,
         ),
         pose,
+        reference_pose=torch.eye(4).repeat(2, 1, 1) if relative else None,
     )
     commands = list(
         port.actions(policy, segment=segment, active_mask=torch.tensor([True, True]))

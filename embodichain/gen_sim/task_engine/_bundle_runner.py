@@ -97,10 +97,12 @@ def execute_bundle(
     torch.manual_seed(args.seed)
 
     result_metadata: dict[str, Any] | None = None
+    cargo_report: dict[str, Any] | None = None
     row_success = [False] * int(args.num_envs)
     terminal_reasons = ["runtime_not_started"] * int(args.num_envs)
     failure: dict[str, Any] | None = None
     env: Any = None
+    probe: dict[str, Any] | None = None
     try:
         import gymnasium
 
@@ -139,24 +141,53 @@ def execute_bundle(
         deployment.integration.registration.catalog.preflight(env_cfg.task_program)
         env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
         env.reset(seed=args.seed, options={"save_data": False})
-        result = execute_demo_episode(env, episode_index=0, attempt_id=0)
-        result_metadata = result.to_metadata()
-        row_success = [bool(value) for value in result.success]
-        terminal_reasons = list(result.terminal_reasons) or [
-            str(result.terminal_reason)
-        ] * len(row_success)
-        if result.completed and result.all_success:
-            env.reset()
+        from ._task_program.cargo import capture_cargo, check_cargo
+
+        cargo = capture_cargo(env, load_config(root / "components/scene.yaml"), graph)
+        probe = _isolated_initial_probe(env, deployment, env_cfg.task_program)
+        probe["integration_fingerprint"] = graph["integration_fingerprint"]
+        (output / "planning_probe.json").write_text(
+            json.dumps(probe, indent=2), encoding="utf-8"
+        )
+        if args.plan_probe_only or not any(probe["plan_success"]):
+            terminal_reasons = ["initial_plan_rejected"] * int(args.num_envs)
+            _write_terminal_robot_state(env, output)
         else:
-            _preserve_failed_execution_recording(
-                env,
-                output,
-                num_envs=len(row_success),
+            result = execute_demo_episode(env, episode_index=0, attempt_id=0)
+            result_metadata = result.to_metadata()
+            _write_terminal_robot_state(env, output)
+            row_success = [bool(value) for value in result.success]
+            terminal_reasons = list(result.terminal_reasons) or [
+                str(result.terminal_reason)
+            ] * len(row_success)
+            target = getattr(env, "unwrapped", env)
+            buffer = getattr(target, "_traj_buffer", None)
+            if cargo and buffer is None:
+                raise ValueError("Cargo acceptance requires a recorded trajectory.")
+            cargo_report = check_cargo(
+                cargo,
+                len(row_success),
+                trajectory=None if buffer is None else buffer["states"],
+                step_counts=getattr(target, "_traj_steps", None),
             )
-            env.reset(options={"save_data": False})
+            (output / "cargo_envelope.json").write_text(
+                json.dumps(cargo_report, indent=2), encoding="utf-8"
+            )
+            for index, accepted in enumerate(cargo_report["accepted_mask"]):
+                if not accepted and row_success[index]:
+                    row_success[index] = False
+                    terminal_reasons[index] = "cargo_envelope_failed"
+            if result.completed and all(row_success):
+                env.reset()
+            else:
+                _preserve_failed_execution_recording(
+                    env, output, num_envs=len(row_success)
+                )
+                env.reset(options={"save_data": False})
     except Exception as exc:
         failure = _exception_metadata(exc)
         if env is not None:
+            _write_terminal_robot_state(env, output)
             try:
                 _preserve_failed_execution_recording(
                     env,
@@ -196,6 +227,19 @@ def execute_bundle(
             else:
                 failure["simulation_cleanup_error"] = cleanup
 
+    if args.plan_probe_only:
+        probe = probe or {"scope": "initial_call", "plan_success": []}
+        probe["failure"] = failure
+        probe["integration_fingerprint"] = graph["integration_fingerprint"]
+        (output / "planning_probe.json").write_text(
+            json.dumps(probe, indent=2), encoding="utf-8"
+        )
+        _print_json(probe)
+        return (
+            0
+            if failure is None and probe["plan_success"] and all(probe["plan_success"])
+            else 2
+        )
     if len(row_success) != int(args.num_envs):
         row_success = (row_success + [False] * int(args.num_envs))[: int(args.num_envs)]
     if len(terminal_reasons) != len(row_success):
@@ -213,10 +257,61 @@ def execute_bundle(
         terminal_reasons=terminal_reasons,
         failure=failure,
         trajectory_root=trajectory_root,
+        cargo_report=cargo_report,
     )
+    if probe is not None and not any(probe["plan_success"]) and failure is None:
+        report["status"] = "rejected"
     write_execution_report(output, report)
     _print_json(report)
     return 0 if report["status"] == "succeeded" else 2
+
+
+from ._task_program.assembly import probe_initial_plan as _probe_initial_plan
+
+
+def _isolated_initial_probe(env: Any, deployment: Any, program: Any) -> dict[str, Any]:
+    """Keep diagnostic sampling from perturbing the subsequent execution stream."""
+    python_rng, numpy_rng = random.getstate(), np.random.get_state()
+    torch_rng = torch.random.get_rng_state()
+    cuda_rng = torch.cuda.get_rng_state_all() if torch.cuda.is_initialized() else None
+    try:
+        return _probe_initial_plan(env, deployment, program)
+    finally:
+        random.setstate(python_rng)
+        np.random.set_state(numpy_rng)
+        torch.random.set_rng_state(torch_rng)
+        if cuda_rng is not None:
+            torch.cuda.set_rng_state_all(cuda_rng)
+
+
+def _write_terminal_robot_state(env: Any, output: Path) -> None:
+    """Persist measured joint state before reset; this is not success evidence."""
+    path = output / "terminal_robot_state.json"
+    if path.exists():
+        return
+    payload: dict[str, Any] = {"schema_version": "gen_sim.terminal-robot-state/v1"}
+    try:
+        robot = getattr(env, "unwrapped", env).robot
+        payload["control_parts"] = {
+            name: {
+                "joint_ids": list(robot.get_joint_ids(name=name)),
+                "joint_names": [
+                    robot.joint_names[index] for index in robot.get_joint_ids(name=name)
+                ],
+                "measured_qpos": robot.get_qpos(name=name).detach().cpu().tolist(),
+            }
+            for name in robot.cfg.control_parts
+        }
+    except Exception as exc:
+        payload["observation_error"] = _exception_metadata(exc)
+    try:
+        path.write_text(
+            json.dumps(payload, indent=2, allow_nan=False), encoding="utf-8"
+        )
+    except (OSError, ValueError) as exc:
+        print(
+            f"[Task Engine] Terminal robot snapshot unavailable: {exc}", file=sys.stderr
+        )
 
 
 def _build_execution_report(
@@ -227,6 +322,7 @@ def _build_execution_report(
     terminal_reasons: list[str],
     failure: dict[str, Any] | None,
     trajectory_root: Path,
+    cargo_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a report without turning row-local failure into global failure."""
     semantic_success = _semantic_success_by_env(
@@ -234,6 +330,26 @@ def _build_execution_report(
         runtime_result,
         num_envs=len(row_success),
     )
+    if cargo_report is not None:
+        row_success = list(row_success)
+        terminal_reasons = list(terminal_reasons)
+        for env_id, accepted in enumerate(cargo_report["accepted_mask"]):
+            if accepted is not True and row_success[env_id]:
+                row_success[env_id] = False
+                terminal_reasons[env_id] = "cargo_envelope_failed"
+        nodes = {node["id"]: node for node in graph["nodes"]}
+        for group in graph["task_groups"]:
+            carriers = {
+                nodes[node_id]["call"].get("arguments", {}).get("object")
+                for node_id in group["node_ids"]
+                if nodes[node_id].get("task_type") == "E5"
+            }
+            for content in cargo_report["contents"]:
+                if content["carrier"] not in carriers:
+                    continue
+                for env_id, accepted in enumerate(content["accepted_mask"]):
+                    if accepted is not True:
+                        semantic_success[env_id][str(group["id"])] = False
     return {
         "schema_version": "task_program_execution_report/v1",
         "status": "succeeded" if failure is None and all(row_success) else "failed",
@@ -449,9 +565,9 @@ def _semantic_success_by_env(
             if type(successes) is not list or len(successes) != num_envs:
                 continue
             if type(active) is not list or len(active) != num_envs:
-                active = [True] * num_envs
+                active = [False] * num_envs
             node_success[str(name)] = [
-                bool(is_active) and bool(success)
+                is_active is True and success is True
                 for is_active, success in zip(active, successes, strict=True)
             ]
     result: list[dict[str, bool]] = []
@@ -473,6 +589,7 @@ def _runner_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(add_help=True)
     add_env_launcher_args_to_parser(parser, require_gym_config=False)
     parser.set_defaults(seed=0)
+    parser.add_argument("--plan-probe-only", action="store_true")
     parser.add_argument(
         "--failure-policy", choices=("stop", "continue"), default="stop"
     )

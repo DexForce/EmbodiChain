@@ -20,11 +20,127 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
+import json
+import torch
 
 from embodichain.gen_sim.task_engine import _bundle_runner
 from embodichain.gen_sim.task_engine._bundle_runner import _exception_metadata
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_initial_probe_restores_random_streams(
+    monkeypatch: pytest.MonkeyPatch, fails: bool
+) -> None:
+    import random
+    import numpy as np
+
+    before_python = random.getstate()
+    before_numpy = np.random.get_state()
+    before_torch = torch.random.get_rng_state().clone()
+
+    def probe(*args):
+        random.random()
+        np.random.random(20)
+        torch.rand(20)
+        if fails:
+            raise ValueError("probe failed")
+        return {"plan_success": [True]}
+
+    monkeypatch.setattr(_bundle_runner, "_probe_initial_plan", probe)
+    if fails:
+        with pytest.raises(ValueError, match="probe failed"):
+            _bundle_runner._isolated_initial_probe(None, None, None)
+    else:
+        assert _bundle_runner._isolated_initial_probe(None, None, None)[
+            "plan_success"
+        ] == [True]
+    assert random.getstate() == before_python
+    after_numpy = np.random.get_state()
+    assert after_numpy[0] == before_numpy[0]
+    np.testing.assert_array_equal(after_numpy[1], before_numpy[1])
+    assert after_numpy[2:] == before_numpy[2:]
+    assert torch.equal(torch.random.get_rng_state(), before_torch)
+
+
+@pytest.mark.parametrize("success", [True, False])
+def test_initial_probe_plans_without_dispatch_or_effect_commit(
+    success: bool, monkeypatch
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program import (
+        assembly as assembly_module,
+    )
+
+    monkeypatch.setattr(
+        assembly_module, "_joint_velocity_limits", lambda *a: torch.ones(1, 2)
+    )
+    context = object()
+    invocation = object()
+    compiler = Mock()
+    compiler.analyze.return_value = SimpleNamespace(
+        calls=(
+            SimpleNamespace(downstream_object_targets=(object(),)),
+            SimpleNamespace(downstream_object_targets=()),
+        )
+    )
+    compiler.ground.return_value = SimpleNamespace(invocation=invocation)
+    engine = Mock()
+    engine.plan.return_value = SimpleNamespace(
+        plan_success=torch.tensor([success]),
+        joint_trajectory=SimpleNamespace(
+            positions=torch.zeros(1, 2, 2), dt=torch.tensor([[0.0, 0.04]])
+        ),
+    )
+    observer = Mock()
+    observer.observe.return_value = context
+    assembly = SimpleNamespace(
+        compiler=compiler, engine=engine, observation_provider=observer
+    )
+    compiled = SimpleNamespace(
+        preflight_analyses=lambda: [SimpleNamespace(kind="sequential", calls=())]
+    )
+    adapter = Mock()
+    adapter.compile.return_value = compiled
+    adapter.assemble_runtime.return_value = assembly
+    factory = Mock()
+    factory.create_adapter.return_value = adapter
+    deployment = SimpleNamespace(
+        integration=SimpleNamespace(adapter_factory=factory), selection=object()
+    )
+    env = SimpleNamespace(robot=SimpleNamespace(get_qpos=lambda: torch.zeros(1, 2)))
+    result = _bundle_runner._probe_initial_plan(env, deployment, object())
+    assert result["plan_success"] == [success]
+    assert result["task_success"] is None
+    assert result["analysis_call_count"] == 2
+    assert result["initial_downstream_target_count"] == 1
+    assert result["unplanned_call_indices"] == [1]
+    assert result["remaining_analysis_count"] == 0
+    engine.plan.assert_called_once_with(invocation, context)
+    assert len(engine.mock_calls) == 1
+    state = observer.observe.call_args.args[0]
+    assert not state.held_objects
+    assert not state.coordinated_held_objects
+
+
+def test_terminal_snapshot_preserves_pre_reset_measurement(tmp_path: Path) -> None:
+    qpos = torch.tensor([[0.1, 0.2]])
+    robot = SimpleNamespace(
+        cfg=SimpleNamespace(control_parts={"hand": [0, 1]}),
+        joint_names=["finger", "knuckle"],
+        get_joint_ids=lambda **kwargs: [0, 1],
+        get_qpos=lambda **kwargs: qpos,
+    )
+    env = SimpleNamespace(robot=robot)
+    _bundle_runner._write_terminal_robot_state(env, tmp_path)
+    qpos.zero_()
+    _bundle_runner._write_terminal_robot_state(env, tmp_path)
+    data = json.loads((tmp_path / "terminal_robot_state.json").read_text())
+    assert data["control_parts"]["hand"]["joint_names"] == ["finger", "knuckle"]
+    assert data["control_parts"]["hand"]["measured_qpos"][0] == pytest.approx(
+        [0.1, 0.2]
+    )
 
 
 @pytest.mark.parametrize("argv, expected_seed", [([], 0), (["--seed", "7"], 7)])
@@ -123,6 +239,48 @@ def test_execution_report_preserves_partial_row_success() -> None:
     assert report["status"] == "failed"
     assert [row["success"] for row in report["environments"]] == [True, False]
     assert report["failure"] is None
+
+
+def test_cargo_failure_masks_only_affected_semantic_groups() -> None:
+    graph = {
+        "task_id": "cargo",
+        "integration_fingerprint": "0" * 64,
+        "nodes": [
+            {"id": "move", "task_type": "E1", "call": {"object": "cup"}},
+            {
+                "id": "carry",
+                "task_type": "E5",
+                "call": {"arguments": {"object": "tray"}},
+            },
+        ],
+        "task_groups": [
+            {"id": "e1", "node_ids": ["move"]},
+            {"id": "e5", "node_ids": ["carry"]},
+        ],
+    }
+    runtime = {
+        "segments": [
+            {"name": name, "active": [True, True], "successes": [True, True]}
+            for name in ("move", "carry")
+        ]
+    }
+    report = _bundle_runner._build_execution_report(
+        graph,
+        runtime,
+        row_success=[True, True],
+        terminal_reasons=["success", "success"],
+        failure=None,
+        trajectory_root=Path("trajectory"),
+        cargo_report={
+            "accepted_mask": [True, False],
+            "contents": [{"carrier": "tray", "accepted_mask": [True, False]}],
+        },
+    )
+    assert report["status"] == "failed"
+    assert report["environments"][0]["success"] is True
+    assert report["environments"][1]["success"] is False
+    assert report["environments"][1]["semantic_success"] == {"e1": True, "e5": False}
+    assert report["environments"][1]["terminal_reason"] == "cargo_envelope_failed"
 
 
 def test_execution_report_masks_rows_after_global_failure() -> None:

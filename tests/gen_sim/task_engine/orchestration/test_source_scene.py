@@ -30,6 +30,175 @@ from embodichain.gen_sim.task_engine.orchestration.source_scene import (
 )
 
 
+@pytest.mark.parametrize("ids", [["other"], ["cup", "cup"], ["cup"]])
+def test_scene_export_rejects_mixed_companion_ids(
+    tmp_path: Path, ids: list[str]
+) -> None:
+    path = tmp_path / "scene_config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "format": "embodichain.scene-export/v1",
+                "rigid_object": [{"uid": "cup"}],
+            }
+        )
+    )
+    (tmp_path / "scene.json").write_text(
+        json.dumps({"objects": [{"id": uid} for uid in ids]})
+    )
+    if ids == ["cup"]:
+        assert resolve_source_scene(path).path == path
+    else:
+        with pytest.raises(ValueError, match="companion"):
+            resolve_source_scene(path)
+
+
+@pytest.mark.parametrize("field", ["category", "name", "description", "is_articulated"])
+def test_scene_export_rejects_companion_semantic_drift(
+    tmp_path: Path, field: str
+) -> None:
+    path = tmp_path / "scene_config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "format": "embodichain.scene-export/v1",
+                "rigid_object": [{"uid": "cup", field: "runtime"}],
+            }
+        )
+    )
+    (tmp_path / "scene.json").write_text(
+        json.dumps({"objects": [{"id": "cup", field: "different"}]})
+    )
+    with pytest.raises(ValueError, match=f"companion {field} differs"):
+        resolve_source_scene(path)
+
+
+@pytest.mark.parametrize(
+    "status,accepted",
+    [("consistent", True), ("unknown", False), ("contradicted", False)],
+)
+@pytest.mark.parametrize("malformed", [False, True])
+@pytest.mark.parametrize("fenced", [False, True])
+@pytest.mark.parametrize("instruction_status", ["consistent", "unknown"])
+def test_visual_review_requires_consistent_object_evidence(
+    tmp_path: Path,
+    status: str,
+    accepted: bool,
+    malformed: bool,
+    fenced: bool,
+    instruction_status: str,
+) -> None:
+    from embodichain.gen_sim.task_engine.scene.visual_consistency import (
+        review_scene_image,
+    )
+
+    path = tmp_path / "scene_config.json"
+    path.write_text(
+        json.dumps(
+            {"format": "embodichain.scene-export/v1", "rigid_object": [{"uid": "cup"}]}
+        )
+    )
+    (tmp_path / "scene.json").write_text(json.dumps({"objects": [{"id": "cup"}]}))
+    image = tmp_path / "image.png"
+    image.write_bytes(b"test-image")
+
+    class Client:
+        def complete(self, **kwargs):
+            assert kwargs["image_path"] == image
+            assert "NOT a task-completion audit" in kwargs["system_prompt"]
+            assert "intended action, not a contradiction" in kwargs["system_prompt"]
+            assert (
+                json.loads(kwargs["user_prompt"])["requested_future_task"] == "pick cup"
+            )
+            if malformed:
+                return "not JSON"
+            response = json.dumps(
+                {
+                    "status": "consistent",
+                    "instruction_status": instruction_status,
+                    "instruction_reason": "The cup reference is being audited.",
+                    "objects": [{"id": "cup", "status": status, "reason": "evidence"}],
+                }
+            )
+            return f"```json\n{response}\n```" if fenced else response
+
+    result = review_scene_image(path, image, "pick cup", client=Client())
+    assert result["accepted"] is (
+        accepted and not malformed and instruction_status == "consistent"
+    )
+    if malformed:
+        assert result["raw_response"] == "not JSON"
+        assert result["error"]["type"] == "JSONDecodeError"
+    assert len(result["image_sha256"]) == 64
+    assert result["audit_prompt_revision"] == 2
+    if not malformed:
+        assert (
+            result["audit"]["instruction_reason"]
+            == "The cup reference is being audited."
+        )
+
+
+@pytest.mark.parametrize("ids", [[], ["cup", "cup"], ["other"]])
+def test_visual_schema_errors_preserve_response_and_input_hashes(
+    tmp_path: Path, ids
+) -> None:
+    from embodichain.gen_sim.task_engine.scene.visual_consistency import (
+        review_scene_image,
+    )
+
+    path = tmp_path / "scene_config.json"
+    path.write_text(
+        json.dumps(
+            {"format": "embodichain.scene-export/v1", "rigid_object": [{"uid": "cup"}]}
+        )
+    )
+    (tmp_path / "scene.json").write_text(json.dumps({"objects": [{"id": "cup"}]}))
+    image = tmp_path / "image.png"
+    image.write_bytes(b"image")
+    response = json.dumps(
+        {
+            "status": "consistent",
+            "instruction_status": "consistent",
+            "instruction_reason": "Cup is visible.",
+            "objects": [
+                {"id": uid, "status": "consistent", "reason": "visible"} for uid in ids
+            ],
+        }
+    )
+
+    class Client:
+        def complete(self, **kwargs):
+            return response
+
+    result = review_scene_image(path, image, "pick cup", client=Client())
+    assert result["accepted"] is False
+    assert result["raw_response"] == response
+    assert result["error"]["type"] == "ValueError"
+    assert "missing=" in result["error"]["message"]
+    for field in (
+        "image_sha256",
+        "config_sha256",
+        "companion_sha256",
+        "response_sha256",
+    ):
+        assert len(result[field]) == 64
+
+
+@pytest.mark.parametrize(
+    "entries", [[{"uid": "cup"}, {"uid": "cup"}], [{"uid": []}], [None], None]
+)
+def test_companion_check_rejects_invalid_runtime_inventory(
+    tmp_path: Path, entries: object
+) -> None:
+    path = tmp_path / "scene_config.json"
+    path.write_text(
+        json.dumps({"format": "embodichain.scene-export/v1", "rigid_object": entries})
+    )
+    (tmp_path / "scene.json").write_text(json.dumps({"objects": [{"id": "cup"}]}))
+    with pytest.raises(ValueError, match="Scene export"):
+        resolve_source_scene(path)
+
+
 @pytest.fixture
 def gym_export(tmp_path: Path) -> Path:
     """Create a minimal legacy Prompt2Scene export."""

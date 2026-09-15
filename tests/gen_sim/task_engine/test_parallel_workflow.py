@@ -121,6 +121,53 @@ class _TaskAgent:
         return self.candidates
 
 
+@pytest.mark.parametrize("status", ["rejected", "failed", "succeeded"])
+def test_executor_requires_trajectory_unless_rejected_before_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+
+    def fake_run(command, log_path):
+        report = {
+            "schema_version": "task_program_execution_report/v1",
+            "status": status,
+            "task_id": "task",
+            "semantic_call_count": 1,
+            "integration_fingerprint": "0" * 64,
+            "record_dir": str(tmp_path / "absent"),
+            "environments": [
+                {
+                    "env_id": 0,
+                    "success": False,
+                    "terminal_reason": "initial_plan_rejected",
+                    "semantic_success": {},
+                }
+            ],
+            "runtime_result": None,
+            "failure": None,
+        }
+        (Path(log_path).parent / "execution_report.json").write_text(json.dumps(report))
+        return SimpleNamespace(returncode=2, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        "embodichain.gen_sim.task_engine.workflow._run_streaming_process", fake_run
+    )
+    executor = SubprocessActionExecutor()
+    if status == "rejected":
+        assert (
+            executor(
+                bundle, tmp_path / "attempt", seed=0, num_envs=1, dataset_saving=False
+            )["status"]
+            == "rejected"
+        )
+    else:
+        with pytest.raises(RuntimeError, match="readable trajectory"):
+            executor(
+                bundle, tmp_path / "attempt", seed=0, num_envs=1, dataset_saving=False
+            )
+
+
 class _SceneBackend:
     def __init__(
         self,
@@ -139,6 +186,7 @@ class _SceneBackend:
         self.materialize_failures = materialize_failures
         self.selection_error = selection_error
         self.seeds: list[int] = []
+        self.selection_options: list[dict] = []
 
     def analyze(self, request, output_root) -> SceneAnalysis:
         if self.input_barrier is not None:
@@ -151,6 +199,7 @@ class _SceneBackend:
         )
 
     def select(self, *_args, **_kwargs) -> CandidateSelection:
+        self.selection_options.append(dict(_kwargs))
         if self.selection_error is not None:
             raise self.selection_error
         return self.selection
@@ -473,6 +522,8 @@ def test_parallel_workflow_accepts_one_success_and_publishes_all_graphs(
     }
     assert manifest["configuration"]["execution"]["dataset_saving"] is False
     assert coordinator.kwargs[0]["max_episode_steps"] == 6000
+    assert scene.selection_options[0]["force_most_likely"] is False
+    assert coordinator.kwargs[0]["force_most_likely"] is False
     assert coordinator.kwargs[0]["final_inspection"]["scene_revision_id"] == "0" * 64
     assert (
         coordinator.kwargs[0]["unbound_action_plan"]["candidate_id"] == "candidate_01"

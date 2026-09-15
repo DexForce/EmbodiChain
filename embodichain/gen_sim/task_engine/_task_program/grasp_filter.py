@@ -34,7 +34,31 @@ from embodichain.utils.math import pose_inv
 
 __all__: list[str] = []
 
-GRASP_FILTER_REVISION = 1
+GRASP_FILTER_REVISION = 2
+
+
+def opening_envelope_mask(
+    vertices: torch.Tensor,
+    poses: torch.Tensor,
+    object_pose: torch.Tensor,
+    opening: float,
+) -> torch.Tensor:
+    """Require the full object to fit between open pads, not only a sampled chord."""
+    if vertices.ndim != 2 or vertices.shape[1] != 3 or not len(vertices):
+        raise ValueError("Opening clearance requires non-empty mesh vertices (N, 3).")
+    relative = pose_inv(object_pose) @ poses
+    accepted = torch.isfinite(relative).all(-1).all(-1)
+    # Leave clearance at both pads beyond the millimetre-scale contact envelope.
+    half_gap = opening * 0.5 - 0.002
+    for start in range(0, len(poses), 64):
+        chunk = relative[start : start + 64]
+        axes = chunk[:, :3, 0]
+        centers = (chunk[:, :3, 3] * axes).sum(-1)
+        projection = vertices.to(poses) @ axes.T - centers[None]
+        accepted[start : start + len(chunk)] &= torch.isfinite(projection).all(0) & (
+            projection.abs().amax(0) <= half_gap
+        )
+    return accepted
 
 
 def geometry_key(vertices: torch.Tensor, triangles: torch.Tensor) -> str:
@@ -96,10 +120,11 @@ def accepted_candidates(
 
 
 class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
-    """Filter unrestricted single-arm proposals; preserve other generator protocols.
+    """Check single-arm opening clearance and configured object-region rules.
 
-    Rules are fixed at assembly. End-specific HandOver/stack proposals and dual
-    grasps retain their own baseline selection contracts. This provider owns no
+    Rules are fixed at assembly. End-specific proposals bypass region rules but
+    still require opening clearance; dual grasps retain their paired protocol.
+    This provider owns no
     execution cursor, held relation, eligibility state, or recovery policy.
     """
 
@@ -148,11 +173,11 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             obj_longest_axis=obj_longest_axis,
             is_positive_part=is_positive_part,
         )
-        if obj_longest_axis is not None:
-            return results
-        rules = self._by_geometry.get(geometry_key(mesh_vertices, mesh_triangles), ())
-        if not rules:
-            return results
+        rules = (
+            ()
+            if obj_longest_axis is not None
+            else self._by_geometry.get(geometry_key(mesh_vertices, mesh_triangles), ())
+        )
         if obj_poses.shape != (len(results), 4, 4):
             raise ValueError("Grasp filter rows must match the observed object poses.")
         filtered = []
@@ -168,6 +193,12 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 )
             costs = costs.to(poses.device)
             accepted = torch.isfinite(costs)
+            accepted &= opening_envelope_mask(
+                mesh_vertices,
+                poses,
+                obj_poses[row].to(poses),
+                self.gripper_model.max_opening_width,
+            )
             for rule in rules:
                 accepted &= accepted_candidates(
                     poses, obj_poses[row].to(poses), rule, self.gripper_model
@@ -209,8 +240,6 @@ def install_grasp_filters(
         if route.grasp_region is not None
         or route.release_clearance_object_pose is not None
     )
-    if not routes:
-        return generators
     registry = registration.scene_binding.build(simulation)
     registration.validate_scene_registry(registry)
     rules = []

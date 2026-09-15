@@ -27,7 +27,12 @@ from typing import Any, Final, Sequence
 from .config import load_task_engine_config
 from .orchestration.scene_adapter import SceneAdapter
 from .run_directory import reserve_run_directory
-from .workflow import SubprocessActionExecutor, TaskEngineWorkflow
+from .workflow import (
+    SubprocessActionExecutor,
+    TaskEngineWorkflow,
+    _bundle_success_terms,
+    _environment_successes,
+)
 from .workflow_contracts import (
     TASK_RUN_REQUEST_SCHEMA,
     validate_scene_history_root,
@@ -85,6 +90,9 @@ def _add_workflow_arguments(parser: argparse.ArgumentParser) -> None:
     instruction.add_argument("--instruction")
     instruction.add_argument("--task-file", "--task_file")
     parser.add_argument("--image")
+    parser.add_argument(
+        "--reference-image", help="Audit an existing scene against its reference image."
+    )
     parser.add_argument("--scene")
     parser.add_argument("--scene-edit", "--scene_edit", default=None)
     parser.add_argument("--output-root", required=True)
@@ -159,12 +167,38 @@ def _run_workflow(
     if scene is not None:
         validate_scene_history_root(scene, args.output_root)
     instruction = _instruction(args)
+    reference_image = getattr(args, "reference_image", None)
+    if reference_image and args.mode != "scene":
+        parser.error("--reference-image requires --mode scene.")
     adapter = SceneAdapter(model=args.model, robot_profile=args.robot_profile)
     workflow = TaskEngineWorkflow(scene_adapter=adapter)
     workflow_cfg, planning_cfg, execution_cfg = load_task_engine_config(args.config)
     with reserve_run_directory(args.output_root) as allocation:
         if scene is not None:
             validate_scene_output_separation(scene, allocation.path)
+        if reference_image:
+            from .scene.visual_consistency import review_scene_image
+
+            try:
+                audit = review_scene_image(scene, reference_image, instruction)
+            except Exception as exc:
+                audit = {
+                    "accepted": False,
+                    "error": {"type": type(exc).__name__, "message": str(exc)},
+                }
+            if not audit["accepted"]:
+                allocation.path.mkdir(parents=True, exist_ok=True)
+                (allocation.path / "visual_consistency.json").write_text(
+                    json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                _print_json(
+                    {
+                        "status": "input_conflict",
+                        "failure_class": "visual_consistency",
+                        "output_dir": str(allocation.path),
+                    }
+                )
+                return 2
         result = workflow.run(
             {
                 "schema_version": TASK_RUN_REQUEST_SCHEMA,
@@ -188,6 +222,10 @@ def _run_workflow(
             created_at=allocation.created_at,
             execute=execute,
         )
+        if reference_image:
+            (allocation.path / "visual_consistency.json").write_text(
+                json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
     _print_json(
         {
             "run_id": allocation.run_id,
@@ -220,10 +258,10 @@ def _run_prepared_bundle(args: argparse.Namespace) -> int:
             failure_policy=args.failure_policy,
             open_window=bool(args.open_window),
         )
-    environments = report.get("environments", ())
-    successes = [
-        bool(item.get("success")) for item in environments if isinstance(item, dict)
-    ]
+    successes = _environment_successes(
+        report,
+        required_semantic_steps=_bundle_success_terms(Path(args.bundle)),
+    )
     accepted = (
         str(report.get("status")) not in {"rejected", "aborted"}
         and len(successes) == num_envs

@@ -19,8 +19,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
+import math
+from typing import Any
+import xml.etree.ElementTree as ET
 
 import torch
+from embodichain.utils import logger
 
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenOptions,
@@ -34,6 +39,127 @@ from embodichain.lab.sim.motion.planners.utils import (
 )
 
 __all__: list[str] = []
+
+MOTION_VALIDATION_REVISION = 3
+
+
+def _joint_velocity_limits(robot: Any, control_part: str | None) -> torch.Tensor:
+    """Intersect runtime limits with the assembled model's named URDF limits."""
+    declared = {}
+    for joint in ET.parse(robot.cfg.fpath).getroot().findall("joint"):
+        limit = joint.find("limit")
+        if limit is not None and "velocity" in limit.attrib:
+            declared[joint.attrib["name"]] = float(limit.attrib["velocity"])
+    names = [robot.joint_names[int(i)] for i in robot.get_joint_ids(name=control_part)]
+    if any(
+        name not in declared or not math.isfinite(declared[name]) or declared[name] <= 0
+        for name in names
+    ):
+        raise ValueError(
+            "Every controlled joint requires a finite positive URDF velocity limit."
+        )
+    runtime = robot.get_qvel_limits(name=control_part)
+    if runtime.ndim != 2 or runtime.shape[1] != len(names):
+        raise ValueError(
+            "Runtime velocity limits must match the named control-part joints."
+        )
+    return torch.minimum(
+        runtime, runtime.new_tensor([declared[name] for name in names])[None]
+    )
+
+
+class CheckedMotionGenerator(MotionGenerator):
+    """Preserve planner output while rejecting velocity-infeasible rows."""
+
+    def generate(
+        self, target_states: list[PlanState], options: MotionGenOptions | None = None
+    ) -> PlanResult:
+        result = super().generate(target_states, options=options)
+        if (
+            result.positions is not None
+            and options is not None
+            and options.control_part is not None
+        ):
+            limits = _joint_velocity_limits(self.robot, options.control_part).to(
+                result.positions
+            )
+            valid_velocity = _velocity_validity(result.positions, result.dt, limits)
+            success = torch.as_tensor(
+                result.success, device=valid_velocity.device, dtype=torch.bool
+            )
+            if (success & ~valid_velocity).any():
+                logger.log_warning(
+                    "GenSim motion exceeds declared joint velocity limits; rejecting affected rows."
+                )
+                logger.log_warning(
+                    "GenSim velocity diagnostics: "
+                    + json.dumps(
+                        _velocity_diagnostics(result.positions, result.dt, limits),
+                        allow_nan=False,
+                    )
+                )
+                result = replace(result, success=success & valid_velocity)
+        return result
+
+
+def _velocity_diagnostics(
+    positions: torch.Tensor, dt: torch.Tensor, limits: torch.Tensor
+) -> list[dict[str, Any]]:
+    """Report the largest finite-interval speed ratio per environment."""
+    records = []
+    for env_id in range(positions.shape[0]):
+        delta = (positions[env_id, 1:] - positions[env_id, :-1]).abs()
+        allowed = dt[env_id, 1:, None] * limits[env_id, None]
+        ratio = torch.where(
+            allowed > 0, delta / allowed, torch.where(delta == 0, 0.0, float("inf"))
+        )
+        if not ratio.numel():
+            continue
+        index = int(torch.nan_to_num(ratio, nan=float("inf")).argmax())
+        frame, joint = divmod(index, positions.shape[2])
+        values = {
+            "previous_qpos": float(positions[env_id, frame, joint]),
+            "next_qpos": float(positions[env_id, frame + 1, joint]),
+            "dt": float(dt[env_id, frame + 1]),
+            "velocity_limit": float(limits[env_id, joint]),
+            "speed_ratio": float(ratio[frame, joint]),
+        }
+        records.append(
+            {
+                "env_id": env_id,
+                "frame": frame + 1,
+                "control_joint_index": joint,
+                **{
+                    key: value if math.isfinite(value) else None
+                    for key, value in values.items()
+                },
+            }
+        )
+    return records
+
+
+def _velocity_validity(
+    positions: torch.Tensor, dt: torch.Tensor, limits: torch.Tensor
+) -> torch.Tensor:
+    """Reject timed joint paths that cannot respect the declared velocity limits."""
+    if (
+        positions.ndim != 3
+        or dt.shape != positions.shape[:2]
+        or limits.shape != (positions.shape[0], positions.shape[2])
+    ):
+        raise ValueError(
+            "Motion velocity checks require matching batched positions, dt and limits."
+        )
+    if not torch.isfinite(limits).all() or (limits < 0).any():
+        raise ValueError("Joint velocity limits must be finite and non-negative.")
+    delta = (positions[:, 1:] - positions[:, :-1]).abs()
+    allowed = limits[:, None] * dt[:, 1:, None]
+    return (
+        torch.isfinite(positions).all(-1).all(-1)
+        & torch.isfinite(dt).all(-1)
+        & (dt >= 0).all(-1)
+        & (delta <= allowed + 1e-5).all(-1).all(-1)
+    )
 
 
 def _cartesian_samples(
@@ -65,7 +191,7 @@ def _cartesian_samples(
     return result
 
 
-class ApproachMotionGenerator(MotionGenerator):
+class ApproachMotionGenerator(CheckedMotionGenerator):
     """Keep multi-waypoint EEF approaches Cartesian; the core solves every sample."""
 
     def generate(
@@ -73,6 +199,12 @@ class ApproachMotionGenerator(MotionGenerator):
         target_states: list[PlanState],
         options: MotionGenOptions | None = None,
     ) -> PlanResult:
+        input_target_count = len(target_states)
+        input_poses = [
+            state.xpos.detach().cpu().tolist()
+            for state in target_states
+            if state.xpos is not None
+        ]
         if (
             options is not None
             and options.strategy == "ik_interp"
@@ -97,4 +229,21 @@ class ApproachMotionGenerator(MotionGenerator):
                 start, target_states, options.sample_count
             )
             options = replace(options, preserve_cartesian_samples=True, is_linear=True)
-        return super().generate(target_states, options=options)
+        result = super().generate(target_states, options=options)
+        logger.log_info(
+            "GenSim motion plan: "
+            + json.dumps(
+                {
+                    "control_part": None if options is None else options.control_part,
+                    "input_target_count": input_target_count,
+                    "planned_target_count": len(target_states),
+                    "input_poses": input_poses,
+                    "success": (
+                        result.success.detach().cpu().tolist()
+                        if isinstance(result.success, torch.Tensor)
+                        else result.success
+                    ),
+                }
+            )
+        )
+        return result

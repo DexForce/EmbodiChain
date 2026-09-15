@@ -110,6 +110,7 @@ class SemanticTaskPlanner:
         steps_by_id = {str(step["id"]): step for step in steps}
         result_objects: dict[str, str] = {}
         held_by: dict[str, str] = {}
+        pending_cleanup: set[str] = set()
         upright_objects: set[str] = set()
         upright_staging_targets: dict[str, str] = {}
         targets: dict[str, Any] = {}
@@ -317,6 +318,7 @@ class SemanticTaskPlanner:
                     }
                 )
                 held_by[object_id] = destination
+                pending_cleanup.add(source)
                 # HandOver already retreats the source; do not delay a held receiver.
                 cleanup_resources = ()
                 if str(step.get("terminal_behavior")) == "place":
@@ -347,7 +349,8 @@ class SemanticTaskPlanner:
                 )
                 requested = str(step.get("required_arm", "auto"))
                 resource = (
-                    held_by.get(object_id) or self._nearest_resource(object_id, objects)
+                    held_by.get(object_id)
+                    or self._nearest_resource(object_id, objects, target_id=target_id)
                     if requested in {"auto", "none"}
                     else _resource(requested, field="required_arm")
                 )
@@ -567,6 +570,13 @@ class SemanticTaskPlanner:
                         "cleanup",
                     )
                 )
+            if cleanup_resources:
+                cleanup_resources = tuple(cleanup_resources) + tuple(
+                    sorted(
+                        pending_cleanup - set(cleanup_resources) - set(held_by.values())
+                    )
+                )
+                pending_cleanup.difference_update(cleanup_resources)
             call_roles.extend(
                 (_park_call(resource), "cleanup") for resource in cleanup_resources
             )
@@ -655,6 +665,8 @@ class SemanticTaskPlanner:
         self,
         object_id: str,
         objects: Mapping[str, Mapping[str, Any]],
+        *,
+        target_id: str | None = None,
     ) -> str:
         item = objects.get(object_id)
         if item is None:
@@ -662,9 +674,20 @@ class SemanticTaskPlanner:
         position = item.get("init_pos")
         if not isinstance(position, Sequence) or len(position) != 3:
             raise ValueError(f"Scene object {object_id!r} has no three-value init_pos.")
+        lateral = float(position[1])
+        if target_id is not None and target_id != "table":
+            target = objects.get(target_id)
+            target_position = None if target is None else target.get("init_pos")
+            if not isinstance(target_position, Sequence) or len(target_position) != 3:
+                raise ValueError(
+                    f"Scene target {target_id!r} has no three-value init_pos."
+                )
+            lateral = 0.5 * (lateral + float(target_position[1]))
+        # Rank the symmetric arm bases by the source/target midpoint. This is
+        # only a preference; the runtime planning probe still checks feasibility.
         # The canonical dual-Franka embodiment faces world -X: its right arm
         # base is on +Y and its left arm base is on -Y.
-        return "right" if float(position[1]) >= 0.0 else "left"
+        return "right" if lateral >= 0.0 else "left"
 
     def _relation_world_offset(
         self,
@@ -813,6 +836,8 @@ class SemanticTaskPlanner:
             "down": (0.0, 0.0, -1.0),
         }
         direction = str(step.get("direction", "none"))
+        if direction == "none" and step.get("terminal_behavior") == "place":
+            return [0.0, 0.0, 0.0]
         try:
             vector = vectors[direction]
         except KeyError as exc:

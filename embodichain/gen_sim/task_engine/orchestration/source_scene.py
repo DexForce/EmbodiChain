@@ -370,6 +370,53 @@ def _preferred_config(directory: Path) -> Path | None:
     return None
 
 
+def _validate_export_companion_ids(path: Path, source: Mapping[str, Any]) -> None:
+    """Reject mixed exports when semantic companion data is present."""
+    companion = path.parent / "scene.json"
+    if not companion.is_file():
+        return
+    objects = _read_json_object(companion).get("objects")
+    if not isinstance(objects, list) or any(
+        not isinstance(item, Mapping)
+        or not isinstance(item.get("id"), str)
+        or not item["id"]
+        for item in objects
+    ):
+        raise ValueError("Scene export companion requires object IDs.")
+    semantic_ids = [item["id"] for item in objects]
+    runtime_ids: list[str] = []
+    for section in _SCENE_SECTIONS:
+        entries = source.get(section, [])
+        if type(entries) is not list or any(
+            not isinstance(item, Mapping)
+            or type(item.get("uid")) is not str
+            or not item["uid"]
+            for item in entries
+        ):
+            raise ValueError(f"Scene export {section} requires a list of object UIDs.")
+        runtime_ids.extend(item["uid"] for item in entries)
+    if len(runtime_ids) != len(set(runtime_ids)):
+        raise ValueError("Scene export runtime contains duplicate object UIDs.")
+    if len(set(semantic_ids)) != len(semantic_ids):
+        raise ValueError("Scene export companion contains duplicate object IDs.")
+    if set(semantic_ids) != set(runtime_ids):
+        raise ValueError("Scene export companion IDs do not match runtime config.")
+    semantic_by_id = {item["id"]: item for item in objects}
+    for section in _SCENE_SECTIONS:
+        for item in source.get(section, ()):
+            companion_item = semantic_by_id[item["uid"]]
+            # These labels are copied by the exporter, not inferred synonyms.
+            for field in ("category", "name", "description", "is_articulated"):
+                if (
+                    field in item
+                    and field in companion_item
+                    and item[field] != companion_item[field]
+                ):
+                    raise ValueError(
+                        f"Scene export companion {field} differs for UID {item['uid']!r}."
+                    )
+
+
 def _classify_source_config(path: Path) -> ResolvedSceneSource:
     if path.name not in _CONFIG_FILENAMES:
         source = _read_json_object(path)
@@ -394,6 +441,7 @@ def _classify_source_config(path: Path) -> ResolvedSceneSource:
                 f"Scene config {path} has unsupported format {source_format!r}; "
                 f"expected {_SCENE_EXPORT_FORMAT!r}."
             )
+        _validate_export_companion_ids(path, source)
         return ResolvedSceneSource(
             path=path,
             source_format=_SCENE_EXPORT_FORMAT,
