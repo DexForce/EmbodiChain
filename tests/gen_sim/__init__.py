@@ -14,4 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Generative simulation tests."""
+
 from __future__ import annotations
+
+__all__: list[str] = []

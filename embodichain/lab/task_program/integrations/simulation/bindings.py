@@ -388,6 +388,8 @@ class ContainerAffordanceBinding:
         aliases: Optional non-authoritative lookup aliases.
         object_target_pose: Desired object pose relative to the parent.
         minimum_confidence: Minimum parent/affordance observation confidence.
+        release_clearance: Non-negative local-z release offset in metres. The
+            declared object target remains the final semantic target.
         is_default: Whether this is the parent's default ``Place(inside=...)`` frame.
     """
 
@@ -397,10 +399,18 @@ class ContainerAffordanceBinding:
     aliases: tuple[str, ...] = ()
     object_target_pose: tuple[float, ...] = _IDENTITY_POSE
     minimum_confidence: float = 0.0
+    release_clearance: float = 0.0
     is_default: bool = False
 
     def __post_init__(self) -> None:
         _validate_placement_binding(self)
+        release_clearance = _finite(
+            self.release_clearance,
+            field_name="release_clearance",
+        )
+        if release_clearance < 0.0:
+            raise ValueError("release_clearance must be non-negative.")
+        object.__setattr__(self, "release_clearance", release_clearance)
 
 
 @dataclass(frozen=True, slots=True)
@@ -923,8 +933,15 @@ class SimulationSceneBinding:
                         aliases=binding.aliases,
                         parent=parent,
                         native_name=binding.native_name,
-                        affordance=payload_type(
-                            minimum_confidence=binding.minimum_confidence,
+                        affordance=(
+                            ContainerAffordance(
+                                minimum_confidence=binding.minimum_confidence,
+                                release_clearance=binding.release_clearance,
+                            )
+                            if type(binding) is ContainerAffordanceBinding
+                            else SupportSurfaceAffordance(
+                                minimum_confidence=binding.minimum_confidence,
+                            )
                         ),
                         affordance_capabilities=frozenset({capability}),
                         affordance_revision=PLACEMENT_TARGET_AFFORDANCE_REVISION,

@@ -722,6 +722,7 @@ class TaskProgramEnvironmentAdapter:
             )
         command_encoder = RuntimeCommandFrameEncoder(
             observation_provider,
+            hold_qpos_provider=getattr(observation_provider, "hold_qpos", None),
             transports=self._runtime_transports,
             include_joint_position=include_joint_position,
             joint_command_mode=self._joint_command_mode,

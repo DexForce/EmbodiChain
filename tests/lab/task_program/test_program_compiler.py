@@ -33,6 +33,7 @@ from embodichain.lab.task_program import (
     TaskProgramIntegrationCfg,
     HandOverCfg,
     InvokeCfg,
+    ObjectNearRelativeTargetValidatorCfg,
     ObjectNearTargetValidatorCfg,
     PickCfg,
     PlaceCfg,
@@ -352,6 +353,38 @@ def test_compiler_resolves_articulation_joint_validator_provider_free() -> None:
     assert validator.cfg.joint == "drawer_slide"
     assert validator.cfg.minimum_position == pytest.approx(0.10)
     assert validator.cfg.maximum_position is None
+    assert provider.calls == 0
+
+
+def test_compiler_resolves_relative_validator_provider_free() -> None:
+    """Compilation resolves both identities without observing either pose."""
+    registry, provider = _scene_registry()
+    config = _program(
+        SegmentCfg(
+            name="place_relative",
+            steps=InvokeCfg(call=PickCfg(object="cube")),
+            validators=(
+                ObjectNearRelativeTargetValidatorCfg(
+                    object="cube",
+                    reference="tray",
+                    displacement=(0.0, -0.1, 0.04),
+                    position_tolerance=0.05,
+                ),
+            ),
+        )
+    )
+
+    segment = next(
+        TaskProgramCompiler.from_scene_registry(registry)
+        .compile(config)
+        .iter_segments()
+    )
+    validator = segment.validators[0]
+
+    assert validator.object == SceneObjectRef("cube")
+    assert validator.reference == SceneObjectRef("tray")
+    assert validator.cfg.displacement == pytest.approx((0.0, -0.1, 0.04))
+    assert validator.cfg.position_tolerance == pytest.approx(0.05)
     assert provider.calls == 0
 
 
