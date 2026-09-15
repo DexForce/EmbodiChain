@@ -24,6 +24,17 @@ import pytest
 from embodichain.gen_sim.task_engine import interpretation as interpretation_module
 
 
+def test_prompt_preserves_explicit_handover_orientation() -> None:
+    prompt = interpretation_module._instruction_prompt(
+        "Keep the received bottle upright."
+    )
+    assert "requires orientation_goal=upright" in prompt
+    assert "terminal_behavior=hold" in prompt
+    assert "If placement is a separate E1 step" in prompt
+    assert "Never emit terminal_behavior=place with an empty E4 target" in prompt
+    assert "Keep the received bottle upright." in prompt
+
+
 @pytest.mark.parametrize(
     "settings",
     [

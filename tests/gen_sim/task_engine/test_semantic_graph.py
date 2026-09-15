@@ -104,6 +104,95 @@ def _graph() -> dict:
     }
 
 
+def _fresh_handover_graph() -> dict:
+    graph = _graph()
+    graph["nodes"][0]["call"] = {
+        "kind": "registered",
+        "call_id": "gen_sim.pick.handover_source",
+        "arguments": {"object": "cube", "target": "source_grasp"},
+        "resources": {"primary": "left"},
+    }
+    graph["nodes"][1]["call"] = {
+        "kind": "hand_over",
+        "object": "cube",
+        "resources": {"source": "left", "destination": "right"},
+    }
+    for node in graph["nodes"]:
+        node["task_type"] = "E4"
+        node["task_instance_id"] = "exchange"
+    graph["task_groups"] = [
+        {
+            "id": "exchange",
+            "task_type": "E4",
+            "node_ids": [node["id"] for node in graph["nodes"]],
+            "depends_on": [],
+            "success": {"kind": "call_completed"},
+        }
+    ]
+    return graph
+
+
+def test_handover_staging_preserves_dependencies_and_is_idempotent(monkeypatch) -> None:
+    from copy import deepcopy
+    from embodichain.gen_sim.task_engine import task_program_bundle as bundle
+
+    graph = _fresh_handover_graph()
+    original = deepcopy(graph)
+    scene = SimpleNamespace(
+        planner_objects=[
+            {
+                "runtime_uid": "cube",
+                "init_pos": [2.4, 3.2, 0.7],
+                "init_rot": [0.0, 0.0, 90.0],
+            }
+        ],
+        background=[
+            {"uid": "table", "init_pos": [2.0, 3.0, 0.0], "init_rot": [0.0, 0.0, 0.0]}
+        ],
+    )
+    monkeypatch.setattr(
+        bundle,
+        "_mesh_vertices",
+        lambda table: np.array([[-1.0, -1.0, 0.0], [1.0, 1.0, 0.0]]),
+    )
+    result = bundle._add_handover_staging(graph, scene)
+    stage = result["nodes"][1]
+    pose = result["targets"][stage["call"]["arguments"]["target"]]["values"][0]
+    assert pose["position"] == pytest.approx([2.2, 3.1, 0.86])
+    assert pose["quaternion_wxyz"] == pytest.approx([2**-0.5, 0.0, 0.0, 2**-0.5])
+    assert stage["depends_on"] == [graph["nodes"][0]["id"]]
+    assert result["nodes"][2]["depends_on"] == [stage["id"]]
+    assert result["task_groups"][0]["node_ids"] == [
+        node["id"] for node in result["nodes"]
+    ]
+    assert result["success"] == original["success"]
+    assert graph == original
+    assert bundle._add_handover_staging(result, None) == result
+
+
+def test_handover_staging_does_not_predict_cross_task_holds() -> None:
+    from embodichain.gen_sim.task_engine.task_program_bundle import (
+        _add_handover_staging,
+    )
+
+    graph = _fresh_handover_graph()
+    pick = graph["nodes"][0]
+    pick["task_instance_id"] = "earlier_pick"
+    graph["task_groups"][0]["node_ids"].remove(pick["id"])
+    graph["task_groups"][0]["depends_on"] = ["earlier_pick"]
+    graph["task_groups"].insert(
+        0,
+        {
+            "id": "earlier_pick",
+            "task_type": "E4",
+            "node_ids": [pick["id"]],
+            "depends_on": [],
+            "success": {"kind": "call_completed"},
+        },
+    )
+    assert _add_handover_staging(graph, None) == graph
+
+
 def test_e3_return_pose_preserves_scene_rotation() -> None:
     quaternion = _initial_quaternion_wxyz([90.0, 0.0, 0.0])
     assert quaternion == pytest.approx([2**-0.5, 2**-0.5, 0.0, 0.0], abs=1.0e-6)
@@ -124,6 +213,80 @@ def _program(graph: dict) -> dict:
                 for node in graph["nodes"]
             ],
         },
+    }
+
+
+@pytest.mark.parametrize(
+    "relation", ["right_of", "left_of", "front_of", "behind", "front_left_of"]
+)
+def test_tabletop_region_cannot_be_lowered_outside_the_table(relation: str) -> None:
+    graph = _graph()
+    graph["nodes"] = [
+        {
+            "call": {
+                "kind": "registered",
+                "call_id": "simulation.place_relative",
+                "arguments": {
+                    "object": "cube",
+                    "reference": "table",
+                    "relation": relation,
+                },
+            }
+        }
+    ]
+    scene = SimpleNamespace(planner_objects=())
+    with pytest.raises(ValueError, match="named relation anchor"):
+        task_program_bundle._relative_place_route_payloads(graph, scene)
+
+
+@pytest.mark.parametrize("table_height", [0.5, 0.9])
+def test_handover_minimum_height_preserves_retreat_headroom(
+    table_height: float,
+) -> None:
+    assert task_program_bundle._handover_position_z(table_height) == pytest.approx(
+        table_height + 0.10
+    )
+
+
+@pytest.mark.parametrize("table_height", [None, float("nan"), float("inf")])
+def test_handover_minimum_requires_finite_table_height(table_height) -> None:
+    with pytest.raises(ValueError, match="tabletop height"):
+        task_program_bundle._handover_position_z(table_height)
+
+
+def test_collision_world_declares_unreferenced_obstacles_without_changing_default() -> (
+    None
+):
+    graph = _graph()
+    graph["nodes"] = [{"call": {"kind": "pick", "object": "bottle"}}]
+    scene = SimpleNamespace(
+        table_top_z=0.7,
+        planner_objects=[
+            {"runtime_uid": "bottle", "role": "rigid_object"},
+            {"runtime_uid": "obstacle", "role": "rigid_object"},
+            {"runtime_uid": "table", "role": "background"},
+        ],
+    )
+    default = task_program_bundle._integration_payload(
+        graph, scene, program_id="probe", scene_contract="scene"
+    )
+    assert {v["entity_id"] for v in default["scene_binding"]["rigid_objects"]} == {
+        "bottle",
+        "table",
+    }
+    assert all(
+        "collision_role" not in v for v in default["scene_binding"]["rigid_objects"]
+    )
+    configured = task_program_bundle._integration_payload(
+        graph, scene, program_id="probe", scene_contract="scene", collision_world=True
+    )
+    assert {
+        v["entity_id"]: v["collision_role"]
+        for v in configured["scene_binding"]["rigid_objects"]
+    } == {
+        "bottle": "dynamic",
+        "obstacle": "dynamic",
+        "table": "static",
     }
 
 
@@ -181,6 +344,40 @@ def test_completed_task_groups_survive_later_runtime_failure() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    "active,successes",
+    [
+        (None, [True]),
+        ([], [True]),
+        (["false"], [True]),
+        ([True], ["false"]),
+        ([1], [True]),
+        ([True], [1]),
+        ([False], [True]),
+    ],
+)
+def test_semantic_projection_rejects_unproven_segment_masks(active, successes) -> None:
+    graph = _graph()
+    runtime = {
+        "segments": [{"name": "pick_cube", "active": active, "successes": successes}]
+    }
+    assert _semantic_success_by_env(graph, runtime, num_envs=1) == [
+        {"pick_group": False, "place_group": False}
+    ]
+
+
+def test_segment_failure_prevents_whole_group_success() -> None:
+    graph = _graph()
+    graph["task_groups"] = [{"id": "task", "node_ids": ["pick_cube", "place_cube"]}]
+    runtime = {
+        "segments": [
+            {"name": "pick_cube", "active": [True], "successes": [True]},
+            {"name": "place_cube", "active": [True], "successes": [False]},
+        ]
+    }
+    assert _semantic_success_by_env(graph, runtime, num_envs=1) == [{"task": False}]
+
+
 def test_inside_place_waits_for_released_object() -> None:
     node = {
         "id": "place_cube",
@@ -224,6 +421,84 @@ def test_coordinated_transport_waits_for_observed_object_motion() -> None:
             "preset": "transported_rigid_object",
         },
     ]
+
+
+@pytest.mark.parametrize("with_clearance", [False, True])
+def test_relative_placement_checks_stability_again_after_park(
+    monkeypatch, with_clearance
+) -> None:
+    graph = _graph()
+    graph["nodes"] = [
+        {
+            "id": "place",
+            "task_type": "E1",
+            "task_instance_id": "move",
+            "call": {
+                "kind": "registered",
+                "call_id": "simulation.place_relative",
+                "arguments": {
+                    "object": "cube",
+                    "reference": "block",
+                    "relation": "near",
+                },
+                "resources": {"primary": "right"},
+            },
+        },
+        {
+            "id": "park",
+            "task_type": "E1",
+            "task_instance_id": "move",
+            "call": {
+                "kind": "registered",
+                "call_id": "simulation.park",
+                "arguments": {},
+            },
+        },
+    ]
+    graph["task_groups"] = [{"node_ids": ["place", "park"]}]
+    if with_clearance:
+        graph["nodes"].insert(
+            1,
+            {
+                "id": "clear",
+                "task_type": "E1",
+                "task_instance_id": "move",
+                "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.clear_released",
+                    "arguments": {"object": "cube", "target": "clear_target"},
+                },
+            },
+        )
+        graph["task_groups"][0]["node_ids"].insert(1, "clear")
+    route = {
+        "object_id": "cube",
+        "reference_entity_id": "block",
+        "relation": "near",
+        "world_displacement": [0.1, 0.0, 0.0],
+    }
+    monkeypatch.setattr(
+        task_program_bundle, "_relative_place_route_payloads", lambda *a, **kw: [route]
+    )
+    scene = SimpleNamespace(planner_objects=())
+    payload = task_program_bundle._task_stability_payload(
+        graph, scene, {"skill_profile": {"resources": []}}
+    )
+    cfg = payload["presets"]["gen_sim.place.stable"]
+    assert cfg["kind"] == "placement"
+    assert cfg["reference"] == "block"
+    assert cfg["displacement"] == [0.1, 0.0, 0.0]
+    program = _program_payload(
+        graph, "move", scene=scene, stability_presets=set(payload["presets"])
+    )
+    place, *_, park = program["program"]["items"]
+    if with_clearance:
+        assert "post" not in place and "validators" not in place
+        assert len(park["post"]) == 2
+        assert park["validators"]
+    else:
+        assert park["post"] == [place["post"][-1]]
+    assert park["post"][-1]["preset"] == "gen_sim.place.stable"
 
 
 def test_coordinated_placement_checks_destination_after_release_and_cleanup() -> None:
@@ -733,7 +1008,28 @@ def test_generated_handover_uses_only_baseline_release_and_retreat_options() -> 
     assert options["retreat_distance"] == pytest.approx(0.10)
     assert integration["runtime_services"]["handover_pose_providers"][0][
         "final_position"
-    ] == pytest.approx([0.0, -0.08, 0.913])
+    ] == pytest.approx([0.0, -0.08, 0.82])
+
+
+def test_task_gripper_opening_respects_pad_clearance_and_stricter_models() -> None:
+    from embodichain.gen_sim.task_engine.task_program_bundle import (
+        _calibrate_task_gripper_opening,
+    )
+
+    generators = {
+        "left": {"model": {"model_id": "robotiq_arg2f_140", "max_opening_width": 0.15}},
+        "right": {
+            "model": {"model_id": "robotiq_arg2f_140", "max_opening_width": 0.12}
+        },
+        "other": {"model": {"model_id": "other", "max_opening_width": 0.2}},
+    }
+    payload = {
+        "skill_profile": {"runtime_services": {"grasp_pose_generators": generators}}
+    }
+    _calibrate_task_gripper_opening(payload)
+    assert generators["left"]["model"]["max_opening_width"] == 0.128
+    assert generators["right"]["model"]["max_opening_width"] == 0.12
+    assert generators["other"]["model"]["max_opening_width"] == 0.2
 
 
 def test_task_pick_directions_are_declared_per_policy_not_injected_by_lowerers() -> (
@@ -784,6 +1080,9 @@ def test_task_pick_directions_are_declared_per_policy_not_injected_by_lowerers()
         graph, scene, program_id="directions", scene_contract="directions_scene"
     )
     options = integration["profile"]["action_options"]
+    for key in ("pick", "gen_sim.pick.one", "gen_sim.pick.two"):
+        intervals = options[key]["hand_interp_steps"] - 1
+        assert 0.7 / (intervals * 0.04) <= 2.0
     assert options["gen_sim.pick.one"]["approach_direction"] == pytest.approx(
         [0.0, 2**-0.5, -(2**-0.5)]
     )
@@ -981,10 +1280,22 @@ def test_explicit_orientation_bundle_uses_shared_preflight_and_terminal_post(
     policy = load_config(paths.execution_policy)
     assert policy["tracking"]["terminal_max_abs_error"] == pytest.approx(0.25)
     integration = load_config(paths.integration)
+    if task_type == "E4":
+        source_call = generated["nodes"][0]["call"]
+        assert source_call["call_id"] == "gen_sim.pick.handover_source"
+        options = integration["profile"]["action_options"]
+        assert options[source_call["call_id"]]["pick_object_part"] == "top"
+        assert options["hand_over"]["receive_pick_object_part"] == "center"
+        assert source_call["call_id"] in integration["profile"]["effect_monitors"]
     assert integration["profile"]["action_options"]["place"][
         "lift_height"
     ] == pytest.approx(0.05)
     if terminal == "place":
+        place_options = integration["profile"]["action_options"][
+            "simulation.place_relative"
+        ]
+        assert "max_approach_retract_z" not in place_options
+        assert place_options["lift_height"] == pytest.approx(0.10)
         place_params = integration["profile"]["effect_monitors"][
             "simulation.place_relative"
         ]["params"]
@@ -1049,8 +1360,9 @@ def test_stack_alignment_does_not_replace_support_acceptance_with_upright_only(
 @pytest.mark.parametrize(
     "call_id", ["simulation.coordinated_hold", "simulation.coordinated_transport"]
 )
+@pytest.mark.parametrize("displacement", [[-0.1, 0.0, 0.05], [0.0, 0.0, 0.0]])
 def test_coordinated_bundle_composes_against_unmodified_public_options(
-    tmp_path: Path, call_id: str
+    tmp_path: Path, call_id: str, displacement: list[float]
 ) -> None:
     scene = _prepared_axis_scene(tmp_path)
     graph = _graph()
@@ -1067,7 +1379,7 @@ def test_coordinated_bundle_composes_against_unmodified_public_options(
                 "arguments": {
                     "object": "bottle",
                     "target": "forward",
-                    "world_displacement": [-0.1, 0.0, 0.05],
+                    "world_displacement": displacement,
                 },
                 "resources": {"left": "left", "right": "right"},
             },
@@ -1192,23 +1504,23 @@ def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
         for item in integration["runtime_services"]["registered_semantic_lowerers"]
         if item["kind"] == "place_relative"
     )["routes"][0]
-    assert release["validators"][0]["kind"] == "object_near_relative_target"
+    assert "post" not in release and "validators" not in release
+    assert terminal["validators"][0]["kind"] == "object_near_relative_target"
     # Planning includes 1 cm release clearance; acceptance uses the support surface.
     expected_displacement = list(route["world_displacement"])
     expected_displacement[2] -= 0.01
-    assert release["validators"][0]["displacement"] == pytest.approx(
+    assert terminal["validators"][0]["displacement"] == pytest.approx(
         expected_displacement
     )
     constraints = load_config(paths.program.parent / "constraints.json")["presets"]
-    preset = release["post"][-1]["preset"]
+    preset = terminal["post"][-1]["preset"]
     assert constraints[preset]["kind"] == "upright"
     # The imported rotation is baked into the normalized mesh before binding.
     assert constraints[preset]["local_axis"] == [0.0, -0.0, 1.0]
     assert constraints[preset]["displacement"] == pytest.approx(expected_displacement)
-    assert len(release["validators"]) == 1
+    assert len(terminal["validators"]) == 1
     assert terminal["steps"]["call"]["call_id"] == "simulation.park"
-    assert terminal["post"] == [release["post"][-1]]
-    assert terminal["validators"] == release["validators"]
+    assert len(terminal["post"]) == 2
     assert set(release["steps"]["call"]["arguments"]) == {
         "object",
         "reference",
