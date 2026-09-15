@@ -87,6 +87,10 @@ start, and does not run generic joint pre-interpolation. It also preserves the
 planner's native sample grid and its analytical velocity and acceleration
 outputs. `MotionGenOptions.sample_count` therefore does not replace an explicit
 `TrapezoidalPlanOptions.sample_interval`.
+When options are automatically resolved from a backend-neutral request, the
+requested quantity is treated as a lower bound if Cartesian-to-joint conversion
+produces more required waypoints; an explicit
+`TrapezoidalPlanOptions.sample_interval` remains authoritative.
 
 Every successful result with positions contains:
 

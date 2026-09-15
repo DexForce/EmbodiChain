@@ -8,8 +8,9 @@ robot:
   provider: franka_pgi
   config:
     attrs:
-      static_friction: 1.0
-      dynamic_friction: 1.0
+      material_props:
+        static_friction: 1.0
+        dynamic_friction: 1.0
     solver_cfg:
       arm:
         tcp:
@@ -25,14 +26,15 @@ planners:
     enabled: false
     config:
       onnx_model_path: null
-      num_waypoints: 3
-      max_steps: 240
+      num_waypoints: 5
+      steps_per_waypoint: 30
+      max_steps: 150
       action_scale: 0.2
       use_relative_obs: true
       intermediate_orientation: true
       pos_eps: 0.01
       rot_eps: 0.1
-      joint_eps: 0.02
+      joint_eps: 0.01
       policy_frame_from_world:
         - [-1.0, 0.0, 0.0, 0.0]
         - [0.0, -1.0, 0.0, 0.0]
@@ -109,8 +111,9 @@ tracks:
           drive:
             drive_type: none
           attrs:
-            static_friction: 1.0
-            dynamic_friction: 1.0
+            material_props:
+              static_friction: 1.0
+              dynamic_friction: 1.0
           fix_base: true
           settle_steps: 10
           reset_settle_steps: 0

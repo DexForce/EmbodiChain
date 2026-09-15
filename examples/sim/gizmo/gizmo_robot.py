@@ -18,9 +18,32 @@
 from __future__ import annotations
 
 import time
+import argparse
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create a simulation scene with SimulationManager"
+    )
+    add_sim_args_to_parser(parser)
+    parser.add_argument(
+        "--ik-solver",
+        choices=("dexsim", "pytorch", "pink"),
+        default="dexsim",
+        help="IK solver; the native window always uses DexSim's IKGizmoController.",
+    )
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
 import torch
 import numpy as np
-import argparse
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
@@ -31,30 +54,22 @@ from embodichain.lab.sim.objects import (
 )
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     RobotCfg,
     URDFCfg,
     JointDrivePropertiesCfg,
 )
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 
 
-def main():
+def main(args: argparse.Namespace | None = None) -> None:
     """Main function to create and run the simulation scene."""
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="Create a simulation scene with SimulationManager"
-    )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--ik-solver",
-        choices=("dexsim", "pytorch", "pink"),
-        default="dexsim",
-        help="IK solver; the native window always uses DexSim's IKGizmoController.",
-    )
-    args = parser.parse_args()
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
 
     # Configure the simulation
     sim_cfg = SimulationManagerCfg(
@@ -62,8 +77,9 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
 
@@ -111,7 +127,7 @@ def main():
             "hand": ["FINGER[1-2]"],
         },
         solver_cfg=solver_cfg,
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
             stiffness={"Joint[0-9]": 1e4, "FINGER[1-2]": 1e2},
             damping={"Joint[0-9]": 1e3, "FINGER[1-2]": 1e1},
             max_effort={"Joint[0-9]": 1e5, "FINGER[1-2]": 1e3},
@@ -120,8 +136,7 @@ def main():
         init_qpos=[0.0, -np.pi / 2, -np.pi / 2, np.pi / 2, -np.pi / 2, 0.0, 0.0, 0.0],
     )
     robot = sim.add_robot(cfg=robot_cfg)
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    sim.prepare()
 
     # Set initial joint positions
     initial_qpos = torch.tensor(
@@ -204,4 +219,4 @@ def run_simulation(sim: SimulationManager, native_control=None):
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

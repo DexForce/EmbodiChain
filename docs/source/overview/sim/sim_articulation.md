@@ -8,20 +8,19 @@ The {class}`~objects.Articulation` class represents the fundamental physics enti
 ## Configuration
 
 Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
+
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `fpath` | `str` | `None` | Path to the asset file (URDF/USD). |
 | `init_pos` | `tuple` | `(0,0,0)` | Initial root position `(x, y, z)`. |
 | `init_rot` | `tuple` | `(0,0,0)` | Initial root rotation `(r, p, y)` in degrees. |
-| `fix_base` | `bool` | `True` | Whether to fix the base of the articulation. |
-| `use_usd_properties` | `bool` | `False` | If True, use physical properties from USD file; if False, override with config values. Only effective for usd files. |
+| `root_props` | `ArticulationRootPropertiesCfg` | `fixed_base=True`, `self_collision_enabled=False`; other fields `None` | Fixed-base/self-collision are portable; root sleep and paired solver iterations are Default-only and ignored by Newton. Explicit `None` preserves source/backend values. |
+| `asset_physics_mode` | `"preserve" \| "overlay"` | `"preserve"` | Preserve source link/joint physics, or apply explicitly configured overlays after source resolution. |
 | `init_qpos` | `List[float]` | `None` | Initial joint positions. |
-| `qpos_limits` | `Tensor` / `Dict[str, List[float]]` | `None` | Override joint position limits. Replaces asset limits and may either tighten or expand the range. |
+| `qpos_limits` | `Tensor` / `Dict[str, List[float]]` | `None` | Override limits by flattened source-resolved DOF order or joint-name/regex rules before backend build. |
 | `body_scale` | `List[float]` | `[1.0, 1.0, 1.0]` | Scaling factors for the articulation links. |
-| `disable_self_collision` | `bool` | `True` | Whether to disable self-collisions. |
-| `enable_gravity` | `bool` | `True` | Whether gravity affects the articulation. This runtime flag also applies when `use_usd_properties=True`. |
-| `drive_pros` | `JointDrivePropertiesCfg` | `drive_type="none"` | Default drive properties. |
-| `attrs` | `RigidBodyAttributesCfg` | `...` | Default rigid body attributes applied to all links. |
+| `joint_drive_props` | `JointDrivePropertiesCfg` | `None` | Optional sparse joint drive, limit, friction, and armature overlay. |
+| `attrs` | `RigidBodyPhysicsCfg` | empty groups | Grouped rigid-body physics applied to all links. |
 | `link_attrs` | `dict[str, LinkPhysicsOverrideCfg]` | `None` | Optional per-link overrides keyed by group name; each group matches link names via regex. |
 
 At runtime, call `articulation.set_gravity(...)` to change gravity for every
@@ -35,20 +34,24 @@ override specific links (matched by regex, same rules as joint drive dict keys):
 ```python
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    CollisionPropertiesCfg,
     LinkPhysicsOverrideCfg,
-    RigidBodyAttributesCfg,
-    RigidBodyAttributesOverrideCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
 )
 
 art_cfg = ArticulationCfg(
     fpath="path/to/robot.urdf",
-    attrs=RigidBodyAttributesCfg(static_friction=0.5),
+    asset_physics_mode="overlay",
+    attrs=RigidBodyPhysicsCfg(
+        material_props=RigidBodyMaterialCfg(static_friction=0.5),
+    ),
     link_attrs={
         "eef": LinkPhysicsOverrideCfg(
             link_names_expr=[".*(hand|finger|ee).*"],
-            attrs=RigidBodyAttributesOverrideCfg(
-                static_friction=0.95,
-                contact_offset=0.001,
+            attrs=RigidBodyPhysicsCfg(
+                material_props=RigidBodyMaterialCfg(static_friction=0.95),
+                collision_props=CollisionPropertiesCfg(contact_offset=0.001),
             ),
         ),
     },
@@ -58,19 +61,54 @@ art_cfg = ArticulationCfg(
 At runtime, use `articulation.set_link_physical_attr(...)` and `get_link_physical_attr(...)`
 for the same partial-override behavior.
 
+### Source mass properties
+
+For URDF-backed articulations, `MassPropertiesCfg.recompute_inertia` is the
+only switch that permits geometry-derived mass properties to replace the
+asset's authored inertia. It defaults to `False` (or `None`, which resolves to
+the same behavior), so an `overlay` that only configures joint drives or other
+unrelated attributes retains the source mass, inertia, and center of mass in
+both backends. Set it to `True` only when collision geometry should be used to
+derive a new tensor. A positive `mass` can be overridden while retaining the
+source tensor; `density` requires `recompute_inertia=True` when the source
+already provides a valid tensor. An all-zero or otherwise invalid source
+tensor is not preserved: when the link has collision geometry, both backends
+derive a fallback tensor from that geometry.
+
 ### Drive Configuration
 
-The `drive_pros` parameter controls the joint physics behavior. It is defined using the `JointDrivePropertiesCfg` class. Generic articulations default to `drive_type="none"`, so passive assets such as cabinets and drawers do not receive internal drive forces unless explicitly configured.
+The `joint_drive_props` parameter uses `JointDrivePropertiesCfg` for sparse
+joint-property overlays. Each field defaults to `None`, preserving its source
+or backend value. Generic articulations default to
+`asset_physics_mode="preserve"`; explicit drive changes require `"overlay"`.
+Robot configurations default to `"overlay"`. An unspecified drive is not an
+instruction to remove an existing source-authored actuator.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `stiffness` | `float` / `Dict` | `1.0e4` | Stiffness (P-gain) of the joint drive. Unit: $N/m$ or $Nm/rad$. |
-| `damping` | `float` / `Dict` | `1.0e3` | Damping (D-gain) of the joint drive. Unit: $Ns/m$ or $Nms/rad$. |
-| `max_effort` | `float` / `Dict` | `1.0e10` | Maximum effort (force/torque) the joint can exert. |
-| `max_velocity` | `float` / `Dict` | `1.0e10` | Maximum velocity allowed for the joint ($m/s$ or $rad/s$). |
-| `friction` | `float` / `Dict` | `0.0` | Joint friction coefficient. |
-| `armature` | `float` / `Dict` | `0.0` | Joint armature added to joint-space inertia ($kg$ for prismatic, $kg \cdot m^2$ for revolute). |
-| `drive_type` | `str` | `"none"` | Drive mode: `"force"`(driven by a force), `"acceleration"`(driven by an acceleration) or `none`(no force). |
+| `stiffness` | `float` / `Dict` | `None` | Position gain; force-drive units are N/m or N·m/rad. |
+| `damping` | `float` / `Dict` | `None` | Velocity gain; force-drive units are N·s/m or N·m·s/rad. |
+| `max_effort` | `float` / `Dict` | `None` | Authored effort limit in N or N·m; solver enforcement varies. |
+| `max_velocity` | `float` / `Dict` | `None` | Authored speed limit in m/s or rad/s; solver enforcement varies. |
+| `friction` | `float` / `Dict` | `None` | Passive joint friction; interpretation depends on backend/solver. |
+| `armature` | `float` / `Dict` | `None` | Added joint-space inertia in kg for prismatic joints or kg·m² for revolute joints. |
+| `drive_type` | `str` | `None` | `"force"`, `"acceleration"` (Default only), or `"none"`; omission preserves the source value. |
+| `target_mode` | `str` / `int` / `Dict` | `None` | Target components: `none`/0, `position`/1, `velocity`/2, `position_velocity`/3, or `effort`/4. |
+
+`None` is accepted for every field in this table. Gain units shown apply to
+force/torque drives; Default acceleration drives use a mass-independent
+response. Newton rejects active acceleration drives. Unless `target_mode` is
+explicit, `drive_type="force"` or `"acceleration"` selects
+`position_velocity`, while `drive_type="none"` selects `none`.
+
+Default implements target components through effective gains. Newton authors
+its target mode and uses gain-based fallbacks for solvers without native mode
+support: `none` and `effort` clear both gains, and `velocity` clears position
+gain. Non-MuJoCo Newton position mode assumes a zero velocity target.
+
+Newton support for effort/velocity limits, passive friction, and armature is
+solver-dependent; storing a value is not proof that the solver enforces it.
+Inspect the resolved properties and test the response after changing solvers.
 
 ### Joint Position Limits
 
@@ -120,18 +158,19 @@ articulation layer.
 ```python
 import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.objects import Articulation, ArticulationCfg
+from embodichain.lab.sim.cfg import ArticulationCfg, ArticulationRootPropertiesCfg
+from embodichain.lab.sim.objects import Articulation
 
 # 1. Initialize Simulation
 device = "cuda" if torch.cuda.is_available() else "cpu"
-sim_cfg = SimulationManagerCfg(sim_device=device)
+sim_cfg = SimulationManagerCfg(device=device)
 sim = SimulationManager(sim_config=sim_cfg)
 
 # 2. Configure Articulation
 art_cfg = ArticulationCfg(
     fpath="assets/robots/franka/franka.urdf",
     init_pos=(0, 0, 0.5),
-    fix_base=True
+    root_props=ArticulationRootPropertiesCfg(fixed_base=True),
 )
 
 # 3. Spawn Articulation
@@ -154,7 +193,7 @@ from embodichain.data import get_data_path
 usd_art_cfg = ArticulationCfg(
     fpath=get_data_path("path/to/robot.usd"),
     init_pos=(0, 0, 0.5),
-    use_usd_properties=True  # Keep USD drive/physics properties
+    asset_physics_mode="preserve",
 )
 usd_robot = sim.add_articulation(cfg=usd_art_cfg)
 
@@ -162,8 +201,8 @@ usd_robot = sim.add_articulation(cfg=usd_art_cfg)
 usd_art_cfg_override = ArticulationCfg(
     fpath=get_data_path("path/to/robot.usd"),
     init_pos=(0, 0, 0.5),
-    use_usd_properties=False,  # Use config instead
-    drive_pros=JointDrivePropertiesCfg(stiffness=5000, damping=500)
+    asset_physics_mode="overlay",
+    joint_drive_props=JointDrivePropertiesCfg(stiffness=5000, damping=500),
 )
 robot = sim.add_articulation(cfg=usd_art_cfg_override)
 ```
@@ -182,8 +221,8 @@ State data is accessed via getter methods that return batched tensors (`N` envir
 
 | Method | Shape / Return Type | Description |
 | :--- | :--- | :--- |
-| `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Root link pose `[x, y, z, qw, qx, qy, qz]` or a 4x4 matrix. |
-| `get_link_pose(link_name, to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Specific link pose `[x, y, z, qw, qx, qy, qz]` or a 4x4 matrix. |
+| `get_local_pose(to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Root link pose `[x, y, z, qx, qy, qz, qw]` or a 4x4 matrix. |
+| `get_link_pose(link_name, to_matrix=False)` | `(N, 7)` or `(N, 4, 4)` | Specific link pose `[x, y, z, qx, qy, qz, qw]` or a 4x4 matrix. |
 | `get_qpos(target=False)` | `(N, dof)` | Current joint positions (or joint targets if `target=True`). |
 | `get_qvel(target=False)` | `(N, dof)` | Current joint velocities (or velocity targets if `target=True`). |
 | `get_joint_drive()` | `Tuple[Tensor, ...]` | Returns `(stiffness, damping, max_effort, max_velocity, friction, armature)`, each shaped `(N, dof)`. |
@@ -260,8 +299,8 @@ sim.update()
 ### Pose Control
 ```python
 # Teleport the articulation root to a new pose
-# shape: (N, 7) formatted as [x, y, z, qw, qx, qy, qz]
-new_root_pose = torch.tensor([[0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0]], device=device).repeat(sim.num_envs, 1)
+# shape: (N, 7) formatted as [x, y, z, qx, qy, qz, qw]
+new_root_pose = torch.tensor([[0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]], device=device).repeat(sim.num_envs, 1)
 articulation.set_local_pose(new_root_pose)
 ```
 

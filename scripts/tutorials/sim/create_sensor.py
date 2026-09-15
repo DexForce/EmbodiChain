@@ -22,6 +22,34 @@ It shows how to configure a camera sensor, attach it to the robot's end-effector
 from __future__ import annotations
 
 import argparse
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create and simulate a robot in SimulationManager"
+    )
+    add_sim_args_to_parser(parser)
+    parser.add_argument(
+        "--attach_sensor",
+        action="store_true",
+        help="Attach sensor to robot end-effector",
+    )
+    parser.add_argument(
+        "--steps",
+        type=int,
+        default=0,
+        help="Stop after this many simulation steps; zero runs until Ctrl+C.",
+    )
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
 import numpy as np
 import torch
 import cv2
@@ -31,12 +59,12 @@ torch.set_printoptions(precision=4, sci_mode=False)
 from scipy.spatial.transform import Rotation as R
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.sensors import Camera, CameraCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     JointDrivePropertiesCfg,
     RobotCfg,
     URDFCfg,
@@ -74,33 +102,21 @@ def mask_to_color_map(mask, user_ids, fix_seed=True):
     return color_map
 
 
-def main() -> None:
+def main(args: argparse.Namespace | None = None) -> None:
     """Main function to demonstrate robot sensor simulation."""
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="Create and simulate a robot in SimulationManager"
-    )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--attach_sensor",
-        action="store_true",
-        help="Attach sensor to robot end-effector",
-    )
-    parser.add_argument(
-        "--steps",
-        type=int,
-        default=0,
-        help="Stop after this many simulation steps; zero runs until Ctrl+C.",
-    )
-    args = parser.parse_args()
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
     # Initialize simulation
     print("Creating simulation...")
     config = SimulationManagerCfg(
         headless=True,
-        sim_device=args.device,
+        device=args.device,
         arena_space=3.0,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
         visualization=visualization_cfg_from_args(args),
@@ -109,8 +125,6 @@ def main() -> None:
 
     # Create robot configuration
     robot = create_robot(sim)
-
-    sensor = create_sensor(sim, args)
 
     # Add a cube to the scene
     cube_cfg = RigidObjectCfg(
@@ -121,9 +135,12 @@ def main() -> None:
     )
     sim.add_rigid_object(cfg=cube_cfg)
 
-    # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    # Materialize all physical assets before reading robot metadata or
+    # constructing render-only sensors.
+    sim.prepare()
+    print(f"Robot created successfully with {robot.dof} joints")
+
+    sensor = create_sensor(sim, args)
 
     # Open visualization window if not headless
     if not args.headless:
@@ -147,7 +164,8 @@ def create_sensor(sim: SimulationManager, args):
 
     # extrinsics params
     pos = [0.09, 0.05, 0.04]
-    quat = R.from_euler("xyz", [-35, 135, 0], degrees=True).as_quat().tolist()
+    # CameraCfg uses xyzw; this rotation preserves the intended wrist-camera view.
+    quat = R.from_euler("xyz", [180, -45, 35], degrees=True).as_quat().tolist()
 
     # If attach_sensor is True, attach to robot end-effector; otherwise, place it in the scene
     if args.attach_sensor:
@@ -156,7 +174,6 @@ def create_sensor(sim: SimulationManager, args):
         parent = None
         pos = [1.2, -0.2, 1.5]
         quat = R.from_euler("xyz", [0, 180, 0], degrees=True).as_quat().tolist()
-        quat = [quat[3], quat[0], quat[1], quat[2]]  # Convert to (w, x, y, z)
 
     # create camera sensor and attach to robot end-effector
     camera: Camera = sim.add_sensor(
@@ -223,16 +240,16 @@ def create_robot(sim):
             ]
         ),
         control_parts=CONTROL_PARTS,
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={"joint[1-6]": 1e4, "LEFT_.*": 1e3},
-            damping={"joint[1-6]": 1e3, "LEFT_.*": 1e2},
+            damping={"joint[1-6]": 1.5e3, "LEFT_.*": 1e2},
+            max_effort={"joint[1-6]": 1e4, "LEFT_.*": 1e4},
         ),
     )
 
     # Add robot to simulation
     robot: Robot = sim.add_robot(cfg=cfg)
-
-    print(f"Robot created successfully with {robot.dof} joints")
 
     return robot
 
@@ -356,4 +373,4 @@ def run_simulation(
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

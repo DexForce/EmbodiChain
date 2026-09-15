@@ -11,7 +11,7 @@
 |---|---|
 | `embodichain/lab/sim/motion/solvers/__init__.py` | Public re-exports for all solver classes and configs |
 | `embodichain/lab/sim/motion/solvers/base_solver.py` | `BaseSolver` ABC + `SolverCfg` base config |
-| `embodichain/lab/sim/cfg.py` | `RobotCfg.solver_cfg` — where solver config is wired into a robot |
+| `embodichain/lab/sim/cfg/robot.py` | `RobotCfg.solver_cfg` — where solver config is wired into a robot |
 | `embodichain/lab/sim/motion/solvers/qpos_seed_sampler.py` | `QposSeedSampler` — random joint-seed generation |
 | `embodichain/lab/sim/motion/solvers/null_space_posture_task.py` | `NullSpacePostureTask` — Pink null-space posture objective |
 | `embodichain/lab/sim/utility/solver_utils.py` | Helpers: `create_pk_serial_chain`, `build_reduced_pinocchio_robot`, `validate_iteration_params`, `compute_pinocchio_fk` |
@@ -140,3 +140,20 @@ solver interfaces. The compute kernels do not import simulation modules.
 `utils/warp/kinematics/*_solver.py` are compatibility aliases.
 Validate kernel import/compilation with `tests/compute/test_imports.py` and
 solver behavior with the corresponding `tests/sim/motion/solvers/` tests.
+
+## Batch adapters and analytic scratch memory
+
+`BaseSolver.get_fk_batch()` and `get_ik_batch()` flatten and restore arbitrary
+leading batch axes in the chain-root frame. Nearest IK returns a boolean success
+mask with the leading shape and qpos with a final `dof` axis; existing concrete
+`get_fk`/`get_ik` signatures remain available. Robot owns local-arena/root frame
+conversion and broadcasts root transforms without materializing per-target copies.
+
+UR/OPW reuse internal candidate buffers through `solvers/_buffers.py`.
+`prepare_buffers(max_batch)` reserves a high-water capacity; allocation is lazy
+and later larger calls grow it. Public results remain independent of subsequent
+calls, including `return_all_solutions=True`. Calls are serialized by a lock and
+CUDA events; Warp kernels use the current Torch stream. Buffer storage is released
+with the solver. UR retains all 512 periodic candidates and the existing nearest
+selection; OPW retains eight candidates. OPW packs live joint limits in one host
+transfer per call, so limit updates do not require cache invalidation.

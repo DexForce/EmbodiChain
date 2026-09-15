@@ -277,13 +277,14 @@ class TestAuthoringSessionWithSimulation:
             AtomicActionEngine,
             ControlPartCommandProfile,
         )
-        from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
+        from embodichain.lab.sim.cfg import RigidObjectCfg
         from embodichain.lab.sim.shapes import CubeCfg
         from scripts.tutorials.atomic_action.tutorial_utils import (
             add_ur5_gripper_robot,
             clone_local_pose_from_first_env,
             create_parallel_jaw_grasp_pose_generator,
             create_toppra_motion_generator,
+            create_tutorial_rigid_body_physics,
             get_hand_open_close_qpos,
         )
 
@@ -301,11 +302,12 @@ class TestAuthoringSessionWithSimulation:
             cfg=RigidObjectCfg(
                 uid="cube",
                 shape=CubeCfg(size=[OBJECT_SIZE] * 3),
-                attrs=RigidBodyAttributesCfg(
+                attrs=create_tutorial_rigid_body_physics(
                     mass=0.05,
                     dynamic_friction=0.97,
                     static_friction=0.99,
                     enable_ccd=True,
+                    newton_contact=cls.sim.is_newton_backend,
                 ),
                 max_convex_hull_num=16,
                 init_pos=[*OBJECT_XY, OBJECT_SIZE],

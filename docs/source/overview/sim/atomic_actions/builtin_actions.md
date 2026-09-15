@@ -1063,5 +1063,14 @@ python scripts/tutorials/atomic_action/pickup.py --headless --auto_play --device
 python scripts/tutorials/atomic_action/hand_over.py --headless --auto_play --device cpu
 ```
 
+The scripts share a `--planner` selector for the non-neural backends
+(`toppra`, `trapezoidal`, or `curobo`); `trapezoidal` is the default. See
+{doc}`/tutorial/atomic_actions` for backend-specific caveats and examples.
+The dynamic-obstacle recovery example remains cuRobo-only because it updates a
+live collision world.
+Every script also receives the same single global `sun` light from the shared
+tutorial scene setup; vectorized environments do not create per-arena point
+lights.
+
 See {doc}`/tutorial/atomic_actions` for engine setup, static compilation,
 closed-loop execution, effect verification, and custom-action guidance.

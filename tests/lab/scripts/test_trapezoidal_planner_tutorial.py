@@ -97,7 +97,7 @@ class _Robot:
             pose[:, :3, 3] = qpos[:, :3]
             return pose
         quaternion = qpos.new_zeros((qpos.shape[0], 4))
-        quaternion[:, 0] = 1.0
+        quaternion[:, 3] = 1.0
         return torch.cat((qpos[:, :3], quaternion), dim=-1)
 
     def compute_ik(
@@ -307,6 +307,10 @@ def test_eef_trajectory_uses_one_batched_fk_call() -> None:
 
     assert poses.shape == (sample_count, 7)
     assert torch.equal(poses[:, 2], joint_positions[1, :, 2])
+    assert torch.equal(
+        poses[:, 3:],
+        torch.tensor([0.0, 0.0, 0.0, 1.0]).expand(sample_count, -1),
+    )
     assert robot.fk_call_count == 1
 
 

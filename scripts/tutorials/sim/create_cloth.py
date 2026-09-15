@@ -22,26 +22,51 @@ It shows the basic setup of simulation context, adding objects, lighting, and se
 from __future__ import annotations
 
 import argparse
+import time
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create a simulation scene with SimulationManager"
+    )
+    add_sim_args_to_parser(parser)
+    parser.set_defaults(device="cuda", physics="newton")
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
 import os
 import tempfile
-import time
-import torch
+
 import open3d as o3d
+import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
+    SurfaceElementPropertiesCfg,
+    MassPropertiesCfg,
+    NewtonCollisionPipelineCfg,
+    NewtonPhysicsCfg,
     RenderCfg,
+    SurfaceDeformableObjectCfg,
+    SurfaceDeformablePhysicsCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
     RigidObjectCfg,
-    RigidBodyAttributesCfg,
-    ClothObjectCfg,
-    ClothPhysicalAttributesCfg,
 )
 from embodichain.lab.sim.shapes import MeshCfg, CubeCfg
-from embodichain.lab.sim.objects import ClothObject
+from embodichain.lab.sim.objects import SurfaceDeformableObject
 
 
-def create_2d_grid_mesh(width: float, height: float, nx: int = 1, ny: int = 1):
+def create_2d_grid_mesh(
+    width: float, height: float, nx: int = 1, ny: int = 1
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Create a flat rectangle in the XY plane centered at `origin`.
 
     The rectangle is subdivided into an `nx` by `ny` grid (cells) and
@@ -57,7 +82,7 @@ def create_2d_grid_mesh(width: float, height: float, nx: int = 1, ny: int = 1):
     # Vectorized vertex positions using PyTorch
     x_lin = torch.linspace(-w / 2.0, w / 2.0, steps=nx + 1, dtype=torch.float64)
     y_lin = torch.linspace(-h / 2.0, h / 2.0, steps=ny + 1, dtype=torch.float64)
-    yy, xx = torch.meshgrid(y_lin, x_lin)  # shapes: (ny+1, nx+1)
+    yy, xx = torch.meshgrid(y_lin, x_lin, indexing="ij")
     xx_flat = xx.reshape(-1)
     yy_flat = yy.reshape(-1)
     zz_flat = torch.full_like(xx_flat, 0, dtype=torch.float64)
@@ -75,25 +100,46 @@ def create_2d_grid_mesh(width: float, height: float, nx: int = 1, ny: int = 1):
     return verts, faces
 
 
-def main():
+def main(args: argparse.Namespace | None = None) -> None:
     """Main function to create and run the simulation scene."""
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="Create a simulation scene with SimulationManager"
-    )
-    add_env_launcher_args_to_parser(parser)
-    args = parser.parse_args()
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
+    if args.physics != "newton":
+        parser.error("Cloth requires --physics newton.")
+    if not str(args.device).startswith("cuda"):
+        parser.error("Cloth requires a CUDA device.")
 
     # Configure the simulation
     sim_cfg = SimulationManagerCfg(
         width=1920,
         height=1080,
-        headless=True,
+        headless=args.headless,
         num_envs=args.num_envs,
+        arena_space=args.arena_space,
+        gpu_id=args.gpu_id,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device="cuda",  # soft simulation only supports cuda device
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=NewtonPhysicsCfg(
+            num_substeps=4,
+            solver_cfg={
+                "solver_type": "vbd",
+                "iterations": 5,
+                "particle_enable_self_contact": False,
+                "particle_self_contact_radius": 0.002,
+                "particle_self_contact_margin": 0.002,
+                "particle_enable_tile_solve": True,
+                "soft_contact_ke": 1.0e4,
+                "soft_contact_kd": 1.0e-2,
+                "soft_contact_mu": 0.8,
+            },
+            collision_cfg=NewtonCollisionPipelineCfg(
+                soft_contact_margin=0.002,
+            ),
+        ),
         visualization=visualization_cfg_from_args(args),
     )
 
@@ -110,21 +156,24 @@ def main():
     cloth_save_path = os.path.join(tempfile.gettempdir(), "cloth_mesh.ply")
     o3d.io.write_triangle_mesh(cloth_save_path, cloth_mesh)
     # add cloth to the scene
-    cloth = sim.add_cloth_object(
-        cfg=ClothObjectCfg(
+    cloth = sim.add_deformable_object(
+        cfg=SurfaceDeformableObjectCfg(
             uid="cloth",
             shape=MeshCfg(fpath=cloth_save_path),
-            init_pos=[0.5, 0.0, 0.3],
+            init_pos=[0.5, 0.0, 0.8],
             init_rot=[0, 0, 0],
-            physical_attr=ClothPhysicalAttributesCfg(
-                mass=0.01,
-                youngs=1e9,
-                poissons=0.4,
-                thickness=0.04,
-                bending_stiffness=0.01,
-                bending_damping=0.1,
-                dynamic_friction=0.95,
-                min_position_iters=30,
+            # The grid spacing is 0.025 m, so avoid Newton's much larger
+            # 0.1 m default particle radius for this small cloth mesh.
+            particle_radius=0.01,
+            attrs=SurfaceDeformablePhysicsCfg(
+                density=0.02,
+                surface_props=SurfaceElementPropertiesCfg(
+                    tri_ke=2.0e3,
+                    tri_ka=2.0e3,
+                    tri_kd=0.1,
+                    edge_ke=2.0,
+                    edge_kd=0.1,
+                ),
             ),
         )
     )
@@ -133,20 +182,22 @@ def main():
         shape=CubeCfg(
             size=[0.1, 0.1, 0.06],
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=1.0,
-            static_friction=0.95,
-            dynamic_friction=0.9,
-            restitution=0.01,
-            min_position_iters=32,
-            min_velocity_iters=8,
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(mass=1.0),
+            material_props=RigidBodyMaterialCfg(
+                static_friction=0.95,
+                dynamic_friction=0.9,
+                restitution=0.01,
+            ),
         ),
         body_type="dynamic",
         init_pos=[0.5, 0.0, 0.04],
         init_rot=[0.0, 0.0, 0.0],
     )
-    padding_box = sim.add_rigid_object(cfg=padding_box_cfg)
-    print("[INFO]: Add soft object complete!")
+    sim.add_rigid_object(cfg=padding_box_cfg)
+    print("[INFO]: Add cloth object complete!")
+
+    sim.prepare()
 
     # Open window when the scene has been set up
     if not args.headless:
@@ -159,41 +210,34 @@ def main():
     run_simulation(sim, cloth)
 
 
-def run_simulation(sim: SimulationManager, cloth: ClothObject) -> None:
+def run_simulation(sim: SimulationManager, cloth: SurfaceDeformableObject) -> None:
     """Run the simulation loop.
 
     Args:
         sim: The SimulationManager instance to run
-        soft_obj: soft object
+        cloth: The cloth object to simulate.
     """
 
-    # Initialize GPU physics
-    sim.init_gpu_physics()
-
-    step_count = 0
-
     try:
-        last_time = time.time()
+        step_count = 0
+        last_time = time.perf_counter()
         last_step = 0
         while True:
             # Update physics simulation
             sim.update(step=1)
             step_count += 1
 
-            # Print FPS every second
             if step_count % 100 == 0:
-                current_time = time.time()
+                current_time = time.perf_counter()
                 elapsed = current_time - last_time
                 fps = (
                     sim.num_envs * (step_count - last_step) / elapsed
-                    if elapsed > 0
-                    else 0
+                    if elapsed > 0.0
+                    else 0.0
                 )
                 print(f"[INFO]: Simulation step: {step_count}, FPS: {fps:.2f}")
                 last_time = current_time
                 last_step = step_count
-                if step_count % 500 == 0:
-                    cloth.reset()
 
     except KeyboardInterrupt:
         print("\n[INFO]: Stopping simulation...")
@@ -204,4 +248,4 @@ def run_simulation(sim: SimulationManager, cloth: ClothObject) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

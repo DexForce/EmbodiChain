@@ -38,7 +38,12 @@ from dexsim.types import RigidBodyShape
 
 from embodichain.lab.sim.objects.rigid_object import CollisionShapeDesc
 from embodichain.utils import logger
-from embodichain.utils.math import matrix_from_quat, quat_from_matrix
+from embodichain.utils.math import (
+    matrix_from_quat,
+    quat_from_matrix,
+    quat_wxyz_to_xyzw,
+    quat_xyzw_to_wxyz,
+)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import RigidObject, Robot
@@ -360,11 +365,34 @@ def _compute_convex_hull(mesh: Any) -> Any:
     return mesh.compute_convex_hull()
 
 
+def _pose_matrix_to_list(pose: torch.Tensor) -> list[float]:
+    """Convert an EmbodiChain pose matrix to cuRobo ``xyz+wxyz`` format."""
+    pose = torch.as_tensor(pose, dtype=torch.float32).detach().cpu()
+    return torch.cat(
+        [pose[:3, 3], quat_xyzw_to_wxyz(quat_from_matrix(pose[:3, :3]))]
+    ).tolist()
+
+
+def _curobo_pose_to_components(
+    pose: object,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Decode one cuRobo ``xyz+wxyz`` pose for EmbodiChain math."""
+    pose_tensor = torch.as_tensor(pose, dtype=torch.float32).detach().cpu().reshape(-1)
+    if pose_tensor.shape != (7,):
+        raise ValueError(
+            "cuRobo pose must have shape (7,) in xyz+wxyz order, got "
+            f"{tuple(pose_tensor.shape)}."
+        )
+    position = pose_tensor[:3]
+    rotation = matrix_from_quat(quat_wxyz_to_xyzw(pose_tensor[3:7]))
+    return position, rotation
+
+
 def _convex_hull_to_voxel_entry(
     name: str,
     vertices: torch.Tensor,
     faces: torch.Tensor,
-    pose: torch.Tensor,
+    pose_matrix: torch.Tensor,
     *,
     voxel_size: float = 0.01,
     voxel_padding: float = 0.005,
@@ -373,6 +401,11 @@ def _convex_hull_to_voxel_entry(
 
     The grid is centered at the object's local origin, so the voxel obstacle's
     pose stays identical to the source object's pose during dynamic updates.
+    ``pose_matrix`` is an EmbodiChain homogeneous ``(4, 4)`` pose in the
+    ``xyz + xyzw`` convention. It is converted exactly once to cuRobo's
+    serialized ``xyz + wxyz`` format at this external boundary. Requiring a
+    matrix here keeps a raw 7D vector from silently introducing an ambiguous
+    quaternion convention into the world generator.
     """
     vertices = (
         torch.as_tensor(vertices, dtype=torch.float32).detach().to("cpu").reshape(-1, 3)
@@ -385,15 +418,13 @@ def _convex_hull_to_voxel_entry(
     if voxel_padding < 0.0:
         raise ValueError(f"voxel_padding must be non-negative, got {voxel_padding}.")
 
-    pose = torch.as_tensor(pose, dtype=torch.float32).detach().to("cpu")
-    if pose.shape == (4, 4):
-        position = pose[:3, 3]
-        quaternion = quat_from_matrix(pose[:3, :3])  # wxyz
-        pose = torch.cat([position, quaternion])
-    if pose.shape != (7,):
+    pose_matrix = torch.as_tensor(pose_matrix, dtype=torch.float32).detach().to("cpu")
+    if pose_matrix.shape != (4, 4):
         raise ValueError(
-            f"pose must be (7,) [x,y,z,qw,qx,qy,qz] or (4, 4), got {tuple(pose.shape)}."
+            "pose_matrix must be an EmbodiChain (4, 4) homogeneous matrix "
+            f"in xyz+xyzw convention, got {tuple(pose_matrix.shape)}."
         )
+    serialized_pose = _pose_matrix_to_list(pose_matrix)
 
     import open3d as o3d
 
@@ -434,17 +465,11 @@ def _convex_hull_to_voxel_entry(
 
     feature_tensor = signed_distance.reshape(grid_shape).to(torch.float16).contiguous()
     return name, {
-        "pose": pose.tolist(),
+        "pose": serialized_pose,
         "dims": dims.tolist(),
         "voxel_size": float(voxel_size),
         "feature_tensor": feature_tensor,
     }
-
-
-def _pose_matrix_to_list(pose: torch.Tensor) -> list[float]:
-    """Convert a homogeneous pose matrix to cuRobo ``xyz+wxyz`` format."""
-    pose = torch.as_tensor(pose, dtype=torch.float32).detach().cpu()
-    return torch.cat([pose[:3, 3], quat_from_matrix(pose[:3, :3])]).tolist()
 
 
 def _collision_shape_mesh(
@@ -993,9 +1018,8 @@ def _world_collision_sphere_data(world_scene: Any) -> tuple[torch.Tensor, torch.
                 f"Voxel collision entry {name!r} has no samples near its zero level set."
             )
             continue
-        pose = torch.as_tensor(get_value("pose"), dtype=torch.float32).detach().cpu()
-        rotation = matrix_from_quat(pose[3:7])
-        world_points = local_points[surface] @ rotation.T + pose[:3]
+        position, rotation = _curobo_pose_to_components(get_value("pose"))
+        world_points = local_points[surface] @ rotation.T + position
         centers.append(world_points)
         radii.append(torch.full((world_points.shape[0],), 0.5 * voxel_size))
 
@@ -1014,8 +1038,7 @@ def _world_collision_sphere_data(world_scene: Any) -> tuple[torch.Tensor, torch.
                 if isinstance(entry, dict)
                 else lambda key: getattr(entry, key)
             )
-            pose = torch.as_tensor(get_value("pose"), dtype=torch.float32)
-            rotation = matrix_from_quat(pose[3:7])
+            position, rotation = _curobo_pose_to_components(get_value("pose"))
             if representation == "sphere":
                 local_points = torch.zeros((1, 3), dtype=torch.float32)
                 sample_radii = torch.tensor([float(get_value("radius"))])
@@ -1050,7 +1073,7 @@ def _world_collision_sphere_data(world_scene: Any) -> tuple[torch.Tensor, torch.
                     stride = (local_points.shape[0] + 9_999) // 10_000
                     local_points = local_points[::stride]
                 sample_radii = torch.full((local_points.shape[0],), 0.005)
-            world_points = local_points @ rotation.T + pose[:3]
+            world_points = local_points @ rotation.T + position
             centers.append(world_points)
             radii.append(sample_radii)
 

@@ -83,6 +83,11 @@ as a mapping with `name` and `cfg`.
 `DifferentiableVecEnv.detach_state()` as the truncated-backpropagation
 boundary.
 
+Variable-horizon APG environments may also implement
+`ScheduledDifferentiableVecEnv.prepare_differentiable_rollout()`. Its
+`DifferentiableRolloutSpec` selects the next reset's complete horizon,
+per-environment objective scale, and scalar rollout metadata.
+
 This path supports both standard algorithms and differentiable algorithms,
 but currently rejects distributed training and environment profiling.
 
@@ -114,9 +119,11 @@ use it as padding. The collector writes into the preallocated rollout and the
 algorithm consumes it after collection.
 
 The differentiable path does not copy transitions into the standard buffer.
-It preserves the action-to-reward autograd graph across short segments.
-`segment_length` sets TBPTT boundaries, while `update_horizon` controls
-how many environment steps contribute to one optimizer update.
+It supports explicitly configured `segmented` TBPTT rollouts and `complete`
+rollouts that reset before each independent microbatch, retain the full
+environment-provided horizon, mask post-terminal rewards, and accumulate full
+trajectory gradients before one optimizer step. Read the training detail for
+the complete-rollout safety and normalization contracts.
 
 ## Component Ownership
 
@@ -127,6 +134,8 @@ how many environment steps contribute to one optimizer update.
 | Standard rollout storage and views | `buffer/` |
 | Standard and differentiable collection | `collector/` |
 | Policy interface, actor-critic, actor-only, MLP builder | `models/` |
+| Running observation statistics | `normalization.py` |
+| Batched action-adjoint stabilization | `gradients.py` |
 | Actor and critic observation statistics | `models/normalizer.py` |
 | Standard collect/update loop | `utils/trainer.py` |
 | Differentiable TBPTT/update loop | `differentiable_trainer.py` |
@@ -158,6 +167,10 @@ distributed ownership, official examples and adding algorithms/policies/envs.
 - The standard buffer holds at most one unconsumed rollout.
 - APG must retain differentiable rewards until its optimizer boundary;
   `detach_state()` must not reset or resample the task.
+- Complete APG must reset once per independent rollout, detach only after
+  backward, and exclude post-terminal auto-reset rewards from its objective.
+- Observation statistics stay frozen during each complete rollout; semantic
+  mask/type fields remain unnormalized.
 - GRPO environment count must satisfy its grouping contract.
 - Evaluation must use completed episodes and an independent environment.
 - Only rank zero owns external logging and checkpoints in distributed runs.
@@ -173,6 +186,8 @@ distributed ownership, official examples and adding algorithms/policies/envs.
 | Policy dimension mismatch | Policy config disagrees with the built environment's observation or action space |
 | Standard buffer is already full | A rollout was started before the previous one was consumed with `get()` |
 | APG gradients disappear | Actions were sampled under `no_grad`, transitions were copied/detached, or the state was detached too early |
+| Long-horizon APG accuracy is lower than the reference | `rollout_mode` is still segmented, the scheduled horizon was truncated, return scaling is missing, or observation normalization differs |
+| One environment poisons every APG row | Action-adjoint clipping is disabled or non-finite row filtering is bypassed |
 | GRPO reshape or grouping fails | `num_envs` is not divisible by `group_size` |
 | Evaluation never completes | The environment does not emit completed asynchronous episodes or terminal metrics correctly |
 | Output/checkpoint directories diverge across ranks | Distributed run metadata was not coordinated through rank zero |

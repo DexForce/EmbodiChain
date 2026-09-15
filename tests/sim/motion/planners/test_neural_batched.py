@@ -61,6 +61,7 @@ class TestNeuralPlanBatched:
         from embodichain.lab.sim.motion.planners.neural_planner import (
             NeuralPlanner,
             NeuralPlanOptions,
+            _waypoint_obs_dim,
         )
         from embodichain.lab.sim.motion.planners.utils import PlanState, MoveType
 
@@ -74,7 +75,9 @@ class TestNeuralPlanBatched:
         planner._joint_eps = 1e9
         planner._intermediate_orientation = True
         planner._use_relative_obs = False
-        planner._obs_dim = 101
+        planner._obs_dim = _waypoint_obs_dim(
+            planner._num_waypoints, planner._use_relative_obs
+        )
         _set_identity_policy_frames(planner)
         planner.cfg = type(
             "c",
@@ -129,6 +132,7 @@ class TestNeuralEarlyConvergenceHold:
         from embodichain.lab.sim.motion.planners.neural_planner import (
             NeuralPlanner,
             NeuralPlanOptions,
+            _waypoint_obs_dim,
         )
         from embodichain.lab.sim.motion.planners.utils import PlanState, MoveType
 
@@ -142,7 +146,9 @@ class TestNeuralEarlyConvergenceHold:
         planner._joint_eps = 1e9
         planner._intermediate_orientation = True
         planner._use_relative_obs = False
-        planner._obs_dim = 101
+        planner._obs_dim = _waypoint_obs_dim(
+            planner._num_waypoints, planner._use_relative_obs
+        )
         _set_identity_policy_frames(planner)
         planner.cfg = type(
             "c",

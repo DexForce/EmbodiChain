@@ -44,7 +44,7 @@ The built-in declarations are:
 
 * TOPPRA: `JOINT_MOVE`;
 * TrapezoidalPlanner: `JOINT_MOVE`, sparse joint waypoints, and preserved native
-  samples;
+  samples. During quantity sampling it retains every converted waypoint;
 * NeuralPlanner: `EEF_MOVE`;
 * cuRobo: `EEF_MOVE` and `JOINT_MOVE`.
 
@@ -54,6 +54,10 @@ TrapezoidalPlanner declares both `uses_sparse_joint_waypoints=True` and
 returns the planner's native `positions`, `velocities`, `accelerations`, and
 `dt` without normalizing them to `MotionGenOptions.sample_count`. See the
 [TrapezoidalPlanner guide](planners/trapezoidal_planner.md).
+When options are automatically resolved from a backend-neutral request, a
+requested quantity is treated as a lower bound if Cartesian-to-joint conversion
+produces more waypoints; an explicit `TrapezoidalPlanOptions.sample_interval`
+remains authoritative.
 
 ## Usage
 
@@ -81,7 +85,7 @@ sim_cfg = SimulationManagerCfg(
     width=1920,
     height=1080,
     physics_dt=1.0 / 100.0,
-    sim_device="cpu",
+    device="cpu",
 )
 
 sim = SimulationManager(sim_cfg)
@@ -107,7 +111,7 @@ robot_cfg = RobotCfg(
             dt=0.1,
         )
     },
-    drive_pros=JointDrivePropertiesCfg(
+    joint_drive_props=JointDrivePropertiesCfg(
         stiffness={"Joint[1-6]": 1e4},
         damping={"Joint[1-6]": 1e3},
     ),

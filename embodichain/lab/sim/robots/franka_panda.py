@@ -24,7 +24,6 @@ import torch
 from embodichain.data import get_data_path
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
     RobotCfg,
     URDFCfg,
 )
@@ -141,7 +140,8 @@ class FrankaPandaCfg(RobotCfg):
             ),
         }
 
-        self.drive_pros = JointDrivePropertiesCfg(
+        self.joint_drive_props = JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={
                 "fr3_joint[1-7]": 1e4,
                 "fr3_finger_joint[1-2]": 1e3,
@@ -188,25 +188,41 @@ class FrankaPandaCfg(RobotCfg):
 
 
 if __name__ == "__main__":
+    import argparse
+
     np.set_printoptions(precision=5, suppress=True)
 
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.cfg import RenderCfg
+    from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
+
+    parser = argparse.ArgumentParser(description="Launch the Franka Panda robot")
+    parser.add_argument(
+        "--physics",
+        choices=("default", "newton"),
+        default="default",
+        help="Physics backend to launch (default: default).",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Runtime device override; otherwise the selected backend default is used.",
+    )
+    args = parser.parse_args()
 
     config = SimulationManagerCfg(
-        headless=False,
-        sim_device="cpu",
+        headless=True,
+        device=args.device,
         num_envs=1,
+        physics_cfg=physics_cfg_for_backend(args.physics),
         render_cfg=RenderCfg(renderer="hybrid"),
     )
     sim = SimulationManager(config)
 
     cfg = FrankaPandaCfg.from_dict({"robot_type": "panda"})
     robot = sim.add_robot(cfg=cfg)
+    sim.prepare()
     sim.open_window()
-
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     from IPython import embed
 

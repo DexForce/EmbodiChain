@@ -42,6 +42,7 @@ from tensordict import TensorDict
 
 from embodichain.lab.sim.cfg import (
     RobotCfg,
+    RobotPresetCfg,
     RigidObjectCfg,
     RigidObjectGroupCfg,
     ArticulationCfg,
@@ -57,6 +58,7 @@ from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
+from embodichain.lab.gym.envs._startup_summary import format_functor_summary
 from embodichain.lab.gym.envs.demo import (
     DEMO_SCHEMA_VERSION,
     DemoExecutionCfg,
@@ -114,8 +116,9 @@ class EmbodiedEnvCfg(EnvCfg):
     instance as attributes during initialization.
 
     Key fields
-    - **robot**: `RobotCfg` (required) — the agent definition (URDF/MJCF, initial
-        state, control mode, etc.).
+    - **robot**: `RobotCfg | RobotPresetCfg` (required) — one portable robot
+        definition or replace-only complete alternatives selected by the active
+        physics backend.
     - **control_parts**: Optional[List[str]] — named robot parts to control. If
         `None`, all controllable joints are used.
     - **active_joint_ids**: List[int] — explicit joint indices to use for
@@ -153,7 +156,7 @@ class EmbodiedEnvCfg(EnvCfg):
         # TODO: support more types of indirect light in the future.
         indirect: dict[str, Any] | None = None
 
-    robot: RobotCfg = MISSING
+    robot: RobotCfg | RobotPresetCfg = MISSING
 
     control_parts: list[str] | None = None
     """List of robot parts to control. If None, all controllable joints will be used. 
@@ -306,8 +309,8 @@ class EmbodiedEnv(BaseEnv):
     _manager_summary_fields: tuple[tuple[str, str], ...] = (
         ("EventManager", "event_manager"),
         ("ObservationManager", "observation_manager"),
-        ("RewardManager", "reward_manager"),
         ("ActionManager", "action_manager"),
+        ("RewardManager", "reward_manager"),
         ("DatasetManager", "dataset_manager"),
     )
 
@@ -371,124 +374,145 @@ class EmbodiedEnv(BaseEnv):
 
         super().__init__(cfg, **kwargs)
 
-        self.expert_action_spec = build_expert_action_spec(
-            joint_names=[
-                self.robot.joint_names[joint_id] for joint_id in self.active_joint_ids
-            ],
-            joint_command_mode=self.cfg.expert_trajectory.joint_command_mode,
-        )
-        self._expert_action_space = gym.spaces.Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=(self.num_envs, self.expert_action_spec.width),
-            dtype=np.float32,
-        )
-
-        if task_program_adapter_factory is not None:
-            from embodichain.lab.task_program.integrations import (
-                TaskProgramEnvironmentAdapter,
+        try:
+            self.expert_action_spec = build_expert_action_spec(
+                joint_names=[
+                    self.robot.joint_names[joint_id]
+                    for joint_id in self.active_joint_ids
+                ],
+                joint_command_mode=self.cfg.expert_trajectory.joint_command_mode,
+            )
+            self._expert_action_space = gym.spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(self.num_envs, self.expert_action_spec.width),
+                dtype=np.float32,
             )
 
-            adapter = task_program_adapter_factory.create_adapter(self)
-            if type(adapter) is not TaskProgramEnvironmentAdapter:
-                raise TypeError(
-                    "TaskProgramAdapterFactory.create_adapter() must return "
-                    "exactly TaskProgramEnvironmentAdapter."
+            if task_program_adapter_factory is not None:
+                from embodichain.lab.task_program.integrations import (
+                    TaskProgramEnvironmentAdapter,
                 )
-            self._task_program_adapter = adapter
 
-        dataset_terms = getattr(self.cfg.dataset, "__dict__", self.cfg.dataset)
-        if dataset_terms and not self.cfg.filter_dataset_saving:
-            self.dataset_manager = DatasetManager(self.cfg.dataset, self)
-            self.cfg.init_rollout_buffer = True
+                adapter = task_program_adapter_factory.create_adapter(self)
+                if type(adapter) is not TaskProgramEnvironmentAdapter:
+                    raise TypeError(
+                        "TaskProgramAdapterFactory.create_adapter() must return "
+                        "exactly TaskProgramEnvironmentAdapter."
+                    )
+                self._task_program_adapter = adapter
 
-        # Rollout buffer for episode data collection.
-        # The shape of the buffer is (num_envs, max_episode_steps, *data_shape) for each key.
-        # The default key in the buffer are:
-        # - obs: the observation returned by the environment.
-        # - action: the action applied to the environment.
-        # - reward: the reward returned by the environment.
-        # TODO: we may add more keys and make the buffer extensible in the future.
-        # This buffer should also be support initialized from outside of the environment.
-        # For example, a shared rollout buffer initialized in model training process and passed to the environment for data collection.
-        self.rollout_buffer: TensorDict | None = None
-        self._max_rollout_steps = 0
-        self._rollout_buffer_mode: str | None = None
-        if self.cfg.init_rollout_buffer:
-            self.rollout_buffer = init_rollout_buffer_from_gym_space(
-                obs_space=self.observation_space,
-                action_space=self._expert_action_space,
-                max_episode_steps=self.max_episode_steps,
-                num_envs=self.num_envs,
-                device=self.device,
-            )
-            self._max_rollout_steps = self.rollout_buffer.shape[1]
-            self._rollout_buffer_mode = "expert"
+            dataset_terms = getattr(self.cfg.dataset, "__dict__", self.cfg.dataset)
+            if dataset_terms and not self.cfg.filter_dataset_saving:
+                self.dataset_manager = DatasetManager(self.cfg.dataset, self)
+                self.cfg.init_rollout_buffer = True
 
-        # Dedicated per-env trajectory buffer (states + actions). Decoupled from
-        # rollout_buffer so async parallel envs and ActionManager are supported.
-        self._traj_buffer: TensorDict | None = None
-        self._traj_steps: torch.Tensor | None = None
-        self._traj_raw_action: EnvAction | None = None
-        self._traj_save_count = 0
-        self._traj_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        if self.cfg.record_trajectory:
-            self._traj_buffer = build_trajectory_buffer(
-                env=self,
-                max_steps=self.max_episode_steps,
-                num_envs=self.num_envs,
-                device=self.device,
-                uids=self.cfg.trajectory_uids,
-                action_space=self._expert_action_space,
-            )
-            self._traj_steps = torch.zeros(
+            self.rollout_buffer: TensorDict | None = None
+            self._max_rollout_steps = 0
+            self._rollout_buffer_mode: str | None = None
+            if self.cfg.init_rollout_buffer:
+                self.rollout_buffer = init_rollout_buffer_from_gym_space(
+                    obs_space=self.observation_space,
+                    action_space=self._expert_action_space,
+                    max_episode_steps=self.max_episode_steps,
+                    num_envs=self.num_envs,
+                    device=self.device,
+                )
+                self._max_rollout_steps = self.rollout_buffer.shape[1]
+                self._rollout_buffer_mode = "expert"
+
+            self._traj_buffer: TensorDict | None = None
+            self._traj_steps: torch.Tensor | None = None
+            self._traj_raw_action: EnvAction | None = None
+            self._traj_save_count = 0
+            self._traj_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+            if self.cfg.record_trajectory:
+                self._traj_buffer = build_trajectory_buffer(
+                    env=self,
+                    max_steps=self.max_episode_steps,
+                    num_envs=self.num_envs,
+                    device=self.device,
+                    uids=self.cfg.trajectory_uids,
+                    action_space=self._expert_action_space,
+                )
+                self._traj_steps = torch.zeros(
+                    self.num_envs, dtype=torch.long, device=self.device
+                )
+
+            self.rollout_steps = torch.zeros(
                 self.num_envs, dtype=torch.long, device=self.device
             )
+            self._demo_steps = torch.zeros(
+                self.num_envs, dtype=torch.long, device=self.device
+            )
+            self.current_rollout_step = 0
 
-        self.rollout_steps = torch.zeros(
-            self.num_envs, dtype=torch.long, device=self.device
+            # Segment recording is intentionally separate from task planning. The
+            # common demo executor updates this context while the regular rollout
+            # writer turns it into per-frame annotations.
+            self._demo_episode_index = 0
+            self._demo_execution_cfg = DemoExecutionCfg()
+            self._demo_attempt_id = 0
+            self._demo_continuity_id = 0
+            self._demo_program_run_id = "0:0"
+            self._demo_active_segment_id = 0
+            self._demo_active_segment_ids = torch.zeros(
+                self.num_envs, dtype=torch.long, device=self.device
+            )
+            self._demo_active_mask = torch.ones(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            self._demo_segment_participants = self._demo_active_mask.clone()
+            self._demo_active_segment_start_steps = self._demo_steps.clone()
+            self._demo_active_rollout_start_steps = self.rollout_steps.clone()
+            self._demo_episode_metadata: list[dict[str, Any]] = [
+                self._new_demo_episode_metadata(env_id)
+                for env_id in range(self.num_envs)
+            ]
+
+            self.episode_success_status: torch.Tensor = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            self._closed = False
+            self._close_error: BaseException | None = None
+            self._close_lock = threading.RLock()
+
+            all_env_ids = torch.arange(self.num_envs, device=self.device)
+            self._seed_recording_state(self._init_raw_obs, all_env_ids)
+
+            self._log_initialization_summary()
+        except Exception:
+            if self.dataset_manager is not None:
+                try:
+                    self.dataset_manager.finalize()
+                except Exception as cleanup_error:
+                    logger.log_warning(
+                        f"Failed to finalize dataset after initialization error: {cleanup_error!r}"
+                    )
+            self._cleanup_failed_initialization()
+            raise
+
+    def _initialization_summary_lines(self) -> list[str]:
+        """Append a separate functor table after the environment summary."""
+        lines = super()._initialization_summary_lines()
+        if not lines:
+            return lines
+        managers = []
+        for name, attribute in self._manager_summary_fields:
+            manager = getattr(self, attribute, None)
+            if manager is not None:
+                managers.append(
+                    (name, manager, self._manager_functor_groups(name, manager))
+                )
+        details = format_functor_summary(
+            managers, full=self.sim_cfg.startup_summary == "full"
         )
-        self._demo_steps = torch.zeros(
-            self.num_envs, dtype=torch.long, device=self.device
-        )
-        self.current_rollout_step = 0
+        if details:
+            lines.extend(["", *details.splitlines()])
+        return lines
 
-        # Segment recording is intentionally separate from task planning. The
-        # common demo executor updates this context while the regular rollout
-        # writer turns it into per-frame annotations.
-        self._demo_episode_index = 0
-        self._demo_execution_cfg = DemoExecutionCfg()
-        self._demo_attempt_id = 0
-        self._demo_continuity_id = 0
-        self._demo_program_run_id = "0:0"
-        self._demo_active_segment_id = 0
-        self._demo_active_segment_ids = torch.zeros(
-            self.num_envs, dtype=torch.long, device=self.device
-        )
-        self._demo_active_mask = torch.ones(
-            self.num_envs, dtype=torch.bool, device=self.device
-        )
-        self._demo_segment_participants = self._demo_active_mask.clone()
-        self._demo_active_segment_start_steps = self._demo_steps.clone()
-        self._demo_active_rollout_start_steps = self.rollout_steps.clone()
-        self._demo_episode_metadata: list[dict[str, Any]] = [
-            self._new_demo_episode_metadata(env_id) for env_id in range(self.num_envs)
-        ]
-
-        self.episode_success_status: torch.Tensor = torch.zeros(
-            self.num_envs, dtype=torch.bool, device=self.device
-        )
-        self._closed = False
-        self._close_error: BaseException | None = None
-        self._close_lock = threading.RLock()
-
-        all_env_ids = torch.arange(self.num_envs, device=self.device)
-        self._seed_recording_state(self._init_raw_obs, all_env_ids)
-
-        self._log_initialization_summary()
-
-    def _extra_initialization_summary_lines(self) -> list[str]:
-        """Build manager and functor details for the initialization summary."""
+    def _extra_initialization_summary_rows(self) -> list[tuple[str, str, str]]:
+        """Keep manager status and counts in the main initialization table."""
         manager_summaries: list[tuple[str, list[tuple[str, list[str]]] | None, int]] = (
             []
         )
@@ -508,30 +532,24 @@ class EmbodiedEnv(BaseEnv):
             total_functor_count += functor_count
 
         functor_noun = "functor" if total_functor_count == 1 else "functors"
-        lines = [
-            f"├─ Managers ({active_manager_count}/{len(manager_summaries)} active, "
-            f"{total_functor_count} {functor_noun})"
+        rows = [
+            (
+                "Managers",
+                "Total",
+                f"{active_manager_count}/{len(manager_summaries)} active, "
+                f"{total_functor_count} {functor_noun}",
+            )
         ]
         for manager_name, groups, functor_count in manager_summaries:
             if groups is None:
-                lines.append(
-                    self._format_initialization_summary_row(manager_name, "disabled")
-                )
+                rows.append(("Managers", manager_name, "disabled"))
                 continue
 
             manager_functor_noun = "functor" if functor_count == 1 else "functors"
-            lines.append(
-                self._format_initialization_summary_row(
-                    manager_name, f"{functor_count} {manager_functor_noun}"
-                )
+            rows.append(
+                ("Managers", manager_name, f"{functor_count} {manager_functor_noun}")
             )
-            for mode, names in groups:
-                lines.append(
-                    self._format_initialization_summary_row(
-                        mode, ", ".join(names), indent=1
-                    )
-                )
-        return lines
+        return rows
 
     @staticmethod
     def _manager_functor_groups(
@@ -878,9 +896,9 @@ class EmbodiedEnv(BaseEnv):
         return rewards
 
     def _prepare_scene(self, **kwargs) -> None:
-        self._setup_lights()
         self._setup_background()
         self._setup_interactive_objects()
+        self._setup_lights()
 
     def _update_sim_state(self, **kwargs) -> None:
         """Perform the simulation step and apply events if configured.
@@ -1961,8 +1979,15 @@ class EmbodiedEnv(BaseEnv):
             return self.action_manager.process_action(action, mode="post")
         return super()._postprocess_action(action)
 
+    def _declare_robot(self, **kwargs) -> Robot:
+        """Declare the configured robot without reading articulation metadata."""
+        del kwargs
+        if self.cfg.robot is None:
+            logger.log_error("Robot configuration is not provided.")
+        return self.sim.add_robot(self.cfg.robot)
+
     def _setup_robot(self, **kwargs) -> Robot:
-        """Setup the robot in the environment.
+        """Configure the finalized robot interface for the environment.
 
         Currently, only joint position control is supported. Would be extended to support joint velocity and torque
             control in the future.
@@ -1970,11 +1995,10 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             Robot: The robot instance added to the scene.
         """
-        if self.cfg.robot is None:
-            logger.log_error("Robot configuration is not provided.")
-
-        # Initialize the robot based on the configuration.
-        robot: Robot = self.sim.add_robot(self.cfg.robot)
+        del kwargs
+        robot = self.robot
+        if robot is None:
+            logger.log_error("Robot was not declared before simulation prepare.")
 
         # Setup active joints for robot to control.
         if self.cfg.control_parts:

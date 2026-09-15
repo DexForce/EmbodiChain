@@ -104,7 +104,7 @@ class MockRigidObject:
         pos = self._pose[:, :3, 3]
         # Simple quaternion from identity rotation
         quat = torch.zeros(self.num_envs, 4)
-        quat[:, 0] = 1.0  # w=1 (identity)
+        quat[:, 3] = 1.0  # xyzw identity
         return torch.cat([pos, quat], dim=-1)
 
     def get_mass(self):

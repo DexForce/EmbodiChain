@@ -65,6 +65,12 @@ omit the Python task module. Follow the authoritative
 [configuration and registration contract](agent_context/topics/env-framework/configuration.md)
 and `/add-task-env` before adding a deployment.
 
+Every inline runnable Gym config and reusable physical environment declares
+exactly one `physics: default|newton` backend. An environment component owns
+its optional matching `physics_config`; a deployment cannot repeat or override
+either field. Launcher `--physics` may confirm the file-owned backend but does
+not switch it. Use a separate environment config for each backend.
+
 ## Code and validation
 
 - Run **`black==26.3.1`**, using `black .`, before every commit.

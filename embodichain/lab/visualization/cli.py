@@ -19,84 +19,9 @@ from __future__ import annotations
 import argparse
 
 from .cfg import VisualizationCfg, ViserServerCfg
+from embodichain.cli._visualization import add_viser_args_to_parser
 
 __all__ = ["add_viser_args_to_parser", "visualization_cfg_from_args"]
-
-
-def _parse_viser_env_id(value: str) -> int | str:
-    """Parse one environment ID or the ``all`` selector."""
-    if value.lower() == "all":
-        return "all"
-    try:
-        env_id = int(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"Expected a non-negative environment ID or 'all', received {value!r}."
-        ) from exc
-    if env_id < 0:
-        raise argparse.ArgumentTypeError("Environment IDs must be non-negative.")
-    return env_id
-
-
-def add_viser_args_to_parser(parser: argparse.ArgumentParser) -> None:
-    """Add the standard EmbodiChain Viser command-line options.
-
-    Args:
-        parser: Parser receiving the Viser options.
-    """
-    visualization_defaults = VisualizationCfg()
-    server_defaults = visualization_defaults.viser_server
-    parser.add_argument(
-        "--viser",
-        action="store_true",
-        help=(
-            "Enable the headless Viser browser scene; configured Gizmos are "
-            "interactive. Only expose it to trusted clients."
-        ),
-    )
-    parser.add_argument(
-        "--viser-host",
-        default=server_defaults.host,
-        help="Viser bind host.",
-    )
-    parser.add_argument(
-        "--viser-port",
-        type=int,
-        default=server_defaults.port,
-        help="Viser bind port.",
-    )
-    parser.add_argument(
-        "--viser-fps",
-        type=float,
-        default=visualization_defaults.scene_fps,
-        help="Maximum Viser scene update rate.",
-    )
-    parser.add_argument(
-        "--viser-image-fps",
-        type=float,
-        default=visualization_defaults.sensor_image_fps,
-        help=(
-            "Maximum Viser camera RGB preview rate. run-env synchronizes once "
-            "per environment step when this option is omitted."
-        ),
-    )
-    parser.add_argument(
-        "--viser-soft-body-fps",
-        type=float,
-        default=visualization_defaults.soft_body_fps,
-        help="Maximum Viser soft-body and cloth mesh update rate.",
-    )
-    parser.add_argument(
-        "--viser-env-ids",
-        type=_parse_viser_env_id,
-        nargs="+",
-        default=(
-            ["all"]
-            if visualization_defaults.env_ids is None
-            else list(visualization_defaults.env_ids)
-        ),
-        help="Environment IDs published to Viser, or 'all'.",
-    )
 
 
 def visualization_cfg_from_args(

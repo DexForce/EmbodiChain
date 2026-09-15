@@ -112,7 +112,11 @@ resample fractional durations.
 Primitive planner results are explicitly retimed before their controlled-joint
 paths are embedded into a full-robot `TimedTrajectory`. Off-grid duration rounds
 up to a whole control interval, qvel is recomputed from the executed samples,
-and now-invalid native acceleration samples are discarded.
+and now-invalid native acceleration samples are discarded. Composite primitives
+that combine planner output with fixed-length hand or multi-part phases may
+also resample the planner's position path to the phase count before assembly;
+the final composite trajectory then derives its velocity targets from the
+assembled positions and timing.
 
 Tracking recovery is separate from task-level semantic recovery:
 

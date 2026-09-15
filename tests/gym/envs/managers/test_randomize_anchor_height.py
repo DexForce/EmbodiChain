@@ -41,7 +41,7 @@ class _MockObject:
         self.cfg = MagicMock()
         self.cfg.init_pos = [0.0, 0.0, 0.0]
         self._pose = torch.zeros(num_envs, 7)
-        self._pose[:, 3] = 1.0  # identity quaternion
+        self._pose[:, 6] = 1.0  # xyzw identity quaternion
         self._cleared = False
         self._cleared_env_ids = None
 

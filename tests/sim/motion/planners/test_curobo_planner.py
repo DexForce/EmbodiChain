@@ -53,6 +53,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     _validate_dynamic_obstacles,
 )
 from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
+    _curobo_pose_to_components,
     _convex_hull_to_voxel_entry,
     _parse_mimic_joint_names,
     _world_collision_sphere_data,
@@ -63,6 +64,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
     visualize_curobo_world_collision_model,
 )
 from embodichain.lab.sim.motion.planners.utils import MoveType
+from embodichain.utils.math import matrix_from_quat, quat_xyzw_to_wxyz
 
 _SIM_ROBOT_UID = "curobo_franka_inprocess_test"
 _SIM_CONTROL_PART = "arm"
@@ -121,9 +123,9 @@ def _restore_torch_precision_settings():
 
     yield
 
-    torch.set_float32_matmul_precision(matmul_precision)
     torch.backends.cuda.matmul.allow_tf32 = matmul_allow_tf32
     torch.backends.cudnn.allow_tf32 = cudnn_allow_tf32
+    torch.set_float32_matmul_precision(matmul_precision)
 
 
 def _raise_module_not_found(*args, **kwargs):
@@ -139,9 +141,14 @@ def test_public_config_imports_without_curobo():
 
 def test_matrix_to_position_quaternion_uses_wxyz():
     matrix = torch.eye(4).unsqueeze(0)
+    xyzw = torch.tensor([[1.0, 2.0, 3.0, 4.0]]) / math.sqrt(30.0)
+    matrix[:, :3, :3] = matrix_from_quat(xyzw)
     position, quaternion = _matrix_to_position_quaternion(matrix)
     assert torch.equal(position, torch.zeros(1, 3))
-    assert torch.equal(quaternion, torch.tensor([[1.0, 0.0, 0.0, 0.0]]))
+    torch.testing.assert_close(
+        quaternion,
+        torch.tensor([[4.0, 1.0, 2.0, 3.0]]) / math.sqrt(30.0),
+    )
     assert position.is_contiguous()
     assert quaternion.is_contiguous()
 
@@ -155,6 +162,71 @@ def test_missing_curobo_is_actionable(monkeypatch):
     monkeypatch.setattr(importlib, "import_module", _raise_module_not_found)
     with pytest.raises(ImportError, match=r"cu12.*cu13"):
         _require_curobo()
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("precision", ["highest", "high", "medium"])
+@pytest.mark.parametrize(
+    "failure_module",
+    [
+        None,
+        "curobo.motion_planner",
+        "curobo.batch_motion_planner",
+        "curobo.collision_checking",
+        "curobo.types",
+        "curobo.scene",
+    ],
+)
+def test_curobo_import_preserves_caller_precision(
+    monkeypatch: pytest.MonkeyPatch, precision: str, failure_module: str | None
+) -> None:
+    original_precision = torch.get_float32_matmul_precision()
+    original_matmul = torch.backends.cuda.matmul.allow_tf32
+    original_cudnn = torch.backends.cudnn.allow_tf32
+    facade = SimpleNamespace(
+        **{
+            name: object()
+            for name in (
+                "MotionPlanner",
+                "MotionPlannerCfg",
+                "BatchMotionPlanner",
+                "RobotCollisionChecker",
+                "RobotCollisionCheckerCfg",
+                "JointState",
+                "Pose",
+                "GoalToolPose",
+                "DeviceCfg",
+                "Scene",
+            )
+        }
+    )
+
+    def import_backend(name: str):
+        torch.set_float32_matmul_precision(
+            "high" if precision == "highest" else "highest"
+        )
+        torch.backends.cudnn.allow_tf32 = True
+        if name == failure_module:
+            raise ModuleNotFoundError("cuRobo dependency unavailable")
+        return facade
+
+    try:
+        torch.set_float32_matmul_precision(precision)
+        torch.backends.cudnn.allow_tf32 = False
+        expected_matmul = torch.backends.cuda.matmul.allow_tf32
+        monkeypatch.setattr(importlib, "import_module", import_backend)
+        if failure_module is None:
+            assert _require_curobo().MotionPlanner is facade.MotionPlanner
+        else:
+            with pytest.raises(ImportError, match="cuRobo V2"):
+                _require_curobo()
+        assert torch.get_float32_matmul_precision() == precision
+        assert torch.backends.cuda.matmul.allow_tf32 == expected_matmul
+        assert torch.backends.cudnn.allow_tf32 is False
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = original_matmul
+        torch.backends.cudnn.allow_tf32 = original_cudnn
+        torch.set_float32_matmul_precision(original_precision)
 
 
 def test_unknown_dynamic_obstacle_is_rejected():
@@ -910,6 +982,25 @@ def _identity_pose(
     translation: tuple[float, float, float] = (0.45, 0.0, 0.18),
 ) -> torch.Tensor:
     return torch.tensor(
+        [*translation, 0.0, 0.0, 0.0, 1.0],
+        dtype=torch.float32,
+    )
+
+
+def _identity_pose_matrix(
+    translation: tuple[float, float, float] = (0.45, 0.0, 0.18),
+) -> torch.Tensor:
+    """Return an EmbodiChain homogeneous pose in ``xyz + xyzw`` semantics."""
+    pose = torch.eye(4, dtype=torch.float32)
+    pose[:3, 3] = torch.tensor(translation, dtype=torch.float32)
+    return pose
+
+
+def _identity_curobo_pose(
+    translation: tuple[float, float, float] = (0.45, 0.0, 0.18),
+) -> torch.Tensor:
+    """Return the same identity pose serialized as cuRobo ``xyz+wxyz``."""
+    return torch.tensor(
         [*translation, 1.0, 0.0, 0.0, 0.0],
         dtype=torch.float32,
     )
@@ -975,19 +1066,24 @@ def _track_convex_hull_preprocessing(monkeypatch, calls=None):
 def test_voxel_entry_computes_convex_hull_before_signed_distance(monkeypatch):
     calls = []
     _track_convex_hull_preprocessing(monkeypatch, calls)
+    quaternion_xyzw = torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32)
+    quaternion_xyzw /= torch.linalg.vector_norm(quaternion_xyzw)
+    pose_matrix = _identity_pose_matrix()
+    pose_matrix[:3, :3] = matrix_from_quat(quaternion_xyzw.unsqueeze(0))[0]
 
     name, fields = _convex_hull_to_voxel_entry(
         "block",
         _unit_cube_vertices(),
         _cube_faces(),
-        _identity_pose(),
+        pose_matrix,
         voxel_size=0.25,
         voxel_padding=0.25,
     )
 
     assert len(calls) == 1
     assert name == "block"
-    assert fields["pose"] == pytest.approx(_identity_pose().tolist())
+    expected_pose = torch.cat((pose_matrix[:3, 3], quat_xyzw_to_wxyz(quaternion_xyzw)))
+    assert fields["pose"] == pytest.approx(expected_pose.tolist())
     assert fields["dims"] == pytest.approx([1.5, 1.5, 1.5])
     assert tuple(fields["feature_tensor"].shape) == (6, 6, 6)
     assert fields["feature_tensor"].amin() < 0.0
@@ -1008,7 +1104,7 @@ def test_voxel_entry_preserves_homogeneous_object_pose(monkeypatch):
         voxel_padding=0.0,
     )
 
-    assert fields["pose"] == pytest.approx(_identity_pose().tolist())
+    assert fields["pose"] == pytest.approx(_identity_curobo_pose().tolist())
 
 
 @pytest.mark.parametrize(
@@ -1021,9 +1117,21 @@ def test_voxel_entry_rejects_invalid_settings(voxel_size, voxel_padding, match):
             "block",
             _unit_cube_vertices(),
             _cube_faces(),
-            _identity_pose(),
+            _identity_pose_matrix(),
             voxel_size=voxel_size,
             voxel_padding=voxel_padding,
+        )
+
+
+def test_voxel_entry_rejects_7d_pose_to_keep_convention_unambiguous():
+    with pytest.raises(ValueError, match="pose_matrix.*4, 4"):
+        _convex_hull_to_voxel_entry(
+            "block",
+            _unit_cube_vertices(),
+            _cube_faces(),
+            _identity_curobo_pose(),
+            voxel_size=0.25,
+            voxel_padding=0.25,
         )
 
 
@@ -1229,6 +1337,20 @@ def test_mixed_collision_visualization_supports_cuboid():
 
     assert centers.shape == (8, 3)
     assert radii.shape == (8,)
+
+
+def test_curobo_world_pose_is_converted_from_wxyz_before_visualization():
+    """cuRobo serialized poses must cross back to EmbodiChain math exactly once."""
+    quaternion_xyzw = torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32)
+    quaternion_xyzw /= torch.linalg.vector_norm(quaternion_xyzw)
+    expected_rotation = matrix_from_quat(quaternion_xyzw)
+    position = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32)
+    serialized_pose = torch.cat((position, quat_xyzw_to_wxyz(quaternion_xyzw)))
+
+    decoded_position, decoded_rotation = _curobo_pose_to_components(serialized_pose)
+
+    torch.testing.assert_close(decoded_position, position)
+    torch.testing.assert_close(decoded_rotation, expected_rotation)
 
 
 def test_world_scene_object_override_can_force_voxel(monkeypatch):
@@ -1681,7 +1803,7 @@ def test_generated_physical_mesh_loads_as_voxel_in_curobo_scene_cfg(monkeypatch)
 
 def _build_curobo_scene(sim_device: str = "cuda") -> tuple[object, object, object]:
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+    from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg
     from embodichain.lab.sim.objects import RigidObjectCfg
     from embodichain.lab.sim.robots import FrankaPandaCfg
     from embodichain.lab.sim.shapes import CubeCfg
@@ -1702,12 +1824,13 @@ def _build_curobo_scene(sim_device: str = "cuda") -> tuple[object, object, objec
         cfg=RigidObjectCfg(
             uid="block",
             shape=CubeCfg(size=_SIM_BLOCK_DIMS),
-            attrs=RigidBodyAttributesCfg(),
-            body_type="kinematic",
+            attrs=RigidBodyPhysicsCfg(),
+            body_type="static",
             init_pos=_SIM_BLOCK_POS,
             init_rot=(0.0, 0.0, 0.0),
         )
     )
+    sim.prepare()
     return sim, robot, block
 
 

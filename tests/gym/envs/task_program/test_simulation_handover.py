@@ -28,7 +28,7 @@ def _provider() -> ConfiguredHandOverPoseProvider:
     """Return one deterministic dual-arm transfer declaration."""
     return ConfiguredHandOverPoseProvider(
         final_position=(0.0, -0.2, 0.7),
-        final_quaternion_wxyz=(1.0, 1.0, 0.0, 0.0),
+        final_quaternion_xyzw=(1.0, 0.0, 0.0, 1.0),
     )
 
 
@@ -59,7 +59,7 @@ def test_configured_handover_provider_normalizes_and_owns_targets() -> None:
     ("overrides", "error_type"),
     [
         ({"final_position": (0.0, 0.0)}, TypeError),
-        ({"final_quaternion_wxyz": (0.0, 0.0, 0.0, 0.0)}, ValueError),
+        ({"final_quaternion_xyzw": (0.0, 0.0, 0.0, 0.0)}, ValueError),
     ],
 )
 def test_configured_handover_provider_rejects_invalid_declarations(
@@ -69,7 +69,7 @@ def test_configured_handover_provider_rejects_invalid_declarations(
     """Malformed provider declarations fail before simulation construction."""
     values: dict[str, object] = {
         "final_position": (0.0, -0.2, 0.7),
-        "final_quaternion_wxyz": (1.0, 0.0, 0.0, 0.0),
+        "final_quaternion_xyzw": (0.0, 0.0, 0.0, 1.0),
     }
     values.update(overrides)
 

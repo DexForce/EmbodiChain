@@ -29,11 +29,16 @@ import torch
 from embodichain.data import get_data_path
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    ArticulationRootPropertiesCfg,
+    CollisionPropertiesCfg,
+    DefaultRigidBodyPropertiesCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
+    MassPropertiesCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
     RigidObjectCfg,
 )
-from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
 from embodichain.utils.math import matrix_from_euler
 
 if TYPE_CHECKING:
@@ -178,8 +183,18 @@ def _mesh_shape(config: Mapping[str, object]) -> MeshCfg:
     if not isinstance(asset_path, str) or not asset_path:
         raise ValueError("mesh.asset_path must be a non-empty string.")
     resolved = Path(asset_path)
+    max_hulls = int(config.get("max_convex_hull_num", 16))
+    collision = (
+        MeshCollisionCfg(approximation="convex_hull")
+        if max_hulls == 1
+        else MeshCollisionCfg(
+            approximation="convex_decomposition",
+            max_hulls=max_hulls,
+        )
+    )
     return MeshCfg(
-        fpath=str(resolved if resolved.is_absolute() else get_data_path(asset_path))
+        fpath=str(resolved if resolved.is_absolute() else get_data_path(asset_path)),
+        collision=collision,
     )
 
 
@@ -247,24 +262,33 @@ def create_atomic_object(
         cfg=RigidObjectCfg(
             uid=f"atomic_benchmark_{object_id}",
             shape=factory(config),
-            attrs=RigidBodyAttributesCfg(
-                mass=float(config.get("mass", 0.05)),
-                dynamic_friction=float(config.get("dynamic_friction", 0.97)),
-                static_friction=float(config.get("static_friction", 0.99)),
-                restitution=float(config.get("restitution", 0.0)),
-                contact_offset=float(config.get("contact_offset", 0.003)),
-                rest_offset=float(config.get("rest_offset", 0.001)),
-                enable_ccd=bool(config.get("enable_ccd", False)),
-                linear_damping=float(config.get("linear_damping", 0.7)),
-                angular_damping=float(config.get("angular_damping", 0.7)),
-                min_position_iters=int(config.get("min_position_iters", 32)),
-                min_velocity_iters=int(config.get("min_velocity_iters", 8)),
+            attrs=RigidBodyPhysicsCfg(
+                mass_props=MassPropertiesCfg(mass=float(config.get("mass", 0.05))),
+                rigid_props=DefaultRigidBodyPropertiesCfg(
+                    enable_ccd=bool(config.get("enable_ccd", False)),
+                    linear_damping=float(config.get("linear_damping", 0.7)),
+                    angular_damping=float(config.get("angular_damping", 0.7)),
+                    min_position_iters=int(config.get("min_position_iters", 32)),
+                    min_velocity_iters=int(config.get("min_velocity_iters", 8)),
+                ),
+                collision_props=CollisionPropertiesCfg(
+                    contact_offset=float(config.get("contact_offset", 0.003)),
+                    rest_offset=float(config.get("rest_offset", 0.001)),
+                ),
+                material_props=RigidBodyMaterialCfg(
+                    dynamic_friction=float(config.get("dynamic_friction", 0.97)),
+                    static_friction=float(config.get("static_friction", 0.99)),
+                    restitution=float(config.get("restitution", 0.0)),
+                ),
             ),
-            max_convex_hull_num=int(config.get("max_convex_hull_num", 16)),
             init_pos=position,
             init_rot=rotation,
             body_scale=scale,
-            use_usd_properties=bool(config.get("use_usd_properties", False)),
+            asset_physics_mode=(
+                "preserve"
+                if bool(config.get("use_usd_properties", False))
+                else "overlay"
+            ),
         )
     )
     configured_pose = _configured_pose(simulation, position, rotation)
@@ -338,6 +362,11 @@ def create_atomic_articulation(
     if not isinstance(raw_attrs, Mapping):
         raise TypeError(f"articulations[{object_id}].attrs must be a mapping.")
     resolved_path = Path(asset_path)
+    attrs = RigidBodyPhysicsCfg.from_dict(dict(raw_attrs))
+    if attrs.rigid_props is None:
+        attrs.rigid_props = DefaultRigidBodyPropertiesCfg()
+    if "enable_gravity" in config:
+        attrs.rigid_props.has_gravity = bool(config["enable_gravity"])
     entity = simulation.add_articulation(
         cfg=ArticulationCfg(
             uid=f"atomic_benchmark_{object_id}",
@@ -349,14 +378,18 @@ def create_atomic_articulation(
             init_pos=position,
             init_rot=rotation,
             init_qpos=init_qpos,
-            drive_pros=JointDrivePropertiesCfg.from_dict(dict(raw_drive)),
-            attrs=RigidBodyAttributesCfg.from_dict(dict(raw_attrs)),
+            joint_drive_props=JointDrivePropertiesCfg.from_dict(dict(raw_drive)),
+            attrs=attrs,
             body_scale=scale,
-            fix_base=bool(config.get("fix_base", True)),
-            disable_self_collision=bool(config.get("disable_self_collision", True)),
-            enable_gravity=bool(config.get("enable_gravity", True)),
-            min_position_iters=int(config.get("min_position_iters", 4)),
-            min_velocity_iters=int(config.get("min_velocity_iters", 1)),
+            asset_physics_mode="overlay",
+            root_props=ArticulationRootPropertiesCfg(
+                fixed_base=bool(config.get("fix_base", True)),
+                self_collision_enabled=not bool(
+                    config.get("disable_self_collision", True)
+                ),
+                min_position_iters=int(config.get("min_position_iters", 4)),
+                min_velocity_iters=int(config.get("min_velocity_iters", 1)),
+            ),
         )
     )
     configured_pose = _configured_pose(simulation, position, rotation)

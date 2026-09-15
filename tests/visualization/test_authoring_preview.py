@@ -120,17 +120,11 @@ class _Simulation:
     def get_articulation(self, uid: str) -> None:
         return None
 
-    def get_soft_object_uid_list(self) -> list[str]:
+    def get_deformable_object_uid_list(self) -> list[str]:
         return []
 
-    def get_soft_object(self, uid: str) -> None:
-        raise AssertionError(f"Unexpected soft-object lookup: {uid}")
-
-    def get_cloth_object_uid_list(self) -> list[str]:
-        return []
-
-    def get_cloth_object(self, uid: str) -> None:
-        raise AssertionError(f"Unexpected cloth-object lookup: {uid}")
+    def get_deformable_object(self, uid: str) -> None:
+        raise AssertionError(f"Unexpected deformable-object lookup: {uid}")
 
     def get_sensor_uid_list(self) -> list[str]:
         return []

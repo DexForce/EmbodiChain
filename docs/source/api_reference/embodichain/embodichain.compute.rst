@@ -10,7 +10,7 @@ own robots, scenes, or environment lifecycle. Importing the root package does
 not load Torch or Warp. Domain packages load their required dependencies.
 
 - ``kinematics/_warp`` implements analytical OPW, SRS, and UR computations.
-  Stateful solver interfaces remain in ``embodichain.lab.sim.solvers``.
+  Stateful solver interfaces remain in ``embodichain.lab.sim.motion.solvers``.
 - ``trajectory`` provides the public tensor interfaces below. Its private
   ``_warp`` implementation supports path resampling and trajectory warping.
 - ``geometry/_warp/convex_query.py`` evaluates maximum halfspace values for

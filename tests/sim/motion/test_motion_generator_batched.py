@@ -117,11 +117,15 @@ def _trapezoidal_generator() -> MotionGenerator:
     return generator
 
 
-def test_trapezoidal_generator_prepends_start_for_single_joint_target() -> None:
+def test_trapezoidal_generator_prepends_observed_start_for_sparse_joint_goal() -> None:
+    """A joint-only backend must start from the observed robot configuration."""
     generator = _trapezoidal_generator()
+    generator.interpolate_trajectory = Mock(
+        side_effect=AssertionError("sparse joint targets must bypass interpolation")
+    )
+
     start = torch.tensor([[0.0, 0.0]], dtype=torch.float64)
     goal = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
-
     result = generator.generate(
         [PlanState.from_qpos(goal)],
         MotionGenOptions(
@@ -130,14 +134,16 @@ def test_trapezoidal_generator_prepends_start_for_single_joint_target() -> None:
         ),
     )
 
+    assert result.positions is not None
     torch.testing.assert_close(result.positions[:, 0], start)
     torch.testing.assert_close(result.positions[:, -1], goal)
 
 
-def test_trapezoidal_generator_holds_stationary_single_joint_target() -> None:
+def test_trapezoidal_generator_holds_stationary_sparse_joint_goal() -> None:
+    """A stationary single goal still forms a valid two-waypoint hold."""
     generator = _trapezoidal_generator()
-    start = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
 
+    start = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
     result = generator.generate(
         [PlanState.from_qpos(start)],
         MotionGenOptions(
@@ -147,6 +153,7 @@ def test_trapezoidal_generator_holds_stationary_single_joint_target() -> None:
     )
 
     assert bool(result.success.all())
+    assert result.positions is not None
     assert result.positions.shape[1] == 2
     torch.testing.assert_close(
         result.positions, start.unsqueeze(1).expand_as(result.positions)
@@ -159,7 +166,33 @@ def test_trapezoidal_generator_holds_stationary_single_joint_target() -> None:
     )
 
 
+def test_trapezoidal_generator_covers_dense_ik_waypoints() -> None:
+    """Quantity sampling grows to retain all Cartesian-to-joint waypoints."""
+    generator = _trapezoidal_generator()
+    generator.robot = SimpleNamespace(
+        compute_fk=lambda *, qpos, name, to_matrix: torch.eye(
+            4, dtype=qpos.dtype, device=qpos.device
+        ).expand(qpos.shape[0], -1, -1)
+    )
+    dense_qpos = torch.linspace(0.0, 0.5, 6, dtype=torch.float64).reshape(1, 6, 1)
+    dense_qpos = dense_qpos.expand(-1, -1, 2).clone()
+    generator.interpolate_trajectory = Mock(return_value=(dense_qpos, None))
+
+    result = generator.generate(
+        [PlanState.from_xpos(torch.eye(4, dtype=torch.float64).unsqueeze(0))],
+        MotionGenOptions(
+            start_qpos=torch.zeros(1, 2, dtype=torch.float64),
+            sample_count=3,
+            is_interpolate=True,
+        ),
+    )
+
+    assert result.positions is not None
+    assert result.positions.shape[1] == dense_qpos.shape[1]
+
+
 def test_trapezoidal_generator_preserves_native_derivatives() -> None:
+    """Native Trapezoidal samples and derivatives survive normalization."""
     generator = _trapezoidal_generator()
     start = torch.tensor([[0.0, 0.0]], dtype=torch.float64)
     goal = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
@@ -176,6 +209,8 @@ def test_trapezoidal_generator_preserves_native_derivatives() -> None:
         ),
     )
 
+    assert result.positions is not None
+    assert expected.positions is not None
     torch.testing.assert_close(result.positions, expected.positions)
     torch.testing.assert_close(result.dt, expected.dt)
     assert result.velocities is not None
