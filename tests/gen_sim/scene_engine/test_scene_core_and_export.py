@@ -205,7 +205,18 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
 
 def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
+    from embodichain.gen_sim.scene_engine.pipeline.utils import scene_exporter
+
+    monkeypatch.setattr(
+        scene_exporter, "_articulation_root_bottom_z", lambda *args: -0.05
+    )
+    monkeypatch.setattr(
+        scene_exporter,
+        "measure_scene_object_z_up_world_aabb",
+        lambda **kwargs: [[0, 0, 0], [1, 1, 0.73]],
+    )
     table_glb = tmp_path / "table.glb"
     drawer_glb = tmp_path / "drawer.glb"
     drawer_usdc = tmp_path / "drawer.usdc"
@@ -242,6 +253,7 @@ def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
     assert articulation["proxy_glb_fpath"] == "mesh_assets/drawer/drawer.glb"
     assert articulation["body_scale"] == [1.25, 2.5, 3.75]
     assert articulation["proxy_body_scale"] == [1.0, 2.0, 3.0]
+    assert articulation["init_pos"][2] == pytest.approx(0.781)
     assert (export_path.parent / articulation["fpath"]).read_bytes() == b"USDC-drawer"
     assert (
         export_path.parent / articulation["proxy_glb_fpath"]
@@ -256,6 +268,8 @@ def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
         export_path.parent / "articulated_assets" / "drawer" / "drawer.usdc"
     )
     assert imported_drawer.articulated_usdc_scale == [1.25, 2.5, 3.75]
+    assert np.allclose(imported_drawer.pos, drawer.pos)
+    assert np.allclose(imported_drawer.rot, drawer.rot)
 
 
 def test_preview_loads_exported_usdc_as_an_articulation(tmp_path: Path) -> None:

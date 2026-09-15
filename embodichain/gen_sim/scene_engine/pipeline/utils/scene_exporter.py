@@ -29,6 +29,12 @@ from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.utils.logger import log_info
+from embodichain.gen_sim.scene_engine.pipeline.utils.articulated_usdc_utils import (
+    _articulation_root_bottom_z,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
+    measure_scene_object_z_up_world_aabb,
+)
 
 _Y_UP_TO_Z_UP_ROTATION = np.array(
     [
@@ -291,14 +297,14 @@ class SceneExporter:
             "max_convex_hull_num": scene_object.physics.max_convex_hull_num,
         }
 
-    @staticmethod
     def _articulation_config(
+        self,
         *,
         scene_object: SceneObject,
         articulated_relative_path: str,
         proxy_glb_relative_path: str,
     ) -> dict[str, object]:
-        """Build one y-up USDC articulation config from an optimized scene asset."""
+        """Place native root collision geometry on the proxy's support surface."""
         pos_y_up = SceneExporter._scene_vector(scene_object, "pos")
         rot_y_up = SceneExporter._scene_vector(scene_object, "rot")
         proxy_scale_y_up = SceneExporter._scene_vector(scene_object, "scale")
@@ -309,6 +315,33 @@ class SceneExporter:
             _Y_UP_TO_Z_UP_ROTATION @ rotation_y_up @ _Y_UP_TO_Z_UP_ROTATION.T
         )
         rot_z_up = Rotation.from_matrix(rotation_z_up).as_euler("XYZ", degrees=True)
+        proxy_pos_z_up = pos_z_up.copy()
+        parent_id = self.scene_graph.node_by_id()[scene_object.id].parent_id
+        parent = next(o for o in self.scene.objects if o.id == parent_id)
+        if parent.kind == "table" and parent.support_surface_z is not None:
+            # Table support metadata is measured in canonical z-up coordinates.
+            parent_rot = Rotation.from_euler(
+                "xyz", parent.rot, degrees=True
+            ).as_matrix()
+            parent_rot = _Y_UP_TO_Z_UP_ROTATION @ parent_rot @ _Y_UP_TO_Z_UP_ROTATION.T
+            if not np.allclose(parent_rot[2], [0, 0, 1], atol=1e-5):
+                raise ValueError(
+                    "Articulation height placement requires a horizontal table."
+                )
+            support_z = parent.support_surface_z * self._scene_vector(parent, "scale")[
+                1
+            ] + float((_Y_UP_TO_Z_UP_ROTATION @ np.asarray(parent.pos))[2])
+        else:
+            support_z = measure_scene_object_z_up_world_aabb(scene_object=parent)[1][2]
+        pos_z_up[2] = (
+            support_z
+            + 0.001
+            - _articulation_root_bottom_z(
+                scene_object.articulated_usdc_path,
+                articulated_scale_y_up,
+                rot_z_up.tolist(),
+            )
+        )
         return {
             "uid": scene_object.id,
             "category": scene_object.category,
@@ -318,8 +351,9 @@ class SceneExporter:
             "fpath": articulated_relative_path,
             # The proxy stays in the export so scene edit can keep using GLB AABBs.
             "proxy_glb_fpath": proxy_glb_relative_path,
-            # Both y-up assets load with their bottom on z-up's XY plane.
+            # Runtime root and editable proxy have distinct placement origins.
             "init_pos": pos_z_up.tolist(),
+            "proxy_init_pos": proxy_pos_z_up.tolist(),
             "init_rot": rot_z_up.tolist(),
             "body_scale": articulated_scale_y_up,
             "proxy_body_scale": proxy_scale_y_up,

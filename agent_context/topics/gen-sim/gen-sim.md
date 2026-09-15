@@ -36,6 +36,11 @@ The `scene_export/` directory contains `scene.json`, `scene_config.json`,
 - Scene object IDs and graph node IDs must be equal sets on import and export.
 - Editable scene state is Y-up; portable runtime output is Z-up. Convert world
   pose at this boundary, and preserve `body_scale` separately from mesh geometry.
+- Articulation export measures collision meshes relative to the native root
+  rigid body, respecting USD up-axis, scale and deployment rotation, and sets
+  root Z to leave 1 mm above the support. `proxy_init_pos` retains the independent
+  GLB placement; import/edit must use it (legacy exports fall back to `init_pos`).
+  An authored USD root translation is not a runtime rigid-body origin rebase.
 - A generated scene includes a rigid table. Articulated assets need both a
   runtime USDC and a GLB proxy for editing.
 - Overwrite validates/writes new scene state before deleting stale assets.
