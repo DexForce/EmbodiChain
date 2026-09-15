@@ -53,13 +53,6 @@ class _JointBinding:
     applied_sequence: int = 0
 
 
-def _joint_type_name(value: object) -> str:
-    name = getattr(value, "name", None)
-    if name is not None:
-        return str(name).lower()
-    return str(value).rsplit(".", maxsplit=1)[-1].lower()
-
-
 class ArticulationPreviewController:
     """Expose scalar articulation joints and hold commanded preview poses.
 
@@ -164,7 +157,6 @@ class ArticulationPreviewController:
                 f"received {limits.shape}."
             )
 
-        entity = articulation._entities[0]
         active_joint_ids = tuple(
             int(joint_id)
             for joint_id in getattr(
@@ -176,8 +168,7 @@ class ArticulationPreviewController:
         bindings: list[_JointBinding] = []
         for joint_id in active_joint_ids:
             joint_name = joint_names[joint_id]
-            joint_info = entity.get_joint_info(joint_name)
-            joint_type = _joint_type_name(joint_info.joint_type)
+            joint_type = articulation.get_joint_type(joint_name)
             if joint_type not in _SUPPORTED_JOINT_TYPES:
                 logger.log_warning(
                     f"Skipping joint {uid!r}/{joint_name!r}: joint type "
