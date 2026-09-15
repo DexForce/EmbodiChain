@@ -49,6 +49,7 @@ from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.objects import Robot
+from embodichain.lab.visualization import VisualizationCfg
 from embodichain.utils.utility import reset_all_seeds
 
 # (label, ik_solution_selection, enable_seed_selection)
@@ -97,7 +98,13 @@ def main() -> None:
     parser.add_argument("--device", type=str, default="cpu")
     args = parser.parse_args()
 
-    sim = SimulationManager(SimulationManagerCfg(headless=True, sim_device=args.device))
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            sim_device=args.device,
+            visualization=VisualizationCfg(),
+        )
+    )
     try:
         rows = []
         targets = seed_q = None
