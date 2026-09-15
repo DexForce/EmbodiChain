@@ -44,6 +44,7 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.visual_yaw_optimizer import
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.articulated_usdc_utils import (
     _canonicalize_articulated_usdc_bottom_center,
+    _articulation_root_bottom_z,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
     layout_object_to_transform_matrix,
@@ -54,6 +55,52 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
     scene_object_y_up_layout,
     y_up_to_z_up_matrix,
 )
+
+
+@pytest.mark.parametrize("up_axis, expected", [("Y", -0.2), ("Z", -0.1)])
+def test_root_height_uses_collision_geometry_not_usd_root_translation(
+    tmp_path: Path, up_axis: str, expected: float
+) -> None:
+    path = tmp_path / "height.usdc"
+    stage = Usd.Stage.CreateNew(str(path))
+    root = UsdGeom.Xform.Define(stage, "/Asset")
+    stage.SetDefaultPrim(root.GetPrim())
+    UsdGeom.SetStageUpAxis(stage, up_axis)
+    root.AddTranslateOp().Set(Gf.Vec3d(4, 5, 6))
+    body = UsdGeom.Xform.Define(stage, "/Asset/base")
+    body.AddTranslateOp().Set(Gf.Vec3d(0, 0, 2))
+    UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+    mesh = UsdGeom.Mesh.Define(stage, "/Asset/base/collision")
+    mesh.CreatePointsAttr([(-1, -0.1, -0.05), (1, 0.1, 0.05)])
+    UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
+    stage.GetRootLayer().Save()
+    assert _articulation_root_bottom_z(path, [2, 2, 2], [0, 0, 35]) == pytest.approx(
+        expected
+    )
+    root.GetOrderedXformOps()[0].Set(Gf.Vec3d(9, 10, 11))
+    stage.GetRootLayer().Save()
+    assert _articulation_root_bottom_z(path, [2, 2, 2], [0, 0, 35]) == pytest.approx(
+        expected
+    )
+
+
+def test_z_up_canonicalization_uses_z_bottom(tmp_path: Path) -> None:
+    path = tmp_path / "z_up.usdc"
+    stage = Usd.Stage.CreateNew(str(path))
+    root = UsdGeom.Xform.Define(stage, "/Asset")
+    stage.SetDefaultPrim(root.GetPrim())
+    UsdGeom.SetStageUpAxis(stage, "Z")
+    UsdPhysics.ArticulationRootAPI.Apply(root.GetPrim())
+    cube = UsdGeom.Cube.Define(stage, "/Asset/mesh")
+    cube.CreateSizeAttr(2)
+    cube.AddTranslateOp().Set(Gf.Vec3d(2, 3, 4))
+    stage.GetRootLayer().Save()
+    _canonicalize_articulated_usdc_bottom_center(path)
+    stage = Usd.Stage.Open(str(path))
+    translation = (
+        UsdGeom.Xformable(stage.GetDefaultPrim()).GetOrderedXformOps()[0].Get()
+    )
+    assert list(translation) == pytest.approx([-2, -3, -3])
 
 
 def _z_up_rotation_from_y_up_layout(layout: dict[str, object]) -> np.ndarray:

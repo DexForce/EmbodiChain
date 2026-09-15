@@ -407,11 +407,11 @@ def _generate_articulated_usdcs(
             image_path=scene_object.visible_rgba_path,
             output_path=resolved_output_root / f"{scene_object.id}.usdc",
         )
-        # Canonicalize the runtime USDC so it shares the SimReady GLB origin.
+        # Normalize the authored hierarchy; export separately places the native root.
         scene_object.articulated_usdc_path = str(
             _canonicalize_articulated_usdc_bottom_center(generated_usdc_path)
         )
-        # USDC is y-up like GLB; SimulationManager performs the shared z-up conversion.
+        # Retain deployment scale; USD's declared up-axis is handled at export.
         scene_object.articulated_usdc_scale = list(coarse_scale_y_up)
         log_info(f"Created articulated USDC: {scene_object.id!r}.")
 
