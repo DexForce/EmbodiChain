@@ -53,6 +53,7 @@ a physical effect.
 | Concern | Source of truth |
 |---|---|
 | Core action and goal contracts | `atomic_actions/core.py`, `goals.py`, `affordance.py` |
+| Affordance sampling values and deterministic branch selection | `atomic_actions/affordance_sampling.py` |
 | Articulation affordance geometry adapter | `atomic_actions/articulation_geometry.py` |
 | Invocation, binding, and policies | `invocation.py`, `bindings.py`, `policies.py`, `control.py` |
 | Robot/task/scene state | `state.py`, `scene.py` |
@@ -69,6 +70,7 @@ a physical effect.
 ## Read on demand
 
 - [Planning and execution](execution.md): invocation resolution, control grid, row-local recovery and verification.
+- [Affordance sampling](affordance-sampling.md): legal geometric variation, reproducible branch identity, action feasibility, and the sim-only host boundary.
 - [Articulation geometry](articulation-geometry.md): topology/mesh ownership and directional affordance contracts.
 
 The `scripts/tutorials/atomic_action/place.py` tutorial configures a
