@@ -54,23 +54,27 @@ def _write_source(directory: Path, extension: str, content: bytes = b"video") ->
     return source
 
 
+@pytest.mark.parametrize("task_id", ["task_alpha", "trial-42", "scene.with.dots"])
 def test_archive_task_video_copies_source_and_preserves_extension(
     tmp_path: Path,
+    task_id: str,
 ) -> None:
     source = _write_source(tmp_path, ".webm")
 
     destination = _archive_task_video(
         tmp_path,
         source_stem=SOURCE_STEM,
-        task_id="task2_1",
+        task_id=task_id,
     )
 
-    assert destination == tmp_path / "task2_1.webm"
+    assert destination == tmp_path / f"{task_id}.webm"
     assert destination.read_bytes() == b"video"
     assert source.read_bytes() == b"video"
 
 
-@pytest.mark.parametrize("task_id", ["../task2_1", "task2/1", r"task2\1", ".."])
+@pytest.mark.parametrize(
+    "task_id", ["../task_alpha", "task/alpha", r"task\alpha", ".."]
+)
 def test_archive_task_video_rejects_path_characters(
     tmp_path: Path,
     task_id: str,
@@ -90,11 +94,11 @@ def test_archive_task_video_reports_missing_source_with_task_and_path(
         _archive_task_video(
             tmp_path,
             source_stem=SOURCE_STEM,
-            task_id="task2_1",
+            task_id="task_alpha",
         )
 
     message = str(error.value)
-    assert "task2_1" in message
+    assert "task_alpha" in message
     assert str(tmp_path / f"{SOURCE_STEM}.<extension>") in message
 
 
@@ -102,13 +106,13 @@ def test_archive_task_video_overwrites_existing_target(
     tmp_path: Path,
 ) -> None:
     source = _write_source(tmp_path, ".mp4", b"new")
-    destination = tmp_path / "task2_1.mp4"
+    destination = tmp_path / "task_alpha.mp4"
     destination.write_bytes(b"existing")
 
     result = _archive_task_video(
         tmp_path,
         source_stem=SOURCE_STEM,
-        task_id="task2_1",
+        task_id="task_alpha",
     )
 
     assert result == destination
@@ -117,7 +121,7 @@ def test_archive_task_video_overwrites_existing_target(
 
 
 def test_consecutive_tasks_keep_independent_videos(tmp_path: Path) -> None:
-    for task_id, content in (("task2_1", b"first"), ("task2_2", b"second")):
+    for task_id, content in (("task_alpha", b"first"), ("task_beta", b"second")):
         _write_source(tmp_path, ".mp4", content)
         _archive_task_video(
             tmp_path,
@@ -125,8 +129,8 @@ def test_consecutive_tasks_keep_independent_videos(tmp_path: Path) -> None:
             task_id=task_id,
         )
 
-    assert (tmp_path / "task2_1.mp4").read_bytes() == b"first"
-    assert (tmp_path / "task2_2.mp4").read_bytes() == b"second"
+    assert (tmp_path / "task_alpha.mp4").read_bytes() == b"first"
+    assert (tmp_path / "task_beta.mp4").read_bytes() == b"second"
     assert (tmp_path / f"{SOURCE_STEM}.mp4").read_bytes() == b"second"
 
 
@@ -134,12 +138,12 @@ def test_task_recording_uses_runtime_recorder_path(tmp_path: Path) -> None:
     recorder = record_camera_data(tmp_path)
     source = _write_source(tmp_path, ".mkv")
 
-    destination = _archive_task_recording(_env(recorder), "task2_1")
+    destination = _archive_task_recording(_env(recorder), "task_alpha")
 
-    assert destination == tmp_path / "task2_1.mkv"
+    assert destination == tmp_path / "task_alpha.mkv"
     assert destination.read_bytes() == b"video"
     assert source.read_bytes() == b"video"
 
 
 def test_task_recording_is_noop_when_recording_is_disabled() -> None:
-    assert _archive_task_recording(_env(), "task2_1") is None
+    assert _archive_task_recording(_env(), "task_alpha") is None
