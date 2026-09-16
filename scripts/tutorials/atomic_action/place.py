@@ -239,4 +239,7 @@ def initialize_simulation(args) -> "SimulationManager":
 
 def create_robot(sim: "SimulationManager") -> "Robot":
     """Add the default Place tutorial robot."""
-    return add_tutorial_robot(sim, "ur5", tcp_z=0.15)
+    robot = add_tutorial_robot(sim, "ur5", tcp_z=0.15)
+    # DexSim binds body_data (and therefore get_qpos) only after prepare().
+    sim.prepare()
+    return robot

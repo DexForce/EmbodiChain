@@ -60,14 +60,8 @@ POSE_CASES = {
 }
 DEFAULT_POSE_CASES = tuple(POSE_CASES.keys())
 MOVE_SAMPLE_INTERVAL = 80
-# The planned endpoint sits a constant 1.00 cm from the target along the
-# end-effector frame's -X axis, independent of sample_count (verified at
-# 80/160/320) and identical across all pose cases: the analytic URSolver
-# reports success while its solution's FK carries this fixed offset against
-# the tutorial UR5+gripper URDF chain. Until that kinematic mismatch is
-# fixed, a 0.01 m gate fails every run by construction; restore 0.01 once
-# the solver discrepancy is resolved.
-SUCCESS_TOLERANCE_M = 0.015
+# Endpoint accuracy of the planned trajectory against the commanded pose.
+SUCCESS_TOLERANCE_M = 0.01
 
 
 def add_benchmark_args(parser: argparse.ArgumentParser) -> None:

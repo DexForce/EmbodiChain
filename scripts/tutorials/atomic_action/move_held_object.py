@@ -240,7 +240,10 @@ def initialize_simulation(args) -> "SimulationManager":
 
 def create_robot(sim: "SimulationManager") -> "Robot":
     """Add the default MoveHeldObject tutorial robot."""
-    return add_tutorial_robot(sim, "ur5")
+    robot = add_tutorial_robot(sim, "ur5")
+    # DexSim binds body_data (and therefore get_qpos) only after prepare().
+    sim.prepare()
+    return robot
 
 
 def make_pre_pick_eef_pose(robot: "Robot", position) -> "torch.Tensor":
