@@ -444,6 +444,24 @@ asset registry and environment count, then coordinates creation and attachment.
 `qpos_joint_names`. Stochastic surface sampling and Atomic Action geometry keys
 do not belong to the simulation object; use
 `atomic_actions.sample_initial_articulation_geometry()` for that adaptation.
+
+With `build_pk_chain=True`, USD articulations build their PK tree during binding
+from resolved Spawn joint descriptors in `objects/backends/_kinematics.py`;
+URDF assets retain their source-file chain. USD FK supports fixed, revolute,
+and prismatic tree joints. Movable joints use an internal joint frame followed
+by a fixed physical-link frame to preserve
+`origin_pose @ motion(q) @ inverse(target_pose)`. Fixed world attachments are
+excluded from root-relative FK; unsupported joint types or non-tree topology
+fail explicitly (simulation-only callers can disable `build_pk_chain`).
+Jacobian and serial FK reuse the built chain without reopening the asset.
+`compute_jacobian()` treats a full-width input as public `joint_names` order
+and selects/reorders it into the requested serial chain's parameter order.
+Narrower chain-sized inputs retain serial-order compatibility; equal widths
+always mean public state order. Returned columns contain only the selected
+chain's joints, in serial-chain parameter order. `qpos=None` evaluates the zero
+state. Regression coverage uses the branched `DrawerUSD/drawer_001.usdc` asset
+and nonzero rotational chains with permuted public state order.
+
 ## Configuration Flow
 
 `SimulationManagerCfg.physics_cfg` is the backend selector as well as the
