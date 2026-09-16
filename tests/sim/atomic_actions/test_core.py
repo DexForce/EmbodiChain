@@ -30,6 +30,7 @@ from embodichain.lab.sim.atomic_actions import (
     ActionOptions,
     ActionPlan,
     Affordance,
+    AffordanceSamplingContext,
     AtomicAction,
     AtomicActionEngine,
     DynamicCollisionMode,
@@ -118,6 +119,18 @@ def _context(
         env_ids=torch.tensor([4, 7], dtype=torch.long),
         control_dt=control_dt,
     )
+
+
+def test_planning_context_validates_and_preserves_affordance_sampling() -> None:
+    sampling = AffordanceSamplingContext(count=2, seed=7, attempt_id=3)
+    context = replace(_context(control_dt=0.02), affordance_sampling=sampling)
+
+    projected = context.project(qpos=context.robot.qpos + 1.0, task=context.task)
+
+    assert context.affordance_sampling is sampling
+    assert projected.affordance_sampling is sampling
+    with pytest.raises(TypeError, match="affordance_sampling"):
+        replace(context, affordance_sampling=object())
 
 
 def _command_sequence(
