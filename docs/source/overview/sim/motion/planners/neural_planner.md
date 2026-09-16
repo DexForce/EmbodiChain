@@ -17,8 +17,12 @@ The ONNX graph must include raw-observation normalization.
 Install the optional runtime and export the trained policy to ONNX before use:
 
 ```bash
-pip install -e '.[nmg]'
+pip install -e '.[policy-deploy]'
 ```
+
+The shared `policy-deploy` extra installs `onnxruntime-gpu`. See
+[policy deployment installation](../../../../quick_start/install.md#optional-policy-deployment-policy-deploy)
+for package indexes, CUDA requirements, and migration from the former `nmg` extra.
 
 ```python
 from embodichain.lab.sim.motion.motion_generator import (
