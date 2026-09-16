@@ -43,6 +43,13 @@ ACTION_MODULES = {
     "pick_up": "scripts.benchmark.atomic_action.pickup_benchmark",
     "move_held_object": "scripts.benchmark.atomic_action.move_held_object_benchmark",
     "place": "scripts.benchmark.atomic_action.place_benchmark",
+    "open_door": "scripts.benchmark.atomic_action.open_door_benchmark",
+    "press": "scripts.benchmark.atomic_action.press_benchmark",
+    "slide": "scripts.benchmark.atomic_action.slide_benchmark",
+    "twist": "scripts.benchmark.atomic_action.twist_benchmark",
+    "axis_align": "scripts.benchmark.atomic_action.axis_align_benchmark",
+    "pour": "scripts.benchmark.atomic_action.pour_benchmark",
+    "hand_over": "scripts.benchmark.atomic_action.hand_over_benchmark",
 }
 DEFAULT_ACTIONS = tuple(ACTION_MODULES.keys())
 MESH_OBJECT_ACTIONS = {"pick_up", "move_held_object", "place"}

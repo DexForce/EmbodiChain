@@ -232,7 +232,7 @@ def main() -> None:
                 ),
                 control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
                 motion_policy=MotionPolicy(
-                    strategy="motion_gen",
+                    strategy="ik_interp",
                     sample_count=PRESS_SAMPLE_INTERVAL,
                 ),
                 skill_options=PressOptions(
