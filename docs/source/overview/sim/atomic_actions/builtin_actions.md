@@ -430,6 +430,11 @@ the fixed calibration, the action samples valid affordance grasps and evaluates
 reachability. Both paths store the selected `object_to_eef` transform in the
 expected held-object state so later object-centric skills can reuse it.
 
+With parallel affordance expansion enabled, selection distributes the feasible
+candidate pool across environment branches after those reachability checks.
+The selected grasp anchors the entire approach/close/lift trajectory. See
+{doc}`affordance_expansion` for candidate shapes, branch allocation, and reuse.
+
 `GraspGoal.object_pose` optionally supplies the object pose used by the same
 planning pass. It accepts `(4, 4)` (broadcast to every environment) or
 `(B, 4, 4)` (one pose per environment row), and may be a `SceneEntityPose` when
@@ -722,6 +727,10 @@ generic `ActionBinding`, and the action keeps the gripper closed for all arm
 motion segments. Applications that require force/contact confirmation must
 verify it externally.
 
+Parallel expansion rolls the contact frame's local x/y axes about local z while
+keeping the contact point, approach axis, and press depth fixed. All phases use
+that same selected frame; see {doc}`affordance_expansion`.
+
 **Example:** `scripts/tutorials/atomic_action/press.py`
 
 (builtin-slide)=
@@ -734,9 +743,11 @@ Plans a grasped linear interaction for one articulation link. The entity-free
 optional joint name/limits. `SlideGoal.target_pose` supplies the link pose as a
 snapshot or `SceneEntityPose`. The positive axis direction means approach and
 push/close; pull/open uses its negative direction. The affordance inherits
-`AntipodalAffordance` and selects a grasp with `get_best_grasp_poses()`. The
-grasp approach direction is the resolved link-frame translation axis
-transformed by the current link rotation.
+`AntipodalAffordance` and selects a grasp with `get_best_grasp_poses()` when
+expansion is disabled. With expansion enabled it obtains
+`get_valid_grasp_poses()` candidates, selects one per environment, and then
+checks trajectory feasibility. The grasp approach direction is the resolved
+link-frame translation axis transformed by the current link rotation.
 
 The Atomic Action articulation-geometry adapter samples the target link, the
 merged articulation surface, and the merged surface of every non-target link at
@@ -785,6 +796,12 @@ translation axis belongs to `SlideAffordance`; the bound `primary.grasp`
 endpoint must provide `open` and `grasp`. Reach, pull/push, and push-return use
 axis-aligned Cartesian samples rather than sparse joint-space endpoints.
 
+Optional `SlideOptions.translation_distance_range` declares task-accepted
+positive travel bounds containing the nominal distance. Expansion intersects
+them with the observed joint's legal travel and preserves the pull/push
+direction. Missing bounds preserve the exact distance. See
+{doc}`affordance_expansion` for the configured YAML field and sample budgeting.
+
 **Example:** `scripts/tutorials/atomic_action/slide.py`
 plans and replays a pull first, then replans a push from the drawer's measured
 post-pull link pose.
@@ -818,6 +835,12 @@ time, the resolved joint name must uniquely match a live
 by `target_position - observed_position`; invalid observations, out-of-range
 targets, and targets that would move toward closing fail that row, while rows
 already at the target succeed with a hold trajectory.
+
+Optional `OpenDoorGoal.open_fraction_range` declares an accepted interval in
+`[0, 1]` containing the nominal fraction. Parallel expansion retains the nominal
+branch and samples the other branches within the interval that remains legal
+and forward-opening from each observed joint state. Without this range, the
+opening target stays exact even when handle grasp selection is expanded.
 
 For active rows, the opening segment interpolates handle-link poses around the
 resolved hinge axis and applies the initial rigid `link -> EEF` transform to
@@ -895,6 +918,14 @@ the grasp pose's negative z-axis; the target-local twist axis belongs to
 `Twist` is intentionally a pure-rotation primitive. Thread pitch, coupled axial
 translation, and regrasping are outside its contract; an `Unscrew` action should
 model those behaviors separately.
+
+Parallel expansion can sample `TwistOptions.twist_angle_range` when an accepted
+signed interval is supplied; it contains the nominal angle and cannot reverse
+the requested direction. Joint-aware sampling requires live joint state,
+limits, and the axis-to-joint sign. Optional `TwistAffordance.grasp_roll_range`
+allows initial grasp roll only for declared contact symmetry. Both preserve
+the rotation axis/origin; omitted ranges retain exact values. See
+{doc}`affordance_expansion`.
 
 For all four primitives, `SkillDescriptor.open_loop` is `True`. Trajectory
 completion therefore means commanded motion completion only. Applications that

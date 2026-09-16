@@ -5085,3 +5085,140 @@ def test_move_held_object_retimes_arm_derivatives() -> None:
     assert torch.count_nonzero(trajectory.velocities[:, 0]) == 0
     assert torch.count_nonzero(trajectory.velocities[:, -1]) == 0
     assert torch.count_nonzero(trajectory.velocities[:, :, ARM_DOF:]) == 0
+
+
+def test_expanded_pick_selects_distinct_feasible_grasps_and_preserves_attachment():
+    from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+        AffordanceSamplingContext,
+    )
+
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    object_poses = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    candidates = torch.eye(4).repeat(3, 1, 1)
+    candidates[:, 0, 3] = torch.tensor([0.0, 0.02, 0.04])
+    # Existing approach preference is downward for PickUp.
+    candidates[:, :3, :3] = torch.diag(torch.tensor([1.0, -1.0, -1.0]))
+    _GRASP_GENERATORS[id(action)].get_valid_grasp_poses = Mock(
+        return_value=[
+            (candidates.clone(), torch.tensor([0.0, 0.1, 0.2])) for _ in range(NUM_ENVS)
+        ]
+    )
+
+    def solve(*, pose, name, joint_seed):
+        valid = torch.ones(pose.shape[:2], dtype=torch.bool)
+        # Reject one grasp at all phases; selection must never resurrect it.
+        valid &= pose[..., 0, 3] < 0.03
+        return valid, joint_seed.clone()
+
+    generator.robot.compute_batch_ik.side_effect = solve
+    context = replace(
+        _context(), affordance_sampling=AffordanceSamplingContext(count=2, seed=7)
+    )
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(), geometry={}, entity_id="cube"
+    )
+    invocation = _invocation(
+        action,
+        GraspGoal(semantics=semantics, object_pose=object_poses),
+        sample_count=20,
+    )
+    plan = _plan_action(action, invocation, context)
+    assert plan.plan_success.all()
+    metadata = plan.diagnostics.metadata["affordance_selection"]
+    assert metadata["candidate_ids"] == [0, 1]
+    held = plan.expected_effects.apply(context.task, plan.plan_success).get_held_object(
+        "arm"
+    )
+    assert held is not None
+    torch.testing.assert_close(held.object_to_eef[:, 0, 3], torch.tensor([0.0, 0.02]))
+    assert plan.diagnostics.metadata["affordance_expansion"]["seed"] == 7
+
+
+def test_expanded_press_uses_one_roll_for_all_contact_phases():
+    from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+        AffordanceSamplingContext,
+    )
+
+    semantics = ObjectSemantics(
+        affordance=PressAffordance(press_position=(0.0, 0.0, 0.0)),
+        geometry={},
+        entity_id="button",
+    )
+    action = _bind_action(_motion_generator(), Press())
+    context = replace(
+        _context(), affordance_sampling=AffordanceSamplingContext(count=2, seed=9)
+    )
+    planned_poses = []
+    original = action._plan_pose_segment
+
+    def capture(pose, *args, **kwargs):
+        planned_poses.append(pose.clone())
+        return original(pose, *args, **kwargs)
+
+    action._plan_pose_segment = capture
+    plan = _plan_action(
+        action,
+        _invocation(action, PressGoal(semantics, torch.eye(4)), sample_count=24),
+        context,
+    )
+    assert plan.plan_success.all()
+    contact = torch.tensor(plan.diagnostics.metadata["contact_poses"])
+    assert not torch.allclose(contact[0, :3, 0], contact[1, :3, 0])
+    for poses in planned_poses:
+        if poses.ndim == 4:
+            expected = contact[:, None, :3, :3].expand_as(poses[..., :3, :3])
+        else:
+            expected = contact[:, :3, :3]
+        torch.testing.assert_close(poses[..., :3, :3], expected)
+
+
+def test_expanded_open_door_respects_accepted_range_and_current_opening():
+    from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+        AffordanceSamplingContext,
+    )
+
+    affordance = _door_affordance()
+    semantics = ObjectSemantics(
+        affordance=affordance, geometry={}, entity_id=DOOR_ENTITY_ID
+    )
+    action = _bind_action(_motion_generator(), OpenDoor())
+    lower, upper = affordance.joint_limits
+    # The random branch is already 75% open; sampling must never close it.
+    positions = torch.tensor([[lower], [lower + 0.75 * (upper - lower)]])
+    context = replace(
+        _context(scene=_door_scene(hinge_position=positions)),
+        affordance_sampling=AffordanceSamplingContext(count=2, seed=3),
+    )
+    invocation = ActionInvocation(
+        skill_id="open_door",
+        goal=OpenDoorGoal(
+            semantics, torch.eye(4), open_fraction=0.8, open_fraction_range=(0.6, 0.9)
+        ),
+        binding=_binding(action),
+        motion_policy=MotionPolicy(sample_count=40),
+        skill_options=OpenDoorOptions(door_waypoint_count=4),
+    )
+    plan = _plan_action(action, invocation, context)
+    fractions = plan.diagnostics.metadata["open_fraction"]
+    assert fractions[0] == pytest.approx(0.8)
+    assert 0.75 <= fractions[1] <= 0.9
+    assert plan.plan_success.all()
+
+
+def test_twist_arc_supports_different_angles_without_moving_axis_origin():
+    action = _bind_action(_motion_generator(), Twist())
+    link = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    grasp = link.clone()
+    grasp[:, 0, 3] = 0.4
+    angles = torch.tensor([math.pi / 4, math.pi / 2])
+    arc = action._twisted_grasp_poses(
+        link, grasp, torch.tensor([0.0, 0.0, 1.0]), (0.1, 0.0, 0.0), angles, 8
+    )
+    relative = arc[..., :3, 3] - torch.tensor([0.1, 0.0, 0.0])
+    torch.testing.assert_close(
+        torch.linalg.vector_norm(relative, dim=-1), torch.full((NUM_ENVS, 8), 0.3)
+    )
+    torch.testing.assert_close(
+        torch.atan2(relative[:, -1, 1], relative[:, -1, 0]), angles
+    )

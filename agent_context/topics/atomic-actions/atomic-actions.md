@@ -69,6 +69,7 @@ a physical effect.
 ## Read on demand
 
 - [Planning and execution](execution.md): invocation resolution, control grid, row-local recovery and verification.
+- [Affordance expansion](affordance-expansion.md): constrained candidate sampling, parallel branch allocation and collection.
 - [Articulation geometry](articulation-geometry.md): topology/mesh ownership and directional affordance contracts.
 
 The `scripts/tutorials/atomic_action/place.py` tutorial configures a

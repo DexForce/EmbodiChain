@@ -2283,3 +2283,35 @@ kernel policy; callers log and apply that seed to their own generators.
 .. autofunction:: add_seed_arg_to_parser
 
 .. autofunction:: resolve_seed
+
+
+Affordance sampling
+-------------------
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.affordance_sampling
+
+Affordance expansion samples geometric candidates before trajectory planning.
+Candidate tensors keep the simulation batch separate from the candidate axis;
+invalid or padded candidates cannot become successful selections. The immutable
+sampling context derives private streams from seed, episode, explicit attempt,
+invocation key and stable environment identifiers. The first branch retains the
+nominal choice. Remaining branches diversify valid candidates and report reuse
+when the available unique choices are exhausted.
+
+For CLI examples, the candidate-to-trajectory pipeline, action-specific
+constraints, and collection semantics, see :ref:`affordance-expansion`.
+
+.. autosummary::
+
+   AffordanceExpansionCfg
+   AffordanceSamplingContext
+   AffordancePoseCandidates
+
+.. autoclass:: AffordanceExpansionCfg
+   :members:
+
+.. autoclass:: AffordanceSamplingContext
+   :members:
+
+.. autoclass:: AffordancePoseCandidates
+   :members:

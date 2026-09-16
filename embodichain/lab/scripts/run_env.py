@@ -439,6 +439,56 @@ def generate_function(
     return False
 
 
+def _generate_expanded_batch(
+    env: Any,
+    *,
+    episode_index: int,
+    max_to_save: int,
+    max_attempts: int,
+    **kwargs: Any,
+) -> int:
+    """Commit accepted rows independently and return the actual episode count.
+
+    The existing commit boundary discards every unselected row and resets the
+    full batch. No completed row is replayed or double-counted on a retry.
+    """
+    if max_attempts < 1 or max_to_save < 1:
+        raise ValueError(
+            "Expansion attempts and remaining episode quota must be positive."
+        )
+    for attempt in range(max_attempts):
+        committed = False
+        try:
+            result = execute_demo_episode(
+                env,
+                episode_index=episode_index,
+                attempt_id=attempt,
+                execution_cfg=DemoExecutionCfg(),
+                progress=_progress_wrapper,
+                **kwargs,
+            )
+            completed = result.completed_by_env or tuple(
+                result.completed for _ in result.success
+            )
+            lengths = result.lengths or tuple(result.length for _ in result.success)
+            accepted = tuple(
+                row
+                for row, success in enumerate(result.success)
+                if completed[row] and success and lengths[row] > 0
+            )[:max_to_save]
+            if accepted:
+                _commit_pending_episode(env, accepted)
+                committed = True
+                return len(accepted)
+        finally:
+            if not committed:
+                _abort_pending_episode(env)
+        log_warning(
+            f"Expansion batch {episode_index}, attempt {attempt + 1}/{max_attempts}: no accepted episodes ({result.terminal_reason})."
+        )
+    return 0
+
+
 def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
     """Replay a recorded trajectory.
 
@@ -781,6 +831,12 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
     if num_envs < 1:
         raise ValueError(f"env.num_envs must be at least 1, got {num_envs}.")
     max_attempts = int(gym_config.get("demo_max_attempts", 3))
+    expansion_count = (
+        gym_config.get("env", {})
+        .get("expert_trajectory", {})
+        .get("affordance_expansion", {})
+        .get("count", 1)
+    )
 
     environment_label = "environment" if num_envs == 1 else "environments"
     tqdm.tqdm.write(
@@ -814,17 +870,27 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
         while saved_episodes < max_episodes:
             batch_episode_count = min(num_envs, max_episodes - saved_episodes)
             save_env_ids = tuple(range(batch_episode_count))
-            generated = generate_function(
-                env,
-                time_id=saved_episodes,
-                save_path=getattr(args, "save_path", ""),
-                save_video=getattr(args, "save_video", False),
-                debug_mode=getattr(args, "debug_mode", False),
-                save_env_ids=save_env_ids,
-                regenerate=getattr(args, "regenerate", False),
-                max_attempts=max_attempts,
-                reset_before=False,
-            )
+            if expansion_count > 1:
+                batch_episode_count = _generate_expanded_batch(
+                    env,
+                    episode_index=saved_episodes,
+                    max_to_save=batch_episode_count,
+                    max_attempts=max_attempts,
+                    regenerate=getattr(args, "regenerate", False),
+                )
+                generated = batch_episode_count > 0
+            else:
+                generated = generate_function(
+                    env,
+                    time_id=saved_episodes,
+                    save_path=getattr(args, "save_path", ""),
+                    save_video=getattr(args, "save_video", False),
+                    debug_mode=getattr(args, "debug_mode", False),
+                    save_env_ids=save_env_ids,
+                    regenerate=getattr(args, "regenerate", False),
+                    max_attempts=max_attempts,
+                    reset_before=False,
+                )
             if not generated:
                 raise RuntimeError(
                     f"Failed to generate episode batch starting at {saved_episodes} "

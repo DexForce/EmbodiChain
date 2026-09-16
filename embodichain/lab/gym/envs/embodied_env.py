@@ -990,26 +990,27 @@ class EmbodiedEnv(BaseEnv):
                 for mode_cfgs in self.event_manager._mode_functor_cfgs.values():
                     for functor_cfg in mode_cfgs:
                         if isinstance(functor_cfg.func, record_camera_data):
-                            if save_data:
+                            if env_ids_to_commit.numel() > 0:
                                 functor_cfg.func.save_and_clear(
-                                    env_ids=env_ids_to_process
+                                    env_ids=env_ids_to_commit
                                 )
-                            else:
-                                functor_cfg.func.discard_and_clear(
-                                    env_ids=env_ids_to_process
-                                )
+                            discard_ids = env_ids_to_process[
+                                ~torch.isin(env_ids_to_process, env_ids_to_commit)
+                            ]
+                            if discard_ids.numel() > 0:
+                                functor_cfg.func.discard_and_clear(env_ids=discard_ids)
 
         # Auto-save + reset the per-env trajectory buffer for environments being
         # reset. Use getattr so this no-ops on envs/subclasses that don't allocate
         # a _traj_buffer (e.g. unit-test stubs of _initialize_episode).
         _traj_buffer = getattr(self, "_traj_buffer", None)
         if (
-            save_data
+            env_ids_to_commit.numel() > 0
             and _traj_buffer is not None
             and getattr(self.cfg, "trajectory_auto_save", False)
         ):
             with self._profiler.section("trajectory_save"):
-                for env_id in env_ids_to_process.tolist():
+                for env_id in env_ids_to_commit.tolist():
                     self._save_trajectory_for_env(env_id)
 
         _traj_steps = getattr(self, "_traj_steps", None)

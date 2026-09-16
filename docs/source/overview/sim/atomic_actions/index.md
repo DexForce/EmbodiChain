@@ -6,6 +6,7 @@
 :hidden:
 
 builtin_actions
+affordance_expansion
 ```
 
 ```{currentmodule} embodichain.lab.sim.atomic_actions
@@ -920,6 +921,8 @@ See {doc}`builtin_actions` for the shipped skill catalog and visual demos, and
 
 ## Further reading
 
+- {doc}`affordance_expansion` — parallel candidate selection, pose-to-trajectory
+  flow, collection commands, and drawer tuning
 - {doc}`../../task_program/scene_registry` — canonical scene identity,
   snapshots, and collision integration
 - {doc}`../../task_program/index` — declarative semantic calls, scenes,

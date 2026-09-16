@@ -945,3 +945,118 @@ def test_control_loop_consumes_viser_seek_while_paused() -> None:
         REPLAY_NUM_STEPS - 1,
         False,
     )
+
+
+@pytest.mark.parametrize("count", [0, -1])
+def test_affordance_expansion_rejects_invalid_cli_count(count):
+    args = _create_parser().parse_args(
+        ["--gym_config", GYM_CONFIG_PATH, "--n_affordance_expand", str(count)]
+    )
+    with pytest.raises(ValueError, match="positive integer"):
+        merge_args_with_gym_config(args, {"physics": "default"})
+
+
+def test_affordance_expansion_sets_total_env_count_and_keeps_source_config():
+    args = _create_parser().parse_args(
+        ["--gym_config", GYM_CONFIG_PATH, "--n_affordance_expand", "9"]
+    )
+    original = {"physics": "default", "num_envs": 1}
+    merged = merge_args_with_gym_config(args, original)
+    assert merged["num_envs"] == 9
+    assert merged["env"]["expert_trajectory"]["affordance_expansion"] == {"count": 9}
+    assert original == {"physics": "default", "num_envs": 1}
+
+
+def test_affordance_expansion_rejects_conflicting_env_count():
+    args = _create_parser().parse_args(
+        [
+            "--gym_config",
+            GYM_CONFIG_PATH,
+            "--n_affordance_expand",
+            "9",
+            "--num_envs",
+            "2",
+        ]
+    )
+    with pytest.raises(ValueError, match="--num_envs"):
+        merge_args_with_gym_config(args, {"physics": "default"})
+
+
+def test_expansion_disabled_preserves_existing_parallel_count():
+    args = _create_parser().parse_args(
+        ["--gym_config", GYM_CONFIG_PATH, "--n_affordance_expand", "1"]
+    )
+    assert (
+        merge_args_with_gym_config(args, {"physics": "default", "num_envs": 3})[
+            "num_envs"
+        ]
+        == 3
+    )
+
+
+def test_expanded_collection_commits_successful_rows_and_obeys_remaining_quota(
+    monkeypatch,
+):
+    from dataclasses import replace
+
+    env = _ResetTrackingEnv(num_envs=3)
+    failed = _episode_result(success=False, reason="mixed", num_envs=3)
+    mixed = replace(
+        failed, success=(False, True, True), completed_by_env=(False, True, True)
+    )
+    execute = MagicMock(return_value=mixed)
+    commit = MagicMock()
+    abort = MagicMock()
+    monkeypatch.setattr(run_env, "execute_demo_episode", execute)
+    monkeypatch.setattr(run_env, "_commit_pending_episode", commit)
+    monkeypatch.setattr(run_env, "_abort_pending_episode", abort)
+    count = run_env._generate_expanded_batch(
+        env, episode_index=5, max_to_save=1, max_attempts=3
+    )
+    assert count == 1
+    commit.assert_called_once_with(env, (1,))
+    abort.assert_not_called()
+    assert execute.call_count == 1
+
+
+def test_expanded_collection_resamples_only_after_zero_accepted_rows(monkeypatch):
+    from dataclasses import replace
+
+    env = _ResetTrackingEnv(num_envs=3)
+    failed = _episode_result(success=False, reason="failed", num_envs=3)
+    success = replace(
+        failed, success=(True, False, True), completed_by_env=(True, False, True)
+    )
+    execute = MagicMock(side_effect=[failed, success])
+    monkeypatch.setattr(run_env, "execute_demo_episode", execute)
+    commit = MagicMock()
+    abort = MagicMock()
+    monkeypatch.setattr(run_env, "_commit_pending_episode", commit)
+    monkeypatch.setattr(run_env, "_abort_pending_episode", abort)
+    assert (
+        run_env._generate_expanded_batch(
+            env, episode_index=3, max_to_save=3, max_attempts=2
+        )
+        == 2
+    )
+    assert [call.kwargs["attempt_id"] for call in execute.call_args_list] == [0, 1]
+    commit.assert_called_once_with(env, (0, 2))
+    abort.assert_called_once_with(env)
+
+
+def test_main_counts_actual_partial_expansion_commits(monkeypatch):
+    env = _ResetTrackingEnv(num_envs=9)
+    generate = MagicMock(side_effect=[7, 3])
+    monkeypatch.setattr(run_env, "_generate_expanded_batch", generate)
+    run_env.main(
+        SimpleNamespace(),
+        env,
+        {
+            "max_episodes": 10,
+            "env": {"expert_trajectory": {"affordance_expansion": {"count": 9}}},
+        },
+    )
+    assert [
+        (call.kwargs["episode_index"], call.kwargs["max_to_save"])
+        for call in generate.call_args_list
+    ] == [(0, 9), (7, 3)]

@@ -30,6 +30,9 @@ from embodichain.utils.math import (
     get_relative_rotation,
 )
 
+from embodichain.lab.sim.atomic_actions.primitives._helpers import _sample_joint_motion
+from embodichain.lab.sim.atomic_actions.affordance_sampling import _validate_range
+from embodichain.lab.sim.atomic_actions.plans import PlannerDiagnostics
 from embodichain.lab.sim.atomic_actions.affordance import TwistAffordance
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
@@ -99,7 +102,20 @@ class TwistOptions(ActionOptions):
     twist_angle: float = math.pi / 4
     """Requested twist rotation in radians."""
 
+    twist_angle_range: tuple[float, float] | None = None
+    """Optional task-accepted signed rotation interval, in radians."""
+
     def __post_init__(self) -> None:
+        if self.twist_angle_range is not None:
+            bounds = _validate_range(self.twist_angle_range, name="twist_angle_range")
+            if (
+                not bounds[0] <= self.twist_angle <= bounds[1]
+                or bounds[0] * bounds[1] < 0
+            ):
+                raise ValueError(
+                    "twist_angle_range must contain twist_angle without reversing direction."
+                )
+            object.__setattr__(self, "twist_angle_range", bounds)
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
         if self.twist_waypoint_count < 1:
@@ -197,9 +213,12 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             num_envs=self.num_envs,
             device=self.device,
         )
-        grasp_xpos = affordance.get_grasp_pose(link_pose).to(
-            device=self.device, dtype=torch.float32
-        )
+        grasp_xpos = affordance.get_grasp_pose(
+            link_pose,
+            sampling=context.affordance_sampling,
+            env_ids=context.env_ids,
+            key=(request.invocation_id or self.skill_id) + ":grasp",
+        ).to(device=self.device, dtype=torch.float32)
         grasp_xpos = self._find_symmetric_nearest_xpos(
             grasp_xpos,
             reference_xpos=self.robot.compute_fk(
@@ -210,12 +229,22 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             grasp_xpos,
             -grasp_xpos[:, :3, 2] * options.pre_grasp_distance,
         )
+        angle, travel_valid = _sample_joint_motion(
+            options.twist_angle,
+            options.twist_angle_range,
+            context,
+            joint_name=affordance.joint_name,
+            joint_limits=affordance.joint_limits,
+            joint_axis_sign=affordance.joint_axis_sign,
+            motion_sign=1,
+            key=(request.invocation_id or self.skill_id) + ":travel",
+        )
         twist_xpos = self._twisted_grasp_poses(
             link_pose,
             grasp_xpos,
             affordance.twist_axis,
             affordance.require_axis_origin(),
-            options.twist_angle,
+            angle,
             options.twist_waypoint_count,
         )
 
@@ -314,7 +343,14 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         return self.build_plan(
             request,
             context,
-            success=success,
+            success=success & travel_valid,
+            diagnostics=PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                metadata={
+                    "twist_angle": angle.cpu().tolist(),
+                    "grasp_poses": grasp_xpos.cpu().tolist(),
+                },
+            ),
             trajectory=TimedTrajectory.from_uniform_step(
                 full,
                 env_ids=context.env_ids,
@@ -386,25 +422,31 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         grasp_xpos: torch.Tensor,
         twist_axis: torch.Tensor,
         axis_origin: tuple[float, float, float],
-        twist_angle: float,
+        twist_angle: float | torch.Tensor,
         waypoint_count: int,
     ) -> torch.Tensor:
         """Build Cartesian EEF keyframes that follow the target's twist arc."""
         axis = twist_axis.to(device=self.device, dtype=torch.float32)
         axis = axis / torch.linalg.vector_norm(axis)
-        angles = torch.linspace(
-            twist_angle / waypoint_count,
-            twist_angle,
+        fractions = torch.linspace(
+            1.0 / waypoint_count,
+            1.0,
             waypoint_count,
             dtype=torch.float32,
             device=self.device,
         )
-        rotations = (
-            torch.eye(4, dtype=torch.float32, device=self.device)
-            .reshape(1, 4, 4)
-            .repeat(waypoint_count, 1, 1)
+        values = torch.as_tensor(twist_angle, dtype=torch.float32, device=self.device)
+        if values.ndim == 0:
+            values = values.expand(len(link_pose))
+        if values.shape != (len(link_pose),):
+            raise ValueError(
+                "twist_angle must be scalar or have one value per environment."
+            )
+        angles = values[:, None] * fractions[None]
+        rotations = torch.eye(4, dtype=torch.float32, device=self.device).repeat(
+            len(link_pose), waypoint_count, 1, 1
         )
-        rotations[:, :3, :3] = axis_angle_to_rotation_matrix(angles[:, None] * axis)
+        rotations[..., :3, :3] = axis_angle_to_rotation_matrix(angles[..., None] * axis)
         link_to_eef = torch.bmm(pose_inv(link_pose), grasp_xpos)
         origin = torch.tensor(axis_origin, dtype=torch.float32, device=self.device)
         to_origin = torch.eye(4, dtype=torch.float32, device=self.device)
@@ -412,10 +454,10 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         to_origin[:3, 3] = origin
         from_origin[:3, 3] = -origin
         local_rotations = torch.matmul(
-            torch.matmul(to_origin[None], rotations), from_origin[None]
+            torch.matmul(to_origin[None, None], rotations), from_origin[None, None]
         )
         return torch.matmul(
-            torch.matmul(link_pose[:, None], local_rotations[None]),
+            torch.matmul(link_pose[:, None], local_rotations),
             link_to_eef[:, None],
         )
 

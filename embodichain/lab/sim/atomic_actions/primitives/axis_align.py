@@ -31,6 +31,9 @@ from embodichain.utils.math import (
     pose_inv,
 )
 
+from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+    AffordancePoseCandidates,
+)
 from embodichain.lab.sim.atomic_actions.affordance import AxisAlignAffordance
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
@@ -244,6 +247,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             rotation_angle,
             end_effector.target_id,
             object_part=options.pick_object_part,
+            sample_key=request.invocation_id or self.skill_id,
         )
         grasp_xpos = self._find_symmetric_nearest_xpos(
             grasp_xpos,
@@ -422,6 +426,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         grasp_target_id: str,
         *,
         object_part: str,
+        sample_key: str = "axis_align",
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Resolve an explicit grasp or select the lowest-cost sampled grasp."""
         if goal.grasp_xpos is not None:
@@ -453,6 +458,33 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             obj_longest_axis=obj_longest_axis,
             is_positive_part=is_positive_part,
         )
+        if (
+            context.affordance_sampling is not None
+            and context.affordance_sampling.enabled
+        ):
+            candidate_batch = AffordancePoseCandidates.from_rows(
+                sampled, device=self.device
+            )
+            valid = candidate_batch.valid.clone()
+            for row in range(len(object_pose)):
+                if rotation_angle[row] > 1.0e-6 and valid[row].any():
+                    y_axis = torch.nn.functional.normalize(
+                        candidate_batch.poses[row, :, :3, 1], dim=-1
+                    )
+                    error = torch.abs(y_axis @ rotation_axis[row])
+                    minimum = error[valid[row]].min()
+                    valid[row] &= torch.isclose(
+                        error, minimum, atol=1.0e-6, rtol=1.0e-5
+                    )
+            success, poses, _ = AffordancePoseCandidates(
+                candidate_batch.poses, candidate_batch.costs, valid
+            ).select(
+                context.affordance_sampling,
+                env_ids=context.env_ids,
+                key=sample_key,
+                reference_poses=object_pose,
+            )
+            return success, poses
         poses: list[torch.Tensor] = []
         success: list[bool] = []
         for env_index, (candidates, costs) in enumerate(sampled):

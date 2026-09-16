@@ -426,7 +426,12 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             device=self.device,
             name="base_pose",
         )
-        assemble_object_pose = affordance.get_assemble_object_pose(base_pose)
+        assemble_object_pose = affordance.get_assemble_object_pose(
+            base_pose,
+            sampling=state.affordance_sampling,
+            env_ids=state.env_ids,
+            key="assembly:" + target.affordance.object_label,
+        )
         object_to_eef = resolve_object_target(
             held.object_to_eef,
             num_envs=self.num_envs,

@@ -76,6 +76,11 @@ snapshot to the exact integration registration.
 - [Assurance and execution](execution.md): measured/projected effects, acceptance, parallel calls and MLLM boundaries.
 - [Dataset persistence](../data-pipeline/data-pipeline.md): recorder commits, fragments, failures and finalization.
 
+The simulation integration carries the environment-owned immutable affordance
+sampling context through JIT grounding and later observations. Calls retain
+independent branch choices and held-object transforms; see
+[affordance expansion](../atomic-actions/affordance-expansion.md).
+
 ## Reference integrations
 
 | Environment | Assurance | Source |

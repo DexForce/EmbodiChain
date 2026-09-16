@@ -28,7 +28,7 @@ profile:
     simulation.articulation_link_slide:
       kind: slide
       direction: pull
-      hand_interp_steps: 12
+      hand_interp_steps: 18
       approach_distance: 0.1
       translation_distance: 0.18
   effect_monitors: {}

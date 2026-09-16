@@ -1863,3 +1863,48 @@ def test_factory_planner_config_uses_owner_without_mutating_input(
     assert captured[0].robot_uid == robot.uid
     assert captured[0] is not supplied
     assert supplied.sim_instance_id == 0
+
+
+def test_simulation_factory_samples_from_episode_identity_not_observation_count():
+    from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+        AffordanceExpansionCfg,
+    )
+
+    robot = _Robot()
+    simulation = _Simulation(robot)
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
+    )
+    environment = SimpleNamespace(
+        sim=simulation,
+        robot=robot,
+        step_dt=_STEP_DT,
+        cfg=SimpleNamespace(
+            seed=19,
+            expert_trajectory=ExpertTrajectoryCfg(
+                affordance_expansion=AffordanceExpansionCfg(count=_BATCH_SIZE),
+            ),
+        ),
+        _demo_episode_index=5,
+        _demo_attempt_id=2,
+    )
+    factory = SimulationTaskProgramFactory.from_environment(
+        environment,
+        registration=registration,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    registry = factory.create_scene_registry()
+    engine = factory.create_atomic_action_engine(factory.create_robot_skill_profile())
+    provider = factory.create_planning_observation_provider(
+        scene_registry=registry,
+        engine=engine,
+        clock=EnvironmentStepClock(_STEP_DT),
+    )
+    task = TaskState.empty(_BATCH_SIZE, robot.device)
+    first = provider.observe(task).affordance_sampling
+    assert first is not None
+    assert (first.seed, first.episode_id, first.attempt_id) == (19, 5, 2)
+    assert provider.observe(task).affordance_sampling == first
+    environment._demo_attempt_id = 3
+    assert provider.observe(task).affordance_sampling.attempt_id == 3

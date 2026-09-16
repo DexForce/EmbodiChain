@@ -32,6 +32,9 @@ from embodichain.lab.sim.objects import (
     Robot,
 )
 from embodichain.lab.sim.cfg import RigidObjectCfg, ArticulationCfg, RigidConstraintCfg
+from embodichain.lab.sim.objects.backends.articulation_physics import (
+    _refresh_link_contact_material,
+)
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.gym.envs.managers._event_functors import (
     wait_for_dynamic_objects_to_settle,
@@ -58,6 +61,7 @@ __all__ = [
     "replace_assets_from_group",
     "prepare_extra_attr",
     "register_entity_attrs",
+    "refresh_articulation_contact_material",
     "register_entity_pose",
     "register_info_to_env",
     "resolve_uids",
@@ -288,6 +292,54 @@ class prepare_extra_attr(Functor):
                         )
                         attr_func_ret = global_func(**attr_func_kwargs)
                     self.extra_attrs[cfg.uid].update({attr_name: attr_func_ret})
+
+
+def refresh_articulation_contact_material(
+    env: EmbodiedEnv,
+    env_ids: torch.Tensor | list[int] | None,
+    entity_cfg: SceneEntityCfg,
+) -> None:
+    """Rebind selected link materials at startup on the Default GPU backend.
+
+    Temporary workaround for first-environment grasp slip: writing an unchanged
+    coefficient can leave the native shape material binding stale. A small
+    change followed immediately by restoration forces the binding to refresh,
+    without advancing physics or changing the final friction. Remove this
+    opt-in event once the underlying DexSim material issue is fixed.
+
+    Only native shape materials are updated; mass, inertia and joint state
+    remain untouched. This event does nothing on CPU or Newton.
+
+    Args:
+        env: Environment whose scene has already been prepared.
+        env_ids: Selected environments, or all environments at startup.
+        entity_cfg: Articulation UID and explicit link-name selectors.
+
+    Raises:
+        ValueError: The articulation is missing or no links are selected.
+    """
+    if env.sim.physics_backend != "default" or env.device.type != "cuda":
+        return
+    articulation = env.sim.get_articulation(entity_cfg.uid)
+    if articulation is None or entity_cfg.link_names is None:
+        raise ValueError("Material refresh requires an articulation and link_names.")
+    _, link_names = resolve_matching_names(
+        entity_cfg.link_names, articulation.link_names
+    )
+    if not link_names:
+        raise ValueError("Material refresh did not match any articulation links.")
+    rows = (
+        range(env.num_envs)
+        if env_ids is None
+        else torch.as_tensor(env_ids).cpu().tolist()
+    )
+    for row in rows:
+        for link_name in link_names:
+            _refresh_link_contact_material(
+                articulation._entities[row],
+                link_name,
+                is_spawn_bound=articulation.is_spawn_bound,
+            )
 
 
 def register_entity_attrs(

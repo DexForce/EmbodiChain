@@ -28,6 +28,7 @@ from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
     resample_planned_trajectory,
 )
+from embodichain.lab.sim.atomic_actions.plans import PlannerDiagnostics
 from embodichain.lab.sim.atomic_actions.affordance import PressAffordance
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
@@ -196,6 +197,9 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         contact_xpos = affordance.get_press_pose(
             target_pose,
             press_position=options.press_position,
+            sampling=context.affordance_sampling,
+            env_ids=context.env_ids,
+            key=request.invocation_id or self.skill_id,
         ).to(device=self.device, dtype=torch.float32)
         contact_xpos = self._find_symmetric_nearest_xpos(
             contact_xpos,
@@ -300,6 +304,10 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             request,
             context,
             success=success,
+            diagnostics=PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                metadata={"contact_poses": contact_xpos.cpu().tolist()},
+            ),
             trajectory=TimedTrajectory.from_uniform_step(
                 full,
                 env_ids=context.env_ids,

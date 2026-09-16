@@ -44,8 +44,10 @@ of exception; it does not supply an automatic retry loop.
 `env.step()` buffers frames. An explicit reset/commit reaches
 `DatasetManager.apply("save", env_ids)` before rows are cleared. Finalization
 drains committed work; it does not commit a live rollout. Final partial vector
-batches use `commit_env_ids` to select dataset rows while preserving a full
-physical reset. The recorder requires an exactly representable integer FPS.
+batches use `commit_env_ids` to select the same rows for dataset, trajectory
+and camera recorders while preserving a full physical reset. Unselected rows
+are discarded. Affordance expansion collection counts the actual accepted
+rows and continues to the requested episode quota. The recorder requires an exactly representable integer FPS.
 
 Expert rollout actions use the environment's `ExpertActionSpec`, independently
 of the policy action space. The default position mode preserves active-joint

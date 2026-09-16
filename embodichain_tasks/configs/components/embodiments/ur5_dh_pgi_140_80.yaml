@@ -66,7 +66,7 @@ skill_profile:
       control_part: hand
       commands:
         open: [0.0]
-        grasp: [0.024]
+        grasp: [0.040]
   runtime_services:
     grasp_pose_generators:
       hand:

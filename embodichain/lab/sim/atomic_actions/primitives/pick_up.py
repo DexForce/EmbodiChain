@@ -37,6 +37,10 @@ from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     require_shared_task_state_key,
     split_joint_trajectory_at_pose,
 )
+from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+    AffordancePoseCandidates,
+)
+from embodichain.lab.sim.atomic_actions.plans import PlannerDiagnostics
 from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
@@ -486,6 +490,17 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             state,
             list(manipulator.joint_ids),
         )
+        selection_metadata: dict[str, object] = {}
+        sampling_kwargs = {}
+        if (
+            context.affordance_sampling is not None
+            and context.affordance_sampling.enabled
+        ):
+            sampling_kwargs = {
+                "sampling_context": context,
+                "sample_key": request.invocation_id or self.skill_id,
+                "selection_metadata": selection_metadata,
+            }
         if target.grasp_xpos is None:
             if options.fixed_object_to_eef is None:
                 is_success, grasp_xpos = self._resolve_grasp_pose(
@@ -496,6 +511,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                     end_effector.target_id,
                     options,
                     approach_direction,
+                    **sampling_kwargs,
                 )
             else:
                 object_to_eef = options.fixed_object_to_eef.to(
@@ -570,6 +586,10 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             request,
             context,
             success=success_mask,
+            diagnostics=PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                metadata={"affordance_selection": selection_metadata},
+            ),
             trajectory=TimedTrajectory.from_uniform_step(
                 full,
                 env_ids=context.env_ids,
@@ -599,6 +619,10 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         grasp_target_id: str,
         options: PickUpOptions,
         approach_direction: torch.Tensor,
+        *,
+        sampling_context: PlanningContext | None = None,
+        sample_key: str = "pick_up",
+        selection_metadata: dict[str, object] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         affordance = semantics.affordance
         if not isinstance(affordance, AntipodalAffordance):
@@ -611,52 +635,41 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                 [0.0, 0.0, 1.0], dtype=torch.float32, device=self.device
             )
             is_positive_part = options.pick_object_part == "top"
-        grasp_poses_result = generator.get_valid_grasp_poses(
-            mesh_vertices=affordance.mesh_vertices,
-            mesh_triangles=affordance.mesh_triangles,
-            obj_poses=object_pose,
-            approach_direction=approach_direction,
+        candidates = affordance.get_grasp_candidates(
+            generator,
+            object_pose,
+            approach_direction,
             obj_longest_axis=obj_longest_axis,
             is_positive_part=is_positive_part,
         )
-        num_envs = object_pose.shape[0]
-        n_max_pose = max(r[0].shape[0] for r in grasp_poses_result)
-        grasp_xpos_padding = torch.zeros(
-            (num_envs, n_max_pose, 4, 4), dtype=torch.float32, device=self.device
-        )
-        grasp_cost_padding = torch.full(
-            (num_envs, n_max_pose),
-            float("inf"),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        for i in range(num_envs):
-            n_pose = grasp_poses_result[i][0].shape[0]
-            grasp_poses = grasp_poses_result[i][0].to(
-                device=self.device, dtype=torch.float32
-            )
-            grasp_costs = grasp_poses_result[i][1].to(
-                device=self.device, dtype=torch.float32
-            )
-            grasp_xpos_padding[i, :n_pose] = grasp_poses
-            grasp_cost_padding[i, :n_pose] = grasp_costs
-            grasp_xpos_padding[i, n_pose:] = grasp_poses[0]
-            grasp_cost_padding[i, n_pose:] = grasp_costs[0]
-        grasp_xpos_padding, ik_success = self._select_feasible_grasp_variants(
-            grasp_xpos_padding,
+        poses, ik_success = self._select_feasible_grasp_variants(
+            candidates.poses,
             start_qpos,
             object_pose,
             manipulator,
             options,
             approach_direction,
         )
-        grasp_cost_masked = torch.where(ik_success, grasp_cost_padding, 10000.0)
-        best_cost, best_idx = grasp_cost_masked.min(dim=1)
-        is_success = best_cost < 9999.0
-        best_grasp_xpos = grasp_xpos_padding[
-            torch.arange(num_envs, device=self.device), best_idx
-        ]
-        return is_success, best_grasp_xpos
+        candidates = AffordancePoseCandidates(
+            poses, candidates.costs, candidates.valid & ik_success
+        )
+        ids = (
+            torch.arange(len(object_pose), device=self.device)
+            if sampling_context is None
+            else sampling_context.env_ids
+        )
+        sampling = (
+            None if sampling_context is None else sampling_context.affordance_sampling
+        )
+        success, selected, metadata = candidates.select(
+            sampling,
+            env_ids=ids,
+            key=sample_key,
+            reference_poses=object_pose,
+        )
+        if selection_metadata is not None:
+            selection_metadata.update(metadata)
+        return success, selected
 
     def _select_feasible_grasp_variants(
         self,

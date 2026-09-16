@@ -210,6 +210,7 @@ class _PrimedObservationProvider:
             scene=context.scene,
             env_ids=context.env_ids,
             control_dt=context.control_dt,
+            affordance_sampling=context.affordance_sampling,
         )
 
 
@@ -811,6 +812,7 @@ class SemanticCallExecutor:
             scene=context.scene,
             env_ids=context.env_ids,
             control_dt=context.control_dt,
+            affordance_sampling=context.affordance_sampling,
         )
         if normalized.batch_size != self._task_state.batch_size:
             raise ValueError(

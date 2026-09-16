@@ -24,6 +24,9 @@ from typing import ClassVar, Literal
 
 import torch
 
+from embodichain.lab.sim.atomic_actions.primitives._helpers import _sample_joint_motion
+from embodichain.lab.sim.atomic_actions.affordance_sampling import _validate_range
+from embodichain.lab.sim.atomic_actions.plans import PlannerDiagnostics
 from embodichain.lab.sim.atomic_actions.affordance import SlideAffordance
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
@@ -97,7 +100,22 @@ class SlideOptions(ActionOptions):
     translation_distance: float = 0.15
     """Distance traveled along the pull or push direction."""
 
+    translation_distance_range: tuple[float, float] | None = None
+    """Optional task-accepted positive travel interval, in metres."""
+
     def __post_init__(self) -> None:
+        if self.translation_distance_range is not None:
+            bounds = _validate_range(
+                self.translation_distance_range, name="translation_distance_range"
+            )
+            if (
+                bounds[0] <= 0.0
+                or not bounds[0] <= self.translation_distance <= bounds[1]
+            ):
+                raise ValueError(
+                    "translation_distance_range must be positive and contain translation_distance."
+                )
+            object.__setattr__(self, "translation_distance_range", bounds)
         if self.direction not in ("pull", "push"):
             raise ValueError("direction must be either 'pull' or 'push'.")
         if self.hand_interp_steps < 1:
@@ -186,12 +204,27 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         grasp_generator = self.planning_services.grasp_pose_generator(
             grasp_target.target_id
         )
-        grasp_success, grasp_xpos, _ = grasp_generator.get_best_grasp_poses(
-            mesh_vertices=affordance.mesh_vertices,
-            mesh_triangles=affordance.mesh_triangles,
-            obj_poses=link_pose,
-            approach_direction=translation_axis_world,
-        )
+        selection_metadata: dict[str, object] = {}
+        if (
+            context.affordance_sampling is not None
+            and context.affordance_sampling.enabled
+        ):
+            candidates = affordance.get_grasp_candidates(
+                grasp_generator, link_pose, translation_axis_world
+            )
+            grasp_success, grasp_xpos, selection_metadata = candidates.select(
+                context.affordance_sampling,
+                env_ids=context.env_ids,
+                key=(request.invocation_id or self.skill_id) + ":grasp",
+                reference_poses=link_pose,
+            )
+        else:
+            grasp_success, grasp_xpos, _ = grasp_generator.get_best_grasp_poses(
+                mesh_vertices=affordance.mesh_vertices,
+                mesh_triangles=affordance.mesh_triangles,
+                obj_poses=link_pose,
+                approach_direction=translation_axis_world,
+            )
         grasp_xpos = grasp_xpos.to(device=self.device, dtype=torch.float32)
         grasp_success = normalize_success_mask(
             grasp_success,
@@ -210,9 +243,19 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             -translation_axis_world * options.approach_distance,
         )
         translation_sign = -1.0 if options.direction == "pull" else 1.0
+        distance, travel_valid = _sample_joint_motion(
+            options.translation_distance,
+            options.translation_distance_range,
+            context,
+            joint_name=affordance.joint_name,
+            joint_limits=affordance.joint_limits,
+            joint_axis_sign=affordance.joint_axis_sign,
+            motion_sign=int(translation_sign),
+            key=(request.invocation_id or self.skill_id) + ":travel",
+        )
         translated_xpos = translate_pose_world(
             grasp_xpos,
-            translation_axis_world * (translation_sign * options.translation_distance),
+            translation_axis_world * (translation_sign * distance[:, None]),
         )
 
         motion_lengths = self._motion_segment_lengths(
@@ -336,7 +379,14 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         return self.build_plan(
             request,
             context,
-            success=success,
+            success=success & travel_valid,
+            diagnostics=PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                metadata={
+                    "translation_distance": distance.cpu().tolist(),
+                    "affordance_selection": selection_metadata,
+                },
+            ),
             trajectory=TimedTrajectory.from_uniform_step(
                 full,
                 env_ids=context.env_ids,

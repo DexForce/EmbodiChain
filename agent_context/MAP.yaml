@@ -252,13 +252,16 @@ topics:
   status: active
 - id: atomic-actions
   title: Atomic Skills
-  aliases: [atomic action, atomic skill, 原子动作, 原子技能]
+  aliases: [atomic action, atomic skill, 原子动作, 原子技能, affordance expansion, affordance 扩增]
   keywords: [AtomicActionEngine, PlanningContext, ExecutionSession, ExecutionRunner, ActionInvocation,
+    AffordanceSamplingContext, n_affordance_expand,
     RecoveryPolicy, HeldObjectGuardRequest, PhaseEffectGateRequest, articulation_geometry, control-grid retiming]
   paths: [topics/atomic-actions/atomic-actions.md]
   source_of_truth:
   - embodichain/lab/sim/atomic_actions/engine.py
   - embodichain/lab/sim/atomic_actions/core.py
+  - embodichain/lab/sim/atomic_actions/affordance.py
+  - embodichain/lab/sim/atomic_actions/affordance_sampling.py
   - embodichain/lab/sim/atomic_actions/goals.py
   - embodichain/lab/sim/atomic_actions/execution.py
   - embodichain/lab/sim/atomic_actions/verification.py

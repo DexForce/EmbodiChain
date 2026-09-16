@@ -40,6 +40,9 @@ from typing import Protocol, TYPE_CHECKING
 
 import torch
 
+from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+    AffordanceSamplingContext,
+)
 from embodichain.lab.gym.envs.expert_trajectory import JointCommandMode
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
@@ -324,6 +327,7 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         env_ids: torch.Tensor,
         *,
         owner_token: object,
+        sampling_provider: Callable[[], AffordanceSamplingContext | None] | None = None,
     ) -> None:
         if type(scene_provider) is not SharedTickSceneProvider:
             raise TypeError("scene_provider must be exactly SharedTickSceneProvider.")
@@ -346,6 +350,7 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         self._clock = clock
         self._env_ids = env_ids.clone()
         self._owner_token = owner_token
+        self._sampling_provider = sampling_provider
         super().__init__(self._capture)
 
     @property
@@ -401,6 +406,9 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
             scene=scene,
             env_ids=self._env_ids,
             control_dt=self._clock.step_dt,
+            affordance_sampling=(
+                None if self._sampling_provider is None else self._sampling_provider()
+            ),
         )
 
 
@@ -436,6 +444,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         *,
         step_dt: float,
         joint_command_mode: JointCommandMode = "position",
+        sampling_provider: Callable[[], AffordanceSamplingContext | None] | None = None,
         planner_cfg: BasePlannerCfg | None = None,
         motion_generator_factory: MotionGeneratorFactory | None = None,
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
@@ -495,6 +504,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         self._robot_profile_binding = selected_profile_binding
         self._step_dt = _positive_finite(step_dt, field_name="step_dt")
         self._joint_command_mode = joint_command_mode
+        self._sampling_provider = sampling_provider
         self._planner_cfg = selected_planner_cfg
         self._motion_generator_factory = motion_generator_factory
         self._grasp_pose_generators = (
@@ -557,12 +567,25 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             "joint_command_mode",
             "position",
         )
+
+        def sampling_provider() -> AffordanceSamplingContext | None:
+            expansion = getattr(expert_trajectory_cfg, "affordance_expansion", None)
+            if expansion is None or expansion.count == 1:
+                return None
+            return AffordanceSamplingContext(
+                count=expansion.count,
+                seed=getattr(getattr(environment, "cfg", None), "seed", None) or 0,
+                episode_id=getattr(environment, "_demo_episode_index", 0),
+                attempt_id=getattr(environment, "_demo_attempt_id", 0),
+            )
+
         return cls(
             simulation,
             robot,
             registration,
             step_dt=step_dt,
             joint_command_mode=joint_command_mode,
+            sampling_provider=sampling_provider,
             planner_cfg=planner_cfg,
             motion_generator_factory=motion_generator_factory,
             grasp_pose_generators=grasp_pose_generators,
@@ -683,6 +706,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             clock,
             self._env_ids,
             owner_token=self._owner_token,
+            sampling_provider=self._sampling_provider,
         )
 
     def create_effect_evidence_providers(

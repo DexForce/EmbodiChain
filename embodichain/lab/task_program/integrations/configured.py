@@ -1090,6 +1090,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "hand_interp_steps",
                     "approach_distance",
                     "translation_distance",
+                    "translation_distance_range",
                 }
             ),
         )
@@ -1117,6 +1118,12 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 path=f"{path}.translation_distance",
                 minimum=0.0,
                 strict_minimum=True,
+            )
+        if "translation_distance_range" in config:
+            kwargs["translation_distance_range"] = _finite_tuple(
+                config["translation_distance_range"],
+                path=f"{path}.translation_distance_range",
+                expected_length=2,
             )
         return SlideOptions(**kwargs)
     if kind == "hand_over":

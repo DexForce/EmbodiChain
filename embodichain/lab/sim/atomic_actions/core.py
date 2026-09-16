@@ -413,6 +413,24 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         plan = self._plan(prepared, context)
         if not isinstance(plan, ActionPlan):
             raise TypeError("AtomicAction._plan() must return an ActionPlan.")
+        if (
+            context.affordance_sampling is not None
+            and context.affordance_sampling.enabled
+        ):
+            plan = replace(
+                plan,
+                diagnostics=replace(
+                    plan.diagnostics,
+                    metadata={
+                        **plan.diagnostics.metadata,
+                        "affordance_expansion": {
+                            **context.affordance_sampling.metadata(),
+                            "env_ids": context.env_ids.cpu().tolist(),
+                            "invocation_id": request.invocation_id,
+                        },
+                    },
+                ),
+            )
         return replace(
             plan,
             commands=self._authorize_command_targets(prepared, plan.commands),

@@ -32,6 +32,9 @@ from tensordict import TensorDictBase
 from embodichain.compute.trajectory import retime_to_control_grid
 from embodichain.lab.sim.motion.planners import PlanResult
 from embodichain.utils import configclass
+from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+    AffordanceExpansionCfg,
+)
 
 JointCommandMode = Literal["position", "position_velocity"]
 EXPERT_TRAJECTORY_SCHEMA_VERSION = 1
@@ -61,12 +64,23 @@ class ExpertTrajectoryCfg:
 
     Args:
         joint_command_mode: Position-only or position-velocity expert targets.
+        affordance_expansion: Geometry-constrained parallel sampling settings.
     """
 
     joint_command_mode: JointCommandMode = "position"
     """Joint targets emitted and stored by expert trajectory generation."""
 
+    affordance_expansion: AffordanceExpansionCfg = AffordanceExpansionCfg()
+    """Geometry-constrained parallel affordance sampling."""
+
     def __post_init__(self) -> None:
+        if isinstance(self.affordance_expansion, dict):
+            self.affordance_expansion = AffordanceExpansionCfg(
+                **self.affordance_expansion
+            )
+        if not isinstance(self.affordance_expansion, AffordanceExpansionCfg):
+            raise TypeError("affordance_expansion must be AffordanceExpansionCfg.")
+        self.affordance_expansion.__post_init__()
         self.joint_command_mode = _validate_joint_command_mode(self.joint_command_mode)
 
 

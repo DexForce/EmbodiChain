@@ -292,6 +292,65 @@ def split_joint_trajectory_at_pose(
     )
 
 
+def _sample_joint_motion(
+    nominal: float,
+    bounds: tuple[float, float] | None,
+    context: PlanningContext,
+    *,
+    joint_name: str | None,
+    joint_limits: tuple[float, float] | None,
+    joint_axis_sign: int,
+    motion_sign: int,
+    key: str,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Intersect task travel bounds with observed native joint coordinates.
+
+    Expanded scalar motion needs unambiguous joint metadata. If absent, keep
+    the exact nominal motion; grasp-pose diversification remains available.
+    """
+    values = torch.full(context.env_ids.shape, nominal, device=context.env_ids.device)
+    valid = torch.ones_like(context.env_ids, dtype=torch.bool)
+    sampling = context.affordance_sampling
+    if sampling is None or not sampling.enabled or bounds is None:
+        return values, valid
+    states = [
+        state
+        for (_, name), state in context.scene.articulation_joints.items()
+        if name == joint_name
+    ]
+    if joint_name is None or joint_limits is None or len(states) != 1:
+        raise ValueError(
+            "Randomized joint travel requires joint_name, joint_limits and one unambiguous live joint observation."
+        )
+    state = states[0]
+    position = state.position.to(values).reshape(-1)
+    if position.numel() == 1:
+        position = position.expand_as(values)
+    if position.shape != values.shape:
+        raise ValueError("Joint observation batch must match the sampling batch.")
+    lower, upper = joint_limits
+    coordinate_sign = joint_axis_sign * motion_sign
+    first = (lower - position) * coordinate_sign
+    second = (upper - position) * coordinate_sign
+    minimum = torch.minimum(first, second).clamp_min(bounds[0])
+    maximum = torch.maximum(first, second).clamp_max(bounds[1])
+    valid = (
+        torch.isfinite(position)
+        & (position >= lower)
+        & (position <= upper)
+        & (minimum <= maximum)
+    )
+    if state.valid_mask is not None:
+        valid &= state.valid_mask.to(device=values.device).reshape(-1)
+    fractions = sampling.sample_range(0.0, (0.0, 1.0), env_ids=context.env_ids, key=key)
+    randomized = minimum + fractions * (maximum - minimum)
+    nominal_rows = context.env_ids.remainder(sampling.count) == 0
+    values = torch.where(nominal_rows, values, randomized)
+    valid &= (values >= minimum) & (values <= maximum) & torch.isfinite(values)
+    # Invalid rows hold later in build_plan; use finite intermediates for IK.
+    return torch.where(valid, values, torch.full_like(values, nominal)), valid
+
+
 __all__ = [
     "arm_qpos_from_state",
     "assemble_full_robot_trajectory",

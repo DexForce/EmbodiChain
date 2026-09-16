@@ -30,6 +30,28 @@ __all__ = [
 ]
 
 
+def _refresh_link_contact_material(
+    entity: object, link_name: str, *, is_spawn_bound: bool
+) -> None:
+    """Temporarily force a Default-backend shape-material rebind without stepping.
+
+    Spawn has no material-only public setter. Keep this temporary native escape
+    in the backend adapter: its full physical-attribute setter also touches
+    inertia and invalidates GPU articulation buffers. Delete this workaround
+    with the opt-in startup event once DexSim fixes initial material binding.
+    """
+    native = entity._physics_binding if is_spawn_bound else entity
+    body = native.get_physical_body(link_name)
+    if body is None:
+        raise ValueError(f"Link {link_name!r} has no native physical body.")
+    friction = body.get_dynamic_friction()
+    try:
+        # An unchanged write is skipped by the native material cache.
+        body.set_dynamic_friction(friction + 0.001)
+    finally:
+        body.set_dynamic_friction(friction)
+
+
 def get_link_properties(entity: object, link_name: str, *, is_newton: bool) -> Any:
     """Read a link's physical properties through the active backend API."""
     if is_newton:

@@ -73,6 +73,7 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     translate_pose_world,
 )
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
+from embodichain.lab.sim.atomic_actions.affordance_sampling import _validate_range
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -85,7 +86,25 @@ class OpenDoorGoal(ObjectActionGoal):
     open_fraction: float | torch.Tensor
     """Desired hinge position normalized from its closed to open legal endpoint."""
 
+    open_fraction_range: tuple[float, float] | None = None
+    """Optional task-accepted absolute opening interval in [0, 1]."""
+
     def __post_init__(self) -> None:
+        if self.open_fraction_range is not None:
+            bounds = _validate_range(
+                self.open_fraction_range, name="open_fraction_range"
+            )
+            if not 0.0 <= bounds[0] <= bounds[1] <= 1.0:
+                raise ValueError("open_fraction_range must lie in [0, 1].")
+            nominal = torch.as_tensor(self.open_fraction)
+            if (
+                not torch.isfinite(nominal).all()
+                or ((nominal < bounds[0]) | (nominal > bounds[1])).any()
+            ):
+                raise ValueError(
+                    "open_fraction_range must contain the nominal open_fraction."
+                )
+            object.__setattr__(self, "open_fraction_range", bounds)
         ObjectActionGoal.__post_init__(self)
         validate_pose_goal(self.target_pose, "target_pose", allow_waypoints=False)
         if isinstance(self.open_fraction, bool) or not isinstance(
@@ -208,9 +227,46 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         )
         if hinge_state is None:
             return self.failed_plan(request, context, message=hinge_error)
+        sampled_fraction = target.open_fraction
+        sampling = context.affordance_sampling
+        if (
+            sampling is not None
+            and sampling.enabled
+            and target.open_fraction_range is not None
+            and affordance.joint_limits is not None
+        ):
+            lower, upper = affordance.joint_limits
+            closed, opened = (
+                (lower, upper) if affordance.opening_direction > 0 else (upper, lower)
+            )
+            current = (hinge_state.position.reshape(-1) - closed) / (opened - closed)
+            current = current.expand(context.batch_size)
+            accepted_lower, accepted_upper = target.open_fraction_range
+            minimum = current.clamp_min(accepted_lower)
+            fractions = sampling.sample_range(
+                0.0,
+                (0.0, 1.0),
+                env_ids=context.env_ids,
+                key=(request.invocation_id or self.skill_id) + ":opening",
+            )
+            nominal = torch.as_tensor(
+                target.open_fraction, device=self.device, dtype=torch.float32
+            ).expand(context.batch_size)
+            sampled_fraction = torch.where(
+                context.env_ids.remainder(sampling.count) == 0,
+                nominal,
+                minimum + fractions * (accepted_upper - minimum),
+            )
+            # An empty forward-opening interval is a semantic row failure,
+            # never permission to close the door or exceed the task interval.
+            sampled_fraction = torch.where(
+                minimum <= accepted_upper,
+                sampled_fraction,
+                torch.full_like(sampled_fraction, -1.0),
+            )
         hinge_rotation, active, already_open, semantic_valid = (
             self._resolve_hinge_rotation(
-                target.open_fraction,
+                sampled_fraction,
                 hinge_state.position,
                 hinge_state.valid_mask,
                 affordance.joint_limits,
@@ -259,12 +315,27 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         grasp_generator = self.planning_services.grasp_pose_generator(
             grasp_target.target_id
         )
-        grasp_success, grasp_xpos, _ = grasp_generator.get_best_grasp_poses(
-            mesh_vertices=affordance.mesh_vertices,
-            mesh_triangles=affordance.mesh_triangles,
-            obj_poses=link_pose,
-            approach_direction=approach_direction_world,
-        )
+        selection_metadata: dict[str, object] = {}
+        if (
+            context.affordance_sampling is not None
+            and context.affordance_sampling.enabled
+        ):
+            candidates = affordance.get_grasp_candidates(
+                grasp_generator, link_pose, approach_direction_world
+            )
+            grasp_success, grasp_xpos, selection_metadata = candidates.select(
+                context.affordance_sampling,
+                env_ids=context.env_ids,
+                key=(request.invocation_id or self.skill_id) + ":grasp",
+                reference_poses=link_pose,
+            )
+        else:
+            grasp_success, grasp_xpos, _ = grasp_generator.get_best_grasp_poses(
+                mesh_vertices=affordance.mesh_vertices,
+                mesh_triangles=affordance.mesh_triangles,
+                obj_poses=link_pose,
+                approach_direction=approach_direction_world,
+            )
         grasp_xpos = grasp_xpos.to(device=self.device, dtype=torch.float32)
         grasp_success = normalize_success_mask(
             grasp_success,
@@ -406,7 +477,14 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
                 step_dt=interpolation_dt,
             ),
             expected_effects=StateDelta(),
-            diagnostics=self._semantic_diagnostics(semantic_valid),
+            diagnostics=PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                messages=self._semantic_diagnostics(semantic_valid).messages,
+                metadata={
+                    "open_fraction": torch.as_tensor(sampled_fraction).cpu().tolist(),
+                    "affordance_selection": selection_metadata,
+                },
+            ),
             segment_lengths=segment_lengths,
             scene_dependency_end_segment=(
                 "reach" if self._scene_dependencies(request) else None

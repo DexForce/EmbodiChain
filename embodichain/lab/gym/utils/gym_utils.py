@@ -633,7 +633,24 @@ def config_to_cfg(
         env_cfg.task_program = task_program
 
     env_cfg.max_episode_steps = config.get("max_episode_steps", 300)
-    env_cfg.num_envs = config.get("num_envs", 1)
+    expansion_count = (
+        config.get("env", {})
+        .get("expert_trajectory", {})
+        .get("affordance_expansion", {})
+        .get("count", 1)
+    )
+    from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+        AffordanceExpansionCfg,
+    )
+
+    AffordanceExpansionCfg(count=expansion_count)
+    if expansion_count > 1 and env_cfg.task_program is None:
+        raise ValueError(
+            "run-env affordance expansion requires a Task Program deployment; direct Atomic Skill callers can supply AffordanceSamplingContext explicitly."
+        )
+    env_cfg.num_envs = (
+        expansion_count if expansion_count > 1 else config.get("num_envs", 1)
+    )
     env_cfg.seed = config.get("seed", None)
 
     render_config = deepcopy(config.get("render_cfg", {}))
@@ -1104,6 +1121,12 @@ def add_env_launcher_args_to_parser(
         action="store_true",
     )
     parser.add_argument(
+        "--n_affordance_expand",
+        type=int,
+        default=None,
+        help="Total geometry-constrained affordance branches and parallel environments; 1 disables expansion.",
+    )
+    parser.add_argument(
         "--max_episodes",
         help="Override the max_episodes value from the gym config.",
         default=None,
@@ -1157,6 +1180,37 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     configured_physics = _declared_physics_backend(merged_config)
     if args.num_envs is not None:
         merged_config["num_envs"] = args.num_envs
+    expansion_count = getattr(args, "n_affordance_expand", None)
+    if expansion_count is not None:
+        from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+            AffordanceExpansionCfg,
+        )
+
+        AffordanceExpansionCfg(count=expansion_count)
+        if (
+            expansion_count > 1
+            and args.num_envs is not None
+            and args.num_envs != expansion_count
+        ):
+            raise ValueError(
+                "--num_envs must equal --n_affordance_expand when expansion is enabled."
+            )
+        expert = merged_config.setdefault("env", {}).setdefault("expert_trajectory", {})
+        expert["affordance_expansion"] = {"count": expansion_count}
+        if expansion_count > 1:
+            merged_config["num_envs"] = expansion_count
+    configured_expansion = (
+        merged_config.get("env", {})
+        .get("expert_trajectory", {})
+        .get("affordance_expansion", {})
+        .get("count", 1)
+    )
+    if configured_expansion > 1:
+        if args.num_envs is not None and args.num_envs != configured_expansion:
+            raise ValueError(
+                "--num_envs must match the configured affordance expansion count."
+            )
+        merged_config["num_envs"] = configured_expansion
     if getattr(args, "seed", None) is not None:
         merged_config["seed"] = args.seed
     if args.device is not None:

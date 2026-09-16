@@ -38,6 +38,12 @@ file-owned values. Explicit values override runtime settings (`--headless` / `--
 select either mode); `--physics` can only confirm the file-owned backend. An omitted seed preserves the config seed.
 Standalone examples use `add_sim_args_to_parser()` and opt into seed separately.
 
+`--n_affordance_expand N` enables N total geometry-constrained branches in a
+configured Task Program and sets the runtime environment count. Count one
+preserves existing behavior. `--num_envs`, when explicit, must agree.
+See [affordance expansion](../atomic-actions/affordance-expansion.md) for sampling
+constraints, seed ownership, partial-row acceptance and configuration.
+
 ## Timing contract
 
 `BaseEnv._configure_timing()` resolves `EnvCfg` before constructing the scene:

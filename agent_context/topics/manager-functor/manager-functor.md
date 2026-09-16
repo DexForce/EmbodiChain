@@ -102,6 +102,13 @@ Event and observation calls have per-functor profiling through
 `ManagerBase._call_functor()`; reward/action/dataset calls do not yet use that
 helper. See [profiling](../env-framework/profiling.md).
 
+The Default `open_drawer/env.yaml` opts into the startup event
+`refresh_articulation_contact_material` for `drawer.large_handle_bar`. It
+temporarily changes and restores native dynamic friction before stepping to
+work around first-environment contact loss. The backend helper updates only
+materials; CPU and Newton skip the event. Remove the event configuration and
+helper when DexSim's underlying material initialization issue is fixed.
+
 ## Change sites and validation
 
 Change the selected manager's dispatch for scheduling changes; change its

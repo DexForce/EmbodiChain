@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from .affordance_sampling import AffordanceSamplingContext
+
 from embodichain.utils import configclass
 
 from .bindings import JointPositionTarget, RuntimeEndpointTarget
@@ -326,6 +328,7 @@ class SimulationExecutionAdapter:
         scene_supplier: Optional callback for versioned scene observations.
             It is mutually exclusive with ``scene_provider``.
         initial_time: Initial elapsed simulation time in seconds.
+        affordance_sampling: Optional immutable stream preserved across observations.
     """
 
     transport_id = JointPositionTarget.TRANSPORT_ID
@@ -342,6 +345,7 @@ class SimulationExecutionAdapter:
         scene_provider: SceneProvider | None = None,
         scene_supplier: SceneSnapshotSupplier | None = None,
         initial_time: float = 0.0,
+        affordance_sampling: AffordanceSamplingContext | None = None,
     ) -> None:
         if not math.isfinite(initial_time) or initial_time < 0.0:
             raise ValueError("initial_time must be finite and non-negative.")
@@ -373,6 +377,13 @@ class SimulationExecutionAdapter:
         if torch.unique(env_ids).numel() != env_ids.numel():
             raise ValueError("env_ids must be unique.")
 
+        if affordance_sampling is not None and not isinstance(
+            affordance_sampling, AffordanceSamplingContext
+        ):
+            raise TypeError(
+                "affordance_sampling must be AffordanceSamplingContext or None."
+            )
+        self.affordance_sampling = affordance_sampling
         self.simulation = simulation
         self.robot = robot
         self.physics_dt = resolved_physics_dt
@@ -468,6 +479,7 @@ class SimulationExecutionAdapter:
             scene=scene,
             env_ids=self.env_ids,
             control_dt=self.control_dt,
+            affordance_sampling=self.affordance_sampling,
         )
 
     def send(

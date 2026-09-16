@@ -237,7 +237,7 @@ def test_initialize_episode_saves_row_with_accepted_segment_fragment() -> None:
 
 
 def test_initialize_episode_commits_only_explicit_vector_rows() -> None:
-    """An explicit commit subset persists only requested dataset rows."""
+    """An explicit commit subset persists the same rows in every recorder."""
     env, manager = make_env_for_episode_selection(
         save_failed_episodes=False,
         successful_env_ids=[],
@@ -245,6 +245,7 @@ def test_initialize_episode_commits_only_explicit_vector_rows() -> None:
     recorder = record_camera_data.__new__(record_camera_data)
     recorder._frames = [object()]
     recorder.save_and_clear = MagicMock()
+    recorder.discard_and_clear = MagicMock()
     env.cfg.events = object()
     env.event_manager = SimpleNamespace(
         _mode_functor_cfgs={"interval": [SimpleNamespace(func=recorder)]},
@@ -263,9 +264,13 @@ def test_initialize_episode_commits_only_explicit_vector_rows() -> None:
     )
 
     assert torch.equal(manager.saved_env_ids, torch.tensor([1]))
-    recorder.save_and_clear.assert_not_called()
-    assert recorder._frames == []
-    env._save_trajectory_for_env.assert_not_called()
+    assert torch.equal(
+        recorder.save_and_clear.call_args.kwargs["env_ids"], torch.tensor([1])
+    )
+    assert torch.equal(
+        recorder.discard_and_clear.call_args.kwargs["env_ids"], torch.tensor([0, 2])
+    )
+    env._save_trajectory_for_env.assert_called_once_with(1)
     assert env._traj_steps.tolist() == [0, 0, 0]
 
 
