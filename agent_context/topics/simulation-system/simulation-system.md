@@ -394,7 +394,7 @@ The DexSim descriptor merge must preserve this field through source overlays.
 | Robot-specific configuration | `robots/` | `robot-system` |
 | Inverse kinematics | `motion/solvers/` | `ik-solvers` |
 | Trajectory and motion generation | `motion/planners/` | `motion-planning` |
-| Trajectory candidates, augmentation, coverage, generation bookkeeping | `motion/expansion/` | `motion-planning` |
+| Trajectory candidates, augmentation, coverage, manipulability bands, generation bookkeeping | `motion/expansion/` | `motion-planning` |
 | Typed action planning and execution | `atomic_actions/` | `atomic-actions` |
 | Task Program Semantic Calls and robot profiles | `embodichain/lab/task_program/semantics/` | `task-programs` |
 | Reachability analysis and runtime workspace queries | `motion/workspace/` | `robot-workspace` |
