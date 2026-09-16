@@ -719,6 +719,29 @@ class TestSequencePreviewPlayback:
         assert update.positions.shape == (2, 3)
         assert driver.overlays().trajectories == ()
 
+    def test_suppression_hides_the_preview_robot(self) -> None:
+        driver, session, _ = _make_driver()
+        driver.register()
+        session.recompile(4)
+
+        driver.set_suppressed(True)
+
+        assert driver.is_suppressed
+        assert not driver.preview_update().visible
+
+    def test_suppression_is_reversible_and_leaves_the_cursor_alone(self) -> None:
+        """Restoring the preview resumes at the waypoint it was hidden on."""
+        driver, session, _ = _make_driver()
+        driver.register()
+        session.recompile(4)
+        driver.seek(2)
+
+        driver.set_suppressed(True)
+        driver.set_suppressed(False)
+
+        assert not driver.is_suppressed
+        assert driver.cursor == 2
+
 
 # ----------------------------------------------------------------------------
 # Simulation-backed behavior
@@ -853,6 +876,24 @@ class TestSequencePreviewWithSimulation:
             final_update.positions[-1],
             atol=FK_POSITION_TOLERANCE_M,
         )
+
+    def test_suppression_hides_the_robot_but_keeps_the_polyline(self) -> None:
+        """Execution hides the preview arm without dropping the planned path."""
+        session, preview, _ = self._make_preview()
+        session.add_card(
+            "move_end_effector",
+            card_id="move",
+            params={"position": MEE_HOVER_POSITION},
+        )
+        assert session.compile(), [card.failure_message for card in session.cards]
+        visible_points = preview.overlays().trajectories[0].points
+
+        preview.set_suppressed(True)
+
+        assert not preview.preview_update().visible
+        suppressed_trajectories = preview.overlays().trajectories
+        assert len(suppressed_trajectories) == 1
+        np.testing.assert_array_equal(suppressed_trajectories[0].points, visible_points)
 
     def test_captured_frame_publishes_translucent_preview_nodes(self) -> None:
         session, preview, exporter = self._make_preview()

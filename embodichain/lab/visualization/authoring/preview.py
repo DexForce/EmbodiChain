@@ -199,6 +199,7 @@ class SequencePreview:
         self.cfg = cfg if cfg is not None else PreviewPlaybackCfg()
         self._cursor = 0
         self._playing = False
+        self._suppressed = False
         self._trajectory_key: int | None = None
         self._trajectory_cache: _TrajectoryCache | None = None
         self._fk_kwargs: dict[str, object] | None = None
@@ -283,6 +284,23 @@ class SequencePreview:
         """Whether :meth:`advance` moves the cursor."""
         self.sync()
         return self._playing
+
+    @property
+    def is_suppressed(self) -> bool:
+        """Whether :meth:`preview_update` hides the translucent robot."""
+        return self._suppressed
+
+    def set_suppressed(self, suppressed: bool) -> None:
+        """Hide or restore the translucent robot without moving the cursor.
+
+        Suppression reaches :meth:`preview_update` only. :meth:`overlays`
+        keeps returning the compiled path, so a caller that hides the preview
+        robot while the real one executes still shows the planned polyline.
+
+        Args:
+            suppressed: Whether preview frames hide the translucent robot.
+        """
+        self._suppressed = bool(suppressed)
 
     def sync(self) -> bool:
         """Reconcile the cursor with the session's current compilation.
@@ -417,7 +435,8 @@ class SequencePreview:
 
         Returns:
             An update holding detached CPU poses. The update hides the preview
-            nodes when the sequence has no successful compilation.
+            nodes when the preview is suppressed or the sequence has no
+            successful compilation.
 
         Raises:
             RuntimeError: If the preview group is not part of the exporter's
@@ -425,7 +444,7 @@ class SequencePreview:
         """
         link_names = self._preview_link_names()
         self.sync()
-        if self.length == 0 or not link_names:
+        if self._suppressed or self.length == 0 or not link_names:
             return self._hidden_update(len(link_names))
         qpos = self._session.preview_qpos(self._cursor)
         return self.preview_update_for(qpos[self._env_row(qpos)])

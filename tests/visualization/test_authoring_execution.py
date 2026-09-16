@@ -369,6 +369,31 @@ def _bridge(**kwargs: object) -> tuple[AuthoringBridge, _CompiledSession, _Runti
     return bridge, session, runtime
 
 
+class _Preview:
+    """Playback surface the bridge drives, recording suppression changes."""
+
+    def __init__(self, length: int = WAYPOINT_COUNT) -> None:
+        self.length = length
+        self.is_playing = True
+        self.suppressed = False
+        self.suppression_history: list[bool] = []
+        self.cursor = 0
+
+    def set_suppressed(self, suppressed: bool) -> None:
+        self.suppressed = bool(suppressed)
+        self.suppression_history.append(self.suppressed)
+
+    def pause(self) -> None:
+        self.is_playing = False
+
+    def seek(self, index: int) -> int:
+        self.cursor = index
+        return index
+
+    def state(self) -> None:
+        return None
+
+
 class TestBridgeStepwiseExecution:
     """``ExecuteSequence`` no longer has to block the host loop."""
 
@@ -454,3 +479,66 @@ class TestBridgeStepwiseExecution:
     def test_rejects_a_non_positive_step_budget(self) -> None:
         with pytest.raises(ValueError, match="execution_steps_per_update"):
             _bridge(execution_steps_per_update=0)
+
+
+class TestBridgePreviewSuppression:
+    """The translucent preview steps aside while the real robot executes."""
+
+    def test_execution_hides_the_preview_robot(self) -> None:
+        preview = _Preview()
+        bridge, _, runtime = _bridge(stepwise_execution=True, preview=preview)
+        runtime.queue(ExecuteSequence())
+
+        bridge.update()
+
+        assert bridge.execution_active
+        assert preview.suppressed
+
+    def test_execution_pauses_the_hidden_preview(self) -> None:
+        """A preview nobody can see must not keep reporting that it plays."""
+        preview = _Preview()
+        bridge, _, runtime = _bridge(stepwise_execution=True, preview=preview)
+        assert preview.is_playing
+        runtime.queue(ExecuteSequence())
+
+        bridge.update()
+
+        assert not preview.is_playing
+
+    def test_finishing_restores_the_preview_robot(self) -> None:
+        preview = _Preview()
+        bridge, _, runtime = _bridge(
+            stepwise_execution=True,
+            execution_steps_per_update=WAYPOINT_COUNT,
+            preview=preview,
+        )
+        runtime.queue(ExecuteSequence())
+
+        while True:
+            bridge.update()
+            if not bridge.execution_active:
+                break
+
+        assert not preview.suppressed
+        # It really was hidden for the run rather than never suppressed at all.
+        assert True in preview.suppression_history
+
+    def test_cancelling_restores_the_preview_robot(self) -> None:
+        """Cancel restores immediately; a host may capture before the next update."""
+        preview = _Preview()
+        bridge, _, runtime = _bridge(stepwise_execution=True, preview=preview)
+        runtime.queue(ExecuteSequence())
+        bridge.update()
+        assert preview.suppressed
+
+        bridge.cancel_execution()
+
+        assert not preview.suppressed
+
+    def test_an_idle_bridge_leaves_the_preview_visible(self) -> None:
+        preview = _Preview()
+        bridge, _, _ = _bridge(stepwise_execution=True, preview=preview)
+
+        bridge.update()
+
+        assert not preview.suppressed

@@ -202,6 +202,9 @@ class AuthoringBridge:
             return
         self._execution = None
         execution.close()
+        # Restore the preview now: a host that cancels and captures without a
+        # further update() would otherwise drop the preview for one frame.
+        self._sync_preview_suppression()
         self._status = "Execution cancelled."
 
     # ------------------------------------------------------------------
@@ -244,6 +247,7 @@ class AuthoringBridge:
             self._apply(command.value)
             applied = True
         self._advance_execution(keep_status=applied)
+        self._sync_preview_suppression()
         self._park_preview_on_selection()
         return self.publish()
 
@@ -400,6 +404,32 @@ class AuthoringBridge:
         if isinstance(command, ExecuteSequence):
             return "Execution finished."
         return f"Applied {type(command).__name__}."
+
+    def _sync_preview_suppression(self) -> None:
+        """Hide the translucent preview while a host-driven execution runs.
+
+        The preview robot answers "where would this card leave the arm". Once
+        the sequence is executing, the solid robot answers that directly, and a
+        second arm replaying the same waypoints on its own playback cursor only
+        competes with it: both trace the compiled path at once, out of phase.
+        Hiding the preview for the duration keeps the plan and its execution
+        separated in time.
+
+        Only the preview robot is hidden. The compiled polyline is an overlay,
+        so the planned path stays on screen for the real robot to follow.
+
+        A hidden preview is also paused. Left running it would advance a cursor
+        nobody can see and leave the panel reporting ``playing`` beside an
+        invisible robot. Playback stays paused afterwards, which hands the
+        preview back to the idle parking rule rather than to an autoplay loop.
+        """
+        preview = self._preview
+        if preview is None:
+            return
+        executing = self.execution_active
+        preview.set_suppressed(executing)
+        if executing:
+            preview.pause()
 
     def _park_preview_on_selection(self) -> None:
         """Rest the idle preview on the selected card's final waypoint.

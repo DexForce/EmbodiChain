@@ -98,6 +98,11 @@ polyline traces the compiled end-effector path.
 joint positions and physics advances between waypoints, so objects are grasped,
 moved, and released. It cannot be undone; rebuild the scene to start over.
 
+The translucent robot hides for the duration, so the plan and its execution
+never animate side by side on separate cursors; the orange polyline stays,
+leaving the planned path visible for the real robot to follow. The preview
+returns, on the waypoint it was hidden on, once the run ends or is cancelled.
+
 ## Supported skills and parameters
 
 The compiler currently accepts three Atomic Skills.

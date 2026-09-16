@@ -1009,6 +1009,9 @@ class _Preview:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, int]] = []
+        # Suppression is driven every update, so it stays out of ``calls``:
+        # recording it there would bury the playback commands under noise.
+        self.suppressed = False
         self.playback = PreviewPlaybackState(
             group_id="preview",
             length=PREVIEW_LENGTH,
@@ -1028,6 +1031,12 @@ class _Preview:
 
     def state(self) -> PreviewPlaybackState:
         return self.playback
+
+    def set_suppressed(self, suppressed: bool) -> None:
+        self.suppressed = bool(suppressed)
+
+    def pause(self) -> None:
+        self.calls.append(("pause", 0))
 
     def toggle(self) -> bool:
         self.calls.append(("toggle", 0))

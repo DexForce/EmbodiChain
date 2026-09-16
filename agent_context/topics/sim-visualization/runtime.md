@@ -183,6 +183,12 @@ pose, so the preview overlaps the rendered robot exactly at the current
 configuration and absorbs fixed chain-versus-model offsets. It performs two
 forward-kinematics evaluations per frame and never writes joint state.
 
+`set_suppressed()` hides the translucent robot without moving the cursor, and
+reaches `preview_update()` only: `overlays()` still returns the compiled path.
+`AuthoringBridge` drives it from `execution_active`, so the preview arm steps
+aside while the real one executes instead of replaying the same waypoints
+beside it on an independent cursor, and the planned polyline stays on screen.
+
 ## Custom Panels
 
 `VisualizationRuntime.register_panel(PanelSpec(...))` adds an
