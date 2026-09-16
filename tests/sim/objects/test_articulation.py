@@ -44,10 +44,86 @@ from embodichain.data import get_data_path
 from dexsim.types import ActorType, DriveType
 
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
+USD_DRAWER_PATH = "DrawerUSD/drawer_001.usdc"
 NUM_ARENAS = 10
 NEWTON_EFFORT_TARGET_MODE = 4
 DRIVE_TEST_STIFFNESS = 12.0
 DRIVE_TEST_DAMPING = 4.0
+
+
+@pytest.mark.parametrize("physics", ["default", "newton"])
+def test_usdc_drawer_supports_named_fk_and_affordance_geometry(physics: str) -> None:
+    """The packaged drawer can sample top-link geometry without a URDF chain."""
+    from embodichain.lab.sim.atomic_actions.articulation_geometry import (
+        sample_initial_articulation_geometry,
+    )
+
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            num_envs=1,
+            physics_cfg=physics_cfg_for_backend(physics),
+        )
+    )
+    drawer = None
+    try:
+        drawer = sim.add_articulation(
+            ArticulationCfg(
+                uid="usd_drawer",
+                fpath=get_data_path(USD_DRAWER_PATH),
+                init_pos=(0.0, 0.0, 0.8),
+                asset_physics_mode="overlay",
+                joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
+            )
+        )
+        sim.prepare()
+        assert drawer.pk_chain is not None
+        assert drawer.dof == 3
+        top_joint = drawer.get_parent_joint_chain("top_drawer")[0]
+        assert top_joint.name == "top_slide"
+        assert top_joint.joint_type == "prismatic"
+        assert top_joint.joint_limits == pytest.approx((-0.26, 0.0))
+
+        geometry = sample_initial_articulation_geometry(
+            drawer,
+            "top_drawer",
+            initial_qpos=drawer.cfg.init_qpos,
+            initial_qpos_joint_names=drawer.joint_names,
+            body_scale=drawer.cfg.body_scale,
+            articulation_point_count=128,
+            target_point_count=32,
+        )
+        assert geometry.target_link_point_cloud.shape == (32, 3)
+        assert geometry.articulation_point_cloud.shape == (128, 3)
+        assert geometry.non_target_articulation_point_cloud.shape == (128, 3)
+        torch.testing.assert_close(
+            geometry.prismatic_joint_axis, torch.tensor([0.0, 1.0, 0.0])
+        )
+
+        # Move only the top joint halfway open. Physics publishes link poses
+        # after update; FK itself must evaluate a named state without mutation.
+        top_joint_id = drawer.joint_names.index("top_slide")
+        drawer.set_qpos(torch.tensor([[-0.13]]), joint_ids=[top_joint_id], target=False)
+        sim.update()
+        measured_qpos = drawer.get_qpos().clone()
+        assert measured_qpos[0, top_joint_id] < -0.1
+        fk = drawer.compute_fk(
+            measured_qpos,
+            link_names=drawer.link_names,
+            qpos_joint_names=drawer.joint_names,
+        )
+        root = drawer.get_link_pose("cabinet", to_matrix=True)
+        for index, link_name in enumerate(drawer.link_names):
+            observed = torch.linalg.inv(root) @ drawer.get_link_pose(
+                link_name, to_matrix=True
+            )
+            torch.testing.assert_close(fk[:, index], observed, atol=1e-5, rtol=1e-5)
+        torch.testing.assert_close(drawer.get_qpos(), measured_qpos)
+    finally:
+        sim.destroy(exit_process=False)
+        del drawer
+        SimulationManager.flush_cleanup_queue()
 
 
 def _assert_newton_collision_groups(entity: Any, env_index: int) -> None:

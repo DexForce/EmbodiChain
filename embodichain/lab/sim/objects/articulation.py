@@ -74,6 +74,7 @@ from embodichain.lab.sim.objects.backends.articulation_physics import (
 from embodichain.lab.sim.objects.backends.articulation_topology import (
     get_joint_descriptor,
 )
+from embodichain.lab.sim.objects.backends._kinematics import _build_pk_chain
 from embodichain.lab.sim.objects.backends.articulation_state import (
     get_state_joint_names,
     map_source_qpos_to_state_order,
@@ -847,16 +848,13 @@ class Articulation(BatchEntity):
 
         is_usd_source = str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc"))
         self.pk_chain = None
-        if self.cfg.build_pk_chain and not is_usd_source:
-            self.pk_chain = create_pk_chain(
-                urdf_path=self.cfg.fpath, device=self.device
-            )
-        elif self.cfg.build_pk_chain:
-            logger.log_warning(
-                f"Articulation {self.uid!r} uses USD for simulation; skipping "
-                "the URDF-only pk_chain. Configure a solver with its matching "
-                "URDF when kinematics are required."
-            )
+        if self.cfg.build_pk_chain:
+            if is_usd_source:
+                self.pk_chain = _build_pk_chain(entities[0], device=self.device)
+            else:
+                self.pk_chain = create_pk_chain(
+                    urdf_path=self.cfg.fpath, device=self.device
+                )
 
         self._visual_material = [{} for _ in range(len(entities))]
         self.is_shared_visual_material = False
@@ -2972,7 +2970,7 @@ class Articulation(BatchEntity):
         qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
 
         # Default root and end link names if not provided
-        frame_names = self.pk_chain.get_frame_names()
+        frame_names = self.pk_chain.get_frame_names(exclude_fixed=False)
         if root_link_name is None:
             root_link_name = frame_names[0]  # Default to the first frame
         if end_link_name is None:
@@ -2980,7 +2978,7 @@ class Articulation(BatchEntity):
 
         # Create pk_serial_chain
         pk_serial_chain = create_pk_serial_chain(
-            urdf_path=self.cfg.fpath,
+            chain=self.pk_chain,
             root_link_name=root_link_name,
             end_link_name=end_link_name,
             device=self.device,

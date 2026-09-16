@@ -14,11 +14,16 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Load a passive articulation and open or close it with joint forces."""
+"""Open and close a passive drawer with joint forces.
+
+The default demonstrates a URDF drawer. Pass ``--asset usd`` to load
+``DrawerUSD/drawer_001.usdc`` and move only its top drawer.
+"""
 
 from __future__ import annotations
 
 import argparse
+from typing import Literal
 from embodichain.cli.sim import add_sim_args_to_parser
 
 
@@ -28,6 +33,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Load an articulation with its default passive joint drive"
     )
     add_sim_args_to_parser(parser)
+    parser.add_argument(
+        "--asset",
+        choices=("urdf", "usd"),
+        default="urdf",
+        help="Drawer asset to demonstrate; usd moves the top drawer of DrawerUSD.",
+    )
     parser.add_argument(
         "--max-steps",
         type=int,
@@ -61,6 +72,7 @@ from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.visualization import visualization_cfg_from_args
 
 DRAWER_ASSET = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
+USD_DRAWER_ASSET = "DrawerUSD/drawer_001.usdc"
 DRAWER_USER_QPOS_LIMITS = {"slide_rails": [0.0, 0.18]}
 DRAWER_JOINT_FORCE_LIMIT = 1.0
 DRAWER_POSITION_GAIN = 20.0
@@ -69,29 +81,37 @@ JOINT_POSITION_TOLERANCE = 1.0e-3
 JOINT_VELOCITY_TOLERANCE = 1.0e-2
 
 
-def create_articulation(sim: SimulationManager) -> Articulation:
+def create_articulation(
+    sim: SimulationManager, asset: Literal["urdf", "usd"] = "urdf"
+) -> Articulation:
     """Load a drawer articulation with the passive default drive.
 
     Args:
         sim: Simulation manager that owns the scene.
+        asset: URDF drawer or the USD cabinet with three drawers.
 
     Returns:
         The loaded drawer articulation.
 
     Raises:
+        ValueError: If the asset selector is unknown.
         RuntimeError: If the constructed backend joints are not passive.
     """
-    # Resolve the drawer URDF and explicitly request the passive drive used by
+    if asset not in ("urdf", "usd"):
+        raise ValueError(f"Unknown drawer asset: {asset!r}.")
+    is_usd = asset == "usd"
+    # Resolve the selected asset and explicitly request the passive drive used by
     # this tutorial while retaining all unconfigured asset properties.
     articulation_cfg = ArticulationCfg(
         uid="drawer",
-        fpath=get_data_path(DRAWER_ASSET),
+        fpath=get_data_path(USD_DRAWER_ASSET if is_usd else DRAWER_ASSET),
         asset_physics_mode="overlay",
-        init_pos=(0.0, 0.0, 0.05),
+        # The USD cabinet extends 0.31 m below its root; lift it clear of the ground.
+        init_pos=(0.0, 0.0, 0.8 if is_usd else 0.05),
         root_props=ArticulationRootPropertiesCfg(fixed_base=True),
         joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
-        # The asset limit is [0.0, 0.2]; keep 90% of its travel range.
-        qpos_limits=DRAWER_USER_QPOS_LIMITS,
+        # Keep 90% of the URDF travel; retain the USD's named per-drawer limits.
+        qpos_limits=None if is_usd else DRAWER_USER_QPOS_LIMITS,
         # Newton currently has no body-level damping setting. Remove the
         # Default backend's damping so both passive models use zero damping.
         attrs=RigidBodyPhysicsCfg(
@@ -133,30 +153,36 @@ def create_articulation(sim: SimulationManager) -> Articulation:
 def apply_drawer_force(
     articulation: Articulation,
     target_qpos: torch.Tensor,
+    joint_ids: list[int] | None = None,
 ) -> None:
     """Apply effort-limited PD control toward a drawer position.
 
     Args:
         articulation: Drawer articulation receiving the force.
-        target_qpos: Target joint positions for every environment and joint.
+        target_qpos: Target positions for every environment and selected joint.
+        joint_ids: Joint indices to control; None selects all joints.
     """
-    position_error = target_qpos - articulation.get_qpos()
-    joint_forces = (
-        DRAWER_POSITION_GAIN * position_error
-        - DRAWER_VELOCITY_GAIN * articulation.get_qvel()
-    )
+    qpos = articulation.get_qpos()
+    qvel = articulation.get_qvel()
+    if joint_ids is not None:
+        qpos, qvel = qpos[:, joint_ids], qvel[:, joint_ids]
+    position_error = target_qpos - qpos
+    joint_forces = DRAWER_POSITION_GAIN * position_error - DRAWER_VELOCITY_GAIN * qvel
     joint_forces = torch.clamp(
         joint_forces,
         min=-DRAWER_JOINT_FORCE_LIMIT,
         max=DRAWER_JOINT_FORCE_LIMIT,
     )
-    articulation.set_qf(joint_forces)
+    articulation.set_qf(joint_forces, joint_ids=joint_ids)
 
 
 def run_simulation(
     sim: SimulationManager,
     articulation: Articulation,
     max_steps: int | None = None,
+    *,
+    joint_name: str = "slide_rails",
+    open_at_lower_limit: bool = False,
 ) -> None:
     """Open and close the drawer with effort-limited position tracking.
 
@@ -164,22 +190,25 @@ def run_simulation(
         sim: Simulation manager to advance.
         articulation: Drawer articulation whose joints are updated.
         max_steps: Optional number of steps to run before returning.
+        joint_name: Drawer joint to move; all other joints remain passive.
+        open_at_lower_limit: Whether opening moves toward the lower joint limit.
     """
-    qpos_limits = articulation.get_qpos_limits()
-    closed_qpos = qpos_limits[..., 0]
-    open_qpos = qpos_limits[..., 1]
+    joint_ids = [articulation.joint_names.index(joint_name)]
+    qpos_limits = articulation.get_qpos_limits(joint_ids=joint_ids)
+    closed_qpos = qpos_limits[..., 1 if open_at_lower_limit else 0]
+    open_qpos = qpos_limits[..., 0 if open_at_lower_limit else 1]
     opening = True
     target_qpos = open_qpos
     step_count = 0
     print(
-        "[INFO]: Tracking the open position with joint effort limited to "
+        f"[INFO]: Tracking {joint_name!r} toward the open position with effort limited to "
         f"+/-{DRAWER_JOINT_FORCE_LIMIT:.1f} N",
         flush=True,
     )
     try:
         while max_steps is None or step_count < max_steps:
-            qpos = articulation.get_qpos()
-            qvel = articulation.get_qvel()
+            qpos = articulation.get_qpos()[:, joint_ids]
+            qvel = articulation.get_qvel()[:, joint_ids]
             settled = torch.all(
                 (torch.abs(qpos - target_qpos) <= JOINT_POSITION_TOLERANCE)
                 & (torch.abs(qvel) <= JOINT_VELOCITY_TOLERANCE)
@@ -199,13 +228,18 @@ def run_simulation(
                     flush=True,
                 )
 
-            apply_drawer_force(articulation, target_qpos=target_qpos)
+            apply_drawer_force(
+                articulation, target_qpos=target_qpos, joint_ids=joint_ids
+            )
             sim.update(step=1)
             step_count += 1
     except KeyboardInterrupt:
         print("\n[INFO]: Stopping simulation...")
     finally:
-        articulation.set_qf(torch.zeros_like(articulation.get_qpos()))
+        articulation.set_qf(
+            torch.zeros_like(articulation.get_qpos()[:, joint_ids]),
+            joint_ids=joint_ids,
+        )
 
 
 def main(args: argparse.Namespace | None = None) -> None:
@@ -233,14 +267,20 @@ def main(args: argparse.Namespace | None = None) -> None:
     sim = SimulationManager(sim_cfg)
 
     try:
-        articulation = create_articulation(sim)
+        articulation = create_articulation(sim, asset=args.asset)
         print(f"[INFO]: Initial joint positions: {articulation.get_qpos()}", flush=True)
 
         if open_native_window:
             sim.open_window()
 
         print("[INFO]: Running simulation. Press Ctrl+C to stop.", flush=True)
-        run_simulation(sim, articulation, max_steps=args.max_steps)
+        run_simulation(
+            sim,
+            articulation,
+            max_steps=args.max_steps,
+            joint_name="top_slide" if args.asset == "usd" else "slide_rails",
+            open_at_lower_limit=args.asset == "usd",
+        )
     finally:
         sim.destroy(exit_process=False)
 

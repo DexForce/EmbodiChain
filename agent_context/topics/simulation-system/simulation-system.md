@@ -444,6 +444,17 @@ asset registry and environment count, then coordinates creation and attachment.
 `qpos_joint_names`. Stochastic surface sampling and Atomic Action geometry keys
 do not belong to the simulation object; use
 `atomic_actions.sample_initial_articulation_geometry()` for that adaptation.
+
+With `build_pk_chain=True`, USD articulations build their PK tree during binding
+from resolved Spawn joint descriptors in `objects/backends/_kinematics.py`;
+URDF assets retain their source-file chain. USD FK supports fixed, revolute,
+and prismatic tree joints. Movable joints use an internal joint frame followed
+by a fixed physical-link frame to preserve
+`origin_pose @ motion(q) @ inverse(target_pose)`. Fixed world attachments are
+excluded from root-relative FK; unsupported joint types or non-tree topology
+fail explicitly (simulation-only callers can disable `build_pk_chain`).
+Jacobian and serial FK reuse the built chain without reopening the asset.
+
 ## Configuration Flow
 
 `SimulationManagerCfg.physics_cfg` is the backend selector as well as the
