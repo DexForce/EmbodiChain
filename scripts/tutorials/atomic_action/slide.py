@@ -169,7 +169,7 @@ def create_invocation(
         ),
         control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
         motion_policy=MotionPolicy(
-            strategy="motion_gen",
+            strategy="ik_interp",
             sample_count=TRAJECTORY_SAMPLE_COUNT,
         ),
         skill_options=SlideOptions(
