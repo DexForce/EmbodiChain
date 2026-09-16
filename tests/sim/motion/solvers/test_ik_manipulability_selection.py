@@ -60,9 +60,8 @@ class TestManipulabilitySelection:
         self.sim.destroy()
         SimulationManager.flush_cleanup_queue()
 
-    def _solver(self, selection: str):
-        robot: Robot = self.sim.add_robot(cfg=RobotCfg.from_dict(_cfg_dict(selection)))
-        return robot.get_solver("left_arm")
+    def _add_robot(self, selection: str) -> Robot:
+        return self.sim.add_robot(cfg=RobotCfg.from_dict(_cfg_dict(selection)))
 
     def _targets(self, solver, n: int) -> tuple[torch.Tensor, torch.Tensor]:
         reset_all_seeds(0)
@@ -77,14 +76,17 @@ class TestManipulabilitySelection:
         return yoshikawa_manipulability(solver.get_jacobian(qpos))
 
     def test_invalid_mode_rejected(self):
+        self._add_robot("bogus")
         with pytest.raises(ValueError, match="ik_solution_selection"):
-            self._solver("bogus")
+            self.sim.prepare()
 
     def test_solutions_reach_target_and_outrank_nearest(self):
+        robots = {mode: self._add_robot(mode) for mode in ("nearest", "manipulability")}
+        self.sim.prepare()
         targets = None
         results = {}
         for mode in ("nearest", "manipulability"):
-            solver = self._solver(mode)
+            solver = robots[mode].get_solver("left_arm")
             if targets is None:
                 targets, seed_q = self._targets(solver, n=8)
             reset_all_seeds(1)  # identical multi-seed draws for both modes
@@ -103,7 +105,9 @@ class TestManipulabilitySelection:
         assert bool((results["manipulability"] > results["nearest"] + 1e-9).any())
 
     def test_deterministic_selection(self):
-        solver = self._solver("manipulability")
+        robot = self._add_robot("manipulability")
+        self.sim.prepare()
+        solver = robot.get_solver("left_arm")
         targets, seed_q = self._targets(solver, n=4)
         reset_all_seeds(2)
         _, first = solver.get_ik(targets, qpos_seed=seed_q[0])
