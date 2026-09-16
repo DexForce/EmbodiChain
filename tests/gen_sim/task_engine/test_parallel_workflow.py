@@ -527,6 +527,7 @@ def test_parallel_workflow_accepts_one_success_and_publishes_all_graphs(
         "planning_mode": "offline",
         "max_episodes": 1,
         "max_episode_steps": 6000,
+        "fit_grasp_assets": False,
     }
     assert manifest["configuration"]["execution"]["dataset_saving"] is False
     assert coordinator.kwargs[0]["max_episode_steps"] == 6000

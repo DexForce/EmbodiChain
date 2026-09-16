@@ -694,6 +694,7 @@ class TaskEngineWorkflow:
                         planning_mode=planning_cfg.planning_mode,
                         max_episodes=planning_cfg.max_episodes,
                         max_episode_steps=planning_cfg.max_episode_steps,
+                        fit_grasp_assets=planning_cfg.fit_grasp_assets,
                         candidate_set=candidate_set,
                         force_most_likely=False,
                         final_inspection=final_inspection,
@@ -1083,6 +1084,7 @@ class TaskEngineWorkflow:
                         "planning_mode": planning_cfg.planning_mode,
                         "max_episodes": planning_cfg.max_episodes,
                         "max_episode_steps": planning_cfg.max_episode_steps,
+                        "fit_grasp_assets": planning_cfg.fit_grasp_assets,
                     },
                     "execution": {
                         "num_envs": execution_cfg.num_envs,

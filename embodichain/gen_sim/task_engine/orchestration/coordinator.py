@@ -115,6 +115,7 @@ class TaskEngineCoordinator:
         vlm_model: str | None = None,
         max_episodes: int | None = None,
         max_episode_steps: int | None = None,
+        fit_grasp_assets: bool = False,
         planner_policy: Mapping[str, Any] | None = None,
         randomize_scene: bool = False,
         randomize_table_material: bool = False,
@@ -210,6 +211,7 @@ class TaskEngineCoordinator:
                     robot_profile=str(adaptation.scene_manifest["robot_profile"]),
                     max_episodes=max_episodes,
                     max_episode_steps=max_episode_steps,
+                    fit_grasp_assets=fit_grasp_assets,
                 )
             except (TypeError, ValueError, UnsupportedSemanticCapabilityError) as exc:
                 planning_attempt["status"] = "failed"
