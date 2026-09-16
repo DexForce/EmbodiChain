@@ -804,16 +804,17 @@ class TaskEngineWorkflow:
             final_unbound = getattr(preparation, "unbound_action_plan", None)
             if (
                 final_unbound is None
-                and final_candidate_id != unbound_plan["candidate_id"]
+                or str(final_unbound.get("candidate_id")) != final_candidate_id
             ):
-                final_candidate = next(
-                    item
-                    for item in candidate_set["candidates"]
-                    if item["candidate_id"] == final_candidate_id
-                )
-                final_unbound = _semantic_draft(final_candidate)
-            elif final_unbound is None:
-                final_unbound = unbound_plan
+                if final_candidate_id == unbound_plan["candidate_id"]:
+                    final_unbound = unbound_plan
+                else:
+                    final_candidate = next(
+                        item
+                        for item in candidate_set["candidates"]
+                        if item["candidate_id"] == final_candidate_id
+                    )
+                    final_unbound = _semantic_draft(final_candidate)
             if str(final_unbound.get("candidate_id")) != final_candidate_id:
                 raise ValueError(
                     "Final UnboundActionPlan candidate does not match preparation."

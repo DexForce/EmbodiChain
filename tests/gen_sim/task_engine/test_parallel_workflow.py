@@ -306,6 +306,14 @@ class _RebindingCoordinator(_Coordinator):
         return result
 
 
+class _StaleRebindingCoordinator(_Coordinator):
+    def prepare(self, *args, **kwargs):
+        result = super().prepare(*args, **kwargs)
+        result.selected_candidate_id = "candidate_02"
+        result.unbound_action_plan = deepcopy(kwargs["unbound_action_plan"])
+        return result
+
+
 class _InvalidSceneBackend(_SceneBackend):
     def materialize(self, *_args, **kwargs):
         self.seeds.append(int(kwargs["seed"]))
@@ -595,6 +603,33 @@ def test_final_candidate_rebinding_updates_attempt_unbound_audit(
     attempt = manifest["attempts"][0]
     assert attempt["unbound_action_plan"]["candidate_id"] == "candidate_01"
     assert attempt["final_unbound_action_plan"]["candidate_id"] == "candidate_02"
+    assert attempt["unbound_transition"]["changed"] is True
+
+
+def test_stale_unbound_plan_is_rebuilt_for_final_candidate(tmp_path: Path) -> None:
+    candidates = _candidate_set()
+    final_candidate = deepcopy(candidates["candidates"][0])
+    final_candidate["candidate_id"] = "candidate_02"
+    final_candidate["draft"]["steps"][0]["id"] = "final_place"
+    candidates["candidates"].append(final_candidate)
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=_SceneBackend(_selection(candidates)),
+        coordinator=_StaleRebindingCoordinator(["bound"]),
+    )
+
+    result = workflow.run(
+        _request(tmp_path),
+        workflow_cfg=TaskEngineWorkflowCfg(),
+        execution_cfg=TaskEngineExecutionCfg(),
+        execute=False,
+    )
+
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    attempt = manifest["attempts"][0]
+    assert attempt["unbound_action_plan"]["candidate_id"] == "candidate_01"
+    assert attempt["final_unbound_action_plan"]["candidate_id"] == "candidate_02"
+    assert attempt["final_unbound_action_plan"]["steps"][0]["id"] == "final_place"
     assert attempt["unbound_transition"]["changed"] is True
 
 

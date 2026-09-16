@@ -103,7 +103,11 @@ class _StackPlaceLowerer(_RelativePlaceLowerer):
         approach[:, 2, 3] += self._approach - self._nominal
         release[:, 2, 3] += self._release - self._nominal
         return replace(
-            result, goal=PlaceGoal(xpos=torch.stack((approach, release), dim=1))
+            result,
+            goal=PlaceGoal(
+                xpos=torch.stack((approach, release), dim=1),
+                tcp_symmetry="z_roll_180",
+            ),
         )
 
     def pick_lookahead_targets(
@@ -134,7 +138,7 @@ class _StackPlaceFactory(_RelativePlaceLowererFactory):
     """Register a separate task preset while retaining canonical route validation."""
 
     call_id: ClassVar[str] = STACK_PLACE_CALL
-    revision: ClassVar[str] = "2"
+    revision: ClassVar[str] = "3"
     approach_clearance: float = 0.02
     release_clearance: float = 0.003
     nominal_clearance: float = 0.01
