@@ -961,6 +961,59 @@ def test_handover_tutorial_defaults_to_cpu_for_grasp_planning() -> None:
     assert args.device == "cpu"
 
 
+def test_pickup_tutorial_maps_affordance_branches_to_parallel_environments() -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.pickup")
+
+    with patch(
+        "sys.argv",
+        [
+            "pickup.py",
+            "--affordance_branches",
+            "3",
+            "--sampling_seed",
+            "17",
+            "--sampling_attempt",
+            "2",
+        ],
+    ):
+        args = module.parse_arguments()
+
+    sampling = module.create_affordance_sampling_context(args)
+
+    assert args.num_envs == 3
+    assert sampling is not None
+    assert sampling.count == 3
+    assert sampling.seed == 17
+    assert sampling.episode_id == 0
+    assert sampling.attempt_id == 2
+
+
+def test_pickup_tutorial_keeps_single_branch_sampling_disabled() -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.pickup")
+
+    with patch("sys.argv", ["pickup.py"]):
+        args = module.parse_arguments()
+
+    assert args.num_envs == 1
+    assert module.create_affordance_sampling_context(args) is None
+
+
+@pytest.mark.parametrize("branch_count", ("0", "-1"))
+def test_pickup_tutorial_rejects_non_positive_branch_count(
+    branch_count: str,
+) -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.pickup")
+
+    with (
+        patch(
+            "sys.argv",
+            ["pickup.py", "--affordance_branches", branch_count],
+        ),
+        pytest.raises(SystemExit),
+    ):
+        module.parse_arguments()
+
+
 def test_assemble_tutorial_uses_center_grasp_for_laid_soda_can() -> None:
     module = importlib.import_module("scripts.tutorials.atomic_action.assemble")
 

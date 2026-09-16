@@ -29,6 +29,8 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
+    ActionPlan,
+    AffordanceSamplingContext,
     ControlPartCommandProfile,
     create_simulation_atomic_action_engine,
     GraspGoal,
@@ -79,7 +81,70 @@ def parse_arguments() -> argparse.Namespace:
         "--approach", choices=[*APPROACH_DIRECTIONS, "custom"], default="top"
     )
     parser.add_argument("--custom_approach_direction", type=float, nargs=3)
-    return parser.parse_args()
+    parser.add_argument(
+        "--affordance_branches",
+        type=int,
+        default=1,
+        help="Number of reproducible Affordance branches and simulation rows.",
+    )
+    parser.add_argument(
+        "--sampling_seed",
+        type=int,
+        default=0,
+        help="Base seed for Affordance sampling streams.",
+    )
+    parser.add_argument(
+        "--sampling_attempt",
+        type=int,
+        default=0,
+        help="Explicit resampling-attempt identity.",
+    )
+    args = parser.parse_args()
+    if args.affordance_branches < 1:
+        parser.error("--affordance_branches must be positive.")
+    if args.sampling_seed < 0:
+        parser.error("--sampling_seed must be non-negative.")
+    if args.sampling_attempt < 0:
+        parser.error("--sampling_attempt must be non-negative.")
+    if args.num_envs not in (1, args.affordance_branches):
+        parser.error(
+            "--num_envs must be omitted or match --affordance_branches in the "
+            "PickUp sampling tutorial."
+        )
+    args.num_envs = args.affordance_branches
+    return args
+
+
+def create_affordance_sampling_context(
+    args: argparse.Namespace,
+) -> AffordanceSamplingContext | None:
+    """Build tutorial sampling identity without owning mutable sampler state."""
+    if args.affordance_branches == 1:
+        return None
+    return AffordanceSamplingContext(
+        count=args.affordance_branches,
+        seed=args.sampling_seed,
+        attempt_id=args.sampling_attempt,
+    )
+
+
+def log_affordance_branch_diagnostics(plan: ActionPlan) -> None:
+    """Log the selected candidate and reuse status for each simulation row."""
+    metadata = plan.diagnostics.metadata.get("affordance_sample", {})
+    if not isinstance(metadata, dict):
+        return
+    grasp = metadata.get("grasp", {})
+    if not isinstance(grasp, dict):
+        return
+    candidate_ids = grasp.get("candidate_ids")
+    reused = grasp.get("reused")
+    if not isinstance(candidate_ids, list) or not isinstance(reused, list):
+        return
+    for row, (candidate_id, is_reused) in enumerate(zip(candidate_ids, reused)):
+        logger.log_info(
+            f"Affordance branch {row}: success={bool(plan.plan_success[row])}, "
+            f"candidate_id={candidate_id}, reused={is_reused}."
+        )
 
 
 def create_pick_object(sim) -> RigidObject:
@@ -126,6 +191,7 @@ def resolve_approach_direction(
 def main() -> None:
     """Plan and replay a sampled antipodal PickUp trajectory."""
     args = parse_arguments()
+    sampling = create_affordance_sampling_context(args)
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot, tcp_z=0.15)
     obj = create_pick_object(sim)
@@ -181,8 +247,12 @@ def main() -> None:
                 ),
             ),
         ),
-        engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        engine.initial_context(
+            control_dt=sim.sim_config.physics_dt,
+            affordance_sampling=sampling,
+        ),
     )
+    log_affordance_branch_diagnostics(compiled.action_plans[0])
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan PickUp demo trajectory.")
         return
