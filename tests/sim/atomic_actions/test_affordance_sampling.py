@@ -28,6 +28,15 @@ from embodichain.lab.sim.atomic_actions.affordance_sampling import (
     AffordanceSample,
     AffordanceSamplingContext,
 )
+from embodichain.lab.sim.atomic_actions.affordance import (
+    Affordance,
+    AntipodalAffordance,
+    AssembleAffordance,
+    InteractionPoints,
+    PressAffordance,
+    TwistAffordance,
+)
+from embodichain.utils.math import axis_angle_to_rotation_matrix
 
 
 def _poses(batch_size: int, candidate_count: int | None = None) -> torch.Tensor:
@@ -143,3 +152,197 @@ def test_affordance_sample_rejects_invalid_result_contract(
 ):
     with pytest.raises((TypeError, ValueError)):
         AffordanceSample(success=success, poses=poses, metadata=metadata)
+
+
+def _sampling(count: int = 4) -> AffordanceSamplingContext:
+    return AffordanceSamplingContext(count=count, seed=42, episode_id=3)
+
+
+def test_affordance_is_the_only_public_candidate_sampling_entry_point():
+    batch_size = 4
+    local = _poses(batch_size)
+    local[:, 0, 3] = torch.tensor([-0.04, -0.01, 0.02, 0.04])
+    objects = _poses(batch_size)
+    objects[:, 1, 3] = torch.arange(batch_size) * 2.5
+    poses = objects[:, None] @ local[None]
+    costs = torch.arange(batch_size, dtype=torch.float32).repeat(batch_size, 1)
+    candidates = AffordancePoseCandidates(
+        poses=poses,
+        costs=costs,
+        valid=torch.ones_like(costs, dtype=torch.bool),
+    )
+
+    sample = Affordance().sample_candidates(
+        candidates,
+        sampling=_sampling(batch_size),
+        env_ids=torch.arange(batch_size),
+        key="pick",
+        reference_poses=objects,
+    )
+
+    assert not hasattr(candidates, "select")
+    assert isinstance(sample, AffordanceSample)
+    assert sample.success.all()
+    assert len(set(sample.metadata["candidate_ids"])) == batch_size
+    assert sample.metadata["candidate_ids"][0] == 0
+    torch.testing.assert_close(sample.poses[:, 1, 3], objects[:, 1, 3])
+
+
+def test_affordance_candidate_sampling_preserves_failed_rows_and_metadata():
+    candidates = AffordancePoseCandidates.from_rows(
+        [
+            (_poses(1), torch.tensor([0.0])),
+            (torch.empty(0, 4, 4), torch.empty(0)),
+        ],
+        device="cpu",
+    )
+
+    sample = Affordance().sample_candidates(
+        candidates,
+        sampling=_sampling(2),
+        env_ids=torch.arange(2),
+        key="grasp",
+    )
+
+    assert sample.success.tolist() == [True, False]
+    assert sample.metadata["candidate_ids"] == [0, -1]
+    assert sample.metadata["sampling"] == _sampling(2).metadata()
+    torch.testing.assert_close(sample.poses[1], torch.eye(4))
+
+
+class _FakeGraspGenerator:
+    def get_valid_grasp_poses(self, **_: object):
+        first = _poses(2)
+        first[:, 0, 3] = torch.tensor([0.0, 0.1])
+        return [
+            (first, torch.tensor([0.0, 1.0])),
+            (torch.empty(0, 4, 4), torch.empty(0)),
+        ]
+
+
+def test_antipodal_affordance_builds_explicit_candidate_validity():
+    affordance = AntipodalAffordance(
+        mesh_vertices=torch.zeros(3, 3),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+    )
+
+    candidates = affordance.get_grasp_candidates(
+        _FakeGraspGenerator(),
+        _poses(2),
+        torch.tensor([0.0, 0.0, -1.0]),
+    )
+
+    assert candidates.valid.tolist() == [[True, True], [False, False]]
+
+
+def test_press_sampling_rotates_only_contact_frame_roll():
+    targets = _poses(4)
+    targets[:, :3, :3] = axis_angle_to_rotation_matrix(torch.tensor([0.4, 0.2, -0.3]))
+    targets[:, :3, 3] = torch.tensor([0.5, 0.1, 0.3])
+    affordance = PressAffordance(
+        press_axis=torch.tensor([1.0, 0.0, 0.0]),
+        press_position=(0.01, 0.02, 0.03),
+    )
+    nominal = affordance.get_press_pose(targets)
+
+    sample = affordance.sample_press_pose(
+        targets,
+        sampling=_sampling(4),
+        env_ids=torch.arange(4),
+        key="press",
+    )
+
+    assert sample.success.all()
+    torch.testing.assert_close(sample.poses[:, :3, 3], nominal[:, :3, 3])
+    torch.testing.assert_close(sample.poses[:, :3, 2], nominal[:, :3, 2])
+    torch.testing.assert_close(torch.linalg.det(sample.poses[:, :3, :3]), torch.ones(4))
+    assert sample.metadata["roll"][0] == 0.0
+    assert len(torch.unique(sample.poses[:, :3, 0], dim=0)) == 4
+
+
+def test_twist_sampling_requires_explicit_roll_symmetry():
+    targets = _poses(4)
+    fixed = TwistAffordance(
+        grasp_position=(0.1, 0.0, 0.0),
+        axis_origin=(0.0, 0.0, 0.0),
+    )
+    nominal = fixed.get_grasp_pose(targets)
+
+    fixed_sample = fixed.sample_grasp_pose(
+        targets,
+        sampling=_sampling(4),
+        env_ids=torch.arange(4),
+        key="twist",
+    )
+    torch.testing.assert_close(fixed_sample.poses, nominal)
+
+    symmetric = TwistAffordance(
+        grasp_position=(0.1, 0.0, 0.0),
+        axis_origin=(0.0, 0.0, 0.0),
+        grasp_roll_range=(-0.2, 0.2),
+    )
+    sample = symmetric.sample_grasp_pose(
+        targets,
+        sampling=_sampling(4),
+        env_ids=torch.arange(4),
+        key="twist",
+    )
+    torch.testing.assert_close(sample.poses[:, :3, 3], nominal[:, :3, 3])
+    torch.testing.assert_close(sample.poses[:, :3, 2], nominal[:, :3, 2])
+    assert not torch.equal(sample.poses, nominal)
+
+
+def test_assembly_sampling_uses_only_declared_rotational_symmetry():
+    rotations = _poses(3)
+    rotations[:, :3, :3] = axis_angle_to_rotation_matrix(
+        torch.tensor(
+            [
+                [0.0, 0.0, torch.pi / 2],
+                [0.0, 0.0, torch.pi],
+                [0.0, 0.0, -torch.pi / 2],
+            ]
+        )
+    )
+    relation = torch.eye(4)
+    relation[2, 3] = 0.03
+    affordance = AssembleAffordance(
+        assemble_to_base_pose=relation,
+        symmetry_transforms=rotations,
+    )
+    nominal = affordance.get_assemble_object_pose(_poses(4))
+
+    sample = affordance.sample_assemble_object_pose(
+        _poses(4),
+        sampling=_sampling(4),
+        env_ids=torch.arange(4),
+        key="assemble",
+    )
+
+    torch.testing.assert_close(sample.poses[:, :3, 3], nominal[:, :3, 3])
+    assert len(torch.unique(sample.poses.flatten(1), dim=0)) == 4
+    assert sample.metadata["candidate_ids"][0] == 0
+    assert set(sample.metadata["candidate_ids"]) == {0, 1, 2, 3}
+
+
+def test_interaction_points_sampling_retains_success_and_metadata():
+    affordance = InteractionPoints(
+        points=torch.tensor([[0.0, 0.0, 0.0], [0.03, 0.0, 0.0], [9.0, 0.0, 0.0]]),
+        normals=torch.tensor([[0.0, 0.0, -1.0]]).repeat(3, 1),
+        point_types=["press", "press", "pull"],
+    )
+
+    sample = affordance.sample_poses(
+        _poses(4),
+        sampling=_sampling(4),
+        env_ids=torch.arange(4),
+        key="interaction",
+        point_type="press",
+    )
+
+    assert sample.success.all()
+    assert (sample.poses[:, 0, 3] <= 0.03).all()
+    assert len(torch.unique(sample.poses[:, :3, 3], dim=0)) == 2
+    assert sample.metadata["reused"] == [False, False, True, True]
+    torch.testing.assert_close(
+        sample.poses[:, :3, 2], torch.tensor([0.0, 0.0, 1.0]).expand(4, -1)
+    )
