@@ -185,6 +185,39 @@ def test_motion_wrapper_masks_unsafe_rows_without_clipping_commands(
     torch.testing.assert_close(result.positions, positions)
 
 
+def test_stack_place_allows_equivalent_tcp_roll_without_moving_release(
+    monkeypatch,
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program import stack_place
+    from embodichain.lab.sim.atomic_actions.primitives.place import PlaceGoal
+    from embodichain.lab.task_program.compiler.lowering import SemanticLowering
+    from embodichain.lab.task_program.semantics.calls import RegisteredSemanticCall
+
+    pose = torch.eye(4)
+    pose[2, 3] = 1.20
+    monkeypatch.setattr(
+        stack_place._RelativePlaceLowerer,
+        "lower",
+        lambda *a, **kw: SemanticLowering(goal=PlaceGoal(xpos=pose)),
+    )
+    lowerer = object.__new__(stack_place._StackPlaceLowerer)
+    lowerer._approach = 0.02
+    lowerer._release = 0.003
+    lowerer._nominal = 0.01
+
+    result = lowerer.lower(
+        RegisteredSemanticCall(call_id="gen_sim.stack_place", arguments={}),
+        context=SimpleNamespace(batch_size=1),
+        bound=object(),
+        option_template=object(),
+    )
+
+    assert result.goal.tcp_symmetry == "z_roll_180"
+    torch.testing.assert_close(
+        result.goal.xpos[0, :, 2, 3], torch.tensor([1.21, 1.193])
+    )
+
+
 def test_velocity_limits_use_urdf_names_and_preserve_stricter_runtime_limits(
     tmp_path,
 ) -> None:
