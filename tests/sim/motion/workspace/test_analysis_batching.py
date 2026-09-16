@@ -54,6 +54,9 @@ def _analyzer(**kwargs) -> WorkspaceAnalyzer:
     robot.get_qpos.return_value = torch.zeros(3, 3)
     robot.cfg = SimpleNamespace(uid="test", fpath=None, solver_cfg={})
     robot._solvers = {}
+    # Faithful to Robot.get_solver with no solvers attached: manipulability
+    # computation then skips with a warning instead of touching a Mock.
+    robot.get_solver.return_value = None
 
     def fk(qpos, **kw):
         pose = torch.eye(4).expand(*qpos.shape[:-1], 4, 4).clone()

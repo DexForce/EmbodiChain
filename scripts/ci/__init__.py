@@ -14,23 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Kinematics computations and scalar motion profiles.
-
-Private Warp kernels implement OPW, SRS, UR, and trapezoidal/Double-S profiles.
-Stateful solver interfaces and robot configuration remain in
-``embodichain.lab.sim.motion.solvers``.
-Pure batched manipulability helpers live in :mod:`.manipulability`."""
+"""Continuous-integration helper scripts."""
 
 from __future__ import annotations
 
-from embodichain.compute.kinematics.manipulability import (
-    condition_number,
-    select_jacobian_rows,
-    yoshikawa_manipulability,
-)
-
-__all__ = [
-    "condition_number",
-    "select_jacobian_rows",
-    "yoshikawa_manipulability",
-]
+__all__: list[str] = []
