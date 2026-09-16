@@ -49,6 +49,10 @@ from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.objects import Robot
+from embodichain.lab.visualization.cli import (
+    add_viser_args_to_parser,
+    visualization_cfg_from_args,
+)
 from embodichain.utils.utility import reset_all_seeds
 
 # (label, ik_solution_selection, enable_seed_selection)
@@ -95,9 +99,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--num_targets", type=int, default=50)
     parser.add_argument("--device", type=str, default="cpu")
+    add_viser_args_to_parser(parser)
     args = parser.parse_args()
 
-    sim = SimulationManager(SimulationManagerCfg(headless=True, sim_device=args.device))
+    # This comparison runs headless, so the browser scene is the only way to
+    # inspect it. Viser stays off unless --viser is passed, which keeps the
+    # reported timings free of capture overhead by default.
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            sim_device=args.device,
+            visualization=visualization_cfg_from_args(args),
+        )
+    )
     try:
         rows = []
         targets = seed_q = None
