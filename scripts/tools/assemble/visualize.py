@@ -32,7 +32,7 @@ if not __package__:
 
 from scripts.tools.assemble._protocol import load_config
 from scripts.tools.assemble._generation_process import run_generation
-from scripts.tools.mug_rack_pose._json_io import pose_matrix
+from scripts.tools.assemble._json_io import pose_matrix
 
 if TYPE_CHECKING:
     from embodichain.lab.sim import SimulationManager

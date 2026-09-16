@@ -20,12 +20,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import trimesh
 
-pytest.importorskip("open3d")
 pytest.importorskip("fcl")
 pytest.importorskip("manifold3d")
 
@@ -33,7 +33,7 @@ from scripts.tools.assemble import generate
 from scripts.tools.assemble._protocol import load_config
 from scripts.tools.assemble._validation import PlacementValidator
 from scripts.tools.assemble.visualize import run_cycles
-from scripts.tools.mug_rack_pose._json_io import read_json
+from scripts.tools.assemble._json_io import read_json
 
 
 @pytest.fixture
@@ -203,6 +203,127 @@ def test_regeneration_invalidates_previous_candidates(
     assert [x["candidate_id"] for x in result["candidates"]] == [6]
 
 
+def test_timing_includes_model_build_retries_pose_checks_and_final_validation(
+    config_path: Path,
+    geometry: dict,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    from scripts.tools.assemble import _validation
+
+    clock = [0.0]
+    monkeypatch.setattr(
+        generate, "time", SimpleNamespace(perf_counter=lambda: clock[0])
+    )
+
+    def build(source: str, *args: object) -> dict:
+        if source == "broken":
+            clock[0] += 5
+            raise ValueError("Invalid mesh")
+        clock[0] += 7
+        return geometry
+
+    class TimedValidator:
+        def __init__(self, *args: object) -> None:
+            clock[0] += 3  # Collision preprocessing, repeated at final validation.
+            self.hull_counts = None
+
+        def evaluate(self, pose: list) -> dict:
+            clock[0] += 4
+            return {
+                "T_base_assemble": pose,
+                "validation": {"accepted": pose[2][3] < 0.1},
+            }
+
+        def validate(self, pose: list) -> dict:
+            clock[0] += 6
+            return {"accepted": True}
+
+    monkeypatch.setattr(generate, "_generate", build)
+    monkeypatch.setattr(_validation, "PlacementValidator", TimedValidator)
+    decisions = iter(
+        [
+            (2, action("plan", design=design())),
+            (10, action("generate", source="broken")),
+            (20, action("generate", source="valid")),
+            (30, action("evaluate", T_base_assemble=proposal(0.5))),
+            (40, action("evaluate", T_base_assemble=proposal())),
+            (50, action("finish", candidate_id=5)),
+        ]
+    )
+
+    def decide(*args: object) -> dict:
+        duration, choice = next(decisions)
+        clock[0] += duration
+        return choice
+
+    handoff = config_path.parent / "handoff.json"
+    result = generate.run_harness(
+        load_config(config_path), decide=decide, result_file=handoff
+    )
+    expected = {"planning": 2, "objects": 45, "relative_pose": 137, "total": 184}
+    assert result["success"]
+    assert result["timing_seconds"] == expected
+    assert result["trace"][1]["timing"] == {"stage": "objects", "seconds": 15}
+    assert read_json(handoff)["timing_seconds"] == expected
+    assert (
+        read_json(Path(result["run_directory"]) / "result.json")["timing_seconds"]
+        == expected
+    )
+    assert (
+        read_json(Path(result["config"]["output_dir"]) / "latest.json")[
+            "timing_seconds"
+        ]
+        == expected
+    )
+    output = capsys.readouterr().out
+    assert "Object generation: 15.00s this turn" in output
+    assert "Relative pose generation: 59.00s this turn; 137.00s cumulative" in output
+    assert "Cycle 1 timing (complete): objects=45.00s, relative pose=137.00s" in output
+
+
+@pytest.mark.parametrize("error_type", [TimeoutError, KeyboardInterrupt])
+@pytest.mark.parametrize("failed_stage", ["planning", "objects", "relative_pose"])
+def test_timing_persists_failed_model_calls_and_interruptions(
+    config_path: Path,
+    geometry: dict,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+    error_type: type[BaseException],
+    failed_stage: str,
+) -> None:
+    clock = [0.0]
+    monkeypatch.setattr(
+        generate, "time", SimpleNamespace(perf_counter=lambda: clock[0])
+    )
+    monkeypatch.setattr(generate, "_generate", lambda *args: geometry)
+    failure_turn = {"planning": 1, "objects": 2, "relative_pose": 3}[failed_stage]
+
+    def decide(prompt: str, directory: Path, turn: int, config: dict) -> dict:
+        if turn == failure_turn:
+            clock[0] += 7
+            raise error_type("request stopped")
+        return (
+            action("plan", design=design())
+            if turn == 1
+            else action("generate", source="build")
+        )
+
+    config = load_config(config_path)
+    if error_type is KeyboardInterrupt:
+        with pytest.raises(KeyboardInterrupt):
+            generate.run_harness(config, decide=decide)
+    else:
+        assert not generate.run_harness(config, decide=decide)["success"]
+    result = read_json(Path(config["output_dir"]) / "latest.json")
+    assert result["status"] == (
+        "interrupted" if error_type is KeyboardInterrupt else "failed"
+    )
+    assert result["timing_seconds"][failed_stage] == 7
+    assert result["timing_seconds"]["total"] == 7
+    assert f"Cycle 1 timing ({result['status']})" in capsys.readouterr().out
+
+
 def test_final_reload_rejects_mesh_modified_after_evaluation(
     config_path: Path, geometry: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -263,14 +384,85 @@ def build():
     report = generate._generate(
         source, tmp_path / "generated", load_config(config_path)["geometry"]
     )
-    from scripts.tools.mug_rack_pose._geometry import infer_cavity, load_mesh
+    from scripts.tools.assemble._geometry import load_mesh
 
     mesh = load_mesh(Path(report["assets"]["assemble"]["path"]))
     assert mesh.is_volume
-    cavity = infer_cavity(mesh)
-    assert cavity.basis[2, 2] > 0.999
-    assert cavity.depth == pytest.approx(0.084, abs=0.001)
+    # The +Z mouth stays open: a downward center ray first hits the 6 mm floor,
+    # while a ray through the wall hits the 90 mm rim in the exported frame.
+    hits, rays, _ = mesh.ray.intersects_location(
+        [[0, 0, 0.1], [0.0375, 0, 0.1]], [[0, 0, -1], [0, 0, -1]]
+    )
+    assert hits[rays == 0, 2].max() == pytest.approx(0.006, abs=1e-6)
+    assert hits[rays == 1, 2].max() == pytest.approx(0.09, abs=1e-6)
     assert (tmp_path / "generated" / "assets.blend").is_file()
+
+
+def test_blender_worker_reduces_face_count_preserving_cavity_and_asset_frame(
+    config_path: Path, tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    source = """from scripts.tools.assemble.blender_helpers import box, cylinder, difference
+
+def build():
+    base = box([.2, .1, .02], [.1, -.05, .01])
+    base.rotation_euler.z = .3
+    mug = difference(cylinder(.04,.09,[0,0,.045]), cylinder(.035,.09,[0,0,.051]))
+    for obj in (base, mug):
+        modifier = obj.modifiers.new('Dense flat subdivisions', 'SUBSURF')
+        modifier.subdivision_type = 'SIMPLE'
+        modifier.levels = 3
+    return {"base": base, "assemble": mug, "metadata": {}}
+"""
+    from scripts.tools.assemble._geometry import load_mesh
+    from scripts.tools.assemble._protocol import run_process
+
+    directory = tmp_path / "simplified"
+    settings = load_config(config_path)["geometry"] | {"max_faces": 500}
+    report = generate._generate(source, directory, settings)
+    for asset in report["assets"].values():
+        assert asset["mesh_processing"]["decimated"]
+        assert asset["mesh_processing"]["input_triangles"] > settings["max_faces"]
+        assert 0 < asset["faces"] <= settings["max_faces"]
+        assert load_mesh(Path(asset["path"])).is_volume
+    base = load_mesh(Path(report["assets"]["base"]["path"]))
+    reference = trimesh.creation.box([0.2, 0.1, 0.02])
+    reference.apply_transform(trimesh.transformations.rotation_matrix(0.3, [0, 0, 1]))
+    reference.apply_translation([0.1, -0.05, 0.01])
+    np.testing.assert_allclose(base.bounds, reference.bounds, atol=1e-6)
+    assert base.volume == pytest.approx(reference.volume, rel=1e-4)
+    mug = load_mesh(Path(report["assets"]["assemble"]["path"]))
+    hits, rays, _ = mug.ray.intersects_location(
+        [[0, 0, 0.1], [0.0375, 0, 0.1]], [[0, 0, -1], [0, 0, -1]]
+    )
+    assert hits[rays == 0, 2].max() == pytest.approx(0.006, abs=1e-5)
+    assert hits[rays == 1, 2].max() == pytest.approx(0.09, abs=1e-5)
+    assert "base mesh simplified:" in capsys.readouterr().out
+    # Reopen the saved Blender scene in isolation; the simplified geometry and
+    # baked transforms must agree with the actual exported triangle meshes.
+    check = """import bpy, json, numpy as np, sys
+from pathlib import Path
+from mathutils import Matrix
+root = Path(sys.argv[1])
+report = json.loads((root / 'geometry.json').read_text())
+bpy.ops.wm.open_mainfile(filepath=str(root / 'assets.blend'))
+objects = [obj for obj in bpy.context.scene.objects if obj.type == 'MESH']
+assert len(objects) == 2
+for role, z in [('base', .02), ('assemble', .09)]:
+    obj = min(objects, key=lambda obj: abs(obj.dimensions.z - z))
+    assert obj.matrix_world == Matrix.Identity(4)
+    obj.data.calc_loop_triangles()
+    assert len(obj.data.loop_triangles) == report['assets'][role]['mesh_processing']['exported_triangles']
+    vertices = np.array([vertex.co[:] for vertex in obj.data.vertices])
+    np.testing.assert_allclose([vertices.min(axis=0), vertices.max(axis=0)], report['assets'][role]['bounds'], atol=1e-6)
+"""
+    import sys
+
+    run_process(
+        [sys.executable, "-c", check, str(directory)],
+        directory,
+        directory / "scene_check",
+        30,
+    )
 
 
 def test_enter_generates_before_replacing_the_scene_and_eof_stops() -> None:
@@ -320,7 +512,7 @@ def build():
     report = generate._generate(
         source, tmp_path / "boolean_seams", load_config(config_path)["geometry"]
     )
-    from scripts.tools.mug_rack_pose._geometry import load_mesh
+    from scripts.tools.assemble._geometry import load_mesh
 
     mesh = load_mesh(Path(report["assets"]["base"]["path"]))
     assert mesh.is_watertight and mesh.is_volume
@@ -547,7 +739,7 @@ def test_subprocess_result_is_read_from_unique_handoff_not_stale_latest(
     config_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from scripts.tools.assemble import _generation_process as jobs
-    from scripts.tools.mug_rack_pose._json_io import write_json
+    from scripts.tools.assemble._json_io import write_json
 
     output = Path(load_config(config_path)["output_dir"])
     output.mkdir()
@@ -584,7 +776,7 @@ def test_timeout_marks_live_checkpoints_failed(
     config_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from scripts.tools.assemble import _generation_process as jobs
-    from scripts.tools.mug_rack_pose._json_io import write_json
+    from scripts.tools.assemble._json_io import write_json
 
     output = Path(load_config(config_path)["output_dir"])
     actual_run = output / "actual_run"

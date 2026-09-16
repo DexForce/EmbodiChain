@@ -22,13 +22,13 @@ from pathlib import Path
 
 import numpy as np
 
-from scripts.tools.mug_rack_pose._collision import (
+from scripts.tools.assemble._collision import (
     ExactCollision,
     HullCollision,
     decompose,
 )
-from scripts.tools.mug_rack_pose._geometry import load_mesh
-from scripts.tools.mug_rack_pose._json_io import pose_matrix
+from scripts.tools.assemble._geometry import load_mesh
+from scripts.tools.assemble._json_io import pose_matrix
 
 
 class PlacementValidator:

@@ -24,6 +24,7 @@ import hashlib
 from pathlib import Path
 import sys
 import tempfile
+import time
 
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -36,7 +37,7 @@ from scripts.tools.assemble._protocol import (
     load_config,
     run_process,
 )
-from scripts.tools.mug_rack_pose._json_io import pose_matrix, read_json, write_json
+from scripts.tools.assemble._json_io import pose_matrix, read_json, write_json
 
 __all__ = ["build_parser", "run_harness", "main"]
 
@@ -87,7 +88,17 @@ def _generate(source: str, directory: Path, config: dict) -> dict:
         directory / "build",
         config["timeout_seconds"],
     )
-    return read_json(directory / "geometry.json")
+    geometry = read_json(directory / "geometry.json")
+    for role, asset in geometry["assets"].items():
+        processing = asset.get("mesh_processing", {})
+        if processing.get("decimated"):
+            print(
+                f"[assemble] {role} mesh simplified: "
+                f"{processing['input_triangles']} -> {processing['exported_triangles']} "
+                f"triangles (limit {config['max_faces']})",
+                flush=True,
+            )
+    return geometry
 
 
 def run_harness(
@@ -109,6 +120,7 @@ def run_harness(
     """
     from scripts.tools.assemble._validation import PlacementValidator
 
+    started = time.perf_counter()
     output = Path(config["output_dir"])
     output.mkdir(parents=True, exist_ok=True)
     directory = Path(tempfile.mkdtemp(prefix=f"cycle_{cycle:03d}_", dir=output))
@@ -126,11 +138,18 @@ def run_harness(
         "validation": None,
         "trace": [],
         "candidates": [],
+        "timing_seconds": {
+            "planning": 0.0,
+            "objects": 0.0,
+            "relative_pose": 0.0,
+            "total": 0.0,
+        },
         "reason": "Generation has started",
     }
     trace, candidates = result["trace"], result["candidates"]
 
     def save() -> None:
+        result["timing_seconds"]["total"] = time.perf_counter() - started
         write_json(directory / "result.json", result)
         write_json(output / "latest.json", result)
         if result_file is not None:
@@ -142,131 +161,163 @@ def run_harness(
     try:
         for turn in range(1, config["codex"]["max_turns"] + 1):
             print(f"[assemble] Cycle {cycle}, Codex turn {turn}", flush=True)
-            action = decide(
-                build_prompt(
-                    config,
-                    cycle,
-                    trace,
-                    geometry,
-                    candidates,
-                    design,
-                    resolved_validation,
-                ),
-                directory,
-                turn,
-                config["codex"],
+            turn_started = time.perf_counter()
+            # If the model call fails without an action, charge the waiting stage.
+            stage = (
+                "planning"
+                if design is None
+                else ("objects" if validator is None else "relative_pose")
             )
-            entry = {"turn": turn, "action": action}
-            trace.append(entry)
+            entry = None
             try:
-                _check_action(action)
-                name = action["action"]
-                print(f"[assemble] {name}: {action['reason']}", flush=True)
-                if name == "plan":
-                    if design is not None:
-                        raise ValueError(
-                            "The accepted design and axis constraints are frozen for this cycle"
-                        )
-                    design, resolved_validation = resolve_design(
-                        action["design"], config["validation"]
-                    )
-                    result.update(
-                        design_plan=design, resolved_validation=resolved_validation
-                    )
-                    write_json(
-                        directory / "design_plan.json",
-                        {"design": design, "resolved_validation": resolved_validation},
-                    )
-                    entry["observation"] = {
-                        "design_accepted": True,
-                        "resolved_validation": resolved_validation,
-                    }
-                elif name == "generate":
-                    if design is None:
-                        raise ValueError(
-                            "Expand the descriptions with a valid plan before generating meshes"
-                        )
-                    # Invalidate the old assets BEFORE building, including when the new build fails.
-                    geometry = validator = None
-                    candidates.clear()
-                    result["assets"] = None
-                    generation += 1
-                    geometry = _generate(
-                        action["source"],
-                        directory / f"generation_{generation:02d}",
-                        config["geometry"],
-                    )
-                    validator = PlacementValidator(
-                        geometry, resolved_validation, output / "cache"
-                    )
-                    result["assets"] = geometry["assets"]
-                    entry["observation"] = geometry | {
-                        "visacd_hull_counts": validator.hull_counts
-                    }
-                elif name == "evaluate":
-                    if validator is None:
-                        raise ValueError(
-                            "Generate valid objects before evaluating a pose"
-                        )
-                    candidate = validator.evaluate(action["T_base_assemble"])
-                    candidate["candidate_id"] = turn
-                    candidate["generation"] = generation
-                    candidates.append(candidate)
-                    entry["observation"] = candidate
-                elif name == "finish":
-                    if validator is None:
-                        raise ValueError("No generated assets are available")
-                    selected = next(
-                        (
-                            x
-                            for x in candidates
-                            if x["candidate_id"] == action["candidate_id"]
-                        ),
-                        None,
-                    )
-                    if selected is None or not selected["validation"]["accepted"]:
-                        raise ValueError(
-                            "finish requires an accepted candidate from the current generation"
-                        )
-                    fresh = PlacementValidator(
-                        geometry, resolved_validation, output / "cache"
-                    )
-                    check = fresh.validate(selected["T_base_assemble"])
-                    if not check["accepted"]:
-                        raise ValueError(
-                            f"Independent final validation failed: {check}"
-                        )
-                    for asset in result["assets"].values():
-                        asset["sha256"] = hashlib.sha256(
-                            Path(asset["path"]).read_bytes()
-                        ).hexdigest()
-                    result.update(
-                        success=True,
-                        status="complete",
-                        T_base_assemble=selected["T_base_assemble"],
-                        validation=check,
-                        selected_candidate_id=selected["candidate_id"],
-                        geometry_json=str(
-                            Path(result["assets"]["base"]["path"]).with_name(
-                                "geometry.json"
+                action = decide(
+                    build_prompt(
+                        config,
+                        cycle,
+                        trace,
+                        geometry,
+                        candidates,
+                        design,
+                        resolved_validation,
+                    ),
+                    directory,
+                    turn,
+                    config["codex"],
+                )
+                if isinstance(action, dict) and isinstance(action.get("action"), str):
+                    stage = {
+                        "plan": "planning",
+                        "generate": "objects",
+                        "evaluate": "relative_pose",
+                        "finish": "relative_pose",
+                    }.get(action.get("action"), stage)
+                entry = {"turn": turn, "action": action}
+                trace.append(entry)
+                try:
+                    _check_action(action)
+                    name = action["action"]
+                    print(f"[assemble] {name}: {action['reason']}", flush=True)
+                    if name == "plan":
+                        if design is not None:
+                            raise ValueError(
+                                "The accepted design and axis constraints are frozen for this cycle"
                             )
-                        ),
-                        reason=action["reason"],
-                    )
-                    entry["observation"] = {
-                        "accepted": True,
-                        "independently_revalidated": True,
-                    }
-                    save()
-                    return result
-                else:
-                    result.update(status="failed", reason=action["reason"])
-                    entry["observation"] = {"stopped": True}
-                    save()
-                    return result
-            except Exception as error:
-                entry["observation"] = {"error": f"{type(error).__name__}: {error}"}
-                print(f"[assemble] Feedback: {error}", flush=True)
+                        design, resolved_validation = resolve_design(
+                            action["design"], config["validation"]
+                        )
+                        result.update(
+                            design_plan=design, resolved_validation=resolved_validation
+                        )
+                        write_json(
+                            directory / "design_plan.json",
+                            {
+                                "design": design,
+                                "resolved_validation": resolved_validation,
+                            },
+                        )
+                        entry["observation"] = {
+                            "design_accepted": True,
+                            "resolved_validation": resolved_validation,
+                        }
+                    elif name == "generate":
+                        if design is None:
+                            raise ValueError(
+                                "Expand the descriptions with a valid plan before generating meshes"
+                            )
+                        # Invalidate the old assets BEFORE building, including when the new build fails.
+                        geometry = validator = None
+                        candidates.clear()
+                        result["assets"] = None
+                        generation += 1
+                        geometry = _generate(
+                            action["source"],
+                            directory / f"generation_{generation:02d}",
+                            config["geometry"],
+                        )
+                        validator = PlacementValidator(
+                            geometry, resolved_validation, output / "cache"
+                        )
+                        result["assets"] = geometry["assets"]
+                        entry["observation"] = geometry | {
+                            "visacd_hull_counts": validator.hull_counts
+                        }
+                    elif name == "evaluate":
+                        if validator is None:
+                            raise ValueError(
+                                "Generate valid objects before evaluating a pose"
+                            )
+                        candidate = validator.evaluate(action["T_base_assemble"])
+                        candidate["candidate_id"] = turn
+                        candidate["generation"] = generation
+                        candidates.append(candidate)
+                        entry["observation"] = candidate
+                    elif name == "finish":
+                        if validator is None:
+                            raise ValueError("No generated assets are available")
+                        selected = next(
+                            (
+                                x
+                                for x in candidates
+                                if x["candidate_id"] == action["candidate_id"]
+                            ),
+                            None,
+                        )
+                        if selected is None or not selected["validation"]["accepted"]:
+                            raise ValueError(
+                                "finish requires an accepted candidate from the current generation"
+                            )
+                        fresh = PlacementValidator(
+                            geometry, resolved_validation, output / "cache"
+                        )
+                        check = fresh.validate(selected["T_base_assemble"])
+                        if not check["accepted"]:
+                            raise ValueError(
+                                f"Independent final validation failed: {check}"
+                            )
+                        for asset in result["assets"].values():
+                            asset["sha256"] = hashlib.sha256(
+                                Path(asset["path"]).read_bytes()
+                            ).hexdigest()
+                        result.update(
+                            success=True,
+                            status="complete",
+                            T_base_assemble=selected["T_base_assemble"],
+                            validation=check,
+                            selected_candidate_id=selected["candidate_id"],
+                            geometry_json=str(
+                                Path(result["assets"]["base"]["path"]).with_name(
+                                    "geometry.json"
+                                )
+                            ),
+                            reason=action["reason"],
+                        )
+                        entry["observation"] = {
+                            "accepted": True,
+                            "independently_revalidated": True,
+                        }
+                        return result
+                    else:
+                        result.update(status="failed", reason=action["reason"])
+                        entry["observation"] = {"stopped": True}
+                        return result
+                except Exception as error:
+                    entry["observation"] = {"error": f"{type(error).__name__}: {error}"}
+                    print(f"[assemble] Feedback: {error}", flush=True)
+            finally:
+                elapsed = time.perf_counter() - turn_started
+                result["timing_seconds"][stage] += elapsed
+                if entry is not None:
+                    entry["timing"] = {"stage": stage, "seconds": elapsed}
+                label = {
+                    "planning": "Planning",
+                    "objects": "Object generation",
+                    "relative_pose": "Relative pose generation",
+                }[stage]
+                print(
+                    f"[assemble] {label}: {elapsed:.2f}s this turn; "
+                    f"{result['timing_seconds'][stage]:.2f}s cumulative",
+                    flush=True,
+                )
             save()
         result.update(
             status="failed",
@@ -277,10 +328,18 @@ def run_harness(
             status="interrupted" if isinstance(error, KeyboardInterrupt) else "failed",
             reason=f"{type(error).__name__}: {error}",
         )
-        save()
         if isinstance(error, KeyboardInterrupt):
             raise
-    save()
+    finally:
+        save()
+        timing = result["timing_seconds"]
+        print(
+            f"[assemble] Cycle {cycle} timing ({result['status']}): "
+            f"objects={timing['objects']:.2f}s, "
+            f"relative pose={timing['relative_pose']:.2f}s, "
+            f"planning={timing['planning']:.2f}s, total={timing['total']:.2f}s",
+            flush=True,
+        )
     return result
 
 

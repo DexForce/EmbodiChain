@@ -2,8 +2,8 @@
 
 Generate a pair of household objects from descriptions, assemble them, and inspect
 the result in EmbodiChain's native simulation window. This is an independent,
-generalized companion to [`mug_rack_pose`](../mug_rack_pose/README.md): it creates
-both meshes instead of requiring existing mesh paths.
+self-contained tool that creates both meshes instead of requiring existing
+mesh paths. Its JSON, mesh-loading, and collision helpers live in this directory.
 
 The input is a JSON configuration. The output is JSON containing the generated
 asset paths and a verified **4 × 4 `T_base_assemble` matrix**. Blender source, OBJ
@@ -65,6 +65,30 @@ The job-specific handoff is checkpointed alongside the run JSON. If the supervis
 must terminate a job, it marks those records as failed or interrupted instead of
 leaving a stale `running` status. It updates `latest.json` only if it still belongs
 to that same run.
+
+Both `generate.py` and `visualize.py` print elapsed seconds after each model turn
+and a cumulative summary at the end of each cycle, for example:
+
+```text
+[assemble] Object generation: 42.35s this turn; 42.35s cumulative
+[assemble] Relative pose generation: 18.20s this turn; 18.20s cumulative
+[assemble] Cycle 1 timing (complete): objects=42.35s, relative pose=26.10s, planning=8.40s, total=76.95s
+```
+
+Timings include prompt construction, the Codex request, and local processing.
+`objects` covers all `generate` turns: both assets are built together, including
+Blender export and collision preprocessing. `relative_pose` covers `evaluate` and
+`finish` turns, including settling, collision checks and independent final
+validation. `planning` covers design expansion. Retries and failed attempts are
+included in their corresponding totals. If a request fails before returning an
+action, its elapsed time is charged to the stage awaiting a response. Failures
+and Ctrl+C handled inside `generate.py` also print the cycle summary.
+
+The `timing_seconds` result field stores these cumulative values, and each trace
+entry has a `timing` object containing its `stage` and `seconds`. `total` also
+includes harness overhead; it excludes viewer loading, simulation updates, and
+waiting for Enter. A forcibly terminated subprocess retains only the timing
+information saved at its last checkpoint.
 
 Both bodies are **static rigid objects** with original triangle-mesh collision
 geometry. This preserves the accepted pose and cup cavity while the simulator
@@ -169,7 +193,7 @@ Optional settings and their defaults:
 | `codex.max_turns` | Total decisions including initial planning, generation repairs, pose proposals, and finish; at least four calls. |
 | `codex.timeout_seconds` | Per-call elapsed timeout; a timed-out CLI process group is stopped and the run fails. |
 | `geometry.timeout_seconds` | Per-build Blender subprocess timeout; errors are returned to Codex for repair. |
-| `geometry.max_faces` | Maximum exported triangle count per object. |
+| `geometry.max_faces` | Maximum exported triangle count per object; oversize meshes are decimated and revalidated before export. |
 | `validation.collision` | `visacd` for cached convex acceleration; `exact` for original-mesh checks without decomposition. |
 | `concavity`, `max_parts` | VISACD approximation settings; its actual hull count may exceed the requested budget. |
 | `contact_gap` | Vertical retreat from a detected contact boundary, in meters. |
@@ -378,14 +402,25 @@ in its own local asset frame; the assembly transform is applied later. Meshes ar
 checked for finite vertices, watertight solid boundaries, valid size, and triangle
 budget. Before export, BMesh collapses Boolean seam edges within 0.1 micrometers
 and dissolves degenerate edges before retriangulation, preserving closed topology
-instead of deleting tiny triangles and leaving cracks. The worker also saves the
+instead of deleting tiny triangles and leaving cracks. If the evaluated triangle
+count exceeds `geometry.max_faces`, the worker applies Blender collapse decimation
+with a target of 95% of the budget and rechecks the result. It does not replace
+a hollow object with its convex hull. The exported mesh must still be a watertight
+solid and stay under the face limit; otherwise the build fails and Codex receives
+the error for repair. The same reduced geometry is saved in `assets.blend`.
+
+The terminal reports reductions such as `base mesh simplified: 106160 -> 95000
+triangles (limit 100000)`. Each asset's `mesh_processing` records the input and
+exported triangle counts and whether decimation ran. Model prompts request a
+margin below the limit; remeshing and simplification can shift contact surfaces,
+so pose checks always use the actual exported meshes. The worker also saves the
 Blender scene and measured bounding boxes,
 volumes, vertex counts, and face counts. Generated metadata are model assertions;
 the measured statistics and subsequent collision checks are independent evidence.
 
 ### Geometry acceptance
 
-The geometry layer reuses the existing `mug_rack_pose` collision implementation:
+The local `_geometry.py` and `_collision.py` modules implement these checks:
 
 - DexSim `convex_decomposition_visacd` creates multiple solid convex parts per
   object, following the API in
@@ -412,8 +447,6 @@ household assemblies. Direction constraints help express inversion/upright
 orientation, while semantic requirements such as "inside the retaining lip" are
 handled by the model and should be visually inspected. The generic checker does
 not automatically infer a mug cavity or prove arbitrary natural-language actions.
-Use `mug_rack_pose` for its specialized cavity and branch reasoning on existing
-mug/rack meshes.
 
 The support probe is a local geometric test. It does not establish center-of-mass
 balance, frictional stability, a collision-free continuous insertion path, or
@@ -479,6 +512,7 @@ A successful `result.json` contains:
 | `candidates` | Proposed/final matrices and validations for the current generation. |
 | `selected_candidate_id` | Host-assigned candidate chosen by the model. |
 | `trace` | Complete actions, source code, observations, and errors. |
+| `timing_seconds` | Cumulative `planning`, `objects`, `relative_pose`, and `total` elapsed seconds. |
 | `run_directory`, `geometry_json` | Audit artifact locations. |
 
 The transform uses **column vectors**:
@@ -501,6 +535,9 @@ The native preview uses `T_world_base = identity` and assigns the matrix through
 | `blender_helpers.py` | Generic Blender primitives and booleans available to model code. |
 | `_build_worker.py` | Separate Blender execution process and local-frame mesh export. |
 | `_validation.py` | Generic support checks, VISACD acceleration, downward adjustment. |
+| `_json_io.py` | UTF-8 JSON object loading, atomic writes, finite-number and SE(3) checks. |
+| `_geometry.py` | Solid mesh loading, seam welding, and watertightness checks. |
+| `_collision.py` | Cached VISACD hulls, FCL collision/distance, and Manifold solid intersection. |
 | `visualize.py` | Full pipeline and native scene reset/regeneration loop. |
 | `configs/` | Reusable examples and custom job descriptions. |
 
@@ -516,11 +553,13 @@ call Codex. They cover configuration errors, real Blender export, cavity
 preservation, support adjustment, orientation, stale candidates, independent
 revalidation, unsuccessful result persistence, planning-before-generation, automatic
 axis constraints, retaining the displayed scene after failures, subprocess progress,
-and stopping descendants in separate process groups on timeout:
+and stopping descendants in separate process groups on timeout. Helper tests
+also cover strict JSON, atomic checkpoint replacement, rigid transforms, seam
+welding, cavity preservation, solid containment, and VISACD cache reuse:
 
 ```bash
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=4 \
 python -m pytest -q -c /dev/null --noconftest -p no:cacheprovider \
   tests/toolkits/test_assemble_harness.py \
-  tests/toolkits/test_mug_rack_pose.py
+  tests/toolkits/test_assemble_helpers.py
 ```

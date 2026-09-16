@@ -26,7 +26,7 @@ import tempfile
 import time
 
 from scripts.tools.assemble._protocol import load_config
-from scripts.tools.mug_rack_pose._json_io import read_json, write_json
+from scripts.tools.assemble._json_io import read_json, write_json
 
 
 def _stop_tree(process: subprocess.Popen) -> None:

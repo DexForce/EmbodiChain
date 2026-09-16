@@ -22,18 +22,80 @@ import argparse
 from pathlib import Path
 import runpy
 import sys
+from typing import TYPE_CHECKING
 
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from scripts.tools.mug_rack_pose._json_io import write_json
+from scripts.tools.assemble._json_io import write_json
+
+if TYPE_CHECKING:
+    import bmesh
 
 
-def _export(obj: object, path: Path, color: tuple[float, float, float]) -> None:
+def _clean(mesh: bmesh.types.BMesh) -> None:
+    import bmesh
+
+    # Collapse Boolean seam edges before triangulation, preserving closed topology.
+    bmesh.ops.remove_doubles(mesh, verts=list(mesh.verts), dist=1e-7)
+    bmesh.ops.triangulate(mesh, faces=list(mesh.faces))
+    bmesh.ops.dissolve_degenerate(mesh, edges=list(mesh.edges), dist=1e-8)
+    bmesh.ops.triangulate(mesh, faces=list(mesh.faces))
+    bmesh.ops.recalc_face_normals(mesh, faces=list(mesh.faces))
+
+
+def _fit_face_budget(mesh: bmesh.types.BMesh, role: str) -> dict:
+    import bpy
+
+    original_count = len(mesh.faces)
+    # Leave margin for cleanup/retriangulation. Work on evaluated, triangulated
+    # geometry so quad-heavy voxel remeshes cannot hide their exported face count.
+    for _ in range(3):
+        count = len(mesh.faces)
+        if count <= _MAX_FACES:
+            break
+        temporary_mesh = bpy.data.meshes.new("assembly_decimation")
+        temporary = bpy.data.objects.new("assembly_decimation", temporary_mesh)
+        bpy.context.scene.collection.objects.link(temporary)
+        try:
+            mesh.to_mesh(temporary_mesh)
+            modifier = temporary.modifiers.new("Face budget", "DECIMATE")
+            modifier.decimate_type = "COLLAPSE"
+            modifier.ratio = 0.95 * _MAX_FACES / count
+            modifier.use_collapse_triangulate = True
+            bpy.context.view_layer.update()
+            evaluated = temporary.evaluated_get(bpy.context.evaluated_depsgraph_get())
+            reduced = evaluated.to_mesh()
+            try:
+                mesh.clear()
+                mesh.from_mesh(reduced)
+            finally:
+                evaluated.to_mesh_clear()
+            _clean(mesh)
+        finally:
+            bpy.data.objects.remove(temporary, do_unlink=True)
+            bpy.data.meshes.remove(temporary_mesh)
+        if len(mesh.faces) >= count:
+            break
+    if len(mesh.faces) > _MAX_FACES:
+        raise ValueError(
+            f"{role} still has {len(mesh.faces)} triangles after simplification "
+            f"(originally {original_count}), exceeding max_faces={_MAX_FACES}; "
+            "reduce mesh resolution or complexity"
+        )
+    return {
+        "input_triangles": original_count,
+        "exported_triangles": len(mesh.faces),
+        "decimated": original_count > _MAX_FACES,
+    }
+
+
+def _export(obj: object, path: Path, color: tuple[float, float, float]) -> dict:
     import bmesh
     import bpy
+    from mathutils import Matrix
     import numpy as np
-    from scripts.tools.mug_rack_pose._geometry import load_mesh
+    from scripts.tools.assemble._geometry import load_mesh
 
     if not isinstance(obj, bpy.types.Object) or obj.type != "MESH":
         raise ValueError(f"{path.stem} must be a Blender mesh object")
@@ -43,25 +105,25 @@ def _export(obj: object, path: Path, color: tuple[float, float, float]) -> None:
     cleaned = bmesh.new()
     try:
         # Bake the Blender transform explicitly: OBJ XYZ stays Z-up with no export-axis remap.
-        cleaned.from_mesh(mesh)
-        cleaned.transform(evaluated.matrix_world)
-        # Boolean seams can contain sub-micron edges. Collapse their topology before
-        # triangulation instead of dropping triangles and leaving tiny open cracks.
-        bmesh.ops.remove_doubles(cleaned, verts=list(cleaned.verts), dist=1e-7)
-        bmesh.ops.triangulate(cleaned, faces=list(cleaned.faces))
-        bmesh.ops.dissolve_degenerate(cleaned, edges=list(cleaned.edges), dist=1e-8)
-        bmesh.ops.triangulate(cleaned, faces=list(cleaned.faces))
-        bmesh.ops.recalc_face_normals(cleaned, faces=list(cleaned.faces))
+        try:
+            cleaned.from_mesh(mesh)
+            cleaned.transform(evaluated.matrix_world)
+        finally:
+            evaluated.to_mesh_clear()
+        _clean(cleaned)
+        processing = _fit_face_budget(cleaned, path.stem)
+        if processing["decimated"]:
+            # Keep assets.blend consistent with the actual simplified OBJ geometry.
+            baked = bpy.data.meshes.new(f"{obj.name}_export")
+            cleaned.to_mesh(baked)
+            obj.modifiers.clear()
+            obj.data = baked
+            obj.matrix_world = Matrix.Identity(4)
         cleaned.verts.index_update()
         vertices = np.array([v.co[:] for v in cleaned.verts])
         faces = np.array([[v.index for v in face.verts] for face in cleaned.faces])
     finally:
         cleaned.free()
-        evaluated.to_mesh_clear()
-    if len(faces) > _MAX_FACES:
-        raise ValueError(
-            f"{path.stem} has {len(faces)} triangles, exceeding max_faces={_MAX_FACES}; reduce mesh resolution or complexity"
-        )
     with path.open("w") as stream:
         stream.write(f"mtllib {path.stem}.mtl\no {path.stem}\nusemtl {path.stem}\n")
         for vertex in vertices:
@@ -78,6 +140,7 @@ def _export(obj: object, path: Path, color: tuple[float, float, float]) -> None:
         raise ValueError(
             "Generated assets must be between 0.1 mm and 3 m along every axis"
         )
+    return processing
 
 
 def main() -> None:
@@ -89,7 +152,7 @@ def main() -> None:
     args = parser.parse_args()
     _MAX_FACES = args.max_faces
     import bpy
-    from scripts.tools.mug_rack_pose._geometry import load_mesh
+    from scripts.tools.assemble._geometry import load_mesh
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
     namespace = runpy.run_path(str(args.source), run_name="assembly_generated")
@@ -105,7 +168,7 @@ def main() -> None:
     observations = {"metadata": objects["metadata"], "assets": {}}
     for role, color in (("base", (0.35, 0.22, 0.12)), ("assemble", (0.12, 0.58, 0.42))):
         path = output / f"{role}.obj"
-        _export(objects[role], path, color)
+        processing = _export(objects[role], path, color)
         mesh = load_mesh(path)
         observations["assets"][role] = {
             "path": str(path),
@@ -113,6 +176,7 @@ def main() -> None:
             "volume_m3": float(mesh.volume),
             "vertices": len(mesh.vertices),
             "faces": len(mesh.faces),
+            "mesh_processing": processing,
         }
     bpy.ops.wm.save_as_mainfile(filepath=str(output / "assets.blend"))
     write_json(output / "geometry.json", observations)

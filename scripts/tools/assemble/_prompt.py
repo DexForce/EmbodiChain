@@ -54,11 +54,14 @@ Available actions (all schema fields are required; irrelevant fields MUST be nul
    mouth axis, cavity floor height/depth/radius and the chosen branch tip coordinates. Explain
    how the branch enters the mouth and how its tip supports the inside bottom after inversion.
    For a phone specify the support ledge and upright/tilted phone frame. Include enough numeric
-   information for YOUR next evaluate action. Keep meshes below geometry.max_faces.
+   information for YOUR next evaluate action. Aim for at most half of geometry.max_faces
+   per object, counting TRIANGLES after modifiers rather than Blender polygons/quads.
    If voxel remeshing, check the triangulated face count for BOTH objects. Triangle count
    grows roughly as 1 / voxel_size^2; use a coarser voxel size or adaptive decimation when
-   necessary, while preserving cavity walls and support surfaces. A watertight mesh that
-   exceeds the face budget will be rejected just like an open mesh.
+   necessary, while preserving cavity walls and support surfaces. The host attempts Blender
+   collapse decimation if an exported mesh exceeds geometry.max_faces, then rechecks the
+   solid. Avoid relying on this to preserve tiny features. Read mesh_processing and the
+   exported bounds: simplification/remeshing may shift the intended contact surfaces.
    Generation again replaces BOTH objects and INVALIDATES ALL existing candidates.
 2. evaluate: T_base_assemble is your numeric 4x4 SE(3) proposal, mapping column homogeneous
    assemble-local coordinates to base-local coordinates. Rotation must be orthonormal det +1.

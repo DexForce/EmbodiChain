@@ -26,7 +26,7 @@ import signal
 import subprocess
 
 from scripts.tools.assemble._planning import design_schema
-from scripts.tools.mug_rack_pose._json_io import read_json, write_json
+from scripts.tools.assemble._json_io import read_json, write_json
 
 
 def load_config(path: Path) -> dict:
