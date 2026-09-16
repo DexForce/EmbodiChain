@@ -35,6 +35,12 @@ Configuration
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict, validate
 
+.. autoclass:: PreviewGroupCfg
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
 Runtime
 -------
 
@@ -52,6 +58,10 @@ Runtime
    :undoc-members:
 
 .. autoclass:: JointControlCommandQueue
+   :members:
+   :undoc-members:
+
+.. autoclass:: PanelCommandQueue
    :members:
    :undoc-members:
 
@@ -128,6 +138,48 @@ explicitly configured gizmos retain their ownership.
    :undoc-members:
 
 .. autoclass:: CaptureResult
+   :members:
+   :undoc-members:
+
+Preview Nodes
+-------------
+
+Preview nodes reuse an articulation's link meshes with independent poses and a
+constant :attr:`SceneNode.opacity`, so a caller can render a translucent copy of
+a robot at a hypothetical configuration while the physics world stays untouched.
+Register groups with :meth:`SceneExporter.set_preview_groups`, publish a new
+manifest, then pass one :class:`PreviewNodeUpdate` per group to
+:meth:`SceneExporter.capture` or :meth:`VisualizationRuntime.capture`.
+
+.. autoclass:: PreviewNodeUpdate
+   :members:
+   :undoc-members:
+
+Custom Panels
+-------------
+
+A custom panel adds application-specific controls to the browser sidebar
+without teaching the backend what they mean. :class:`PanelSpec` carries a build
+callback and an optional state callback; both run on the visualization worker
+thread, the only thread allowed to touch backend GUI handles. Register a panel
+with :meth:`VisualizationRuntime.register_panel`, push immutable state with
+:meth:`VisualizationRuntime.publish_panel_state`, and consume the values the
+panel emits with :meth:`VisualizationRuntime.drain_panel_commands`. Publishing a
+manifest resets the browser GUI, so registered panels are rebuilt automatically.
+
+.. autoclass:: PanelSpec
+   :members:
+   :undoc-members:
+
+.. autoclass:: PanelBuildContext
+   :members:
+   :undoc-members:
+
+.. autoclass:: PanelEventSink
+   :members:
+   :undoc-members:
+
+.. autoclass:: PanelCommand
    :members:
    :undoc-members:
 

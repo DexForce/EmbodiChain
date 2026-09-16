@@ -14,6 +14,9 @@
 | `embodichain/lab/visualization/cfg.py` | `VisualizationCfg` and nested `ViserServerCfg` |
 | `embodichain/lab/visualization/cli.py` | Common `--viser*` arguments and standalone argument-to-config conversion |
 | `embodichain/lab/visualization/protocol.py` | Backend-neutral manifest, frame, mesh, camera, and overlay snapshots |
+| `embodichain/lab/visualization/panels.py` | Backend-neutral custom side-panel registration (`PanelSpec`, `PanelBuildContext`) |
+| `embodichain/lab/visualization/authoring/` | Skill-sequence authoring: immutable card/command protocol, the simulation-thread `AuthoringSession` that compiles and executes atomic-action sequences, `SequencePreview` playback on preview nodes, the `SkillSequencePanel` browser panel, the `AuthoringBridge` that applies its commands, and the `StepwiseExecution` driver that replays a compiled sequence under host-loop control |
+| `scripts/tutorials/visualization/skill_sequencer.py` | Runnable browser authoring tutorial; `--headless_smoke` self-checks the whole chain against real physics |
 | `embodichain/lab/visualization/scene_exporter.py` | Reads simulation assets and produces detached CPU snapshots |
 | `embodichain/lab/visualization/runtime.py` | Background worker, latest-frame queues, rate limiting, health, and telemetry |
 | `embodichain/lab/visualization/backends/base.py` | Visualization backend contract |
@@ -69,6 +72,17 @@ this invariant.
 ## Invariants
 
 - Scene export must not mutate physics, actions, or asset state.
+- Preview nodes reuse an articulation's link meshes with caller-supplied
+  poses and a constant `SceneNode.opacity`. They carry no simulation asset,
+  so their poses come only from `PreviewNodeUpdate` values and preview
+  producers must stay read-only (analytic FK, never joint writes).
+- Custom panels are opaque to the backend: it builds them, hands them
+  immutable state, and forwards the immutable values they emit as
+  `PanelCommand`. No panel concept may enter `backends/viser.py`, and a
+  backend with no registered panel behaves exactly as before.
+- Exactly one owner steps physics at a time. While a `StepwiseExecution` is
+  active it owns the simulation clock, so the host loop must not call
+  `sim.update()` and the sequence must not be edited.
 - Gizmo commands mutate targets only after simulation-thread validation.
 - Simulation/DexSim reads stay on the simulation thread.
 - Viser server and handle operations stay on one private worker thread.
@@ -110,6 +124,10 @@ Relevant tests:
 - `tests/visualization/test_cfg.py`
 - `tests/visualization/test_cli.py`
 - `tests/visualization/test_protocol.py`
+- `tests/visualization/test_authoring.py`
+- `tests/visualization/test_authoring_preview.py`
+- `tests/visualization/test_authoring_panel.py`
+- `tests/visualization/test_authoring_execution.py`
 - `tests/visualization/test_scene_exporter.py`
 - `tests/visualization/test_runtime.py`
 - `tests/visualization/test_viser_backend.py`

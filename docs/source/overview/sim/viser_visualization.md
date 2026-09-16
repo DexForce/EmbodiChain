@@ -40,6 +40,9 @@ python scripts/tutorials/sim/create_rigid_object_group.py --viser
 # CUDA deformables
 python scripts/tutorials/sim/create_softbody.py --viser
 python scripts/tutorials/sim/create_cloth.py --viser
+
+# Authoring, previewing, and running an Atomic Skill sequence in the browser
+python scripts/tutorials/visualization/skill_sequencer.py --viser
 ```
 
 Gym environments use the same launcher options:
@@ -314,6 +317,7 @@ Viser port behind an authenticated gateway.
 
 ## Related pages
 
+- {doc}`skill_sequencer`
 - {doc}`sim_manager`
 - {doc}`sim_assets`
 - {doc}`sensors/index`

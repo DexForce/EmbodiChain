@@ -1677,6 +1677,200 @@ embodichain.lab.sim.motion.workspace.visualizers.voxel_visualizer
 
    VoxelVisualizer
 
+embodichain.lab.visualization.authoring
+---------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.authoring
+
+Browser skill-sequence authoring. Immutable card, snapshot, and command
+values cross the thread boundary between the simulation thread and
+browser-facing UI layers, while :class:`AuthoringSession` compiles configured
+skill cards into atomic-action trajectories and executes them on the
+simulation thread. :class:`SequencePreview` replays a compiled trajectory on a
+translucent preview robot without mutating simulation state.
+:class:`SkillSequencePanel` renders the sequence as a browser side panel and
+emits commands, and :class:`AuthoringBridge` applies them on the simulation
+thread and publishes new :class:`PanelViewState` values back to the panel.
+:class:`StepwiseExecution` replays a compiled sequence under host-loop control
+so a browser keeps receiving card-state updates while the robot is moving.
+
+.. autosummary::
+
+   AddCard
+   AuthoringBridge
+   AuthoringCommand
+   AuthoringSession
+   CardRow
+   CompileSequence
+   ExecuteSequence
+   ExecutionProgress
+   MoveCard
+   PanelViewState
+   PreviewCommand
+   PreviewPlaybackCfg
+   PreviewPlaybackState
+   RemoveCard
+   SUPPORTED_SKILL_IDS
+   SeekPreview
+   SequencePreview
+   SequenceSnapshot
+   SkillCard
+   SkillCardState
+   SkillSequencePanel
+   SkillSequencePanelCfg
+   StepPreview
+   StepwiseExecution
+   TogglePreviewPlayback
+   UpdateCard
+   card_rows
+   freeze_params
+   render_cards_markdown
+   render_preview_markdown
+   render_summary_markdown
+
+embodichain.lab.visualization.authoring.bridge
+-----------------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.authoring.bridge
+
+.. autosummary::
+
+   AuthoringBridge
+
+.. autoclass:: AuthoringBridge
+   :members:
+
+embodichain.lab.visualization.authoring.execution
+--------------------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.authoring.execution
+
+A blocking :meth:`AuthoringSession.execute` call publishes nothing while it
+runs. :class:`StepwiseExecution` hands the pacing to the host loop instead:
+each :meth:`StepwiseExecution.advance` call performs a bounded number of
+simulation updates and returns, so a browser-facing loop can publish panel
+state and capture a frame between slices.
+
+.. autosummary::
+
+   StepwiseExecution
+
+.. autoclass:: StepwiseExecution
+   :members:
+
+embodichain.lab.visualization.authoring.panel
+----------------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.authoring.panel
+
+The panel is a pure UI layer: it renders an immutable :class:`PanelViewState`
+into browser controls and emits immutable command values. Sequence edits use
+the authoring protocol commands; playback uses the :data:`PreviewCommand`
+family defined here. The rendering helpers are pure functions, so a different
+browser frontend can reuse the display model.
+
+.. autosummary::
+
+   CardRow
+   PanelViewState
+   PreviewCommand
+   SeekPreview
+   SkillSequencePanel
+   SkillSequencePanelCfg
+   StepPreview
+   TogglePreviewPlayback
+   card_rows
+   render_cards_markdown
+   render_preview_markdown
+   render_summary_markdown
+
+.. autoclass:: SkillSequencePanel
+   :members:
+
+.. autoclass:: SkillSequencePanelCfg
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: PanelViewState
+   :members:
+
+.. autoclass:: CardRow
+   :members:
+
+.. autoclass:: SeekPreview
+   :members:
+
+.. autoclass:: StepPreview
+   :members:
+
+.. autoclass:: TogglePreviewPlayback
+   :members:
+
+.. autofunction:: card_rows
+
+.. autofunction:: render_cards_markdown
+
+.. autofunction:: render_preview_markdown
+
+.. autofunction:: render_summary_markdown
+
+embodichain.lab.visualization.authoring.preview
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.authoring.preview
+
+.. autosummary::
+
+   PreviewPlaybackCfg
+   PreviewPlaybackState
+   SequencePreview
+
+.. autoclass:: PreviewPlaybackCfg
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: PreviewPlaybackState
+   :members:
+
+.. autoclass:: SequencePreview
+   :members:
+
+embodichain.lab.visualization.authoring.protocol
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.authoring.protocol
+
+.. autosummary::
+
+   AddCard
+   AuthoringCommand
+   CompileSequence
+   ExecuteSequence
+   ExecutionProgress
+   MoveCard
+   RemoveCard
+   SUPPORTED_SKILL_IDS
+   SequenceSnapshot
+   SkillCard
+   SkillCardState
+   UpdateCard
+   freeze_params
+
+.. autoclass:: ExecutionProgress
+   :members:
+
+embodichain.lab.visualization.authoring.session
+-----------------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.authoring.session
+
+.. autosummary::
+
+   AuthoringSession
+
+.. autoclass:: AuthoringSession
+   :members:
+
 embodichain.lab.visualization.backends
 --------------------------------------
 
@@ -1712,6 +1906,7 @@ embodichain.lab.visualization.cfg
 
 .. autosummary::
 
+   PreviewGroupCfg
    VisualizationCfg
    ViserServerCfg
 
@@ -1724,6 +1919,31 @@ embodichain.lab.visualization.cli
 
    add_viser_args_to_parser
    visualization_cfg_from_args
+
+embodichain.lab.visualization.panels
+------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.panels
+
+Backend-neutral registration contract for custom browser side panels. A panel
+is a build callback plus an optional state callback, both invoked on the
+visualization worker thread. The backend forwards whatever immutable value the
+panel emits to the simulation thread and never interprets it.
+
+.. autosummary::
+
+   PanelBuildContext
+   PanelEventSink
+   PanelSpec
+
+.. autoclass:: PanelSpec
+   :members:
+
+.. autoclass:: PanelBuildContext
+   :members:
+
+.. autoclass:: PanelEventSink
+   :members:
 
 embodichain.lab.visualization.picker
 ------------------------------------
@@ -1762,8 +1982,10 @@ embodichain.lab.visualization.protocol
    JointControlSpec
    JointControlState
    MeshGeometry
+   PanelCommand
    PickCommand
    PointCloudOverlay
+   PreviewNodeUpdate
    SceneFrame
    SceneManifest
    SceneNode
@@ -1785,6 +2007,7 @@ embodichain.lab.visualization.runtime
    GizmoCommandQueue
    JointControlCommandQueue
    LatestFrameQueue
+   PanelCommandQueue
    RuntimeHealth
    RuntimeStats
    VisualizationRuntime

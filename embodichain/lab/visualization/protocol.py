@@ -39,8 +39,10 @@ __all__ = [
     "JointControlSpec",
     "JointControlState",
     "MeshGeometry",
+    "PanelCommand",
     "PickCommand",
     "PointCloudOverlay",
+    "PreviewNodeUpdate",
     "SceneFrame",
     "SceneManifest",
     "SceneNode",
@@ -392,6 +394,42 @@ class PickCommand:
 
 
 @dataclass(frozen=True)
+class PanelCommand:
+    """Immutable custom-panel interaction consumed on the simulation thread.
+
+    Custom panels are backend-neutral: the visualization backend only knows how
+    to build them, hand them state, and forward the values they emit. ``value``
+    therefore carries a payload defined by the panel and its simulation-thread
+    owner, and must be immutable so it can cross the thread boundary unshared.
+    """
+
+    run_id: str
+    scene_revision: int
+    sequence: int
+    panel_id: str
+    client_id: str
+    value: object
+    schema_version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if not self.run_id:
+            raise ValueError("Panel command run_id must not be empty.")
+        if self.scene_revision < 0:
+            raise ValueError("Panel command scene_revision must be non-negative.")
+        if self.sequence < 0:
+            raise ValueError("Panel command sequence must be non-negative.")
+        if not self.panel_id:
+            raise ValueError("Panel command panel_id must not be empty.")
+        if not self.client_id:
+            raise ValueError("Panel command client_id must not be empty.")
+        if isinstance(self.value, (list, dict, set, bytearray, np.ndarray)):
+            raise TypeError(
+                "Panel command value must be immutable; received "
+                f"{type(self.value).__name__}."
+            )
+
+
+@dataclass(frozen=True)
 class JointControlSpec:
     """Static description of one scalar articulation joint control.
 
@@ -516,6 +554,86 @@ class SceneNode:
     geometry_id: str
     dynamic_geometry: bool = False
     visible: bool = True
+    opacity: float = 1.0
+    """Constant transparency multiplier applied on top of frame visibility.
+
+    The default keeps a node fully opaque. Values below one are reserved for
+    translucent preview nodes and are multiplied with the node's per-frame
+    visibility by the backend.
+    """
+
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.opacity) or not 0.0 <= float(self.opacity) <= 1.0:
+            raise ValueError(
+                f"SceneNode.opacity must be a finite value in [0, 1], "
+                f"received {self.opacity}."
+            )
+
+
+@dataclass(frozen=True)
+class PreviewNodeUpdate:
+    """Detached poses for one registered group of preview scene nodes.
+
+    Preview nodes reuse a simulated articulation's link meshes but carry their
+    own poses, letting a caller render a translucent copy of a robot at a
+    hypothetical joint configuration while the physics world stays untouched.
+
+    Poses use the same per-environment local frame as
+    ``Articulation.body_data.body_link_pose``; the scene exporter adds the
+    environment's arena offset when it writes them into a frame.
+    """
+
+    group_id: str
+    positions: np.ndarray
+    wxyz: np.ndarray
+    visible: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.group_id:
+            raise ValueError("Preview node update group_id must not be empty.")
+        positions = _array(self.positions, np.float32)
+        wxyz = _array(self.wxyz, np.float32)
+        if positions.ndim != 2 or positions.shape[1] != 3:
+            raise ValueError(
+                f"Preview positions must have shape (N, 3), received {positions.shape}."
+            )
+        node_count = int(positions.shape[0])
+        if wxyz.shape != (node_count, 4):
+            raise ValueError(
+                f"Preview wxyz must have shape ({node_count}, 4), "
+                f"received {wxyz.shape}."
+            )
+        norms = np.linalg.norm(wxyz, axis=1, keepdims=True)
+        if np.any(norms <= np.finfo(np.float32).eps):
+            raise ValueError("Preview update contains a degenerate quaternion.")
+        object.__setattr__(self, "positions", positions)
+        object.__setattr__(self, "wxyz", wxyz / norms)
+
+    @classmethod
+    def from_matrices(
+        cls,
+        group_id: str,
+        poses: object,
+        *,
+        visible: bool = True,
+    ) -> PreviewNodeUpdate:
+        """Build an update from homogeneous ``(N, 4, 4)`` link poses.
+
+        Args:
+            group_id: Identifier of the registered preview group.
+            poses: Homogeneous transforms, one per preview node.
+            visible: Whether the preview nodes should be rendered.
+
+        Returns:
+            An immutable update holding detached CPU copies.
+        """
+        positions, wxyz = pose_to_position_wxyz(poses)
+        return cls(
+            group_id=group_id,
+            positions=positions,
+            wxyz=wxyz,
+            visible=visible,
+        )
 
 
 @dataclass(frozen=True)

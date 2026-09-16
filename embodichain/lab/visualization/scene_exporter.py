@@ -20,13 +20,13 @@ import hashlib
 import uuid
 from dataclasses import dataclass
 from time import perf_counter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 from urllib.parse import quote
 
 import numpy as np
 
 from ._utils import to_numpy_array as _to_numpy
-from .cfg import VisualizationCfg
+from .cfg import PreviewGroupCfg, VisualizationCfg
 from .protocol import (
     CameraImage,
     CameraImageFrame,
@@ -40,6 +40,7 @@ from .protocol import (
     JointControlState,
     MeshGeometry,
     PointCloudOverlay,
+    PreviewNodeUpdate,
     SceneFrame,
     SceneManifest,
     SceneNode,
@@ -107,6 +108,8 @@ class _NodeSource:
     asset: object
     link_index: int | None = None
     object_index: int | None = None
+    preview_group_id: str | None = None
+    """Owning preview group, or ``None`` for simulation-backed nodes."""
 
 
 @dataclass(frozen=True)
@@ -153,6 +156,10 @@ class SceneExporter:
         "soft_object": (230, 120, 255),
         "cloth_object": (255, 105, 145),
     }
+    _PREVIEW_SOURCE_COLORS = {
+        "robot": "robot_link",
+        "articulation": "articulation_link",
+    }
 
     def __init__(
         self,
@@ -173,6 +180,11 @@ class SceneExporter:
         self._dynamic_env_ids = np.empty((0,), dtype=np.int64)
         self._camera_sources: tuple[_CameraSource, ...] = ()
         self._gizmo_sources: tuple[_GizmoSource, ...] = ()
+        self._preview_groups: tuple[PreviewGroupCfg, ...] = ()
+        self._preview_node_indices: dict[str, np.ndarray] = {}
+        self._preview_link_names: dict[str, tuple[str, ...]] = {}
+        self._preview_source_indices = np.empty((0,), dtype=np.int64)
+        self._preview_env_ids = np.empty((0,), dtype=np.int64)
         self._joint_control_provider: JointControlProvider | None = None
         self._joint_control_specs: tuple[JointControlSpec, ...] = ()
         self._env_ids = (
@@ -198,6 +210,80 @@ class SceneExporter:
     def has_deformables(self) -> bool:
         """Whether the current manifest contains soft-body or cloth nodes."""
         return any(source.node.dynamic_geometry for source in self._sources)
+
+    @property
+    def preview_groups(self) -> tuple[PreviewGroupCfg, ...]:
+        """Preview groups applied by the next :meth:`build_manifest` call."""
+        return self._preview_groups
+
+    def set_preview_groups(
+        self,
+        groups: Sequence[PreviewGroupCfg] = (),
+    ) -> None:
+        """Register translucent preview copies of simulated articulations.
+
+        Preview nodes reuse the link meshes of an existing robot or
+        articulation but never read simulation joint state. Their poses come
+        from :class:`~embodichain.lab.visualization.protocol.PreviewNodeUpdate`
+        values passed to :meth:`capture`, so a caller can render a robot at a
+        hypothetical configuration without stepping or mutating physics.
+
+        The next :meth:`build_manifest` call materializes the groups, and the
+        caller is responsible for publishing that manifest (for example through
+        :meth:`~embodichain.lab.visualization.runtime.VisualizationRuntime.refresh_scene`).
+        Passing an empty sequence removes every preview group.
+
+        Args:
+            groups: Preview group configurations. Group IDs must be unique.
+
+        Raises:
+            TypeError: If a group still holds unresolved ``MISSING`` fields.
+            ValueError: If a group ID is duplicated or the group selects an
+                environment outside the visualized set.
+        """
+        registered: list[PreviewGroupCfg] = []
+        seen: set[str] = set()
+        for group in groups:
+            group.validate()
+            if group.group_id in seen:
+                raise ValueError(f"Duplicate preview group ID {group.group_id!r}.")
+            if group.env_id not in self._env_ids:
+                raise ValueError(
+                    f"Preview group {group.group_id!r} targets env_id "
+                    f"{group.env_id}, which is not visualized."
+                )
+            seen.add(group.group_id)
+            registered.append(group)
+        self._preview_groups = tuple(registered)
+
+    def preview_link_names(self, group_id: str) -> tuple[str, ...]:
+        """Return the source link names backing one preview group's nodes.
+
+        The order matches the pose rows expected by
+        :class:`~embodichain.lab.visualization.protocol.PreviewNodeUpdate`.
+        Source links without renderable geometry are omitted.
+
+        Args:
+            group_id: Identifier of a registered preview group.
+
+        Returns:
+            Link names in preview-node order.
+
+        Raises:
+            KeyError: If the group is not part of the current manifest.
+        """
+        if group_id not in self._preview_link_names:
+            raise KeyError(f"No preview group {group_id!r} in the current manifest.")
+        return self._preview_link_names[group_id]
+
+    def preview_node_ids(self, group_id: str) -> tuple[str, ...]:
+        """Return the scene node IDs of one preview group in pose order."""
+        if group_id not in self._preview_node_indices:
+            raise KeyError(f"No preview group {group_id!r} in the current manifest.")
+        return tuple(
+            self._sources[int(index)].node.node_id
+            for index in self._preview_node_indices[group_id]
+        )
 
     def set_joint_control_provider(
         self,
@@ -231,7 +317,7 @@ class SceneExporter:
         """Compile per-asset node selections into NumPy indexing arrays."""
         grouped: dict[tuple[str, str], list[tuple[int, _NodeSource]]] = {}
         for destination_index, source in enumerate(sources):
-            if source.node.dynamic_geometry:
+            if source.node.dynamic_geometry or source.preview_group_id is not None:
                 continue
             grouped.setdefault(source.asset_key, []).append((destination_index, source))
 
@@ -370,6 +456,7 @@ class SceneExporter:
             uids=self._sim.get_deformable_object_uid_list(),
             getter=self._sim.get_deformable_object,
         )
+        self._append_preview_nodes(sources, geometries)
         self._append_cameras(camera_sources)
         self._append_gizmos(gizmo_sources)
 
@@ -405,6 +492,7 @@ class SceneExporter:
         )
         self._camera_sources = tuple(camera_sources)
         self._gizmo_sources = tuple(gizmo_sources)
+        self._rebuild_preview_indices()
         self._joint_control_specs = joint_control_specs
         return SceneManifest(
             run_id=self.run_id,
@@ -711,6 +799,124 @@ class SceneExporter:
                         )
                     )
 
+    def _append_preview_nodes(
+        self,
+        sources: list[_NodeSource],
+        geometries: dict[str, MeshGeometry],
+    ) -> None:
+        """Append translucent preview nodes for every registered group.
+
+        Only static link geometry is read here. Joint state is never queried,
+        so registering a preview cannot perturb the simulation.
+        """
+        self._preview_link_names = {}
+        for group in self._preview_groups:
+            if group.source_kind == "robot":
+                asset = self._sim.get_robot(group.articulation_uid)
+            else:
+                asset = self._sim.get_articulation(group.articulation_uid)
+            if asset is None:
+                raise ValueError(
+                    f"Preview group {group.group_id!r} references unknown "
+                    f"{group.source_kind} {group.articulation_uid!r}."
+                )
+            available = tuple(asset.link_names)
+            selected = (
+                available if group.link_names is None else tuple(group.link_names)
+            )
+            unknown = [name for name in selected if name not in available]
+            if unknown:
+                raise ValueError(
+                    f"Preview group {group.group_id!r} references unknown links "
+                    f"{unknown} on {group.articulation_uid!r}."
+                )
+            color = (
+                group.color
+                if group.color is not None
+                else self._COLORS[self._PREVIEW_SOURCE_COLORS[group.source_kind]]
+            )
+            group_component = safe_path_component(group.group_id)
+            link_names: list[str] = []
+            for link_name in selected:
+                vertices, faces = asset.get_link_vert_face(link_name)
+                geometry_id = self._add_geometry(geometries, vertices, faces, color)
+                if geometry_id is None:
+                    continue
+                link_component = safe_path_component(link_name)
+                node = SceneNode(
+                    node_id=f"preview:{group_component}/link:{link_component}",
+                    path=f"/previews/{group_component}/links/{link_component}",
+                    parent_id=f"preview:{group_component}",
+                    env_id=group.env_id,
+                    kind="preview_link",
+                    geometry_id=geometry_id,
+                    visible=group.visible,
+                    opacity=group.opacity,
+                )
+                sources.append(
+                    _NodeSource(
+                        node=node,
+                        asset_key=("preview", group.group_id),
+                        asset=asset,
+                        preview_group_id=group.group_id,
+                    )
+                )
+                link_names.append(link_name)
+            self._preview_link_names[group.group_id] = tuple(link_names)
+
+    def _rebuild_preview_indices(self) -> None:
+        """Cache the frame rows owned by each registered preview group."""
+        grouped: dict[str, list[int]] = {
+            group.group_id: [] for group in self._preview_groups
+        }
+        for index, source in enumerate(self._sources):
+            if source.preview_group_id is not None:
+                grouped[source.preview_group_id].append(index)
+        self._preview_node_indices = {
+            group_id: np.asarray(indices, dtype=np.int64)
+            for group_id, indices in grouped.items()
+        }
+        all_indices = [index for indices in grouped.values() for index in indices]
+        self._preview_source_indices = np.asarray(all_indices, dtype=np.int64)
+        self._preview_env_ids = np.asarray(
+            [self._sources[index].node.env_id for index in all_indices],
+            dtype=np.int64,
+        )
+
+    def _apply_preview_updates(
+        self,
+        updates: Sequence[PreviewNodeUpdate],
+        positions: np.ndarray,
+        wxyz: np.ndarray,
+        visible: np.ndarray,
+    ) -> None:
+        """Write caller-supplied preview poses into one frame's pose arrays."""
+        seen: set[str] = set()
+        for update in updates:
+            indices = self._preview_node_indices.get(update.group_id)
+            if indices is None:
+                raise ValueError(
+                    f"Preview update references unregistered group "
+                    f"{update.group_id!r}."
+                )
+            if update.group_id in seen:
+                raise ValueError(
+                    f"Duplicate preview update for group {update.group_id!r}."
+                )
+            seen.add(update.group_id)
+            if update.positions.shape[0] != indices.size:
+                raise ValueError(
+                    f"Preview group {update.group_id!r} expects "
+                    f"{indices.size} node poses, received "
+                    f"{update.positions.shape[0]}."
+                )
+            if indices.size == 0:
+                continue
+            env_id = int(self._sources[int(indices[0])].node.env_id)
+            positions[indices] = update.positions + self._env_offsets[env_id]
+            wxyz[indices] = update.wxyz
+            visible[indices] = update.visible
+
     def _capture_axis_marker_overlays(
         self, reserved_frame_ids: set[str] | None = None
     ) -> tuple[FrameOverlay, ...]:
@@ -799,6 +1005,7 @@ class SceneExporter:
         sim_time: float,
         overlays: SceneOverlays | None = None,
         capture_dynamic_geometry: bool = True,
+        preview_updates: Sequence[PreviewNodeUpdate] = (),
     ) -> CaptureResult:
         """Capture one dynamic scene frame on the simulation thread.
 
@@ -807,6 +1014,9 @@ class SceneExporter:
             sim_time: Current simulation time in seconds.
             overlays: Optional debug overlays.
             capture_dynamic_geometry: Whether to copy soft-body and cloth vertices.
+            preview_updates: Poses for registered preview groups, at most one
+                update per group. Groups without an update keep their manifest
+                visibility at the environment origin.
 
         Returns:
             Captured frame and producer-side copy duration.
@@ -826,6 +1036,15 @@ class SceneExporter:
                 [1.0, 0.0, 0.0, 0.0],
                 dtype=np.float32,
             )
+        if self._preview_source_indices.size:
+            positions[self._preview_source_indices] = self._env_offsets[
+                self._preview_env_ids
+            ]
+            wxyz[self._preview_source_indices] = np.array(
+                [1.0, 0.0, 0.0, 0.0],
+                dtype=np.float32,
+            )
+        self._apply_preview_updates(preview_updates, positions, wxyz, visible)
 
         for batch in self._pose_batches:
             if batch.asset_kind in {"rigid", "rigid_group"}:

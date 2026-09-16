@@ -19,10 +19,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 
+from ..panels import PanelSpec
 from ..protocol import (
     CameraImageFrame,
     GizmoCommand,
     JointControlCommand,
+    PanelCommand,
     PickCommand,
     SceneFrame,
     SceneManifest,
@@ -65,6 +67,39 @@ class VisualizationBackend(ABC):
             sink: Callback receiving the newest requested trajectory step.
         """
         self._replay_control_command_sink = sink
+
+    def set_panel_command_sink(
+        self,
+        sink: Callable[[PanelCommand], None] | None,
+    ) -> None:
+        """Set the thread-safe sink used for custom panel interactions."""
+        self._panel_command_sink = sink
+
+    def register_panel(self, spec: PanelSpec) -> None:
+        """Register or replace one custom side panel.
+
+        Backends that support custom panels build the panel on the
+        visualization thread and forward its emitted values to the panel
+        command sink. The default implementation ignores the registration.
+
+        Args:
+            spec: Panel build and state callbacks.
+        """
+
+    def unregister_panel(self, panel_id: str) -> None:
+        """Remove one previously registered custom side panel.
+
+        Args:
+            panel_id: Identifier used at registration time.
+        """
+
+    def publish_panel_state(self, panel_id: str, state: object) -> None:
+        """Push one immutable state object into a registered custom panel.
+
+        Args:
+            panel_id: Identifier used at registration time.
+            state: Immutable payload handed to the panel's state callback.
+        """
 
     @property
     @abstractmethod

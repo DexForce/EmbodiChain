@@ -398,6 +398,57 @@ Choosing where to start
    * - Author semantic calls, effects, settling, or parallel barriers
      - :doc:`/overview/task_program/index`
 
+Typical Data Flow
+-----------------
+
+A typical robot-learning or data-generation workflow follows this sequence:
+
+1. Create a :class:`SimulationManager` from :class:`SimulationManagerCfg`.
+2. Add assets such as objects, articulations, robots, lights, and materials.
+3. Add sensors for camera, stereo, or contact observations.
+4. Use solvers and planners to convert task goals into robot trajectories.
+5. Step the simulation with :meth:`SimulationManager.update` and collect state or sensor tensors.
+6. Wrap the same simulation logic in a Gym environment when training or evaluating agents.
+
+For manipulation tasks, atomic actions can replace the lower-level solver and
+planner calls. An action engine receives semantic targets or poses, resolves the
+motion primitive sequence, and returns a trajectory that can be replayed in the
+simulation.
+
+For robot-independent task code, Task Program declares typed calls, scene
+identity, robot profiles, effects, and evidence. It owns program
+validation, compilation, live grounding, task segmentation, and structured
+results before delegating physical planning and execution to the same action
+engine.
+
+Choosing Where to Start
+-----------------------
+
+- Start with :doc:`sim_manager` when creating a new simulation scene or learning
+  how stepping, rendering, and parallel arenas work.
+- Use :doc:`sim_assets` when adding physical entities, materials, lights, or USD
+  assets. The asset pages underneath it cover each object family in detail.
+- Use :doc:`sim_sensor` when adding camera, stereo, or contact observations.
+- Use :doc:`viser_visualization` when inspecting a headless or remote scene in
+  a browser.
+- Use :doc:`skill_sequencer` when an Atomic Skill sequence should be authored,
+  previewed, and run from that browser scene.
+- Use :doc:`motion/index` for the shared robot motion package and its boundaries.
+- Use :doc:`motion/solvers/index` when a robot needs FK, IK, or velocity-level
+  kinematics.
+- Use :doc:`motion/planners/index` when a target pose or joint goal must become a
+  time-ordered trajectory.
+- Use :doc:`atomic actions <atomic_actions/index>` when building scripted
+  manipulation from reusable motion primitives.
+- Use :doc:`/overview/task_program/scene_registry` when Semantic Calls,
+  snapshots, and planner obstacles must share one authoritative entity
+  namespace.
+- Use :doc:`/overview/task_program/robot_profiles` to declare reusable
+  embodiment resources, policy presets, and effect assurance.
+- Use :doc:`/overview/task_program/index` when a task should declare semantic
+  calls, settling, validation, or parallel barriers from JSON/YAML without
+  implementing task-local motion generation.
+
 Documentation quality notes
 ---------------------------
 
@@ -417,5 +468,6 @@ See Also
    sim_assets.md
    sensors/index
    viser_visualization.md
+   skill_sequencer.md
    motion/index
    atomic_actions/index

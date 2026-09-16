@@ -21,16 +21,19 @@ import threading
 from collections import deque
 from dataclasses import dataclass, replace
 from time import perf_counter
-from typing import Generic, TypeVar
+from typing import Generic, Sequence, TypeVar
 
 from .backends.base import VisualizationBackend
 from .cfg import VisualizationCfg
+from .panels import PanelSpec
 from .protocol import (
     CameraImageFrame,
     GizmoCommand,
     JointControlCommand,
     JointControlProvider,
+    PanelCommand,
     PickCommand,
+    PreviewNodeUpdate,
     SceneFrame,
     SceneManifest,
     SceneOverlays,
@@ -44,6 +47,7 @@ __all__ = [
     "GizmoCommandQueue",
     "JointControlCommandQueue",
     "LatestFrameQueue",
+    "PanelCommandQueue",
     "RuntimeHealth",
     "RuntimeStats",
     "VisualizationRuntime",
@@ -215,6 +219,78 @@ class JointControlCommandQueue:
             self._commands.clear()
 
 
+class PanelCommandQueue:
+    """Bounded arrival-order queue for custom panel interactions.
+
+    Panel values are discrete user intents, so unlike drag updates they are
+    never coalesced. Commands are stored in one sub-queue per ``panel_id``, so
+    a consumer draining its own panel can never swallow the commands another
+    panel's consumer has not read yet. ``maxsize`` bounds each sub-queue
+    independently and drops that panel's oldest command when it is full.
+    """
+
+    def __init__(self, maxsize: int = 256) -> None:
+        if maxsize <= 0:
+            raise ValueError("maxsize must be greater than zero.")
+        self._maxsize = maxsize
+        self._commands: dict[str, deque[tuple[int, PanelCommand]]] = {}
+        self._arrivals = 0
+        self._lock = threading.Lock()
+
+    def put(self, command: PanelCommand) -> None:
+        """Enqueue a command without blocking the visualization thread."""
+        with self._lock:
+            commands = self._commands.get(command.panel_id)
+            if commands is None:
+                commands = deque()
+                self._commands[command.panel_id] = commands
+            if len(commands) >= self._maxsize:
+                commands.popleft()
+            self._arrivals += 1
+            commands.append((self._arrivals, command))
+
+    def drain(self, panel_id: str | None = None) -> tuple[PanelCommand, ...]:
+        """Return and clear queued commands in arrival order.
+
+        Args:
+            panel_id: Panel whose commands are drained. ``None``, the default,
+                drains every panel and merges the result back into the global
+                arrival order.
+
+        Returns:
+            The drained commands, oldest first.
+        """
+        with self._lock:
+            if panel_id is not None:
+                commands = self._commands.pop(panel_id, None)
+                if not commands:
+                    return ()
+                return tuple(command for _, command in commands)
+            pending = sorted(
+                (entry for entries in self._commands.values() for entry in entries),
+                key=lambda entry: entry[0],
+            )
+            self._commands.clear()
+        return tuple(command for _, command in pending)
+
+    def discard(self, panel_id: str) -> None:
+        """Drop every command queued for one panel.
+
+        Called when a panel is unregistered, so a later panel reusing the same
+        identifier cannot inherit interactions aimed at its predecessor.
+
+        Args:
+            panel_id: Panel whose pending commands are discarded.
+        """
+        with self._lock:
+            self._commands.pop(panel_id, None)
+
+    def clear(self) -> None:
+        """Discard all queued commands."""
+        with self._lock:
+            self._commands.clear()
+
+
 @dataclass(frozen=True)
 class RuntimeStats:
     """Snapshot of scene and camera-image capture/upload telemetry."""
@@ -290,6 +366,13 @@ class VisualizationRuntime:
         self._backend.set_replay_control_command_sink(
             self._enqueue_replay_control_command
         )
+        self._panel_commands = PanelCommandQueue()
+        self._backend.set_panel_command_sink(self._enqueue_panel_command)
+        self._panel_registrations: queue.Queue[tuple[str, PanelSpec | None]] = (
+            queue.Queue()
+        )
+        self._panel_states: dict[str, LatestFrameQueue[object]] = {}
+        self._panel_states_lock = threading.Lock()
         self._frames: LatestFrameQueue[SceneFrame] = LatestFrameQueue()
         self._camera_images: LatestFrameQueue[CameraImageFrame] = LatestFrameQueue()
         self._replay_control_states: LatestFrameQueue[tuple[int, int, bool]] = (
@@ -379,6 +462,80 @@ class VisualizationRuntime:
             raise ValueError("Replay step must satisfy 0 <= step <= max_step.")
         self._raise_worker_error()
         self._replay_control_states.put_latest((step, max_step, visible))
+
+    def _enqueue_panel_command(self, command: PanelCommand) -> None:
+        if self.cfg.allow_commands:
+            self._panel_commands.put(command)
+
+    def drain_panel_commands(
+        self,
+        panel_id: str | None = None,
+    ) -> tuple[PanelCommand, ...]:
+        """Drain custom panel interactions for simulation-thread processing.
+
+        Args:
+            panel_id: Panel whose commands are drained. ``None``, the default,
+                drains every registered panel in arrival order. Pass the
+                identifier whenever several consumers share one runtime, so a
+                consumer cannot swallow commands addressed to another panel.
+
+        Returns:
+            The drained commands, oldest first.
+        """
+        if not self.cfg.allow_commands:
+            return ()
+        return self._panel_commands.drain(panel_id)
+
+    def register_panel(self, spec: PanelSpec) -> None:
+        """Register one custom side panel on the visualization backend.
+
+        The registration is applied on the visualization thread, either at the
+        next worker iteration or when the backend starts. Registering does not
+        require a scene refresh: a running backend builds the panel as soon as
+        it observes the registration.
+
+        Args:
+            spec: Panel build and state callbacks.
+        """
+        if not isinstance(spec, PanelSpec):
+            raise TypeError("register_panel expects a PanelSpec.")
+        self._panel_registrations.put_nowait((spec.panel_id, spec))
+
+    def unregister_panel(self, panel_id: str) -> None:
+        """Remove one custom side panel from the visualization backend.
+
+        Pending state and pending commands for ``panel_id`` are discarded, so
+        a later panel registering under the same identifier starts clean
+        instead of inheriting its predecessor's queued interactions.
+
+        Args:
+            panel_id: Identifier used at registration time.
+        """
+        if not panel_id:
+            raise ValueError("panel_id must not be empty.")
+        with self._panel_states_lock:
+            self._panel_states.pop(panel_id, None)
+        self._panel_commands.discard(panel_id)
+        self._panel_registrations.put_nowait((panel_id, None))
+
+    def publish_panel_state(self, panel_id: str, state: object) -> None:
+        """Asynchronously push one immutable state into a custom panel.
+
+        Only the newest state per panel is retained, so a simulation loop that
+        publishes every step can never outrun the visualization thread.
+
+        Args:
+            panel_id: Identifier used at registration time.
+            state: Immutable payload handed to the panel's state callback.
+        """
+        if not panel_id:
+            raise ValueError("panel_id must not be empty.")
+        with self._panel_states_lock:
+            states = self._panel_states.get(panel_id)
+            if states is None:
+                states = LatestFrameQueue()
+                self._panel_states[panel_id] = states
+        states.put_latest(state)
 
     def set_joint_control_provider(
         self,
@@ -487,6 +644,7 @@ class VisualizationRuntime:
         overlays: SceneOverlays | None = None,
         force: bool = False,
         capture_camera_images: bool = True,
+        preview_updates: Sequence[PreviewNodeUpdate] = (),
     ) -> bool:
         """Capture a due frame and enqueue it without waiting for Viser.
 
@@ -498,6 +656,8 @@ class VisualizationRuntime:
             capture_camera_images: Whether camera images may be captured in
                 this call. Simulation batches disable this for intermediate
                 physics substeps.
+            preview_updates: Poses for preview groups registered on the
+                exporter, at most one update per group.
 
         Returns:
             ``True`` when a frame was captured, otherwise ``False`` when limited.
@@ -532,6 +692,7 @@ class VisualizationRuntime:
                 sim_time=sim_time,
                 overlays=overlays,
                 capture_dynamic_geometry=deformable_due,
+                preview_updates=preview_updates,
             )
             dropped = self._frames.put_latest(result.frame)
             self._update_stats(
@@ -557,7 +718,33 @@ class VisualizationRuntime:
                 )
         return True
 
+    def _apply_pending_panels(self) -> None:
+        """Apply queued panel registrations on the visualization thread."""
+        while True:
+            try:
+                panel_id, spec = self._panel_registrations.get_nowait()
+            except queue.Empty:
+                return
+            if spec is None:
+                self._backend.unregister_panel(panel_id)
+            else:
+                self._backend.register_panel(spec)
+
+    def _publish_pending_panel_states(self) -> None:
+        """Publish the newest state of every panel that has one pending."""
+        with self._panel_states_lock:
+            pending = tuple(self._panel_states.items())
+        for panel_id, states in pending:
+            try:
+                state = states.get_nowait()
+            except queue.Empty:
+                continue
+            self._backend.publish_panel_state(panel_id, state)
+
     def _publish_pending_manifests(self) -> None:
+        # Panels registered before a topology refresh must exist on the backend
+        # when the manifest rebuilds the browser GUI.
+        self._apply_pending_panels()
         while True:
             try:
                 manifest = self._manifests.get_nowait()
@@ -593,6 +780,7 @@ class VisualizationRuntime:
     def _run(self, initial_manifest: SceneManifest) -> None:
         try:
             self._backend.start()
+            self._apply_pending_panels()
             self._backend.publish_manifest(initial_manifest)
             self._published_scene_revision = initial_manifest.scene_revision
             self._ready_event.set()
@@ -600,11 +788,13 @@ class VisualizationRuntime:
                 self._publish_pending_manifests()
                 self._publish_pending_camera_images()
                 self._publish_pending_replay_control()
+                self._publish_pending_panel_states()
                 try:
                     frame = self._frames.get(timeout=0.05)
                 except queue.Empty:
                     self._publish_pending_camera_images()
                     self._publish_pending_replay_control()
+                    self._publish_pending_panel_states()
                     self._backend.poll()
                     continue
                 # A topology refresh and its first frame can be queued while this
@@ -612,6 +802,7 @@ class VisualizationRuntime:
                 self._publish_pending_manifests()
                 self._publish_pending_camera_images()
                 self._publish_pending_replay_control()
+                self._publish_pending_panel_states()
                 started = perf_counter()
                 accepted = self._backend.publish_frame(frame)
                 upload_seconds = perf_counter() - started
@@ -623,6 +814,7 @@ class VisualizationRuntime:
             self._publish_pending_manifests()
             self._publish_pending_camera_images()
             self._publish_pending_replay_control()
+            self._publish_pending_panel_states()
             try:
                 final_frame = self._frames.get_nowait()
             except queue.Empty:
@@ -637,6 +829,7 @@ class VisualizationRuntime:
                 )
             self._publish_pending_camera_images()
             self._publish_pending_replay_control()
+            self._publish_pending_panel_states()
         except BaseException as error:
             self._worker_error = error
             self._ready_event.set()
@@ -664,6 +857,10 @@ class VisualizationRuntime:
         self._gizmo_commands.clear()
         self._pick_commands.clear()
         self._joint_control_commands.clear()
+        self._panel_commands.clear()
+        with self._panel_states_lock:
+            for states in self._panel_states.values():
+                states.clear()
         self._raise_worker_error()
 
     def __enter__(self) -> VisualizationRuntime:

@@ -158,6 +158,87 @@ overlay argument; callers needing overlays must use the active
 `VisualizationRuntime.capture(..., overlays=...)` path or extend the manager
 integration.
 
+## Preview Nodes
+
+`SceneExporter.set_preview_groups()` registers translucent copies of a robot or
+articulation. Each `PreviewGroupCfg` reuses the source link meshes, adds
+`preview_link` nodes with a constant `SceneNode.opacity`, and keeps them hidden
+until a pose arrives. A tinted `color` uploads its own geometry entry (and its
+own batched mesh); `color=None` reuses the source entries and shares the real
+links' batch. The group materializes on the next `build_manifest()`, so a
+caller registering at runtime must also publish a manifest through
+`refresh_scene()`.
+
+Preview poses never come from the simulation: each frame the caller passes one
+`PreviewNodeUpdate` per group to `capture(..., preview_updates=...)`, holding
+detached poses in the same per-environment frame as `body_link_pose`. The
+exporter adds the arena offset and marks the group visible. Groups without an
+update stay hidden at the environment origin.
+
+`embodichain.lab.visualization.authoring.SequencePreview` is the first consumer:
+it owns a playback cursor over an `AuthoringSession`'s compiled trajectory and
+turns `preview_qpos` waypoints into link poses through the robot's analytic
+forward kinematics. It anchors each link with that link's current simulated
+pose, so the preview overlaps the rendered robot exactly at the current
+configuration and absorbs fixed chain-versus-model offsets. It performs two
+forward-kinematics evaluations per frame and never writes joint state.
+
+## Custom Panels
+
+`VisualizationRuntime.register_panel(PanelSpec(...))` adds an
+application-defined side panel. The spec carries a `build` callback, an
+optional `apply_state` callback, and an optional folder `title` the backend
+owns. Registration is queued and applied on the worker thread, so a running
+runtime builds the panel without a scene refresh. Publishing a manifest resets
+the browser GUI, so every registered panel is rebuilt afterwards and its last
+published state is replayed.
+
+The backend stays neutral: it hands `build` a `PanelBuildContext` (GUI
+namespace, `emit` sink, event-to-client resolver, run identity, and
+`allow_commands`) and forwards whatever immutable value the panel emits through
+the existing GUI event queue as a `PanelCommand`. `PanelCommandQueue` stores one
+bounded sub-queue per `panel_id`. The simulation thread drains them with
+`drain_panel_commands(panel_id=None)` (empty unless `allow_commands=True`):
+passing an identifier drains only that panel, so consumers sharing one runtime
+cannot swallow each other's commands, while the default drains every panel
+merged back into global arrival order. New state is pushed with
+`publish_panel_state(panel_id, state)`, which keeps only the newest state per
+panel. Registering nothing leaves browser behavior bit-for-bit unchanged.
+
+`authoring.SkillSequencePanel` is the first consumer. It renders an immutable
+`PanelViewState` (sequence snapshot, preview playback state, picked entity,
+status line) into markdown and controls, colors the five `SkillCardState`
+values with marker glyphs, and emits authoring commands plus the
+`TogglePreviewPlayback` / `SeekPreview` / `StepPreview` playback family. It
+never calls a session write method. `authoring.AuthoringBridge` closes the loop
+on the simulation thread: once per iteration `update()` drains click-picks into
+the selected entity, drains only its own panel's commands, routes them through
+`AuthoringSession.handle_command()` or the preview driver, converts failures
+into a status string, and republishes the view state when it changed. Picks and
+panel commands stamped with a stale `run_id` or `scene_revision` are dropped, so
+input queued before a `refresh_scene()` is never applied to the new topology.
+The pick queue is shared with `SimulationManager.process_pick_commands()`, which
+every `sim.update()` runs through `update_gizmos()`; a host loop that steps a
+simulation manager with picking enabled must therefore call the public
+`AuthoringBridge.drain_picks()` before `sim.update()` or the panel never sees a
+selection. Viser sliders have no mutable range, so the panel rebuilds its seek
+slider whenever the compiled length changes and ignores server-side value
+echoes.
+
+`AuthoringSession.execute()` blocks until the whole trajectory is replayed, so
+a browser sees nothing until it returns. `execute_stepwise()` is the additive,
+non-blocking counterpart: it validates and resets card states eagerly, then
+returns an iterator that performs exactly the same work one simulation update
+at a time and carries the blocking call's boolean in its `StopIteration` value.
+`execution.StepwiseExecution` wraps that iterator with `advance(count)`,
+`is_active`, `succeeded`, and `close()`. `AuthoringBridge(stepwise_execution=True)`
+starts one per `ExecuteSequence` and advances it inside `update()`, which is how
+the panel shows `RUNNING -> SUCCEEDED` while the robot is moving. A host loop
+must then skip its own `sim.update()` while `bridge.execution_active` is true,
+and sequence edits are refused for the duration so a browser click cannot
+invalidate the trajectory being replayed. Both defaults keep the blocking
+behavior.
+
 ## Backpressure, Health, and Telemetry
 
 Scene and camera-image queues each retain one unconsumed frame. A new frame
