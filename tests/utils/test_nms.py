@@ -206,9 +206,31 @@ def _clustered_poses(n: int, seed: int, device: str = "cpu") -> torch.Tensor:
     return poses.to(device)
 
 
+def test_pose_nms_chunk_boundaries_smoke() -> None:
+    """Cover representative tile boundaries without the exhaustive matrix."""
+    poses = _clustered_poses(64, seed=0)
+    for preserve_order in (True, False):
+        expected = _reference_pose_nms_indices(
+            poses,
+            angle_th=np.pi / 36,
+            dist_th=0.003,
+            preserve_order=preserve_order,
+        )
+        for chunk_size in (1, 7, 2048):
+            got = pose_nms_indices(
+                poses,
+                angle_th=np.pi / 36,
+                dist_th=0.003,
+                preserve_order=preserve_order,
+                chunk_size=chunk_size,
+            )
+            assert got.tolist() == expected
+
+
 @pytest.mark.parametrize("preserve_order", [True, False])
 @pytest.mark.parametrize("chunk_size", [1, 7, 128, 2048])
 @pytest.mark.parametrize("seed", [0, 1, 2])
+@pytest.mark.slow
 def test_pose_nms_matches_reference_semantics(preserve_order, chunk_size, seed):
     """Blocked batched implementation must match the literal reference."""
     poses = _clustered_poses(400, seed)
@@ -269,6 +291,7 @@ def _tight_clustered_poses(n: int, seed: int) -> torch.Tensor:
 
 
 @pytest.mark.parametrize("preserve_order", [True, False])
+@pytest.mark.slow
 def test_pose_nms_heavy_suppression_matches_reference(preserve_order):
     """Large tight-cluster input (the realistic grasp-candidate profile):
     the CUDA-offloaded pairwise math must reproduce the literal CPU
