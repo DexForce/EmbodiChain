@@ -455,6 +455,7 @@ def _task_stability_payload(
                     "local_axis": _longest_local_axis(objects[object_id]),
                     "reference": reference_id,
                     "displacement": route["world_displacement"],
+                    "position_tolerance": _RELATIVE_POSITION_TOLERANCE,
                 }
             elif (
                 arguments["relation"] in {"on", "above"}
@@ -1515,7 +1516,7 @@ def _relative_place_route_payloads(
     axis_align_objects: set[str] = set()
     selectors: set[tuple[str, str, str]] = set()
     stack_selectors: set[tuple[str, str, str]] = set()
-    upright_targets: dict[tuple[str, str, str], str] = {}
+    upright_targets: dict[tuple[str, str, str], tuple[str, str]] = {}
     for node in graph["nodes"]:
         call = node["call"]
         if call["kind"] != "registered":
@@ -1542,7 +1543,10 @@ def _relative_place_route_payloads(
                         str(arguments["reference"]),
                         str(arguments["relation"]),
                     )
-                ] = f"{node['task_instance_id']}_upright_target"
+                ] = (
+                    f"{node['task_instance_id']}_upright_target",
+                    str(call["resources"]["primary"]),
+                )
             selectors.add(
                 (
                     str(arguments["object"]),
@@ -1560,7 +1564,8 @@ def _relative_place_route_payloads(
                 "Bind the named relation anchor, not the surrounding tabletop region."
             )
         if selector in upright_targets:
-            target = _single_target_pose(graph, upright_targets[selector])
+            target_id, resource = upright_targets[selector]
+            target = _single_target_pose(graph, target_id)
             reference_position = _position(scene_objects[reference_id])
             displacement = [
                 float(target["position"][index]) - reference_position[index]
@@ -1586,6 +1591,15 @@ def _relative_place_route_payloads(
                 "reference_entity_id": reference_id,
                 "relation": relation,
                 "world_displacement": displacement,
+                **(
+                    {
+                        "world_yaw_offset": (
+                            math.pi / 3.0 if resource == "right" else -math.pi / 3.0
+                        )
+                    }
+                    if selector in upright_targets and not settled
+                    else {}
+                ),
             }
         )
     return routes
