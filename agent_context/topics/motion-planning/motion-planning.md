@@ -18,7 +18,7 @@
 | Motion generator | `embodichain/lab/sim/motion/motion_generator.py` → `MotionGenerator`, `MotionGenCfg`, `MotionGenOptions` |
 | Standalone timed playback | `embodichain/lab/sim/motion/execution.py` → `JointTrajectoryPlaybackCfg`, `play_joint_trajectory` |
 | Planner utilities & data types | `embodichain/lab/sim/motion/planners/utils.py` → `PlanState`, `PlanResult`, `MoveType`, `MovePart`, `TrajectorySampleMethod`, `interpolate_xpos_batched` |
-| Trajectory augmentation | `embodichain/lab/sim/motion/expansion/` → contracts, configs, operators, coverage, `GenerationSession` |
+| Trajectory augmentation | `embodichain/lab/sim/motion/expansion/` → contracts, configs, operators, coverage, manipulability bands, `GenerationSession` |
 
 ## Overview
 
@@ -80,6 +80,20 @@ success.
 object-local axis through the object origin. The caller chooses geometry-valid
 angles and replans the resulting pose candidates; the operator neither moves
 the object nor certifies the grasp.
+
+`expansion/manipulability.py` reuses
+`embodichain.compute.kinematics.yoshikawa_manipulability` to profile a
+trajectory's posture conditioning. Jacobians are supplied by the caller, so the
+module stays host-independent. `ManipulabilityBands` normalizes scores by a
+per-case reference bottleneck; `manipulability_guided_residual` scores several
+`joint_residual` draws from one local generator and keeps the proposal nearest
+a requested band. The feature is opt-in through
+`augmentation.factors.manipulability`, disabled by default. When enabled,
+`register_case` requires a positive `manipulability_reference`, `CoverageIndex`
+enforces a per-band quota so one well-conditioned posture cannot absorb the
+collection budget, and `GenerationSession` classifies bands from the measured
+`manipulability` observation rather than any planned score. Manipulability
+guidance ranks postures only; path, dynamic, and task validation stay separate.
 
 Focused augmentation tests live under `tests/sim/motion/expansion/`.
 

@@ -92,6 +92,13 @@ def test_job_decodes_nested_schema_and_round_trips_without_imports() -> None:
         {"collection": {"max_wall_time_s": float("inf")}},
         {"collection": {"target_committed_episodes": 101}},
         {"persistence": {"pending_max_bytes": 0}},
+        {"augmentation": {"factors": {"manipulability": {"band_edges": []}}}},
+        {"augmentation": {"factors": {"manipulability": {"band_edges": [0.9, 0.5]}}}},
+        {"augmentation": {"factors": {"manipulability": {"band_edges": [0.5, 0.5]}}}},
+        {"augmentation": {"factors": {"manipulability": {"band_edges": [0.0]}}}},
+        {"augmentation": {"factors": {"manipulability": {"jacobian_rows": "linear"}}}},
+        {"augmentation": {"factors": {"manipulability": {"target_per_band": 0}}}},
+        {"augmentation": {"factors": {"manipulability": {"guided_proposals": 0}}}},
     ],
 )
 def test_decoder_rejects_unknown_fields_types_and_invalid_budgets(
@@ -157,6 +164,38 @@ def test_spatial_and_timing_factors_require_available_operators() -> None:
     capabilities["operators"] = set()
     with pytest.raises(ValueError, match="retime"):
         cfg.validate_capabilities(**capabilities)
+
+
+def test_manipulability_guidance_requires_its_operator_capability() -> None:
+    payload = {
+        "augmentation": {
+            "factors": {
+                "manipulability": {
+                    "enabled": True,
+                    "band_edges": [0.5, 0.9],
+                    "guided_proposals": 4,
+                }
+            }
+        }
+    }
+    cfg = TrajectoryGenerationJobCfg.from_mapping(payload)
+    with pytest.raises(ValueError, match="manipulability guided residual"):
+        cfg.validate_capabilities(**_capabilities())
+    capabilities = _capabilities()
+    capabilities["operators"] |= {"manipulability_guided_residual"}
+    cfg.validate_capabilities(**capabilities)
+    assert cfg.augmentation.factors.manipulability.band_edges == (0.5, 0.9)
+    # Banded coverage alone selects among unguided proposals and needs no operator.
+    payload["augmentation"]["factors"]["manipulability"]["guided_proposals"] = 1
+    TrajectoryGenerationJobCfg.from_mapping(payload).validate_capabilities(
+        **_capabilities()
+    )
+
+
+def test_manipulability_is_disabled_by_default() -> None:
+    factors = TrajectoryGenerationJobCfg().augmentation.factors
+    assert not factors.manipulability.enabled
+    assert factors.manipulability.guided_proposals == 1
 
 
 def test_configuration_instances_do_not_share_nested_values() -> None:

@@ -160,12 +160,46 @@ class _TimingCfg:
 
 
 @configclass
+class _ManipulabilityCfg:
+    """Manipulability-guided proposal steering and banded coverage quotas.
+
+    Bands are ratios against a per-case reference manipulability supplied at
+    scene-case registration, so one set of edges transfers across robots. A
+    per-band quota spreads accepted episodes over well- and poorly-conditioned
+    postures instead of concentrating them near the reference posture.
+    """
+
+    enabled: bool = False
+    jacobian_rows: str = "all"
+    band_edges: tuple[float, ...] = (0.5, 0.9)
+    target_per_band: int = 1
+    guided_proposals: int = 1
+
+    def __post_init__(self) -> None:
+        _boolean(self.enabled, "manipulability.enabled")
+        if self.jacobian_rows not in ("all", "translational", "rotational"):
+            raise ValueError(
+                "manipulability.jacobian_rows must be all, translational, or rotational"
+            )
+        if not isinstance(self.band_edges, (list, tuple)) or not self.band_edges:
+            raise ValueError("manipulability.band_edges must be a nonempty sequence")
+        for value in self.band_edges:
+            _positive(value, "manipulability.band_edges")
+        if any(low >= high for low, high in zip(self.band_edges, self.band_edges[1:])):
+            raise ValueError("manipulability.band_edges must increase strictly")
+        self.band_edges = tuple(float(value) for value in self.band_edges)
+        _count(self.target_per_band, "manipulability.target_per_band")
+        _count(self.guided_proposals, "manipulability.guided_proposals")
+
+
+@configclass
 class _FactorsCfg:
     contact: _DisabledFactorCfg = _DisabledFactorCfg()
     ik: _DisabledFactorCfg = _DisabledFactorCfg()
     approach: _DisabledFactorCfg = _DisabledFactorCfg()
     spatial: _SpatialCfg = _SpatialCfg()
     timing: _TimingCfg = _TimingCfg()
+    manipulability: _ManipulabilityCfg = _ManipulabilityCfg()
     contact_timing: _DisabledFactorCfg = _DisabledFactorCfg()
     recovery: _DisabledFactorCfg = _DisabledFactorCfg()
 
@@ -455,3 +489,10 @@ class TrajectoryGenerationJobCfg:
             )
         if self.augmentation.factors.timing.enabled and "retime" not in operators:
             raise ValueError("retime operator capability unavailable")
+        manipulability = self.augmentation.factors.manipulability
+        if (
+            manipulability.enabled
+            and manipulability.guided_proposals > 1
+            and "manipulability_guided_residual" not in operators
+        ):
+            raise ValueError("manipulability guided residual capability unavailable")

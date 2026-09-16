@@ -161,6 +161,7 @@ topics:
     轨迹规划]
   keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
     expansion, GenerationSession, TrajectoryAugmentationCfg, CandidateTrajectoryBatch,
+    ManipulabilityBands, manipulability_guided_residual, manipulability coverage bands,
     collision world, compute trajectory, trajectory resampling, trajectory warping, retime_to_control_grid,
     JointTrajectoryPlaybackCfg, play_joint_trajectory, quaternion, xyzw, wxyz]
   paths: [topics/motion-planning/motion-planning.md]

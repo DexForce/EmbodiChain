@@ -156,6 +156,7 @@ def describe_trajectory(
 class _Reservation:
     family_id: str
     descriptor: TrajectoryDescriptor
+    band: int | None = None
     committed: bool = False
 
 
@@ -166,10 +167,18 @@ class CoverageIndex:
     do not contribute to formal coverage. A timing variant cannot increase the
     geometry count even if small physical tracking differences are measured.
 
+    An optional per-band quota spreads accepted rollouts over manipulability
+    bands. Once a band is full its further rollouts are rejected even when
+    their geometry is new, so a well-conditioned posture cannot absorb the
+    whole collection budget. Bands are classified by the caller; this index
+    only counts them.
+
     Args:
         geometry_tolerance: Maximum normalized joint difference for near copies.
         target_per_geometry: Maximum distinct timing variants per geometry.
         timing_tolerance_s: Maximum timing difference for duplicate episodes.
+        target_per_band: Maximum reservations per band, or ``None`` for unbanded
+            coverage that rejects band arguments.
     """
 
     def __init__(
@@ -178,6 +187,7 @@ class CoverageIndex:
         geometry_tolerance: float = 0.01,
         target_per_geometry: int = 4,
         timing_tolerance_s: float = 1e-6,
+        target_per_band: int | None = None,
     ) -> None:
         import math
 
@@ -192,9 +202,16 @@ class CoverageIndex:
             or target_per_geometry < 1
         ):
             raise ValueError("target_per_geometry must be a positive integer.")
+        if target_per_band is not None and (
+            isinstance(target_per_band, bool)
+            or not isinstance(target_per_band, int)
+            or target_per_band < 1
+        ):
+            raise ValueError("target_per_band must be a positive integer or None.")
         self._geometry_tolerance = geometry_tolerance
         self._timing_tolerance = timing_tolerance_s
         self._target = target_per_geometry
+        self._target_per_band = target_per_band
         self._entries: dict[str, _Reservation] = {}
         self._aliases: dict[str, str] = {}
 
@@ -209,11 +226,26 @@ class CoverageIndex:
             {entry.family_id for entry in self._entries.values() if entry.committed}
         )
 
+    @property
+    def band_counts(self) -> dict[int, int]:
+        """Return confirmed commit counts for each observed manipulability band.
+
+        Returns:
+            A fresh mapping of band index to the number of confirmed commits.
+        """
+        counts: dict[int, int] = {}
+        for entry in self._entries.values():
+            if entry.committed and entry.band is not None:
+                counts[entry.band] = counts.get(entry.band, 0) + 1
+        return counts
+
     def reserve(
         self,
         commit_id: str,
         geometry_family_id: str,
         descriptor: TrajectoryDescriptor,
+        *,
+        band: int | None = None,
     ) -> bool:
         """Reserve a distinct measured rollout before submitting its payload.
 
@@ -221,12 +253,22 @@ class CoverageIndex:
             commit_id: Stable, unique persistence identity.
             geometry_family_id: Family shared by proposed timing variants.
             descriptor: Descriptor calculated from the actual execution.
+            band: Manipulability band index, required when a band quota is
+                configured and rejected otherwise.
 
         Returns:
-            False for a near duplicate or a geometry whose quota is full.
+            False for a near duplicate, or a geometry or band whose quota is full.
         """
         if not commit_id or not geometry_family_id:
             raise ValueError("Commit and geometry-family IDs must be nonempty.")
+        if (band is None) != (self._target_per_band is None):
+            raise ValueError(
+                "A band index is required exactly when a band quota is configured."
+            )
+        if band is not None and (
+            isinstance(band, bool) or not isinstance(band, int) or band < 0
+        ):
+            raise ValueError("A manipulability band must be a non-negative integer.")
         if commit_id in self._entries:
             raise ValueError("A commit ID already has a coverage reservation.")
         family = self._aliases.get(geometry_family_id, geometry_family_id)
@@ -260,10 +302,15 @@ class CoverageIndex:
                 return False
         if len(matching) >= self._target:
             return False
+        if self._target_per_band is not None and (
+            sum(entry.band == band for entry in self._entries.values())
+            >= self._target_per_band
+        ):
+            return False
         owned = TrajectoryDescriptor(
             descriptor.phase_ids, descriptor.geometry, descriptor.timing
         )
-        self._entries[commit_id] = _Reservation(family, owned)
+        self._entries[commit_id] = _Reservation(family, owned, band)
         self._aliases[geometry_family_id] = family
         return True
 
