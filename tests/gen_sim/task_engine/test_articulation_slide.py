@@ -228,6 +228,26 @@ def test_unannotated_binding_keeps_legacy_payload(scene: PreparedScene) -> None:
     assert PrismaticBinding.decode(binding.payload()) == binding
 
 
+@pytest.mark.parametrize("state", ["open", "closed"])
+@pytest.mark.parametrize(
+    "limits,expected",
+    [((0.0, 0.07367365696480928), 0.03), ((0.0, 0.04), 0.0196)],
+)
+def test_articulation_state_tolerance_is_metric_but_keeps_endpoints_disjoint(
+    scene: PreparedScene,
+    state: str,
+    limits: tuple[float, float],
+    expected: float,
+) -> None:
+    binding = replace(
+        inspect_prismatic(scene.articulations[0]),
+        limits=limits,
+        closed_position=limits[1],
+    )
+    assert binding.tolerance(state) == pytest.approx(expected)
+    assert binding.tolerance(state) < (limits[1] - limits[0]) / 2
+
+
 def _graph(scene: PreparedScene, states: tuple[str, ...] = ("open",)) -> dict:
     empty = {
         "kind": "none",
@@ -309,6 +329,9 @@ def test_multi_part_bundle_keeps_distinct_bindings(
     joint.CreateAxisAttr("Y")
     joint.CreateLowerLimitAttr(-0.2)
     joint.CreateUpperLimitAttr(0.0)
+    joint.GetPrim().CreateAttribute(
+        "gen_sim:closedPosition", Sdf.ValueTypeNames.Double
+    ).Set(0.0)
     stage.GetRootLayer().Save()
     parts = discover_prismatic_parts(scene.articulations[0])
     part_ids = {part.joint: part.part_id for part in parts}
@@ -371,6 +394,12 @@ def test_multi_part_bundle_keeps_distinct_bindings(
 def test_e6_bundle_uses_standard_registration_and_complete_recipe(
     scene: PreparedScene, tmp_path: Path, states: tuple
 ) -> None:
+    if "closed" in states:
+        stage = Usd.Stage.Open(scene.articulations[0]["fpath"])
+        stage.GetPrimAtPath("/fixture/slide").CreateAttribute(
+            "gen_sim:closedPosition", Sdf.ValueTypeNames.Double
+        ).Set(0.0)
+        stage.GetRootLayer().Save()
     graph, paths = generate_task_program_bundle(
         _graph(scene, states), scene, tmp_path / "bundle", robot_profile="dual_franka"
     )
@@ -418,6 +447,19 @@ def test_e6_bundle_uses_standard_registration_and_complete_recipe(
         assert graph["nodes"][3]["call"]["resources"] == {"primary": "left"}
 
 
+def test_e6_closed_target_rejects_unannotated_endpoint(
+    scene: PreparedScene, tmp_path: Path
+) -> None:
+    with pytest.raises(ValueError, match="explicit closed endpoint"):
+        generate_task_program_bundle(
+            _graph(scene, ("closed",)),
+            scene,
+            tmp_path / "bundle",
+            robot_profile="dual_franka",
+        )
+    assert not (tmp_path / "bundle").exists()
+
+
 @pytest.mark.parametrize("friction", [0.0, 0.03, {"slide": 0.02}])
 def test_e6_preserves_authored_passive_friction(
     scene: PreparedScene, tmp_path: Path, friction: object
@@ -447,6 +489,7 @@ def test_e6_preserves_authored_passive_friction(
         "incomplete",
         "dependency",
         "penetration",
+        "tilt",
     ],
 )
 def test_e6_rejects_invalid_assets_or_recipes_before_publication(
@@ -462,6 +505,8 @@ def test_e6_rejects_invalid_assets_or_recipes_before_publication(
         cfg["fix_base"] = False
     elif mutation == "penetration":
         cfg["init_pos"][2] = 0.70
+    elif mutation == "tilt":
+        cfg["init_rot"][0] = 2.0
     elif mutation == "incomplete":
         graph["nodes"][1]["call"]["call_id"] = PARK_CALL
     elif mutation == "dependency":

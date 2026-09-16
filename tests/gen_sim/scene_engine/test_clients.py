@@ -290,6 +290,61 @@ def test_articulated_usdc_rejects_invalid_physics(tmp_path: Path, defect: str) -
         articulated_generation._validate_articulated_usdc(path)
 
 
+@pytest.mark.parametrize("closed", [None, 0.05, float("nan"), True])
+def test_articulated_usdc_requires_explicit_prismatic_closed_endpoint(
+    tmp_path: Path, closed: object
+) -> None:
+    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+
+    path = tmp_path / "drawer.usdc"
+    stage = Usd.Stage.CreateNew(str(path))
+    root = UsdGeom.Xform.Define(stage, "/Asset").GetPrim()
+    UsdPhysics.ArticulationRootAPI.Apply(root)
+    for name in ("base", "drawer"):
+        UsdPhysics.RigidBodyAPI.Apply(
+            UsdGeom.Cube.Define(stage, f"/Asset/{name}").GetPrim()
+        )
+    joint = UsdPhysics.PrismaticJoint.Define(stage, "/Asset/slide")
+    joint.CreateBody0Rel().SetTargets(["/Asset/base"])
+    joint.CreateBody1Rel().SetTargets(["/Asset/drawer"])
+    joint.CreateAxisAttr("Y")
+    joint.CreateLowerLimitAttr(0.0)
+    joint.CreateUpperLimitAttr(0.1)
+    if closed is not None:
+        joint.GetPrim().CreateAttribute(
+            "gen_sim:closedPosition", Sdf.ValueTypeNames.Double
+        ).Set(closed)
+    stage.GetRootLayer().Save()
+    with pytest.raises(RuntimeError, match="closed endpoint"):
+        articulated_generation._validate_articulated_usdc(path)
+
+
+def test_articulated_usdc_accepts_declared_prismatic_closed_endpoint(
+    tmp_path: Path,
+) -> None:
+    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+
+    path = tmp_path / "drawer.usdc"
+    stage = Usd.Stage.CreateNew(str(path))
+    root = UsdGeom.Xform.Define(stage, "/Asset").GetPrim()
+    UsdPhysics.ArticulationRootAPI.Apply(root)
+    for name in ("base", "drawer"):
+        UsdPhysics.RigidBodyAPI.Apply(
+            UsdGeom.Cube.Define(stage, f"/Asset/{name}").GetPrim()
+        )
+    joint = UsdPhysics.PrismaticJoint.Define(stage, "/Asset/slide")
+    joint.CreateBody0Rel().SetTargets(["/Asset/base"])
+    joint.CreateBody1Rel().SetTargets(["/Asset/drawer"])
+    joint.CreateAxisAttr("Y")
+    joint.CreateLowerLimitAttr(0.0)
+    joint.CreateUpperLimitAttr(0.1)
+    joint.GetPrim().CreateAttribute(
+        "gen_sim:closedPosition", Sdf.ValueTypeNames.Double
+    ).Set(0.1)
+    stage.GetRootLayer().Save()
+    articulated_generation._validate_articulated_usdc(path)
+
+
 def test_image_generation_client_posts_prompt_and_writes_png(
     tmp_path: Path,
 ) -> None:

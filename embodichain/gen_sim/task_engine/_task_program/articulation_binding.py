@@ -144,9 +144,7 @@ class PrismaticBinding:
 
     def tolerance(self, state: str) -> float:
         self.target(state)
-        return min(
-            0.03 if state == "open" else 0.005, (self.limits[1] - self.limits[0]) / 4
-        )
+        return min(0.03, (self.limits[1] - self.limits[0]) * 0.49)
 
     def payload(self) -> dict[str, Any]:
         value = asdict(self)
@@ -545,12 +543,23 @@ def graph_bindings(graph: dict, scene: Any) -> dict[str, PrismaticBinding]:
             )
         result_key = uid if part_id is None else f"{uid}::{part_id}"
         if result_key not in result:
-            result[result_key] = (
+            binding = (
                 inspect_prismatic_part(configs[uid], part_id)
                 if part_id is not None
                 else inspect_prismatic(configs[uid])
             )
-            validate_placement(result[result_key], configs[uid], scene.table_top_z)
+            if args["state"] == "closed" and binding.closed_position is None:
+                raise ValueError(
+                    "GenSim E6 closed targets require an explicit closed endpoint; "
+                    "author gen_sim:closedPosition on the selected prismatic joint."
+                )
+            result[result_key] = binding
+            validate_placement(binding, configs[uid], scene.table_top_z)
+        elif args["state"] == "closed" and result[result_key].closed_position is None:
+            raise ValueError(
+                "GenSim E6 closed targets require an explicit closed endpoint; "
+                "author gen_sim:closedPosition on the selected prismatic joint."
+            )
     return result
 
 
@@ -579,6 +588,15 @@ def validate_placement(
     rotation = Rotation.from_euler(
         "XYZ", config.get("init_rot", [0, 0, 0]), degrees=True
     )
+    slide_axis_world = rotation.apply(
+        link_pose[:3, :3] @ np.asarray(binding.axis, dtype=float)
+    )
+    slide_axis_world /= np.linalg.norm(slide_axis_world)
+    if abs(float(slide_axis_world[2])) > np.sin(np.deg2rad(1.0)):
+        raise ValueError(
+            "GenSim E6 requires a passive slide axis within one degree of "
+            "horizontal; repair the source articulation layout before execution."
+        )
     handle = rotation.apply(handle) + np.asarray(config.get("init_pos", [0, 0, 0]))
     if handle[:, 2].min() <= table_top_z:
         raise ValueError("E6 handle is not clear of the tabletop.")

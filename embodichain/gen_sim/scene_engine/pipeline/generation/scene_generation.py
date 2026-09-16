@@ -393,6 +393,9 @@ def _generate_articulated_usdcs(
                 "revolute or prismatic joints with physically meaningful axes and "
                 "motion limits, connected to valid rigid-body links. Do not fuse "
                 "movable parts into the base or add an unrelated token joint. "
+                "For every prismatic joint, author a custom Double attribute "
+                "gen_sim:closedPosition equal to the joint-limit endpoint at which "
+                "the drawer or slider is physically closed; do not assume zero. "
                 "Deliver a self-contained USDC with an articulation root, meshes, "
                 "and enabled non-fixed joints. A rigid GLB proxy is not sufficient."
             ),
