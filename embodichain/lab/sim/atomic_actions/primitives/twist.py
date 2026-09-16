@@ -49,7 +49,11 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
 )
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    PlannerDiagnostics,
+    TimedTrajectory,
+)
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
@@ -197,9 +201,13 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             num_envs=self.num_envs,
             device=self.device,
         )
-        grasp_xpos = affordance.get_grasp_pose(link_pose).to(
-            device=self.device, dtype=torch.float32
+        grasp_sample = affordance.sample_grasp_pose(
+            link_pose,
+            sampling=context.affordance_sampling,
+            env_ids=context.env_ids,
+            key=(request.invocation_id or self.skill_id) + ":grasp",
         )
+        grasp_xpos = grasp_sample.poses.to(device=self.device, dtype=torch.float32)
         grasp_xpos = self._find_symmetric_nearest_xpos(
             grasp_xpos,
             reference_xpos=self.robot.compute_fk(
@@ -256,7 +264,13 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             n_retract,
             interpolation_dt=interpolation_dt,
         )
-        success = approach_success & reach_success & twist_success & retract_success
+        success = (
+            grasp_sample.success
+            & approach_success
+            & reach_success
+            & twist_success
+            & retract_success
+        )
 
         hand_close = interpolate_hand_qpos(
             hand_open_qpos,
@@ -321,6 +335,10 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
                 step_dt=interpolation_dt,
             ),
             expected_effects=StateDelta(),
+            diagnostics=PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                metadata={"affordance_sample": grasp_sample.metadata},
+            ),
             segment_lengths={
                 "approach": lengths[0],
                 "reach": lengths[1],

@@ -200,8 +200,6 @@ class AntipodalAffordance(Affordance):
         Returns:
             Padded candidates with explicit validity.
         """
-        if self.mesh_vertices is None or self.mesh_triangles is None:
-            raise ValueError("Antipodal grasp sampling requires mesh geometry.")
         rows = generator.get_valid_grasp_poses(
             mesh_vertices=self.mesh_vertices,
             mesh_triangles=self.mesh_triangles,
