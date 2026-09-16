@@ -84,8 +84,11 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--affordance_branches",
         type=int,
-        default=1,
-        help="Number of reproducible Affordance branches and simulation rows.",
+        default=None,
+        help=(
+            "Number of reproducible Affordance branches and simulation rows; "
+            "defaults to --num_envs."
+        ),
     )
     parser.add_argument(
         "--sampling_seed",
@@ -100,6 +103,8 @@ def parse_arguments() -> argparse.Namespace:
         help="Explicit resampling-attempt identity.",
     )
     args = parser.parse_args()
+    if args.affordance_branches is None:
+        args.affordance_branches = args.num_envs
     if args.affordance_branches < 1:
         parser.error("--affordance_branches must be positive.")
     if args.sampling_seed < 0:

@@ -998,6 +998,20 @@ def test_pickup_tutorial_keeps_single_branch_sampling_disabled() -> None:
     assert module.create_affordance_sampling_context(args) is None
 
 
+def test_pickup_tutorial_preserves_num_envs_as_branch_count() -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.pickup")
+
+    with patch("sys.argv", ["pickup.py", "--num_envs", "3"]):
+        args = module.parse_arguments()
+
+    sampling = module.create_affordance_sampling_context(args)
+
+    assert args.affordance_branches == 3
+    assert args.num_envs == 3
+    assert sampling is not None
+    assert sampling.count == 3
+
+
 @pytest.mark.parametrize("branch_count", ("0", "-1"))
 def test_pickup_tutorial_rejects_non_positive_branch_count(
     branch_count: str,
