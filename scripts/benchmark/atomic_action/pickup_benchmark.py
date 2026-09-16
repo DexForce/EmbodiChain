@@ -150,7 +150,7 @@ def _run_case(
             settle_steps=2,
         )
         initial_obj_position = object_position_tuple(obj)
-        hand_open, hand_close = get_hand_open_close_qpos(robot, sim.device)
+        hand_open, hand_close = get_hand_open_close_qpos(robot)
         initialize_pre_pick_robot_pose(robot, obj, hand_open)
         case_args = _make_pickup_args(args, approach, object_preset, profile)
         approach_direction = resolve_pickup_approach_direction(
@@ -595,7 +595,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    from scripts.tutorials.atomic_action.tutorial_utils import run_tutorial
+
+    run_tutorial(main)
 
 
 __all__ = ["add_benchmark_args", "run_all_benchmarks"]
