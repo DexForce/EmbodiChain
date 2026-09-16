@@ -13,6 +13,11 @@ It is a thin, opt-in layer on top of {doc}`viser_visualization`: nothing is
 registered unless your application creates the objects below, and a browser
 session without the panel behaves exactly as before.
 
+One sequence authored end to end: pick the cube, stack `move_end_effector`,
+`pick_up` and `place`, compile, preview, execute.
+
+<img src="../../_static/atomic_actions/skill_sequencer.gif" alt="Skill sequence authoring panel" width="760" style="max-width: 100%;" />
+
 ## Quick start
 
 From the repository root:
