@@ -139,4 +139,3 @@ black --check --diff --color ./
 python docs/scripts/check_api_docs.py
 python -m sphinx -b dummy docs/source docs/build/api-docs-check
 ```
-
