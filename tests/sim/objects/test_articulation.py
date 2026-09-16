@@ -198,6 +198,40 @@ def test_set_gravity_updates_only_selected_environments(enable: bool) -> None:
 
 
 @pytest.mark.no_sim
+@pytest.mark.parametrize("is_newton_backend", [False, True])
+def test_get_joint_type_uses_backend_neutral_descriptor_adapter(
+    is_newton_backend: bool,
+) -> None:
+    """Joint type queries hide Default and Newton native descriptor APIs."""
+    joint = SimpleNamespace(
+        name="hinge",
+        joint_type=SimpleNamespace(name="REVOLUTE"),
+    )
+    entity = SimpleNamespace(
+        get_joint_names=lambda: [joint.name],
+        get_joint_info=(lambda _: joint) if not is_newton_backend else (lambda _: None),
+        get_joint_desc=(lambda _: joint),
+    )
+    articulation = object.__new__(Articulation)
+    articulation._entities = [entity]
+    articulation._data = SimpleNamespace(is_newton_backend=is_newton_backend)
+
+    assert articulation.get_joint_type("hinge") == "revolute"
+
+
+@pytest.mark.no_sim
+def test_get_joint_type_rejects_unknown_joint() -> None:
+    """Joint type queries fail before touching a native descriptor for bad names."""
+    entity = SimpleNamespace(get_joint_names=lambda: ["hinge"])
+    articulation = object.__new__(Articulation)
+    articulation._entities = [entity]
+    articulation._data = SimpleNamespace(is_newton_backend=False)
+
+    with pytest.raises(ValueError, match="Unknown articulation joint"):
+        articulation.get_joint_type("missing")
+
+
+@pytest.mark.no_sim
 def test_set_gravity_updates_all_environments_by_default() -> None:
     """Omitting environment indices applies gravity to every native entity."""
     articulation = object.__new__(Articulation)

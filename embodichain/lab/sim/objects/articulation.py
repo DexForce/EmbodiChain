@@ -1134,6 +1134,45 @@ class Articulation(BatchEntity):
         """
         return self._entities[0].get_joint_names()
 
+    def get_joint_type(self, joint_name: str) -> str:
+        """Return the normalized backend-neutral type of one joint.
+
+        The native joint descriptor is resolved through the active backend
+        adapter and is not exposed to callers.  Returned values are lowercase
+        names such as ``"fixed"``, ``"revolute"``, or ``"prismatic"``.
+
+        Args:
+            joint_name: Name of the joint to query.
+
+        Returns:
+            The normalized lowercase joint type.
+
+        Raises:
+            TypeError: If ``joint_name`` is not a non-empty string.
+            ValueError: If the joint is unknown or has no type descriptor.
+        """
+        if (
+            type(joint_name) is not str
+            or not joint_name
+            or joint_name != joint_name.strip()
+        ):
+            raise TypeError("joint_name must be a non-empty joint name.")
+        if joint_name not in self.all_joint_names:
+            raise ValueError(
+                f"Unknown articulation joint {joint_name!r}. Available joints: "
+                f"{list(self.all_joint_names)!r}."
+            )
+
+        descriptor = get_joint_descriptor(
+            self._entities[0],
+            joint_name,
+            is_newton=getattr(getattr(self, "_data", None), "is_newton_backend", False),
+        )
+        joint_type = getattr(descriptor, "joint_type", None)
+        if joint_type is None:
+            raise ValueError(f"Joint {joint_name!r} has no joint type descriptor.")
+        return str(getattr(joint_type, "name", joint_type)).lower()
+
     def get_parent_joint_chain(
         self,
         link_name: str,
