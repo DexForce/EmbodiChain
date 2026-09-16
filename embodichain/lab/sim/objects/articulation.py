@@ -440,8 +440,15 @@ class ArticulationData:
 
         COM poses use the EmbodiChain convention ``xyz + xyzw`` and all
         tensors use the public link ordering. DexSim physical-property
-        descriptors use ``wxyz`` and are converted at this boundary.
+        descriptors use ``wxyz`` and are converted at this boundary. Newton
+        reads use the Scene batch to avoid per-link device-to-host transfers.
         """
+        if self.is_newton_backend:
+            self.articulation_view.fetch_link_physical_properties(
+                self._mass, self._inertia, self._com_pose
+            )
+            return self._mass, self._inertia, self._com_pose
+
         masses: list[list[float]] = []
         inertias: list[list[np.ndarray]] = []
         com_poses: list[list[np.ndarray]] = []
