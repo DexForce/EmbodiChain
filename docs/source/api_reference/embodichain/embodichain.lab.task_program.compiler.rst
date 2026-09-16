@@ -13,6 +13,7 @@ embodichain.lab.task_program.compiler
 
       CompiledArticulationJointPositionValidator
       CompiledBarrier
+      CompiledObjectNearRelativeTargetValidator
       CompiledObjectNearTargetValidator
       CompiledParallelBlock
       CompiledParallelBranch

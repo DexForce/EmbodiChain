@@ -17,7 +17,9 @@
 from __future__ import annotations
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
+from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
     layout_object_to_transform_matrix,
@@ -73,6 +75,70 @@ def translate_scene_object_y_up_by_z_up_delta(
             scene_object.center_xy[0] + dx,
             scene_object.center_xy[1] + dy,
         ]
+
+
+def rotate_scene_z_up_world(*, scene: Scene, rotation_degrees: float) -> None:
+    """Rotate every final scene pose and support point about world z.
+
+    The generated meshes remain unchanged. The same rigid world transform is
+    applied to positions, orientations, and persisted z-up XY support metadata
+    so the exported scene stays internally consistent.
+
+    Args:
+        scene: Final generated scene whose object poses use the internal y-up frame.
+        rotation_degrees: Counterclockwise world-z rotation in degrees.
+
+    Raises:
+        ValueError: If the rotation is not finite or a scene pose is incomplete.
+    """
+    angle = float(rotation_degrees)
+    if not np.isfinite(angle):
+        raise ValueError("rotation_degrees must be finite.")
+    if angle % 360.0 == 0.0:
+        return
+
+    world_rotation = np.eye(4)
+    world_rotation[:3, :3] = Rotation.from_euler("z", angle, degrees=True).as_matrix()
+    basis = y_up_to_z_up_matrix()
+    inverse_basis = np.linalg.inv(basis)
+    rotation_xy = world_rotation[:2, :2]
+
+    for scene_object in scene.objects:
+        y_up_layout = scene_object_y_up_layout(scene_object)
+        z_up_transform = (
+            basis @ layout_object_to_transform_matrix(y_up_layout) @ inverse_basis
+        )
+        rotated_y_up_transform = inverse_basis @ world_rotation @ z_up_transform @ basis
+        rotated_layout = transform_matrix_to_layout_object(
+            scene_object.id,
+            rotated_y_up_transform,
+        )
+        scene_object.pos = rotated_layout["pos"]
+        scene_object.rot = rotated_layout["rot"]
+        scene_object.scale = rotated_layout["scale"]
+
+        if scene_object.center_xy is not None:
+            scene_object.center_xy = (
+                rotation_xy
+                @ np.asarray(
+                    two_floats(scene_object.center_xy, field_name="center_xy"),
+                    dtype=float,
+                )
+            ).tolist()
+        for field_name in ("support_contour_xy", "support_optimization_rect_xy"):
+            points = getattr(scene_object, field_name)
+            if points is None:
+                continue
+            setattr(
+                scene_object,
+                field_name,
+                [
+                    (rotation_xy @ np.asarray(two_floats(point, field_name=field_name)))
+                    .astype(float)
+                    .tolist()
+                    for point in points
+                ],
+            )
 
 
 def measure_scene_object_z_up_world_aabb(

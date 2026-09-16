@@ -37,8 +37,8 @@ from .articulation_geometry import (
 from .affordance import (
     Affordance,
     AntipodalAffordance,
-    AssembleAffordance,
     AxisAlignAffordance,
+    AssembleAffordance,
     InteractionPoints,
     OpenDoorAffordance,
     PressAffordance,
@@ -58,6 +58,7 @@ from .control import (
     GRASP_COMMAND,
     JointPositionCommand,
     OPEN_COMMAND,
+    PARK_COMMAND,
 )
 from .core import AtomicAction, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
@@ -262,11 +263,11 @@ __all__ = [
     "ArticulationAffordanceGeometry",
     "ArticulationGeometryProvider",
     "ArticulationJointGeometry",
+    "AxisAlignAffordance",
     "ArticulationJointState",
     "AssembleAffordance",
     "AssembleGoal",
     "AxisAlign",
-    "AxisAlignAffordance",
     "AxisAlignGoal",
     "AxisAlignOptions",
     "AtomicAction",
@@ -360,6 +361,7 @@ __all__ = [
     "OPEN_COMMAND",
     "ObservationProvider",
     "ObservedArticulationJointState",
+    "PARK_COMMAND",
     "PickUp",
     "PickUpOptions",
     "Place",
