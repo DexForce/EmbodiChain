@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -311,6 +312,7 @@ def test_relative_place_corrects_goal_without_mutating_grasp_state(monkeypatch) 
                 "table",
                 relative_pose=nominal,
                 world_displacement=torch.tensor([0.0, 0.0, 0.1]),
+                world_orientation=object_pose[:, :3, :3].clone(),
             )
         )
     )
@@ -326,6 +328,7 @@ def test_relative_place_corrects_goal_without_mutating_grasp_state(monkeypatch) 
                 reference_entity_id="table",
                 relation="on",
                 world_displacement=(0.0, 0.0, 0.1),
+                world_yaw_offset=math.pi / 6.0,
             ),
         ),
         robot,
@@ -365,7 +368,22 @@ def test_relative_place_corrects_goal_without_mutating_grasp_state(monkeypatch) 
     torch.testing.assert_close(
         object_pose @ result.goal.xpos.relative_pose, measured_eef
     )
+    angle = torch.tensor(math.pi / 6.0)
+    yaw = torch.tensor(
+        [
+            [torch.cos(angle), -torch.sin(angle), 0.0],
+            [torch.sin(angle), torch.cos(angle), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    torch.testing.assert_close(
+        result.goal.xpos.world_orientation,
+        yaw @ object_pose[:, :3, :3],
+    )
     torch.testing.assert_close(canonical.goal.xpos.relative_pose, nominal)
+    torch.testing.assert_close(
+        canonical.goal.xpos.world_orientation, object_pose[:, :3, :3]
+    )
     assert result.registered_effect is canonical.registered_effect
     assert robot.compute_fk.call_args.kwargs["env_ids"] == [1, 3]
 

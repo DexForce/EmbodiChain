@@ -309,6 +309,7 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                         "world_displacement",
                     }
                 ),
+                optional=frozenset({"world_yaw_offset"}),
             )
             routes.append(
                 _RelativePlaceRoute(
@@ -328,6 +329,10 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                         route["world_displacement"],
                         path=f"{route_path}.world_displacement",
                         expected_length=3,
+                    ),
+                    world_yaw_offset=_real(
+                        route.get("world_yaw_offset", 0.0),
+                        path=f"{route_path}.world_yaw_offset",
                     ),
                 )
             )
