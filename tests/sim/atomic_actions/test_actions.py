@@ -114,7 +114,13 @@ from embodichain.toolkits.graspkit import (
     ParallelJawGripperModelCfg,
 )
 from embodichain.lab.sim.motion.motion_generator import MotionGenerator
-from embodichain.lab.sim.motion.planners import MoveType, PlanOptions, PlanResult
+from embodichain.lab.sim.motion.planners import (
+    MoveType,
+    PlanOptions,
+    PlanResult,
+    TrapezoidalPlanOptions,
+    TrapezoidalPlanner,
+)
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
 NUM_ENVS = 2
@@ -1151,7 +1157,9 @@ def test_pick_combined_motion_gen_preserves_backend_samples_before_split() -> No
     )
 
     generator.generate.assert_called_once()
-    assert generator.generate.call_args.kwargs["options"].sample_count is None
+    motion_options = generator.generate.call_args.kwargs["options"]
+    assert motion_options.sample_count is None
+    assert motion_options.plan_opts is None
     assert plan.commands.frame_count == sample_count
 
 
@@ -4984,6 +4992,7 @@ def test_position_only_motion_policy_emits_explicit_zero_velocity() -> None:
 
 
 def test_move_joints_supports_sparse_trapezoidal_planning() -> None:
+    """MoveJoints passes a sparse goal through the native time-profile backend."""
     generator = _motion_generator()
     planner = object.__new__(TrapezoidalPlanner)
     planner.cfg = SimpleNamespace(planner_type="trapezoidal")
@@ -5013,6 +5022,7 @@ def test_move_joints_supports_sparse_trapezoidal_planning() -> None:
 
 
 def test_move_joints_holds_stationary_trapezoidal_goal() -> None:
+    """MoveJoints emits a zero-derivative hold for a stationary goal."""
     generator = _motion_generator()
     planner = object.__new__(TrapezoidalPlanner)
     planner.cfg = SimpleNamespace(planner_type="trapezoidal")

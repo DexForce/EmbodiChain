@@ -50,7 +50,7 @@ from embodichain.learning.rl.runtime import (
 )
 from embodichain.learning.rl.routing import get_trainer_class
 from embodichain.learning.rl.utils.trainer import Trainer
-from embodichain.utils import logger
+from embodichain.utils import logger, set_seed
 from embodichain.lab.gym.utils.registration import (
     build_env,
     discover_task_packages,
@@ -175,9 +175,10 @@ def _train_learning_env(
         raise ValueError("CUDA was requested but is not available.")
     if device.type == "cuda":
         torch.cuda.set_device(device)
-        torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    set_seed(
+        seed,
+        deterministic=bool(trainer_cfg.get("torch_deterministic", False)),
+    )
 
     num_envs = int(trainer_cfg.get("num_envs", 64))
     runtime = build_learning_policy_runtime(
@@ -231,9 +232,23 @@ def _train_learning_env(
             diff_cfg = DifferentiableTrainerCfg(
                 segment_length=segment_length,
                 update_horizon=update_horizon,
+                rollout_mode=str(trainer_cfg.get("rollout_mode", "segmented")),
+                gradient_accumulation_steps=int(
+                    trainer_cfg.get("gradient_accumulation_steps", 1)
+                ),
                 deterministic_actions=bool(
                     trainer_cfg.get("deterministic_actions", False)
                 ),
+                clip_actions_to_space=bool(
+                    trainer_cfg.get("clip_actions_to_space", False)
+                ),
+                action_adjoint_max_norm=float(
+                    trainer_cfg.get("action_adjoint_max_norm", 0.0)
+                ),
+                normalize_observations=bool(
+                    trainer_cfg.get("normalize_observations", False)
+                ),
+                rollout_seed=seed,
                 checkpoint_dir=str(checkpoint_dir),
                 experiment_name=exp_name,
                 save_frequency_updates=int(
@@ -254,7 +269,12 @@ def _train_learning_env(
                 writer=writer,
                 eval_env=eval_env,
             )
-            default_steps = iterations * update_horizon * num_envs
+            default_steps = (
+                iterations
+                * update_horizon
+                * num_envs
+                * diff_cfg.gradient_accumulation_steps
+            )
         else:
             buffer_size = int(
                 trainer_cfg.get("buffer_size", trainer_cfg.get("rollout_steps", 256))
@@ -281,8 +301,15 @@ def _train_learning_env(
                 ),
             )
             default_steps = iterations * buffer_size * num_envs
-        total_timesteps = int(trainer_cfg.get("total_timesteps", default_steps))
-        trainer.train(total_timesteps)
+        if (
+            trainer_class is DifferentiableTrainer
+            and diff_cfg.rollout_mode == "complete"
+            and "total_timesteps" not in trainer_cfg
+        ):
+            trainer.train(total_updates=iterations)
+        else:
+            total_timesteps = int(trainer_cfg.get("total_timesteps", default_steps))
+            trainer.train(total_timesteps)
         trainer.save_checkpoint()
         summary = trainer.get_summary()
     finally:
@@ -477,7 +504,7 @@ def train_from_config(
         raise RuntimeError("Simulator Policy runtime is missing task configuration")
     if rank == 0:
         logger.log_info(
-            f"Loaded gym_config from {gym_config_path} (env_id={gym_config_data['id']}, num_envs={gym_env_cfg.num_envs}, headless={gym_env_cfg.sim_cfg.headless}, renderer={gym_env_cfg.sim_cfg.render_cfg.renderer}, sim_device={gym_env_cfg.sim_cfg.sim_device})"
+            f"Loaded gym_config from {gym_config_path} (env_id={gym_config_data['id']}, num_envs={gym_env_cfg.num_envs}, headless={gym_env_cfg.sim_cfg.headless}, renderer={gym_env_cfg.sim_cfg.render_cfg.renderer}, device={gym_env_cfg.sim_cfg.device})"
         )
 
     # Create evaluation environment only if enabled

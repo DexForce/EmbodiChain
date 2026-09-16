@@ -37,15 +37,7 @@ import argparse
 import csv
 from pathlib import Path
 
-import torch
-
-from embodichain.compute.trajectory import differentiate_positions
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RenderCfg
-from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.robots import FrankaPandaCfg
-from embodichain.lab.visualization import visualization_cfg_from_args
+from embodichain.cli.sim import add_sim_args_to_parser
 
 __all__ = [
     "compute_pose_errors",
@@ -186,9 +178,10 @@ def _compute_fk_trajectory(
     return torch.stack(poses, dim=1)
 
 
-def _parse_args() -> argparse.Namespace:
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without importing simulation dependencies."""
     parser = argparse.ArgumentParser(description=__doc__)
-    add_env_launcher_args_to_parser(parser)
+    add_sim_args_to_parser(parser)
     parser.set_defaults(device="cpu", num_envs=1, arena_space=2.0)
     parser.add_argument("--physics-dt", type=float, default=0.01)
     parser.add_argument("--control-dt", type=float, default=0.04)
@@ -199,7 +192,28 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir", type=Path, default=Path("trajectory_velocity_results")
     )
-    return parser.parse_args()
+    return parser
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for the trajectory tracking example."""
+    parser = build_parser()
+    return parser.parse_args() if argv is None else parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation dependencies.
+    _cli_args = parse_args()
+
+
+import torch
+
+from embodichain.compute.trajectory import differentiate_positions
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
+from embodichain.lab.sim.objects import Robot
+from embodichain.lab.sim.robots import FrankaPandaCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 
 
 def _validate_args(args: argparse.Namespace) -> None:
@@ -362,9 +376,9 @@ def _write_artifacts(
     plt.close(figure)
 
 
-def main() -> None:
+def main(args: argparse.Namespace | None = None) -> None:
     """Run both tracking modes and write their measurements."""
-    args = _parse_args()
+    args = parse_args() if args is None else args
     _validate_args(args)
     sim = SimulationManager(
         SimulationManagerCfg(
@@ -374,6 +388,7 @@ def main() -> None:
             num_envs=1,
             arena_space=args.arena_space,
             render_cfg=RenderCfg(renderer=args.renderer),
+            physics_cfg=physics_cfg_for_backend(args.physics),
             visualization=visualization_cfg_from_args(args),
         )
     )
@@ -429,4 +444,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

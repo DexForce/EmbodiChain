@@ -325,3 +325,17 @@ class BakeTextureObj(EmbodiChainDataset):
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+
+
+class DrawerUSD(EmbodiChainDataset):
+    """get_data_path("DrawerUSD/drawer_001.usdc")"""
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "DrawerUSD.zip"),
+            "47ca77e3e87e7c891606a7cb56b44ea0",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)

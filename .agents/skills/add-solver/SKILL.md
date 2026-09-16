@@ -219,7 +219,7 @@ exactly:
   `test_ur_solver.py`) to sample joint configs within limits with a safety
   margin.
 - A `BaseSolverTest` class with:
-  - `setup_simulation(self, sim_device)` — builds a `SimulationManagerCfg`,
+  - `setup_simulation(self, device)` — builds a `SimulationManagerCfg`,
     a `RobotCfg` whose `solver_cfg={"arm": <Name>SolverCfg(...)}` uses the new
     solver, and adds the robot via `self.sim.add_robot(cfg=cfg)`.
   - `test_ik(self)` — the round-trip contract:

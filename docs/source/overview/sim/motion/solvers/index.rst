@@ -1,100 +1,78 @@
 Solvers
-=================================
+========
 
-This section documents the solvers provided by the project with a focus on
-robotic kinematics: forward kinematics (FK), inverse kinematics (IK),
-differential (velocity) kinematics, constraint handling and practical
-considerations such as singularities and performance tuning.
+Kinematic solvers map joint positions to end-effector poses (forward
+kinematics, FK) and find joint positions for target poses (inverse kinematics,
+IK). Use :doc:`../motion_generator` when you need a timed trajectory between
+poses.
 
-The repository contains several solver implementations — each has a dedicated
-page with implementation details and examples. Use the links at the bottom of
-this page to jump to a specific solver.
+Choose a solver
+---------------
 
-.. contents:: Table of contents
-    :local:
-    :depth: 2
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
 
-Overview
---------
+   * - Solver
+     - Use it for
+   * - :doc:`pytorch_solver`
+     - Numerical IK with batched PyTorch computation and multiple seeds.
+   * - :doc:`differential_solver`
+     - Jacobian-based joint updates for differential pose control.
+   * - :doc:`pink_solver`
+     - Optimization with frame tasks and null-space posture objectives.
+   * - :doc:`pinocchio_solver`
+     - Single-target numerical IK using Pinocchio.
+   * - :doc:`opw_solver`
+     - Analytical IK for 6-DOF arms matching the OPW parameterization.
+   * - :doc:`srs_solver`
+     - Analytical IK for 7-DOF spherical-rotational-spherical arms.
+   * - :doc:`ur_solver`
+     - Analytical IK for supported Universal Robots models.
+   * - :doc:`neural_ik_solver`
+     - Experimental learned IK with a trained Franka Panda checkpoint.
 
-Robotic kinematics solvers translate between joint-space and task-space.
+Analytical solvers require matching robot geometry. Numerical solvers support
+more general chains but depend on seed quality and convergence settings.
 
-- Forward kinematics (FK) maps joint values q to an end-effector pose.
-- Inverse kinematics (IK) finds joint values q that achieve a desired end-effector
-   pose.
+.. _motion-solver-conventions:
 
+Shared FK/IK conventions
+------------------------
 
-Forward kinematics
--------------------
+Configure the robot model, joint order, root link, end link, and optional TCP
+through the solver's configuration. Joint positions use radians; pose matrices
+are homogeneous transforms. Direct solver calls use the solver's root/TCP
+conventions. For simulation targets, use the robot's IK methods and their
+documented pose frame; they handle conversion to the solver root frame.
 
-Forward kinematics composes joint transforms according to the robot's
-kinematic tree to produce the end-effector transform. Practical builders compute these transforms efficiently using the robot's
-URDF or internal kinematic model. FK solvers in `embodichain` are
-optimized for batch evaluation and for returning both pose and link frames.
+For solvers that support batches, joint inputs have shape ``(B, DOF)`` and
+pose inputs have shape ``(B, 4, 4)``. A basic FK-to-IK call is:
 
-Inverse kinematics
--------------------
+.. code-block:: python
 
-Inverse kinematics is the core topic for robotics. There are two common
-approaches implemented in the repository:
+   target_pose = solver.get_fk(qpos_seed)
+   success, solutions = solver.get_ik(
+       target_xpos=target_pose,
+       qpos_seed=qpos_seed,
+   )
 
-- Analytical IK (closed-form): when the robot geometry admits a closed-form
-   solution (e.g., many 6-DOF industrial arms), these solvers return exact
-   solutions quickly and deterministically.
-- Numerical IK: general-purpose methods based on the Jacobian or optimization
-   that work for arbitrary kinematic chains but may be slower and require
-   a good initial guess.
+``get_ik()`` returns validity/success first and joint solutions second. Check
+success before using a solution. Output shapes and the meaning of
+``return_all_solutions`` differ by solver; the pages below document these
+exceptions. PinocchioSolver currently solves one target per call.
 
-Analytical IK
-~~~~~~~~~~~~~
-
-Analytical solvers (see the OPW and UR solvers) exploit kinematic
-structure to derive algebraic inverse mappings. Benefits include:
-
-- very fast runtime
-- exact solutions when they exist
-
-Limitations:
-
-- only available for specific robot families and joint arrangements
-
-Numerical IK (Jacobian-based and optimization)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Numerical IK methods iteratively update joint values q to reduce pose error.
-Jacobian-based updates use the task Jacobian J(q) to relate changes in joint
-space to end-effector motion.
-
-
-Multi-chain and closed-loop kinematics
---------------------------------------
-
-Solvers can handle serial chains, branched kinematic trees and some closed-loop
-mechanisms. Closed-loop systems commonly require constraint solvers and may
-embed loop-closure constraints in the solver as equality constraints.
-
-
-Choosing a solver
------------------
-
-- Use analytic solvers (OPW for 6-DOF arms, UR for the Universal Robots family, or SRS for 7-DOF arms) when available for speed and
-   determinism.
-- Use numerical solvers (PyTorch/optimization, Differential) when you need
-   flexibility.
-- Use the neural IK solver (experimental) when you have a trained checkpoint and need
-   fast batch inference on a supported robot.
-
-See also
---------
+For full signatures and configuration fields, see the
+:doc:`solver API </api_reference/embodichain/embodichain.lab.sim.motion.solvers>`.
 
 .. toctree::
-    :maxdepth: 1
+   :maxdepth: 1
 
-    pytorch_solver.md
-    differential_solver.md
-    pink_solver.md
-    pinocchio_solver.md
-    opw_solver.md
-    srs_solver.md
-    ur_solver.md
-    neural_ik_solver.md
+   pytorch_solver
+   differential_solver
+   pink_solver
+   pinocchio_solver
+   opw_solver
+   srs_solver
+   ur_solver
+   neural_ik_solver

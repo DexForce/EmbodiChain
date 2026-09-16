@@ -22,13 +22,13 @@ import argparse
 import math
 import re
 import time
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import Literal
 
 import torch
 
 from embodichain.data import get_data_path
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.cli.sim import add_sim_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.atomic_actions import (
@@ -36,10 +36,31 @@ from embodichain.lab.sim.atomic_actions import (
     ObjectSemantics,
     TimedTrajectory,
 )
-from embodichain.lab.sim.cfg import LightCfg, MarkerCfg, RenderCfg, RobotCfg
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    CollisionPropertiesCfg,
+    DefaultRigidBodyPropertiesCfg,
+    LightCfg,
+    LinkPhysicsOverrideCfg,
+    MassPropertiesCfg,
+    MarkerCfg,
+    NewtonCollisionPropertiesCfg,
+    NewtonPhysicsCfg,
+    NewtonRigidBodyMaterialCfg,
+    PhysicsBackendCfg,
+    RenderCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
+    RobotCfg,
+    physics_cfg_for_backend,
+)
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
-from embodichain.lab.sim.motion.planners import CuroboPlannerCfg, ToppraPlannerCfg
+from embodichain.lab.sim.motion.planners import (
+    CuroboPlannerCfg,
+    ToppraPlannerCfg,
+    TrapezoidalPlannerCfg,
+)
 from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
@@ -90,9 +111,34 @@ TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
     palm_depth=0.096,
 )
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.036
+NEWTON_GRASP_CONTACT_STIFFNESS = 4.0e4
+NEWTON_GRASP_CONTACT_DAMPING = 4.0e2
+# MuJoCo-Warp's default contact dimension (3) has no torsional friction.  A
+# parallel-jaw grasp needs spin resistance as well as normal stiffness. Values
+# were selected from Newton's native-contact examples and a fixed-seed
+# Default-backend cube pick/place comparison. ``rolling_friction`` is retained
+# for solvers/condim=6 that consume it; MuJoCo-Warp condim=4 activates
+# torsional friction only. Keep this tutorial-local candidate profile on
+# manipulation contact surfaces rather than using it as a world-wide Newton
+# material.
+NEWTON_GRASP_TORSIONAL_FRICTION = 0.1
+NEWTON_GRASP_ROLLING_FRICTION = 0.01
+# The official Newton native-contact grasp example uses condim=4 to retain
+# torsional friction. The tutorial profile applies it just before replay.
+NEWTON_NATIVE_CONTACT_DIMENSION = 4
+# Native MuJoCo contacts need a short hold after the gripper first reaches its
+# commanded grasp position. Keep this as a duration rather than a raw number of
+# updates so the helper remains correct if a tutorial changes its control rate.
+NEWTON_NATIVE_CONTACT_SETTLE_DURATION = 0.24
 DEFAULT_TUTORIAL_LIGHT_POS = (1.0, 0.0, 3.0)
+DEFAULT_TUTORIAL_SUN_DIRECTION = (0.0, 0.0, -1.0)
+DEFAULT_TUTORIAL_SUN_INTENSITY = 5.0
 _FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
 _DEFAULT_GRIPPER_TCP_Z = 0.17
+_GRIPPER_CONTACT_LINK_PATTERN = (
+    r"(?:.*_)?(?:gripper_finger[12]_link_1|"
+    r"(?:left|right)_(?:outer|inner)_(?:finger(?:_pad)?|knuckle))"
+)
 _GRIPPER_TCP = (
     (1.0, 0.0, 0.0, 0.0),
     (0.0, 1.0, 0.0, 0.0),
@@ -118,6 +164,12 @@ TUTORIAL_ROBOTS: tuple[TutorialRobot, ...] = (
     "franka",
     "ur10",
 )
+TutorialPlanner = Literal["toppra", "trapezoidal", "curobo"]
+TUTORIAL_PLANNERS: tuple[TutorialPlanner, ...] = (
+    "toppra",
+    "trapezoidal",
+    "curobo",
+)
 
 
 def create_tutorial_argument_parser(
@@ -126,10 +178,31 @@ def create_tutorial_argument_parser(
     features: Collection[TutorialCliFeature] = (),
     default_device: str | None = None,
     default_renderer: str | None = None,
+    default_planner: TutorialPlanner = "trapezoidal",
 ) -> argparse.ArgumentParser:
-    """Create a launcher parser with the shared atomic-tutorial switches."""
+    """Create a launcher parser with the shared atomic-tutorial switches.
+
+    Args:
+        description: Command-line program description.
+        features: Optional groups of tutorial-specific shared arguments.
+        default_device: Optional device override for the launcher arguments.
+        default_renderer: Optional renderer override for the launcher arguments.
+        default_planner: Planner selected when ``--planner`` is omitted. The
+            shared default is deterministic ``trapezoidal`` timing.
+
+    Returns:
+        The configured argument parser.
+
+    Raises:
+        ValueError: If ``default_planner`` is not a supported tutorial backend.
+    """
+    if default_planner not in TUTORIAL_PLANNERS:
+        raise ValueError(
+            f"default_planner must be one of {TUTORIAL_PLANNERS}, "
+            f"got {default_planner!r}."
+        )
     parser = argparse.ArgumentParser(description=description)
-    add_env_launcher_args_to_parser(parser)
+    add_sim_args_to_parser(parser)
     defaults = {}
     if default_device is not None:
         defaults["device"] = default_device
@@ -148,6 +221,16 @@ def create_tutorial_argument_parser(
         choices=TUTORIAL_ROBOTS,
         default="ur5",
         help="Robot construction to use (default: ur5).",
+    )
+    parser.add_argument(
+        "--planner",
+        choices=TUTORIAL_PLANNERS,
+        default=default_planner,
+        help=(
+            "Motion-planner backend: toppra, trapezoidal, or curobo "
+            f"(default: {default_planner}). NeuralPlanner is not exposed "
+            "by this tutorial selector."
+        ),
     )
     if "debug_state" in features:
         parser.add_argument(
@@ -179,11 +262,46 @@ def create_tutorial_argument_parser(
     return parser
 
 
+def _tutorial_physics_cfg(
+    backend: Literal["default", "newton"],
+) -> PhysicsBackendCfg:
+    """Build the shared physics configuration for atomic-action tutorials.
+
+    Newton tutorials intentionally use MuJoCo Warp's native collision path.
+    It generates contacts inside every solver substep, so an external Newton
+    collision pipeline would be unused and would only allocate unnecessary
+    contact buffers.
+    """
+    physics_cfg = physics_cfg_for_backend(backend)
+    if isinstance(physics_cfg, NewtonPhysicsCfg):
+        # Keep 0.5 ms internal solver steps for stable robot contacts. Newton's
+        # tuning guide recommends reducing the solver interval for stiff
+        # contacts and fast-changing manipulator loads. DexSim sizes
+        # contact/constraint buffers from the finalized scene, including the
+        # contact dimensions authored on gripper and object surfaces.
+        # MultiCCD retains up to four contacts per gripper-mesh/object pair,
+        # which prevents a marginal two-finger grasp from sliding away.
+        physics_cfg.num_substeps = 20
+        physics_cfg.collision_cfg = None
+        physics_cfg.solver_cfg = {
+            "solver_type": "mujoco_warp",
+            "solver": "newton",
+            "integrator": "implicitfast",
+            "iterations": 20,
+            "ls_iterations": 100,
+            "cone": "elliptic",
+            "impratio": 1_000.0,
+            "use_mujoco_contacts": True,
+            "enable_multiccd": True,
+        }
+    return physics_cfg
+
+
 def create_tutorial_simulation(
     args: argparse.Namespace,
     *,
     arena_space: float = 2.5,
-    light_pos: Sequence[float] = DEFAULT_TUTORIAL_LIGHT_POS,
+    sun_direction: Sequence[float] = DEFAULT_TUTORIAL_SUN_DIRECTION,
 ) -> SimulationManager:
     """Create the shared simulation setup used by atomic-action tutorials.
 
@@ -191,7 +309,8 @@ def create_tutorial_simulation(
         args: Parsed launcher arguments containing environment count, device,
             and renderer selections.
         arena_space: Spacing between parallel simulation arenas in meters.
-        light_pos: Position of the scene's key light.
+        sun_direction: Direction of the single global sun light. The vector
+            points from the light toward the scene.
 
     Returns:
         A simulation manager with the tutorial key light configured.
@@ -202,7 +321,8 @@ def create_tutorial_simulation(
             height=VIEWER_HEIGHT,
             headless=True,
             num_envs=args.num_envs,
-            sim_device=args.device,
+            device=args.device,
+            physics_cfg=_tutorial_physics_cfg(getattr(args, "physics", "default")),
             render_cfg=RenderCfg(renderer=args.renderer),
             physics_dt=1.0 / 100.0,
             arena_space=arena_space,
@@ -212,9 +332,10 @@ def create_tutorial_simulation(
     sim.add_light(
         cfg=LightCfg(
             uid="main_light",
+            light_type="sun",
             color=(0.6, 0.6, 0.6),
-            intensity=30.0,
-            init_pos=list(light_pos),
+            intensity=DEFAULT_TUTORIAL_SUN_INTENSITY,
+            direction=tuple(sun_direction),
         )
     )
     return sim
@@ -272,13 +393,13 @@ def add_ur5_gripper_robot(
     Returns:
         The added robot instance.
     """
-    return sim.add_robot(
-        cfg=create_ur5_gripper_robot_cfg(
-            init_pos=init_pos,
-            init_qpos=init_qpos,
-            tcp_z=tcp_z,
-        )
+    robot_cfg = create_ur5_gripper_robot_cfg(
+        init_pos=init_pos,
+        init_qpos=init_qpos,
+        tcp_z=tcp_z,
     )
+    configure_newton_gripper_contacts(sim, robot_cfg)
+    return sim.add_robot(cfg=robot_cfg)
 
 
 def add_tutorial_robot(
@@ -302,41 +423,261 @@ def add_tutorial_robot(
     Raises:
         ValueError: If ``robot_type`` is not supported.
     """
-    return sim.add_robot(
-        cfg=create_tutorial_robot_cfg(
-            robot_type,
-            init_pos=init_pos,
-            init_qpos=init_qpos,
-            **kwargs,
-        )
+    robot_cfg = create_tutorial_robot_cfg(
+        robot_type,
+        init_pos=init_pos,
+        init_qpos=init_qpos,
+        **kwargs,
     )
+    configure_newton_gripper_contacts(sim, robot_cfg)
+    return sim.add_robot(cfg=robot_cfg)
 
 
-def create_toppra_motion_generator(robot: Robot) -> MotionGenerator:
-    """Create the standard TOPPRA motion generator for a tutorial robot.
+def create_tutorial_motion_generator(
+    robot: Robot,
+    planner: TutorialPlanner = "trapezoidal",
+) -> MotionGenerator:
+    """Create a selected non-neural motion generator for a tutorial robot.
+
+    The selector intentionally mirrors the planner types that are usable from
+    the atomic-action tutorials. ``NeuralPlanner`` is omitted because it needs
+    a model-specific ONNX configuration and is not a drop-in backend for these
+    examples.
 
     Args:
         robot: Robot whose trajectories will be planned.
+        planner: Planner backend to construct.
+
+    Returns:
+        The configured motion generator for ``planner``.
+
+    Raises:
+        ValueError: If ``planner`` is not one of the supported tutorial
+            backends.
+    """
+    planner_cfg_types = {
+        "toppra": ToppraPlannerCfg,
+        "trapezoidal": TrapezoidalPlannerCfg,
+        "curobo": CuroboPlannerCfg,
+    }
+    if planner not in TUTORIAL_PLANNERS:
+        raise ValueError(
+            f"Unsupported tutorial planner {planner!r}; "
+            f"choose one of {TUTORIAL_PLANNERS}."
+        )
+    planner_cfg = planner_cfg_types[planner](robot_uid=robot.uid)
+    return MotionGenerator(cfg=MotionGenCfg(planner_cfg=planner_cfg))
+
+
+def create_toppra_motion_generator(
+    robot: Robot,
+    planner: TutorialPlanner = "toppra",
+) -> MotionGenerator:
+    """Create a tutorial motion generator, defaulting to TOPPRA.
+
+    ``planner`` keeps this historical helper compatible while allowing a
+    tutorial to opt into the shared command-line selector.
+
+    Args:
+        robot: Robot whose trajectories will be planned.
+        planner: Planner backend to construct.
 
     Returns:
         The configured motion generator.
     """
-    return MotionGenerator(
-        cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
+    return create_tutorial_motion_generator(robot, planner)
+
+
+def create_tutorial_rigid_body_physics(
+    *,
+    mass: float | None = None,
+    static_friction: float | None = None,
+    dynamic_friction: float | None = None,
+    restitution: float | None = None,
+    linear_damping: float | None = None,
+    angular_damping: float | None = None,
+    max_depenetration_velocity: float | None = None,
+    enable_ccd: bool | None = None,
+    min_position_iters: int | None = None,
+    min_velocity_iters: int | None = None,
+    contact_offset: float | None = None,
+    rest_offset: float | None = None,
+    newton_contact: bool = False,
+) -> RigidBodyPhysicsCfg:
+    """Create portable rigid-body physics for an atomic-action tutorial.
+
+    Material and mass values apply to both physics backends. The remaining
+    values are retained in the Default-backend configuration group; Newton
+    safely ignores those properties because it has no equivalent controls.
+    Set ``newton_contact`` only for a manipulation contact surface in a Newton
+    scene to use the task-scoped stiffness, damping, and torsional/rolling
+    friction profile used by the drawer tutorial.
+
+    Args:
+        newton_contact: Whether to add the Newton-only contact stiffness and
+            damping and torsional/rolling friction used on grasped or directly
+            manipulated objects.
+
+    Returns:
+        Grouped physics configuration accepted by both tutorial backends.
+    """
+    rigid_values = (
+        linear_damping,
+        angular_damping,
+        max_depenetration_velocity,
+        enable_ccd,
+        min_position_iters,
+        min_velocity_iters,
+    )
+    collision_values = (contact_offset, rest_offset)
+    material_values = (static_friction, dynamic_friction, restitution)
+    return RigidBodyPhysicsCfg(
+        mass_props=MassPropertiesCfg(mass=mass) if mass is not None else None,
+        rigid_props=(
+            DefaultRigidBodyPropertiesCfg(
+                linear_damping=linear_damping,
+                angular_damping=angular_damping,
+                max_depenetration_velocity=max_depenetration_velocity,
+                enable_ccd=enable_ccd,
+                min_position_iters=min_position_iters,
+                min_velocity_iters=min_velocity_iters,
+            )
+            if any(value is not None for value in rigid_values)
+            else None
+        ),
+        collision_props=(
+            (
+                NewtonCollisionPropertiesCfg(
+                    contact_offset=contact_offset,
+                    rest_offset=rest_offset,
+                    condim=NEWTON_NATIVE_CONTACT_DIMENSION,
+                )
+                if newton_contact
+                else CollisionPropertiesCfg(
+                    contact_offset=contact_offset,
+                    rest_offset=rest_offset,
+                )
+            )
+            if newton_contact or any(value is not None for value in collision_values)
+            else None
+        ),
+        material_props=(
+            (
+                NewtonRigidBodyMaterialCfg(
+                    static_friction=static_friction,
+                    dynamic_friction=dynamic_friction,
+                    restitution=restitution,
+                    ke=NEWTON_GRASP_CONTACT_STIFFNESS,
+                    kd=NEWTON_GRASP_CONTACT_DAMPING,
+                    torsional_friction=NEWTON_GRASP_TORSIONAL_FRICTION,
+                    rolling_friction=NEWTON_GRASP_ROLLING_FRICTION,
+                )
+                if newton_contact
+                else RigidBodyMaterialCfg(
+                    static_friction=static_friction,
+                    dynamic_friction=dynamic_friction,
+                    restitution=restitution,
+                )
+            )
+            if newton_contact or any(value is not None for value in material_values)
+            else None
+        ),
     )
 
 
-def create_curobo_motion_generator(robot: Robot) -> MotionGenerator:
+def configure_newton_link_contacts(
+    sim: SimulationManager,
+    articulation_cfg: ArticulationCfg,
+    *,
+    group_name: str,
+    link_names_expr: list[str],
+) -> None:
+    """Apply the tutorial Newton contact material to selected articulation links."""
+    if not sim.is_newton_backend:
+        return
+
+    articulation_cfg.link_attrs = {
+        **(articulation_cfg.link_attrs or {}),
+        group_name: LinkPhysicsOverrideCfg(
+            link_names_expr=link_names_expr,
+            attrs=RigidBodyPhysicsCfg(
+                collision_props=NewtonCollisionPropertiesCfg(
+                    condim=NEWTON_NATIVE_CONTACT_DIMENSION,
+                ),
+                material_props=NewtonRigidBodyMaterialCfg(
+                    ke=NEWTON_GRASP_CONTACT_STIFFNESS,
+                    kd=NEWTON_GRASP_CONTACT_DAMPING,
+                    torsional_friction=NEWTON_GRASP_TORSIONAL_FRICTION,
+                    rolling_friction=NEWTON_GRASP_ROLLING_FRICTION,
+                ),
+            ),
+        ),
+    }
+
+
+def configure_newton_gripper_contacts(
+    sim: SimulationManager,
+    robot_cfg: RobotCfg,
+) -> None:
+    """Configure Newton gripper contacts and recompute their source inertia."""
+    if not sim.is_newton_backend:
+        return
+
+    configure_newton_link_contacts(
+        sim,
+        robot_cfg,
+        group_name="newton_gripper_contacts",
+        link_names_expr=[_GRIPPER_CONTACT_LINK_PATTERN],
+    )
+    robot_cfg.link_attrs["newton_gripper_contacts"].attrs.mass_props = (
+        MassPropertiesCfg(recompute_inertia=True)
+    )
+
+
+def create_trapezoidal_motion_generator(
+    robot: Robot,
+    planner: TutorialPlanner = "trapezoidal",
+) -> MotionGenerator:
+    """Create a tutorial motion generator, defaulting to trapezoidal timing.
+
+    Args:
+        robot: Robot whose trajectories will be planned.
+        planner: Planner backend to construct.
+
+    Returns:
+        The configured motion generator.
+    """
+    return create_tutorial_motion_generator(robot, planner)
+
+
+def create_curobo_motion_generator(
+    robot: Robot,
+    planner: TutorialPlanner = "curobo",
+    *,
+    use_cuda_graph: bool = True,
+) -> MotionGenerator:
     """Create a cuRobo-backed motion generator for a tutorial robot.
 
     Args:
         robot: Robot whose trajectories will be planned.
+        planner: Planner backend to construct. The default preserves the
+            historical cuRobo helper behavior.
+        use_cuda_graph: Whether cuRobo may capture CUDA graphs. Disable this
+            when the tutorial uses Newton physics, which owns CUDA graph
+            capture on the same device.
 
     Returns:
-        The configured motion generator with an empty external collision world.
+        The configured motion generator.
     """
+    if planner != "curobo":
+        return create_tutorial_motion_generator(robot, planner)
     return MotionGenerator(
-        cfg=MotionGenCfg(planner_cfg=CuroboPlannerCfg(robot_uid=robot.uid))
+        cfg=MotionGenCfg(
+            planner_cfg=CuroboPlannerCfg(
+                robot_uid=robot.uid,
+                use_cuda_graph=use_cuda_graph,
+            )
+        )
     )
 
 
@@ -637,7 +978,9 @@ def replay_trajectory(
         hold_steps: Number of final-pose simulation updates after the trajectory.
         trajectory_sim_steps: Optional fixed physics steps per waypoint. When
             omitted for a ``TimedTrajectory``, its arrival intervals determine
-            the synchronized physics-step count. Legacy tensors default to four.
+            the synchronized physics-step count. Native Newton replays add one
+            short contact-settling hold after each hand transition. Legacy
+            tensors otherwise default to four.
         hold_sim_steps: Physics steps for each final-pose update.
         joint_ids: Optional joint IDs when controlling a robot subset.
         on_trajectory_step: Optional callback run after each trajectory update.
@@ -652,6 +995,12 @@ def replay_trajectory(
         raise ValueError("trajectory positions must have shape (B, N, D).")
     if positions.shape[1] == 0:
         raise ValueError("trajectory must contain at least one waypoint.")
+
+    native_contact_settle_steps = _newton_native_contact_settle_steps(
+        sim,
+        robot,
+        positions,
+    )
 
     recording_started = (
         start_auto_play_recording(
@@ -689,6 +1038,14 @@ def replay_trajectory(
                         else math.ceil(step_ratio)
                     ),
                 )
+            if step_idx in native_contact_settle_steps:
+                settle_steps = math.ceil(
+                    NEWTON_NATIVE_CONTACT_SETTLE_DURATION
+                    / float(sim.sim_config.physics_dt)
+                )
+                waypoint_sim_steps = (
+                    4 if waypoint_sim_steps is None else waypoint_sim_steps
+                ) + max(1, settle_steps)
             sim.update(step=4 if waypoint_sim_steps is None else waypoint_sim_steps)
             if on_trajectory_step is not None:
                 on_trajectory_step(step_idx, total_steps)
@@ -704,6 +1061,72 @@ def replay_trajectory(
             time.sleep(1e-2)
     finally:
         stop_auto_play_recording(sim, recording_started)
+
+
+def _newton_native_contact_settle_steps(
+    sim: SimulationManager,
+    robot: Robot,
+    positions: torch.Tensor,
+) -> frozenset[int]:
+    """Return endpoints for contiguous native-MuJoCo hand-motion intervals.
+
+    MuJoCo-Warp creates contacts internally, rather than retaining the
+    external Newton pipeline's contact set. Each hand transition needs a brief
+    integration hold before subsequent object motion. This also covers the
+    receiving-hand close in the HandOver tutorial. Detect every contiguous
+    hand-motion interval generically from tutorial control parts so arm-only
+    trajectories retain their authored timing.
+    """
+    if getattr(sim, "is_newton_backend", False) is not True:
+        return frozenset()
+    control_parts = getattr(robot, "control_parts", None)
+    if not isinstance(control_parts, Mapping):
+        return frozenset()
+
+    hand_joint_ids: set[int] = set()
+    for part_name in control_parts:
+        if "hand" not in part_name.lower() and "gripper" not in part_name.lower():
+            continue
+        joint_ids = robot.get_joint_ids(name=part_name)
+        hand_joint_ids.update(
+            joint_id
+            for joint_id in joint_ids
+            if isinstance(joint_id, int) and 0 <= joint_id < positions.shape[2]
+        )
+    if not hand_joint_ids:
+        return frozenset()
+
+    hand_positions = positions[:, :, sorted(hand_joint_ids)]
+    changed_from_previous = ~torch.isclose(
+        hand_positions[:, 1:, :],
+        hand_positions[:, :-1, :],
+        rtol=0.0,
+        atol=1.0e-6,
+    )
+    changed_intervals = torch.nonzero(
+        changed_from_previous.any(dim=2).any(dim=0),
+        as_tuple=False,
+    ).flatten()
+    if changed_intervals.numel() == 0:
+        return frozenset()
+
+    # A changed interval i is the command transition from waypoint i to i + 1.
+    # Hold at each contiguous interval's endpoint, where its hand has reached
+    # the requested qpos. Separate hand phases arise in multi-arm handovers.
+    settle_steps: set[int] = set()
+    previous_interval: int | None = None
+    for interval_value in changed_intervals.tolist():
+        interval = int(interval_value)
+        if previous_interval is not None and interval != previous_interval + 1:
+            settle_step = previous_interval + 1
+            if settle_step < positions.shape[1]:
+                settle_steps.add(settle_step)
+        previous_interval = interval
+    if previous_interval is not None:
+        settle_step = previous_interval + 1
+        if settle_step < positions.shape[1]:
+            settle_steps.add(settle_step)
+    return frozenset(settle_steps)
 
 
 def make_clear_dynamics_callback(
@@ -918,7 +1341,7 @@ def create_ur5_gripper_robot_cfg(
             "control_parts": {
                 "hand": [GRIPPER_HAND_JOINT_PATTERN],
             },
-            "drive_pros": {
+            "joint_drive_props": {
                 "stiffness": {
                     "arm": 5e4,
                     GRIPPER_HAND_JOINT_PATTERN: 1e3,
@@ -986,7 +1409,7 @@ def create_franka_panda_robot_cfg(
             ],
         },
         "control_parts": {"hand": [GRIPPER_HAND_JOINT_PATTERN]},
-        "drive_pros": {
+        "joint_drive_props": {
             "stiffness": {GRIPPER_HAND_JOINT_PATTERN: 1e3},
             "damping": {GRIPPER_HAND_JOINT_PATTERN: 1e2},
             "max_effort": {GRIPPER_HAND_JOINT_PATTERN: 1e4},
@@ -1004,9 +1427,9 @@ def create_franka_panda_robot_cfg(
     if init_qpos is None:
         cfg.init_qpos[-2:] = [0.0, 0.0]
     for drive_values in (
-        cfg.drive_pros.stiffness,
-        cfg.drive_pros.damping,
-        cfg.drive_pros.max_effort,
+        cfg.joint_drive_props.stiffness,
+        cfg.joint_drive_props.damping,
+        cfg.joint_drive_props.max_effort,
     ):
         drive_values.pop("fr3_finger_joint[1-2]", None)
     return cfg
@@ -1057,7 +1480,7 @@ def create_ur10_robotiq_robot_cfg(
             "control_parts": {
                 "hand": [ROBOTIQ_HAND_JOINT_PATTERN],
             },
-            "drive_pros": {
+            "joint_drive_props": {
                 "stiffness": {ROBOTIQ_HAND_JOINT_PATTERN: 1e3},
                 "damping": {ROBOTIQ_HAND_JOINT_PATTERN: 1e2},
                 "max_effort": {ROBOTIQ_HAND_JOINT_PATTERN: 1e3},
@@ -1122,27 +1545,40 @@ __all__ = [
     "DEFAULT_AXIS_LEN",
     "DEFAULT_AXIS_SIZE",
     "DEFAULT_GRIPPER_CLOSE_QPOS",
-    "DEFAULT_TUTORIAL_LIGHT_POS",
+    "DEFAULT_TUTORIAL_SUN_DIRECTION",
+    "DEFAULT_TUTORIAL_SUN_INTENSITY",
     "GRIPPER_HAND_JOINT_PATTERN",
     "GRIPPER_URDF_PATH",
     "ROBOTIQ_2F_140_TCP",
     "ROBOTIQ_2F_140_URDF_PATH",
     "ROBOTIQ_HAND_JOINT_PATTERN",
+    "NEWTON_GRASP_CONTACT_DAMPING",
+    "NEWTON_GRASP_CONTACT_STIFFNESS",
+    "NEWTON_GRASP_ROLLING_FRICTION",
+    "NEWTON_GRASP_TORSIONAL_FRICTION",
+    "NEWTON_NATIVE_CONTACT_DIMENSION",
+    "NEWTON_NATIVE_CONTACT_SETTLE_DURATION",
     "TOP_DOWN_EEF_ROTATION",
     "TutorialCliFeature",
+    "TutorialPlanner",
     "TutorialRobot",
+    "TUTORIAL_PLANNERS",
     "TUTORIAL_ROBOTS",
     "add_tutorial_robot",
     "add_ur5_gripper_robot",
     "broadcast_pose_batch",
     "broadcast_waypoint_pose_batch",
     "clone_local_pose_from_first_env",
+    "configure_newton_gripper_contacts",
+    "configure_newton_link_contacts",
     "create_antipodal_semantics",
     "create_parallel_jaw_grasp_pose_generator",
     "create_curobo_motion_generator",
     "create_franka_panda_robot_cfg",
+    "create_trapezoidal_motion_generator",
     "create_toppra_motion_generator",
     "create_tutorial_argument_parser",
+    "create_tutorial_motion_generator",
     "create_tutorial_robot_cfg",
     "create_tutorial_simulation",
     "create_ur10_robotiq_robot_cfg",

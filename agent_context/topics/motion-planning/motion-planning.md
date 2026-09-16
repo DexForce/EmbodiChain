@@ -32,13 +32,30 @@ Actions consume these motion capabilities from `sim/atomic_actions/`.
 Focused tests and examples live under `tests/sim/motion/` and
 `examples/sim/motion/`.
 
+The cuRobo adapter imports its optional backend through `_require_curobo()`.
+That boundary preserves the caller's Torch matmul precision and CUDA/cuDNN
+TF32 flags on success or failure; cuRobo import side effects must not change
+the numerical policy of other planners or FK/IK solvers.
+
 The planning stack has two layers:
 1. **BasePlanner** — low-level trajectory planner that takes a list of `PlanState` waypoints and produces a `PlanResult` with joint trajectories.
 2. **MotionGenerator** — the single stateful planning facade that composes a
    planner with strategy selection, interpolation, IK resolution, result
    normalization, and multi-part coordination.
 
-All planners resolve their robot at init via `SimulationManager.get_instance().get_robot(cfg.robot_uid)`.
+`MotionGenOptions.strategy` selects the timing owner: `motion_gen` always
+invokes the configured backend; `ik_interp` uses explicit start/count/dt and
+rejects backend options and derivative limits. Both Cartesian preparation
+routes share sequential seeded IK. Required IK failures propagate per row;
+waypoints are never discarded to salvage a successful path. Fixed Cartesian
+sample preservation currently requires `ik_interp`; an unsupported backend
+target or `motion_gen` plus preservation raises rather than changing strategy.
+
+All planners resolve their robot at init via `SimulationManager.get_instance(cfg.sim_instance_id).get_robot(cfg.robot_uid)`.
+`BasePlannerCfg.sim_instance_id` defaults to `0`. Environment-owned planner
+factories supply their manager's ID, copying supplied configurations before
+overriding it. A missing manager or robot is an error; lookup does not fall
+back to another manager with the same robot UID.
 
 The entire stack is **env-batched** (`B = num_envs`). `PlanState` / `PlanResult` tensors carry a leading `B` dimension; `BasePlanner.plan()` and `MotionGenerator.generate()` operate on `B` environments in one call.
 
@@ -69,7 +86,8 @@ Focused augmentation tests live under `tests/sim/motion/expansion/`.
 ## Choose the owning layer
 
 - `BasePlanner` and `PlanState` / `PlanResult` define planning interfaces.
-- `ToppraPlanner` owns time parameterization; `CuroboPlanner` owns collision-aware planning.
+- `ToppraPlanner` and `TrapezoidalPlanner` own joint-path time parameterization;
+  `CuroboPlanner` owns collision-aware planning.
 - `MotionGenerator` composes motion commands and trajectory helpers; `NeuralPlanner` is experimental.
 - [Planner details](planner-details.md) cover process/memory behavior, registration and validation.
 - [Collision worlds](collision-worlds.md) cover snapshots, pose updates, provenance and cache boundaries.
@@ -77,12 +95,22 @@ Focused augmentation tests live under `tests/sim/motion/expansion/`.
 ### NeuralPlanner / NMG
 
 `NeuralPlanner` rolls out a standalone NMG ONNX policy whose graph includes
-raw-observation normalization. Install the `nmg` optional dependency, set
+raw-observation normalization. Install the `policy-deploy` optional dependency
+(`onnxruntime-gpu`, shared with DexSim Motion Policy Kit consumers), set
 `NeuralPlannerCfg.onnx_model_path`, and invoke it through `MotionGenerator`
 with `NeuralPlanOptions`. `EEF_MOVE` inputs use batched `(B, 4, 4)` poses;
-dynamic-batch exports roll out all environments together. When the runtime
-robot base or TCP differs from training, configure
+dynamic-batch exports roll out all environments together. The default policy
+capacity is five waypoint slots, matching the official K=1–5 NMG export and
+benchmark adapter; set `num_waypoints` explicitly for another exported layout.
+Current exports identify the `unified_constraint_tokens` observation layout and
+its concrete fingerprint in ONNX metadata. `NeuralPlanner` validates that
+metadata and rejects exports without the complete contract.
+When the runtime robot base or TCP differs from training, configure
 `policy_frame_from_world` and `runtime_tcp_from_policy_tcp` explicitly.
+NeuralPlanner target and FK quaternions remain EmbodiChain `xyzw` throughout
+the observation and convergence paths; `quat_from_matrix()` must not be
+re-converted. External `wxyz` conversion is limited to the adapter that owns
+that external contract.
 
 ## Planner Interface
 
@@ -128,6 +156,10 @@ preserves each row's duration, and recomputes velocities; acceleration samples
 are invalidated. Unchanged planner samples retain native derivatives. cuRobo
 maps native velocities/accelerations into simulator joint order and zero-pads
 short/failed rows, deriving only missing velocity segments.
+When normalization changes a backend output grid, a backend that supports joint
+trajectory validation rechecks the final samples using the resolved control
+part and dynamic obstacle poses. Invalid samples fail the corresponding row;
+this is a sampled collision check, not continuous or derivative certification.
 Planners that own sparse joint-waypoint timing declare
 `uses_sparse_joint_waypoints=True`; `MotionGenerator` then prepends
 `start_qpos` without generic pre-interpolation. Backends that also declare
@@ -164,7 +196,7 @@ failed rows and their reports remain intact unless resampling changes them.
 ## Common Failure Modes
 
 - **`robot_uid` is MISSING** — `BasePlannerCfg.robot_uid` defaults to `MISSING`. Forgetting to set it raises `ValueError` at planner init.
-- **Robot not found** — planner init calls `SimulationManager.get_instance().get_robot(uid)`. If the robot hasn't been added to the sim yet, this returns `None` and raises `ValueError`.
+- **Robot not found** — planner init calls `SimulationManager.get_instance(cfg.sim_instance_id).get_robot(uid)`. If the robot hasn't been added to the sim yet, this returns `None` and raises `ValueError`.
 - **toppra not installed** — `ToppraPlanner` import fails with `ImportError` at module load time if `toppra==0.6.3` is not installed.
 - **Batch dim mismatch** — `@validate_plan_options` raises `ValueError` if `PlanState` entries have inconsistent `B` or if `B` does not equal `robot.num_instances`.
 - **Single-env caller shape mismatch** — legacy callers passing `(DOF,)` qpos or `(4,4)` xpos must wrap with `PlanState.single(...)` or call `from_qpos`/`from_xpos` with a leading `B=1` dim.
@@ -198,7 +230,8 @@ retains compatibility aliases; compute does not import simulation modules.
 
 `embodichain.compute.trajectory` owns pure interpolation, path resampling,
 time-domain differentiation/resampling, and keyframe-based warping. `interpolate_with_distance` retains keyframes;
-`resample_with_distance` treats interior points as optional path samples.
+`resample_with_distance` treats interior points as optional path samples and
+falls back to pure Torch when the Warp runtime cannot launch.
 MotionGenerator and atomic trajectory helpers import the compute API directly.
 `lab.sim.utility.action_utils` retains solver-dependent pose/IK adaptation and
 re-exports pure functions for compatibility. Warp implementations live in

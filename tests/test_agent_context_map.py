@@ -69,6 +69,7 @@ def test_map_registers_the_supported_context_domains() -> None:
         "data-assets",
         "data-pipeline",
         "robot-workspace",
+        "differentiable-env",
     }
 
     assert set(topics) == expected_topic_ids
@@ -81,6 +82,7 @@ def test_new_topics_cover_their_owning_packages() -> None:
         "data-assets": "embodichain/data/",
         "data-pipeline": "embodichain/data_pipeline/",
         "robot-workspace": "embodichain/lab/sim/motion/workspace/",
+        "differentiable-env": "embodichain/lab/gym/envs/differentiable_env.py",
     }
 
     for topic_id, prefix in expected_source_prefixes.items():
@@ -108,6 +110,8 @@ def test_representative_queries_route_against_the_repository_map() -> None:
         "OnlineDataEngine 采样失败后怎么处理？": ["data-pipeline"],
         "SimReady pipeline 的入口在哪里？": ["gen-sim"],
         "get_data_path 如何解析资产路径？": ["data-assets"],
+        "Newton physics backend config 在哪里？": ["simulation-system"],
+        "可微环境 APG 如何重置？": ["differentiable-env"],
     }
 
     assert {

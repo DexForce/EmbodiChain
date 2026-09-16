@@ -58,6 +58,7 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
+    resample_planned_trajectory,
     require_shared_task_state_key,
 )
 from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
@@ -512,7 +513,9 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
-        return result.success, result.positions
+        return result.success, resample_planned_trajectory(
+            result.positions, sample_count
+        )
 
     def _axis_alignment_eef_keyframes(
         self,

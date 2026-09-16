@@ -16,13 +16,42 @@
 
 from __future__ import annotations
 
+import argparse
 import time
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(description="Run the batch robot simulation.")
+    add_sim_args_to_parser(parser)
+    parser.add_argument(
+        "--sensor_type",
+        type=str,
+        default="camera",
+        choices=["stereo", "camera"],
+        help="Type of camera sensor to use.",
+    )
+
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
 import numpy as np
 import matplotlib.pyplot as plt
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import (
+    RenderCfg,
+    physics_cfg_for_backend,
+    RigidObjectCfg,
+    LightCfg,
+)
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.sim.cfg import RenderCfg, RigidObjectCfg, LightCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.objects import RigidObject, Light
 from embodichain.lab.sim.sensors import (
@@ -31,17 +60,17 @@ from embodichain.lab.sim.sensors import (
     CameraCfg,
     StereoCameraCfg,
 )
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.data import get_data_path
 
 
 def main(args):
     config = SimulationManagerCfg(
         headless=True,
-        sim_device=args.device,
+        device=args.device,
         num_envs=args.num_envs,
         arena_space=2,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(config)
@@ -54,8 +83,7 @@ def main(args):
         )
     )
 
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
+    sim.prepare()
 
     if not args.headless:
         sim.open_window()
@@ -117,19 +145,12 @@ def main(args):
     else:
         plt.show()
 
+    sim.destroy()
+
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Run the batch robot simulation.")
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument(
-        "--sensor_type",
-        type=str,
-        default="camera",
-        choices=["stereo", "camera"],
-        help="Type of camera sensor to use.",
-    )
-
-    args = parser.parse_args()
+    parser = build_parser()
+    args = _cli_args
     main(args)

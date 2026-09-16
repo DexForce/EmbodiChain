@@ -21,6 +21,7 @@ through :func:`~embodichain.lab.gym.utils.registration.make`.
    .. autosummary::
 
       demo
+      differentiable_env
       expert_trajectory
       task_program
       managers
@@ -56,6 +57,22 @@ Environment Classes
 .. autoclass:: EmbodiedEnvCfg
     :members:
     :exclude-members: __init__, class_type
+
+Differentiable Environment
+--------------------------
+
+``DifferentiableEnv`` keeps the standard environment lifecycle while bridging
+task-defined Newton kinematics into PyTorch autograd for analytic
+policy-gradient tasks. Subclasses provide action, kinematics, and output
+kernels; the base class owns tape-aware stepping and deferred resets without
+advancing the Newton solver.
+
+.. currentmodule:: embodichain.lab.gym.envs.differentiable_env
+
+.. autoclass:: DifferentiableEnv
+    :members:
+    :inherited-members:
+    :show-inheritance:
 
 Expert Trajectories
 -------------------

@@ -101,7 +101,7 @@ The browser scene currently includes:
 - `RigidObject`, including multi-segment render meshes;
 - each constituent object in a `RigidObjectGroup`;
 - every visible link of `Robot` and `Articulation`;
-- dynamic `SoftObject` and `ClothObject` geometry;
+- dynamic `VolumeDeformableObject` and `SurfaceDeformableObject` geometry;
 - camera frustums and low-frequency RGB previews, including the primary (left)
   RGB view of stereo sensors;
 - read-only Gizmo frames, or interactive transform controls when commands are
@@ -179,7 +179,7 @@ sampled independently from rigid-body poses:
 
 - **Cloth** uses the physical cloth vertices and a welded mapping of the source
   render triangles. Its browser topology matches the simulated surface.
-- **Soft bodies** expose live PhysX collision vertices through DexSim, but
+- **Soft bodies** expose live DexSim collision vertices, but
   DexSim does not expose the collision triangle connectivity. EmbodiChain
   therefore visualizes a stable convex-hull surface over those vertices. The
   preview follows deformation but omits concave render-mesh details.
@@ -316,7 +316,7 @@ Viser port behind an authenticated gateway.
 
 - {doc}`sim_manager`
 - {doc}`sim_assets`
-- {doc}`sim_sensor`
+- {doc}`sensors/index`
 - {doc}`/features/interaction/gizmo`
 - {doc}`/guides/preview_asset`
 - {doc}`/tutorial/create_scene`

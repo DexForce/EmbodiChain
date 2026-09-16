@@ -274,7 +274,7 @@ def test_atomic_suite_is_franka_pgi_and_curobo_only():
         "rotation_deg": [0.0, 0.0, 90.0],
         "init_qpos": [0.0],
         "drive": {"drive_type": "none"},
-        "attrs": {"static_friction": 1.0, "dynamic_friction": 1.0},
+        "attrs": {"material_props": {"static_friction": 1.0, "dynamic_friction": 1.0}},
         "fix_base": True,
         "settle_steps": 10,
         "reset_settle_steps": 0,
@@ -324,6 +324,16 @@ def test_randomized_atomic_suite_covers_six_skills_with_fixed_seed_sweep():
         any(str(key).endswith(("_jitter_m", "_jitter_rad")) for key in item)
         for item in track.config["skills"]
     )
+    assert track.config["articulations"][0]["id"] == "microwave"
+    press = next(item for item in track.config["skills"] if item["id"] == "press")
+    assert {
+        key: press[key] for key in ("articulation", "target_link", "target_joint")
+    } == {
+        "articulation": "microwave",
+        "target_link": "button_cap",
+        "target_joint": "start_button_press",
+    }
+    assert press["articulation_position_jitter_m"] == [0.03, 0.03, 0.015]
 
 
 def test_seeded_jitter_is_reproducible_bounded_and_stream_separated():
@@ -424,6 +434,24 @@ def test_atomic_skill_and_object_extensions_are_registry_driven():
     assert atomic_object_kind_names() == ("cube", "mesh")
     with pytest.raises(ValueError, match="Unknown atomic object kind"):
         create_atomic_object(Mock(), {"id": "new_object", "kind": "not_registered"})
+
+
+def test_atomic_cube_uses_current_rigid_object_physics_api():
+    simulation = Mock()
+    simulation.device = torch.device("cpu")
+    simulation.num_envs = 1
+    entity = Mock()
+    simulation.add_rigid_object.return_value = entity
+
+    handle = create_atomic_object(
+        simulation,
+        {"id": "cube", "kind": "cube", "size": [0.05, 0.05, 0.05]},
+        initialize=False,
+    )
+
+    cfg = simulation.add_rigid_object.call_args.kwargs["cfg"]
+    assert handle.entity is entity
+    assert cfg.asset_physics_mode == "overlay"
 
 
 @pytest.mark.parametrize(

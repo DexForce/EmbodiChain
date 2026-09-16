@@ -90,7 +90,11 @@ class MotionGenOptions:
     """Optional scalar joint acceleration limit used by compatible backends."""
 
     start_qpos: torch.Tensor | None = None
-    """Optional starting joint configuration for the trajectory, shape (B, DOF). If provided, the planner will ensure that the trajectory starts from this configuration. If not provided, the planner will use the current joint configuration of the robot as the starting point."""
+    """Observed controlled-joint start, shape ``(B, DOF)``.
+
+    Required for ``ik_interp``. Backend pre-interpolation reads the current
+    robot state when omitted; native backend requests use backend defaults.
+    """
 
     control_part: str | None = None
     """Name of the robot part to control, e.g. 'left_arm'. Must correspond to a valid control part defined in the robot's configuration."""
@@ -118,23 +122,49 @@ class MotionGenOptions:
     Can be an integer (same for all segments) or a list of integers with len(PlanState) specifying the number of points for each segment."""
 
     is_linear: bool = False
-    """If True, use cartesian linear interpolation, else joint space"""
+    """Request Cartesian pre-interpolation for joint-only backends.
+
+    With ``ik_interp``, requires explicit ``preserve_cartesian_samples``;
+    sparse endpoint IK followed by joint interpolation is not a Cartesian line.
+    """
 
     preserve_cartesian_samples: bool = False
-    """Treat Cartesian targets as exact output samples and solve each with IK.
+    """Treat Cartesian targets as exact output samples in ``ik_interp`` only.
 
     This constrained mode requires exactly ``sample_count - 1`` target states;
     the observed start configuration supplies the first output sample.
     """
 
     interpolate_position_step: float = 0.002
-    """Step size for interpolation. If is_linear is True, this is the step size in Cartesian space (meters). If is_linear is False, this is the step size in joint space (radians)."""
+    """Position step in meters for Cartesian pre-interpolation."""
 
     interpolate_angle_step: float = np.pi / 90
-    """Angular step size for interpolation in joint space (radians). Only used if is_linear is False."""
+    """Orientation step in radians for Cartesian pre-interpolation."""
 
     def __post_init__(self) -> None:
         """Validate backend-neutral motion generation options."""
+        if self.preserve_cartesian_samples and self.strategy != "ik_interp":
+            raise ValueError(
+                "preserve_cartesian_samples requires strategy='ik_interp'; "
+                "planner backends do not guarantee exact Cartesian samples."
+            )
+        if self.strategy == "ik_interp" and any(
+            value is not None
+            for value in (self.plan_opts, self.velocity_limit, self.acceleration_limit)
+        ):
+            raise ValueError(
+                "strategy='ik_interp' does not consume plan_opts, velocity_limit, "
+                "or acceleration_limit; use strategy='motion_gen' for backend limits."
+            )
+        if (
+            self.strategy == "ik_interp"
+            and self.is_linear
+            and not self.preserve_cartesian_samples
+        ):
+            raise ValueError(
+                "is_linear with ik_interp requires preserve_cartesian_samples=True "
+                "and explicit Cartesian path samples."
+            )
         valid_strategies = {"motion_gen", "ik_interp"}
         if self.strategy not in valid_strategies:
             raise ValueError(
@@ -486,8 +516,12 @@ class MotionGenerator:
 
         ``options.strategy`` selects either the configured planner backend
         (``"motion_gen"``) or deterministic waypoint IK followed by joint-space
-        interpolation (``"ik_interp"``). Joint targets fall back to interpolation
-        when the configured backend cannot consume :class:`MoveType.JOINT_MOVE`.
+        interpolation (``"ik_interp"``). Unsupported backend target types raise
+        rather than silently switching to interpolation.
+        Joint-only planners that own sparse waypoints may retain every converted
+        waypoint when quantity sampling is requested. For automatically resolved
+        trapezoidal options, the requested count is then treated as a lower bound;
+        an explicitly supplied planner option remains authoritative.
 
         Args:
             target_states: Batched planner waypoints.
@@ -503,11 +537,8 @@ class MotionGenerator:
         if not target_states:
             raise ValueError("target_states must contain at least one waypoint.")
         options = MotionGenOptions() if options is None else deepcopy(options)
-        if options.strategy not in {"motion_gen", "ik_interp"}:
-            raise ValueError(
-                "strategy must be 'motion_gen' or 'ik_interp', "
-                f"got {options.strategy!r}."
-            )
+        # Options are mutable config objects; revalidate at the call boundary.
+        options.__post_init__()
 
         move_types = {state.move_type for state in target_states}
         heterogeneous = len(move_types) > 1
@@ -521,16 +552,7 @@ class MotionGenerator:
             raise ValueError(
                 "strategy='ik_interp' does not support heterogeneous waypoints."
             )
-        move_type = target_states[0].move_type
-        use_interpolation = not heterogeneous and (
-            options.preserve_cartesian_samples
-            or options.strategy == "ik_interp"
-            or (
-                move_type is MoveType.JOINT_MOVE
-                and not self.planner.supports_move_type(MoveType.JOINT_MOVE)
-            )
-        )
-        if use_interpolation:
+        if options.strategy == "ik_interp":
             raw_result = self._generate_ik_interpolation(target_states, options)
         else:
             raw_result = self._generate_with_planner(target_states, options)
@@ -546,8 +568,8 @@ class MotionGenerator:
         move_type = target_states[0].move_type
         uses_sparse_joint_waypoints = (
             len(move_types) == 1
-            and move_type == MoveType.JOINT_MOVE
-            and self.planner.uses_sparse_joint_waypoints
+            and move_type is MoveType.JOINT_MOVE
+            and getattr(self.planner, "uses_sparse_joint_waypoints", False) is True
         )
         should_preinterpolate = (
             len(move_types) == 1
@@ -557,6 +579,7 @@ class MotionGenerator:
             and self.planner.supports_move_type(MoveType.JOINT_MOVE)
         )
 
+        preparation_success = None
         if should_preinterpolate:
             if move_type == MoveType.EEF_MOVE:
                 if any(state.xpos is None for state in target_states):
@@ -577,6 +600,8 @@ class MotionGenerator:
                     f"Unsupported move type for pre-interpolation: {move_type}"
                 )
 
+            if options.start_qpos is None:
+                options.start_qpos = self.robot.get_qpos(name=options.control_part)
             if options.start_qpos is not None:
                 start = options.start_qpos
                 if start.dim() == 1:
@@ -591,7 +616,7 @@ class MotionGenerator:
                         start_xpos = start_xpos.unsqueeze(1)
                     xpos_list = torch.cat([start_xpos, xpos_list], dim=1)
 
-            qpos_interpolated, _ = self.interpolate_trajectory(
+            qpos_interpolated, _, preparation_success = self._interpolate_waypoints(
                 control_part=options.control_part,
                 xpos_list=xpos_list,
                 qpos_list=qpos_list,
@@ -646,21 +671,91 @@ class MotionGenerator:
                 ValueError,
             )
 
+        explicit_plan_options = options.plan_opts is not None
         plan_opts = self.resolve_plan_options(
             options.plan_opts,
             sample_count=options.sample_count,
             velocity_limit=options.velocity_limit,
             acceleration_limit=options.acceleration_limit,
         )
+        if (
+            should_preinterpolate
+            and not explicit_plan_options
+            and isinstance(plan_opts, TrapezoidalPlanOptions)
+            and plan_opts.sample_method is TrajectorySampleMethod.QUANTITY
+            and int(plan_opts.sample_interval) < len(target_plan_states)
+        ):
+            # Trapezoidal quantity sampling retains every supplied waypoint.
+            # Cartesian targets may have been converted to a denser IK path.
+            # For backend-neutral defaults, make the requested count a safe
+            # lower bound instead of rejecting an otherwise valid path. An
+            # explicit TrapezoidalPlanOptions remains caller-authoritative.
+            plan_opts.sample_interval = len(target_plan_states)
         plan_opts = self.planner.with_motion_context(
             plan_opts,
             start_qpos=options.start_qpos,
             control_part=options.control_part,
         )
-        return self.planner.plan(
+        options.plan_opts = plan_opts
+        result = self.planner.plan(
             target_states=target_plan_states,
             options=plan_opts,
         )
+        if preparation_success is not None:
+            result.success = (
+                normalize_success_mask(
+                    result.success,
+                    num_envs=preparation_success.shape[0],
+                    device=self._runtime_device(),
+                    name="Planner success",
+                )
+                & preparation_success
+            )
+        return result
+
+    def _solve_cartesian_waypoints(
+        self,
+        poses: torch.Tensor,
+        start_qpos: torch.Tensor,
+        control_part: str,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Solve required poses in order, retaining every row and IK failure."""
+        device = self._runtime_device()
+        start_qpos = start_qpos.to(device)
+        batch_size, controlled_dof = start_qpos.shape
+        if poses.ndim != 4 or poses.shape[0] != batch_size or poses.shape[2:] != (4, 4):
+            raise ValueError("Cartesian waypoints must have shape (B, N, 4, 4).")
+        success = torch.ones(batch_size, dtype=torch.bool, device=device)
+        qpos_seed = start_qpos
+        solved_waypoints = []
+        for index in range(poses.shape[1]):
+            step_success, qpos = self.robot.compute_ik(
+                pose=poses[:, index].to(device),
+                name=control_part,
+                joint_seed=qpos_seed,
+            )
+            step_success = normalize_success_mask(
+                step_success,
+                num_envs=batch_size,
+                device=device,
+                name=f"IK success for target state {index}",
+            )
+            qpos = torch.as_tensor(qpos, dtype=start_qpos.dtype, device=device)
+            if qpos.shape != (batch_size, controlled_dof):
+                raise ValueError(
+                    "IK qpos must have shape "
+                    f"({batch_size}, {controlled_dof}), got {tuple(qpos.shape)}."
+                )
+            step_success = step_success & torch.isfinite(qpos).all(dim=1)
+            qpos = torch.where(step_success[:, None], qpos, qpos_seed)
+            success &= step_success
+            solved_waypoints.append(qpos)
+            qpos_seed = qpos
+        positions = torch.stack(solved_waypoints, dim=1)
+        positions = torch.where(
+            success[:, None, None], positions, start_qpos[:, None, :]
+        )
+        return success, positions
 
     def _generate_ik_interpolation(
         self,
@@ -726,56 +821,18 @@ class MotionGenerator:
         if options.control_part is None:
             raise ValueError("EEF_MOVE IK interpolation requires control_part.")
 
-        success = torch.ones(batch_size, dtype=torch.bool, device=device)
-        qpos_seed = start_qpos
-        solved_waypoints: list[torch.Tensor] = []
-        for index, state in enumerate(target_states):
+        poses = []
+        for state in target_states:
             if state.xpos is None:
                 raise ValueError("EEF_MOVE target states require xpos tensors.")
             pose = state.xpos
             if pose.dim() == 2:
                 pose = pose.unsqueeze(0)
-            expected_shape = (batch_size, 4, 4)
-            if pose.shape != expected_shape:
-                raise ValueError(
-                    f"EEF_MOVE target xpos must have shape {expected_shape}, "
-                    f"got {tuple(pose.shape)}."
-                )
-            step_success, qpos = self.robot.compute_ik(
-                pose=pose.to(device),
-                name=options.control_part,
-                joint_seed=qpos_seed,
-            )
-            step_success = normalize_success_mask(
-                step_success,
-                num_envs=batch_size,
-                device=device,
-                name=f"IK success for target state {index}",
-            )
-            qpos = torch.as_tensor(
-                qpos,
-                dtype=start_qpos.dtype,
-                device=device,
-            )
-            if qpos.shape != (batch_size, controlled_dof):
-                raise ValueError(
-                    "IK qpos must have shape "
-                    f"({batch_size}, {controlled_dof}), got {tuple(qpos.shape)}."
-                )
-            if not step_success.all():
-                logger.log_warning(
-                    f"Failed to compute IK for target state {index} in some "
-                    "environments."
-                )
-            qpos = torch.where(step_success[:, None], qpos, qpos_seed)
-            success &= step_success
-            solved_waypoints.append(qpos)
-            qpos_seed = qpos
-
-        keyframes = torch.cat(
-            [start_qpos.unsqueeze(1), torch.stack(solved_waypoints, dim=1)],
-            dim=1,
+            poses.append(pose)
+        success, solved_waypoints = self._solve_cartesian_waypoints(
+            torch.stack(poses, dim=1), start_qpos, options.control_part
         )
+        keyframes = torch.cat([start_qpos.unsqueeze(1), solved_waypoints], dim=1)
         if options.preserve_cartesian_samples:
             if keyframes.shape[1] != options.sample_count:
                 raise ValueError(
@@ -791,8 +848,6 @@ class MotionGenerator:
                 interp_num=options.sample_count,
                 device=device,
             )
-        held = start_qpos.unsqueeze(1).expand_as(positions)
-        positions = torch.where(success[:, None, None], positions, held)
         dt = self._uniform_dt(
             batch_size=batch_size,
             waypoint_count=positions.shape[1],
@@ -891,7 +946,9 @@ class MotionGenerator:
         if dt.device != device or not torch.isfinite(dt).all() or (dt < 0).any():
             raise ValueError("MotionGenerator returned invalid time deltas.")
         resampled = False
-        preserve_samples = getattr(self.planner, "preserve_plan_samples", False) is True
+        preserve_samples = options.strategy == "motion_gen" and (
+            getattr(self.planner, "preserve_plan_samples", False) is True
+        )
         if (
             options.sample_count is not None
             and not preserve_samples
@@ -899,6 +956,22 @@ class MotionGenerator:
         ):
             positions, dt = resample_in_time(positions, dt, options.sample_count)
             resampled = True
+        if (
+            resampled
+            and options.strategy == "motion_gen"
+            and self.supports_joint_trajectory_validation
+        ):
+            control_part = (
+                getattr(options.plan_opts, "control_part", None) or options.control_part
+            )
+            validity = self.validate_joint_trajectory(
+                positions,
+                control_part=control_part,
+                obstacle_poses=getattr(
+                    options.plan_opts, "dynamic_obstacle_poses", None
+                ),
+            )
+            success = success & validity.all(dim=1)
 
         def normalize_derivative(
             value: torch.Tensor | None,
@@ -1223,7 +1296,31 @@ class MotionGenerator:
                   ``(B, M, DOF)``.
                 - feasible_pose_targets: Corresponding end-effector poses, shape
                   ``(B, M, 4, 4)``, or ``None`` if not applicable.
+
+        Raises:
+            ValueError: If any required Cartesian waypoint fails IK or FK
+                consistency. Use :meth:`generate` for per-environment failures.
         """
+        qpos, poses, success = self._interpolate_waypoints(
+            control_part=control_part,
+            xpos_list=xpos_list,
+            qpos_list=qpos_list,
+            options=options,
+        )
+        if not success.all():
+            raise ValueError(
+                "Cartesian interpolation failed for required IK waypoints."
+            )
+        return qpos, poses
+
+    def _interpolate_waypoints(
+        self,
+        control_part: str | None = None,
+        xpos_list: torch.Tensor | None = None,
+        qpos_list: torch.Tensor | None = None,
+        options: MotionGenOptions | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor]:
+        """Prepare backend waypoints without deleting failed Cartesian targets."""
         options = MotionGenOptions() if options is None else options
 
         # Normalize single-env inputs to batched form.
@@ -1260,6 +1357,7 @@ class MotionGenerator:
         if qpos_seed is None:
             # Fallback to current robot state as seed.
             qpos_seed = self.robot.get_qpos(name=control_part)  # (B, DOF)
+        qpos_seed = qpos_seed.to(self._runtime_device())
 
         # Generate trajectory
         if options.is_linear or qpos_list is None:
@@ -1290,65 +1388,31 @@ class MotionGenerator:
                     interpolated_point_allocations[i],
                 )  # (B, seg, 4, 4)
                 total_interpolated_poses.append(seg)
-            total_interpolated_poses = torch.cat(
-                total_interpolated_poses, dim=1
+            total_interpolated_poses = torch.cat(total_interpolated_poses, dim=1).to(
+                self._runtime_device()
             )  # (B, M, 4, 4)
 
-            qpos_seed_b = qpos_seed
-            if qpos_seed_b.dim() == 1:
-                qpos_seed_b = qpos_seed_b.unsqueeze(0).repeat(xpos_list.shape[0], 1)
-            joint_seed = qpos_seed_b.unsqueeze(1).repeat(
-                1, total_interpolated_poses.shape[1], 1
-            )  # (B, M, D)
-            success_batch, qpos_batch = self.robot.compute_batch_ik(
-                pose=total_interpolated_poses,
-                joint_seed=joint_seed,
-                name=control_part,
-            )  # (B, M), (B, M, D)
-
-            has_nan = torch.isnan(qpos_batch).any(dim=-1)
-            valid = success_batch.bool() & (~has_nan)  # (B, M)
-
-            # Vectorized FK feasibility check to keep only physically consistent IK outputs.
-            if valid.any():
-                fk_batch = self.robot.compute_batch_fk(
-                    qpos=qpos_batch,
-                    name=control_part,
-                    to_matrix=True,
-                )  # (B, M, 4, 4)
-                pos_err = torch.norm(
-                    fk_batch[:, :, :3, 3] - total_interpolated_poses[:, :, :3, 3],
-                    dim=-1,
-                )
-                rot_err = torch.norm(
-                    fk_batch[:, :, :3, :3] - total_interpolated_poses[:, :, :3, :3],
-                    dim=(-2, -1),
-                )
-                fk_valid = (pos_err < 0.02) & (rot_err < 0.2)
-                valid = valid & fk_valid
-
-            # Per-env filter: keep only valid rows; pad short envs by repeating last valid.
-            B, M, D = qpos_batch.shape
-            max_valid = int(valid.sum(dim=1).max().item())
-            max_valid = max(max_valid, 1)
-            interp_q = torch.zeros(
-                B, max_valid, D, device=self.device, dtype=torch.float32
+            if control_part is None:
+                raise ValueError("Cartesian interpolation requires control_part.")
+            success, qpos_batch = self._solve_cartesian_waypoints(
+                total_interpolated_poses, qpos_seed, control_part
             )
-            feasible = torch.zeros(
-                B, max_valid, 4, 4, device=self.device, dtype=torch.float32
+            # Keep the FK consistency guard, but never remove required poses.
+            fk_batch = self.robot.compute_batch_fk(
+                qpos=qpos_batch, name=control_part, to_matrix=True
             )
-            for b in range(B):
-                v = qpos_batch[b][valid[b]]
-                f = total_interpolated_poses[b][valid[b]]
-                if v.shape[0] == 0:
-                    v = qpos_batch[b : b + 1, 0]
-                    f = total_interpolated_poses[b : b + 1, 0]
-                interp_q[b, : v.shape[0]] = v
-                interp_q[b, v.shape[0] :] = v[-1]
-                feasible[b, : f.shape[0]] = f
-                feasible[b, f.shape[0] :] = f[-1]
-            interpolate_qpos_list = interp_q
-            feasible_pose_targets = feasible
+            pos_err = torch.linalg.vector_norm(
+                fk_batch[..., :3, 3] - total_interpolated_poses[..., :3, 3], dim=-1
+            )
+            rot_err = torch.linalg.vector_norm(
+                fk_batch[..., :3, :3] - total_interpolated_poses[..., :3, :3],
+                dim=(-2, -1),
+            )
+            success &= ((pos_err < 0.02) & (rot_err < 0.2)).all(dim=1)
+            interpolate_qpos_list = torch.where(
+                success[:, None, None], qpos_batch, qpos_seed[:, None, :]
+            )
+            feasible_pose_targets = total_interpolated_poses
         else:
             # Joint-space interpolation. qpos_list is (B, N, DOF).
             if isinstance(options.interpolate_nums, int):
@@ -1365,5 +1429,8 @@ class MotionGenerator:
                 qpos_list, interp_nums=interp_nums, device=self.device
             )  # (B, M, DOF)
             feasible_pose_targets = None
+            success = torch.ones(
+                qpos_list.shape[0], dtype=torch.bool, device=self._runtime_device()
+            )
 
-        return interpolate_qpos_list, feasible_pose_targets
+        return interpolate_qpos_list, feasible_pose_targets, success

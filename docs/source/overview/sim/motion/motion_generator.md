@@ -1,306 +1,210 @@
 # MotionGenerator
 
-`MotionGenerator` is the single stateful interface for robot trajectory
-planning. `MotionGenOptions.strategy` selects the configured planner backend
-(`"motion_gen"`) or deterministic waypoint IK/joint interpolation
-(`"ik_interp"`). TOPPRA, TrapezoidalPlanner, and NeuralPlanner retain their
-backend-specific behavior, while the optional cuRobo V2 backend performs
-collision-aware planning against an explicit cuRobo world.
+`MotionGenerator` turns batched joint or end-effector goals into timed
+trajectories. Choose a [planner backend](planners/index.rst), then select one
+of two strategies for each request:
 
-## Features
+| `MotionGenOptions.strategy` | Behavior | Required inputs |
+|---|---|---|
+| `"motion_gen"` (default) | Run the configured planner. | Targets and backend options; provide the start state explicitly in the examples below. |
+| `"ik_interp"` | Solve EEF waypoints sequentially with IK, or interpolate joint waypoints directly. | `start_qpos`, `sample_count`, and `interpolation_dt`. |
 
-* **Unified planning interface**: Supports interpolation-oriented planners and collision-aware cuRobo V2 planning through one `generate()` API.
-* **Explicit strategy**: Accepts only `"motion_gen"` or `"ik_interp"`; no
-  planner bypass is inferred from a missing backend-options object.
-* **Strict timed results**: A planner result with positions must include
-  per-waypoint `dt`; `duration` is derived from it. The generator validates that
-  contract, derives missing velocity targets, preserves native derivatives when
-  samples are unchanged, preserves total duration when resampling, and holds
-  failed rows at `start_qpos` with zero velocity.
-* **Flexible planner selection**: Supports TOPPRA, TrapezoidalPlanner,
-  NeuralPlanner (experimental), and the optional CuroboPlanner backend, which
-  plans on CUDA with either CPU or CUDA physics simulation.
-* **Automatic constraint handling**: Retrieves velocity and acceleration limits from the robot or uses user-specified/default values.
-* **Backend-aware target handling**: Generates discrete trajectories using joint or Cartesian interpolation where appropriate; cuRobo receives original Cartesian goals so it can perform collision-aware IK itself.
-* **Convenient sampling**: Supports various sampling strategies via `TrajectorySampleMethod`.
+The strategy selects who generates the timed trajectory. `motion_gen` can
+also interpolate a path and solve IK before planning; it still invokes the
+backend. Unsupported target types raise an error instead of switching strategy.
 
-## Backend target capabilities
+## Plan a trajectory
 
-Every `BasePlanner` subclass declares the target types it accepts directly
-through `supported_move_types` and exposes them through
-`supports_move_type(move_type)`. `MotionGenerator` uses this contract to:
+These examples assume `sim` already contains a `robot` with an `"arm"` control
+part and a configured IK solver. See the
+{doc}`simulation tutorial </tutorial/motion_gen>` for scene setup.
+`B` is the number of robot instances and `DOF` is the controlled joint count.
 
-* forward native EEF or joint targets unchanged;
-* convert EEF targets into joint waypoints only for joint-only backends when
-  `MotionGenOptions.is_interpolate=True`;
-* prepend `start_qpos` without generic interpolation for planners that own
-  sparse joint-waypoint timing;
-* fall back to deterministic joint interpolation when a backend cannot consume
-  a `JOINT_MOVE` target and explicit `start_qpos`/`sample_count`/
-  `interpolation_dt` are available;
-* reject unsupported target types before entering the backend.
-
-The built-in declarations are:
-
-* TOPPRA: `JOINT_MOVE`;
-* TrapezoidalPlanner: `JOINT_MOVE`, sparse joint waypoints, and preserved native
-  samples;
-* NeuralPlanner: `EEF_MOVE`;
-* cuRobo: `EEF_MOVE` and `JOINT_MOVE`.
-
-TrapezoidalPlanner declares both `uses_sparse_joint_waypoints=True` and
-`preserve_plan_samples=True`. A single joint goal can therefore be paired with
-`MotionGenOptions.start_qpos`; the generator supplies the start waypoint and
-returns the planner's native `positions`, `velocities`, `accelerations`, and
-`dt` without normalizing them to `MotionGenOptions.sample_count`. See the
-[TrapezoidalPlanner guide](planners/trapezoidal_planner.md).
-
-## Usage
-
-### Initialization
+### Initialize a backend
 
 ```python
-from embodichain.data import get_data_path
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import (
-    RobotCfg,
-    URDFCfg,
-    JointDrivePropertiesCfg,
+from embodichain.lab.sim.motion.motion_generator import (
+    MotionGenCfg,
+    MotionGenOptions,
+    MotionGenerator,
+)
+from embodichain.lab.sim.motion.planners import (
+    PlanState,
+    ToppraPlannerCfg,
+    ToppraPlanOptions,
+    TrajectorySampleMethod,
 )
 
-from embodichain.lab.sim.motion.motion_generator import MotionGenerator, MotionGenCfg
-from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
-from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanOptions
-from embodichain.lab.sim.objects.robot import Robot
-from embodichain.lab.sim.motion.solvers.pink_solver import PinkSolverCfg
-from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod, PlanState, MoveType
-from embodichain.lab.sim.motion.motion_generator import MotionGenOptions
-
-# Configure the simulation
-sim_cfg = SimulationManagerCfg(
-    width=1920,
-    height=1080,
-    physics_dt=1.0 / 100.0,
-    sim_device="cpu",
-)
-
-sim = SimulationManager(sim_cfg)
-
-# Get UR10 URDF path
-urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
-
-# Create UR10 robot
-robot_cfg = RobotCfg(
-    uid="UR10_test",
-    urdf_cfg=URDFCfg(
-        components=[{"component_type": "arm", "urdf_path": urdf_path}]
-    ),
-    control_parts={"arm": ["Joint[1-6]"]},
-    solver_cfg={
-        "arm": PinkSolverCfg(
-            urdf_path=urdf_path,
-            end_link_name="ee_link",
-            root_link_name="base_link",
-            pos_eps=1e-2,
-            rot_eps=5e-2,
-            max_iterations=300,
-            dt=0.1,
-        )
-    },
-    drive_pros=JointDrivePropertiesCfg(
-        stiffness={"Joint[1-6]": 1e4},
-        damping={"Joint[1-6]": 1e3},
-    ),
-)
-robot = sim.add_robot(cfg=robot_cfg)
-
-# Constraints are now specified in ToppraPlanOptions, not in ToppraPlannerCfg
 motion_gen = MotionGenerator(
-    cfg=MotionGenCfg(
+    MotionGenCfg(
         planner_cfg=ToppraPlannerCfg(
-            robot_uid="UR10_test",
-        )
+            robot_uid=robot.uid,
+            sim_instance_id=sim.instance_id,
+        ),
     )
 )
-```
-
-### Trajectory Planning
-
-#### Joint Space Planning
-
-```python
-# Create options with constraints and planning parameters
 plan_opts = ToppraPlanOptions(
-    constraints={
-        "velocity": 0.2,
-        "acceleration": 0.5,
-    },
+    constraints={"velocity": 0.2, "acceleration": 0.5},
     sample_method=TrajectorySampleMethod.TIME,
-    sample_interval=0.01
+    sample_interval=0.01,
 )
-
-# Create motion generation options
-motion_opts = MotionGenOptions(
-    strategy="motion_gen",
-    plan_opts=plan_opts,
-    control_part="arm",
-    is_interpolate=False,
-)
-
-# Use generate() method instead of plan()
-target_states = [
-    PlanState(move_type=MoveType.JOINT_MOVE, qpos=torch.tensor([1, 1, 1, 1, 1, 1]))
-]
-result = motion_gen.generate(
-    target_states=target_states,
-    options=motion_opts
-)
+start_qpos = robot.get_qpos(name="arm")  # (B, DOF)
 ```
 
-For deterministic interpolation, select the timing explicitly:
+### Joint goals
+
+Supply both the start and goal when calling TOPPRA without pre-interpolation.
+Choose a goal within the robot's joint limits and reachable workspace.
 
 ```python
-motion_opts = MotionGenOptions(
-    strategy="ik_interp",
-    sample_count=50,
-    interpolation_dt=0.02,
-    start_qpos=start_qpos,
-    control_part="arm",
-)
-```
-
-Missing interpolation timing is an error; it is never inferred from an engine
-or global default. Custom planners likewise must return `PlanResult.dt` with
-shape `(B, N)` whenever they return positions; `duration` is exposed as the
-derived value `dt.sum(dim=1)`.
-
-## Physical playback
-
-Planner output is a timed command: apply position and velocity sample `i`, then
-advance physics by `dt[i + 1]` before observing sample `i + 1`. Clear the target
-velocity to zero after dispatching the terminal position and during its hold.
-The motion-generator tutorial implements that controller loop. Planning-only
-visualizations may instead teleport current state to each waypoint; for example,
-the cuRobo planner demo does this deliberately to display the collision-checked
-path without measuring drive tracking.
-
-For a reproducible physical comparison, run:
-
-```bash
-python examples/sim/motion/trajectory_velocity_tracking.py --headless \
-    --device cpu --output-dir trajectory_velocity_results
-```
-
-It restores the same configured initial state and clears dynamics before each
-trial, then executes the same smooth reference. One mode explicitly writes zero target velocity and the other sends differentiated
-velocity targets. The CSV preserves the actual measurement timestamps; the plot
-and printed RMSE/P95/maximum errors describe this particular drive configuration
-and cadence rather than asserting that velocity feed-forward always improves
-tracking.
-
-#### Cartesian Space Planning
-
-```python
-import torch
-import numpy as np
-
-# Create options with constraints
-plan_opts = ToppraPlanOptions(
-    constraints={
-        "velocity": 0.2,
-        "acceleration": 0.5,
-    },
-    sample_method=TrajectorySampleMethod.TIME,
-    sample_interval=0.01
-)
-
-# Create motion generation options with interpolation for smoother Cartesian motion
-motion_opts = MotionGenOptions(
-    strategy="motion_gen",
-    plan_opts=plan_opts,
-    control_part="arm",
-    is_interpolate=True,  # Enable pre-interpolation for Cartesian moves
-    interpolate_nums=10,   # Number of points between each waypoint
-    is_linear=True,        # Linear interpolation in Cartesian space
-)
-
-# Define target poses as 4x4 transformation matrices
-# Each matrix is [position(3), orientation(3x3)] in row-major order
-target_pose_1 = torch.eye(4)
-target_pose_1[:3, 3] = torch.tensor([0.5, 0.3, 0.4])  # position
-
-target_pose_2 = torch.eye(4)
-target_pose_2[:3, 3] = torch.tensor([0.6, 0.4, 0.3])  # another position
-
-# Use EEF_MOVE for Cartesian space planning
-target_states = [
-    PlanState(move_type=MoveType.EEF_MOVE, xpos=target_pose_1),
-    PlanState(move_type=MoveType.EEF_MOVE, xpos=target_pose_2),
-]
+goal_qpos = start_qpos.clone()
+goal_qpos[:, 0] += 0.1
 
 result = motion_gen.generate(
-    target_states=target_states,
-    options=motion_opts
+    [PlanState.from_qpos(start_qpos), PlanState.from_qpos(goal_qpos)],
+    MotionGenOptions(
+        strategy="motion_gen",
+        start_qpos=start_qpos,
+        control_part="arm",
+        plan_opts=plan_opts,
+    ),
 )
+assert result.is_all_success()
 ```
 
-For deterministic planning without invoking the configured backend, pass
-`strategy="ik_interp"` together with explicit batched `start_qpos` and
-`sample_count`. EEF waypoints are solved sequentially with the previous solution
-as the next IK seed; joint waypoints are interpolated directly.
+### Cartesian goals
 
+For a joint-only backend such as TOPPRA, enable pre-interpolation to convert
+Cartesian waypoints through the robot's IK solver. Native Cartesian backends
+receive the original targets directly.
 
-### Estimating Trajectory Sample Count
-
-You can estimate the number of sampling points required for a trajectory before generating it:
+Pre-interpolation solves the sampled poses in order, using each solution as
+the next IK seed. A failed required pose fails that environment's trajectory;
+the generator never drops it to report a shorter path as successful. The
+backend then applies its own path and timing behavior, so these input samples
+do not guarantee an exact Cartesian line in the final output.
 
 ```python
-# Estimate based on joint configurations (qpos_list)
-qpos_list = torch.as_tensor([
-    [0, 0, 0, 0, 0, 0],
-    [0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
-    [1, 1, 1, 1, 1, 1]
-])
-sample_count = motion_gen.estimate_trajectory_sample_count(
-    qpos_list=qpos_list,  # List of joint positions
-    step_size=0.01, # unit: m
-    angle_step=0.05, # unit: rad
-    control_part="arm",
+goal_pose = robot.compute_fk(qpos=start_qpos, name="arm", to_matrix=True)
+goal_pose = goal_pose.clone()  # (B, 4, 4), arena-local TCP pose
+goal_pose[:, 2, 3] += 0.02
+
+result = motion_gen.generate(
+    [PlanState.from_xpos(goal_pose)],
+    MotionGenOptions(
+        strategy="motion_gen",
+        start_qpos=start_qpos,
+        control_part="arm",
+        plan_opts=plan_opts,
+        is_interpolate=True,
+        is_linear=True,
+        interpolate_position_step=0.002,
+    ),
 )
-print(f"Estimated sample count: {sample_count}")
 ```
 
-## Notes
+### Deterministic interpolation
 
-* The planner type can be specified as a string or `PlannerType` enum.
-* If the robot provides its own joint limits, those will be used; otherwise, default or user-specified limits are applied.
-* For Cartesian interpolation, inverse kinematics (IK) is used to compute joint configurations for each interpolated pose.
-* Backends declare whether pre-interpolation is safe and whether their returned samples must be preserved. cuRobo V2 disables EmbodiChain Cartesian pre-interpolation and (by default) is resampled to `MotionGenOptions.sample_count`; set `CuroboPlannerCfg.preserve_plan_samples=True` to keep its raw collision-checked samples.
-* CuroboPlanner is optional and requires CUDA plus a matching cuRobo V2 installation; see [the cuRobo planner page](planners/curobo_planner.md) and [NVIDIA's installation guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html).
-* Run the collision-aware Panda demo with `python examples/sim/motion/planners/curobo_planner.py --headless --hold-steps 1 --step-repeat 1`.
-* The sample count estimation is useful for predicting computational load and memory requirements.
+Use explicit sampling and timing to generate a path without invoking the
+configured planner. EEF targets use the previous IK solution as the next seed;
+joint targets are interpolated directly.
 
-
-### Task Program velocity targets
-
-Configured Atomic Skill execution policies retain `ik_interp` by default and
-make the velocity-target choice explicit:
-
-```yaml
-motion:
-  strategy: ik_interp
-  sample_count: 40
-  velocity_targets: auto
+```python
+result = motion_gen.generate(
+    [PlanState.from_qpos(goal_qpos)],
+    MotionGenOptions(
+        strategy="ik_interp",
+        start_qpos=start_qpos,
+        control_part="arm",
+        sample_count=50,
+        interpolation_dt=0.02,
+    ),
+)
 ```
 
-`auto` uses native planner velocities when available and derives missing
-velocities from the final timed joint trajectory, including composite skills.
-`zero` commands position targets with explicit zero velocity targets.
-Execution uses the existing `Robot.set_qpos` and `Robot.set_qvel` target APIs.
-A nonzero damping gain is needed for a velocity contribution.
+Interpolation alone does not enforce velocity or acceleration limits or check
+collisions. Passing `plan_opts`, `velocity_limit`, or `acceleration_limit` with
+`ik_interp` raises an error. Use a suitable planner when those constraints
+are required.
 
-Stationary joint intervals and the final settling command use zero target
-velocity. These are execution holds, not a claim that numerical differentiation
-makes a piecewise-linear path smoothly start or stop. Neither differentiation
-nor time resampling certifies joint velocity/acceleration limits; use a suitable
-time-parameterizing planner and validate any subsequently retimed trajectory.
+To preserve a supplied Cartesian path, use `ik_interp` with
+`preserve_cartesian_samples=True` and provide exactly `sample_count - 1` EEF
+poses after the start. Each pose is solved with IK and retained at the explicit
+`interpolation_dt`; no joint-space resampling follows. `is_linear=True` in
+this strategy requires those explicit samples. The caller defines their
+geometry, including whether they form a line.
+
+`motion_gen` with `preserve_cartesian_samples=True` is unsupported and raises
+an error: the current backend contract cannot guarantee exact Cartesian
+samples while also applying backend timing and path constraints.
+
+## Inputs and results
+
+`PlanState.from_qpos()` takes `(B, DOF)` tensors and
+`PlanState.from_xpos()` takes `(B, 4, 4)` tensors. For a single environment,
+`PlanState.single()` also accepts unbatched inputs. All waypoints must use the
+same batch size as the robot.
+
+`generate()` returns a `PlanResult`:
+
+| Field | Shape | Meaning |
+|---|---|---|
+| `success` | `(B,)` | Per-environment planning status; `is_all_success()` checks every row. |
+| `positions` | `(B, N, DOF)` | Joint position samples; `generate()` requires a trajectory from the backend. |
+| `velocities`, `accelerations` | `(B, N, DOF)` when present | Joint derivatives. Missing velocities are derived from the final timed positions. |
+| `dt` | `(B, N)` | Arrival intervals, required whenever positions are present. |
+| `duration` | `(B,)` | Derived as `dt.sum(dim=1)`. |
+| `constraint_report` | mapping or `None` | Backend diagnostics, retained only while the reported trajectory is unchanged. |
+
+When `sample_count` changes a backend's output grid, the generator resamples
+in time, preserves each row's duration, recomputes velocities, and invalidates
+accelerations and constraint diagnostics. If the backend supports joint
+trajectory validation, the final samples are checked again against the resolved
+collision scene, and a failed check fails that environment. This sampled check
+does not certify continuous motion between samples or enforce derivative limits.
+Backends may preserve native samples;
+see [TrapezoidalPlanner](planners/trapezoidal_planner.md) and
+[cuRobo](planners/curobo_planner.md) for their controls.
+
+Failed rows hold `start_qpos` with zero velocity when it is supplied, except
+for backends that explicitly preserve failed rollout positions, such as
+NeuralPlanner. Always check `success` before execution.
+
+## Execute in simulation
+
+Planning returns a trajectory; playback applies it on the simulator's fixed
+control clock. With `sim` in explicit-update mode:
+
+```python
+from embodichain.lab.sim.motion.execution import (
+    JointTrajectoryPlaybackCfg,
+    play_joint_trajectory,
+)
+
+assert result.is_all_success()
+play_joint_trajectory(
+    sim,
+    robot,
+    positions=result.positions,
+    dt=result.dt,
+    joint_ids=robot.get_joint_ids("arm"),
+    cfg=JointTrajectoryPlaybackCfg(joint_command_mode="position_velocity"),
+)
+```
+
+Playback defaults to one command per physics step. An explicit `control_dt`
+must be an integer multiple of `physics_dt`; playback retimes the trajectory
+and recomputes velocity targets on that grid without changing the physics
+period. Position-only playback is the default; the example opts into velocity
+targets, with zero velocity at the first, terminal, and padded hold samples.
+
+Atomic Skills and Gym experts own their execution cadence and holds. See
+{doc}`Atomic actions </overview/sim/atomic_actions/index>` and the
+{doc}`expert data tutorial </tutorial/data_generation>` for those
+workflows. Teleporting through samples, as the cuRobo visualization demo does,
+shows a path but does not measure physical tracking.
+
+For a physical position-only versus velocity-target comparison, run
+`examples/sim/motion/trajectory_velocity_tracking.py`. For complete options and
+helper methods such as `estimate_trajectory_sample_count()`, see the
+{doc}`MotionGenerator API </api_reference/embodichain/embodichain.lab.sim.motion.motion_generator>`.

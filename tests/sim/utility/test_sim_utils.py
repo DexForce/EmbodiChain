@@ -22,7 +22,8 @@ pytest.importorskip("dexsim")
 pytest.importorskip("open3d")
 
 from embodichain.lab.sim.cfg import RigidObjectCfg
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
+from embodichain.lab.sim.utility import sim_utils
 from embodichain.lab.sim.utility.sim_utils import load_mesh_objects_from_cfg
 
 _MESH_PATH = "mesh.obj"
@@ -43,18 +44,25 @@ class _FakeArena:
         return _FakeMeshObject()
 
 
+@pytest.fixture(autouse=True)
+def default_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep raw mesh-loader argument tests independent of a live manager."""
+    monkeypatch.setattr(sim_utils, "_is_newton_backend_active", lambda: False)
+
+
 def _load_mesh_with_method(acd_method: str | None = None) -> _FakeArena:
     arena = _FakeArena()
     cfg = RigidObjectCfg(
         uid="mesh",
         shape=MeshCfg(
             fpath=_MESH_PATH,
-            max_convex_hull_num=_CONVEX_HULL_COUNT,
+            collision=MeshCollisionCfg(
+                approximation="convex_decomposition",
+                max_hulls=_CONVEX_HULL_COUNT,
+                acd_method=acd_method,
+            ),
         ),
     )
-    if acd_method is not None:
-        cfg.acd_method = acd_method
-
     load_mesh_objects_from_cfg(cfg, [arena])
     return arena
 
@@ -64,10 +72,11 @@ def test_mesh_cfg_default_acd_method_is_forwarded_to_dexsim() -> None:
 
     assert arena.acd_kwargs is not None
     assert arena.acd_kwargs["method"] == "visacd"
+    assert arena.acd_kwargs["max_convex_hull_num"] == _CONVEX_HULL_COUNT
 
 
-def test_legacy_rigid_object_acd_method_overrides_mesh_default() -> None:
-    arena = _load_mesh_with_method("coacd")
+def test_mesh_collision_acd_method_is_forwarded_to_dexsim() -> None:
+    arena = _load_mesh_with_method("vhacd")
 
     assert arena.acd_kwargs is not None
-    assert arena.acd_kwargs["method"] == "coacd"
+    assert arena.acd_kwargs["method"] == "vhacd"

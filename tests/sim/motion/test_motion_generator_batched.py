@@ -117,11 +117,15 @@ def _trapezoidal_generator() -> MotionGenerator:
     return generator
 
 
-def test_trapezoidal_generator_prepends_start_for_single_joint_target() -> None:
+def test_trapezoidal_generator_prepends_observed_start_for_sparse_joint_goal() -> None:
+    """A joint-only backend must start from the observed robot configuration."""
     generator = _trapezoidal_generator()
+    generator.interpolate_trajectory = Mock(
+        side_effect=AssertionError("sparse joint targets must bypass interpolation")
+    )
+
     start = torch.tensor([[0.0, 0.0]], dtype=torch.float64)
     goal = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
-
     result = generator.generate(
         [PlanState.from_qpos(goal)],
         MotionGenOptions(
@@ -130,14 +134,16 @@ def test_trapezoidal_generator_prepends_start_for_single_joint_target() -> None:
         ),
     )
 
+    assert result.positions is not None
     torch.testing.assert_close(result.positions[:, 0], start)
     torch.testing.assert_close(result.positions[:, -1], goal)
 
 
-def test_trapezoidal_generator_holds_stationary_single_joint_target() -> None:
+def test_trapezoidal_generator_holds_stationary_sparse_joint_goal() -> None:
+    """A stationary single goal still forms a valid two-waypoint hold."""
     generator = _trapezoidal_generator()
-    start = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
 
+    start = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
     result = generator.generate(
         [PlanState.from_qpos(start)],
         MotionGenOptions(
@@ -147,6 +153,7 @@ def test_trapezoidal_generator_holds_stationary_single_joint_target() -> None:
     )
 
     assert bool(result.success.all())
+    assert result.positions is not None
     assert result.positions.shape[1] == 2
     torch.testing.assert_close(
         result.positions, start.unsqueeze(1).expand_as(result.positions)
@@ -159,7 +166,35 @@ def test_trapezoidal_generator_holds_stationary_single_joint_target() -> None:
     )
 
 
+def test_trapezoidal_generator_covers_dense_ik_waypoints() -> None:
+    """Quantity sampling grows to retain all Cartesian-to-joint waypoints."""
+    generator = _trapezoidal_generator()
+    generator.robot = SimpleNamespace(
+        compute_fk=lambda *, qpos, name, to_matrix: torch.eye(
+            4, dtype=qpos.dtype, device=qpos.device
+        ).expand(qpos.shape[0], -1, -1)
+    )
+    dense_qpos = torch.linspace(0.0, 0.5, 6, dtype=torch.float64).reshape(1, 6, 1)
+    dense_qpos = dense_qpos.expand(-1, -1, 2).clone()
+    generator._interpolate_waypoints = Mock(
+        return_value=(dense_qpos, None, torch.ones(1, dtype=torch.bool))
+    )
+
+    result = generator.generate(
+        [PlanState.from_xpos(torch.eye(4, dtype=torch.float64).unsqueeze(0))],
+        MotionGenOptions(
+            start_qpos=torch.zeros(1, 2, dtype=torch.float64),
+            sample_count=3,
+            is_interpolate=True,
+        ),
+    )
+
+    assert result.positions is not None
+    assert result.positions.shape[1] == dense_qpos.shape[1]
+
+
 def test_trapezoidal_generator_preserves_native_derivatives() -> None:
+    """Native Trapezoidal samples and derivatives survive normalization."""
     generator = _trapezoidal_generator()
     start = torch.tensor([[0.0, 0.0]], dtype=torch.float64)
     goal = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
@@ -176,6 +211,8 @@ def test_trapezoidal_generator_preserves_native_derivatives() -> None:
         ),
     )
 
+    assert result.positions is not None
+    assert expected.positions is not None
     torch.testing.assert_close(result.positions, expected.positions)
     torch.testing.assert_close(result.dt, expected.dt)
     assert result.velocities is not None
@@ -304,13 +341,13 @@ def test_direct_cartesian_planner_skips_preinterpolation_without_mutating_option
     assert planner.received[1] == "arm"
 
 
-def test_direct_cartesian_planner_requires_joint_fallback_inputs():
+def test_direct_cartesian_planner_rejects_joint_targets():
     planner = _DirectCartesianPlanner()
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
     generator.device = torch.device("cpu")
 
-    with pytest.raises(ValueError, match="start_qpos"):
+    with pytest.raises(ValueError, match="JOINT_MOVE"):
         generator.generate(
             [PlanState.from_qpos(torch.zeros(1, 2))],
             MotionGenOptions(plan_opts=PlanOptions()),
@@ -662,11 +699,18 @@ class TestGenerateBatched:
         mg.robot = planner.robot
         mg.device = torch.device("cpu")
         interpolated_qpos = torch.zeros(1, 2, 6)
-        mg.interpolate_trajectory = Mock(return_value=(interpolated_qpos, None))
+        mg.robot.compute_fk.return_value = torch.eye(4).unsqueeze(0)
+        mg._interpolate_waypoints = Mock(
+            return_value=(interpolated_qpos, None, torch.ones(1, dtype=torch.bool))
+        )
 
         mg.generate(
             [PlanState.from_xpos(torch.eye(4).unsqueeze(0))],
-            MotionGenOptions(is_interpolate=True, plan_opts=PlanOptions()),
+            MotionGenOptions(
+                is_interpolate=True,
+                plan_opts=PlanOptions(),
+                start_qpos=torch.zeros(1, 6),
+            ),
         )
 
         target_states = planner.plan.call_args.kwargs["target_states"]
@@ -771,7 +815,7 @@ class TestMotionStrategy:
         result = generator.generate(
             targets,
             MotionGenOptions(
-                strategy="motion_gen",
+                strategy="ik_interp",
                 sample_count=SAMPLE_COUNT,
                 start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
                 control_part="arm",
@@ -856,32 +900,6 @@ class TestMotionStrategy:
 
         assert result.positions is not None
         assert result.positions.shape[1] == raw_sample_count
-
-    def test_joint_target_falls_back_when_backend_has_no_joint_capability(self):
-        generator = _mock_generator(supported_move_types=frozenset({MoveType.EEF_MOVE}))
-        start = torch.zeros(BATCH_SIZE, CONTROLLED_DOF)
-        target = torch.ones(BATCH_SIZE, CONTROLLED_DOF)
-
-        result = generator.generate(
-            [PlanState.from_qpos(target)],
-            MotionGenOptions(
-                strategy="motion_gen",
-                sample_count=SAMPLE_COUNT,
-                start_qpos=start,
-                control_part="arm",
-                interpolation_dt=STEP_DT,
-            ),
-        )
-
-        assert result.positions is not None
-        assert result.positions.shape == (
-            BATCH_SIZE,
-            SAMPLE_COUNT,
-            CONTROLLED_DOF,
-        )
-        assert torch.allclose(result.positions[:, 0], start)
-        assert torch.allclose(result.positions[:, -1], target)
-        generator.planner.plan.assert_not_called()
 
     def test_generate_does_not_mutate_caller_plan_options(self):
         generator = _mock_generator()
@@ -1019,3 +1037,288 @@ def test_normalization_resamples_by_time_and_recomputes_derivatives() -> None:
     )
     assert result.velocities is not None
     torch.testing.assert_close(result.velocities[0, 1, 0], torch.tensor(4 / 3))
+
+
+class _CartesianRobot:
+    """CPU kinematics double: one joint translates the TCP along x."""
+
+    device = torch.device("cpu")
+    num_instances = 2
+
+    def compute_fk(self, *, qpos: torch.Tensor, **kwargs: object) -> torch.Tensor:
+        pose = torch.eye(4, device=qpos.device).repeat(qpos.shape[0], 1, 1)
+        pose[:, 0, 3] = qpos[:, 0]
+        return pose
+
+    def compute_batch_fk(self, *, qpos: torch.Tensor, **kwargs: object) -> torch.Tensor:
+        pose = torch.eye(4, device=qpos.device).repeat(*qpos.shape[:2], 1, 1)
+        pose[..., 0, 3] = qpos[..., 0]
+        return pose
+
+    def compute_ik(
+        self, *, pose: torch.Tensor, joint_seed: torch.Tensor, **kwargs: object
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        valid = torch.ones(pose.shape[0], dtype=torch.bool, device=pose.device)
+        valid[1] = pose[1, 0, 3] < 0.75
+        return valid, pose[:, 0, 3:4].clone()
+
+    def compute_batch_ik(
+        self, *, pose: torch.Tensor, **kwargs: object
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        valid = torch.ones(pose.shape[:2], dtype=torch.bool)
+        valid[1] = pose[1, :, 0, 3] < 0.75
+        return valid, pose[..., 0, 3:4].clone()
+
+
+@pytest.mark.parametrize("strategy", ["motion_gen", "ik_interp"])
+def test_cartesian_ik_failure_holds_only_failed_environment(strategy: str) -> None:
+    """A failed final target cannot turn into a successful truncated path."""
+    generator = _trapezoidal_generator()
+    generator.robot = _CartesianRobot()
+    goal = torch.eye(4).repeat(2, 1, 1)
+    goal[:, 0, 3] = 1.0
+    options = MotionGenOptions(
+        strategy=strategy,
+        start_qpos=torch.zeros(2, 1),
+        control_part="arm",
+        sample_count=20,
+        interpolation_dt=0.05 if strategy == "ik_interp" else None,
+        is_interpolate=strategy == "motion_gen",
+        interpolate_position_step=0.25,
+    )
+    result = generator.generate([PlanState.from_xpos(goal)], options)
+    assert result.success.tolist() == [True, False]
+    torch.testing.assert_close(result.positions[0, -1], torch.ones(1))
+    torch.testing.assert_close(
+        result.positions[1], torch.zeros_like(result.positions[1])
+    )
+    torch.testing.assert_close(
+        result.velocities[1], torch.zeros_like(result.velocities[1])
+    )
+
+
+def test_motion_gen_rejects_fixed_cartesian_samples_instead_of_bypassing_limits() -> (
+    None
+):
+    generator = _trapezoidal_generator()
+    generator.robot = _CartesianRobot()
+    goals = [torch.eye(4).repeat(2, 1, 1) for _ in range(2)]
+    for goal, position in zip(goals, (0.1, 0.2)):
+        goal[:, 0, 3] = position
+    with pytest.raises(ValueError, match="preserve_cartesian_samples"):
+        generator.generate(
+            [PlanState.from_xpos(goal) for goal in goals],
+            MotionGenOptions(
+                strategy="motion_gen",
+                start_qpos=torch.zeros(2, 1),
+                control_part="arm",
+                sample_count=3,
+                interpolation_dt=0.01,
+                preserve_cartesian_samples=True,
+                plan_opts=TrapezoidalPlanOptions(
+                    constraints={"velocity": 0.1, "acceleration": 0.2, "jerk": 1.0},
+                    sample_interval=3,
+                ),
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "unused_option",
+    [
+        {"plan_opts": TrapezoidalPlanOptions()},
+        {"velocity_limit": 0.1},
+        {"acceleration_limit": 0.2},
+    ],
+)
+def test_ik_interp_rejects_unused_backend_constraints(unused_option: dict) -> None:
+    generator = _trapezoidal_generator()
+    with pytest.raises(ValueError, match="ik_interp"):
+        generator.generate(
+            [PlanState.from_qpos(torch.ones(1, 1))],
+            MotionGenOptions(
+                strategy="ik_interp",
+                start_qpos=torch.zeros(1, 1),
+                sample_count=3,
+                interpolation_dt=0.01,
+                **unused_option,
+            ),
+        )
+
+
+def test_motion_gen_rejects_unsupported_joint_goals_without_fallback() -> None:
+    generator = _mock_generator(supported_move_types=frozenset({MoveType.EEF_MOVE}))
+    with pytest.raises(ValueError, match="JOINT_MOVE"):
+        generator.generate(
+            [PlanState.from_qpos(torch.ones(BATCH_SIZE, CONTROLLED_DOF))],
+            MotionGenOptions(
+                strategy="motion_gen",
+                start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+                sample_count=SAMPLE_COUNT,
+                interpolation_dt=STEP_DT,
+            ),
+        )
+
+
+@pytest.mark.parametrize("backend_control_part", [None, "other_arm"])
+def test_resampled_collision_trajectory_is_checked_on_the_output_grid(
+    backend_control_part: str | None,
+) -> None:
+    """New midpoint samples must not inherit an endpoint-only collision check."""
+    generator = _mock_generator(
+        controlled_dof=1,
+        result=_timed_result(torch.tensor([[[0.0], [1.0]], [[0.0], [1.0]]])),
+    )
+    generator.planner.supports_joint_trajectory_validation = True
+    obstacle_poses = {"obstacle": torch.eye(4).repeat(2, 1, 1)}
+    options = PlanOptions()
+    options.dynamic_obstacle_poses = obstacle_poses
+    options.control_part = backend_control_part
+
+    def validate(trajectory, *, control_part, obstacle_poses):
+        assert control_part == (backend_control_part or "arm")
+        assert torch.equal(obstacle_poses["obstacle"], torch.eye(4).repeat(2, 1, 1))
+        assert trajectory.shape == (2, 3, 1)
+        valid = torch.ones(2, 3, dtype=torch.bool)
+        valid[1] = trajectory[1, :, 0] != 0.5
+        return valid
+
+    generator.planner.validate_joint_trajectory.side_effect = validate
+    result = generator.generate(
+        [PlanState.from_qpos(torch.ones(2, 1))],
+        MotionGenOptions(
+            start_qpos=torch.zeros(2, 1),
+            control_part="arm",
+            sample_count=3,
+            plan_opts=options,
+        ),
+    )
+    assert result.success.tolist() == [True, False]
+    torch.testing.assert_close(result.positions[0, :, 0], torch.tensor([0.0, 0.5, 1.0]))
+    torch.testing.assert_close(result.positions[1], torch.zeros(3, 1))
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable")
+def test_cartesian_preinterpolation_accepts_cpu_seed_on_gpu() -> None:
+    generator = _trapezoidal_generator()
+    generator.device = torch.device("cuda:0")
+    generator.robot = _CartesianRobot()
+    poses = torch.eye(4, device=generator.device).repeat(2, 2, 1, 1)
+    poses[:, 1, 0, 3] = 1.0
+    positions, _, success = generator._interpolate_waypoints(
+        control_part="arm",
+        xpos_list=poses,
+        options=MotionGenOptions(
+            start_qpos=torch.zeros(2, 1), interpolate_position_step=0.25
+        ),
+    )
+    assert positions.device == generator.device
+    assert success.tolist() == [True, False]
+    torch.testing.assert_close(positions[0, -1], torch.ones(1, device=generator.device))
+    torch.testing.assert_close(positions[1], torch.zeros_like(positions[1]))
+
+
+@pytest.mark.parametrize("strategy", ["motion_gen", "ik_interp"])
+def test_intermediate_ik_failure_stays_failed_after_reachable_goal(
+    strategy: str,
+) -> None:
+    generator = _trapezoidal_generator()
+    generator.robot = _CartesianRobot()
+    previous_seed = torch.zeros(2, 1)
+
+    def solve(*, pose, joint_seed, **kwargs):
+        nonlocal previous_seed
+        torch.testing.assert_close(joint_seed, previous_seed)
+        qpos = pose[:, 0, 3:4].clone()
+        success = torch.ones(2, dtype=torch.bool)
+        success[1] = not torch.isclose(qpos[1, 0], torch.tensor(0.5))
+        previous_seed = torch.where(success[:, None], qpos, previous_seed)
+        return success, qpos
+
+    generator.robot.compute_ik = solve
+    goals = [torch.eye(4).repeat(2, 1, 1) for _ in range(2)]
+    for pose, position in zip(goals, (0.5, 1.0)):
+        pose[:, 0, 3] = position
+    result = generator.generate(
+        [PlanState.from_xpos(pose) for pose in goals],
+        MotionGenOptions(
+            strategy=strategy,
+            start_qpos=torch.zeros(2, 1),
+            control_part="arm",
+            sample_count=20,
+            interpolation_dt=0.05 if strategy == "ik_interp" else None,
+            is_interpolate=strategy == "motion_gen",
+            interpolate_position_step=0.25,
+        ),
+    )
+    torch.testing.assert_close(previous_seed, torch.ones(2, 1))
+    assert result.success.tolist() == [True, False]
+    torch.testing.assert_close(result.positions[0, -1], torch.ones(1))
+    torch.testing.assert_close(
+        result.positions[1], torch.zeros_like(result.positions[1])
+    )
+
+
+def test_ik_interp_rejects_ambiguous_linear_path_request() -> None:
+    with pytest.raises(ValueError, match="preserve_cartesian_samples"):
+        MotionGenOptions(strategy="ik_interp", is_linear=True)
+
+
+def test_public_interpolation_rejects_failed_required_waypoints() -> None:
+    generator = _trapezoidal_generator()
+    generator.robot = _CartesianRobot()
+    poses = torch.eye(4).repeat(2, 2, 1, 1)
+    poses[:, 1, 0, 3] = 1.0
+    with pytest.raises(ValueError, match="required IK waypoints"):
+        generator.interpolate_trajectory(
+            control_part="arm",
+            xpos_list=poses,
+            options=MotionGenOptions(
+                start_qpos=torch.zeros(2, 1), interpolate_position_step=0.25
+            ),
+        )
+
+
+@pytest.mark.parametrize("strategy", ["motion_gen", "ik_interp"])
+def test_nonfinite_ik_solution_fails_only_its_environment(strategy: str) -> None:
+    generator = _trapezoidal_generator()
+    generator.robot = _CartesianRobot()
+    original_ik = generator.robot.compute_ik
+
+    def nonfinite_ik(**kwargs):
+        success, qpos = original_ik(**kwargs)
+        success[:] = True
+        qpos[1] = float("nan")
+        return success, qpos
+
+    generator.robot.compute_ik = nonfinite_ik
+    goal = torch.eye(4).repeat(2, 1, 1)
+    goal[:, 0, 3] = 0.5
+    result = generator.generate(
+        [PlanState.from_xpos(goal)],
+        MotionGenOptions(
+            strategy=strategy,
+            start_qpos=torch.zeros(2, 1),
+            control_part="arm",
+            sample_count=10,
+            interpolation_dt=0.05 if strategy == "ik_interp" else None,
+            is_interpolate=strategy == "motion_gen",
+            interpolate_position_step=0.25,
+        ),
+    )
+    assert result.success.tolist() == [True, False]
+    assert torch.isfinite(result.positions).all()
+    torch.testing.assert_close(
+        result.positions[1], torch.zeros_like(result.positions[1])
+    )
+
+
+def test_mutated_options_cannot_restore_implicit_planner_bypass() -> None:
+    generator = _mock_generator()
+    options = MotionGenOptions(strategy="ik_interp", preserve_cartesian_samples=True)
+    options.strategy = "motion_gen"
+    with pytest.raises(ValueError, match="preserve_cartesian_samples"):
+        generator.generate(
+            [PlanState.from_xpos(torch.eye(4).repeat(BATCH_SIZE, 1, 1))], options
+        )

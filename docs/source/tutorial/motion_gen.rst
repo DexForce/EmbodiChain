@@ -3,203 +3,67 @@
 Motion Generator
 ================
 
-.. currentmodule:: embodichain.lab.sim.motion.motion_generator
+This tutorial creates one CobotMagic arm, plans joint and Cartesian waypoint
+paths with TOPPRA, and replays them in simulation. For backend selection,
+minimal API examples, and result shapes, see
+:doc:`/overview/sim/motion/motion_generator`.
 
-The ``MotionGenerator`` class in EmbodiChain provides a unified and extensible interface for robot trajectory planning. It supports time-optimal trajectory generation (currently via TOPPRA), joint/Cartesian interpolation, and is designed for easy integration with RL, imitation learning, and classical control scenarios.
+Run the tutorial
+----------------
 
-Key Features
-------------
+Run from the repository root with the simulation runtime and assets installed:
 
-- **Unified API**: One interface for multiple planning strategies (time-optimal, interpolation, etc.)
-- **Constraint Support**: Velocity/acceleration constraints configurable per joint
-- **Flexible Input**: Supports both joint space and Cartesian space waypoints
-- **Extensible**: Easy to add new planners (RRT, PRM, etc.)
-- **Integration Ready**: Can be used in RL, imitation learning, or classical pipelines
+.. code-block:: bash
 
+   python scripts/tutorials/sim/motion_generator.py --headless --device cpu
 
-The Code
-~~~~~~~~
+Use ``--num-envs N`` for a batched scene, ``--physics newton`` for the Newton
+backend, or ``--viser`` to publish the scene in a browser. Headless runs record
+a whole-scene MP4 by default; use ``--disable-record`` to skip recording or
+``--record-save-path PATH`` to choose its destination.
 
-The tutorial corresponds to the ``motion_generator.py`` script in the ``scripts/tutorials/sim`` directory.
+Follow the planning workflow
+----------------------------
 
-.. dropdown:: Code for motion_generator.py
-    :icon: code
+1. Create the simulation and robot, including an IK solver for the arm.
+2. Configure ``MotionGenerator`` with ``ToppraPlannerCfg`` and place velocity,
+   acceleration, and sampling settings in ``ToppraPlanOptions``.
+3. Read the arm's starting joint positions and construct batched ``PlanState``
+   waypoints. Cartesian pre-interpolation uses the configured IK solver.
+4. Call ``generate()`` and check the result's success flags.
+5. Replay the timed joint trajectory using ``play_joint_trajectory()`` on a
+   fixed control grid. The helper keeps the physics period unchanged and
+   recomputes velocity targets for the executed grid.
 
-    .. literalinclude:: ../../../scripts/tutorials/sim/motion_generator.py
-        :language: python
-        :linenos:
+.. dropdown:: Complete tutorial script
+   :icon: code
 
-Typical Usage
-~~~~~~~~~~~~~
+   .. literalinclude:: ../../../scripts/tutorials/sim/motion_generator.py
+      :language: python
+      :linenos:
 
-.. code-block:: python
+Compare physical tracking
+-------------------------
 
-   from embodichain.lab.sim.motion.motion_generator import MotionGenerator, MotionGenCfg
-   from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
-   from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanOptions
-   from embodichain.lab.sim.motion.planners.utils import PlanState, TrajectorySampleMethod, MoveType
+To compare position-only and position-plus-velocity commands with the same
+initial state, gains, reference, and cadence, run:
 
-   # Assume you have a robot instance and arm_name
-   # Constraints are now specified in ToppraPlanOptions, not in ToppraPlannerCfg
-   motion_cfg = MotionGenCfg(
-       planner_cfg=ToppraPlannerCfg(
-           robot_uid=robot.uid,
-       )
-   )
-   motion_gen = MotionGenerator(cfg=motion_cfg)
-
-   # Create options with constraints and planning parameters
-   plan_opts = ToppraPlanOptions(
-       constraints={
-           "velocity": 0.2,
-           "acceleration": 0.5,
-       },
-       sample_method=TrajectorySampleMethod.TIME,
-       sample_interval=0.01
-   )
-
-   # Create motion generation options
-   motion_opts = MotionGenOptions(
-       strategy="motion_gen",
-       plan_opts=plan_opts,
-       control_part=arm_name,
-       is_interpolate=True,
-       interpolate_nums=10,
-   )
-
-   # Plan a joint-space trajectory (use generate() method instead of plan())
-   target_states = [
-       PlanState.from_qpos(torch.tensor([[0.5, 0.2, 0., 0., 0., 0.]]))
-   ]
-   plan_result = motion_gen.generate(
-       target_states=target_states,
-       options=motion_opts
-   )
-   success = plan_result.success
-   positions = plan_result.positions
-   velocities = plan_result.velocities
-   accelerations = plan_result.accelerations
-   duration = plan_result.duration
-
-Timed playback
-~~~~~~~~~~~~~~
-
-``PlanResult.positions``, ``velocities``, and ``dt`` form one timed command.
-During physical playback, send position and velocity sample ``i``, then advance
-physics by ``dt[i + 1]`` before measuring the state at sample ``i + 1``. After
-the final waypoint, write its position with a zero velocity target so the controller holds the terminal
-position instead of retaining the last feed-forward command. The complete
-tutorial script demonstrates this loop and resamples fractional planner
-intervals onto a uniform cadence no larger than the configured physics step.
-
-To compare the controller under position-only and position-plus-velocity
-commands with identical initial state, gains, reference, and cadence, run::
+.. code-block:: bash
 
    python examples/sim/motion/trajectory_velocity_tracking.py --headless \
        --device cpu --output-dir trajectory_velocity_results
 
-The script restores the robot's configured initial state and clears its dynamics
-before each trial. The position-only trial explicitly sends zero target velocity. It writes ``tracking.csv`` with samples
-timestamped after each control interval and ``tracking.png`` with the aggregate
-joint error, and prints RMSE, P95, and maximum absolute joint error. Treat the
-numbers as measurements for the selected robot, drive gains, physics backend,
-and cadence; velocity targets do not imply universal improvement.
+The script restores the configured initial state before each trial. The
+position-only trial explicitly writes zero target velocity. Outputs include
+``tracking.csv`` with measurement timestamps, ``tracking.png`` with joint
+errors, and printed RMSE, P95, and maximum absolute error. These measurements
+apply to the selected robot, drive gains, physics backend, and cadence.
 
-DexSim must support both target-position and target-velocity writes. The
-example uses :meth:`Robot.set_qpos` and :meth:`Robot.set_qvel`, which map to
-DexSim's articulation target APIs. It is headless by default and requires the
-normal simulation assets and runtime.
+Next steps
+----------
 
-API Reference
-~~~~~~~~~~~~~
-
-**Initialization**
-
-.. code-block:: python
-
-   from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanOptions
-
-   motion_cfg = MotionGenCfg(
-       planner_cfg=ToppraPlannerCfg(
-           robot_uid=robot.uid,
-       )
-   )
-   MotionGenerator(cfg=motion_cfg)
-
-- ``cfg``: MotionGenCfg instance, containing the specific planner's configuration (like ``ToppraPlannerCfg``)
-- ``robot_uid``: Robot unique identifier
-- ``constraints``: Now specified in ``ToppraPlanOptions`` (passed via ``MotionGenOptions.plan_opts``)
-
-**MotionGenOptions**
-
-.. code-block:: python
-
-   motion_opts = MotionGenOptions(
-       strategy="motion_gen",               # "motion_gen" or "ik_interp"
-       sample_count=None,                    # Optional normalized output length
-       interpolation_dt=None,                # Required for deterministic interpolation
-       plan_opts=ToppraPlanOptions(...),  # Options for the underlying planner
-       control_part=arm_name,              # Robot part to control (e.g., 'left_arm')
-       is_interpolate=False,               # Whether to pre-interpolate trajectory
-       interpolate_nums=10,                # Number of interpolation points between waypoints
-       is_linear=False,                    # Use Cartesian linear interpolation if True, else joint space
-       interpolate_position_step=0.002,    # Step size for Cartesian interpolation (meters)
-       interpolate_angle_step=np.pi/90,   # Step size for joint interpolation (radians)
-       start_qpos=torch.tensor([...]),     # Optional starting joint configuration
-   )
-
-**generate**
-
-.. code-block:: python
-
-   generate(
-       target_states: list[PlanState],
-       options: MotionGenOptions | None = None,
-   ) -> PlanResult
-
-- ``strategy="motion_gen"`` delegates to the configured backend; ``strategy="ik_interp"`` performs deterministic waypoint IK and joint interpolation and requires ``interpolation_dt``.
-- Returns a normalized, environment-batched ``PlanResult`` with explicit ``dt``
-  and derived ``duration`` whenever positions are present. Its ``velocities``
-  carry the matching velocity targets. Missing timing raises immediately.
-- Uses ``target_states`` (list of PlanState) and ``options`` (MotionGenOptions) instead of individual parameters.
-
-**interpolate_trajectory**
-
-.. code-block:: python
-
-   interpolate_trajectory(
-       control_part: str | None = None,
-       xpos_list: torch.Tensor | None = None,
-       qpos_list: torch.Tensor | None = None,
-       options: MotionGenOptions | None = None,
-   ) -> Tuple[torch.Tensor, torch.Tensor | None]
-
-- Interpolates trajectory between waypoints (joint or Cartesian), auto-handles FK/IK.
-
-**estimate_trajectory_sample_count**
-
-.. code-block:: python
-
-   estimate_trajectory_sample_count(
-       xpos_list=None,
-       qpos_list=None,
-       step_size=0.01,
-       angle_step=np.pi/90,
-       control_part=None,
-   ) -> torch.Tensor
-
-- Estimates the number of samples needed for a trajectory.
-
-Notes & Best Practices
-~~~~~~~~~~~~~~~~~~~~~~
-
-- TOPPRA and NeuralPlanner do not maintain a collision world. Select the optional
-  cuRobo V2 backend for collision-aware planning and exact joint-trajectory
-  collision validation; see :doc:`/overview/sim/motion/planners/curobo_planner`.
-- Planning inputs and outputs use environment-batched PyTorch tensors.
-- Robot instance must implement get_joint_ids, compute_fk, compute_ik, get_proprioception, etc.
-- Custom planners subclass ``BasePlanner`` with a matching ``BasePlannerCfg`` and
-  declare ``supported_move_types``. Register the pair with
-  ``MotionGenerator.register_planner_type(name, planner_class, planner_cfg_class)``.
-- Constraints (velocity, acceleration) are now specified in ``ToppraPlanOptions``, not in ``ToppraPlannerCfg``.
-- Use ``PlanState.qpos`` (not ``position``) for joint positions.
+- :doc:`/tutorial/trajectory_planning` for trajectory diagnostics.
+- :doc:`/overview/sim/motion/planners/index` for alternative planning backends.
+- :doc:`/overview/sim/atomic_actions/index` for task-level planning and execution.
+- :doc:`MotionGenerator API </api_reference/embodichain/embodichain.lab.sim.motion.motion_generator>`
+  for complete options and helper methods.

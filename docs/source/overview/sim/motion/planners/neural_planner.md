@@ -17,8 +17,12 @@ The ONNX graph must include raw-observation normalization.
 Install the optional runtime and export the trained policy to ONNX before use:
 
 ```bash
-pip install -e '.[nmg]'
+pip install -e '.[policy-deploy]'
 ```
+
+The shared `policy-deploy` extra installs `onnxruntime-gpu`. See
+[policy deployment installation](../../../../quick_start/install.md#optional-policy-deployment-policy-deploy)
+for package indexes, CUDA requirements, and migration from the former `nmg` extra.
 
 ```python
 from embodichain.lab.sim.motion.motion_generator import (
@@ -73,3 +77,9 @@ policy_T_policy_tcp = policy_T_world
                     @ world_T_runtime_tcp
                     @ runtime_tcp_T_policy_tcp
 ```
+
+Pose targets and FK observations inside `NeuralPlanner` use EmbodiChain's
+`xyz + xyzw` convention. `quat_from_matrix()` already returns `xyzw`; no
+additional quaternion reordering is required before the ONNX observation is
+assembled. Conversions to `wxyz` belong only at an explicitly documented
+external-library boundary.

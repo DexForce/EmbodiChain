@@ -37,7 +37,7 @@ RL tasks sometimes drop the `-v<N>` suffix (`CartPoleRL`, `PushCubeRL`).
 
 | File / component | Owns | Must not own |
 |---|---|---|
-| Reusable physical `env.yaml` | Scene entities and ordinary environment values; `environment_id` identifies the environment | Runnable `id`, robot, sensor or Task Program fields |
+| Reusable physical `env.yaml` | Exactly one `physics: default|newton` backend, its optional matching `physics_config`, scene entities, and ordinary environment values; `environment_id` identifies the environment | Runnable `id`, robot, sensor or Task Program fields |
 | Runnable `task.<embodiment>.yaml` | Gym `id`, component selections, task-local run/deployment settings | Duplicate inline fields owned by selected components |
 | `configs/components/embodiments/*.yaml` | One robot, its sensors, optional Task Program-facing `skill_profile` | Task-local semantic scene binding |
 | `task_program/program.yaml` | Embodiment-independent program | Trusted runtime provider implementations |
@@ -64,6 +64,21 @@ inline `robot`, `sensor`, and scene fields continue to parse unchanged.
 launcher arguments so environment-owned run controls such as `max_episodes`
 remain visible to the run loop while explicit CLI values retain precedence.
 
+An inline runnable config must declare exactly one
+`physics: default|newton` backend. A reusable environment component also owns
+exactly one backend and its optional `physics_config`; the thin deployment
+cannot repeat either field. `config_to_cfg()` constructs the backend-specific
+typed physics config and rejects fields from the other backend. Launcher
+`--physics` may confirm the declared value but cannot switch the file-owned
+backend. Use separate environment files when one logical task needs both.
+
+Device selection is one shared runtime value. The typed physics config supplies
+the backend default (`cpu` for Default, `cuda:0` for Newton), an optional
+top-level Gym `device` overrides it, and an explicitly supplied CLI `--device`
+wins last. Config-backed launchers leave `--device` unset by default, so
+omission preserves the authored/backend value. `BaseEnv` tensors use the
+manager's resolved device; there is no separate environment-device setting.
+
 The component boundary is implemented in
 `gym/utils/_component_composition.py`. An embodiment's optional `skill_profile`
 is consumed only by a configured Task Program deployment. Scene components are
@@ -77,8 +92,9 @@ configured Task Program deployments reuse that same embodiment.
 
 A simple supported Task Program does not require a task subclass. Its thin Gym
 deployment selects a reusable environment and embodiment and declares all
-three Task Program component paths. The environment component owns only the
-physical scene and ordinary environment values. After the generic resolver
+three Task Program component paths. The environment component owns the
+physical scene, one physics backend and its settings, and ordinary environment
+values. After the generic resolver
 lowers the environment, robot, and sensors into the existing
 `EmbodiedEnvCfg` fields, it checks every semantic root's `simulation_uid`
 against the physical scene. The Task Program layer then checks

@@ -19,7 +19,10 @@ from __future__ import annotations
 
 import pytest
 
-from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
+from embodichain.gen_sim.scene_engine.core.scene_object import (
+    ObjectPhysics,
+    SceneObject,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.gravity_settler import (
     GravitySettleBody,
     GravitySettler,
@@ -79,3 +82,27 @@ def test_gravity_settler_rejects_dynamic_assets_outside_participants() -> None:
             dynamic_asset_ids={_ASSET_ID},
             static_asset_ids=set(),
         ).settle()
+
+
+@pytest.mark.parametrize(
+    ("max_hulls", "expected_approximation", "expected_max_hulls"),
+    [
+        (1, "convex_hull", None),
+        (8, "convex_decomposition", 8),
+    ],
+)
+def test_gravity_settler_normalizes_legacy_hull_budget(
+    max_hulls: int,
+    expected_approximation: str,
+    expected_max_hulls: int | None,
+) -> None:
+    collision = GravitySettler._mesh_collision_cfg(
+        ObjectPhysics(
+            body_type="dynamic",
+            attrs={"mass_props": {"mass": 1.0}},
+            max_convex_hull_num=max_hulls,
+        )
+    )
+
+    assert collision.approximation == expected_approximation
+    assert collision.max_hulls == expected_max_hulls

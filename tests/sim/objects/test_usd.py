@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import torch
 
@@ -29,66 +31,182 @@ from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     RigidObjectCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
+    MassPropertiesCfg,
+    DefaultRigidBodyPropertiesCfg,
+    physics_cfg_for_backend,
 )
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
 
-NUM_ARENAS = 1
+NUM_ARENAS = 2
+
+
+@pytest.mark.parametrize("physics", ["default", "newton"])
+def test_usdc_fk_matches_simulation_at_named_joint_states(
+    tmp_path: Path, physics: str
+) -> None:
+    """Resolved USD FK agrees with physics and does not change joint state."""
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+
+    path = tmp_path / "kinematic_tree.usdc"
+    stage = Usd.Stage.CreateNew(str(path))
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    assembly = UsdGeom.Xform.Define(stage, "/assembly")
+    stage.SetDefaultPrim(assembly.GetPrim())
+    UsdPhysics.ArticulationRootAPI.Apply(assembly.GetPrim())
+    for name in ("base", "drawer", "handle"):
+        body = UsdGeom.Xform.Define(stage, f"/assembly/{name}")
+        UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+        UsdPhysics.MassAPI.Apply(body.GetPrim()).CreateMassAttr(1.0)
+        cube = UsdGeom.Cube.Define(stage, f"/assembly/{name}/mesh")
+        cube.CreateSizeAttr(0.1)
+        UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
+    for name, schema, parent, child in (
+        ("slide", UsdPhysics.PrismaticJoint, "base", "drawer"),
+        ("hinge", UsdPhysics.RevoluteJoint, "drawer", "handle"),
+    ):
+        joint = schema.Define(stage, f"/assembly/{name}")
+        joint.CreateBody0Rel().SetTargets([f"/assembly/{parent}"])
+        joint.CreateBody1Rel().SetTargets([f"/assembly/{child}"])
+        joint.CreateAxisAttr("X")
+        joint.CreateLowerLimitAttr(-1.0 if name == "slide" else -90.0)
+        joint.CreateUpperLimitAttr(1.0 if name == "slide" else 90.0)
+        # Nonzero child-side frames exercise the USD-specific FK conversion.
+        for attr in (joint.CreateLocalPos0Attr(), joint.CreateLocalPos1Attr()):
+            attr.Set(Gf.Vec3f(0.0, 0.0, 0.2))
+        rotation = Gf.Quatf(0.70710678, Gf.Vec3f(0.0, 0.0, 0.70710678))
+        joint.CreateLocalRot0Attr(rotation)
+        joint.CreateLocalRot1Attr(rotation)
+    stage.GetRootLayer().Save()
+
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            num_envs=1,
+            physics_cfg=physics_cfg_for_backend(physics),
+        )
+    )
+    obj = None
+    try:
+        obj = sim.add_articulation(
+            ArticulationCfg(
+                uid="usd_fk",
+                fpath=str(path),
+                init_pos=(0.5, -0.3, 1.0),
+                init_rot=(10.0, 20.0, 30.0),
+            )
+        )
+        sim.prepare()
+        assert obj.pk_chain is not None
+        states = ((0.0, 0.0), (0.13, 0.4), (-0.07, -0.2))
+        if physics == "newton":
+            states = ((0.13, 0.4),)
+        for slide, hinge in states:
+            state = {"slide": slide, "hinge": hinge}
+            qpos = torch.tensor([[state[name] for name in obj.joint_names]])
+            obj.set_qpos(qpos, target=False)
+            # Default publishes physical link poses on the next update. Compare
+            # with the measured state after that update, not the command.
+            sim.update()
+            before = obj.get_qpos().clone()
+            fk = obj.compute_fk(
+                before, link_names=obj.link_names, qpos_joint_names=obj.joint_names
+            )
+            root = obj.get_link_pose("base", to_matrix=True)
+            for index, name in enumerate(obj.link_names):
+                observed = torch.linalg.inv(root) @ obj.get_link_pose(
+                    name, to_matrix=True
+                )
+                torch.testing.assert_close(fk[:, index], observed, atol=1e-5, rtol=1e-5)
+            torch.testing.assert_close(obj.get_qpos(), before)
+    finally:
+        sim.destroy(exit_process=False)
+        del obj
+        SimulationManager.flush_cleanup_queue()
 
 
 class BaseUsdTest:
     """Shared test logic for CPU and CUDA."""
 
-    def setup_simulation(self, sim_device):
+    def setup_simulation(self, device):
         config = SimulationManagerCfg(
             headless=True,
-            sim_device=sim_device,
+            device=device,
             num_envs=NUM_ARENAS,
         )
         self.sim = SimulationManager(config)
 
-        if sim_device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
-            self.sim.init_gpu_physics()
-
     def test_import_rigid(self):
-        default_attr = RigidBodyAttributesCfg()
+        default_attr = RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(mass=1.25),
+            rigid_props=DefaultRigidBodyPropertiesCfg(
+                linear_damping=0.2,
+                angular_damping=0.3,
+                min_position_iters=8,
+                min_velocity_iters=2,
+            ),
+        )
         sugar_box_path = get_data_path("SugarBox/sugar_box_usd/sugar_box.usda")
         sugar_box: RigidObject = self.sim.add_rigid_object(
             cfg=RigidObjectCfg(
                 uid="sugar_box",
                 shape=MeshCfg(fpath=sugar_box_path),
                 body_type="dynamic",
-                use_usd_properties=False,
+                asset_physics_mode="overlay",
                 init_pos=[0.0, 1.0, 0.1],
                 attrs=default_attr,
             )
         )
-        body0 = sugar_box._entities[0].get_physical_body()
-        print(sugar_box._entities[0].get_physical_attr())
-        assert pytest.approx(body0.get_mass()) == default_attr.mass
-        assert pytest.approx(body0.get_linear_damping()) == default_attr.linear_damping
-        assert (
-            pytest.approx(body0.get_angular_damping()) == default_attr.angular_damping
+        self.sim.prepare()
+        torch.testing.assert_close(
+            sugar_box.get_mass(),
+            torch.full_like(sugar_box.get_mass(), default_attr.mass_props.mass),
         )
-        assert body0.get_solver_iteration_counts() == (
-            default_attr.min_position_iters,
-            default_attr.min_velocity_iters,
-        )
+        expected_damping = torch.tensor(
+            [
+                default_attr.rigid_props.linear_damping,
+                default_attr.rigid_props.angular_damping,
+            ],
+            device=self.sim.device,
+        ).expand(NUM_ARENAS, -1)
+        torch.testing.assert_close(sugar_box.get_damping(), expected_damping)
+        for entity in sugar_box._entities:
+            attr = entity.get_physical_attr()
+            assert (
+                attr.min_position_iters == default_attr.rigid_props.min_position_iters
+            )
+            assert (
+                attr.min_velocity_iters == default_attr.rigid_props.min_velocity_iters
+            )
+        assert len(sugar_box._entities) == NUM_ARENAS
+        handles = {entity.get_native_handle() for entity in sugar_box._entities}
+        assert len(handles) == NUM_ARENAS
 
     def test_import_articulation(self):
-        default_drive = JointDrivePropertiesCfg()
+        default_drive = JointDrivePropertiesCfg(
+            drive_type="force",
+            stiffness=1e4,
+            damping=1e3,
+            max_effort=1e10,
+            max_velocity=1e10,
+            friction=0.0,
+            armature=0.0,
+        )
         h1_path = get_data_path("UnitreeH1Usd/H1_usd/h1.usd")
         h1: Articulation = self.sim.add_articulation(
             cfg=ArticulationCfg(
                 uid="h1",
                 fpath=h1_path,
                 build_pk_chain=False,
-                use_usd_properties=False,
+                asset_physics_mode="overlay",
                 init_pos=[0.0, 0.0, 1.2],
-                drive_pros=default_drive,
+                joint_drive_props=default_drive,
             )
         )
+        self.sim.prepare()
 
         stiffness = h1.body_data.joint_stiffness
         damping = h1.body_data.joint_damping
@@ -106,17 +224,18 @@ class BaseUsdTest:
         )
 
     def test_usd_properties(self):
-        """In this test, we set use_usd_properties=True to verify that the USD properties are correctly applied."""
+        """Verify that preserve mode keeps physics authored in USD assets."""
         h1_path = get_data_path("UnitreeH1Usd/H1_usd/h1.usd")
         h1: Articulation = self.sim.add_articulation(
             cfg=ArticulationCfg(
                 uid="h1_beta",
                 fpath=h1_path,
                 build_pk_chain=False,
-                use_usd_properties=True,
+                asset_physics_mode="preserve",
                 init_pos=[1.0, 0.0, 1.2],
             )
         )
+        self.sim.prepare()
 
         stiffness = h1.body_data.joint_stiffness
         damping = h1.body_data.joint_damping
@@ -152,18 +271,17 @@ class BaseUsdTest:
                 uid="sugar_box_beta",
                 shape=MeshCfg(fpath=sugar_box_path),
                 body_type="dynamic",
-                use_usd_properties=True,
+                asset_physics_mode="preserve",
                 init_pos=[1.0, 1.0, 0.1],
             )
         )
-        body0 = sugar_box._entities[0].get_physical_body()
-        print(sugar_box._entities[0].get_physical_attr())
-        assert pytest.approx(body0.get_mass(), 0.001) == 0.514
-        # TODO: nvidia physx attrs in usd currently are not fully suported
-        # assert(body0.get_linear_damping()==0)
-        # assert(body0.get_angular_damping()==0.05)
-        # assert(body0.get_solver_iteration_counts()==(4, 1))
-        # assert(body0.get_max_angular_velocity()==100)
+        self.sim.prepare()
+        torch.testing.assert_close(
+            sugar_box.get_mass(),
+            torch.full_like(sugar_box.get_mass(), 0.514),
+            rtol=0.001,
+            atol=0.0,
+        )
 
     def export_usd(self):
         self.sim.export_usd("test_export.usda")
@@ -180,13 +298,13 @@ class BaseUsdTest:
         gc.collect()
 
 
-@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
+# @pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestUsdCPU(BaseUsdTest):
     def setup_method(self):
         self.setup_simulation("cpu")
 
 
-@pytest.mark.skip(reason="Skipping CUDA tests temporarily")
+# @pytest.mark.skip(reason="Skipping CUDA tests temporarily")
 class TestUsdCUDA(BaseUsdTest):
     def setup_method(self):
         self.setup_simulation("cuda")

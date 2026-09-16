@@ -784,6 +784,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
                 if self._planner_cfg is None
                 else deepcopy(self._planner_cfg)
             )
+            planner_cfg.sim_instance_id = self._simulation.instance_id
             generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
         if not isinstance(generator, MotionGenerator):
             raise TypeError(

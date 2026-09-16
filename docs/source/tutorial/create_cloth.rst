@@ -48,17 +48,19 @@ The simulation environment is configured with :class:`SimulationManagerCfg`. For
 Adding a cloth object to the scene
 ------------------------------------
 
-The grid mesh generated earlier is saved to disk and then passed to :meth:`SimulationManager.add_cloth_object`. The physical properties of the cloth are controlled through :class:`cfg.ClothObjectCfg` together with :class:`cfg.ClothPhysicalAttributesCfg`:
+The grid mesh generated earlier is saved to disk and then passed to :meth:`SimulationManager.add_deformable_object`. The physical properties of the cloth are controlled through :class:`cfg.SurfaceDeformableObjectCfg` together with :class:`cfg.SurfaceDeformablePhysicsCfg`:
 
 - :class:`cfg.MeshCfg` — references the ``.ply`` file written to the system temp directory
-- :class:`cfg.ClothPhysicalAttributesCfg` — material parameters:
+- :class:`cfg.SurfaceDeformablePhysicsCfg` — material parameters:
 
-  - ``mass`` — total mass of the cloth panel (kg)
-  - ``youngs`` / ``poissons`` — elastic stiffness and compressibility
-  - ``thickness`` — collision thickness of the cloth surface
-  - ``bending_stiffness`` / ``bending_damping`` — resistance to and dissipation of bending motion
-  - ``dynamic_friction`` — friction between the cloth and other objects
-  - ``min_position_iters`` — solver iteration count for position constraints
+  - ``density`` — surface density (kg/m²)
+  - ``surface_props.tri_ke`` / ``tri_ka`` — triangle elastic and area stiffness
+  - ``surface_props.tri_kd`` — triangle damping
+  - ``surface_props.edge_ke`` / ``edge_kd`` — bending stiffness and damping
+  - ``add_springs`` / ``spring_ke`` / ``spring_kd`` — optional mesh springs
+
+The object stores these properties in ``attrs``. Set ``particle_radius`` on
+``SurfaceDeformableObjectCfg`` to control the particle contact radius.
 
 .. literalinclude:: ../../../scripts/tutorials/sim/create_cloth.py
    :language: python
@@ -68,7 +70,7 @@ The grid mesh generated earlier is saved to disk and then passed to :meth:`Simul
 Adding a rigid body for interaction
 -------------------------------------
 
-A small cubic rigid body (``padding_box``) is placed beneath the cloth so the cloth drapes over it. It is added with :meth:`SimulationManager.add_rigid_object` using :class:`cfg.RigidObjectCfg` and :class:`cfg.RigidBodyAttributesCfg`:
+A small cubic rigid body (``padding_box``) is placed beneath the cloth so the cloth drapes over it. It is added with :meth:`SimulationManager.add_rigid_object` using :class:`cfg.RigidObjectCfg` and :class:`cfg.RigidBodyPhysicsCfg`:
 
 - :class:`cfg.CubeCfg` — defines the box dimensions
 - ``body_type="dynamic"`` — the box responds to physics; change to ``"static"`` for a fixed obstacle
@@ -77,7 +79,7 @@ A small cubic rigid body (``padding_box``) is placed beneath the cloth so the cl
 .. literalinclude:: ../../../scripts/tutorials/sim/create_cloth.py
    :language: python
    :start-at:     padding_box_cfg = RigidObjectCfg(
-   :end-at:     print("[INFO]: Add soft object complete!")
+   :end-at:     print("[INFO]: Add cloth object complete!")
 
 The Code Execution
 ~~~~~~~~~~~~~~~~~~

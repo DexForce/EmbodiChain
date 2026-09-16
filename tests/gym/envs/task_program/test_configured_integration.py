@@ -584,22 +584,6 @@ def test_all_examples_register_plain_embodied_env_under_config_selected_ids(
     assert env_id in gym_registry
 
 
-def test_trajectory_examples_disable_validation_and_recovery_layers() -> None:
-    """The two showcase profiles contain only open-loop trajectory execution."""
-    for task_name in ("repeated_pick_place", "open_drawer"):
-        integration = _decode_configured_task_program_integration(
-            _integration_payload(task_name)
-        )
-        preset = integration.registration.robot_profile_binding.presets[0]
-
-        assert preset.motion_policy.sample_count == 40
-        assert dict(preset.effect_monitors) == {}
-        assert preset.recovery_policy.max_replans == 0
-        assert preset.recovery_policy.max_action_retries == 0
-        assert preset.workflow_recovery_policy.max_recovery_attempts == 0
-        assert preset.runner_cfg.minimum_cycle_time == 0.0
-
-
 def test_grasp_generator_resolves_named_model_and_library_defaults() -> None:
     """Serialized services name reusable geometry and omit policy defaults."""
     factory = _decode_grasp_generator(

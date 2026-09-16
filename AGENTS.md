@@ -65,11 +65,24 @@ omit the Python task module. Follow the authoritative
 [configuration and registration contract](agent_context/topics/env-framework/configuration.md)
 and `/add-task-env` before adding a deployment.
 
+Every inline runnable Gym config and reusable physical environment declares
+exactly one `physics: default|newton` backend. An environment component owns
+its optional matching `physics_config`; a deployment cannot repeat or override
+either field. Launcher `--physics` may confirm the file-owned backend but does
+not switch it. Use a separate environment config for each backend.
+
 ## Code and validation
 
 - Run **`black==26.3.1`**, using `black .`, before every commit.
-- Use `/pre-commit-check` for proportional checks. New fixes/features need
-  focused tests that prove their behavior; use `/add-test` for project patterns.
+- Use `/pre-commit-check` for proportional checks. New production fixes/features
+  need focused tests that prove their behavior; use `/add-test` for project patterns.
+- Treat `scripts/tutorials/**` as examples, not production API test targets. Do
+  not create or expand tests whose primary subject is a tutorial, and do not
+  import tutorial scripts into new tests, unless the user explicitly requests
+  tutorial test coverage.
+- When a change affects both a tutorial and production code, test the underlying
+  production contract instead. For tutorial-only changes, use existing
+  syntax/import/static checks and do not add a new test file unless requested.
 - New source files use the Apache 2.0 copyright header from
   [.agents/skills/pre-commit-check/SKILL.md](.agents/skills/pre-commit-check/SKILL.md),
   with DexForce's 2021–2026 copyright. Preserve existing third-party licenses.

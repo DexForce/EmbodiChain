@@ -11,7 +11,7 @@
 |---|---|
 | `embodichain/lab/sim/motion/solvers/__init__.py` | Public re-exports for all solver classes and configs |
 | `embodichain/lab/sim/motion/solvers/base_solver.py` | `BaseSolver` ABC + `SolverCfg` base config |
-| `embodichain/lab/sim/cfg.py` | `RobotCfg.solver_cfg` — where solver config is wired into a robot |
+| `embodichain/lab/sim/cfg/robot.py` | `RobotCfg.solver_cfg` — where solver config is wired into a robot |
 | `embodichain/lab/sim/motion/solvers/qpos_seed_sampler.py` | `QposSeedSampler` — random joint-seed generation |
 | `embodichain/lab/sim/motion/solvers/null_space_posture_task.py` | `NullSpacePostureTask` — Pink null-space posture objective |
 | `embodichain/lab/sim/utility/solver_utils.py` | Helpers: `create_pk_serial_chain`, `build_reduced_pinocchio_robot`, `validate_iteration_params`, `compute_pinocchio_fk` |
@@ -138,5 +138,37 @@ OPW, SRS, and UR Warp implementations live in
 `lab.sim.motion.solvers` classes own configuration, state, device buffers, and
 solver interfaces. The compute kernels do not import simulation modules.
 `utils/warp/kinematics/*_solver.py` are compatibility aliases.
+
+`URSolver.get_ik(return_all_solutions=False)` uses `ur_ik_nearest_kernel` to
+generate, validate and select the seed-weighted nearest candidate in local
+storage, returning joints `(N, 6)` and validity `(N,)`. It retains the eight
+analytical branches and 64 periodic combinations per branch. The kernel flags
+nearby competing distances for legacy `torch.norm` / `argmin` selection in
+chunks of at most 128 targets, preserving backend rounding and candidate order
+at branch bisectors. Ordinary targets avoid the full candidate tensor; even an
+all-ambiguous batch uses bounded candidate buffers. The ambiguity margin routes
+the fallback and never decides a tie. `return_all_solutions=True` uses `ur_ik_kernel` and
+preserves the ordered joints `(N, 512, 6)` and validity `(N, 512)`, including
+repeated representatives when no shifted value fits the joint limits.
+
 Validate kernel import/compilation with `tests/compute/test_imports.py` and
 solver behavior with the corresponding `tests/sim/motion/solvers/` tests.
+
+## Batch adapters and analytic scratch memory
+
+`BaseSolver.get_fk_batch()` and `get_ik_batch()` flatten and restore arbitrary
+leading batch axes in the chain-root frame. Nearest IK returns a boolean success
+mask with the leading shape and qpos with a final `dof` axis; existing concrete
+`get_fk`/`get_ik` signatures remain available. Robot owns local-arena/root frame
+conversion and broadcasts root transforms without materializing per-target copies.
+
+UR's all-solutions path and OPW reuse internal candidate buffers through
+`solvers/_buffers.py`. UR's single-solution path keeps its own compact outputs
+and bounded ambiguity-fallback buffers, without allocating the full-batch cache.
+`prepare_buffers(max_batch)` reserves a high-water capacity; allocation is lazy
+and later larger calls grow it. Public results remain independent of subsequent
+calls, including `return_all_solutions=True`. Calls are serialized by a lock and
+CUDA events; Warp kernels use the current Torch stream. Buffer storage is released
+with the solver. UR's all-solutions path retains all 512 periodic candidates;
+OPW retains eight candidates. OPW packs live joint limits in one host
+transfer per call, so limit updates do not require cache invalidation.

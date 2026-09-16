@@ -240,7 +240,13 @@ class ViserBackend(VisualizationBackend):
                         )
                     )
 
-        if self.allow_commands and self._pointer_handler is None:
+    def _sync_pick_pointer_handler(self) -> None:
+        """Capture scene pointers only while the user has enabled picking."""
+        # Viser disables camera dragging while a scene pointer callback is
+        # registered, even if our callback ignores the resulting events.
+        if self.allow_commands and self._pick_enabled:
+            if self._pointer_handler is not None:
+                return
 
             @self._server.scene.on_pointer_event("click")
             def _on_pick_click(event: object) -> None:
@@ -249,6 +255,9 @@ class ViserBackend(VisualizationBackend):
                 )
 
             self._pointer_handler = _on_pick_click
+        elif self._pointer_handler is not None:
+            self._server.scene.remove_pointer_callback()
+            self._pointer_handler = None
 
     def _register_visibility_controls(self, manifest: SceneManifest) -> None:
         previous_env_visibility = self._env_visibility
@@ -1312,6 +1321,7 @@ class ViserBackend(VisualizationBackend):
                 self._overlay_visibility[str(category)] = bool(visible)
             elif event.category == "pick_enabled":
                 self._pick_enabled = bool(event.value)
+                self._sync_pick_pointer_handler()
                 if not self._pick_enabled:
                     self._clear_picker_gizmo()
             elif event.category == "camera_environment":

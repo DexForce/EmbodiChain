@@ -83,7 +83,7 @@ embodichain eval-policy outputs/<experiment>_<timestamp> \
 
 The Viewer uses one environment and keeps running until the window closes. Use
 `--episodes`, `--control-steps`, or `--duration` to select another stopping
-condition. `--renderer` accepts `hybrid`, `fast-rt`, and `offline-rt`.
+condition. `--renderer` accepts `hybrid`, `fast-rt`, and `rt`.
 Tasks exposing `set_velocity_command()` and `velocity_command_bounds()` also
 accept `--command vx vy yaw_rate`; use `--keymap wasd` or `--keymap arrows`
 for interactive command changes.
@@ -178,6 +178,10 @@ While tracking is active, drag with the left mouse button to orbit and use the
 mouse wheel to zoom.
 
 ## External policy example
+
+For ONNX-backed Motion Profiles, install the shared
+[`policy-deploy` extra](../quick_start/install.md#optional-policy-deployment-policy-deploy)
+before evaluation.
 
 For an already-authored DexSim Policy Spec, prefer the native
 `dexsim policy validate` and `dexsim policy run` commands. EmbodiChain's

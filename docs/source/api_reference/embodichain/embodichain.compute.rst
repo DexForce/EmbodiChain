@@ -10,7 +10,7 @@ own robots, scenes, or environment lifecycle. Importing the root package does
 not load Torch or Warp. Domain packages load their required dependencies.
 
 - ``kinematics/_warp`` implements analytical OPW, SRS, and UR computations.
-  Stateful solver interfaces remain in ``embodichain.lab.sim.solvers``.
+  Stateful solver interfaces remain in ``embodichain.lab.sim.motion.solvers``.
 - ``trajectory`` provides the public tensor interfaces below. Its private
   ``_warp`` implementation supports path resampling and trajectory warping.
 - ``geometry/_warp/convex_query.py`` evaluates maximum halfspace values for
@@ -76,6 +76,42 @@ Implementation modules
    :members:
 
 .. automodule:: embodichain.compute.trajectory.warping
+   :members:
+
+Kinematics API
+--------------
+
+``yoshikawa_manipulability`` returns ``sqrt(det(J @ J^T))`` per batched
+Jacobian; ``condition_number`` returns the ratio of largest to smallest
+singular value. ``select_jacobian_rows`` extracts task-specific row subsets
+(for example the translational rows) before scoring. All operate on batched
+Torch tensors of shape ``(N, R, DOF)`` and preserve input dtype and device.
+Workspace analysis and IK candidate ranking share this single numerical
+implementation; aggregation stays in the consuming layer.
+
+.. code-block:: python
+
+   import torch
+   from embodichain.compute.kinematics import (
+       select_jacobian_rows,
+       yoshikawa_manipulability,
+   )
+
+   jacobians = torch.randn(8, 6, 7)
+   scores = yoshikawa_manipulability(jacobians)
+   translational = yoshikawa_manipulability(
+       select_jacobian_rows(jacobians, "translational")
+   )
+
+.. currentmodule:: embodichain.compute.kinematics
+
+.. autosummary::
+
+   condition_number
+   select_jacobian_rows
+   yoshikawa_manipulability
+
+.. automodule:: embodichain.compute.kinematics.manipulability
    :members:
 
 Migration

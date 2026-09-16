@@ -87,17 +87,15 @@ start, and does not run generic joint pre-interpolation. It also preserves the
 planner's native sample grid and its analytical velocity and acceleration
 outputs. `MotionGenOptions.sample_count` therefore does not replace an explicit
 `TrapezoidalPlanOptions.sample_interval`.
+When options are automatically resolved from a backend-neutral request, the
+requested quantity is treated as a lower bound if Cartesian-to-joint conversion
+produces more required waypoints; an explicit
+`TrapezoidalPlanOptions.sample_interval` remains authoritative.
 
-Every successful result with positions contains:
-
-| Field | Shape | Meaning |
-|---|---|---|
-| `positions` | `(B, N, DOF)` | Joint position samples. |
-| `velocities` | `(B, N, DOF)` | Native joint velocity samples. |
-| `accelerations` | `(B, N, DOF)` | Native joint acceleration samples. |
-| `dt` | `(B, N)` | Arrival intervals; the first interval is zero. |
-| `duration` | `(B,)` | Derived as `dt.sum(dim=1)`. |
-| `constraint_report` | mapping | Peaks, per-joint utilization, limits, and status. |
+Results follow the shared
+[PlanResult contract](../motion_generator.md#inputs-and-results).
+`constraint_report` adds derivative peaks, per-joint utilization, limits, and
+status. Native trajectories start with a zero arrival interval.
 
 ## Profiles and constraints
 
