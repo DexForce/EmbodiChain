@@ -126,6 +126,7 @@ def generate_task_program_bundle(
     robot_profile: str,
     max_episodes: int | None = None,
     max_episode_steps: int | None = None,
+    fit_grasp_assets: bool = False,
 ) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
     """Write, compose, and provider-free preflight one semantic deployment.
 
@@ -147,6 +148,8 @@ def generate_task_program_bundle(
             integration cannot be composed and preflighted.
     """
     selected_graph = validate_semantic_task_graph(graph)
+    if type(fit_grasp_assets) is not bool:
+        raise TypeError("fit_grasp_assets must be a boolean.")
     unsupported = sorted(
         {node["task_type"] for node in selected_graph["nodes"]}
         - {"E1", "E2", "E3", "E4", "E5"}
@@ -172,7 +175,58 @@ def generate_task_program_bundle(
         normalize_scene_assets,
     )
 
+    project_root = Path(__file__).resolve().parents[3]
+    embodiment_source = (
+        project_root
+        / "embodichain_tasks/configs/components/embodiments"
+        / embodiment_filename
+    )
+    embodiment_payload = load_config(embodiment_source)
+    _calibrate_task_gripper_opening(embodiment_payload)
+    adaptation = None
+    if fit_grasp_assets:
+        from .orchestration.grasp_fit import fit_e2_grasp_asset
+
+        pick = next(
+            (
+                node["call"]
+                for node in selected_graph["nodes"]
+                if node["call"].get("kind") == "pick"
+                or node["call"].get("call_id") == "simulation.pick"
+                or node["call"].get("call_id", "").startswith("gen_sim.pick.")
+            ),
+            None,
+        )
+        if pick is None:
+            raise ValueError("Grasp-fit scaling requires an E2 Pick.")
+        resource = pick["resources"]["primary"]
+        generators = embodiment_payload["skill_profile"]["runtime_services"][
+            "grasp_pose_generators"
+        ]
+        opening = float(generators[f"{resource}_eef"]["model"]["max_opening_width"])
+        prepared_scene, adaptation = fit_e2_grasp_asset(
+            prepared_scene, selected_graph, opening=opening
+        )
     scene = normalize_scene_assets(prepared_scene, root)
+    if adaptation is not None:
+        provenance = next(
+            (
+                item
+                for item in scene.asset_provenance
+                if item["uid"] == adaptation["object_id"]
+            ),
+            None,
+        )
+        if adaptation["status"] == "scaled" and (
+            provenance is None or provenance["status"] not in {"generated", "reused"}
+        ):
+            raise ValueError(
+                "Scaled grasp asset could not be baked into a runtime GLB."
+            )
+        if provenance is not None:
+            adaptation["runtime_sha256"] = provenance["runtime_sha256"]
+            adaptation["runtime_path"] = provenance["runtime_path"]
+        _write_json(root / "asset_adaptation.json", adaptation)
     selected_graph = _refine_upright_targets(selected_graph, scene)
     selected_graph = _refine_coordinated_targets(selected_graph, scene)
     for node in selected_graph["nodes"]:
@@ -201,20 +255,12 @@ def generate_task_program_bundle(
         semantic_task_graph=root / "semantic_task_graph.json",
         integration_fingerprint=root / "integration_fingerprint.json",
     )
-    project_root = Path(__file__).resolve().parents[3]
-    embodiment_source = (
-        project_root
-        / "embodichain_tasks/configs/components/embodiments"
-        / embodiment_filename
-    )
     policy_source = (
         project_root
         / "embodichain_tasks/configs/components/execution_policies"
         / "dual_arm_trajectory_verified.yaml"
     )
-    embodiment_payload = load_config(embodiment_source)
     _bind_embodiment_to_scene(embodiment_payload, table_top_z=scene.table_top_z)
-    _calibrate_task_gripper_opening(embodiment_payload)
     save_config(paths.embodiment, embodiment_payload)
     policy_payload = load_config(policy_source)
     policy_payload["tracking"]["consecutive_acceptances"] = 5

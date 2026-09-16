@@ -109,6 +109,7 @@ class TaskEnginePlanningCfg:
     planning_mode: str = "offline"
     max_episodes: int = 1
     max_episode_steps: int = 8000
+    fit_grasp_assets: bool = False
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -121,6 +122,8 @@ class TaskEnginePlanningCfg:
                 raise ValueError(f"{field_name} must be a positive integer.")
         if self.planning_mode not in {"offline", "ab"}:
             raise ValueError("planning_mode must be offline or ab.")
+        if type(self.fit_grasp_assets) is not bool:
+            raise TypeError("fit_grasp_assets must be a boolean.")
 
 
 def load_task_engine_config(
@@ -170,7 +173,11 @@ def load_task_engine_config(
         "max_episodes",
         "max_episode_steps",
     }
-    if set(planning) != required_planning:
+    if (
+        not required_planning
+        <= set(planning)
+        <= required_planning | {"fit_grasp_assets"}
+    ):
         raise ValueError("Task Engine planning configuration fields are invalid.")
     if set(execution) != {
         "num_envs",

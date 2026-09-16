@@ -511,6 +511,7 @@ def test_bound_prepare_publishes_semantic_task_program_bundle(
             "robot_profile": "dual_franka",
             "max_episodes": None,
             "max_episode_steps": None,
+            "fit_grasp_assets": False,
         }
     ]
     assert result.semantic_task_graph == graph
