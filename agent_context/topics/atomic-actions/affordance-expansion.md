@@ -71,8 +71,10 @@ trajectory feasibility checks; they do not promise every candidate succeeds.
   arc and retain their relative transform.
 - Twist: optional `TwistOptions.twist_angle_range` declares a signed interval
   containing the nominal angle without reversing direction. The grasp position
-  and axis origin stay fixed. `TwistAffordance.grasp_roll_range` permits initial
-  roll only when the asset declares that contact symmetry.
+  and axis origin stay fixed. `TwistAffordance.grasp_roll` owns the nominal
+  finger orientation about the forward axis and defaults to zero.
+  `grasp_roll_range` permits sampling absolute initial rolls only when the
+  asset declares that contact symmetry; it must contain the nominal roll.
 - Slide: optional `SlideOptions.translation_distance_range` declares positive
   task-accepted travel. Configured slide action options decode the same field.
 - Randomized Twist/Slide travel requires joint limits, an unambiguous live joint

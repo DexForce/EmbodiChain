@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+import math
+from numbers import Real
 from typing import Any, ClassVar, TYPE_CHECKING
 
 import torch
@@ -350,8 +352,11 @@ class TwistAffordance(Affordance):
     )
     """Fallback axis point, overridden by revolute-joint origin metadata."""
 
+    grasp_roll: float = field(default=0.0, kw_only=True)
+    """Nominal contact-frame rotation about its forward z-axis, in radians."""
+
     grasp_roll_range: tuple[float, float] | None = field(default=None, kw_only=True)
-    """Explicitly allowed contact-frame roll symmetry, in radians."""
+    """Allowed absolute contact-frame rolls containing ``grasp_roll``, in radians."""
 
     joint_axis_sign: int = field(default=1, kw_only=True)
     """Sign mapping positive affordance-axis motion to positive joint coordinates.
@@ -372,12 +377,21 @@ class TwistAffordance(Affordance):
     """Optional lower and upper angular limits in radians."""
 
     def __post_init__(self) -> None:
+        if (
+            isinstance(self.grasp_roll, bool)
+            or not isinstance(self.grasp_roll, Real)
+            or not math.isfinite(self.grasp_roll)
+        ):
+            raise ValueError("grasp_roll must be a finite real scalar.")
+        self.grasp_roll = float(self.grasp_roll)
         if self.grasp_roll_range is not None:
             lower, upper = _validate_range(
                 self.grasp_roll_range, name="grasp_roll_range"
             )
-            if not lower <= 0.0 <= upper:
-                raise ValueError("grasp_roll_range must include the nominal zero roll.")
+            if not lower <= self.grasp_roll <= upper:
+                raise ValueError(
+                    "grasp_roll_range must include the nominal grasp_roll."
+                )
             self.grasp_roll_range = (lower, upper)
         if type(self.joint_axis_sign) is not int or self.joint_axis_sign not in (-1, 1):
             raise ValueError("joint_axis_sign must be -1 or 1.")
@@ -451,7 +465,9 @@ class TwistAffordance(Affordance):
         """Construct a deterministic world grasp pose from local geometry.
 
         The pose z-axis follows :attr:`twist_axis`. The remaining axes are
-        formed with an adaptive reference so the result is always in SO(3).
+        formed with an adaptive reference and rotated by :attr:`grasp_roll`
+        about z. A sampled roll replaces that nominal value rather than adding
+        another rotation, preserving the contact point and forward axis.
 
         Args:
             target_pose: Target world poses with shape (B, 4, 4).
@@ -488,6 +504,9 @@ class TwistAffordance(Affordance):
         grasp_pose[:, :3, 3] = (
             torch.matmul(target_pose[:, :3, :3], local_grasp) + target_pose[:, :3, 3]
         )
+        angles = torch.full(
+            (len(target_pose),), self.grasp_roll, dtype=torch.float32, device=device
+        )
         if (
             sampling is not None
             and sampling.enabled
@@ -499,10 +518,9 @@ class TwistAffordance(Affordance):
                 else env_ids
             )
             angles = sampling.sample_range(
-                0.0, self.grasp_roll_range, env_ids=ids, key=key
+                self.grasp_roll, self.grasp_roll_range, env_ids=ids, key=key
             )
-            grasp_pose = _roll_poses(grasp_pose, angles)
-        return grasp_pose
+        return _roll_poses(grasp_pose, angles)
 
 
 @dataclass
@@ -1141,7 +1159,12 @@ def _outer_surface_center(
 def _orthogonal_xy_from_z(z_axis: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Complete normalized z axes into right-handed orthonormal frames."""
     basis = torch.eye(3, dtype=z_axis.dtype, device=z_axis.device)
-    reference_indices = torch.argmin(torch.abs(z_axis), dim=1)
+    magnitudes = torch.abs(z_axis)
+    # Arena transforms can perturb tied components by float32 roundoff. Keep
+    # the first near-minimal reference axis so identical contacts do not gain
+    # an unintended quarter-turn, while preserving the actual forward axis.
+    near_minimum = magnitudes <= magnitudes.amin(dim=1, keepdim=True) + 1.0e-6
+    reference_indices = near_minimum.to(torch.long).argmax(dim=1)
     reference = basis[reference_indices]
     y_axis = torch.nn.functional.normalize(
         torch.linalg.cross(reference, z_axis, dim=1), dim=1

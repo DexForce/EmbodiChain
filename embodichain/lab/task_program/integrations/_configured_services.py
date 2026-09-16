@@ -39,10 +39,14 @@ from embodichain.lab.sim.atomic_actions import (
     MoveHeldObject,
     MoveHeldObjectOptions,
     ObjectSemantics,
+    OpenDoor,
+    OpenDoorAffordance,
     PlanningContext,
     Pour,
     PourGoal,
     PourOptions,
+    Press,
+    PressAffordance,
     PushObject,
     PushObjectGoal,
     PushObjectOptions,
@@ -53,6 +57,8 @@ from embodichain.lab.sim.atomic_actions import (
     SlideAffordance,
     SlideGoal,
     SlideOptions,
+    Twist,
+    TwistAffordance,
     sample_initial_articulation_geometry,
 )
 from embodichain.lab.task_program.semantics import (
@@ -400,6 +406,335 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
             semantics,
             self.link_entity_id,
             target_pose_mode=self.target_pose_mode,
+        )
+
+
+class _ArticulationLinkActionLowerer(RegisteredSemanticLowerer):
+    """Ground a configured articulation link without owning motion options."""
+
+    affordance_type: ClassVar[type[Affordance]]
+    argument_name: ClassVar[str] = "target"
+
+    def __init__(
+        self,
+        semantics: ObjectSemantics,
+        link_entity_id: str,
+        *,
+        target_pose_mode: str = "live",
+    ) -> None:
+        if not isinstance(semantics, ObjectSemantics):
+            raise TypeError("semantics must be ObjectSemantics.")
+        if not isinstance(semantics.affordance, self.affordance_type):
+            raise TypeError(f"{self.call_id} requires {self.affordance_type.__name__}.")
+        self._link_entity_id = _identifier(link_entity_id, field_name="link_entity_id")
+        if semantics.entity_id != self._link_entity_id:
+            raise ValueError("semantics must identify the configured target link.")
+        self._semantics = semantics
+        self._target_pose_mode = _slide_target_pose_mode(target_pose_mode)
+
+    def _goal_arguments(self, arguments: dict[str, object]) -> dict[str, object]:
+        """Accept only the configured semantic target."""
+        if arguments != {self.argument_name: self._link_entity_id}:
+            raise ValueError(
+                f"{self.call_id} arguments must name only the configured "
+                f"{self.argument_name}; motion options belong to the selected "
+                "policy preset."
+            )
+        return {}
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+        option_template: ActionOptions,
+    ) -> SemanticLowering:
+        """Construct a typed goal from the current planning observation."""
+        del bound
+        if call.call_id != self.call_id:
+            raise ValueError(f"Expected registered call {self.call_id!r}.")
+        if type(option_template) is not self.target_descriptor.options_type:
+            raise TypeError(
+                f"{self.call_id} requires an exact "
+                f"{self.target_descriptor.options_type.__name__} template."
+            )
+        goal_arguments = self._goal_arguments(dict(call.arguments))
+        target_pose: torch.Tensor | SceneEntityPose
+        if self._target_pose_mode == "live":
+            target_pose = SceneEntityPose(self._link_entity_id)
+        else:
+            try:
+                observed_pose = context.scene.entities[self._link_entity_id].pose
+            except KeyError as exc:
+                raise KeyError(
+                    f"{self.call_id} snapshot target is absent from the planning "
+                    f"scene: {self._link_entity_id!r}."
+                ) from exc
+            if not isinstance(observed_pose, torch.Tensor):
+                raise TypeError("Articulation-link snapshot pose must be a tensor.")
+            target_pose = observed_pose.clone()
+        return SemanticLowering(
+            goal=self.target_descriptor.goal_type(
+                semantics=self._semantics,
+                target_pose=target_pose,
+                **goal_arguments,
+            )
+        )
+
+
+class _ArticulationLinkPressLowerer(_ArticulationLinkActionLowerer):
+    """Ground a press target using its sampled prismatic-joint geometry."""
+
+    call_id: ClassVar[str] = "simulation.articulation_link_press"
+    target_descriptor: ClassVar[SkillDescriptor] = Press.descriptor()
+    affordance_type: ClassVar[type[Affordance]] = PressAffordance
+
+
+class _ArticulationLinkTwistLowerer(_ArticulationLinkActionLowerer):
+    """Ground a twist target using its sampled revolute-joint geometry."""
+
+    call_id: ClassVar[str] = "simulation.articulation_link_twist"
+    target_descriptor: ClassVar[SkillDescriptor] = Twist.descriptor()
+    affordance_type: ClassVar[type[Affordance]] = TwistAffordance
+
+
+class _ArticulationLinkOpenDoorLowerer(_ArticulationLinkActionLowerer):
+    """Ground a door handle and a task-owned absolute opening fraction."""
+
+    call_id: ClassVar[str] = "simulation.articulation_link_open_door"
+    target_descriptor: ClassVar[SkillDescriptor] = OpenDoor.descriptor()
+    affordance_type: ClassVar[type[Affordance]] = OpenDoorAffordance
+    argument_name: ClassVar[str] = "handle"
+
+    def _goal_arguments(self, arguments: dict[str, object]) -> dict[str, object]:
+        required = {"handle", "open_fraction"}
+        if (
+            not required <= arguments.keys()
+            or arguments.keys() - required - {"open_fraction_range"}
+            or arguments["handle"] != self._link_entity_id
+        ):
+            raise ValueError(
+                f"{self.call_id} arguments require the configured handle and "
+                "open_fraction, with only optional open_fraction_range; "
+                "motion options belong to the selected policy preset."
+            )
+        fraction = arguments["open_fraction"]
+        if type(fraction) not in (int, float) or not math.isfinite(fraction):
+            raise TypeError("open_fraction must be a finite real scalar.")
+        if not 0.0 <= fraction <= 1.0:
+            raise ValueError("open_fraction must lie in [0, 1].")
+        result: dict[str, object] = {"open_fraction": float(fraction)}
+        if "open_fraction_range" in arguments:
+            bounds = arguments["open_fraction_range"]
+            if (
+                not isinstance(bounds, (tuple, list))
+                or len(bounds) != 2
+                or any(type(value) not in (int, float) for value in bounds)
+            ):
+                raise TypeError("open_fraction_range must contain two real values.")
+            result["open_fraction_range"] = tuple(float(value) for value in bounds)
+        return result
+
+
+@dataclass(frozen=True, slots=True)
+class _ArticulationLinkActionLowererFactory(RegisteredSemanticLowererFactory):
+    """Resolve only the configured live link for one registered action family."""
+
+    revision: ClassVar[str] = "1"
+    lowerer_type: ClassVar[type[_ArticulationLinkActionLowerer]]
+
+    articulation_id: str
+    articulation_simulation_uid: str
+    link_entity_id: str
+    target_pose_mode: str = "live"
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "articulation_id",
+            "articulation_simulation_uid",
+            "link_entity_id",
+        ):
+            _identifier(getattr(self, field_name), field_name=field_name)
+        _slide_target_pose_mode(self.target_pose_mode)
+
+    def _semantics(
+        self, articulation: object, native_link_name: str
+    ) -> ObjectSemantics:
+        """Construct the concrete family affordance from public articulation facts."""
+        raise NotImplementedError
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> RegisteredSemanticLowerer:
+        """Build a fresh lowerer without stepping or changing simulation state."""
+        if engine.robot is not robot:
+            raise ValueError("Articulation lowerer requires the engine's exact robot.")
+        registration = scene_registry.lookup(
+            self.link_entity_id, expected_type=SceneLinkRef
+        )
+        if registration.parent != SceneArticulationRef(self.articulation_id):
+            raise ValueError(
+                f"Configured link {self.link_entity_id!r} must belong to "
+                f"articulation {self.articulation_id!r}."
+            )
+        native_registration = scene_registry.lookup(
+            self.articulation_simulation_uid, expected_type=SceneArticulationRef
+        )
+        if native_registration.ref != registration.parent:
+            raise ValueError(
+                "articulation_simulation_uid must identify the configured "
+                "link's parent articulation."
+            )
+        native_link_name = _identifier(
+            registration.native_name, field_name="native_link_name"
+        )
+        get_articulation = getattr(simulation, "get_articulation", None)
+        if not callable(get_articulation):
+            raise TypeError("simulation must provide get_articulation().")
+        articulation = get_articulation(self.articulation_simulation_uid)
+        if articulation is None:
+            raise RuntimeError(
+                f"Configured action requires articulation "
+                f"{self.articulation_simulation_uid!r}."
+            )
+        if native_link_name not in articulation.link_names:
+            raise RuntimeError(f"Articulation must expose link {native_link_name!r}.")
+        return self.lowerer_type(
+            self._semantics(articulation, native_link_name),
+            self.link_entity_id,
+            target_pose_mode=self.target_pose_mode,
+        )
+
+
+def _configured_link_geometry(
+    articulation: object, link_name: str
+) -> dict[str, object]:
+    """Sample target-local geometry at the authored initial articulation state."""
+    return sample_initial_articulation_geometry(
+        articulation,
+        link_name,
+        initial_qpos=articulation.cfg.init_qpos,
+        initial_qpos_joint_names=articulation.joint_names,
+        body_scale=articulation.cfg.body_scale,
+    ).to_object_geometry()
+
+
+@dataclass(frozen=True, slots=True)
+class _ArticulationLinkPressLowererFactory(_ArticulationLinkActionLowererFactory):
+    """Resolve contact position and press direction from articulation geometry."""
+
+    call_id: ClassVar[str] = _ArticulationLinkPressLowerer.call_id
+    target_descriptor: ClassVar[SkillDescriptor] = Press.descriptor()
+    lowerer_type: ClassVar[type[_ArticulationLinkActionLowerer]] = (
+        _ArticulationLinkPressLowerer
+    )
+
+    def _semantics(
+        self, articulation: object, native_link_name: str
+    ) -> ObjectSemantics:
+        return ObjectSemantics(
+            label="articulation_press_target",
+            entity_id=self.link_entity_id,
+            geometry=_configured_link_geometry(articulation, native_link_name),
+            affordance=PressAffordance(),
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _ArticulationLinkTwistLowererFactory(_ArticulationLinkActionLowererFactory):
+    """Keep authored contact position while resolving native rotation geometry."""
+
+    call_id: ClassVar[str] = _ArticulationLinkTwistLowerer.call_id
+    target_descriptor: ClassVar[SkillDescriptor] = Twist.descriptor()
+    lowerer_type: ClassVar[type[_ArticulationLinkActionLowerer]] = (
+        _ArticulationLinkTwistLowerer
+    )
+
+    grasp_position: tuple[float, float, float]
+    grasp_roll: float = 0.0
+    grasp_roll_range: tuple[float, float] | None = None
+
+    def __post_init__(self) -> None:
+        _ArticulationLinkActionLowererFactory.__post_init__(self)
+        # Reuse the skill-owned contact/symmetry validation without live services.
+        checked = TwistAffordance(
+            grasp_position=self.grasp_position,
+            grasp_roll=self.grasp_roll,
+            grasp_roll_range=self.grasp_roll_range,
+        )
+        object.__setattr__(self, "grasp_position", checked.grasp_position)
+        object.__setattr__(self, "grasp_roll", checked.grasp_roll)
+        object.__setattr__(self, "grasp_roll_range", checked.grasp_roll_range)
+
+    def _semantics(
+        self, articulation: object, native_link_name: str
+    ) -> ObjectSemantics:
+        active = tuple(
+            joint
+            for joint in articulation.get_parent_joint_chain(native_link_name)
+            if joint.joint_type != "fixed"
+        )
+        if len(active) != 1 or active[0].joint_type != "revolute":
+            raise ValueError(
+                "Configured Twist requires one unambiguous revolute ancestor."
+            )
+        joint = active[0]
+        return ObjectSemantics(
+            label="articulation_twist_target",
+            entity_id=self.link_entity_id,
+            geometry=_configured_link_geometry(articulation, native_link_name),
+            affordance=TwistAffordance(
+                grasp_position=self.grasp_position,
+                grasp_roll=self.grasp_roll,
+                grasp_roll_range=self.grasp_roll_range,
+                joint_name=joint.name,
+                joint_limits=joint.joint_limits,
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _ArticulationLinkOpenDoorLowererFactory(_ArticulationLinkActionLowererFactory):
+    """Resolve handle mesh and hinge axis through public parent-joint topology."""
+
+    call_id: ClassVar[str] = _ArticulationLinkOpenDoorLowerer.call_id
+    target_descriptor: ClassVar[SkillDescriptor] = OpenDoor.descriptor()
+    lowerer_type: ClassVar[type[_ArticulationLinkActionLowerer]] = (
+        _ArticulationLinkOpenDoorLowerer
+    )
+
+    hinge_joint_name: str | None = None
+    opening_direction: int = 1
+
+    def __post_init__(self) -> None:
+        _ArticulationLinkActionLowererFactory.__post_init__(self)
+        if self.hinge_joint_name is not None:
+            _identifier(self.hinge_joint_name, field_name="hinge_joint_name")
+        if type(self.opening_direction) is not int or self.opening_direction not in (
+            -1,
+            1,
+        ):
+            raise ValueError("opening_direction must be either -1 or 1.")
+
+    def _semantics(
+        self, articulation: object, native_link_name: str
+    ) -> ObjectSemantics:
+        return ObjectSemantics(
+            label="articulation_door_handle",
+            entity_id=self.link_entity_id,
+            geometry={},
+            affordance=OpenDoorAffordance.from_articulation(
+                articulation,
+                native_link_name,
+                hinge_joint_name=self.hinge_joint_name,
+                opening_direction=self.opening_direction,
+            ),
         )
 
 

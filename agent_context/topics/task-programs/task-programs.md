@@ -39,6 +39,7 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Physical Gym component composition | `embodichain/lab/gym/utils/_component_composition.py` |
 | Configured semantic/policy composition | `embodichain/lab/task_program/integrations/_configured_composition.py` |
 | Callable-free configured runtime decode | `embodichain/lab/task_program/integrations/configured.py` |
+| Allowlisted simulation call lowerers | `embodichain/lab/task_program/integrations/_configured_services.py` |
 | Simulation bindings and live assembly | `embodichain/lab/task_program/integrations/simulation/` |
 | Gym `DemoSegment` / `env.step()` bridge | `embodichain/lab/gym/envs/task_program/bridge.py` |
 | Dynamic Gym ID registration | `embodichain/lab/gym/envs/task_program/registration.py` |
@@ -90,8 +91,21 @@ independent branch choices and held-object transforms; see
 | `TaskProgramRepeatedPickPlace-Franka-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.newton.yaml` |
 | `TaskProgramOpenDrawer-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/open_drawer/` |
 | `TaskProgramOpenDrawer-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.newton.yaml` |
+| `TaskProgramPress-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/press/task.ur5.yaml` |
+| `TaskProgramTwist-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/twist/task.ur5.yaml` |
+| `TaskProgramOpenDoor-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/open_door/task.ur5.yaml` |
+| `TaskProgramPour-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/pour/task.ur5.yaml` |
 | `HandOver-v1` | verified | `embodichain_tasks/configs/tasks/manipulation/hand_over/` |
 | `PourWater-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/` |
+
+The Press, Twist, OpenDoor, and Pour deployments reuse the UR5 parallel-gripper
+embodiment and the same component layout as `repeated_pick_place`. They are
+configuration-owned examples without task Python subclasses. The first three
+bind registered calls to microwave articulation links; Pour composes Pick with
+the existing `simulation.pour` call on an axis-aware cube grasp. See the
+[configured action services](configuration.md#configured-articulation-and-pour-services)
+for their geometry and policy boundaries. Their projected assurance declares
+command completion, not measured physical task success.
 
 ## Recommended change sites
 
@@ -105,6 +119,7 @@ independent branch choices and held-object transforms; see
 | Runtime sequencing or parallel behavior | `runtime/` |
 | Registration fingerprint/extensions | `integrations/catalog.py`, `extensions.py` |
 | Configured integration format | `integrations/configured.py` |
+| Configured articulation-link action or held-object Pour | `integrations/_configured_services.py`, then the task's `integration.yaml` |
 | Live simulation binding | `integrations/simulation/` |
 | Gym action/segment lifecycle | `gym/envs/task_program/bridge.py` |
 | Episode program selection/final success | `gym/envs/embodied_env.py` |

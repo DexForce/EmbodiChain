@@ -1,0 +1,47 @@
+integration_id: twist_v1
+program_id: twist_microwave_knob
+
+requires:
+  scene_contract: twist_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+
+scene_binding:
+  contract_id: twist_scene_v1
+  registry_id: task_program_twist
+  articulations:
+    - entity_id: microwave
+      simulation_uid: microwave
+      dynamics: dynamic
+      semantic_type: microwave
+  links:
+    - entity_id: microwave_knob
+      articulation_id: microwave
+      native_link_name: cap_1
+      dynamics: dynamic
+      semantic_type: power_knob
+
+profile:
+  defaults:
+    twist:
+      primary: primary_manipulator
+  action_options:
+    simulation.articulation_link_twist:
+      kind: twist
+      hand_interp_steps: 12
+      twist_waypoint_count: 8
+      pre_grasp_distance: 0.12
+      # Commanded tool rotation; open-loop contact can slip at the knob.
+      twist_angle: -0.7853981634
+  effect_monitors: {}
+
+runtime_services:
+  registered_semantic_lowerers:
+    - kind: articulation_link_twist
+      articulation_id: microwave
+      articulation_simulation_uid: microwave
+      link_entity_id: microwave_knob
+      target_pose_mode: snapshot
+      # Mean of the cap_1 visual mesh vertices, expressed in cap_1's frame.
+      grasp_position: [0.00046654296, 0.00002232439, -0.00524837383]
+      # Align the fingers vertically around the knob instead of its side edges.
+      grasp_roll: 1.5707963267948966

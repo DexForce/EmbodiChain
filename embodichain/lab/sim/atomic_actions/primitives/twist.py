@@ -67,6 +67,7 @@ from embodichain.lab.sim.atomic_actions.requirements import (
 )
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    axis_translation_keyframes,
     build_pose_plan_states,
     interpolate_hand_qpos,
     resolve_pose_target,
@@ -97,7 +98,7 @@ class TwistOptions(ActionOptions):
     """Number of Cartesian keyframes along the target's circular twist arc."""
 
     pre_grasp_distance: float = 0.1
-    """Distance from the grasp pose along its negative z-axis."""
+    """Approach and post-release retreat distance along the negative gripper z-axis."""
 
     twist_angle: float = math.pi / 4
     """Requested twist rotation in radians."""
@@ -252,6 +253,19 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             request.motion_policy.sample_count,
             options.hand_interp_steps,
         )
+        # Leave the contact along the final tool axis before any wrist reset.
+        # Returning to pre_grasp_xpos would unwind beside the knob after release.
+        final_twist_xpos = twist_xpos[:, -1]
+        retract_xpos = translate_pose_world(
+            final_twist_xpos,
+            -final_twist_xpos[:, :3, 2] * options.pre_grasp_distance,
+        )
+        retract_keyframes = axis_translation_keyframes(
+            final_twist_xpos,
+            retract_xpos,
+            final_twist_xpos[:, :3, 2],
+            n_waypoints=n_retract - 1,
+        )
 
         approach_success, approach_arm = self._plan_pose_segment(
             pre_grasp_xpos,
@@ -278,12 +292,13 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             interpolation_dt=interpolation_dt,
         )
         retract_success, retract_arm = self._plan_pose_segment(
-            pre_grasp_xpos,
+            retract_keyframes,
             twist_arm[:, -1],
             control_part,
             request,
             n_retract,
             interpolation_dt=interpolation_dt,
+            cartesian_linear=True,
         )
         success = approach_success & reach_success & twist_success & retract_success
 
@@ -400,6 +415,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         sample_count: int,
         *,
         interpolation_dt: float,
+        cartesian_linear: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         result = self.motion_generator.generate(
             build_pose_plan_states(target_pose),
@@ -408,6 +424,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
                 control_part=control_part,
                 sample_count=sample_count,
                 interpolation_dt=interpolation_dt,
+                cartesian_linear=cartesian_linear,
             ),
         )
         assert isinstance(result.success, torch.Tensor)

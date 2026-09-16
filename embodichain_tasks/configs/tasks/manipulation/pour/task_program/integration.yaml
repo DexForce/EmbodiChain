@@ -1,0 +1,43 @@
+integration_id: pour_v1
+program_id: pick_and_pour_cube
+
+requires:
+  scene_contract: pour_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+
+scene_binding:
+  contract_id: pour_scene_v1
+  registry_id: task_program_pour
+  rigid_objects:
+    - entity_id: cube
+      simulation_uid: cube
+      dynamics: dynamic
+      semantic_type: cube
+      affordances:
+        - entity_id: cube_grasp
+          kind: antipodal_grasp
+          # Pour rotates the grasped cube about its local X axis, then returns.
+          internal_axis: [1.0, 0.0, 0.0]
+
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    pour:
+      primary: primary_manipulator
+  action_options:
+    pick:
+      kind: pick_up
+      approach_direction: [-0.707, 0.0, -0.707]
+      pre_grasp_distance: 0.15
+      lift_height: 0.16
+      hand_interp_steps: 12
+    simulation.pour:
+      kind: pour
+      rotate_angle: 0.7853981633974483
+  effect_monitors: {}
+
+runtime_services:
+  registered_semantic_lowerers:
+    - kind: pour
+      object_id: cube

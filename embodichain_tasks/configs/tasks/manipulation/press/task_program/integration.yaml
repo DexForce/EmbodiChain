@@ -1,0 +1,41 @@
+integration_id: press_v1
+program_id: press_microwave_button
+
+requires:
+  scene_contract: press_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+
+scene_binding:
+  contract_id: press_scene_v1
+  registry_id: task_program_press
+  articulations:
+    - entity_id: microwave
+      simulation_uid: microwave
+      dynamics: dynamic
+      semantic_type: microwave
+  links:
+    - entity_id: microwave_button
+      articulation_id: microwave
+      native_link_name: button_cap
+      dynamics: dynamic
+      semantic_type: button
+
+profile:
+  defaults:
+    press:
+      primary: primary_manipulator
+  action_options:
+    simulation.articulation_link_press:
+      kind: press
+      hand_interp_steps: 12
+      approach_distance: 0.12
+      press_distance: 0.03
+  effect_monitors: {}
+
+runtime_services:
+  registered_semantic_lowerers:
+    - kind: articulation_link_press
+      articulation_id: microwave
+      articulation_simulation_uid: microwave
+      link_entity_id: microwave_button
+      target_pose_mode: snapshot

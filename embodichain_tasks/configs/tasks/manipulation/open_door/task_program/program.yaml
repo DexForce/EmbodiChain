@@ -1,0 +1,14 @@
+program_id: open_microwave_door
+targets: {}
+program:
+  kind: segment
+  name: open_door
+  steps:
+    kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.articulation_link_open_door
+      arguments:
+        handle: microwave_handle
+        # 60 degrees over this asset's legal hinge interval [0, 2.00713] rad.
+        open_fraction: 0.5217387768587972

@@ -37,6 +37,10 @@ from embodichain.lab.sim.atomic_actions.affordance import (
     TwistAffordance,
 )
 from embodichain.lab.sim.atomic_actions.core import ObjectSemantics
+from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+    AffordanceSamplingContext,
+)
+from embodichain.utils.math import axis_angle_to_rotation_matrix
 
 POINT_CLOUD_CENTER = torch.tensor([2.0, -3.0, 4.0])
 PRISMATIC_JOINT_AXIS = torch.tensor([2.0, 2.0, 1.0])
@@ -857,7 +861,123 @@ class TestArticulationGeometryAxisInference:
         assert affordance.axis_origin == pytest.approx((9.0, 8.0, 7.0))
 
 
+@pytest.mark.parametrize("kind", ("press", "twist"))
+@pytest.mark.parametrize(
+    "local_axis",
+    (
+        (1.0, 0.0, 0.0),
+        (-1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, -1.0, 0.0),
+        (0.0, 0.0, 1.0),
+        (0.0, 0.0, -1.0),
+        (1.0, 1.0, 1.0),
+        (0.4, -0.2, 0.9),
+    ),
+)
+def test_contact_frame_roll_is_stable_under_link_pose_roundoff(
+    kind: str, local_axis: tuple[float, float, float]
+) -> None:
+    """Equivalent parallel arenas cannot gain a quarter-turn from float noise."""
+    axis = torch.tensor(local_axis)
+    poses = torch.eye(4).repeat(4, 1, 1)
+    # GPU arena transforms differ by this scale even for identically oriented
+    # links. Perturb rotations rather than supplying invalid pose matrices.
+    perturbations = torch.cat((torch.zeros(1, 3), torch.eye(3) * 2.4e-7))
+    poses[:, :3, :3] = axis_angle_to_rotation_matrix(perturbations)
+    poses[:, :3, 3] = torch.arange(4, dtype=torch.float32)[:, None]
+    if kind == "press":
+        affordance = PressAffordance(press_position=(0.0, 0.0, 0.0), press_axis=axis)
+        contacts = affordance.get_press_pose(poses)
+    else:
+        affordance = TwistAffordance(grasp_position=(0.0, 0.0, 0.0), twist_axis=axis)
+        contacts = affordance.get_grasp_pose(poses)
+    rotation = contacts[:, :3, :3]
+
+    torch.testing.assert_close(
+        rotation, rotation[:1].expand_as(rotation), atol=2.0e-6, rtol=0.0
+    )
+    torch.testing.assert_close(
+        rotation.transpose(1, 2) @ rotation,
+        torch.eye(3).expand(4, -1, -1),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    torch.testing.assert_close(torch.linalg.det(rotation), torch.ones(4))
+    torch.testing.assert_close(
+        rotation[:, :, 2], poses[:, :3, :3] @ torch.nn.functional.normalize(axis, dim=0)
+    )
+    torch.testing.assert_close(contacts[:, :3, 3], poses[:, :3, 3])
+
+
 class TestTwistAffordance:
+    @pytest.mark.parametrize("sampling", (None, AffordanceSamplingContext(count=1)))
+    def test_nominal_roll_rotates_finger_axes_once_without_expansion(self, sampling):
+        target_pose = torch.eye(4).repeat(2, 1, 1)
+        target_pose[:, :3, :3] = axis_angle_to_rotation_matrix(
+            torch.tensor([0.2, -0.1, 0.3])
+        )
+        target_pose[:, :3, 3] = torch.tensor([0.5, 0.1, 0.3])
+        base = TwistAffordance(grasp_position=(0.01, 0.02, 0.03)).get_grasp_pose(
+            target_pose
+        )
+        affordance = TwistAffordance(
+            grasp_position=(0.01, 0.02, 0.03),
+            grasp_roll=torch.pi / 2,
+            grasp_roll_range=(1.2, 1.8),
+        )
+        result = affordance.get_grasp_pose(target_pose, sampling=sampling)
+        torch.testing.assert_close(result[:, :3, 0], base[:, :3, 1])
+        torch.testing.assert_close(result[:, :3, 1], -base[:, :3, 0])
+        torch.testing.assert_close(result[:, :3, 2:], base[:, :3, 2:])
+
+    def test_roll_sampling_preserves_nominal_branch_and_uses_absolute_bounds(self):
+        branch_count = 9
+        target_pose = torch.eye(4).repeat(branch_count, 1, 1)
+        affordance = TwistAffordance(
+            grasp_position=(0.01, 0.02, 0.03),
+            grasp_roll=torch.pi / 2,
+            grasp_roll_range=(1.2, 1.8),
+        )
+        nominal = affordance.get_grasp_pose(target_pose)
+        sampled = affordance.get_grasp_pose(
+            target_pose, sampling=AffordanceSamplingContext(count=branch_count, seed=42)
+        )
+        torch.testing.assert_close(sampled[0], nominal[0])
+        torch.testing.assert_close(sampled[:, :3, 2:], nominal[:, :3, 2:])
+        base = TwistAffordance(grasp_position=affordance.grasp_position).get_grasp_pose(
+            target_pose
+        )
+        relative = base[:, :3, :3].transpose(1, 2) @ sampled[:, :3, :3]
+        angles = torch.atan2(relative[:, 1, 0], relative[:, 0, 0])
+        assert torch.all((angles >= 1.2) & (angles <= 1.8))
+        assert torch.unique(angles).numel() == branch_count
+
+    def test_expansion_without_declared_symmetry_retains_nominal_roll(self):
+        target_pose = torch.eye(4).repeat(9, 1, 1)
+        affordance = TwistAffordance(
+            grasp_position=(0.0, 0.0, 0.0), grasp_roll=torch.pi / 2
+        )
+        torch.testing.assert_close(
+            affordance.get_grasp_pose(
+                target_pose, sampling=AffordanceSamplingContext(count=9)
+            ),
+            affordance.get_grasp_pose(target_pose),
+        )
+
+    @pytest.mark.parametrize("roll", (float("nan"), float("inf"), True, "1.5"))
+    def test_rejects_non_finite_or_non_real_nominal_roll(self, roll):
+        with pytest.raises(ValueError, match="grasp_roll"):
+            TwistAffordance(grasp_position=(0.0, 0.0, 0.0), grasp_roll=roll)
+
+    def test_roll_range_must_contain_authored_nominal_instead_of_zero(self):
+        with pytest.raises(ValueError, match="nominal grasp_roll"):
+            TwistAffordance(
+                grasp_position=(0.0, 0.0, 0.0),
+                grasp_roll=torch.pi / 2,
+                grasp_roll_range=(-0.2, 0.2),
+            )
+
     def test_requires_explicit_grasp_position(self):
         with pytest.raises(TypeError, match="grasp_position"):
             TwistAffordance()  # type: ignore[call-arg]

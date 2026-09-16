@@ -45,6 +45,14 @@ _PROGRAMS = {
         "tasks/manipulation/open_drawer/task_program/program.yaml"
     ): "slide_open_drawer",
     Path(
+        "tasks/manipulation/press/task_program/program.yaml"
+    ): "press_microwave_button",
+    Path("tasks/manipulation/twist/task_program/program.yaml"): "twist_microwave_knob",
+    Path(
+        "tasks/manipulation/open_door/task_program/program.yaml"
+    ): "open_microwave_door",
+    Path("tasks/manipulation/pour/task_program/program.yaml"): "pick_and_pour_cube",
+    Path(
         "tasks/manipulation/hand_over/task_program/program.yaml"
     ): "dual_ur5_hand_over",
     Path(
@@ -52,6 +60,26 @@ _PROGRAMS = {
     ): "pour_water_with_right_arm",
 }
 _DEPLOYMENTS = {
+    Path("tasks/manipulation/press/task.ur5.yaml"): (
+        "press_microwave_button",
+        "task_program_press",
+        "ur5_dh_pgi_140_80",
+    ),
+    Path("tasks/manipulation/twist/task.ur5.yaml"): (
+        "twist_microwave_knob",
+        "task_program_twist",
+        "ur5_dh_pgi_140_80_tcp170",
+    ),
+    Path("tasks/manipulation/open_door/task.ur5.yaml"): (
+        "open_microwave_door",
+        "task_program_open_door",
+        "ur5_dh_pgi_140_80",
+    ),
+    Path("tasks/manipulation/pour/task.ur5.yaml"): (
+        "pick_and_pour_cube",
+        "task_program_pour",
+        "ur5_dh_pgi_140_80",
+    ),
     Path("tasks/manipulation/repeated_pick_place/task.ur5.yaml"): (
         "repeated_cube_pick_place",
         "task_program_repeated_pick_place",
@@ -109,11 +137,22 @@ _RESOURCE_PATHS = frozenset(
         Path("components/embodiments/dual_ur5_dh_pgi_140_80.yaml"),
         Path("components/embodiments/franka_panda.yaml"),
         Path("components/embodiments/ur5_dh_pgi_140_80.yaml"),
+        Path("components/embodiments/ur5_dh_pgi_140_80_tcp170.yaml"),
         Path("tasks/manipulation/hand_over/env.yaml"),
         Path("tasks/manipulation/hand_over/task_program/integration.yaml"),
         Path("tasks/manipulation/open_drawer/env.yaml"),
         Path("tasks/manipulation/open_drawer/env.newton.yaml"),
         Path("tasks/manipulation/open_drawer/task_program/integration.yaml"),
+        Path("tasks/manipulation/press/env.yaml"),
+        Path("tasks/manipulation/press/task_program/integration.yaml"),
+        Path("tasks/manipulation/twist/env.yaml"),
+        Path("tasks/manipulation/twist/task_program/integration.yaml"),
+        Path("tasks/manipulation/twist/task_program/execution_policy.yaml"),
+        Path("tasks/manipulation/open_door/env.yaml"),
+        Path("tasks/manipulation/open_door/task_program/integration.yaml"),
+        Path("tasks/manipulation/open_door/task_program/execution_policy.yaml"),
+        Path("tasks/manipulation/pour/env.yaml"),
+        Path("tasks/manipulation/pour/task_program/integration.yaml"),
         Path("tasks/manipulation/repeated_pick_place/env.yaml"),
         Path("tasks/manipulation/repeated_pick_place/env.newton.yaml"),
         Path("tasks/manipulation/repeated_pick_place/task_program/integration.yaml"),

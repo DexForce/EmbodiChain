@@ -2603,6 +2603,68 @@ def test_twist_rotates_grasp_about_geometry_derived_joint_axis_origin() -> None:
     )
 
 
+@pytest.mark.parametrize("angle", (-math.pi / 2, math.pi / 2))
+def test_twist_retracts_from_final_arc_pose_without_unwinding(angle: float) -> None:
+    """Released fingers keep their final orientation while leaving the knob."""
+    origin = torch.tensor([0.1, -0.2, 0.3])
+    contact = torch.tensor([0.3, -0.2, 0.3])
+    affordance = TwistAffordance(
+        grasp_position=tuple(contact.tolist()),
+        axis_origin=tuple(origin.tolist()),
+        twist_axis=torch.tensor([0.0, 0.0, 1.0]),
+    )
+    semantics = ObjectSemantics(affordance=affordance, geometry={}, entity_id="knob")
+    link_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    link_pose[:, :3, :3] = axis_angle_to_rotation_matrix(
+        torch.tensor([[0.4, 0.0, 0.0], [0.0, -0.3, 0.0]])
+    )
+    link_pose[:, :3, 3] = torch.tensor([[0.5, 0.1, 0.2], [-0.2, 0.3, 0.4]])
+    generator = _motion_generator()
+    generator.generate = Mock(wraps=generator.generate)
+    action = _bind_action(generator, Twist())
+    options = TwistOptions(
+        hand_interp_steps=3, pre_grasp_distance=0.12, twist_angle=angle
+    )
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="twist",
+            goal=TwistGoal(semantics, link_pose),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=30),
+            skill_options=options,
+        ),
+        _context(),
+    )
+
+    assert plan.plan_success.all()
+    twist_call = generator.generate.call_args_list[2]
+    final_twist_pose = twist_call.args[0][-1].xpos
+    local_rotation = axis_angle_to_rotation_matrix(torch.tensor([0.0, 0.0, angle]))
+    rotated_contact = origin + local_rotation @ (contact - origin)
+    expected_start = link_pose[:, :3, :3] @ rotated_contact + link_pose[:, :3, 3]
+    torch.testing.assert_close(final_twist_pose[:, :3, 3], expected_start)
+
+    retract_call = generator.generate.call_args_list[3]
+    retract_targets = torch.stack([state.xpos for state in retract_call.args[0]], dim=1)
+    target_count = plan.segment("retract").waypoint_count - 1
+    assert retract_targets.shape == (NUM_ENVS, target_count, 4, 4)
+    torch.testing.assert_close(
+        retract_targets[:, :, :3, :3],
+        final_twist_pose[:, None, :3, :3].expand(-1, target_count, -1, -1),
+    )
+    fractions = torch.linspace(1.0 / target_count, 1.0, target_count)
+    expected_positions = expected_start[:, None] - (
+        fractions[None, :, None]
+        * options.pre_grasp_distance
+        * final_twist_pose[:, None, :3, 2]
+    )
+    torch.testing.assert_close(retract_targets[:, :, :3, 3], expected_positions)
+    assert retract_call.kwargs["options"].is_linear
+    assert retract_call.kwargs["options"].preserve_cartesian_samples
+
+
 @pytest.mark.parametrize(
     ("goal_factory", "affordance"),
     (

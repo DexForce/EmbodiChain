@@ -28,7 +28,10 @@ from typing import TYPE_CHECKING, TypeVar
 
 from ._configured_services import (
     _AntipodalGraspPoseGeneratorFactory,
+    _ArticulationLinkOpenDoorLowererFactory,
+    _ArticulationLinkPressLowererFactory,
     _ArticulationLinkSlideLowererFactory,
+    _ArticulationLinkTwistLowererFactory,
     _JointPositionConstraintEvidenceProviderFactory,
     _MoveHeldObjectLowererFactory,
     _PourLowererFactory,
@@ -63,14 +66,17 @@ from embodichain.lab.sim.atomic_actions import (
     HandOverOptions,
     MotionPolicy,
     MoveHeldObjectOptions,
+    OpenDoorOptions,
     PickUpOptions,
     PlaceOptions,
     PourOptions,
+    PressOptions,
     PushObjectOptions,
     PushObjectToolCalibration,
     RecoveryPolicy,
     SlideOptions,
     TrackingPolicy,
+    TwistOptions,
 )
 from embodichain.lab.task_program.semantics import (
     EffectAssurance,
@@ -772,6 +778,15 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "direction",
                 "approach_distance",
                 "translation_distance",
+                "translation_distance_range",
+                "press_distance",
+                "press_position",
+                "twist_waypoint_count",
+                "twist_angle",
+                "twist_angle_range",
+                "door_waypoint_count",
+                "retract_distance",
+                "joint_position_tolerance",
                 "rotate_angle",
                 "approach_height",
                 "retract_height",
@@ -1079,6 +1094,76 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 )
             kwargs["tool_calibrations"] = tuple(calibrations)
         return PushObjectOptions(**kwargs)
+    if kind in {"press", "twist", "open_door"}:
+        fields_by_kind = {
+            "press": {
+                "hand_interp_steps",
+                "approach_distance",
+                "press_distance",
+                "press_position",
+            },
+            "twist": {
+                "hand_interp_steps",
+                "twist_waypoint_count",
+                "pre_grasp_distance",
+                "twist_angle",
+                "twist_angle_range",
+            },
+            "open_door": {
+                "hand_interp_steps",
+                "door_waypoint_count",
+                "approach_distance",
+                "retract_distance",
+                "joint_position_tolerance",
+            },
+        }
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset(fields_by_kind[kind]),
+        )
+        kwargs = {}
+        for field_name in (
+            "hand_interp_steps",
+            "twist_waypoint_count",
+            "door_waypoint_count",
+        ):
+            if field_name in config:
+                kwargs[field_name] = _integer(
+                    config[field_name], path=f"{path}.{field_name}", minimum=1
+                )
+        for field_name in (
+            "approach_distance",
+            "pre_grasp_distance",
+            "retract_distance",
+            "joint_position_tolerance",
+            "press_distance",
+        ):
+            if field_name in config:
+                kwargs[field_name] = _real(
+                    config[field_name],
+                    path=f"{path}.{field_name}",
+                    minimum=0.0,
+                    strict_minimum=field_name == "press_distance",
+                )
+        if "twist_angle" in config:
+            kwargs["twist_angle"] = _real(
+                config["twist_angle"], path=f"{path}.twist_angle"
+            )
+        for field_name, size in (("press_position", 3), ("twist_angle_range", 2)):
+            if field_name in config:
+                kwargs[field_name] = _finite_tuple(
+                    config[field_name],
+                    path=f"{path}.{field_name}",
+                    expected_length=size,
+                )
+        option_type = {
+            "press": PressOptions,
+            "twist": TwistOptions,
+            "open_door": OpenDoorOptions,
+        }[kind]
+        return option_type(**kwargs)
     if kind == "slide":
         config = _mapping(
             value,
@@ -1152,8 +1237,8 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
         return HandOverOptions(**kwargs)
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
-        "['hand_over', 'move_held_object', 'pick_up', 'place', 'pour', "
-        "'push_object', 'slide']."
+        "['hand_over', 'move_held_object', 'open_door', 'pick_up', 'place', 'pour', "
+        "'press', 'push_object', 'slide', 'twist']."
     )
 
 
@@ -1725,7 +1810,10 @@ def _decode_registered_lowerer(
     *,
     path: str,
 ) -> (
-    _ArticulationLinkSlideLowererFactory
+    _ArticulationLinkOpenDoorLowererFactory
+    | _ArticulationLinkPressLowererFactory
+    | _ArticulationLinkSlideLowererFactory
+    | _ArticulationLinkTwistLowererFactory
     | _MoveHeldObjectLowererFactory
     | _PourLowererFactory
     | _PushObjectLowererFactory
@@ -1742,6 +1830,11 @@ def _decode_registered_lowerer(
                 "link_entity_id",
                 "translation_axis",
                 "target_pose_mode",
+                "grasp_position",
+                "grasp_roll",
+                "grasp_roll_range",
+                "hinge_joint_name",
+                "opening_direction",
                 "target_id",
                 "reference_entity_id",
                 "relative_pose",
@@ -1751,6 +1844,65 @@ def _decode_registered_lowerer(
         ),
     )
     kind = _identifier(common["kind"], path=f"{path}.kind")
+    if kind in {
+        "articulation_link_press",
+        "articulation_link_twist",
+        "articulation_link_open_door",
+    }:
+        required = {
+            "kind",
+            "articulation_id",
+            "articulation_simulation_uid",
+            "link_entity_id",
+        }
+        optional = {"target_pose_mode"}
+        if kind == "articulation_link_twist":
+            required.add("grasp_position")
+            optional.update({"grasp_roll", "grasp_roll_range"})
+        elif kind == "articulation_link_open_door":
+            optional.update({"hinge_joint_name", "opening_direction"})
+        config = _mapping(
+            value, path=path, required=frozenset(required), optional=frozenset(optional)
+        )
+        kwargs: dict[str, object] = {
+            field_name: _identifier(config[field_name], path=f"{path}.{field_name}")
+            for field_name in (
+                "articulation_id",
+                "articulation_simulation_uid",
+                "link_entity_id",
+            )
+        }
+        kwargs["target_pose_mode"] = _identifier(
+            config.get("target_pose_mode", "live"), path=f"{path}.target_pose_mode"
+        )
+        if "grasp_roll" in config:
+            kwargs["grasp_roll"] = _real(
+                config["grasp_roll"], path=f"{path}.grasp_roll"
+            )
+        for field_name, size in (("grasp_position", 3), ("grasp_roll_range", 2)):
+            if field_name in config:
+                kwargs[field_name] = _finite_tuple(
+                    config[field_name],
+                    path=f"{path}.{field_name}",
+                    expected_length=size,
+                )
+        if "hinge_joint_name" in config:
+            kwargs["hinge_joint_name"] = _identifier(
+                config["hinge_joint_name"], path=f"{path}.hinge_joint_name"
+            )
+        if "opening_direction" in config:
+            kwargs["opening_direction"] = _integer(
+                config["opening_direction"],
+                path=f"{path}.opening_direction",
+                minimum=-1,
+                maximum=1,
+            )
+        factory_type = {
+            "articulation_link_press": _ArticulationLinkPressLowererFactory,
+            "articulation_link_twist": _ArticulationLinkTwistLowererFactory,
+            "articulation_link_open_door": _ArticulationLinkOpenDoorLowererFactory,
+        }[kind]
+        return factory_type(**kwargs)
     if kind == "articulation_link_slide":
         config = _mapping(
             value,
@@ -1862,7 +2014,9 @@ def _decode_registered_lowerer(
         return _PushObjectLowererFactory(routes=tuple(routes))
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
-        "['articulation_link_slide', 'move_held_object', 'pour', 'push_object']."
+        "['articulation_link_open_door', 'articulation_link_press', "
+        "'articulation_link_slide', 'articulation_link_twist', "
+        "'move_held_object', 'pour', 'push_object']."
     )
 
 
@@ -1923,7 +2077,10 @@ class _DecodedRuntimeServices:
     ] = ()
     handover_pose_providers: tuple[ConfiguredHandOverPoseProvider, ...] = ()
     registered_semantic_lowerers: tuple[
-        _ArticulationLinkSlideLowererFactory
+        _ArticulationLinkOpenDoorLowererFactory
+        | _ArticulationLinkPressLowererFactory
+        | _ArticulationLinkSlideLowererFactory
+        | _ArticulationLinkTwistLowererFactory
         | _MoveHeldObjectLowererFactory
         | _PourLowererFactory
         | _PushObjectLowererFactory,

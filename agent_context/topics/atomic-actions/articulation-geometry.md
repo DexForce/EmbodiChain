@@ -27,3 +27,17 @@ sampled target surface is noise, not direction evidence.
 The adapter returns `ArticulationAffordanceGeometry`; convert it with
 `to_object_geometry()` only when constructing `ObjectSemantics`. Keep random
 sampling and semantic geometry keys out of `objects/articulation.py`.
+
+## Contact frames and post-release motion
+
+Press and Twist complete their forward axis into an orthonormal contact frame
+using a near-tie-stable reference axis. Float32 arena-transform differences
+must not introduce an undeclared quarter-turn of the gripper; the forward axis
+and contact position remain unchanged.
+
+Twist keeps the final arc pose's orientation after opening the hand. Its
+retract segment moves from that final contact position along the gripper's
+negative Z axis by `pre_grasp_distance`, using constrained Cartesian keyframes.
+An off-axis grasp therefore retreats from the rotated contact position, not
+the original pre-grasp point. Any later wrist reset belongs to a separate
+motion after the gripper has cleared the object.

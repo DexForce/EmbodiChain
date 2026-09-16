@@ -1,0 +1,19 @@
+program_id: pick_and_pour_cube
+targets: {}
+program:
+  kind: segment
+  name: pick_and_pour_cube
+  steps:
+    kind: sequence
+    items:
+      - kind: invoke
+        call:
+          kind: pick
+          object: cube
+          grasp: cube_grasp
+      - kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.pour
+          arguments:
+            object: cube

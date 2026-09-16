@@ -1,0 +1,48 @@
+integration_id: open_door_v1
+program_id: open_microwave_door
+
+requires:
+  scene_contract: open_door_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+
+scene_binding:
+  contract_id: open_door_scene_v1
+  registry_id: task_program_open_door
+  articulations:
+    - entity_id: microwave
+      simulation_uid: microwave
+      dynamics: dynamic
+      semantic_type: microwave
+  links:
+    - entity_id: microwave_handle
+      articulation_id: microwave
+      native_link_name: door_handle
+      dynamics: dynamic
+      semantic_type: door_handle
+
+profile:
+  defaults:
+    open_door:
+      primary: primary_manipulator
+  action_options:
+    simulation.articulation_link_open_door:
+      kind: open_door
+      hand_interp_steps: 30
+      door_waypoint_count: 50
+      approach_distance: 0.1
+      retract_distance: 0.1
+  effect_monitors: {}
+
+runtime_services:
+  grasp_pose_generator_overrides:
+    hand:
+      # Match the tutorial's contact sampling; regenerate any coarser cache.
+      sample_count: 10000
+      force_refresh: true
+      opening_margin: 0.03
+  registered_semantic_lowerers:
+    - kind: articulation_link_open_door
+      articulation_id: microwave
+      articulation_simulation_uid: microwave
+      link_entity_id: microwave_handle
+      target_pose_mode: snapshot
