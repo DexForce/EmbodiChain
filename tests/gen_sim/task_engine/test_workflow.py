@@ -274,6 +274,7 @@ def test_packaged_workflow_configuration_uses_recovery_defaults() -> None:
     assert planning.planning_mode == "offline"
     assert planning.max_episodes == 1
     assert planning.max_episode_steps == 1000000
+    assert planning.fit_grasp_assets is False
     assert execution.num_envs == 1
     assert execution.required_successes == 1
 
@@ -292,6 +293,7 @@ planning:
   planning_mode: offline
   max_episodes: 2
   max_episode_steps: 5000
+  fit_grasp_assets: true
 execution:
   num_envs: 6
   success_policy: at_least
@@ -308,6 +310,7 @@ execution:
     assert planning.candidate_count == 7
     assert planning.max_episodes == 2
     assert planning.max_episode_steps == 5000
+    assert planning.fit_grasp_assets is True
     assert execution.num_envs == 6
     assert execution.required_successes == 2
 
@@ -335,6 +338,8 @@ def test_planning_configuration_rejects_invalid_values() -> None:
         TaskEnginePlanningCfg(candidate_count=0)
     with pytest.raises(ValueError, match="planning_mode"):
         TaskEnginePlanningCfg(planning_mode="unsupported")
+    with pytest.raises(TypeError, match="fit_grasp_assets"):
+        TaskEnginePlanningCfg(fit_grasp_assets="true")
     with pytest.raises(TypeError):
         TaskEnginePlanningCfg(gripper_model="unsupported")
     with pytest.raises(TypeError):

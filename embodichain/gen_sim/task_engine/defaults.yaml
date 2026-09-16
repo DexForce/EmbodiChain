@@ -26,6 +26,7 @@ planning:
   planning_mode: offline
   max_episodes: 1
   max_episode_steps: 1000000
+  fit_grasp_assets: true
 
 execution:
   num_envs: 1
