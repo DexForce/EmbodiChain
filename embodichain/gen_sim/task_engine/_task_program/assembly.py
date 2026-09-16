@@ -111,9 +111,7 @@ class TaskAdapterFactory:
                     planner_cfg=ToppraPlannerCfg(robot_uid=environment.robot.uid)
                 )
             )
-        grasp_generators = {
-            name: create() for name, create in self.grasp_factories
-        }
+        grasp_generators = {name: create() for name, create in self.grasp_factories}
         grasp_generators = install_grasp_filters(
             self.registration,
             environment.sim,
@@ -123,6 +121,7 @@ class TaskAdapterFactory:
             import torch
 
             from .articulation_binding import handle_mesh
+            from .e6_clearance import profile_clearances
 
             geometry_keys = set()
             for binding in self.articulation_bindings:
@@ -139,7 +138,13 @@ class TaskAdapterFactory:
                     )
                 )
             grasp_generators = install_e6_approach_filters(
-                grasp_generators, frozenset(geometry_keys)
+                grasp_generators,
+                frozenset(geometry_keys),
+                clearances=profile_clearances(
+                    self.registration,
+                    environment.robot,
+                    environment.sim.get_rigid_object("table"),
+                ),
             )
         factory = _TaskFactory(
             environment.sim,

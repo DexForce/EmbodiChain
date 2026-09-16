@@ -151,6 +151,15 @@ class SlideOptions(ActionOptions):
     translation_distance: float = 0.15
     """Distance traveled along the pull or push direction."""
 
+    preshape_fraction: float = 0.0
+    """Fraction from the bound open to grasp command during approach and reach."""
+
+    approach_along_grasp_axis: bool = False
+    """Approach along grasp Z instead of the rail axis; rail motion is unchanged."""
+
+    release_retreat_distance: float = 0.0
+    """Distance opposite grasp Z while opening; zero holds the arm still."""
+
     def __post_init__(self) -> None:
         if self.direction not in ("pull", "push"):
             raise ValueError("direction must be either 'pull' or 'push'.")
@@ -164,6 +173,18 @@ class SlideOptions(ActionOptions):
             raise ValueError("translation_distance must be finite.")
         if self.translation_distance <= 0.0:
             raise ValueError("translation_distance must be positive.")
+        for name in ("preshape_fraction", "release_retreat_distance"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(f"{name} must be a real number.")
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and non-negative.")
+        if self.preshape_fraction > 1.0:
+            raise ValueError("preshape_fraction must not exceed one.")
+        if type(self.approach_along_grasp_axis) is not bool:
+            raise TypeError("approach_along_grasp_axis must be a boolean.")
+        if self.release_retreat_distance > 0.0 and self.hand_interp_steps < 2:
+            raise ValueError("Release retreat requires hand_interp_steps >= 2.")
 
 
 class Slide(AtomicAction[SlideGoal, SlideOptions]):
@@ -314,9 +335,14 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
                 context,
                 message="Failed to resolve an articulated-part grasp pose.",
             )
+        approach_axis = (
+            grasp_xpos[:, :3, 2]
+            if options.approach_along_grasp_axis
+            else translation_axis_world
+        )
         approach_xpos = translate_pose_world(
             grasp_xpos,
-            -translation_axis_world * options.approach_distance,
+            -approach_axis * options.approach_distance,
         )
         translation_sign = -1.0 if direction == "pull" else 1.0
         translated_xpos = translate_pose_world(
@@ -345,7 +371,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         reach_keyframes = axis_translation_keyframes(
             approach_xpos,
             grasp_xpos,
-            translation_axis_world,
+            approach_axis,
             n_waypoints=motion_lengths[1] - 1,
         )
         reach_success, reach_arm = self._plan_pose_segment(
@@ -374,17 +400,50 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         )
         success = grasp_success & approach_success & reach_success & translate_success
 
+        release_arm: torch.Tensor | None = None
+        released_xpos = translated_xpos
+        if options.release_retreat_distance > 0.0:
+            release_axis = -grasp_xpos[:, :3, 2]
+            released_xpos = translate_pose_world(
+                translated_xpos, release_axis * options.release_retreat_distance
+            )
+            release_keyframes = axis_translation_keyframes(
+                translated_xpos,
+                released_xpos,
+                release_axis,
+                n_waypoints=options.hand_interp_steps - 1,
+            )
+            release_success, release_arm = self._plan_pose_segment(
+                release_keyframes,
+                translate_arm[:, -1],
+                control_part,
+                request,
+                options.hand_interp_steps,
+                interpolation_dt=interpolation_dt,
+                cartesian_linear=True,
+            )
+            success = success & release_success
+
         return_arm: torch.Tensor | None = None
         if direction == "push":
+            return_axis = translation_axis_world
+            if options.approach_along_grasp_axis or release_arm is not None:
+                return_axis = approach_xpos[:, :3, 3] - released_xpos[:, :3, 3]
+                return_axis = torch.where(
+                    torch.linalg.vector_norm(return_axis, dim=-1, keepdim=True)
+                    > 1.0e-6,
+                    return_axis,
+                    translation_axis_world,
+                )
             return_keyframes = axis_translation_keyframes(
-                translated_xpos,
+                released_xpos,
                 approach_xpos,
-                translation_axis_world,
+                return_axis,
                 n_waypoints=motion_lengths[3] - 1,
             )
             return_success, return_arm = self._plan_pose_segment(
                 return_keyframes,
-                translate_arm[:, -1],
+                (translate_arm if release_arm is None else release_arm)[:, -1],
                 control_part,
                 request,
                 motion_lengths[3],
@@ -393,8 +452,11 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             )
             success = success & return_success
 
+        hand_preshape_qpos = torch.lerp(
+            hand_open_qpos, hand_grasp_qpos, options.preshape_fraction
+        )
         hand_close = interpolate_hand_qpos(
-            hand_open_qpos,
+            hand_preshape_qpos,
             hand_grasp_qpos,
             n_waypoints=options.hand_interp_steps,
         )
@@ -425,8 +487,16 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         for arm in (approach_arm, reach_arm):
             stop = offset + arm.shape[1]
             full[:, offset:stop, arm_joint_ids] = arm
-            full[:, offset:stop, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
+            full[:, offset:stop, hand_joint_ids] = hand_preshape_qpos.unsqueeze(1)
             offset = stop
+
+        if options.preshape_fraction > 0.0:
+            count = min(approach_arm.shape[1], options.hand_interp_steps)
+            full[:, :count, hand_joint_ids] = interpolate_hand_qpos(
+                context.robot.qpos[:, hand_joint_ids],
+                hand_preshape_qpos,
+                n_waypoints=count,
+            )
 
         stop = offset + hand_close.shape[1]
         full[:, offset:stop, arm_joint_ids] = reach_arm[:, -1].unsqueeze(1)
@@ -439,7 +509,9 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         offset = stop
 
         stop = offset + hand_open.shape[1]
-        full[:, offset:stop, arm_joint_ids] = translate_arm[:, -1].unsqueeze(1)
+        full[:, offset:stop, arm_joint_ids] = (
+            translate_arm[:, -1].unsqueeze(1) if release_arm is None else release_arm
+        )
         full[:, offset:stop, hand_joint_ids] = hand_open
         offset = stop
 

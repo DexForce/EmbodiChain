@@ -110,14 +110,12 @@ def synchronize_joint_limits(binding: PrismaticBinding, art: Any) -> None:
             f"native={native_pair.detach().cpu().tolist()}, "
             f"declared={declared_pair.detach().cpu().tolist()}."
         )
-    native_limits = cached_limits.clone()
-    if native_is_unscaled:
-        native_limits[:, joint_index, :] = declared_pair
-    else:
-        native_limits[:, joint_index, :] = native_pair
-    if not torch.allclose(cached_limits, native_limits, atol=1e-6, rtol=1e-5):
-        # Reapply the already-active native limits to refresh the pre-scale cache.
-        art.set_qpos_limits(native_limits)
+    resolved_pair = declared_pair if native_is_unscaled else native_pair
+    if not torch.allclose(selected_limits, resolved_pair, atol=1e-6, rtol=1e-5):
+        # Other columns can still contain pre-scale cache values. Never write
+        # them back while synchronizing this joint's already-active limits.
+        values = resolved_pair.expand(cached_limits.shape[0], 1, 2).clone()
+        art.set_qpos_limits(values, joint_ids=[joint_index])
 
 
 def _bind(

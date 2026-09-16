@@ -49,6 +49,7 @@ class PrismaticBinding:
     axis: tuple[float, float, float]
     limits: tuple[float, float]
     part_id: str = ""
+    closed_position: float | None = None
 
     def __post_init__(self) -> None:
         for name in ("object_id", "joint", "link", "parent", "handle_path"):
@@ -93,7 +94,7 @@ class PrismaticBinding:
             len(self.limits) != 2
             or not np.isfinite(self.limits).all()
             or self.limits[0] >= self.limits[1]
-            or min(map(abs, self.limits)) > 1e-6
+            or (self.closed_position is None and min(map(abs, self.limits)) > 1e-6)
         ):
             raise ValueError(
                 "Prismatic limits require a zero closed endpoint and a finite open endpoint."
@@ -104,6 +105,20 @@ class PrismaticBinding:
             )
         object.__setattr__(self, "axis", tuple(map(float, self.axis)))
         object.__setattr__(self, "limits", tuple(map(float, self.limits)))
+        if self.closed_position is not None:
+            if (
+                isinstance(self.closed_position, bool)
+                or not isinstance(self.closed_position, Real)
+                or not np.isfinite(self.closed_position)
+                or not any(
+                    np.isclose(self.closed_position, endpoint, atol=1e-6, rtol=1e-6)
+                    for endpoint in self.limits
+                )
+            ):
+                raise ValueError(
+                    "closed_position must name a finite joint-limit endpoint."
+                )
+            object.__setattr__(self, "closed_position", float(self.closed_position))
 
     @property
     def link_id(self) -> str:
@@ -116,7 +131,16 @@ class PrismaticBinding:
     def target(self, state: str) -> float:
         if state not in {"open", "closed"}:
             raise ValueError("Prismatic target state must be open or closed.")
-        return (max if state == "open" else min)(self.limits, key=abs)
+        closed = (
+            min(self.limits, key=abs)
+            if self.closed_position is None
+            else self.closed_position
+        )
+        return (
+            closed
+            if state == "closed"
+            else max(self.limits, key=lambda p: abs(p - closed))
+        )
 
     def tolerance(self, state: str) -> float:
         self.target(state)
@@ -128,13 +152,19 @@ class PrismaticBinding:
         value = asdict(self)
         if not self.part_id:
             value.pop("part_id")
+        if self.closed_position is None:
+            value.pop("closed_position")
         return value
 
     @classmethod
     def decode(cls, value: object) -> PrismaticBinding:
         allowed = {f.name for f in fields(cls)}
-        legacy = allowed - {"part_id"}
-        if type(value) is not dict or (set(value) != legacy and set(value) != allowed):
+        required = allowed - {"part_id", "closed_position"}
+        if (
+            type(value) is not dict
+            or not required.issubset(value)
+            or not set(value).issubset(allowed)
+        ):
             raise ValueError("Prismatic binding requires exactly its declared fields.")
         return cls(**value)
 
@@ -228,6 +258,18 @@ def discover_prismatic_parts(
         raise ValueError("GenSim E6 requires positive uniform body_scale.")
     stage = _stage(config["fpath"])
     source_hash = hashlib.sha256(Path(config["fpath"]).read_bytes()).hexdigest()
+    fixed_children: dict[str, set[str]] = {}
+    for prim in stage.Traverse():
+        if not prim.IsA(UsdPhysics.FixedJoint):
+            continue
+        fixed = UsdPhysics.Joint(prim)
+        if fixed.GetJointEnabledAttr().Get() is False:
+            continue
+        parents = fixed.GetBody0Rel().GetTargets()
+        children = fixed.GetBody1Rel().GetTargets()
+        if len(parents) == 1 and len(children) == 1:
+            fixed_children.setdefault(str(parents[0]), set()).add(str(children[0]))
+
     candidates: list[ArticulationPartCandidate] = []
     for prim in stage.Traverse():
         if not prim.IsA(UsdPhysics.PrismaticJoint):
@@ -251,11 +293,28 @@ def discover_prismatic_parts(
             raise ValueError(
                 f"Prismatic joint {prim.GetPath()} bodies must be rigid bodies."
             )
+        # USD namespace ancestry need not match physical fixed-joint ancestry.
+        attached_bodies = {str(children[0])}
+        pending = list(attached_bodies)
+        while pending:
+            for child_path in fixed_children.get(pending.pop(), ()):
+                if child_path not in attached_bodies:
+                    attached_bodies.add(child_path)
+                    pending.append(child_path)
+
+        def belongs_to_part(mesh_prim: Any) -> bool:
+            owner = mesh_prim
+            while owner and not owner.IsPseudoRoot():
+                if owner.HasAPI(UsdPhysics.RigidBodyAPI):
+                    return str(owner.GetPath()) in attached_bodies
+                owner = owner.GetParent()
+            return False
+
         handles = tuple(
             str(p.GetPath())
             for p in stage.Traverse()
-            if p.GetPath().HasPrefix(children[0])
-            and p.IsA(UsdGeom.Mesh)
+            if p.IsA(UsdGeom.Mesh)
+            and belongs_to_part(p)
             and p.HasAPI(UsdPhysics.CollisionAPI)
             and UsdPhysics.CollisionAPI(p).GetCollisionEnabledAttr().Get()
             and any(
@@ -317,17 +376,45 @@ def _binding_from_candidate(
         )
     scale = float(np.asarray(config.get("body_scale", (1.0, 1.0, 1.0)))[0])
     source_sha256 = hashlib.sha256(Path(config["fpath"]).read_bytes()).hexdigest()
+    from pxr import UsdGeom, UsdPhysics
+
+    stage = _stage(config["fpath"])
+    handle_body = stage.GetPrimAtPath(candidate.handle_paths[0])
+    while handle_body and not handle_body.HasAPI(UsdPhysics.RigidBodyAPI):
+        handle_body = handle_body.GetParent()
+    if not handle_body:
+        raise ValueError("The handle mesh must belong to a rigid body.")
+    handle_axis = np.asarray(candidate.axis)
+    if str(handle_body.GetPath()) != candidate.link_path:
+        cache = UsdGeom.XformCache()
+        moving_pose = np.asarray(
+            cache.GetLocalToWorldTransform(stage.GetPrimAtPath(candidate.link_path))
+        ).T
+        handle_pose = np.asarray(cache.GetLocalToWorldTransform(handle_body)).T
+        handle_axis = np.linalg.solve(
+            handle_pose[:3, :3], moving_pose[:3, :3] @ candidate.axis
+        )
+        handle_axis /= np.linalg.norm(handle_axis)
+    closed_attr = stage.GetPrimAtPath(candidate.joint_path).GetAttribute(
+        "gen_sim:closedPosition"
+    )
+    closed = closed_attr.Get() if closed_attr else None
+    if closed is not None and (
+        isinstance(closed, bool) or not isinstance(closed, Real)
+    ):
+        raise ValueError("gen_sim:closedPosition must be a real coordinate.")
     binding = PrismaticBinding(
         object_id=str(config["uid"]),
         joint=candidate.joint,
-        link=candidate.link,
+        link=handle_body.GetName(),
         parent=candidate.parent,
         handle_path=candidate.handle_paths[0],
         source_sha256=source_sha256,
         scale=scale,
-        axis=candidate.axis,
+        axis=tuple(handle_axis),
         limits=candidate.limits,
         part_id=candidate.part_id if include_part_id else "",
+        closed_position=None if closed is None else float(closed) * scale,
     )
     handle_mesh(binding, config["fpath"])
     return binding

@@ -32,10 +32,11 @@ from embodichain.lab.task_program.semantics import (
 )
 from embodichain.utils import logger
 from embodichain.utils.math import pose_inv
+from .e6_clearance import HandClearance
 
 __all__: list[str] = []
 
-GRASP_FILTER_REVISION = 1
+GRASP_FILTER_REVISION = 2
 
 
 def geometry_key(vertices: torch.Tensor, triangles: torch.Tensor) -> str:
@@ -192,6 +193,10 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         """Retain the baseline articulation-service protocol, not used by GenSim Pick."""
         return self._delegate.get_best_grasp_poses(**kwargs)
 
+    def get_grasp_candidates(self, **kwargs: Any) -> Any:
+        """Forward articulation metadata; Pick uses the filtered pose protocol."""
+        return self._delegate.get_grasp_candidates(**kwargs)
+
     def get_dual_arm_valid_grasp_poses(self, **kwargs: Any) -> Any:
         """Coordinated grasps have a separate, unchanged paired-contact contract."""
         return self._delegate.get_dual_arm_valid_grasp_poses(**kwargs)
@@ -200,19 +205,21 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
 class E6ApproachGraspPoseGenerator(ParallelJawGraspPoseGenerator):
     """Apply the E6 diagonal approach only to bound handle geometries.
 
-    The shared :class:`Slide` action remains unchanged.  Matching is done by
-    immutable handle geometry so the task-scoped policy cannot alter unrelated
-    grasps that use the same robot end-effector.
+    Matching uses immutable handle geometry so the task-scoped policy cannot
+    alter unrelated grasps that use the same robot end-effector.
     """
 
     def __init__(
         self,
         delegate: ParallelJawGraspPoseGenerator,
         geometry_keys: frozenset[str],
+        *,
+        clearance: HandClearance | None = None,
     ) -> None:
         super().__init__(delegate.gripper_model)
         self._delegate = delegate
         self._geometry_keys = geometry_keys
+        self._clearance = clearance
 
     def _approach_direction(
         self,
@@ -245,6 +252,15 @@ class E6ApproachGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         return direction[0] if squeeze else direction
 
     def get_valid_grasp_poses(self, **kwargs: Any) -> Any:
+        if (
+            self._clearance is not None
+            and geometry_key(kwargs["mesh_vertices"], kwargs["mesh_triangles"])
+            in self._geometry_keys
+        ):
+            return [
+                (poses, costs)
+                for poses, _, costs in self.get_grasp_candidates(**kwargs)
+            ]
         kwargs = dict(kwargs)
         kwargs["approach_direction"] = self._approach_direction(
             kwargs["mesh_vertices"],
@@ -254,6 +270,21 @@ class E6ApproachGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         return self._delegate.get_valid_grasp_poses(**kwargs)
 
     def get_best_grasp_poses(self, **kwargs: Any) -> Any:
+        if (
+            self._clearance is not None
+            and geometry_key(kwargs["mesh_vertices"], kwargs["mesh_triangles"])
+            in self._geometry_keys
+        ):
+            rows = self.get_grasp_candidates(**kwargs)
+            poses = kwargs["obj_poses"].clone()
+            widths = poses.new_zeros(len(rows))
+            success = torch.zeros(len(rows), dtype=torch.bool, device=poses.device)
+            for row, (proposals, openings, costs) in enumerate(rows):
+                if torch.isfinite(costs).any():
+                    index = costs.argmin()
+                    poses[row], widths[row] = proposals[index], openings[index]
+                    success[row] = True
+            return success, poses, widths
         kwargs = dict(kwargs)
         kwargs["approach_direction"] = self._approach_direction(
             kwargs["mesh_vertices"],
@@ -262,18 +293,42 @@ class E6ApproachGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         )
         return self._delegate.get_best_grasp_poses(**kwargs)
 
+    def get_grasp_candidates(self, **kwargs: Any) -> Any:
+        """Preserve widths and costs while applying the handle approach policy."""
+        kwargs = dict(kwargs)
+        kwargs["approach_direction"] = self._approach_direction(
+            kwargs["mesh_vertices"],
+            kwargs["mesh_triangles"],
+            kwargs["approach_direction"],
+        )
+        rows = self._delegate.get_grasp_candidates(**kwargs)
+        if (
+            self._clearance is not None
+            and geometry_key(kwargs["mesh_vertices"], kwargs["mesh_triangles"])
+            in self._geometry_keys
+        ):
+            rows = [self._clearance.filter(*row) for row in rows]
+        return rows
+
     def get_dual_arm_valid_grasp_poses(self, **kwargs: Any) -> Any:
         return self._delegate.get_dual_arm_valid_grasp_poses(**kwargs)
 
 
 def install_e6_approach_filters(
-    generators: dict[str, Any], geometry_keys: frozenset[str]
+    generators: dict[str, Any],
+    geometry_keys: frozenset[str],
+    *,
+    clearances: dict[str, HandClearance] | None = None,
 ) -> dict[str, Any]:
     """Install the task-scoped E6 approach policy by handle geometry key."""
     if not geometry_keys:
         return generators
     return {
-        name: E6ApproachGraspPoseGenerator(generator, geometry_keys)
+        name: E6ApproachGraspPoseGenerator(
+            generator,
+            geometry_keys,
+            clearance=None if clearances is None else clearances[name],
+        )
         for name, generator in generators.items()
     }
 

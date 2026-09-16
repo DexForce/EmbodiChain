@@ -2745,10 +2745,14 @@ def test_twist_session_replans_when_scene_target_moves() -> None:
         ),
     ),
 )
+@pytest.mark.parametrize("calibrated", [False, True])
+@pytest.mark.parametrize("release_failure", [False, True])
 def test_slide_plans_expected_segments(
     direction: Literal["pull", "push"],
     expected_segments: list[str],
     translation_sign: float,
+    calibrated: bool,
+    release_failure: bool,
 ) -> None:
     vertices = torch.tensor(
         [
@@ -2792,7 +2796,27 @@ def test_slide_plans_expected_segments(
         hand_interp_steps=3,
         approach_distance=0.1,
         translation_distance=0.15,
+        **(
+            {
+                "approach_along_grasp_axis": True,
+                "preshape_fraction": 0.85,
+                "release_retreat_distance": 0.04,
+            }
+            if calibrated
+            else {}
+        ),
     )
+    if calibrated and release_failure:
+        original_plan = action._plan_pose_segment
+
+        def fail_release(*args, **kwargs):
+            success, positions = original_plan(*args, **kwargs)
+            if args[4] == options.hand_interp_steps:
+                success = success.clone()
+                success[1] = False
+            return success, positions
+
+        action._plan_pose_segment = fail_release
 
     plan = _plan_action(
         action,
@@ -2807,13 +2831,16 @@ def test_slide_plans_expected_segments(
     )
 
     trajectory = _joint_trajectory(plan)
-    assert plan.plan_success.tolist() == [True, True]
+    assert plan.plan_success.tolist() == [True, not (calibrated and release_failure)]
     assert plan.scene_dependencies == ("target",)
     assert plan.scene_dependency_end_segment == "reach"
     assert trajectory.positions.shape == (NUM_ENVS, 24, ROBOT_DOF)
     assert [segment.name for segment in plan.segments] == expected_segments
     assert torch.all(
-        trajectory.positions[:, plan.segment("close").stop - 1, ARM_DOF:] == 1.0
+        trajectory.positions[
+            plan.plan_success, plan.segment("close").stop - 1, ARM_DOF:
+        ]
+        == 1.0
     )
     assert torch.all(
         trajectory.positions[:, plan.segment("open").stop - 1, ARM_DOF:] == 0.0
@@ -2828,6 +2855,7 @@ def test_slide_plans_expected_segments(
         call.kwargs["pose"] for call in generator.robot.compute_ik.call_args_list
     ]
     expected_axis = torch.tensor([0.0, -1.0, 0.0])
+    approach_axis = torch.tensor([0.0, 0.0, 1.0]) if calibrated else expected_axis
     motion_lengths = Slide._motion_segment_lengths(
         24,
         options.hand_interp_steps,
@@ -2835,7 +2863,7 @@ def test_slide_plans_expected_segments(
     )
     assert torch.allclose(
         planned_targets[0][:, :3, 3],
-        -expected_axis.expand(NUM_ENVS, -1) * options.approach_distance,
+        -approach_axis.expand(NUM_ENVS, -1) * options.approach_distance,
     )
     reach_stop = 1 + motion_lengths[1] - 1
     assert torch.allclose(
@@ -2857,11 +2885,49 @@ def test_slide_plans_expected_segments(
         - (translated_targets * expected_axis).sum(dim=-1, keepdim=True) * expected_axis
     )
     assert torch.allclose(orthogonal, torch.zeros_like(orthogonal), atol=1.0e-6)
+    if calibrated:
+        eligible = plan.plan_success
+        for segment in ("approach", "reach"):
+            assert torch.allclose(
+                trajectory.positions[
+                    eligible, plan.segment(segment).stop - 1, ARM_DOF:
+                ],
+                torch.full_like(trajectory.positions[eligible, 0, ARM_DOF:], 0.85),
+            )
+        assert torch.allclose(
+            trajectory.positions[eligible, 0, ARM_DOF:],
+            _context().robot.qpos[eligible, ARM_DOF:],
+        )
+        release_end = translated_targets[:, -1].clone()
+        release_end[:, 2] -= options.release_retreat_distance
+        assert torch.allclose(
+            planned_targets[translate_stop + options.hand_interp_steps - 2][:, :3, 3],
+            release_end,
+        )
     if direction == "push":
         assert torch.allclose(
             planned_targets[-1][:, :3, 3],
-            -expected_axis.expand(NUM_ENVS, -1) * options.approach_distance,
+            -approach_axis.expand(NUM_ENVS, -1) * options.approach_distance,
         )
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"preshape_fraction": -0.1},
+        {"preshape_fraction": 1.1},
+        {"preshape_fraction": float("nan")},
+        {"preshape_fraction": True},
+        {"release_retreat_distance": -0.01},
+        {"release_retreat_distance": float("inf")},
+        {"release_retreat_distance": True},
+        {"release_retreat_distance": 0.04, "hand_interp_steps": 1},
+        {"approach_along_grasp_axis": "yes"},
+    ],
+)
+def test_slide_rejects_invalid_clearance_options(kwargs: dict) -> None:
+    with pytest.raises((ValueError, TypeError)):
+        SlideOptions(**kwargs)
 
 
 @pytest.mark.parametrize(

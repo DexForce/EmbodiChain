@@ -27,7 +27,7 @@ import trimesh
 import numpy as np
 
 pytest.importorskip("pxr")
-from pxr import Usd, UsdGeom, UsdPhysics
+from pxr import Sdf, Usd, UsdGeom, UsdPhysics
 
 from embodichain.gen_sim.task_engine.agent import TaskAgent
 from embodichain.gen_sim.task_engine.interpretation import _INTENT_FIELD_DEFAULTS
@@ -50,6 +50,7 @@ from embodichain.gen_sim.task_engine._task_program.articulation_slide import (
     ArticulationWithdrawFactory,
     ArticulationStabilityPort,
     preset_id,
+    synchronize_joint_limits,
 )
 from embodichain.gen_sim.task_engine._task_program.assembly import load_deployment
 from embodichain.gen_sim.task_engine._bundle_runner import _verify_program_projection
@@ -133,6 +134,98 @@ def scene(tmp_path: Path) -> PreparedScene:
         body_scale=(1.0, 1.0, 1.0),
         asset_hashes={},
     )
+
+
+@pytest.mark.parametrize("fixed", [True, False])
+def test_handle_discovery_follows_only_fixed_child_links(
+    scene: PreparedScene, fixed: bool
+) -> None:
+    stage = Usd.Stage.Open(scene.articulations[0]["fpath"])
+    child = UsdGeom.Xform.Define(stage, "/fixture/grip_link")
+    UsdPhysics.RigidBodyAPI.Apply(child.GetPrim())
+    Sdf.CopySpec(
+        stage.GetRootLayer(),
+        "/fixture/drawer/handle",
+        stage.GetRootLayer(),
+        "/fixture/grip_link/handle",
+    )
+    stage.RemovePrim("/fixture/drawer/handle")
+    joint_type = UsdPhysics.FixedJoint if fixed else UsdPhysics.RevoluteJoint
+    joint = joint_type.Define(stage, "/fixture/grip_joint")
+    joint.CreateBody0Rel().SetTargets(["/fixture/drawer"])
+    joint.CreateBody1Rel().SetTargets(["/fixture/grip_link"])
+    stage.GetRootLayer().Save()
+    if not fixed:
+        with pytest.raises(ValueError, match="handle candidate"):
+            discover_prismatic_parts(scene.articulations[0])
+        return
+    parts = discover_prismatic_parts(scene.articulations[0])
+    assert len(parts) == 1
+    assert parts[0].link == "drawer"
+    assert parts[0].handle_paths == ("/fixture/grip_link/handle",)
+    binding = inspect_prismatic(scene.articulations[0])
+    assert binding.link == "grip_link"
+    assert binding.joint == "slide"
+    assert binding.parent == "cabinet"
+
+
+def test_fixed_handle_binding_expresses_axis_in_handle_frame(
+    scene: PreparedScene,
+) -> None:
+    stage = Usd.Stage.Open(scene.articulations[0]["fpath"])
+    child = UsdGeom.Xform.Define(stage, "/fixture/grip_link")
+    child.AddRotateZOp().Set(90.0)
+    UsdPhysics.RigidBodyAPI.Apply(child.GetPrim())
+    Sdf.CopySpec(
+        stage.GetRootLayer(),
+        "/fixture/drawer/handle",
+        stage.GetRootLayer(),
+        "/fixture/grip_link/handle",
+    )
+    stage.RemovePrim("/fixture/drawer/handle")
+    joint = UsdPhysics.FixedJoint.Define(stage, "/fixture/grip_joint")
+    joint.CreateBody0Rel().SetTargets(["/fixture/drawer"])
+    joint.CreateBody1Rel().SetTargets(["/fixture/grip_link"])
+    stage.GetRootLayer().Save()
+    binding = inspect_prismatic(scene.articulations[0])
+    assert binding.link == "grip_link"
+    assert np.allclose(binding.axis, (1.0, 0.0, 0.0), atol=1e-7)
+
+
+@pytest.mark.parametrize(
+    "limits,closed", [((0.0, 0.4), 0.4), ((-0.4, 0.0), -0.4), ((-0.1, 0.4), 0.4)]
+)
+def test_explicit_closed_endpoint_controls_state_semantics(
+    scene: PreparedScene, limits: tuple[float, float], closed: float
+) -> None:
+    stage = Usd.Stage.Open(scene.articulations[0]["fpath"])
+    joint = UsdPhysics.PrismaticJoint(stage.GetPrimAtPath("/fixture/slide"))
+    joint.GetLowerLimitAttr().Set(limits[0])
+    joint.GetUpperLimitAttr().Set(limits[1])
+    joint.GetPrim().CreateAttribute(
+        "gen_sim:closedPosition", Sdf.ValueTypeNames.Double
+    ).Set(closed)
+    stage.GetRootLayer().Save()
+    binding = inspect_prismatic(scene.articulations[0])
+    assert binding.target("closed") == pytest.approx(closed * 0.5)
+    opened = max(limits, key=lambda value: abs(value - closed))
+    assert binding.target("open") == pytest.approx(opened * 0.5)
+    assert PrismaticBinding.decode(binding.payload()) == binding
+
+
+@pytest.mark.parametrize("closed", [0.1, -0.1, float("nan"), True])
+def test_invalid_explicit_closed_endpoint_is_rejected(
+    scene: PreparedScene, closed
+) -> None:
+    binding = inspect_prismatic(scene.articulations[0])
+    with pytest.raises(ValueError, match="closed_position"):
+        replace(binding, closed_position=closed)
+
+
+def test_unannotated_binding_keeps_legacy_payload(scene: PreparedScene) -> None:
+    binding = inspect_prismatic(scene.articulations[0])
+    assert "closed_position" not in binding.payload()
+    assert PrismaticBinding.decode(binding.payload()) == binding
 
 
 def _graph(scene: PreparedScene, states: tuple[str, ...] = ("open",)) -> dict:
@@ -296,6 +389,19 @@ def test_e6_bundle_uses_standard_registration_and_complete_recipe(
     assert integration["scene_binding"]["articulations"] == [
         {"entity_id": "drawer", "simulation_uid": "drawer"}
     ]
+    options = integration["profile"]["action_options"][SLIDE_CALL]
+    assert options["preshape_fraction"] == 0.85
+    assert options["approach_along_grasp_axis"] is True
+    assert options["release_retreat_distance"] == 0.04
+    embodiment = load_config(paths.embodiment)["simulation"]
+    assert embodiment["drive_pros"]["stiffness"]["left_arm"] == 50000.0
+    assert embodiment["drive_pros"]["stiffness"]["left_eef"] == 50.0
+    assert "mimic_pros" not in embodiment
+    assert load_config(paths.scene)["simulation"]["articulation"][0]["drive_pros"] == {
+        "drive_type": "none",
+        "friction": {"slide": 0.01},
+    }
+    assert "drive_pros" not in scene.articulations[0]
     deployment = load_deployment(
         task_program=load_config(paths.deployment)["task_program"],
         skill_profile=load_config(paths.embodiment)["skill_profile"],
@@ -310,6 +416,24 @@ def test_e6_bundle_uses_standard_registration_and_complete_recipe(
     if len(states) == 2:
         assert graph["nodes"][3]["depends_on"] == [graph["nodes"][2]["id"]]
         assert graph["nodes"][3]["call"]["resources"] == {"primary": "left"}
+
+
+@pytest.mark.parametrize("friction", [0.0, 0.03, {"slide": 0.02}])
+def test_e6_preserves_authored_passive_friction(
+    scene: PreparedScene, tmp_path: Path, friction: object
+) -> None:
+    config = deepcopy(scene.articulations[0])
+    config["drive_pros"] = {"drive_type": "none", "friction": friction}
+    prepared = replace(scene, articulations=(config,))
+    _, paths = generate_task_program_bundle(
+        _graph(prepared), prepared, tmp_path / "bundle", robot_profile="dual_franka"
+    )
+    assert (
+        load_config(paths.scene)["simulation"]["articulation"][0]["drive_pros"][
+            "friction"
+        ]
+        == friction
+    )
 
 
 @pytest.mark.parametrize(
@@ -434,6 +558,49 @@ def test_explicit_tabletop_fit_levels_only_small_pose_errors(
         fit_articulation_to_proxy(cfg, proxy, table_top_z=0.72)
 
 
+@pytest.mark.parametrize("target_index", [0, 1])
+def test_limit_sync_does_not_overwrite_other_joints(target_index: int) -> None:
+    names = ["other", "other"]
+    names[target_index] = "selected"
+    cached = torch.tensor([[[-0.105, 0.0], [-0.105, 0.0]]])
+    native = torch.tensor([[[-0.0735, 0.0], [-0.0735, 0.0]]])
+    before = native.clone()
+    calls = []
+
+    def write_limits(values, joint_ids=None):
+        ids = list(range(2)) if joint_ids is None else list(joint_ids)
+        calls.append(ids)
+        native[:, ids, :] = values
+        cached[:, ids, :] = values
+
+    art = SimpleNamespace(
+        joint_names=names,
+        get_qpos_limits=lambda: cached.clone(),
+        set_qpos_limits=write_limits,
+        get_parent_joint_chain=lambda _: [
+            SimpleNamespace(
+                name="selected",
+                joint_type="prismatic",
+                parent_link_name="cabinet",
+                joint_limits=(-0.105, 0.0),
+            )
+        ],
+    )
+    binding = SimpleNamespace(
+        joint="selected",
+        link="handle",
+        parent="cabinet",
+        limits=(-0.0735, 0.0),
+        scale=0.7,
+        part_id="part_selected",
+    )
+    synchronize_joint_limits(binding, art)
+    assert calls == [[target_index]]
+    assert torch.equal(native, before)
+    synchronize_joint_limits(binding, art)
+    assert len(calls) == 1
+
+
 def _runtime(scene: PreparedScene):
     cfg = scene.articulations[0]
     binding = inspect_prismatic(cfg)
@@ -444,7 +611,7 @@ def _runtime(scene: PreparedScene):
         joint_names=["slide"],
         get_qpos=lambda: position.clone(),
         get_qpos_limits=lambda: cached_limits.clone(),
-        set_qpos_limits=lambda values: cached_limits.copy_(values),
+        set_qpos_limits=lambda values, joint_ids=None: cached_limits.copy_(values),
         get_parent_joint_chain=lambda name: [
             SimpleNamespace(
                 name="slide",

@@ -37,9 +37,16 @@ from ._task_program.articulation_binding import (
     PARK_CALL,
     SLIDE_CALL,
     WITHDRAW_CALL,
+    discover_prismatic_parts,
     graph_bindings,
 )
 from ._task_program.articulation_slide import preset_id
+from ._task_program.e6_clearance import (
+    ARM_STIFFNESS,
+    PASSIVE_FRICTION,
+    PRESHAPE_FRACTION,
+    RELEASE_RETREAT_DISTANCE,
+)
 
 __all__ = ["TaskProgramBundlePaths", "generate_task_program_bundle"]
 
@@ -159,7 +166,7 @@ def generate_task_program_bundle(
     )
     if unsupported:
         raise ValueError(f"Task Engine supports only E1-E6, not {unsupported}.")
-    graph_bindings(selected_graph, prepared_scene)
+    articulation_bindings = graph_bindings(selected_graph, prepared_scene)
     normalized_profile = str(robot_profile).strip()
     try:
         embodiment_filename = _EMBODIMENT_COMPONENTS[normalized_profile]
@@ -209,6 +216,13 @@ def generate_task_program_bundle(
     )
     embodiment_payload = load_config(embodiment_source)
     _bind_embodiment_to_scene(embodiment_payload, table_top_z=scene.table_top_z)
+    if articulation_bindings:
+        # Calibrate this generated E6 deployment, not shared robot defaults.
+        stiffness = embodiment_payload["simulation"]["drive_pros"]["stiffness"]
+        for resource in embodiment_payload["skill_profile"]["resources"]:
+            for endpoint in resource.get("endpoints", []):
+                if endpoint["endpoint_id"] == "motion":
+                    stiffness[endpoint["control_part"]] = ARM_STIFFNESS
     save_config(paths.embodiment, embodiment_payload)
     policy_payload = load_config(policy_source)
     # Centimetre-scale object goals need a settled arm before the core captures
@@ -248,7 +262,20 @@ def generate_task_program_bundle(
             scene_contract=scene_contract,
         ),
     )
-    save_config(paths.scene, _scene_payload(scene, program_id=program_id))
+    scene_payload = _scene_payload(scene, program_id=program_id)
+    bound_uids = {binding.object_id for binding in articulation_bindings.values()}
+    for articulation in scene_payload["simulation"]["articulation"]:
+        if articulation["uid"] not in bound_uids:
+            continue
+        drive = articulation.setdefault("drive_pros", {})
+        if drive.get("drive_type", "none") == "none":
+            drive.setdefault("drive_type", "none")
+            if "friction" not in drive:
+                drive["friction"] = {
+                    part.joint: PASSIVE_FRICTION
+                    for part in discover_prismatic_parts(articulation)
+                }
+    save_config(paths.scene, scene_payload)
     save_config(
         paths.deployment,
         {
@@ -1109,6 +1136,9 @@ def _integration_payload(
                             "kind": "slide",
                             "approach_distance": 0.10,
                             "hand_interp_steps": 12,
+                            "preshape_fraction": PRESHAPE_FRACTION,
+                            "release_retreat_distance": RELEASE_RETREAT_DISTANCE,
+                            "approach_along_grasp_axis": True,
                         },
                         WITHDRAW_CALL: {"kind": "move_end_effector"},
                     }

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 import pytest
 import torch
 
@@ -38,6 +39,114 @@ __all__: list[str] = []
 
 VERTICES = torch.tensor([[-0.02, 0.0, 0.0], [0.02, 0.0, 0.20], [0.0, 0.01, 0.10]])
 TRIANGLES = torch.tensor([[0, 1, 2]])
+
+
+def test_e6_clearance_shifts_only_within_pad_workspace() -> None:
+    from embodichain.gen_sim.task_engine._task_program.e6_clearance import HandClearance
+
+    clearance = HandClearance(
+        points=torch.tensor([[0.0, 0.0, 0.02]]),
+        aperture=0.017,
+        max_retreat=0.028,
+        table_z=0.0,
+    )
+    poses = torch.eye(4).repeat(4, 1, 1)
+    poses[:, :3, :3] = torch.diag(torch.tensor([1.0, -1.0, -1.0]))
+    poses[:, 2, 3] = torch.tensor([0.008, 0.003, -0.020, 0.1])
+    widths = torch.tensor([0.006, 0.006, 0.006, 0.08])
+    costs = torch.tensor([1.0, 2.0, 3.0, 0.0])
+    shifted, actual_widths, filtered = clearance.filter(poses, widths, costs)
+    assert torch.allclose(shifted[:2, 2, 3], torch.tensor([0.028, 0.028]))
+    assert torch.equal(actual_widths, widths)
+    assert torch.equal(filtered[:2], costs[:2])
+    assert torch.isinf(filtered[2:]).all()
+    assert torch.equal(poses[:, 2, 3], torch.tensor([0.008, 0.003, -0.020, 0.1]))
+    assert torch.equal(costs, torch.tensor([1.0, 2.0, 3.0, 0.0]))
+
+
+def test_e6_clearance_provider_fails_closed_and_preserves_unrelated_grasps() -> None:
+    from embodichain.gen_sim.task_engine._task_program.e6_clearance import HandClearance
+
+    delegate = CandidateGenerator(((0.02, 0.04),))
+    provider = E6ApproachGraspPoseGenerator(
+        delegate,
+        frozenset({geometry_key(VERTICES, TRIANGLES)}),
+        clearance=HandClearance(torch.zeros(1, 3), 0.01, 0.028, 0.0),
+    )
+    kwargs = dict(
+        mesh_vertices=VERTICES,
+        mesh_triangles=TRIANGLES,
+        obj_poses=torch.eye(4)[None],
+        approach_direction=torch.tensor([0.0, -1.0, 0.0]),
+    )
+    success, _, _ = provider.get_best_grasp_poses(**kwargs)
+    assert success.tolist() == [False]
+    success, _, width = provider.get_best_grasp_poses(
+        **{**kwargs, "mesh_vertices": VERTICES + 1.0}
+    )
+    assert success.tolist() == [True]
+    assert width.tolist() == pytest.approx([0.05])
+
+
+def test_e6_hand_clearance_uses_named_fk_and_includes_fixed_descendants() -> None:
+    from embodichain.gen_sim.task_engine._task_program.e6_clearance import (
+        build_hand_clearance,
+    )
+
+    links = ["tool", "a_finger_pad", "b_finger_pad", "fixed_mount"]
+    master = SimpleNamespace(name="gripper", parent_link_name="tool")
+    fixed = SimpleNamespace(name="fixed", parent_link_name="tool")
+    calls = []
+
+    def fk(*, qpos, link_names, qpos_joint_names):
+        calls.append((link_names, qpos_joint_names))
+        poses = torch.eye(4).repeat(len(qpos), len(link_names), 1, 1)
+        poses[:, :, 2, 3] = 1.0
+        for index, link in enumerate(link_names):
+            if link in links[1:3]:
+                sign = -1 if link == links[1] else 1
+                poses[:, index, 0, 3] = sign * (0.04 - 0.03 * qpos[:, 1])
+        return poses
+
+    robot = SimpleNamespace(
+        cfg=SimpleNamespace(
+            control_parts={"hand": ["gripper"]},
+            solver_cfg={"arm": SimpleNamespace(end_link_name="tool", tcp=torch.eye(4))},
+        ),
+        link_names=links,
+        joint_names=["arm_joint", "gripper"],
+        get_parent_joint_chain=lambda link: (
+            [] if link == "tool" else [fixed if link == "fixed_mount" else master]
+        ),
+        get_qpos=lambda: torch.zeros(1, 2),
+        compute_fk=fk,
+        get_link_vert_face=lambda link: (
+            torch.tensor([[-0.001, 0.0, -0.03], [0.001, 0.0, 0.03]]),
+            torch.empty(0, 3, dtype=torch.int64),
+        ),
+    )
+    profile = build_hand_clearance(
+        robot,
+        motion_part="arm",
+        hand_part="hand",
+        commands={"open": [0.0], "grasp": [1.0]},
+        table_z=0.5,
+    )
+    assert profile.aperture == pytest.approx(0.023, abs=1e-6)
+    assert profile.max_retreat == pytest.approx(0.026, abs=1e-6)
+    assert profile.points.shape == (7 * 4 * 2, 3)
+    assert profile.points[:, 2].abs().max() == pytest.approx(0.03, abs=1e-6)
+    assert calls == [(links + ["tool"], ["arm_joint", "gripper"])]
+
+
+def test_e6_short_pads_reject_all_candidates_without_extrapolating() -> None:
+    from embodichain.gen_sim.task_engine._task_program.e6_clearance import HandClearance
+
+    clearance = HandClearance(torch.zeros(1, 3), 0.01, 0.005, 0.0)
+    poses = torch.eye(4)[None]
+    shifted, _, costs = clearance.filter(poses, torch.tensor([0.005]), torch.zeros(1))
+    assert torch.equal(poses, shifted)
+    assert torch.isinf(costs).all()
 
 
 class CandidateGenerator(ParallelJawGraspPoseGenerator):
@@ -73,8 +182,34 @@ class CandidateGenerator(ParallelJawGraspPoseGenerator):
             torch.full((len(poses),), 0.05),
         )
 
+    def get_grasp_candidates(self, **kwargs):
+        self.best_directions.append(kwargs["approach_direction"].clone())
+        return [
+            (poses, torch.full((len(poses),), 0.05), costs)
+            for poses, costs in self.get_valid_grasp_poses(**kwargs)
+        ]
+
     def get_dual_arm_valid_grasp_poses(self, **kwargs):
         return [None] * len(kwargs["obj_poses"])
+
+
+def test_e6_candidate_metadata_preserves_widths_and_approach() -> None:
+    delegate = CandidateGenerator(((0.02, 0.04),))
+    provider = E6ApproachGraspPoseGenerator(
+        delegate, frozenset({geometry_key(VERTICES, TRIANGLES)})
+    )
+    poses, widths, costs = provider.get_grasp_candidates(
+        mesh_vertices=VERTICES,
+        mesh_triangles=TRIANGLES,
+        obj_poses=torch.eye(4)[None],
+        approach_direction=torch.tensor([0.0, -1.0, 0.0]),
+    )[0]
+    assert torch.allclose(widths, torch.tensor([0.05, 0.05]))
+    assert torch.equal(costs, torch.tensor([0.0, 1.0]))
+    assert poses.shape == (2, 4, 4)
+    assert torch.allclose(
+        delegate.best_directions[0], torch.tensor([0.0, -(0.5**0.5), -(0.5**0.5)])
+    )
 
 
 def rule(*, upper_half=True, margin=0.02) -> GraspRule:
