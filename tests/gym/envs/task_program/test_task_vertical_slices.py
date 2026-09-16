@@ -31,6 +31,10 @@ import yaml
 
 from embodichain.lab.task_program import TaskProgramCompiler, decode_task_program
 from embodichain.lab.gym.envs import EmbodiedEnv
+from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
+from embodichain.lab.gym.envs.managers.events import (
+    refresh_articulation_contact_material,
+)
 from embodichain.lab.sim.cfg import (
     DefaultPhysicsCfg,
     NewtonCollisionPropertiesCfg,
@@ -113,7 +117,7 @@ _OPEN_DRAWER_PROFILE_ID = "ur5_dh_pgi_140_80"
 _LIFECYCLE_BATCH_SIZE = 2
 _LIFECYCLE_ROBOT_DOF = 3
 _LIFECYCLE_STEP_DT = 0.02
-_EXPECTED_TRAJECTORY_SAMPLE_COUNT = 40
+_EXPECTED_TRAJECTORY_SAMPLE_COUNT = 100
 _EXPECTED_GRASP_SAMPLES = 1_000
 
 
@@ -1038,17 +1042,18 @@ def test_cube_registration_has_no_contact_evidence_route() -> None:
 
 
 @pytest.mark.parametrize(
-    "relative_path",
+    ("relative_path", "expected_event_names"),
     (
-        Path("tasks/manipulation/repeated_pick_place/task.ur5.yaml"),
-        Path("tasks/manipulation/open_drawer/task.ur5.yaml"),
+        (_REPEATED_CUBE_GYM_CONFIG, ()),
+        (_OPEN_DRAWER_GYM_CONFIG, ("refresh_drawer_handle_material",)),
     ),
 )
-def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
+def test_example_gym_configs_keep_environment_mechanisms_task_scoped(
     relative_path: Path,
+    expected_event_names: tuple[str, ...],
 ) -> None:
-    """Runnable examples keep only deterministic simulation and motion inputs."""
-    payload = _read_payload(relative_path)
+    """Examples allow only their declared task-specific startup workaround."""
+    payload, cfg = _configure_packaged_environment(relative_path)
     environment = _read_payload(relative_path.parent / "env.yaml")
 
     assert payload["environment"] == {"component": "env.yaml"}
@@ -1063,10 +1068,28 @@ def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
     assert "task_program_path" not in payload
     assert "task_program_integration_path" not in payload
     assert "task_program_runtime" not in payload
-    assert environment["env"]["events"] == {}
+    assert set(environment["env"]["events"]) == set(expected_event_names)
+    assert set(vars(cfg.events)) == set(expected_event_names)
     assert environment["env"]["dataset"] == {}
     assert environment["physics"] == "default"
     assert "physics_config" not in environment
+
+
+def test_open_drawer_material_refresh_is_scoped_to_handle_at_startup() -> None:
+    """The Default drawer workaround resolves to the intended startup functor."""
+    _, cfg = _configure_packaged_environment(_OPEN_DRAWER_GYM_CONFIG)
+    event = cfg.events.refresh_drawer_handle_material
+
+    assert event.func is refresh_articulation_contact_material
+    assert event.mode == "startup"
+    assert set(event.params) == {"entity_cfg"}
+    entity_cfg = event.params["entity_cfg"]
+    assert isinstance(entity_cfg, SceneEntityCfg)
+    assert entity_cfg.uid == _OPEN_DRAWER_ENTITY_ID
+    assert entity_cfg.link_names == [_OPEN_DRAWER_HANDLE_LINK_NAME]
+
+    _, newton_cfg = _configure_packaged_environment(_OPEN_DRAWER_NEWTON_GYM_CONFIG)
+    assert not hasattr(newton_cfg.events, "refresh_drawer_handle_material")
 
 
 def test_vertical_slice_payloads_expose_no_motion_layer_fields() -> None:
