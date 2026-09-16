@@ -43,6 +43,14 @@ The planning stack has two layers:
    planner with strategy selection, interpolation, IK resolution, result
    normalization, and multi-part coordination.
 
+`MotionGenOptions.strategy` selects the timing owner: `motion_gen` always
+invokes the configured backend; `ik_interp` uses explicit start/count/dt and
+rejects backend options and derivative limits. Both Cartesian preparation
+routes share sequential seeded IK. Required IK failures propagate per row;
+waypoints are never discarded to salvage a successful path. Fixed Cartesian
+sample preservation currently requires `ik_interp`; an unsupported backend
+target or `motion_gen` plus preservation raises rather than changing strategy.
+
 All planners resolve their robot at init via `SimulationManager.get_instance(cfg.sim_instance_id).get_robot(cfg.robot_uid)`.
 `BasePlannerCfg.sim_instance_id` defaults to `0`. Environment-owned planner
 factories supply their manager's ID, copying supplied configurations before
@@ -148,6 +156,10 @@ preserves each row's duration, and recomputes velocities; acceleration samples
 are invalidated. Unchanged planner samples retain native derivatives. cuRobo
 maps native velocities/accelerations into simulator joint order and zero-pads
 short/failed rows, deriving only missing velocity segments.
+When normalization changes a backend output grid, a backend that supports joint
+trajectory validation rechecks the final samples using the resolved control
+part and dynamic obstacle poses. Invalid samples fail the corresponding row;
+this is a sampled collision check, not continuous or derivative certification.
 Planners that own sparse joint-waypoint timing declare
 `uses_sparse_joint_waypoints=True`; `MotionGenerator` then prepends
 `start_qpos` without generic pre-interpolation. Backends that also declare

@@ -193,6 +193,15 @@ from leaking into an Action Agent schema.
 
 `MotionPolicy.strategy` accepts exactly `"motion_gen"` or `"ik_interp"`; the
 same value is forwarded to `MotionGenOptions.strategy` without an adapter layer.
+`motion_gen` invokes the configured backend, including when waypoint preparation
+uses IK or interpolation. `ik_interp` requires the integration's explicit
+control cadence and rejects `plan_opts`. Skill segments that preserve a supplied
+Cartesian path (`cartesian_linear=True`, including Press, Slide, PushObject,
+and OpenDoor) currently require `ik_interp`; selecting `motion_gen` raises an
+error instead of bypassing the backend. See
+{doc}`MotionGenerator <../motion/motion_generator>` for sampling and constraint
+semantics.
+
 Every planner result that contains positions must also contain per-waypoint
 `dt`; its per-environment `duration` is derived from those intervals. Every
 action passes a `TimedTrajectory` to `build_plan()`; raw position tensors are

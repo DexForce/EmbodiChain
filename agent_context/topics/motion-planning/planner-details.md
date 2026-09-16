@@ -83,6 +83,10 @@ Unified interface for trajectory planning with optional pre-interpolation.
 - Supported planner types: TOPPRA, TrapezoidalPlanner, NeuralPlanner, and cuRobo.
 - `MotionGenCfg.planner_cfg` is **MISSING** — must be provided.
 - `generate()` and `interpolate_trajectory()` are env-batched (`B, N, DOF`).
+- Cartesian preparation uses sequential IK with the preceding solution as seed.
+  Required IK or FK-consistency failures fail the whole environment instead of
+  removing samples. The public pair-returning `interpolate_trajectory()` raises
+  on any failed row; `generate()` carries a per-environment success mask.
 - `generate()` always returns a normalized `PlanResult`; failed rows hold the
   supplied `start_qpos` unless the backend opts into `preserve_failed_plan_positions`.
   Every returned trajectory has explicit `dt` and a `duration` derived from it.
@@ -117,11 +121,18 @@ There are no task-specific environment subclasses or direct-planning paths.
 | `control_part` | `str \| None` | `None` | Robot control part name (must match `RobotCfg.control_parts` key) |
 | `plan_opts` | `PlanOptions \| None` | `None` | Passed to the underlying planner |
 | `is_interpolate` | `bool` | `False` | Pre-interpolate waypoints before planning |
-| `interpolation_dt` | `float \| None` | `None` | Required explicit waypoint interval for `strategy="ik_interp"` and automatic joint interpolation fallback |
+| `interpolation_dt` | `float \| None` | `None` | Required explicit waypoint interval for `strategy="ik_interp"`; no automatic strategy fallback |
 | `interpolate_nums` | `int \| list[int]` | `10` | Points per segment (scalar or per-segment list) |
-| `is_linear` | `bool` | `False` | `True` = Cartesian linear interpolation; `False` = joint-space |
-| `interpolate_position_step` | `float` | `0.002` | Cartesian step size (meters) or joint step size (radians) |
-| `interpolate_angle_step` | `float` | `π/90` | Angular step in joint space (radians); only if `is_linear=False` |
+| `is_linear` | `bool` | `False` | Cartesian pre-interpolation for joint-only backends; `ik_interp` requires explicit Cartesian samples with preservation |
+| `preserve_cartesian_samples` | `bool` | `False` | `ik_interp` only; requires exactly `sample_count - 1` EEF targets after the start |
+| `interpolate_position_step` | `float` | `0.002` | Cartesian pre-interpolation position step (meters) |
+| `interpolate_angle_step` | `float` | `π/90` | Cartesian pre-interpolation orientation step (radians) |
+
+`ik_interp` rejects `plan_opts`, `velocity_limit`, and `acceleration_limit`;
+those constraints belong to the backend strategy. Resampling backend output
+revalidates final joint samples when the backend exposes that capability,
+using resolved motion and collision context. Resampling still invalidates
+native derivatives and constraint diagnostics.
 
 ## Configuration
 
