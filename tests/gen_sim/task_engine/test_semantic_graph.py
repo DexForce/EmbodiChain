@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import math
 from pathlib import Path
 
 import numpy as np
@@ -1542,6 +1543,7 @@ def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
         for item in integration["runtime_services"]["registered_semantic_lowerers"]
         if item["kind"] == "place_relative"
     )["routes"][0]
+    assert route["world_yaw_offset"] == pytest.approx(-math.pi / 3.0)
     assert "post" not in release and "validators" not in release
     assert terminal["validators"][0]["kind"] == "object_near_relative_target"
     # Planning includes 1 cm release clearance; acceptance uses the support surface.
@@ -1553,6 +1555,7 @@ def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
     constraints = load_config(paths.program.parent / "constraints.json")["presets"]
     preset = terminal["post"][-1]["preset"]
     assert constraints[preset]["kind"] == "upright"
+    assert constraints[preset]["position_tolerance"] == pytest.approx(0.05)
     # The imported rotation is baked into the normalized mesh before binding.
     assert constraints[preset]["local_axis"] == [0.0, -0.0, 1.0]
     assert constraints[preset]["displacement"] == pytest.approx(expected_displacement)

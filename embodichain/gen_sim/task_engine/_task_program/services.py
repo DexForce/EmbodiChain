@@ -572,6 +572,7 @@ class _RelativePlaceRoute:
     reference_entity_id: str
     relation: str
     world_displacement: tuple[float, float, float]
+    world_yaw_offset: float = 0.0
 
     def __post_init__(self) -> None:
         for field_name in ("object_id", "reference_entity_id", "relation"):
@@ -601,6 +602,13 @@ class _RelativePlaceRoute:
             "world_displacement",
             _world_displacement(self.world_displacement),
         )
+        if (
+            isinstance(self.world_yaw_offset, bool)
+            or not isinstance(self.world_yaw_offset, (int, float))
+            or not math.isfinite(self.world_yaw_offset)
+        ):
+            raise ValueError("world_yaw_offset must be finite.")
+        object.__setattr__(self, "world_yaw_offset", float(self.world_yaw_offset))
 
     @property
     def selector(self) -> tuple[str, str, str]:
@@ -636,6 +644,19 @@ class _ObservedRelativePlaceLowerer(_RelativePlaceLowerer):
             to_matrix=True,
         ).to(object_pose)
         observed_grasp = torch.linalg.solve(object_pose, eef)
+        world_orientation = result.goal.xpos.world_orientation
+        if route.world_yaw_offset:
+            if world_orientation is None:
+                raise ValueError(
+                    "Relative Place world yaw requires preserved object orientation."
+                )
+            angle = object_pose.new_tensor(route.world_yaw_offset)
+            yaw = torch.eye(3, dtype=object_pose.dtype, device=object_pose.device)
+            yaw[0, 0] = torch.cos(angle)
+            yaw[0, 1] = -torch.sin(angle)
+            yaw[1, 0] = torch.sin(angle)
+            yaw[1, 1] = torch.cos(angle)
+            world_orientation = yaw @ world_orientation
         return replace(
             result,
             goal=replace(
@@ -643,6 +664,7 @@ class _ObservedRelativePlaceLowerer(_RelativePlaceLowerer):
                 xpos=replace(
                     result.goal.xpos,
                     relative_pose=observed_grasp,
+                    world_orientation=world_orientation,
                 ),
             ),
         )
@@ -653,7 +675,7 @@ class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
     """Create fresh relative-placement lowerers from canonical scene refs."""
 
     call_id: ClassVar[str] = _PLACE_RELATIVE_CALL_ID
-    revision: ClassVar[str] = "2"
+    revision: ClassVar[str] = "3"
     target_descriptor: ClassVar[SkillDescriptor] = Place.descriptor()
 
     routes: tuple[_RelativePlaceRoute, ...]
@@ -696,6 +718,7 @@ class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
                     reference_entity_id=reference_ref.entity_id,
                     relation=route.relation,
                     world_displacement=route.world_displacement,
+                    world_yaw_offset=route.world_yaw_offset,
                 )
             )
         return _ObservedRelativePlaceLowerer(tuple(routes), robot)
