@@ -148,6 +148,7 @@ class AuthoringBridge:
         self._status = ""
         self._view = PanelViewState(snapshot=SequenceSnapshot(cards=(), compiled=False))
         self._published = False
+        self._parked_preview_key: tuple[int | None, str | None] | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -243,6 +244,7 @@ class AuthoringBridge:
             self._apply(command.value)
             applied = True
         self._advance_execution(keep_status=applied)
+        self._park_preview_on_selection()
         return self.publish()
 
     def drain_picks(self) -> str | None:
@@ -399,6 +401,59 @@ class AuthoringBridge:
             return "Execution finished."
         return f"Applied {type(command).__name__}."
 
+    def _park_preview_on_selection(self) -> None:
+        """Rest the idle preview on the selected card's final waypoint.
+
+        A freshly compiled sequence leaves the playback cursor at waypoint
+        zero, which is the robot's current pose: the translucent preview is
+        then drawn exactly on top of the real robot and the two are
+        indistinguishable. Parking the cursor at the end of the selected
+        card's segment separates them by sequence time instead, so the solid
+        robot shows the present and the preview shows the pose that card
+        produces.
+
+        Playback and stepwise execution own the cursor while they run, and an
+        explicit seek from the panel is preserved until the selection or the
+        compiled trajectory changes.
+        """
+        preview = self._preview
+        if preview is None or self.execution_active:
+            return
+        length = preview.length
+        if length == 0 or preview.is_playing:
+            self._parked_preview_key = None
+            return
+        key = self._current_preview_key()
+        if key == self._parked_preview_key:
+            return
+        self._parked_preview_key = key
+        preview.seek(self._selection_waypoint(key[1], length))
+
+    def _current_preview_key(self) -> tuple[int | None, str | None]:
+        """Identify the compiled trajectory and selection the cursor belongs to."""
+        compiled = self._session.compiled_trajectory
+        return (
+            None if compiled is None else id(compiled),
+            self._panel.selected_card_id,
+        )
+
+    def _selection_waypoint(self, card_id: str | None, length: int) -> int:
+        """Return the last waypoint of ``card_id``, or of the whole sequence.
+
+        Args:
+            card_id: Card selected in the panel, if any.
+            length: Compiled waypoint count, assumed greater than zero.
+
+        Returns:
+            Waypoint index inside ``[0, length)``.
+        """
+        if card_id is not None:
+            for card in self._session.cards:
+                if card.card_id != card_id or card.segment_stop is None:
+                    continue
+                return max(0, min(card.segment_stop - 1, length - 1))
+        return length - 1
+
     def _apply_preview(self, command: object) -> None:
         """Apply one playback command on the optional preview driver."""
         preview = self._preview
@@ -414,6 +469,10 @@ class AuthoringBridge:
                 preview.step(command.delta)
         except Exception as error:  # noqa: BLE001 - surfaced in the panel.
             self._status = f"{type(command).__name__} failed: {error}"
+            return
+        # An explicit playback command owns the cursor: record it as the resting
+        # position so selection parking does not overwrite it on this same tick.
+        self._parked_preview_key = self._current_preview_key()
 
     def clear_status(self) -> None:
         """Clear the status line shown in the panel header.

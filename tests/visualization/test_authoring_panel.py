@@ -1018,6 +1018,14 @@ class _Preview:
             step_stride=1,
         )
 
+    @property
+    def length(self) -> int:
+        return self.playback.length
+
+    @property
+    def is_playing(self) -> bool:
+        return self.playback.playing
+
     def state(self) -> PreviewPlaybackState:
         return self.playback
 
@@ -1056,6 +1064,32 @@ def _bridge(
     runtime = runtime or _Runtime()
     bridge = AuthoringBridge(session, runtime, SkillSequencePanel(), preview)
     return bridge, session, runtime
+
+
+def _install_segmented_cards(session: AuthoringSession) -> None:
+    """Give a stub session two compiled cards with known waypoint segments.
+
+    ``AuthoringSession.compile`` back-fills the segments from a real engine,
+    which these panel tests do not build. The bridge only reads the card
+    segments and the compiled-trajectory identity, so both are injected here.
+    """
+    session._cards = [
+        SkillCard(
+            card_id="first",
+            skill_id="pick_up",
+            state=SkillCardState.READY,
+            segment_start=0,
+            segment_stop=10,
+        ),
+        SkillCard(
+            card_id="second",
+            skill_id="place",
+            state=SkillCardState.READY,
+            segment_start=10,
+            segment_stop=PREVIEW_LENGTH,
+        ),
+    ]
+    session._compiled_trajectory = SimpleNamespace(name="compiled")
 
 
 class TestAuthoringBridge:
@@ -1179,6 +1213,71 @@ class TestAuthoringBridge:
             ("step", -1),
         ]
         assert view.playback == preview.playback
+
+    def test_idle_preview_parks_on_the_selected_card_segment(self) -> None:
+        """The resting preview shows the selected card's result, not the present.
+
+        A freshly compiled cursor sits at waypoint zero, which is the robot's
+        current pose, so the translucent preview would be drawn on top of the
+        real robot. Parking separates the two along sequence time.
+        """
+        preview = _Preview()
+        bridge, session, runtime = _bridge(preview=preview)
+        _install_segmented_cards(session)
+        bridge.register()
+
+        bridge._panel._selected_card_id = "first"
+        bridge.update()
+        assert preview.calls == [("seek", 9)], "parks on the first card's last step"
+
+        bridge._panel._selected_card_id = "second"
+        bridge.update()
+        assert preview.calls == [("seek", 9), ("seek", PREVIEW_LENGTH - 1)]
+
+        bridge.update()
+        assert len(preview.calls) == 2, "an unchanged selection must not re-seek"
+
+    def test_parking_falls_back_to_the_sequence_end(self) -> None:
+        """With no card selected the preview shows the final pose."""
+        preview = _Preview()
+        bridge, session, _ = _bridge(preview=preview)
+        _install_segmented_cards(session)
+        bridge.register()
+
+        bridge.update()
+
+        assert preview.calls == [("seek", PREVIEW_LENGTH - 1)]
+
+    def test_parking_keeps_an_explicit_seek(self) -> None:
+        """A browser seek owns the cursor until the selection changes."""
+        preview = _Preview()
+        bridge, session, runtime = _bridge(preview=preview)
+        _install_segmented_cards(session)
+        bridge.register()
+
+        runtime.queue(SeekPreview(index=PREVIEW_CURSOR))
+        bridge.update()
+
+        assert preview.calls == [("seek", PREVIEW_CURSOR)]
+
+    def test_parking_leaves_a_playing_preview_alone(self) -> None:
+        """Playback owns the cursor while it runs."""
+        preview = _Preview()
+        preview.playback = PreviewPlaybackState(
+            group_id="preview",
+            length=PREVIEW_LENGTH,
+            cursor=0,
+            playing=True,
+            loop=True,
+            step_stride=1,
+        )
+        bridge, session, _ = _bridge(preview=preview)
+        _install_segmented_cards(session)
+        bridge.register()
+
+        bridge.update()
+
+        assert preview.calls == []
 
     def test_preview_commands_without_a_preview_are_reported(self) -> None:
         bridge, _, runtime = _bridge()
