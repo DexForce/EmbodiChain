@@ -290,6 +290,42 @@ def test_collision_world_declares_unreferenced_obstacles_without_changing_defaul
     }
 
 
+def test_generic_repick_uses_end_grasp_only_after_all_objects_were_uprighted() -> None:
+    scene = SimpleNamespace(
+        table_top_z=0.7,
+        planner_objects=[
+            {"runtime_uid": "can", "role": "rigid_object"},
+            {"runtime_uid": "box", "role": "rigid_object"},
+            {"runtime_uid": "table", "role": "background"},
+        ],
+    )
+    graph = {
+        "nodes": [
+            {
+                "task_type": "E2",
+                "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.clear_released",
+                    "arguments": {"object": "can"},
+                },
+            },
+            {"task_type": "E1", "call": {"kind": "pick", "object": "can"}},
+        ]
+    }
+    options = _integration_payload(
+        graph, scene, program_id="probe", scene_contract="scene"
+    )["profile"]["action_options"]
+    assert options["pick"]["pick_object_part"] == "top"
+
+    graph["nodes"].append(
+        {"task_type": "E1", "call": {"kind": "pick", "object": "box"}}
+    )
+    options = _integration_payload(
+        graph, scene, program_id="probe", scene_contract="scene"
+    )["profile"]["action_options"]
+    assert options["pick"]["pick_object_part"] == "center"
+
+
 def test_semantic_graph_uses_canonical_calls_and_has_stable_hash() -> None:
     graph = _graph()
     validated = validate_semantic_task_graph(graph)
@@ -1279,6 +1315,8 @@ def test_explicit_orientation_bundle_uses_shared_preflight_and_terminal_post(
     _verify_program_projection(paths.program, generated)
     policy = load_config(paths.execution_policy)
     assert policy["tracking"]["terminal_max_abs_error"] == pytest.approx(0.25)
+    if task_type == "E4":
+        assert policy["motion"]["sample_count"] >= 260
     integration = load_config(paths.integration)
     if task_type == "E4":
         source_call = generated["nodes"][0]["call"]

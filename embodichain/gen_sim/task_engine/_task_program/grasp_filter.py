@@ -193,17 +193,25 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 )
             costs = costs.to(poses.device)
             accepted = torch.isfinite(costs)
+            raw_count = int(accepted.sum())
             accepted &= opening_envelope_mask(
                 mesh_vertices,
                 poses,
                 obj_poses[row].to(poses),
                 self.gripper_model.max_opening_width,
             )
+            opening_count = int(accepted.sum())
             for rule in rules:
                 accepted &= accepted_candidates(
                     poses, obj_poses[row].to(poses), rule, self.gripper_model
                 )
             counts.append(int(accepted.sum()))
+            if not counts[-1]:
+                logger.log_info(
+                    "GenSim grasp filter rejected all proposals: "
+                    f"raw={raw_count}, opening={opening_count}, "
+                    f"rules={len(rules)}."
+                )
             if accepted.any():
                 filtered.append((poses[accepted].clone(), costs[accepted].clone()))
             else:

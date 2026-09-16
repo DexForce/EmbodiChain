@@ -226,7 +226,7 @@ def generate_task_program_bundle(
         # Leave motion time for handover and upright staging without shrinking
         # a larger configured budget. The velocity validator remains mandatory.
         policy_payload["motion"]["sample_count"] = max(
-            180, policy_payload["motion"]["sample_count"]
+            260, policy_payload["motion"]["sample_count"]
         )
     save_config(paths.execution_policy, policy_payload)
 
@@ -747,9 +747,24 @@ def _integration_payload(
     move_held_routes: list[dict[str, Any]] = []
     upright_move_objects: set[str] = set()
     pick_routes: dict[str, list[dict[str, Any]]] = {}
+    upright_released: set[str] = set()
+    generic_picks_are_upright: list[bool] = []
+    for node in graph["nodes"]:
+        call = node["call"]
+        if (
+            node.get("task_type") == "E2"
+            and call.get("call_id") == _CLEAR_RELEASED_CALL_ID
+        ):
+            upright_released.add(str(call["arguments"]["object"]))
+        elif call["kind"] == "pick":
+            generic_picks_are_upright.append(str(call["object"]) in upright_released)
     default_pick_options = {
         "kind": "pick_up",
-        "pick_object_part": "center",
+        "pick_object_part": (
+            "top"
+            if generic_picks_are_upright and all(generic_picks_are_upright)
+            else "center"
+        ),
         "pre_grasp_distance": 0.15,
         "lift_height": _DEFAULT_PICK_LIFT_HEIGHT,
         "approach_alignment_max_angle": 0.10,
