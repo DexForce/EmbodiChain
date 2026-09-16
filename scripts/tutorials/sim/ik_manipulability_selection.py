@@ -92,6 +92,17 @@ def _sample_targets(solver, num_targets: int) -> tuple[torch.Tensor, torch.Tenso
         return solver.get_fk(q_true), q_true
 
 
+def _prepare_variant_robots(sim: SimulationManager) -> list[tuple[str, Robot]]:
+    """Register every comparison robot before preparing the simulation."""
+    variants = []
+    for label, selection, seed_selection in VARIANTS:
+        uid = f"w1_{selection}_{'sel' if seed_selection else 'rand'}"
+        robot = sim.add_robot(cfg=_robot_cfg(uid, selection, seed_selection))
+        variants.append((label, robot))
+    sim.prepare()
+    return variants
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--num_targets", type=int, default=50)
@@ -108,9 +119,7 @@ def main() -> None:
     try:
         rows = []
         targets = seed_q = None
-        for label, selection, seed_selection in VARIANTS:
-            uid = f"w1_{selection}_{'sel' if seed_selection else 'rand'}"
-            robot: Robot = sim.add_robot(cfg=_robot_cfg(uid, selection, seed_selection))
+        for label, robot in _prepare_variant_robots(sim):
             solver = robot.get_solver("left_arm")
             if targets is None:
                 targets, seed_q = _sample_targets(solver, args.num_targets)

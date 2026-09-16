@@ -119,6 +119,7 @@ def test_repository_manifest_maps_ik_tutorial_to_its_behavior_contracts() -> Non
 
     assert plan.mode == "partial"
     assert {
+        "tests/sim/test_ik_manipulability_tutorial.py",
         "tests/sim/motion/solvers/test_ik_manipulability_selection.py",
         "tests/visualization/test_example_tutorial_coverage.py",
     } <= set(plan.selectors)
