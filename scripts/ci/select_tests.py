@@ -67,6 +67,7 @@ _DOC_PATTERNS = (
     "agent_context/topics/**",
     "agent_context/conventions/**",
     "README.md",
+    "**/README.md",
     "AGENTS.md",
     "CONTRIBUTORS.md",
     "CONTRIBUTING.md",
@@ -167,6 +168,13 @@ def path_matches(path: str, pattern: str) -> bool:
     if pattern.endswith("/"):
         prefix = pattern.rstrip("/")
         return path == prefix or path.startswith(f"{prefix}/")
+    if "**" not in pattern:
+        path_parts = path.split("/")
+        pattern_parts = pattern.split("/")
+        return len(path_parts) == len(pattern_parts) and all(
+            fnmatch.fnmatchcase(path_part, pattern_part)
+            for path_part, pattern_part in zip(path_parts, pattern_parts)
+        )
     return fnmatch.fnmatchcase(path, pattern)
 
 

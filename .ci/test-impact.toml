@@ -316,6 +316,12 @@ resource_hints = ["sim"]
 risk = "medium"
 
 [[rules]]
+id = "lab-preview-scripts"
+paths = ["embodichain/lab/scripts/preview_*.py"]
+tests = ["tests/lab/scripts/test_preview_*.py"]
+risk = "medium"
+
+[[rules]]
 id = "task-program"
 paths = [
   "embodichain/lab/task_program/**",
@@ -335,6 +341,23 @@ id = "atomic-actions"
 paths = ["embodichain/lab/sim/atomic_actions/**"]
 tests = ["tests/sim/atomic_actions/**"]
 resource_hints = ["sim"]
+risk = "medium"
+
+[[rules]]
+id = "atomic-action-tutorials"
+paths = ["scripts/tutorials/atomic_action/*.py"]
+tests = ["tests/sim/atomic_actions/**"]
+resource_hints = ["sim"]
+risk = "medium"
+
+[[rules]]
+id = "ik-manipulability-tutorial"
+paths = ["scripts/tutorials/sim/ik_manipulability_selection.py"]
+tests = [
+  "tests/sim/test_ik_manipulability_tutorial.py",
+  "tests/sim/motion/solvers/test_ik_manipulability_selection.py",
+  "tests/visualization/test_example_tutorial_coverage.py",
+]
 risk = "medium"
 
 [[rules]]
@@ -377,6 +400,13 @@ paths = [
   "embodichain/lab/sim/objects/gizmo.py",
 ]
 tests = ["tests/visualization/**", "tests/sim/objects/test_gizmo.py"]
+resource_hints = ["sim", "gpu"]
+risk = "medium"
+
+[[rules]]
+id = "visualization-tutorials"
+paths = ["scripts/tutorials/visualization/*.py"]
+tests = ["tests/visualization/**"]
 resource_hints = ["sim", "gpu"]
 risk = "medium"
 

@@ -71,6 +71,85 @@ def test_repository_manifest_selectors_resolve() -> None:
     assert not missing, f"unresolved impact selectors: {missing}"
 
 
+@pytest.mark.parametrize(
+    ("source_path", "expected_selector"),
+    [
+        (
+            "embodichain/lab/scripts/preview_joint_control.py",
+            "tests/lab/scripts/test_preview_joint_control.py",
+        ),
+        (
+            "scripts/tutorials/atomic_action/pickup.py",
+            "tests/sim/atomic_actions/test_core.py",
+        ),
+        (
+            "scripts/tutorials/visualization/viser_scene.py",
+            "tests/visualization/test_runtime.py",
+        ),
+    ],
+)
+def test_repository_manifest_maps_supported_scripts(
+    source_path: str,
+    expected_selector: str,
+) -> None:
+    root = Path(__file__).resolve().parents[2]
+    manifest = load_manifest(root / ".ci/test-impact.toml")
+
+    plan = build_plan(
+        root,
+        [ChangedPath(source_path)],
+        manifest,
+        map_data={"topics": []},
+    )
+
+    assert plan.mode == "partial"
+    assert expected_selector in plan.selectors
+
+
+def test_repository_manifest_maps_ik_tutorial_to_its_behavior_contracts() -> None:
+    root = Path(__file__).resolve().parents[2]
+    manifest = load_manifest(root / ".ci/test-impact.toml")
+
+    plan = build_plan(
+        root,
+        [ChangedPath("scripts/tutorials/sim/ik_manipulability_selection.py")],
+        manifest,
+        map_data={"topics": []},
+    )
+
+    assert plan.mode == "partial"
+    assert {
+        "tests/sim/test_ik_manipulability_tutorial.py",
+        "tests/sim/motion/solvers/test_ik_manipulability_selection.py",
+        "tests/visualization/test_example_tutorial_coverage.py",
+    } <= set(plan.selectors)
+
+
+@pytest.mark.parametrize(
+    "source_path",
+    [
+        "embodichain/lab/scripts/preview_widgets/new_unknown.py",
+        "scripts/tutorials/atomic_action/nested/new_unknown.py",
+        "scripts/tutorials/visualization/nested/new_unknown.py",
+    ],
+)
+def test_repository_manifest_keeps_nested_unknown_scripts_conservative(
+    source_path: str,
+) -> None:
+    root = Path(__file__).resolve().parents[2]
+    manifest = load_manifest(root / ".ci/test-impact.toml")
+
+    plan = build_plan(
+        root,
+        [ChangedPath(source_path)],
+        manifest,
+        map_data={"topics": []},
+    )
+
+    assert plan.mode == "full-pr"
+    assert "no impact rule or topic" in (plan.fallback_reason or "")
+
+
 def test_data_pipeline_rule_covers_dataset_functor_consumer() -> None:
     root = Path(__file__).resolve().parents[2]
     manifest = load_manifest(root / ".ci/test-impact.toml")
@@ -413,6 +492,17 @@ def test_design_document_is_docs_only(tmp_path: Path) -> None:
         tmp_path,
         [ChangedPath("design/ci.md")],
         _manifest(),
+    )
+
+    assert plan.mode == "docs-only"
+
+
+def test_nested_readme_is_docs_only(tmp_path: Path) -> None:
+    plan = build_plan(
+        tmp_path,
+        [ChangedPath("scripts/tutorials/visualization/README.md")],
+        _manifest(),
+        map_data={"topics": []},
     )
 
     assert plan.mode == "docs-only"
