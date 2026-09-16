@@ -323,6 +323,17 @@ def discover_prismatic_parts(
                 for token in ("mount", "support", "post", "leg", "plate")
             )
         )
+        # Legacy generators often decompose one U-handle into collision meshes
+        # for feet, drops and one explicitly named grip. Prefer only declared
+        # grip bars when present; multiple grips remain deliberately ambiguous.
+        primary_grips = tuple(
+            path
+            for path in handles
+            if "grip" in path.rsplit("/", 1)[-1].lower()
+            or "pull_bar" in path.rsplit("/", 1)[-1].lower()
+        )
+        if primary_grips:
+            handles = primary_grips
         axis = np.eye(3)[{"X": 0, "Y": 1, "Z": 2}[str(joint.GetAxisAttr().Get())]]
         q = joint.GetLocalRot1Attr().Get()
         axis = (

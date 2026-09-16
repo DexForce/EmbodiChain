@@ -75,6 +75,15 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--dataset-saving", action="store_true")
     _add_open_window_argument(run_parser)
     _add_failure_policy_argument(run_parser)
+    annotate_parser = subparsers.add_parser(
+        "annotate-endpoints",
+        help="Audit or apply reviewed prismatic endpoint metadata offline.",
+    )
+    annotate_parser.add_argument("--asset-root", required=True)
+    annotate_parser.add_argument("--manifest", required=True)
+    annotate_parser.add_argument("--report", required=True)
+    annotate_parser.add_argument("--apply", action="store_true")
+    annotate_parser.add_argument("--backup-root", default=None)
     return parser
 
 
@@ -132,11 +141,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         "prepare",
         "run",
         "run-all",
+        "annotate-endpoints",
         "-h",
         "--help",
     }:
         arguments.insert(0, "run-all")
     args = parser.parse_args(arguments)
+    if args.command == "annotate-endpoints":
+        return _run_endpoint_annotations(args)
     if args.command == "run":
         return _run_prepared_bundle(args)
     return _run_workflow(
@@ -203,6 +215,25 @@ def _run_workflow(
     )
     accepted = result.succeeded if execute else result.status == "prepared"
     return 0 if accepted else 2
+
+
+def _run_endpoint_annotations(args: argparse.Namespace) -> int:
+    """Run the offline endpoint migrator without constructing a simulator."""
+    from .endpoint_annotations import (
+        load_endpoint_manifest,
+        migrate_endpoint_manifest,
+        write_endpoint_report,
+    )
+
+    report = migrate_endpoint_manifest(
+        asset_root=args.asset_root,
+        manifest=load_endpoint_manifest(args.manifest),
+        apply=bool(args.apply),
+        backup_root=args.backup_root,
+    )
+    report_path = write_endpoint_report(args.report, report)
+    _print_json({**report, "report": report_path.as_posix()})
+    return 0
 
 
 def _run_prepared_bundle(args: argparse.Namespace) -> int:

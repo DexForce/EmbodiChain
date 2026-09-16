@@ -169,6 +169,57 @@ def test_handle_discovery_follows_only_fixed_child_links(
     assert binding.parent == "cabinet"
 
 
+def test_composite_legacy_handle_prefers_grip_over_structural_members(
+    scene: PreparedScene,
+) -> None:
+    stage = Usd.Stage.Open(scene.articulations[0]["fpath"])
+    source = "/fixture/drawer/handle"
+    for name in (
+        "handle_left_standoff",
+        "handle_left_drop",
+        "handle_right_standoff",
+        "handle_right_drop",
+        "handle_grip",
+    ):
+        Sdf.CopySpec(
+            stage.GetRootLayer(),
+            source,
+            stage.GetRootLayer(),
+            f"/fixture/drawer/{name}",
+        )
+    stage.RemovePrim(source)
+    stage.GetRootLayer().Save()
+
+    part = discover_prismatic_parts(scene.articulations[0])[0]
+    assert part.handle_paths == ("/fixture/drawer/handle_grip",)
+    binding = inspect_prismatic(scene.articulations[0])
+    assert binding.handle_path == "/fixture/drawer/handle_grip"
+    for name in ("handle_left_standoff", "handle_right_drop"):
+        prim = stage.GetPrimAtPath(f"/fixture/drawer/{name}")
+        assert UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr().Get()
+
+
+def test_composite_legacy_handle_keeps_multiple_real_grips_ambiguous(
+    scene: PreparedScene,
+) -> None:
+    stage = Usd.Stage.Open(scene.articulations[0]["fpath"])
+    source = "/fixture/drawer/handle"
+    for name in ("handle_grip_left", "handle_grip_right"):
+        Sdf.CopySpec(
+            stage.GetRootLayer(),
+            source,
+            stage.GetRootLayer(),
+            f"/fixture/drawer/{name}",
+        )
+    stage.RemovePrim(source)
+    stage.GetRootLayer().Save()
+
+    part = discover_prismatic_parts(scene.articulations[0])[0]
+    assert len(part.handle_paths) == 2
+    with pytest.raises(ValueError, match="one unambiguous handle"):
+        inspect_prismatic(scene.articulations[0])
+
+
 def test_fixed_handle_binding_expresses_axis_in_handle_frame(
     scene: PreparedScene,
 ) -> None:
