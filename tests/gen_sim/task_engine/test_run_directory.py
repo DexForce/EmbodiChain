@@ -26,8 +26,11 @@ from embodichain.gen_sim.task_engine.run_directory import reserve_run_directory
 _NOW = datetime(2026, 8, 20, 7, 24, 36, tzinfo=timezone(timedelta(hours=8)))
 
 
-def test_run_directory_uses_local_second_timestamp(tmp_path: Path) -> None:
-    root = tmp_path / "task2_2"
+@pytest.mark.parametrize("root_name", ["task_alpha", "trial-42"])
+def test_run_directory_uses_local_second_timestamp(
+    tmp_path: Path, root_name: str
+) -> None:
+    root = tmp_path / root_name
 
     with reserve_run_directory(root, now=_NOW) as allocation:
         assert allocation.run_id == "20260820_072436"
@@ -39,8 +42,11 @@ def test_run_directory_uses_local_second_timestamp(tmp_path: Path) -> None:
     assert not (root / ".20260820_072436.reserve").exists()
 
 
-def test_run_directory_adds_suffix_for_same_second_runs(tmp_path: Path) -> None:
-    root = tmp_path / "task2_2"
+@pytest.mark.parametrize("root_name", ["task_alpha", "trial-42"])
+def test_run_directory_adds_suffix_for_same_second_runs(
+    tmp_path: Path, root_name: str
+) -> None:
+    root = tmp_path / root_name
     (root / "20260820_072436").mkdir(parents=True)
 
     with reserve_run_directory(root, now=_NOW) as first:
