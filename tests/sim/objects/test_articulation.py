@@ -52,8 +52,10 @@ DRIVE_TEST_DAMPING = 4.0
 
 
 @pytest.mark.parametrize("physics", ["default", "newton"])
-def test_usdc_drawer_supports_named_fk_and_affordance_geometry(physics: str) -> None:
-    """The packaged drawer can sample top-link geometry without a URDF chain."""
+def test_usdc_drawer_supports_named_kinematics_and_affordance_geometry(
+    physics: str,
+) -> None:
+    """The three-drawer asset supports geometry and a one-joint Jacobian."""
     from embodichain.lab.sim.atomic_actions.articulation_geometry import (
         sample_initial_articulation_geometry,
     )
@@ -119,6 +121,35 @@ def test_usdc_drawer_supports_named_fk_and_affordance_geometry(physics: str) -> 
                 link_name, to_matrix=True
             )
             torch.testing.assert_close(fk[:, index], observed, atol=1e-5, rtol=1e-5)
+
+        # Public state has three sibling joints; top_drawer's serial chain has
+        # only top_slide. Passing the full state directly to PK used to fail.
+        jacobian = drawer.compute_jacobian(
+            drawer.get_qpos(), root_link_name="cabinet", end_link_name="top_drawer"
+        )
+        assert jacobian.shape == (1, 6, 1)
+        torch.testing.assert_close(
+            jacobian[0, :, 0], torch.tensor([0.0, 1.0, 0.0, 0.0, 0.0, 0.0])
+        )
+        epsilon = 0.001
+        delta = torch.zeros_like(measured_qpos)
+        delta[:, top_joint_id] = epsilon
+        plus = drawer.compute_fk(
+            measured_qpos + delta,
+            link_names=["top_drawer"],
+            qpos_joint_names=drawer.joint_names,
+        )
+        minus = drawer.compute_fk(
+            measured_qpos - delta,
+            link_names=["top_drawer"],
+            qpos_joint_names=drawer.joint_names,
+        )
+        torch.testing.assert_close(
+            jacobian[:, :3, 0],
+            (plus[:, 0, :3, 3] - minus[:, 0, :3, 3]) / (2 * epsilon),
+            atol=1e-4,
+            rtol=1e-4,
+        )
         torch.testing.assert_close(drawer.get_qpos(), measured_qpos)
     finally:
         sim.destroy(exit_process=False)

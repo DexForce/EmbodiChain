@@ -2934,8 +2934,12 @@ class Articulation(BatchEntity):
         """Compute the Jacobian matrix for the given joint positions using the pk_serial_chain.
 
         Args:
-            qpos (torch.Tensor): The joint positions. Shape can be (dof,) for a single configuration
-                                 or (batch_size, dof) for batched configurations.
+            qpos: Joint positions with shape ``(dof,)`` or ``(batch_size, dof)``
+                in public :attr:`joint_names` order. The selected chain's joint
+                values are extracted and reordered by name. A narrower vector
+                containing exactly the serial chain's joints is also accepted
+                in serial-chain parameter order. When both widths match, public
+                state order takes precedence. None evaluates the zero state.
             end_link_name (str, optional): The name of the end link for which the Jacobian is computed.
                                            Defaults to the last link in the chain.
             root_link_name (str, optional): The name of the root link for which the Jacobian is computed.
@@ -2944,30 +2948,34 @@ class Articulation(BatchEntity):
                                                                    frame for which the Jacobian is computed.
                                                                    Shape can be (batch_size, 3) or (3,) for a single offset.
                                                                    Defaults to None (origin of the end-effector frame).
-            jac_type (str, optional): Specifies the part of the Jacobian to return:
-                                      - 'full': Returns the full Jacobian (6, dof) or (batch_size, 6, dof).
-                                      - 'trans': Returns only the translational part (3, dof) or (batch_size, 3, dof).
-                                      - 'rot': Returns only the rotational part (3, dof) or (batch_size, 3, dof).
-                                      Defaults to 'full'.
+            jac_type: ``full`` returns all six rows; ``trans`` returns the
+                translational rows and ``rot`` the rotational rows. Defaults to
+                ``full``.
 
         Raises:
             RuntimeError: If the pk_chain is not initialized.
-            ValueError: If an invalid `jac_type` is provided.
+            ValueError: If ``jac_type`` is invalid, the joint-state shape does
+                not match the articulation or selected chain, or the chain
+                contains joint names absent from the public state.
 
         Returns:
-            torch.Tensor: The Jacobian matrix. Shape depends on the input:
-                          - For a single link: (6, dof) or (batch_size, 6, dof).
-                          - For multiple links: (num_links, 6, dof) or (num_links, batch_size, 6, dof).
-                          The shape also depends on the `jac_type` parameter.
+            Jacobian with shape ``(batch_size, 6, chain_dof)`` for ``full`` or
+            ``(batch_size, 3, chain_dof)`` for ``trans``/``rot``. A one-dimensional
+            input has batch size one. Columns follow the selected serial chain's
+            ``get_joint_parameter_names()`` order, not the public state order;
+            sibling joints outside the selected chain have no columns.
         """
         if self.pk_chain is None:
             logger.log_error("pk_chain is not initialized for this articulation.")
 
+        state_joint_names = tuple(self.joint_names)
         if qpos is None:
-            qpos = torch.zeros(self.dof, device=self.device)
+            qpos = torch.zeros(len(state_joint_names), device=self.device)
 
         # Ensure qpos is a tensor on the correct device
         qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
+        if qpos.ndim not in (1, 2):
+            raise ValueError("qpos must have shape (joints,) or (batch_size, joints).")
 
         # Default root and end link names if not provided
         frame_names = self.pk_chain.get_frame_names(exclude_fixed=False)
@@ -2983,6 +2991,28 @@ class Articulation(BatchEntity):
             end_link_name=end_link_name,
             device=self.device,
         )
+
+        serial_joint_names = tuple(pk_serial_chain.get_joint_parameter_names())
+        state_joint_ids = {name: index for index, name in enumerate(state_joint_names)}
+        missing_joint_names = set(serial_joint_names) - state_joint_ids.keys()
+        if missing_joint_names:
+            raise ValueError(
+                "Serial-chain joints are absent from public joint_names: "
+                f"{sorted(missing_joint_names)}."
+            )
+        if qpos.shape[-1] == len(state_joint_names):
+            joint_ids = torch.tensor(
+                [state_joint_ids[name] for name in serial_joint_names],
+                dtype=torch.long,
+                device=self.device,
+            )
+            qpos = qpos.index_select(-1, joint_ids)
+        elif qpos.shape[-1] != len(serial_joint_names):
+            raise ValueError(
+                f"qpos has {qpos.shape[-1]} joints; expected {len(state_joint_names)} "
+                "in public joint_names order or "
+                f"{len(serial_joint_names)} in serial-chain parameter order."
+            )
 
         # Compute the Jacobian using the kinematics chain
         J = pk_serial_chain.jacobian(th=qpos, locations=locations)

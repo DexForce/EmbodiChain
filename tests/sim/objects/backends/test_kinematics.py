@@ -40,6 +40,9 @@ def _articulation(links: list[str], joints: list[JointDesc]) -> Articulation:
     articulation = object.__new__(Articulation)
     articulation.device = torch.device("cpu")
     articulation.pk_chain = _build_pk_chain(entity, articulation.device)
+    articulation.joint_names = [
+        joint.name for joint in joints if joint.joint_type != JointType.FIXED
+    ]
     # This path must never be opened by FK or Jacobian computation.
     articulation.cfg = SimpleNamespace(fpath="missing.usdc")
     return articulation
@@ -162,10 +165,90 @@ def test_urdf_jacobian_keeps_fixed_tip_offset(tmp_path: Path) -> None:
     obj = object.__new__(Articulation)
     obj.device = torch.device("cpu")
     obj.pk_chain = create_pk_chain(str(path), obj.device)
+    obj.joint_names = ["hinge"]
     angle = torch.tensor(0.3)
     actual = obj.compute_jacobian(angle.reshape(1, 1))
     expected = torch.tensor([-angle.sin(), angle.cos(), 0.0, 0.0, 0.0, 1.0])
     torch.testing.assert_close(actual[0, :, 0], expected)
+
+
+@pytest.mark.parametrize("branched", [False, True])
+@pytest.mark.parametrize("batched", [False, True])
+def test_jacobian_maps_public_state_and_columns_by_name(
+    branched: bool, batched: bool
+) -> None:
+    """Nonzero rotational FK exposes permutations even at equal state widths."""
+    hinge = _hinge()
+    extension = JointDesc(
+        "extension",
+        "door",
+        "tip",
+        JointType.PRISMATIC,
+        axis=np.array([1.0, 0.0, 0.0]),
+    )
+    links, joints = ["root", "door", "tip"], [hinge, extension]
+    if branched:
+        links.append("sibling")
+        joints.append(
+            JointDesc("sibling_slide", "root", "sibling", JointType.PRISMATIC)
+        )
+    obj = _articulation(links, joints)
+    # Equal-width input must also be reordered; width alone cannot identify
+    # serial-order input. The unrelated sibling must never reach PK Jacobian.
+    obj.joint_names = ["extension", "hinge"]
+    qpos = torch.tensor([[0.17, 0.4], [-0.09, -0.3]])
+    if branched:
+        obj.joint_names.insert(1, "sibling_slide")
+        qpos = torch.stack([qpos[:, 0], torch.tensor([0.8, -0.6]), qpos[:, 1]], dim=-1)
+    if not batched:
+        qpos = qpos[0]
+    actual = obj.compute_jacobian(qpos, root_link_name="root", end_link_name="tip")
+    assert actual.shape == (2 if batched else 1, 6, 2)
+    epsilon = 0.001
+    for column, name in enumerate(["hinge", "extension"]):
+        offset = torch.zeros_like(qpos)
+        offset[..., obj.joint_names.index(name)] = epsilon
+        plus = obj.compute_fk(
+            qpos + offset, link_names=["tip"], qpos_joint_names=obj.joint_names
+        )
+        minus = obj.compute_fk(
+            qpos - offset, link_names=["tip"], qpos_joint_names=obj.joint_names
+        )
+        derivative = (plus[:, 0, :3, 3] - minus[:, 0, :3, 3]) / (2 * epsilon)
+        torch.testing.assert_close(
+            actual[:, :3, column], derivative, atol=2e-4, rtol=1e-3
+        )
+
+
+def test_jacobian_accepts_legacy_serial_input_and_zero_state() -> None:
+    sibling = JointDesc("slide", "root", "drawer", JointType.PRISMATIC)
+    obj = _articulation(["root", "door", "drawer"], [sibling, _hinge()])
+    full = obj.compute_jacobian(torch.tensor([[0.8, 0.4]]), end_link_name="door")
+    serial = obj.compute_jacobian(np.array([0.4]), end_link_name="door")
+    torch.testing.assert_close(serial, full)
+    zero = obj.compute_jacobian(None, end_link_name="door")
+    torch.testing.assert_close(
+        zero, obj.compute_jacobian(torch.zeros(2), end_link_name="door")
+    )
+    for kind, rows in [("trans", slice(0, 3)), ("rot", slice(3, 6))]:
+        actual = obj.compute_jacobian(
+            torch.tensor([0.8, 0.4]), end_link_name="door", jac_type=kind
+        )
+        torch.testing.assert_close(actual, full[:, rows, :])
+
+
+@pytest.mark.parametrize("shape", [(), (1, 1, 1), (3,)])
+def test_jacobian_rejects_invalid_state_shape(shape: tuple[int, ...]) -> None:
+    obj = _articulation(["root", "door"], [_hinge()])
+    with pytest.raises(ValueError, match="qpos"):
+        obj.compute_jacobian(torch.zeros(shape), end_link_name="door")
+
+
+def test_jacobian_rejects_missing_public_joint_name() -> None:
+    obj = _articulation(["root", "door"], [_hinge()])
+    obj.joint_names = ["unrelated"]
+    with pytest.raises(ValueError, match="hinge"):
+        obj.compute_jacobian(torch.zeros(1), end_link_name="door")
 
 
 @pytest.mark.parametrize(

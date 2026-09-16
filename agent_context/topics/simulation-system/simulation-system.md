@@ -454,6 +454,13 @@ by a fixed physical-link frame to preserve
 excluded from root-relative FK; unsupported joint types or non-tree topology
 fail explicitly (simulation-only callers can disable `build_pk_chain`).
 Jacobian and serial FK reuse the built chain without reopening the asset.
+`compute_jacobian()` treats a full-width input as public `joint_names` order
+and selects/reorders it into the requested serial chain's parameter order.
+Narrower chain-sized inputs retain serial-order compatibility; equal widths
+always mean public state order. Returned columns contain only the selected
+chain's joints, in serial-chain parameter order. `qpos=None` evaluates the zero
+state. Regression coverage uses the branched `DrawerUSD/drawer_001.usdc` asset
+and nonzero rotational chains with permuted public state order.
 
 ## Configuration Flow
 
