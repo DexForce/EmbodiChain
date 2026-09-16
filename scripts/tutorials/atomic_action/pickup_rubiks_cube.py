@@ -46,12 +46,11 @@ import torch
 
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 from embodichain.lab.sim.atomic_actions import (
-    AntipodalAffordance,
     ControlPartCommandProfile,
+    create_rigidized_articulation_antipodal_semantics,
     create_simulation_atomic_action_engine,
     GraspGoal,
     MotionPolicy,
-    ObjectSemantics,
     PickUpOptions,
 )
 from embodichain.lab.sim.cfg import ArticulationCfg, ArticulationRootPropertiesCfg
@@ -185,38 +184,6 @@ def create_pick_object(sim, asset_path: str) -> Articulation:
     return cube
 
 
-def create_link_antipodal_semantics(
-    cube: Articulation,
-    link_name: str,
-    *,
-    label: str,
-) -> ObjectSemantics:
-    """Describe an articulated target using one link's antipodal geometry.
-
-    ``create_antipodal_semantics`` reads ``get_vertices()`` and
-    ``get_triangles()``, which only rigid objects expose. Articulations publish
-    geometry per link instead, so grasp sampling names the link it should use.
-
-    Args:
-        cube: Spawned articulation that will be grasped.
-        link_name: Link whose mesh defines the graspable surface.
-        label: Human-readable object category.
-
-    Returns:
-        Object semantics carrying the link mesh on its affordance.
-    """
-    vertices, triangles = cube.get_link_vert_face(link_name)
-    return ObjectSemantics(
-        label=label,
-        geometry={},
-        affordance=AntipodalAffordance(
-            mesh_vertices=torch.as_tensor(vertices),
-            mesh_triangles=torch.as_tensor(triangles),
-        ),
-        entity_id=cube.uid,
-    )
-
-
 def cube_center_pose(cube: Articulation) -> torch.Tensor:
     """Return the cube's world center pose, compensating the authored offset.
 
@@ -265,7 +232,12 @@ def main() -> None:
             )
         },
     )
-    semantics = create_link_antipodal_semantics(cube, GRASP_LINK, label="rubiks_cube")
+    semantics = create_rigidized_articulation_antipodal_semantics(
+        cube,
+        grasp_link=GRASP_LINK,
+        locked_qpos={TURN_JOINT: 0.0},
+        label="rubiks_cube",
+    )
     if not args.no_vis_eef_axis:
         draw_axis_marker(sim, "pickup_cube_axis", cube_center_pose(cube))
     wait_for_user = prepare_tutorial_scene(

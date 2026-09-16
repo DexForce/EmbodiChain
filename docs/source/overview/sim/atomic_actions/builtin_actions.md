@@ -474,12 +474,41 @@ target recovery, see
 it accepts a rigid object: the scene provider only reads `uid` and
 `get_local_pose()`. Two constraints apply to articulated targets.
 
-`Articulation` has no whole-body `get_vertices()` / `get_triangles()`, so grasp
-geometry is read per link with `get_link_vert_face()` and passed to
-{class}`~embodichain.lab.sim.atomic_actions.AntipodalAffordance`. Sampling then
-proceeds through the shared parallel-jaw generator exactly as it does for rigid
-objects; naming the link is the only additional decision. `slide.py` sources its
-handle affordance the same way.
+A locked articulation is treated as one compound rigid body: the articulation
+root carries object identity and pose, while one selected link is only the
+source of grasp geometry. `Articulation` has no whole-body `get_vertices()` /
+`get_triangles()`, and `get_link_vert_face()` returns vertices in the **link**
+frame, whereas grounding publishes the **articulation root** pose. Feeding link
+vertices straight to an affordance is therefore correct only where the two
+frames coincide, which is a property of one asset and not of the abstraction.
+
+Use
+{func}`~embodichain.lab.sim.atomic_actions.create_rigidized_articulation_antipodal_semantics`,
+which reads the link mesh, evaluates the root-to-link transform at the declared
+locked configuration, and expresses the vertices in the articulation-root frame
+before building
+{class}`~embodichain.lab.sim.atomic_actions.AntipodalAffordance`. It keeps
+`entity_id` at the articulation root UID, so grasp sampling,
+`HeldObjectState.object_to_eef`, `MoveHeldObject`, `Place`, and symbolic effects
+all share one frame:
+
+```python
+semantics = create_rigidized_articulation_antipodal_semantics(
+    cube,
+    grasp_link="lower_two_layers",
+    locked_qpos={"top_turn": 0.0},
+    label="rubiks_cube",
+)
+```
+
+`locked_qpos` declares the configuration the geometry is valid at and is
+verified against the articulation: every joint must be declared and actually
+held there, because a joint still free to move would leave the transformed mesh
+describing a pose the object no longer has. Joint locking itself, initial
+positions, `fixed_base` and drive parameters stay with
+{class}`~embodichain.lab.sim.cfg.ArticulationCfg` or the physical environment.
+`slide.py` sources its handle affordance per link as well, but it manipulates
+the articulation rather than carrying it, so it does not rigidize the body.
 
 {class}`~embodichain.lab.sim.cfg.ArticulationCfg` fixes roots to the world by
 default, which suits drawers and doors but welds a graspable target in place.

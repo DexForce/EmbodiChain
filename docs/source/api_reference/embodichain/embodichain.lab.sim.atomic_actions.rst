@@ -82,6 +82,8 @@ embodichain.lab.sim.atomic_actions
       CommandOperation
       ExecutionClock
       create_simulation_atomic_action_engine
+      create_rigidized_articulation_antipodal_semantics
+      SceneEntity
       SimulationExecutionAdapter
       ExecutionTick
       EffectVerificationRequest
@@ -337,6 +339,11 @@ Engine and execution
    :members:
 
 .. autofunction:: create_simulation_atomic_action_engine
+
+.. autofunction:: create_rigidized_articulation_antipodal_semantics
+
+.. autoclass:: SceneEntity
+   :members:
 
 .. autoclass:: SimulationExecutionAdapter
    :members:
