@@ -18,7 +18,7 @@ import type { Edge, Node } from '@xyflow/react';
 import { MarkerType } from '@xyflow/react';
 import { relations, selectGraph } from './state';
 import type { ArchitectureSnapshot, ExplorerState } from './types';
-export const layerColors = ['#68d7b7', '#91a5ec', '#dcb574', '#66bcd1', '#ac9ccb'];
+export const layerColors = ['#4b6b86', '#6c6589', '#957444', '#4c7976', '#7d6c64'];
 export function buildCanvas(
   data: ArchitectureSnapshot,
   state: ExplorerState,
@@ -80,13 +80,13 @@ export function buildCanvas(
     const incident = edge.source === state.nodeId || edge.target === state.nodeId;
     const matches = graph.matchedNodeIds.has(edge.source) && graph.matchedNodeIds.has(edge.target);
     const color = relations[edge.relation].color;
-    const opacity = !matches ? 0.03 : state.nodeId ? (incident ? 0.88 : 0.035) : 0.19;
+    const opacity = !matches ? 0.03 : state.nodeId ? (incident ? 1 : 0.1) : 0.42;
     return {
       id: edge.id,
       source: edge.source,
       target: edge.target,
       type: 'default',
-      animated: incident,
+      animated: false,
       style: { stroke: color, strokeWidth: incident ? 1.65 : 1, opacity },
       markerEnd: { type: MarkerType.ArrowClosed, color, width: 12, height: 12 },
       zIndex: incident ? 3 : 0,

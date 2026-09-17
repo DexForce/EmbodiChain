@@ -57,7 +57,7 @@ export function LayerNode({
     <div className="layer-label" style={{ '--module-color': data.color } as CSSProperties}>
       <span className="layer-number">{String(data.index + 1).padStart(2, '0')}</span>
       <span>{data.label}</span>
-      <span className="layer-count">{data.count} 模块</span>
+      <span className="layer-count">{data.count} modules</span>
     </div>
   );
 }

@@ -17,16 +17,16 @@
 import type { ArchitectureSnapshot, Evidence, ExplorerState } from './types';
 
 export const relations: Record<string, { label: string; color: string; verb: string }> = {
-  calls: { label: '调用', color: '#76b6f5', verb: '调用' },
-  constructs: { label: '构造', color: '#e5b36c', verb: '构造' },
-  holds: { label: '持有', color: '#b69be5', verb: '持有' },
-  reads: { label: '读取', color: '#65cdb4', verb: '读取' },
-  writes: { label: '写入', color: '#53b7b7', verb: '写入' },
-  produces: { label: '产出', color: '#91bd75', verb: '产出' },
-  inherits: { label: '继承', color: '#8b9fea', verb: '继承' },
-  imports: { label: '导入', color: '#8895ab', verb: '导入' },
-  configures: { label: '配置', color: '#da96b0', verb: '配置' },
-  implements: { label: '实现', color: '#8b9fea', verb: '实现' },
+  calls: { label: 'Calls', color: '#456a8d', verb: 'Calls' },
+  constructs: { label: 'Constructs', color: '#926f38', verb: 'Constructs' },
+  holds: { label: 'Holds', color: '#78618d', verb: 'Holds' },
+  reads: { label: 'Reads', color: '#477d69', verb: 'Reads from' },
+  writes: { label: 'Writes', color: '#457d83', verb: 'Writes to' },
+  produces: { label: 'Produces', color: '#6f7d44', verb: 'Produces' },
+  inherits: { label: 'Inherits', color: '#656c91', verb: 'Inherits from' },
+  imports: { label: 'Imports', color: '#758190', verb: 'Imports from' },
+  configures: { label: 'Configures', color: '#946a7c', verb: 'Configures' },
+  implements: { label: 'Implements', color: '#656c91', verb: 'Implements' },
 };
 
 export function parseState(
@@ -37,10 +37,12 @@ export function parseState(
   const notices: string[] = [];
   const requestedView = params.get('view');
   const view = data.views.find((v) => v.id === requestedView) ?? data.views[0];
-  if (requestedView && requestedView !== view.id) notices.push('该视图已不可用，已返回全局架构。');
+  if (requestedView && requestedView !== view.id)
+    notices.push('This view is unavailable. Showing the system overview.');
   const requestedNode = params.get('node');
   const nodeId = requestedNode && view.node_ids.includes(requestedNode) ? requestedNode : null;
-  if (requestedNode && !nodeId) notices.push('该模块不在当前视图中，已清除选择。');
+  if (requestedNode && !nodeId)
+    notices.push('This module is outside the current view. Selection cleared.');
   const available = Object.keys(relations);
   const selected = params.has('relations')
     ? params

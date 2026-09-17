@@ -18,20 +18,25 @@ import { test, expect } from '@playwright/test';
 
 test('navigate both views, inspect evidence, and restore a shared selection', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: '架构浏览器', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Architecture Explorer', exact: true }),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Task Program', exact: true }).click();
-  await page.getByRole('button', { name: '选择 AtomicActionEngine', exact: true }).click();
-  const details = page.getByRole('complementary', { name: '节点详情' });
+  await page.getByRole('button', { name: 'Select AtomicActionEngine', exact: true }).click();
+  const details = page.getByRole('complementary', { name: 'Node details' });
   await expect(
     details.getByRole('heading', { name: 'AtomicActionEngine', exact: true }),
   ).toBeVisible();
-  await expect(details.getByRole('link', { name: '查看源码', exact: true })).toHaveAttribute(
+  await expect(details.getByRole('link', { name: 'View source', exact: true })).toHaveAttribute(
     'href',
     /blob\/3224ac1e/,
   );
-  await details.getByRole('button', { name: '持有 MotionGenerator', exact: true }).click();
+  await details.getByRole('button', { name: 'Holds MotionGenerator', exact: true }).click();
   await expect(
-    details.getByRole('button', { name: '被 AtomicActionEngine 持有', exact: true }),
+    details.getByRole('button', {
+      name: 'Incoming: AtomicActionEngine holds this module',
+      exact: true,
+    }),
   ).toBeVisible();
   await expect(
     details.getByRole('heading', { name: 'MotionGenerator', exact: true }),
@@ -50,11 +55,11 @@ test('search has clear empty state and relationship filters keep selected detail
   page,
 }) => {
   await page.goto('/#view=task-program&node=atomic-engine');
-  await page.getByRole('searchbox', { name: '搜索模块' }).fill('no-match-xyz');
-  await expect(page.getByText('没有找到匹配的模块')).toBeVisible();
-  await page.getByRole('searchbox', { name: '搜索模块' }).fill('');
-  await page.getByRole('button', { name: '关系类型', exact: true }).click();
-  await page.getByRole('button', { name: '清空关系筛选', exact: true }).click();
+  await page.getByRole('searchbox', { name: 'Search modules' }).fill('no-match-xyz');
+  await expect(page.getByText('No matching modules')).toBeVisible();
+  await page.getByRole('searchbox', { name: 'Search modules' }).fill('');
+  await page.getByRole('button', { name: 'Relationships', exact: true }).click();
+  await page.getByRole('button', { name: 'Clear relationship filters', exact: true }).click();
   await expect(
     page.getByRole('heading', { name: 'AtomicActionEngine', exact: true }),
   ).toBeVisible();
@@ -62,11 +67,11 @@ test('search has clear empty state and relationship filters keep selected detail
 });
 
 test('narrow screens keep navigation and details accessible', async ({ page }) => {
-  await page.setViewportSize({ width: 700, height: 900 });
+  await page.setViewportSize({ width: 390, height: 900 });
   await page.goto('/');
-  await page.getByRole('button', { name: '显示模块列表', exact: true }).click();
-  await page.getByRole('button', { name: '选择 Robot', exact: true }).click();
-  await expect(page.getByRole('complementary', { name: '节点详情' })).toBeVisible();
-  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
-  await expect(page.getByRole('button', { name: '适应画布', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Show module list', exact: true }).click();
+  await page.getByRole('button', { name: 'Select Robot', exact: true }).click();
+  await expect(page.getByRole('complementary', { name: 'Node details' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close details', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Fit to view', exact: true })).toBeVisible();
 });

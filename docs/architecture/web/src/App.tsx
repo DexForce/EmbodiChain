@@ -18,8 +18,6 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
-  Background,
-  BackgroundVariant,
   MiniMap,
   Panel,
   useReactFlow,
@@ -63,15 +61,18 @@ function CanvasTools() {
   const { zoom } = useViewport();
   return (
     <div className="canvas-tools">
-      <button aria-label="缩小" onClick={() => flow.zoomOut({ duration: 180 })}>
+      <button aria-label="Zoom out" onClick={() => flow.zoomOut({ duration: 180 })}>
         <Minus size={16} />
       </button>
       <span>{Math.round(zoom * 100)}%</span>
-      <button aria-label="放大" onClick={() => flow.zoomIn({ duration: 180 })}>
+      <button aria-label="Zoom in" onClick={() => flow.zoomIn({ duration: 180 })}>
         <Plus size={16} />
       </button>
       <i />
-      <button aria-label="适应画布" onClick={() => flow.fitView({ padding: 0.07, duration: 350 })}>
+      <button
+        aria-label="Fit to view"
+        onClick={() => flow.fitView({ padding: 0.07, duration: 350 })}
+      >
         <Maximize size={15} />
       </button>
     </div>
@@ -94,9 +95,9 @@ function Explorer() {
   const [notice, setNotice] = useState(initial.notices.join(' '));
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
-      return localStorage.getItem('architecture-theme') === 'light' ? 'light' : 'dark';
+      return localStorage.getItem('architecture-academic-theme') === 'dark' ? 'dark' : 'light';
     } catch {
-      return 'dark';
+      return 'light';
     }
   });
   const [mobileNav, setMobileNav] = useState(false);
@@ -123,7 +124,7 @@ function Explorer() {
   }, []);
   useEffect(() => {
     try {
-      localStorage.setItem('architecture-theme', theme);
+      localStorage.setItem('architecture-academic-theme', theme);
     } catch {
       /* Browser storage may be unavailable. */
     }
@@ -160,7 +161,7 @@ function Explorer() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      setNotice('请复制浏览器地址分享当前视图。');
+      setNotice('Copy the browser URL to share this view.');
     }
   };
   return (
@@ -178,7 +179,7 @@ function Explorer() {
               relations: Object.keys(relations),
             });
           }}
-          aria-label="EmbodiChain 首页"
+          aria-label="EmbodiChain home"
         >
           <span className="brand-mark">
             <span />
@@ -193,7 +194,7 @@ function Explorer() {
         <span className="product-label">Architecture Explorer</span>
         <div className="header-right">
           <span className="preview-badge">
-            交互预览 <span>01</span>
+            PREVIEW <span>01</span>
           </span>
           <a
             className="revision-badge"
@@ -207,31 +208,34 @@ function Explorer() {
           </a>
           <button
             className="icon-button"
-            aria-label={theme === 'dark' ? '切换浅色主题' : '切换深色主题'}
+            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
           >
             {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
           </button>
           <button className="share-button" onClick={share}>
             {copied ? <Check size={14} /> : <Link2 size={14} />}
-            <span>{copied ? '已复制' : '分享视图'}</span>
+            <span>{copied ? 'Copied' : 'Share view'}</span>
           </button>
         </div>
       </header>
       <div className="workspace">
-        <aside className={`sidebar ${mobileNav ? 'mobile-open' : ''}`} aria-label="模块导航">
+        <aside
+          className={`sidebar ${mobileNav ? 'mobile-open' : ''}`}
+          aria-label="Module navigation"
+        >
           <div className="sidebar-heading">
-            <span>工作空间</span>
+            <span>CONTENTS</span>
             <button
               className="mobile-only icon-button"
-              aria-label="关闭模块列表"
+              aria-label="Close module list"
               onClick={() => setMobileNav(false)}
             >
               <X size={15} />
             </button>
-            <span className="small-label desktop-only">EXPLORER</span>
+            <span className="small-label desktop-only">INDEX</span>
           </div>
-          <nav className="view-nav" aria-label="架构视图">
+          <nav className="view-nav" aria-label="Architecture views">
             {data.views.map((view) => (
               <button
                 key={view.id}
@@ -248,7 +252,7 @@ function Explorer() {
           </nav>
           <div className="sidebar-separator" />
           <div className="module-index-header">
-            <span>模块目录</span>
+            <span>MODULE INDEX</span>
             <span>{hasQuery ? graph.matchedNodeIds.size : graph.nodes.length}</span>
           </div>
           <div className="module-index">
@@ -266,7 +270,7 @@ function Explorer() {
                     return (
                       <button
                         key={id}
-                        aria-label={`选择 ${node.label}`}
+                        aria-label={`Select ${node.label}`}
                         aria-pressed={state.nodeId === id}
                         title={node.label}
                         className={`index-node ${state.nodeId === id ? 'active' : ''}`}
@@ -284,9 +288,9 @@ function Explorer() {
           <div className="sidebar-footer">
             <span className="status-dot" />
             <div>
-              源码静态快照<small>EmbodiChain v{data.package_version}</small>
+              Static source snapshot<small>EmbodiChain v{data.package_version}</small>
             </div>
-            <span className="readonly-label">只读</span>
+            <span className="readonly-label">READ ONLY</span>
           </div>
         </aside>
         <main className="main-area">
@@ -295,32 +299,33 @@ function Explorer() {
               <div className="breadcrumb">
                 EmbodiChain <span>/</span> {graph.view.label}
               </div>
-              <h1 aria-label="架构浏览器">
-                架构浏览器 <span>{state.viewId === 'overview' ? '系统总览' : '任务编排'}</span>
+              <h1 aria-label="Architecture Explorer">
+                Architecture Explorer{' '}
+                <span>{state.viewId === 'overview' ? 'FIG. 01' : 'FIG. 02'}</span>
               </h1>
               <p>{graph.view.description}</p>
             </div>
             <div className="view-metrics">
               <div>
                 <strong>{graph.nodes.length}</strong>
-                <span>模块</span>
+                <span>nodes</span>
               </div>
               <i />
               <div>
                 <strong>{graph.edges.length}</strong>
-                <span>关系</span>
+                <span>edges</span>
               </div>
               <i />
               <div>
                 <strong>{graph.view.groups.length}</strong>
-                <span>分层</span>
+                <span>layers</span>
               </div>
             </div>
           </div>
           <div className="toolbar">
             <button
               className="mobile-only icon-button"
-              aria-label="显示模块列表"
+              aria-label="Show module list"
               onClick={() => setMobileNav(true)}
             >
               <Menu size={18} />
@@ -329,13 +334,13 @@ function Explorer() {
               <Search size={15} />
               <input
                 type="search"
-                aria-label="搜索模块"
-                placeholder="搜索模块、职责或源码…"
+                aria-label="Search modules"
+                placeholder="Search modules, roles, or paths…"
                 value={state.query}
                 onChange={(event) => navigate({ query: event.target.value }, true)}
               />
               {state.query ? (
-                <button aria-label="清空搜索" onClick={() => navigate({ query: '' }, true)}>
+                <button aria-label="Clear search" onClick={() => navigate({ query: '' }, true)}>
                   <X size={13} />
                 </button>
               ) : (
@@ -346,10 +351,11 @@ function Explorer() {
             <button
               className={`filter-trigger ${showFilters ? 'active' : ''}`}
               onClick={() => setShowFilters(!showFilters)}
+              aria-label="Relationships"
               aria-expanded={showFilters}
             >
               <SlidersHorizontal size={14} />
-              <span>关系类型</span>
+              <span>Relationships</span>
               <ChevronDown size={12} />
             </button>
             <div className="inline-legend">
@@ -368,23 +374,25 @@ function Explorer() {
               }}
             >
               <RotateCcw size={13} />
-              <span>重置</span>
+              <span>Reset</span>
             </button>
-            <button className="icon-button" aria-label="使用帮助" onClick={() => setHelp(!help)}>
+            <button className="icon-button" aria-label="Help" onClick={() => setHelp(!help)}>
               <CircleHelp size={16} />
             </button>
           </div>
           {showFilters && (
             <div className="filter-menu">
               <div className="filter-menu-title">
-                显示关系{' '}
+                Show relationships{' '}
                 <button
                   onClick={() =>
                     navigate({ relations: state.relations.length ? [] : Object.keys(relations) })
                   }
-                  aria-label={state.relations.length ? '清空关系筛选' : '显示所有关系'}
+                  aria-label={
+                    state.relations.length ? 'Clear relationship filters' : 'Show all relationships'
+                  }
                 >
-                  {state.relations.length ? '清空' : '全选'}
+                  {state.relations.length ? 'Clear' : 'Select all'}
                 </button>
               </div>
               {usedRelations.map((type) => (
@@ -413,7 +421,7 @@ function Explorer() {
           {notice && (
             <div className="notice" role="status">
               {notice}
-              <button aria-label="关闭提示" onClick={() => setNotice('')}>
+              <button aria-label="Dismiss notice" onClick={() => setNotice('')}>
                 <X size={13} />
               </button>
             </div>
@@ -452,12 +460,6 @@ function Explorer() {
               onlyRenderVisibleElements={false}
               proOptions={{ hideAttribution: false }}
             >
-              <Background
-                variant={BackgroundVariant.Dots}
-                gap={20}
-                size={1}
-                color={theme === 'dark' ? '#27313b' : '#c3cdd2'}
-              />
               <FitOnView viewId={state.viewId} />
               <Panel position="bottom-left">
                 <CanvasTools />
@@ -475,36 +477,40 @@ function Explorer() {
               <Panel position="top-left">
                 <div className="canvas-caption">
                   <span className="status-dot" />
-                  {state.nodeId ? '关联聚焦' : '空间拓扑'}
+                  {state.nodeId ? 'Local neighbourhood' : 'Structural overview'}
                   <span>·</span>
-                  {state.nodeId ? selected?.label : '模块按职责分层'}
+                  {state.nodeId ? selected?.label : 'Modules grouped by responsibility'}
                 </div>
               </Panel>
             </ReactFlow>
             {hasQuery && graph.matchedNodeIds.size === 0 && (
               <div className="empty-search">
                 <Search size={23} />
-                <strong>没有找到匹配的模块</strong>
-                <span>试试 Robot、规划或源码路径</span>
-                <button onClick={() => navigate({ query: '' }, true)}>清空搜索</button>
+                <strong>No matching modules</strong>
+                <span>Try Robot, planning, or a source path</span>
+                <button onClick={() => navigate({ query: '' }, true)}>Clear search</button>
               </div>
             )}
             {help && (
               <div className="help-popover">
-                <strong>探索架构</strong>
-                <p>点击模块查看职责与源码证据。</p>
-                <p>拖动画布平移，滚轮缩放；左侧目录支持键盘选择。</p>
-                <p>通过关系筛选聚焦依赖，分享链接保留当前选择。</p>
-                <button onClick={() => setHelp(false)}>知道了</button>
+                <strong>Reading the diagram</strong>
+                <p>Select a module to inspect its role and source evidence.</p>
+                <p>
+                  Drag to pan and scroll to zoom. The module index supports keyboard navigation.
+                </p>
+                <p>
+                  Filter relationships to focus the diagram. Shared links preserve your selection.
+                </p>
+                <button onClick={() => setHelp(false)}>Got it</button>
               </div>
             )}
           </div>
           <div className="canvas-footer">
             <span>
-              <MouseIcon /> 双击模块放大 · 拖动平移 · 滚轮缩放
+              <MouseIcon /> Double-click to zoom · Drag to pan · Scroll to scale
             </span>
             <span>
-              静态关系，不代表运行时全貌 <ArrowUpRight size={11} />
+              Static relationships; not a runtime trace <ArrowUpRight size={11} />
             </span>
           </div>
         </main>
@@ -519,7 +525,7 @@ function Explorer() {
         />
       </div>
       <div className="sr-only" aria-live="polite">
-        {selected ? `已选择 ${selected.label}` : ''}
+        {selected ? `Selected ${selected.label}` : ''}
       </div>
     </div>
   );

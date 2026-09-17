@@ -50,7 +50,7 @@ describe('shareable exploration', () => {
     expect(graph.edges.map((e) => e.id)).not.toContain('factory-constructs-engine');
   });
   it('searches responsibility and source paths, with an explicit empty result', () => {
-    const { state } = parseState('#view=overview&q=从输入图像', data);
+    const { state } = parseState('#view=overview&q=from input images', data);
     expect(selectGraph(data, state).matchedNodeIds).toEqual(new Set(['scene-generation']));
     expect(selectGraph(data, { ...state, query: 'no-match-xyz' }).matchedNodeIds.size).toBe(0);
   });

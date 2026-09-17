@@ -24,6 +24,13 @@ Open `http://127.0.0.1:4183/`. The preview binds to loopback only. The generated
 `dist/` directory is standalone and uses relative asset paths; serve it over HTTP.
 Fonts are bundled locally. No simulation, GPU, API key, or backend is required.
 
+## Presentation
+
+The interface and descriptive snapshot text are in English. The default academic
+theme uses a paper-white canvas, serif headings, restrained category colours,
+numbered layers, and static directional edges. An optional dark theme remains
+available. Source excerpts and pinned source references are unchanged.
+
 ## Included
 
 - Overview: 24 modules and 27 recorded relationships, organized into five layers.

@@ -22,7 +22,6 @@ import {
   Code2,
   ExternalLink,
   FileCode2,
-  Layers3,
   MousePointer2,
   ShieldCheck,
   X,
@@ -57,13 +56,13 @@ export default function NodeDetails({
     (e) => view.edge_ids.includes(e.id) && (e.source === node?.id || e.target === node?.id),
   ).length;
   return (
-    <aside className={`inspector ${node ? 'has-selection' : ''}`} aria-label="节点详情">
+    <aside className={`inspector ${node ? 'has-selection' : ''}`} aria-label="Node details">
       <div className="inspector-top">
         <span>
-          <Code2 size={14} /> {node ? '模块详情' : '探索指南'}
+          <Code2 size={14} /> {node ? 'Module details' : 'Reader’s guide'}
         </span>
         {node ? (
-          <button className="icon-button" onClick={onClose} aria-label="关闭详情">
+          <button className="icon-button" onClick={onClose} aria-label="Close details">
             <X size={15} />
           </button>
         ) : (
@@ -73,58 +72,56 @@ export default function NodeDetails({
       <div className="inspector-scroll">
         {!node ? (
           <>
-            <div className="welcome-art" aria-hidden="true">
-              <div />
-              <div />
-              <div />
-              <span>
-                <Layers3 size={28} />
-              </span>
-            </div>
-            <div className="eyebrow">SEE THE CONNECTIONS</div>
-            <h2 className="welcome-title">从模块，理解系统。</h2>
+            <div className="eyebrow">ARCHITECTURE NOTES</div>
+            <h2 className="welcome-title">From modules to systems.</h2>
             <p className="welcome-copy">
-              选择一个模块，沿着真实的源码关系，探索它在 EmbodiChain 中的位置。
+              Select a module to examine its role in EmbodiChain and follow relationships grounded
+              in source code.
             </p>
             <div className="guide-steps">
               <div>
                 <span>01</span>
                 <p>
-                  <strong>找到关注的模块</strong>通过画布或左侧目录选择节点
+                  <strong>Locate a module</strong>Select a node in the diagram or module index.
                 </p>
               </div>
               <div>
                 <span>02</span>
                 <p>
-                  <strong>沿着关系继续探索</strong>查看调用、构造与持有关系
+                  <strong>Trace its relationships</strong>Inspect calls, construction, and
+                  ownership.
                 </p>
               </div>
               <div>
                 <span>03</span>
                 <p>
-                  <strong>回到源码验证</strong>每条关系都有固定版本的证据
+                  <strong>Examine the evidence</strong>Each relationship cites a pinned source
+                  revision.
                 </p>
               </div>
             </div>
             <div className="note-card">
               <ShieldCheck size={16} />
               <div>
-                <strong>源码静态快照</strong>
-                <p>关系描述代码结构，不代表实际执行顺序或完整运行时行为。</p>
+                <strong>Static source snapshot</strong>
+                <p>
+                  Relationships describe code structure, not execution order or complete runtime
+                  behaviour.
+                </p>
                 <code>
                   {data.source_ref} · {data.revision.slice(0, 8)}
                 </code>
               </div>
             </div>
             <div className="inspector-caption">
-              <MousePointer2 size={13} /> 点击画布中的任意模块开始
+              <MousePointer2 size={13} /> Select any module to begin
             </div>
           </>
         ) : (
           <>
             <div className="node-kind" style={{ color }}>
               <span className="tiny-dot" style={{ background: color }} />
-              {node.kind === 'class' ? '核心对象' : '功能模块'}
+              {node.kind === 'class' ? 'Core object' : 'Module'}
               <span>{node.kind.toUpperCase()}</span>
             </div>
             <h2 className="node-title">{node.label}</h2>
@@ -145,11 +142,11 @@ export default function NodeDetails({
               target="_blank"
               rel="noreferrer"
             >
-              查看源码 <ArrowUpRight size={14} />
+              View source <ArrowUpRight size={14} />
             </a>
             <section className="boundary">
               <div className="section-title">
-                <ShieldCheck size={14} /> 职责边界
+                <ShieldCheck size={14} /> Responsibility boundary
               </div>
               {node.boundaries.map((text) => (
                 <p key={text}>{text}</p>
@@ -164,16 +161,16 @@ export default function NodeDetails({
             )}
             <section className="relations-section">
               <div className="section-title">
-                直接关系{' '}
+                Direct relationships{' '}
                 <span>
                   {linked.length} / {allCount}
                 </span>
               </div>
               {!linked.length && (
                 <div className="empty-relations">
-                  当前筛选下没有直接关系。
+                  No direct relationships match these filters.
                   <br />
-                  可在工具栏调整关系类型。
+                  Adjust relationship types in the toolbar.
                 </div>
               )}
               {linked.map((edge) => {
@@ -191,7 +188,9 @@ export default function NodeDetails({
                     <button
                       onClick={() => onSelect(other.id)}
                       aria-label={
-                        outgoing ? `${meta.verb} ${other.label}` : `被 ${other.label} ${meta.verb}`
+                        outgoing
+                          ? `${meta.verb} ${other.label}`
+                          : `Incoming: ${other.label} ${meta.verb.toLowerCase()} this module`
                       }
                       className="relation-link"
                     >
@@ -205,9 +204,11 @@ export default function NodeDetails({
                     <p>{edge.description}</p>
                     <details>
                       <summary>
-                        <Code2 size={12} /> 源码证据{' '}
+                        <Code2 size={12} /> Source evidence{' '}
                         <span>
-                          {edge.provenance === 'static-extracted' ? '静态提取' : '源码核对'}
+                          {edge.provenance === 'static-extracted'
+                            ? 'Static extraction'
+                            : 'Source reviewed'}
                         </span>
                       </summary>
                       <div className="evidence-detail">
@@ -234,7 +235,7 @@ export default function NodeDetails({
             {node.documentation.length > 0 && (
               <section className="documentation-links">
                 <div className="section-title">
-                  <BookOpen size={14} /> 文档源码
+                  <BookOpen size={14} /> Documentation source
                 </div>
                 {node.documentation.map((doc) => (
                   <a
@@ -254,7 +255,7 @@ export default function NodeDetails({
               </section>
             )}
             <div className="evidence-footer">
-              <Check size={12} /> 源码版本 <code>{data.revision.slice(0, 8)}</code>
+              <Check size={12} /> Source revision <code>{data.revision.slice(0, 8)}</code>
             </div>
           </>
         )}

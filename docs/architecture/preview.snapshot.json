@@ -22,9 +22,9 @@
       "topic_ids": [
         "task-programs"
       ],
-      "summary": "声明式 Task Program 配置，描述任务意图与执行结构。",
+      "summary": "Declarative task configuration describing intent and execution structure.",
       "boundaries": [
-        "配置本身不执行仿真。"
+        "Configuration alone does not execute a simulation."
       ],
       "evidence": [
         {
@@ -49,9 +49,9 @@
       "topic_ids": [
         "task-programs"
       ],
-      "summary": "基于静态场景清单，将任务配置编译为可分析的程序。",
+      "summary": "Compiles task configuration into an analysable program using a static scene manifest.",
       "boundaries": [
-        "程序编译与执行时的语义落地是不同阶段。"
+        "Program compilation and runtime semantic lowering are separate stages."
       ],
       "evidence": [
         {
@@ -76,9 +76,9 @@
       "topic_ids": [
         "task-programs"
       ],
-      "summary": "不可变的编译产物，按需展开任务片段和分析结果。",
+      "summary": "Immutable compilation result with lazy task segments and analysis outputs.",
       "boundaries": [
-        "编译产物不是控制命令，也不代表物理执行成功。"
+        "The result is not a control command or proof of successful physical execution."
       ],
       "evidence": [
         {
@@ -103,9 +103,9 @@
       "topic_ids": [
         "task-programs"
       ],
-      "summary": "校验集成选择，组装语义运行时与 Gym 执行桥接。",
+      "summary": "Validates integration choices and assembles the semantic runtime and Gym bridge.",
       "boundaries": [
-        "具体的实时数据与服务由环境工厂提供。"
+        "Live data and concrete services are supplied by the environment factory."
       ],
       "evidence": [
         {
@@ -130,9 +130,9 @@
       "topic_ids": [
         "task-programs"
       ],
-      "summary": "绑定仿真机器人、规划器与服务，构造原子技能引擎。",
+      "summary": "Binds simulated robots, planners, and services to construct the atomic skill engine.",
       "boundaries": [
-        "这是仿真侧工厂，不承担无运行时依赖的程序编译。"
+        "This simulation factory does not own runtime-independent program compilation."
       ],
       "evidence": [
         {
@@ -157,9 +157,9 @@
       "topic_ids": [
         "task-programs"
       ],
-      "summary": "针对绑定的场景与技能集成，分析并落地 Semantic Call。",
+      "summary": "Analyses and lowers Semantic Calls against the bound scene and skill integration.",
       "boundaries": [
-        "执行时语义落地与 TaskProgramCompiler 的静态编译分离。"
+        "Runtime semantic lowering is separate from static TaskProgramCompiler compilation."
       ],
       "evidence": [
         {
@@ -184,9 +184,9 @@
       "topic_ids": [
         "task-programs"
       ],
-      "summary": "逐个落地并执行语义调用，为每个调用创建执行会话。",
+      "summary": "Lowers and executes semantic calls, creating an execution session for each call.",
       "boundaries": [
-        "执行会话不跨越调用边界。"
+        "Execution sessions do not span call boundaries."
       ],
       "evidence": [
         {
@@ -211,9 +211,9 @@
       "topic_ids": [
         "atomic-actions"
       ],
-      "summary": "管理规划资源与原子技能，建立可执行的动作会话。",
+      "summary": "Manages planning resources and atomic skills to create executable action sessions.",
       "boundaries": [
-        "命令分发由 ExecutionRunner 及其 command sink 完成。"
+        "Commands are dispatched by ExecutionRunner and its command sink."
       ],
       "evidence": [
         {
@@ -238,9 +238,9 @@
       "topic_ids": [
         "motion-planning"
       ],
-      "summary": "组合运动规划后端，提供统一的机器人运动生成能力。",
+      "summary": "Composes planning backends behind a unified robot motion generation interface.",
       "boundaries": [
-        "该入口归属 motion 模块，不由 planners 重导出。"
+        "This entry point belongs to motion and is not re-exported by planners."
       ],
       "evidence": [
         {
@@ -265,9 +265,9 @@
       "topic_ids": [
         "atomic-actions"
       ],
-      "summary": "通过观测、命令和时钟接口推进原子技能执行会话。",
+      "summary": "Advances atomic skill sessions through observation, command, and clock interfaces.",
       "boundaries": [
-        "命令被接受，不等于物理状态已经完成转换。"
+        "Command acceptance does not imply a completed physical state transition."
       ],
       "evidence": [
         {
@@ -292,9 +292,9 @@
       "topic_ids": [
         "task-programs"
       ],
-      "summary": "将程序片段转换为惰性 Gym 演示，共享运行时、命令缓冲与时钟。",
+      "summary": "Converts program segments into lazy Gym demonstrations with a shared runtime, buffer, and clock.",
       "boundaries": [
-        "当前专题聚焦顺序执行，不穷尽并行调度和恢复路径。"
+        "This view focuses on sequential execution, not all parallel scheduling or recovery paths."
       ],
       "evidence": [
         {
@@ -319,9 +319,9 @@
       "topic_ids": [
         "task-programs"
       ],
-      "summary": "校验并缓存控制命令，供 Gym 演示生成器逐步消费。",
+      "summary": "Validates and buffers control commands for incremental Gym demonstration consumption.",
       "boundaries": [
-        "缓冲区接受命令，不代表环境已经执行一步。"
+        "Accepting a buffered command does not mean the environment has stepped."
       ],
       "evidence": [
         {
@@ -346,9 +346,9 @@
       "topic_ids": [
         "task-programs"
       ],
-      "summary": "在环境步进的时间网格上维护执行时钟。",
+      "summary": "Maintains execution time on the environment step grid.",
       "boundaries": [
-        "时钟通过 Gym 桥接握手推进，不通过 sleep 推进仿真。"
+        "Time advances through the Gym bridge handshake; sleeping does not advance simulation."
       ],
       "evidence": [
         {
@@ -373,9 +373,9 @@
       "topic_ids": [
         "env-framework"
       ],
-      "summary": "组装场景、管理器与演示流程，按配置接入 Task Program。",
+      "summary": "Assembles scenes, managers, and demonstrations with optional Task Program integration.",
       "boundaries": [
-        "语言定义、编译与语义运行时由 task_program 拥有。"
+        "Language definitions, compilation, and semantic runtime belong to task_program."
       ],
       "evidence": [
         {
@@ -400,9 +400,9 @@
       "topic_ids": [
         "env-framework"
       ],
-      "summary": "拥有 Gym 环境循环、仿真初始化与步进生命周期。",
+      "summary": "Owns the Gym loop, simulation initialisation, and environment step lifecycle.",
       "boundaries": [
-        "仿真状态通过环境生命周期推进。"
+        "Simulation state advances through the environment lifecycle."
       ],
       "evidence": [
         {
@@ -427,9 +427,9 @@
       "topic_ids": [
         "simulation-system"
       ],
-      "summary": "管理仿真世界、机器人、传感器、物理与可视化生命周期。",
+      "summary": "Manages the world, robots, sensors, physics, and visualisation lifecycle.",
       "boundaries": [
-        "架构浏览器只展示源码关系，不启动该运行时。"
+        "This explorer displays source relationships without starting the simulation runtime."
       ],
       "evidence": [
         {
@@ -454,9 +454,9 @@
       "topic_ids": [
         "env-framework"
       ],
-      "summary": "统一命令入口，按需加载任务发现、环境运行与训练命令。",
+      "summary": "Dispatches commands and lazily loads task discovery, environment, and training entry points.",
       "boundaries": [
-        "CLI 负责分发，任务与运行时逻辑由各自模块拥有。"
+        "Task and runtime behaviour remain with their respective modules."
       ],
       "evidence": [
         {
@@ -476,9 +476,9 @@
       "topic_ids": [
         "env-framework"
       ],
-      "summary": "官方任务入口与注册，组织可复用的机器人任务。",
+      "summary": "Registers official task entry points and organises reusable robot tasks.",
       "boundaries": [
-        "任务配置与 Python 注册入口分别维护。"
+        "Task configurations and Python registration entry points have separate owners."
       ],
       "evidence": [
         {
@@ -498,9 +498,9 @@
       "topic_ids": [
         "env-framework"
       ],
-      "summary": "解析环境与机器人组件，组合可运行的 Gym 配置。",
+      "summary": "Resolves environment and embodiment components into runnable Gym configurations.",
       "boundaries": [
-        "组件拥有的字段不能在部署配置中重复定义。"
+        "Deployment configurations cannot duplicate fields owned by selected components."
       ],
       "evidence": [
         {
@@ -520,9 +520,9 @@
       "topic_ids": [
         "manager-functor"
       ],
-      "summary": "在环境生命周期中组织观测、动作、奖励、事件与数据记录。",
+      "summary": "Organises observations, actions, rewards, events, and data recording within the environment lifecycle.",
       "boundaries": [
-        "各 Manager 的 functor 遵守各自的调用签名。"
+        "Each manager defines the calling signature of its functors."
       ],
       "evidence": [
         {
@@ -542,9 +542,9 @@
       "topic_ids": [
         "motion-planning"
       ],
-      "summary": "提供运动规划后端，生成满足约束的机器人轨迹。",
+      "summary": "Provides motion planning backends that generate constrained robot trajectories.",
       "boundaries": [
-        "MotionGenerator 的组合入口由 motion 模块拥有。"
+        "The MotionGenerator composition entry point belongs to the motion module."
       ],
       "evidence": [
         {
@@ -564,9 +564,9 @@
       "topic_ids": [
         "ik-solvers"
       ],
-      "summary": "提供多种逆运动学求解器与机器人状态相关的求解能力。",
+      "summary": "Provides inverse kinematics backends and stateful robot solving capabilities.",
       "boundaries": [
-        "共享数值算法归属 compute，状态化求解器保留在 sim。"
+        "Shared numerical algorithms belong to compute; stateful solvers remain in sim."
       ],
       "evidence": [
         {
@@ -586,9 +586,9 @@
       "topic_ids": [
         "robot-system"
       ],
-      "summary": "仿真机器人实体，连接控制部件、关节状态与运动学能力。",
+      "summary": "Represents a simulated robot with control parts, joint state, and kinematics.",
       "boundaries": [
-        "机器人预设配置与实体运行状态分开管理。"
+        "Robot presets and live entity state are managed separately."
       ],
       "evidence": [
         {
@@ -608,9 +608,9 @@
       "topic_ids": [
         "sensor-system"
       ],
-      "summary": "相机、立体视觉与接触传感器，为环境提供观测。",
+      "summary": "Provides camera, stereo, and contact observations for the environment.",
       "boundaries": [
-        "接触数据适配属于传感器，共享计算属于 compute。"
+        "Contact-data adaptation belongs to sensors; shared computation belongs to compute."
       ],
       "evidence": [
         {
@@ -630,9 +630,9 @@
       "topic_ids": [
         "simulation-system"
       ],
-      "summary": "根据物理配置构造对应后端，连接仿真状态与物理求解。",
+      "summary": "Constructs the configured physics backend and connects simulation state to physics solving.",
       "boundaries": [
-        "环境文件声明 default 或 newton，启动参数不切换后端。"
+        "Environment files declare default or newton; launch arguments do not switch backends."
       ],
       "evidence": [
         {
@@ -652,9 +652,9 @@
       "topic_ids": [
         "sim-visualization"
       ],
-      "summary": "通过后台运行时向浏览器发布仿真快照与交互控制。",
+      "summary": "Publishes simulation snapshots and interactive controls through a browser runtime.",
       "boundaries": [
-        "仿真读取在仿真线程，后端更新在可视化工作线程。"
+        "Simulation reads run on the simulation thread; backend updates run on the visualisation worker."
       ],
       "evidence": [
         {
@@ -674,9 +674,9 @@
       "topic_ids": [
         "motion-planning"
       ],
-      "summary": "共享数值算法：运动学、轨迹、几何与图像计算。",
+      "summary": "Shared numerical algorithms for kinematics, trajectories, geometry, and images.",
       "boundaries": [
-        "不依赖 lab、仿真对象或环境管理器。"
+        "Does not depend on lab, simulation objects, or environment managers."
       ],
       "evidence": [
         {
@@ -696,9 +696,9 @@
       "topic_ids": [
         "rl-learning"
       ],
-      "summary": "组织策略学习、数据采集、评估和模型保存。",
+      "summary": "Organises policy learning, collection, evaluation, and model persistence.",
       "boundaries": [
-        "RL 训练与仿真环境通过环境接口交互。"
+        "RL training interacts with simulation through the environment interface."
       ],
       "evidence": [
         {
@@ -718,9 +718,9 @@
       "topic_ids": [
         "data-pipeline"
       ],
-      "summary": "在线数据引擎，管理数据工作进程与生命周期。",
+      "summary": "Online data engine managing workers and their lifecycle.",
       "boundaries": [
-        "数据工作进程的持久化与错误传播由数据管线负责。"
+        "The data pipeline owns worker persistence and error propagation."
       ],
       "evidence": [
         {
@@ -740,9 +740,9 @@
       "topic_ids": [
         "gen-sim"
       ],
-      "summary": "从输入图像生成场景状态，为场景资产工作流提供入口。",
+      "summary": "Generates scene state from input images for scene asset workflows.",
       "boundaries": [
-        "场景生成与仿真运行分别拥有独立生命周期。"
+        "Scene generation and simulation execution have independent lifecycles."
       ],
       "evidence": [
         {
@@ -760,9 +760,9 @@
       "label": "Devices",
       "kind": "module",
       "topic_ids": [],
-      "summary": "真实机器人控制器的基础接口。",
+      "summary": "Base interfaces for real robot controllers.",
       "boundaries": [
-        "设备控制与仿真内部对象保持独立职责。"
+        "Device control and internal simulation objects have separate responsibilities."
       ],
       "evidence": [
         {
@@ -1267,7 +1267,7 @@
       "source": "environment-adapter",
       "target": "atomic-engine",
       "relation": "imports",
-      "description": "TaskProgramEnvironmentAdapter 的源码声明导入 AtomicActionEngine 中的符号。",
+      "description": "TaskProgramEnvironmentAdapter declares imports of symbols from AtomicActionEngine in source code.",
       "provenance": "static-extracted",
       "scope": "module-level; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1285,7 +1285,7 @@
       "source": "environment-adapter",
       "target": "semantic-compiler",
       "relation": "imports",
-      "description": "TaskProgramEnvironmentAdapter 的源码声明导入 SemanticCallCompiler 中的符号。",
+      "description": "TaskProgramEnvironmentAdapter declares imports of symbols from SemanticCallCompiler in source code.",
       "provenance": "static-extracted",
       "scope": "module-level; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1303,7 +1303,7 @@
       "source": "environment-adapter",
       "target": "semantic-executor",
       "relation": "imports",
-      "description": "TaskProgramEnvironmentAdapter 的源码声明导入 SemanticCallExecutor 中的符号。",
+      "description": "TaskProgramEnvironmentAdapter declares imports of symbols from SemanticCallExecutor in source code.",
       "provenance": "static-extracted",
       "scope": "module-level; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1321,7 +1321,7 @@
       "source": "environment-adapter",
       "target": "gym-bridge",
       "relation": "imports",
-      "description": "TaskProgramEnvironmentAdapter 的源码声明导入 TaskProgramDemoBridge 中的符号。",
+      "description": "TaskProgramEnvironmentAdapter declares imports of symbols from TaskProgramDemoBridge in source code.",
       "provenance": "static-extracted",
       "scope": "module-level; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1339,7 +1339,7 @@
       "source": "semantic-executor",
       "target": "atomic-engine",
       "relation": "imports",
-      "description": "SemanticCallExecutor 的源码声明导入 AtomicActionEngine 中的符号。",
+      "description": "SemanticCallExecutor declares imports of symbols from AtomicActionEngine in source code.",
       "provenance": "static-extracted",
       "scope": "module-level; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1357,7 +1357,7 @@
       "source": "atomic-engine",
       "target": "motion-generator",
       "relation": "imports",
-      "description": "AtomicActionEngine 的源码声明导入 MotionGenerator 中的符号。",
+      "description": "AtomicActionEngine declares imports of symbols from MotionGenerator in source code.",
       "provenance": "static-extracted",
       "scope": "conditional: TYPE_CHECKING; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1375,7 +1375,7 @@
       "source": "motion-generator",
       "target": "planners",
       "relation": "imports",
-      "description": "MotionGenerator 的源码声明导入 Planners 中的符号。",
+      "description": "MotionGenerator declares imports of symbols from Planners in source code.",
       "provenance": "static-extracted",
       "scope": "module-level; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1393,7 +1393,7 @@
       "source": "motion-generator",
       "target": "compute",
       "relation": "imports",
-      "description": "MotionGenerator 的源码声明导入 Compute 中的符号。",
+      "description": "MotionGenerator declares imports of symbols from Compute in source code.",
       "provenance": "static-extracted",
       "scope": "module-level; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1411,7 +1411,7 @@
       "source": "gym-bridge",
       "target": "semantic-executor",
       "relation": "imports",
-      "description": "TaskProgramDemoBridge 的源码声明导入 SemanticCallExecutor 中的符号。",
+      "description": "TaskProgramDemoBridge declares imports of symbols from SemanticCallExecutor in source code.",
       "provenance": "static-extracted",
       "scope": "module-level; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1429,7 +1429,7 @@
       "source": "embodied-env",
       "target": "sensors",
       "relation": "imports",
-      "description": "EmbodiedEnv 的源码声明导入 Sensors 中的符号。",
+      "description": "EmbodiedEnv declares imports of symbols from Sensors in source code.",
       "provenance": "static-extracted",
       "scope": "module-level; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1447,7 +1447,7 @@
       "source": "embodied-env",
       "target": "managers",
       "relation": "imports",
-      "description": "EmbodiedEnv 的源码声明导入 Managers 中的符号。",
+      "description": "EmbodiedEnv declares imports of symbols from Managers in source code.",
       "provenance": "static-extracted",
       "scope": "module-level; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1465,7 +1465,7 @@
       "source": "embodied-env",
       "target": "gym-bridge",
       "relation": "imports",
-      "description": "EmbodiedEnv 的源码声明导入 TaskProgramDemoBridge 中的符号。",
+      "description": "EmbodiedEnv declares imports of symbols from TaskProgramDemoBridge in source code.",
       "provenance": "static-extracted",
       "scope": "conditional: TYPE_CHECKING; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1483,7 +1483,7 @@
       "source": "simulation-manager",
       "target": "sensors",
       "relation": "imports",
-      "description": "SimulationManager 的源码声明导入 Sensors 中的符号。",
+      "description": "SimulationManager declares imports of symbols from Sensors in source code.",
       "provenance": "static-extracted",
       "scope": "module-level; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1501,7 +1501,7 @@
       "source": "simulation-manager",
       "target": "physics",
       "relation": "imports",
-      "description": "SimulationManager 的源码声明导入 Physics backends 中的符号。",
+      "description": "SimulationManager declares imports of symbols from Physics backends in source code.",
       "provenance": "static-extracted",
       "scope": "module-level; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1519,7 +1519,7 @@
       "source": "robot",
       "target": "solvers",
       "relation": "imports",
-      "description": "Robot 的源码声明导入 Solvers 中的符号。",
+      "description": "Robot declares imports of symbols from Solvers in source code.",
       "provenance": "static-extracted",
       "scope": "module-level; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1537,7 +1537,7 @@
       "source": "physics",
       "target": "simulation-manager",
       "relation": "imports",
-      "description": "Physics backends 的源码声明导入 SimulationManager 中的符号。",
+      "description": "Physics backends declares imports of symbols from SimulationManager in source code.",
       "provenance": "static-extracted",
       "scope": "conditional: TYPE_CHECKING; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1555,7 +1555,7 @@
       "source": "rl",
       "target": "managers",
       "relation": "imports",
-      "description": "RL training 的源码声明导入 Managers 中的符号。",
+      "description": "RL training declares imports of symbols from Managers in source code.",
       "provenance": "static-extracted",
       "scope": "module-level; import dependency only, not an observed runtime call.",
       "evidence": [
@@ -1572,8 +1572,8 @@
   "views": [
     {
       "id": "overview",
-      "label": "全局架构",
-      "description": "从任务入口到运动执行，探索 EmbodiChain 的模块职责与直接依赖。",
+      "label": "System overview",
+      "description": "Module responsibilities and direct dependencies, from task entry points to motion execution.",
       "node_ids": [
         "cli",
         "tasks",
@@ -1632,7 +1632,7 @@
       "groups": [
         {
           "id": "entry",
-          "label": "入口与环境",
+          "label": "Entry points & environments",
           "node_ids": [
             "cli",
             "tasks",
@@ -1643,7 +1643,7 @@
         },
         {
           "id": "orchestration",
-          "label": "任务编排",
+          "label": "Task orchestration",
           "node_ids": [
             "program-compiler",
             "semantic-compiler",
@@ -1654,7 +1654,7 @@
         },
         {
           "id": "motion",
-          "label": "运动能力",
+          "label": "Motion capabilities",
           "node_ids": [
             "atomic-engine",
             "motion-generator",
@@ -1664,7 +1664,7 @@
         },
         {
           "id": "simulation",
-          "label": "仿真世界",
+          "label": "Simulation world",
           "node_ids": [
             "simulation-manager",
             "robot",
@@ -1675,7 +1675,7 @@
         },
         {
           "id": "foundation",
-          "label": "计算与应用",
+          "label": "Computation & applications",
           "node_ids": [
             "compute",
             "rl",
@@ -1689,7 +1689,7 @@
     {
       "id": "task-program",
       "label": "Task Program",
-      "description": "连接任务意图与机器人执行，查看编译、组装和 Gym 桥接的真实边界。",
+      "description": "Compilation, runtime assembly, and Gym integration connecting task intent to robot execution.",
       "node_ids": [
         "task-program-config",
         "program-compiler",
@@ -1738,7 +1738,7 @@
       "groups": [
         {
           "id": "program-definition",
-          "label": "程序定义与编译",
+          "label": "Program definition & compilation",
           "node_ids": [
             "task-program-config",
             "program-compiler",
@@ -1747,7 +1747,7 @@
         },
         {
           "id": "runtime-assembly",
-          "label": "运行时组装",
+          "label": "Runtime assembly",
           "node_ids": [
             "environment-adapter",
             "simulation-factory"
@@ -1755,7 +1755,7 @@
         },
         {
           "id": "semantic-and-atomic",
-          "label": "语义与原子执行",
+          "label": "Semantic & atomic execution",
           "node_ids": [
             "semantic-compiler",
             "semantic-executor",
@@ -1766,7 +1766,7 @@
         },
         {
           "id": "gym-integration",
-          "label": "Gym 集成与仿真",
+          "label": "Gym integration & simulation",
           "node_ids": [
             "gym-bridge",
             "command-sink",
