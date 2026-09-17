@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add reproducible geometric Affordance sampling to batched simulation Atomic Actions and demonstrate it in the parallel PickUp tutorial without Task Program or Gym integration.
+**Goal:** Add reproducible geometric Affordance sampling to batched simulation Atomic Actions and demonstrate it in the parallel Atomic Action tutorials without Task Program or Gym integration.
 
-**Architecture:** A host-owned `AffordanceSamplingContext` flows through `PlanningContext`. Each `Affordance` samples legal pose candidates into one `AffordanceSample`; Atomic Actions intersect that success mask with IK and trajectory feasibility and report namespaced diagnostics. The direct PickUp tutorial maps logical branches one-to-one to simulation rows.
+**Architecture:** A host-owned `AffordanceSamplingContext` flows through `PlanningContext`. Each `Affordance` samples legal pose candidates into one `AffordanceSample`; Atomic Actions intersect that success mask with IK and trajectory feasibility and report namespaced diagnostics. The direct Atomic Action tutorials map logical branches one-to-one to simulation rows through shared host helpers.
 
 **Tech Stack:** Python 3.11, PyTorch, pytest, EmbodiChain Atomic Actions, Sphinx.
 
@@ -12,7 +12,9 @@
 
 ## Global Constraints
 
-- Do not modify or import Task Program, Gym, task deployment, dataset, recorder, or episode collection code.
+- Do not modify or import Task Program, Gym, task deployment, dataset, recorder,
+  or episode collection production code. Compatibility-only integration-test
+  updates are allowed when an Atomic Action internal contract changes.
 - Keep Slide distance, Twist angle, and OpenDoor opening fraction exact; do not add action/goal range sampling.
 - Keep existing tensor-returning Affordance pose helpers compatible.
 - Expose candidate sampling only through `Affordance.sample_candidates()`.
@@ -136,10 +138,12 @@ Require both modules to pass.
 - Modify: `embodichain/lab/sim/atomic_actions/primitives/axis_align.py`
 - Modify: `embodichain/lab/sim/atomic_actions/primitives/slide.py`
 - Modify: `embodichain/lab/sim/atomic_actions/primitives/open_door.py`
+- Modify: `embodichain/lab/sim/atomic_actions/primitives/hand_over.py`
 - Modify: `embodichain/lab/sim/atomic_actions/primitives/press.py`
 - Modify: `embodichain/lab/sim/atomic_actions/primitives/twist.py`
 - Modify: `embodichain/lab/sim/atomic_actions/primitives/place.py`
 - Modify: `tests/sim/atomic_actions/test_actions.py`
+- Modify: `tests/lab/task_program/test_semantic_compiler.py`
 
 **Interfaces:**
 - Consumes: Affordance sampling helpers and `PlanningContext.affordance_sampling`.
@@ -174,34 +178,36 @@ Run: `conda run -n open pytest -q tests/sim/atomic_actions`
 Expected: existing and new tests pass; sim/GPU-specific tests retain their
 normal skip/deselection behavior.
 
-### Task 5: Parallel PickUp Tutorial
+### Task 5: Parallel Atomic Action Tutorials
 
 **Files:**
+- Modify: `scripts/tutorials/atomic_action/tutorial_utils.py`
+- Modify: `scripts/tutorials/atomic_action/axis_align.py`
+- Modify: `scripts/tutorials/atomic_action/hand_over.py`
+- Modify: `scripts/tutorials/atomic_action/open_door.py`
 - Modify: `scripts/tutorials/atomic_action/pickup.py`
-- Modify: `tests/sim/atomic_actions/test_tutorial_utils.py`
+- Modify: `scripts/tutorials/atomic_action/press.py`
+- Modify: `scripts/tutorials/atomic_action/slide.py`
+- Modify: `scripts/tutorials/atomic_action/twist.py`
 
 **Interfaces:**
 - Consumes: engine sampling-context injection.
 - Produces: CLI arguments `--affordance_branches`, `--sampling_seed`, and `--sampling_attempt` for direct simulation demonstration.
 
-- [ ] **Step 1: Add failing argument and context-construction tests**
+- [ ] **Step 1: Add shared host wiring**
 
-Test branch-count validation, branch-to-`num_envs` wiring, and deterministic
-context fields without launching a simulator.
+Centralize branch-count validation, branch-to-`num_envs` wiring, deterministic
+context construction, and diagnostic logging in `tutorial_utils.py`.
 
-- [ ] **Step 2: Run the focused tutorial tests and observe missing arguments**
+- [ ] **Step 2: Integrate the supported tutorials**
 
-Run: `conda run -n open pytest -q tests/sim/atomic_actions/test_tutorial_utils.py`
+Use the shared helpers in PickUp, AxisAlign, HandOver, OpenDoor, Press, Slide,
+and Twist while leaving task-level parameter ranges exact.
 
-- [ ] **Step 3: Implement tutorial-only host wiring**
+- [ ] **Step 3: Run static tutorial validation**
 
-Set `num_envs` from branch count before simulation creation, pass the sampling
-context to `initial_context()`, and log per-branch plan diagnostics. Do not add
-retry, persistence, or Task Program behavior.
-
-- [ ] **Step 4: Rerun tutorial tests**
-
-Require the focused module to pass.
+Run the repository's existing syntax and import checks. Do not add or expand
+tests whose primary subject is a tutorial script.
 
 ### Task 6: Public and Project Documentation
 
@@ -258,7 +264,9 @@ project-context validation from Tasks 4 and 6.
 - [ ] **Step 3: Audit scope**
 
 Confirm `git diff --name-only origin/main...HEAD` contains no Task Program, Gym,
-task deployment, dataset, recorder, or episode-collection files.
+task deployment, dataset, recorder, or episode-collection production files.
+Any Task Program test-only change must be limited to compatibility with the
+Atomic Action contract.
 
 - [ ] **Step 4: Commit, push, and create the PR**
 

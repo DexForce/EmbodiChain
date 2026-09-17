@@ -25,10 +25,10 @@ Action/Goal inputs rather than Affordance variation.
 
 ## Current host boundary
 
-The only host integration is direct simulation. The PickUp tutorial maps
-`--affordance_branches` one-to-one to simulation rows and injects the context
-through `AtomicActionEngine.initial_context()`. AxisAlign, HandOver, OpenDoor,
-Press, Slide, and Twist use the same host helpers in
+The only host integration is direct simulation. The PickUp, AxisAlign,
+HandOver, OpenDoor, Press, Slide, and Twist tutorials map
+`--affordance_branches` one-to-one to simulation rows and inject the context
+through the shared host helpers in
 `scripts/tutorials/atomic_action/tutorial_utils.py`. HandOver samples pickup
 and receiving grasps in separate named streams while preserving opposite object
 ends and per-row arm assignment; its diagnostics retain the selected assignment's
@@ -57,4 +57,4 @@ define an explicit expansion policy.
 - Direct host examples: `scripts/tutorials/atomic_action/` and its shared
   `tutorial_utils.py` sampling helpers.
 - Tests: `tests/sim/atomic_actions/test_affordance_sampling.py`,
-  `test_affordance.py`, `test_actions.py`, and `test_tutorial_utils.py`.
+  `test_affordance.py`, `test_actions.py`, `test_core.py`, and `test_engine.py`.

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
 import math
@@ -259,7 +260,7 @@ class AffordanceSample:
             raise TypeError("metadata must be a mapping.")
         object.__setattr__(self, "success", self.success.clone())
         object.__setattr__(self, "poses", self.poses.clone())
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "metadata", deepcopy(dict(self.metadata)))
 
 
 def _sample_pose_candidates(

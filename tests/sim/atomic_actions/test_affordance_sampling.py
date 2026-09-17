@@ -124,16 +124,23 @@ def test_pose_candidates_rejects_invalid_tensor_contract(kwargs: dict[str, objec
 def test_affordance_sample_validates_and_owns_result_values():
     success = torch.tensor([True, False])
     poses = _poses(2)
-    metadata = {"candidate_ids": [0, -1]}
+    metadata = {
+        "sampling": {"seed": 7},
+        "candidate_ids": [0, -1],
+    }
     sample = AffordanceSample(success=success, poses=poses, metadata=metadata)
 
     success[0] = False
     poses[0, 0, 0] = 7.0
-    metadata["candidate_ids"] = [9, 9]
+    metadata["sampling"]["seed"] = 9
+    metadata["candidate_ids"][0] = 9
 
     assert sample.success.tolist() == [True, False]
     assert sample.poses[0, 0, 0] == 1.0
-    assert sample.metadata == {"candidate_ids": [0, -1]}
+    assert sample.metadata == {
+        "sampling": {"seed": 7},
+        "candidate_ids": [0, -1],
+    }
 
 
 @pytest.mark.parametrize(

@@ -4,8 +4,9 @@
 
 Introduce reproducible, batched Affordance sampling as a simulation Atomic
 Action capability. The first delivery is exercised by direct Atomic Action
-callers and a parallel PickUp tutorial. Task Program execution, Gym lifecycle,
-episode retry, and dataset recording are deliberately deferred.
+callers and the parallel PickUp, AxisAlign, HandOver, OpenDoor, Press, Slide,
+and Twist tutorials. Task Program execution, Gym lifecycle, episode retry, and
+dataset recording are deliberately deferred.
 
 ## Scope
 
@@ -22,7 +23,8 @@ Twist angle, and OpenDoor opening-fraction sampling remain exact caller-owned
 values.
 
 The change must not modify or import Task Program, Gym, task deployment,
-dataset, recorder, or episode collection code.
+dataset, recorder, or episode collection production code. Existing integration
+tests may be updated only to remain compatible with the Atomic Action contract.
 
 ## Public Contracts
 
@@ -106,16 +108,17 @@ Only actions that actually consume a sample report it.
 
 Explicit caller-provided grasp poses remain exact and do not become sampled.
 
-## Direct Simulation Tutorial
+## Direct Simulation Tutorials
 
-The PickUp tutorial adds Affordance branch, seed, and attempt arguments. When
-branch count is greater than one, it creates the same number of simulation
+The PickUp, AxisAlign, HandOver, OpenDoor, Press, Slide, and Twist tutorials
+share Affordance branch, seed, and attempt arguments. When branch count is
+greater than one, each tutorial creates the same number of simulation
 environments, passes an `AffordanceSamplingContext` to
 `AtomicActionEngine.initial_context()`, prints per-row sampling diagnostics, and
 replays the batched trajectory.
 
-The tutorial is a consumer and demonstration of the sim-layer API. Sampling
-logic does not live in the tutorial.
+The tutorials are consumers and demonstrations of the sim-layer API. Sampling
+logic does not live in them.
 
 ## Error Handling
 
@@ -129,7 +132,9 @@ hold failed rows through the existing `build_plan()` contract.
 Pure CPU tests cover deterministic streams, row-order independence, candidate
 diversity, padding and empty rows, metadata ownership, compatibility of exact
 pose helpers, geometric symmetry sampling, PlanningContext propagation, action
-success intersection, diagnostics propagation, and tutorial argument wiring.
+success intersection, and diagnostics propagation. Tutorial wiring uses the
+repository's existing syntax and import checks rather than tutorial-focused
+unit tests.
 
 The focused validation set is:
 
