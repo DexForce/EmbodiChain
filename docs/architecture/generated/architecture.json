@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "032de9e6b1ff960fe418b8a9afb1d8ece3098879",
+  "revision": "80b1d4591d6f403547a271b781ae9fcff0da4de3",
   "source_ref": "HEAD",
   "package_version": "0.2.4",
   "topic_index": "agent_context/MAP.yaml",
@@ -193,6 +193,35 @@
         }
       ],
       "details": "This is the common Gymnasium-compatible lifecycle beneath embodied tasks. It initializes the simulation manager and coordinates reset, stepping, and environment timing. Higher-level environments add task-specific scene assembly and behavior."
+    },
+    {
+      "id": "batch-entity",
+      "label": "BatchEntity",
+      "kind": "class",
+      "topic_ids": [
+        "simulation-system"
+      ],
+      "summary": "Defines shared configuration and instance operations for batched simulation entities.",
+      "details": "RigidObject, RigidObjectGroup, Articulation, Light, and DeformableObject use this base; Robot inherits through Articulation. It carries common identity, configuration, device, and entity indexing. Gizmo and RigidConstraint have separate wrapper contracts.",
+      "boundaries": [
+        "Inheritance describes a shared interface; it does not guarantee every object supports the same physical operations."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/common.py",
+          "symbol": "BatchEntity",
+          "start_line": 34,
+          "end_line": 34,
+          "excerpt": "class BatchEntity(ABC):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.objects",
+          "label": "BatchEntity documentation",
+          "source_extension": ".rst"
+        }
+      ]
     },
     {
       "id": "cli",
@@ -992,6 +1021,35 @@
       "details": "The runner advances an atomic session through observation, command, and clock interfaces. Its command sink determines where commands go. Acknowledgement of a command is distinct from confirmation that a physical effect has occurred."
     },
     {
+      "id": "gizmo",
+      "label": "Gizmo",
+      "kind": "class",
+      "topic_ids": [
+        "sim-visualization"
+      ],
+      "summary": "Provides native robot IK and browser manipulation controls for simulation targets.",
+      "details": "SimulationManager retains and updates Gizmo handles. A handle references a robot, rigid object, or camera; robot control uses a selected control part and IK solver. Native entity-root manipulation is managed separately through enable_entity_gizmo.",
+      "boundaries": [
+        "Gizmo supports exactly one simulation environment and is not a BatchEntity subclass."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/gizmo.py",
+          "symbol": "Gizmo",
+          "start_line": 458,
+          "end_line": 458,
+          "excerpt": "class Gizmo:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.objects",
+          "label": "Gizmo documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
       "id": "grasp-tools",
       "label": "Grasp generation",
       "kind": "module",
@@ -1111,6 +1169,35 @@
       ]
     },
     {
+      "id": "lights",
+      "label": "Lights",
+      "kind": "class",
+      "topic_ids": [
+        "simulation-system"
+      ],
+      "summary": "Controls light color, intensity, falloff, and pose through a batched facade.",
+      "details": "SimulationManager creates global lights or per-arena lights according to LightCfg. Light provides indexed rendering-property updates and reset behavior through BatchEntity.",
+      "boundaries": [
+        "Global light types have one shared render light; other types are replicated per arena."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/light.py",
+          "symbol": "Light",
+          "start_line": 31,
+          "end_line": 31,
+          "excerpt": "class Light(BatchEntity):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.objects",
+          "label": "Lights documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
       "id": "managers",
       "label": "Managers",
       "kind": "module",
@@ -1201,6 +1288,35 @@
         }
       ],
       "details": "Use this entry point to turn joint or end-effector goals into timed trajectories. It composes planner backends behind one motion interface, while simulation playback or Atomic Skills consume the generated motion."
+    },
+    {
+      "id": "object-backends",
+      "label": "Object backend views",
+      "kind": "package",
+      "topic_ids": [
+        "simulation-system"
+      ],
+      "summary": "Adapts rigid and articulated object state to backend-neutral Scene batches.",
+      "details": "RigidBodyViewBase and ArticulationViewBase define the contracts; SceneRigidBodyView and SceneArticulationView normalize tensor layouts and indexed access. Supporting adapters handle drives, geometry, state, physical properties, controls, collision, and lifecycle.",
+      "boundaries": [
+        "Object-state adapters do not select the physics solver or own SimulationManager stepping."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/backends/__init__.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 17,
+          "excerpt": "from .articulation_drive import apply_joint_drive, read_drive_properties"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.objects",
+          "label": "Object backend views documentation",
+          "source_extension": ".rst"
+        }
+      ]
     },
     {
       "id": "online-dataset",
@@ -1494,6 +1610,69 @@
           "docname": "overview/gym/dataset_functors",
           "label": "LeRobot recording documentation",
           "source_extension": ".md"
+        }
+      ]
+    },
+    {
+      "id": "rigid-constraints",
+      "label": "Rigid constraints",
+      "kind": "class",
+      "topic_ids": [
+        "simulation-system"
+      ],
+      "summary": "Wraps per-arena fixed constraints between two rigid objects.",
+      "details": "The manager creates native fixed constraints and stores their handles with references to both RigidObject endpoints. Inactive arenas retain empty handle slots, so indexing remains aligned with environment IDs.",
+      "boundaries": [
+        "Currently a Default-backend resource; only fixed constraints are supported. This wrapper does not inherit BatchEntity."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/constraint.py",
+          "symbol": "RigidConstraint",
+          "start_line": 36,
+          "end_line": 36,
+          "excerpt": "class RigidConstraint:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.objects",
+          "label": "Rigid constraints documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "rigid-object-groups",
+      "label": "Rigid object groups",
+      "kind": "class",
+      "topic_ids": [
+        "simulation-system"
+      ],
+      "summary": "Groups multiple rigid bodies into a batched scene entity.",
+      "details": "RigidObjectGroup maintains an environment-by-object layout with indexed state and physical properties in RigidBodyGroupData. SimulationManager declares and binds the group through Spawn; it is a separate BatchEntity facade, not a subclass of RigidObject.",
+      "boundaries": [
+        "Grouped bodies are not an articulated joint hierarchy."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/rigid_object_group.py",
+          "symbol": "RigidObjectGroup",
+          "start_line": 187,
+          "end_line": 187,
+          "excerpt": "class RigidObjectGroup(BatchEntity):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "overview/sim/sim_rigid_object_group",
+          "label": "Rigid object group guide",
+          "source_extension": ".md"
+        },
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.objects",
+          "label": "Object API reference",
+          "source_extension": ".rst"
         }
       ]
     },
@@ -2069,6 +2248,35 @@
       "details": "Execution time is tied to the environment step grid. The Gym bridge and command sink use the same clock instance, allowing timing checks to stay aligned with the environment handshake instead of wall-clock sleeps."
     },
     {
+      "id": "surface-deformables",
+      "label": "Surface deformables",
+      "kind": "class",
+      "topic_ids": [
+        "simulation-system"
+      ],
+      "summary": "Specializes deformable objects for cloth particle sets.",
+      "details": "SurfaceDeformableObject extends DeformableObject with the surface topology discriminator. SimulationManager.add_deformable_object selects the facade from configuration; shared DeformableObjectData exposes particle positions and velocities. ClothObject is a compatibility alias for this class.",
+      "boundaries": [
+        "Requires a supported Newton solver and CUDA device; Default and gradient-enabled deformable state mutation are unsupported."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/deformable/surface.py",
+          "symbol": "SurfaceDeformableObject",
+          "start_line": 28,
+          "end_line": 28,
+          "excerpt": "class SurfaceDeformableObject(DeformableObject):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.objects",
+          "label": "Surface deformables documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
       "id": "task-discovery",
       "label": "Task discovery",
       "kind": "module",
@@ -2244,6 +2452,35 @@
       "details": "The browser runtime publishes simulation snapshots and interactive controls. Simulation reads remain on the simulation thread, while the visualization worker handles backend updates. This module visualizes a running world; this architecture explorer visualizes code structure."
     },
     {
+      "id": "volume-deformables",
+      "label": "Volume deformables",
+      "kind": "class",
+      "topic_ids": [
+        "simulation-system"
+      ],
+      "summary": "Specializes deformable objects for volumetric soft-body particle sets.",
+      "details": "VolumeDeformableObject extends the shared deformable facade and retains tetrahedral boundary triangles for collision-surface queries. Particle state uses DeformableObjectData; SoftObject is a compatibility alias for this class.",
+      "boundaries": [
+        "Requires a supported Newton solver and CUDA device; render topology and tetrahedral collision-surface topology are distinct."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/deformable/volume.py",
+          "symbol": "VolumeDeformableObject",
+          "start_line": 36,
+          "end_line": 36,
+          "excerpt": "class VolumeDeformableObject(DeformableObject):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.objects",
+          "label": "Volume deformables documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
       "id": "workspace",
       "label": "Robot workspace",
       "kind": "class",
@@ -2390,6 +2627,24 @@
           "start_line": 736,
           "end_line": 736,
           "excerpt": "        command_sink = BufferedGymCommandSink(command_encoder, clock)"
+        }
+      ]
+    },
+    {
+      "id": "articulations-inherits-batch-entity",
+      "source": "articulations",
+      "target": "batch-entity",
+      "relation": "inherits",
+      "description": "Extends the common batched simulation entity interface.",
+      "provenance": "source-reviewed",
+      "scope": "Direct Python inheritance; does not imply support for every physical operation.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/articulation.py",
+          "symbol": "Articulation",
+          "start_line": 687,
+          "end_line": 687,
+          "excerpt": "class Articulation(BatchEntity):"
         }
       ]
     },
@@ -2853,6 +3108,24 @@
       ]
     },
     {
+      "id": "deformables-inherits-batch-entity",
+      "source": "deformables",
+      "target": "batch-entity",
+      "relation": "inherits",
+      "description": "Extends the common batched simulation entity interface.",
+      "provenance": "source-reviewed",
+      "scope": "Direct Python inheritance; does not imply support for every physical operation.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/deformable/base.py",
+          "symbol": "DeformableObject",
+          "start_line": 49,
+          "end_line": 49,
+          "excerpt": "class DeformableObject(BatchEntity):"
+        }
+      ]
+    },
+    {
       "id": "device-controller-holds-devices",
       "source": "device-controller",
       "target": "devices",
@@ -3248,6 +3521,24 @@
       ]
     },
     {
+      "id": "gizmo-holds-batch-entity",
+      "source": "gizmo",
+      "target": "batch-entity",
+      "relation": "holds",
+      "description": "Retains the target entity used for interaction.",
+      "provenance": "source-reviewed",
+      "scope": "Association with the target is not inheritance; target is released on destruction.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/gizmo.py",
+          "symbol": "Gizmo.__init__",
+          "start_line": 486,
+          "end_line": 486,
+          "excerpt": "        self.target: BatchEntity | None = target"
+        }
+      ]
+    },
+    {
       "id": "launcher-calls-config-loader",
       "source": "env-launcher",
       "target": "config-loader",
@@ -3280,6 +3571,24 @@
           "start_line": 1018,
           "end_line": 1018,
           "excerpt": "    discover_task_packages()"
+        }
+      ]
+    },
+    {
+      "id": "lights-inherits-batch-entity",
+      "source": "lights",
+      "target": "batch-entity",
+      "relation": "inherits",
+      "description": "Extends the common batched simulation entity interface.",
+      "provenance": "source-reviewed",
+      "scope": "Direct Python inheritance; does not imply support for every physical operation.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/light.py",
+          "symbol": "Light",
+          "start_line": 31,
+          "end_line": 31,
+          "excerpt": "class Light(BatchEntity):"
         }
       ]
     },
@@ -3388,6 +3697,78 @@
           "start_line": 38,
           "end_line": 38,
           "excerpt": "from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATASET_ROOT"
+        }
+      ]
+    },
+    {
+      "id": "rigid-constraints-holds-rigid-objects",
+      "source": "rigid-constraints",
+      "target": "rigid-objects",
+      "relation": "holds",
+      "description": "Keeps references to the rigid objects linked by the constraint.",
+      "provenance": "source-reviewed",
+      "scope": "Two endpoints are assigned when SimulationManager creates the wrapper; native actors remain scene-owned.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/constraint.py",
+          "symbol": "RigidConstraint",
+          "start_line": 55,
+          "end_line": 55,
+          "excerpt": "    rigid_object_a: RigidObject | None = None"
+        }
+      ]
+    },
+    {
+      "id": "rigid-object-groups-imports-object-backends",
+      "source": "rigid-object-groups",
+      "target": "object-backends",
+      "relation": "imports",
+      "description": "Imports the Scene rigid-body view adapter.",
+      "provenance": "source-reviewed",
+      "scope": "Module-level import from the backend package implementation; not evidence of runtime call order.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/rigid_object_group.py",
+          "symbol": "<module>",
+          "start_line": 29,
+          "end_line": 29,
+          "excerpt": "from embodichain.lab.sim.objects.backends.scene import SceneRigidBodyView"
+        }
+      ]
+    },
+    {
+      "id": "rigid-object-groups-inherits-batch-entity",
+      "source": "rigid-object-groups",
+      "target": "batch-entity",
+      "relation": "inherits",
+      "description": "Extends the common batched simulation entity interface.",
+      "provenance": "source-reviewed",
+      "scope": "Direct Python inheritance; does not imply support for every physical operation.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/rigid_object_group.py",
+          "symbol": "RigidObjectGroup",
+          "start_line": 187,
+          "end_line": 187,
+          "excerpt": "class RigidObjectGroup(BatchEntity):"
+        }
+      ]
+    },
+    {
+      "id": "rigid-objects-inherits-batch-entity",
+      "source": "rigid-objects",
+      "target": "batch-entity",
+      "relation": "inherits",
+      "description": "Extends the common batched simulation entity interface.",
+      "provenance": "source-reviewed",
+      "scope": "Direct Python inheritance; does not imply support for every physical operation.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/rigid_object.py",
+          "symbol": "RigidObject",
+          "start_line": 352,
+          "end_line": 352,
+          "excerpt": "class RigidObject(BatchEntity):"
         }
       ]
     },
@@ -3658,6 +4039,60 @@
       ]
     },
     {
+      "id": "simulation-manager-constructs-gizmo",
+      "source": "simulation-manager",
+      "target": "gizmo",
+      "relation": "constructs",
+      "description": "Creates an interaction handle for a selected simulation target.",
+      "provenance": "source-reviewed",
+      "scope": "Explicit or configured gizmo enablement; exactly one environment.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/sim_manager.py",
+          "symbol": "SimulationManager.enable_gizmo",
+          "start_line": 3207,
+          "end_line": 3207,
+          "excerpt": "            gizmo = Gizmo(target, gizmo_cfg, control_part)"
+        }
+      ]
+    },
+    {
+      "id": "simulation-manager-constructs-rigid-constraints",
+      "source": "simulation-manager",
+      "target": "rigid-constraints",
+      "relation": "constructs",
+      "description": "Creates a fixed constraint wrapper for two registered rigid objects.",
+      "provenance": "source-reviewed",
+      "scope": "Only when the selected backend supports native rigid constraints.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/sim_manager.py",
+          "symbol": "SimulationManager.create_rigid_constraint",
+          "start_line": 2723,
+          "end_line": 2723,
+          "excerpt": "        constraint = RigidConstraint("
+        }
+      ]
+    },
+    {
+      "id": "simulation-manager-constructs-rigid-object-groups",
+      "source": "simulation-manager",
+      "target": "rigid-object-groups",
+      "relation": "constructs",
+      "description": "Declares a batched rigid-object group facade.",
+      "provenance": "source-reviewed",
+      "scope": "When a configured group is added to the Spawn scene.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/sim_manager.py",
+          "symbol": "SimulationManager.add_rigid_object_group",
+          "start_line": 2846,
+          "end_line": 2846,
+          "excerpt": "        group = RigidObjectGroup("
+        }
+      ]
+    },
+    {
       "id": "simulation-manager-constructs-rigid-objects",
       "source": "simulation-manager",
       "target": "rigid-objects",
@@ -3712,6 +4147,24 @@
       ]
     },
     {
+      "id": "simulation-manager-holds-lights",
+      "source": "simulation-manager",
+      "target": "lights",
+      "relation": "holds",
+      "description": "Retains configured global or per-arena light facades.",
+      "provenance": "source-reviewed",
+      "scope": "Render lights are registered by UID after creation.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/sim_manager.py",
+          "symbol": "SimulationManager.add_light",
+          "start_line": 2163,
+          "end_line": 2163,
+          "excerpt": "        self._lights[uid] = batch_lights"
+        }
+      ]
+    },
+    {
       "id": "sink-holds-clock",
       "source": "command-sink",
       "target": "step-clock",
@@ -3762,6 +4215,24 @@
           "start_line": 35,
           "end_line": 39,
           "excerpt": "from embodichain.learning.rl.env import (\n    DifferentiableRolloutSpec,\n    DifferentiableVecEnv,\n    ScheduledDifferentiableVecEnv,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-0ae3233a127d",
+      "source": "deformables",
+      "target": "batch-entity",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/deformable/base.py",
+          "symbol": "<module>",
+          "start_line": 30,
+          "end_line": 30,
+          "excerpt": "from embodichain.lab.sim.common import BatchEntity"
         }
       ]
     },
@@ -3838,6 +4309,24 @@
       ]
     },
     {
+      "id": "static-imports-1c2288600190",
+      "source": "articulations",
+      "target": "object-backends",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/articulation.py",
+          "symbol": "<module>",
+          "start_line": 56,
+          "end_line": 56,
+          "excerpt": "from embodichain.lab.sim.objects.backends import SceneArticulationView"
+        }
+      ]
+    },
+    {
       "id": "static-imports-1d1929c1f98e",
       "source": "environment-adapter",
       "target": "semantic-executor",
@@ -3852,6 +4341,24 @@
           "start_line": 72,
           "end_line": 72,
           "excerpt": "from embodichain.lab.task_program.runtime.executor import SemanticCallExecutor"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-22b538406c16",
+      "source": "articulations",
+      "target": "batch-entity",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/articulation.py",
+          "symbol": "<module>",
+          "start_line": 55,
+          "end_line": 55,
+          "excerpt": "from embodichain.lab.sim.common import BatchEntity"
         }
       ]
     },
@@ -4050,6 +4557,24 @@
           "start_line": 34,
           "end_line": 34,
           "excerpt": "from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-3dac49481ca4",
+      "source": "gizmo",
+      "target": "sensors",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/gizmo.py",
+          "symbol": "<module>",
+          "start_line": 38,
+          "end_line": 38,
+          "excerpt": "from embodichain.lab.sim.sensors import Camera"
         }
       ]
     },
@@ -4450,6 +4975,24 @@
       ]
     },
     {
+      "id": "static-imports-8978d54fe9cd",
+      "source": "lights",
+      "target": "batch-entity",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/light.py",
+          "symbol": "<module>",
+          "start_line": 24,
+          "end_line": 24,
+          "excerpt": "from embodichain.lab.sim.common import BatchEntity"
+        }
+      ]
+    },
+    {
       "id": "static-imports-8a7d5a2a7418",
       "source": "simulation-manager",
       "target": "sensors",
@@ -4500,6 +5043,24 @@
           "start_line": 93,
           "end_line": 96,
           "excerpt": "from embodichain.lab.task_program.language.schema import (\n    TaskProgramCfg,\n    TaskProgramIntegrationCfg,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-8d99eef544be",
+      "source": "simulation-manager",
+      "target": "gizmo",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/sim_manager.py",
+          "symbol": "<module>",
+          "start_line": 83,
+          "end_line": 83,
+          "excerpt": "from embodichain.lab.sim.objects.gizmo import Gizmo, GizmoCfg"
         }
       ]
     },
@@ -4572,6 +5133,24 @@
           "start_line": 82,
           "end_line": 82,
           "excerpt": "from embodichain.lab.gym.utils.registration import register_env"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-9b6691072efd",
+      "source": "rigid-objects",
+      "target": "object-backends",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/rigid_object.py",
+          "symbol": "<module>",
+          "start_line": 31,
+          "end_line": 35,
+          "excerpt": "from embodichain.lab.sim.objects.backends import (\n    SceneRigidBodyView,\n    collision_shapes_from_entity,\n    is_newton_scene,\n)"
         }
       ]
     },
@@ -5008,6 +5587,42 @@
       ]
     },
     {
+      "id": "static-imports-e78e1b0a7280",
+      "source": "gizmo",
+      "target": "robot",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/gizmo.py",
+          "symbol": "<module>",
+          "start_line": 37,
+          "end_line": 37,
+          "excerpt": "from embodichain.lab.sim.objects.robot import Robot"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-e80669c4fea7",
+      "source": "rigid-constraints",
+      "target": "rigid-objects",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration under if TYPE_CHECKING. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/constraint.py",
+          "symbol": "<module>",
+          "start_line": 30,
+          "end_line": 30,
+          "excerpt": "    from embodichain.lab.sim.objects.rigid_object import RigidObject"
+        }
+      ]
+    },
+    {
       "id": "static-imports-eb84e6a51ed6",
       "source": "env-launcher",
       "target": "task-discovery",
@@ -5080,6 +5695,24 @@
       ]
     },
     {
+      "id": "static-imports-f67e0a6b3152",
+      "source": "gizmo",
+      "target": "batch-entity",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/gizmo.py",
+          "symbol": "<module>",
+          "start_line": 35,
+          "end_line": 35,
+          "excerpt": "from embodichain.lab.sim.common import BatchEntity"
+        }
+      ]
+    },
+    {
       "id": "static-imports-f6f4ac515679",
       "source": "motion-generator",
       "target": "configuration",
@@ -5094,6 +5727,96 @@
           "start_line": 51,
           "end_line": 51,
           "excerpt": "from embodichain.utils import logger, configclass"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-f81a407be5c3",
+      "source": "gizmo",
+      "target": "configuration",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/gizmo.py",
+          "symbol": "<module>",
+          "start_line": 39,
+          "end_line": 39,
+          "excerpt": "from embodichain.utils import configclass, logger"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-faf178a781a9",
+      "source": "gizmo",
+      "target": "solvers",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration under if TYPE_CHECKING. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/gizmo.py",
+          "symbol": "<module>",
+          "start_line": 44,
+          "end_line": 44,
+          "excerpt": "    from embodichain.lab.sim.motion.solvers import BaseSolver"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-fcfdcbea1ddf",
+      "source": "gizmo",
+      "target": "rigid-objects",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/gizmo.py",
+          "symbol": "<module>",
+          "start_line": 36,
+          "end_line": 36,
+          "excerpt": "from embodichain.lab.sim.objects.rigid_object import RigidObject"
+        }
+      ]
+    },
+    {
+      "id": "surface-deformables-inherits-deformables",
+      "source": "surface-deformables",
+      "target": "deformables",
+      "relation": "inherits",
+      "description": "Specializes the shared deformable object facade.",
+      "provenance": "source-reviewed",
+      "scope": "Direct Python inheritance; relative imports are reviewed explicitly.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/deformable/surface.py",
+          "symbol": "SurfaceDeformableObject",
+          "start_line": 28,
+          "end_line": 28,
+          "excerpt": "class SurfaceDeformableObject(DeformableObject):"
+        }
+      ]
+    },
+    {
+      "id": "volume-deformables-inherits-deformables",
+      "source": "volume-deformables",
+      "target": "deformables",
+      "relation": "inherits",
+      "description": "Specializes the shared deformable object facade.",
+      "provenance": "source-reviewed",
+      "scope": "Direct Python inheritance; relative imports are reviewed explicitly.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/deformable/volume.py",
+          "symbol": "VolumeDeformableObject",
+          "start_line": 36,
+          "end_line": 36,
+          "excerpt": "class VolumeDeformableObject(DeformableObject):"
         }
       ]
     },
@@ -5161,7 +5884,14 @@
         "device-controller",
         "event-manager",
         "rl-routing",
-        "differentiable-trainer"
+        "differentiable-trainer",
+        "rigid-objects",
+        "rigid-object-groups",
+        "articulations",
+        "deformables",
+        "lights",
+        "rigid-constraints",
+        "gizmo"
       ],
       "edge_ids": [
         "adapter-calls-compiler",
@@ -5196,10 +5926,19 @@
         "robot-constructs-workspace",
         "embodied-env-constructs-event-manager",
         "mllm-calls-environment-adapter",
+        "simulation-manager-constructs-rigid-objects",
+        "simulation-manager-holds-articulations",
+        "simulation-manager-holds-deformables",
+        "robot-inherits-articulations",
         "event-manager-calls-randomization",
         "rl-routing-constructs-rl-train-from-config",
         "rl-routing-constructs-rl-train-learning-env",
         "rl-routing-constructs-differentiable-trainer-train-learning-env",
+        "simulation-manager-constructs-rigid-object-groups",
+        "simulation-manager-holds-lights",
+        "simulation-manager-constructs-gizmo",
+        "simulation-manager-constructs-rigid-constraints",
+        "rigid-constraints-holds-rigid-objects",
         "static-imports-6887f760c2d8",
         "static-imports-b09fe3ed8e44",
         "static-imports-547bae782cdb",
@@ -5218,9 +5957,16 @@
         "static-imports-d3f76cbdac77",
         "static-imports-ab15f87df47f",
         "static-imports-f6f4ac515679",
+        "static-imports-e80669c4fea7",
+        "static-imports-fcfdcbea1ddf",
+        "static-imports-e78e1b0a7280",
+        "static-imports-3dac49481ca4",
+        "static-imports-f81a407be5c3",
+        "static-imports-faf178a781a9",
         "static-imports-17df4f0fef66",
         "static-imports-6a16cc8193b0",
         "static-imports-819e3ce626d3",
+        "static-imports-8d99eef544be",
         "static-imports-8a7d5a2a7418",
         "static-imports-a32fb8db0ae1",
         "static-imports-bba2d7266a0c",
@@ -5287,7 +6033,14 @@
             "robot",
             "sensors",
             "physics",
-            "visualization"
+            "visualization",
+            "rigid-objects",
+            "rigid-object-groups",
+            "articulations",
+            "deformables",
+            "lights",
+            "rigid-constraints",
+            "gizmo"
           ]
         },
         {
@@ -5498,7 +6251,15 @@
         "event-manager",
         "randomization",
         "devices",
-        "device-controller"
+        "device-controller",
+        "rigid-object-groups",
+        "lights",
+        "rigid-constraints",
+        "gizmo",
+        "surface-deformables",
+        "volume-deformables",
+        "object-backends",
+        "batch-entity"
       ],
       "edge_ids": [
         "engine-holds-motion",
@@ -5516,6 +6277,20 @@
         "simulation-manager-holds-deformables",
         "robot-inherits-articulations",
         "event-manager-calls-randomization",
+        "simulation-manager-constructs-rigid-object-groups",
+        "simulation-manager-holds-lights",
+        "simulation-manager-constructs-gizmo",
+        "simulation-manager-constructs-rigid-constraints",
+        "surface-deformables-inherits-deformables",
+        "volume-deformables-inherits-deformables",
+        "rigid-constraints-holds-rigid-objects",
+        "gizmo-holds-batch-entity",
+        "rigid-object-groups-imports-object-backends",
+        "rigid-objects-inherits-batch-entity",
+        "rigid-object-groups-inherits-batch-entity",
+        "articulations-inherits-batch-entity",
+        "deformables-inherits-batch-entity",
+        "lights-inherits-batch-entity",
         "static-imports-547bae782cdb",
         "static-imports-d3f76cbdac77",
         "static-imports-5529b5ed4bec",
@@ -5524,9 +6299,22 @@
         "static-imports-f6f4ac515679",
         "static-imports-9bc131d4e099",
         "static-imports-688b3daedb5b",
+        "static-imports-22b538406c16",
+        "static-imports-1c2288600190",
+        "static-imports-e80669c4fea7",
+        "static-imports-0ae3233a127d",
+        "static-imports-f67e0a6b3152",
+        "static-imports-fcfdcbea1ddf",
+        "static-imports-e78e1b0a7280",
+        "static-imports-3dac49481ca4",
+        "static-imports-f81a407be5c3",
+        "static-imports-faf178a781a9",
+        "static-imports-8978d54fe9cd",
+        "static-imports-9b6691072efd",
         "static-imports-17df4f0fef66",
         "static-imports-6a16cc8193b0",
         "static-imports-819e3ce626d3",
+        "static-imports-8d99eef544be",
         "static-imports-8a7d5a2a7418",
         "static-imports-a32fb8db0ae1",
         "static-imports-bba2d7266a0c"
@@ -5534,16 +6322,36 @@
       "groups": [
         {
           "id": "simulation-0",
-          "label": "World & entities",
+          "label": "World & simulation services",
           "node_ids": [
             "simulation-manager",
             "physics",
+            "sensors",
+            "visualization"
+          ]
+        },
+        {
+          "id": "simulation-objects",
+          "label": "Scene objects & interaction",
+          "node_ids": [
             "robot",
             "articulations",
             "rigid-objects",
+            "rigid-object-groups",
             "deformables",
-            "sensors",
-            "visualization"
+            "surface-deformables",
+            "volume-deformables",
+            "lights",
+            "rigid-constraints",
+            "gizmo"
+          ]
+        },
+        {
+          "id": "simulation-object-contracts",
+          "label": "Object interfaces & backend views",
+          "node_ids": [
+            "batch-entity",
+            "object-backends"
           ]
         },
         {

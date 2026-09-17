@@ -461,3 +461,33 @@ still exits nonzero with 714 pre-existing warnings. All 731 normalized diagnosti
 lines match the main baseline exactly, with no added or removed diagnostics.
 The standalone specialist view and refreshed embedded page were inspected locally.
 The existing nonfatal Vite bundle-size advisory remains. Remote CI is pending.
+
+
+## Simulation Object Families — 2026-09-17
+
+- [x] Add the main scene-object families to the overview's Simulation world
+  layer, reusing nodes in the specialist view.
+- [x] Add eight nodes: rigid-object groups, lights, gizmos, fixed constraints,
+  surface and volume deformables, BatchEntity, and object backend views.
+  Split specialist presentation into world services, object families, and
+  shared interfaces without changing the frontend schema or interactions.
+- [x] Verify direct inheritance, manager construction/retention, wrapper
+  associations, and supported backend boundaries against pinned source.
+  Preserve the separate Gizmo and RigidConstraint contracts and existing
+  ClothObject/SoftObject compatibility aliases in module descriptions.
+- [x] Expand the existing browser navigation check to select objects from both
+  overview and specialist views, follow documentation, and restore selection.
+  It first failed because Rigid object groups was absent; all 17 unit,
+  8 standalone browser, and 10 Sphinx browser checks now pass (35 total).
+
+Snapshot: 85 nodes, 177 relationships (88 source-reviewed, 89 static).
+Overview: 47 nodes / 86 relationships; Simulation: 34 nodes / 56 relationships.
+Independent source review found no substantive issue; the stale README count
+was corrected. The production bundle, Prettier, Black 26.3.1, source validation,
+and 2075/2075 API-documentation coverage pass. No routed context topics changed.
+
+The refreshed standalone and embedded pages were visually inspected. An initial
+incremental Sphinx build emitted 1017 warnings; a clean rebuild returned to the
+714-warning baseline, with all 731 normalized diagnostic lines matching main
+exactly. The strict whole-site warning gate still fails on that existing backlog;
+the strict isolated Sphinx fixtures pass.

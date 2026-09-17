@@ -20,7 +20,10 @@ import snapshot from '../../generated/architecture.json' with { type: 'json' };
 test('browse subsystem views and restore a module with its documentation', async ({ page }) => {
   await page.goto('/');
   for (const [view, label, module, figure] of [
-    ['simulation', 'Simulation', 'Robot workspace', 'FIG. 03'],
+    ['overview', 'System overview', 'Rigid object groups', 'FIG. 01'],
+    ['simulation', 'Simulation', 'Surface deformables', 'FIG. 03'],
+    ['simulation', 'Simulation', 'Gizmo', 'FIG. 03'],
+    ['simulation', 'Simulation', 'Object backend views', 'FIG. 03'],
     ['data-learning', 'Data & Learning', 'LeRobot recording', 'FIG. 04'],
     ['generation-tooling', 'Generation & Toolkits', 'SimReady pipeline', 'FIG. 05'],
   ]) {
