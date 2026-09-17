@@ -48,7 +48,9 @@ overview 28/43, Task Program 16/41). Both tools and their focused tests are deli
 together. The user-reviewed expanded 28-node overview supersedes the original
 24-node target. The generator also supports explicit `--revision` selection.
 Summary documentation links currently point to the source at the same revision;
-Sphinx URL resolution remains Task 4. Sphinx/CI integration remains unimplemented. Do not add a backend server, database, graph editor,
+Sphinx URL resolution remains Task 4. Sphinx embedding, runtime snapshot loading, version-local documentation links,
+and CI toolchain/test steps are now implemented. Full-site strict validation
+remains affected by unrelated documentation warnings; see the integration record below. Do not add a backend server, database, graph editor,
 runtime tracer, or automatic-layout dependency.
 
 ## Task 1: Validated Architecture Snapshots
@@ -194,10 +196,10 @@ def test_changed_evidence_is_not_silently_relocated(changed_source_fixture):
   repository URL and commit. `documentationUrl(docname: string, docsRoot: URL): string`
   resolves from the explicit current-version root supplied by Sphinx.
 
-- [ ] Verify current library/runtime compatibility, fix dependency versions in
+- [x] Verify current library/runtime compatibility, fix dependency versions in
   the lockfile, and add scripts for dev, build, typecheck, state tests, and browser
   tests. Keep dependencies local to documentation tooling.
-- [ ] Write failing state tests for fragment round-trip, unknown view/node,
+- [x] Write failing state tests for fragment round-trip, unknown view/node,
   empty relation filters, search with no matches, and removal of a selected node.
   Use this source-link assertion:
 
@@ -206,15 +208,15 @@ expect(sourceUrl(snapshot.revision, snapshot.nodes[0].evidence[0]))
   .toContain(`/blob/${snapshot.revision}/`);
 ```
 
-- [ ] Implement the state and link functions. On an unknown view select the first
+- [x] Implement the state and link functions. On an unknown view select the first
   view and return a notice; on an unknown node clear selection and return a notice.
   Filter invalid relation names. The details panel remains available if current
   filters hide all of the selected node's adjacent edges.
-- [ ] Load and minimally validate the JSON envelope at startup, with visible
+- [x] Load and minimally validate the JSON envelope at startup, with visible
   loading/error states. Render custom cards, fixed group/column placement,
   relation filters, search, a keyboard node list, and the details panel. Disable
   connection editing; keep drag positions in session state only.
-- [ ] Add browser checks against the built application, including:
+- [x] Add browser checks against the built application, including:
 
 ```typescript
 await page.getByRole('button', { name: 'Select AtomicActionEngine' }).click();
@@ -225,11 +227,11 @@ await expect(page.getByRole('heading', { name: 'AtomicActionEngine', exact: true
   .toBeVisible();
 ```
 
-- [ ] Check relationship selection, source evidence, keyboard selection,
+- [x] Check relationship selection, source evidence, keyboard selection,
   no-results/error states, view switching, and browser back/forward restoration.
   Confirm filters are applied within the selected view and all underlying
   parallel relationships remain accessible in details.
-- [ ] Run typecheck, state tests, build, and browser tests. Inspect the actual
+- [x] Run typecheck, state tests, build, and browser tests. Inspect the actual
   page at desktop and narrow widths in light/dark themes; confirm readable
   cards and no inaccessible clipped detail controls. Commit the prototype.
 
@@ -252,25 +254,25 @@ await expect(page.getByRole('heading', { name: 'AtomicActionEngine', exact: true
   Sphinx-resolved relative URL for the iframe/full-screen link. Assets and summary
   are ignored. Builds fail if their generation fails; never publish stale assets.
 
-- [ ] Write orchestration tests with stub subprocesses for generator/build
+- [x] Write orchestration tests with stub subprocesses for generator/build
   success and failure, including proof that a failure does not replace the last
   complete output directory. Use staging plus atomic replacement for output.
-- [ ] Implement the command: generate snapshot/summary into staging, run the
+- [x] Implement the command: generate snapshot/summary into staging, run the
   frontend build, assemble assets, then replace outputs. Add Node toolchain setup
   to the documented local prerequisites and keep `npm ci` distinct from repeated
   build invocations.
-- [ ] Add the Overview navigation entry, searchable text include, titled iframe,
+- [x] Add the Overview navigation entry, searchable text include, titled iframe,
   fallback text, and full-screen link. Supply version-relative `docsRoot` and
   explicit theme parameters. Open documentation links in the parent context.
   Keep script loading scoped to the architecture page.
-- [ ] Wire the command into local `make html` and `make current-docs` preparation.
+- [x] Wire the command into local `make html` and `make current-docs` preparation.
   Add documentation-tool dependencies to docs requirements. Non-HTML builders
   render the summary and links; they do not depend on an interactive iframe.
-- [ ] Run a focused Sphinx fixture and browser tests serving the output at `/`,
+- [x] Run a focused Sphinx fixture and browser tests serving the output at `/`,
   `/main/`, `/v0.2.4/`, and `/EmbodiChain/main/`. Assert JSON and assets load, API
   links stay in the same version, source links contain the snapshot SHA, and a
   shared fragment restores state in the full-screen page.
-- [ ] Run `make -C docs current-docs` in the documented docs environment and
+- [x] Run `make -C docs current-docs` in the documented docs environment and
   inspect both entry and full-screen pages. Report pre-existing build failures
   separately from changes. Format, review, and commit the integration.
 
@@ -286,27 +288,27 @@ await expect(page.getByRole('heading', { name: 'AtomicActionEngine', exact: true
 - Produces: CI artifacts and per-version builds containing their own architecture
   assets, source revision, summary, and links.
 
-- [ ] Inspect each existing Sphinx invocation and checkout boundary. Call the
+- [x] Inspect each existing Sphinx invocation and checkout boundary. Call the
   asset builder after checking out the ref to document, and before each HTML
   build. Historical refs predating the feature must retain their existing build
   behavior; check for the asset-builder file before invoking it on those refs.
   Leave `docs/scripts/build_versions.py` unchanged: it filters retained versions
   and currently has no build orchestration responsibility.
-- [ ] Install the locked frontend dependencies and browser-test dependencies
+- [x] Install the locked frontend dependencies and browser-test dependencies
   only in relevant documentation/test jobs. Cache using the lockfile, without
   sharing generated architecture JSON between refs.
-- [ ] Add a two-revision fixture test with changed class locations and labels.
+- [x] Add a two-revision fixture test with changed class locations and labels.
   Verify each version directory keeps its own JSON SHA, excerpts and doc links.
   Add a regression test for a historical ref with no architecture builder.
-- [ ] Document the update procedure: edit the curated responsibilities/relations,
+- [x] Document the update procedure: edit the curated responsibilities/relations,
   refresh source selectors when behavior changes, build, inspect evidence,
   validate links, and review the rendered graph. Document that static extraction
   cannot establish a complete runtime call graph.
-- [ ] Run the proportional Python/browser checks, `actionlint` on the changed
+- [x] Run the proportional Python/browser checks, `actionlint` on the changed
   workflows, `python docs/scripts/check_api_docs.py`, and the project-context
   affected check. Add/update context only when new behavior needs a routed topic;
   do not create a second architecture inventory in MAP.
-- [ ] Run `black .`, review all generated/ignored files and staged changes, then
+- [x] Run `black .`, review all generated/ignored files and staged changes, then
   commit. Record the full verification commands and any environment limitations.
 
 ## Completion Evidence
@@ -330,3 +332,34 @@ Independent review findings for dangling view references, decorated class bases,
 and cross-scope module excerpts were reproduced and fixed with regression tests.
 The existing frontend preview was refreshed and inspected with generated data.
 Sphinx embedding, published-version documentation URLs, and CI remain outstanding.
+
+## Sphinx Integration Verification — 2026-09-17
+
+The frontend now fetches and schema-validates the snapshot beside its HTML entry.
+Sphinx supplies `docsRoot` and an explicit initial theme; documentation links open
+in the parent context and remain within the current version. The entry's text
+reference is indexed by Sphinx and works in non-HTML builders.
+
+Implementation choices: the Sphinx `builder-inited` hook owns asset preparation
+for both Make targets and direct Sphinx commands, avoiding duplicate build paths.
+JSON, summary, and application assets live in one staged, ignored bundle so a
+failed generator or frontend build cannot replace the previous complete output.
+The summary is injected during source processing instead of using a separate
+tracked include file. CI prepares Node only for checkouts containing the builder.
+
+Verification includes real Sphinx HTML/text builds without simulator imports,
+a historical fixture without the extension, two source revisions with independently
+pinned evidence, 4 deployment prefixes, parent-frame API navigation, shared-state
+restoration, and missing/invalid snapshot error states. All 12 browser tests pass.
+Actionlint 1.7.12 accepts both modified workflows. The API gate remains 2075/2075,
+and context routing reports no affected topics. Independent review found and
+confirmed the correction of an invalid MyST extension setting; a regression test
+now validates the actual project configuration.
+
+`make -C docs current-docs` was run with Python 3.11 in the full local docs
+environment. It generated the site, including the architecture page, but exited
+nonzero with 714 warnings in other documentation (including duplicate API objects
+and docstring markup). No warning was reported for the architecture entry. The
+isolated strict Sphinx fixture passes; the full site's warning backlog remains
+outside this architecture change. CI workflow execution and publication have not
+been performed locally. The named worktree is retained for review.

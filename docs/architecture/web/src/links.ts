@@ -14,15 +14,21 @@
 // limitations under the License.
 // ----------------------------------------------------------------------------
 
-import { defineConfig } from '@playwright/test';
-export default defineConfig({
-  testDir: './tests',
-  testMatch: 'explorer.spec.ts',
-  use: { baseURL: 'http://127.0.0.1:4179', viewport: { width: 1600, height: 1000 } },
-  webServer: {
-    command: 'npm run dev -- --port 4179 --strictPort',
-    url: 'http://127.0.0.1:4179',
-    reuseExistingServer: !process.env.CI,
-  },
-  reporter: 'list',
-});
+/** Resolve only explicit same-origin documentation contexts; standalone keeps source links. */
+export function resolveDocsRoot(page: URL): URL | null {
+  const value = page.searchParams.get('docsRoot');
+  if (!value) return null;
+  try {
+    const root = new URL(value, page);
+    if (!['http:', 'https:'].includes(root.protocol) || root.origin !== page.origin) return null;
+    root.search = '';
+    root.hash = '';
+    if (!root.pathname.endsWith('/')) root.pathname += '/';
+    return root;
+  } catch {
+    return null;
+  }
+}
+export function documentationUrl(docname: string, root: URL): string {
+  return new URL(docname.split('/').map(encodeURIComponent).join('/') + '.html', root).href;
+}

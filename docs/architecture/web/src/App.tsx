@@ -48,13 +48,11 @@ import {
   Sun,
   X,
 } from 'lucide-react';
-import snapshot from '../../generated/architecture.json';
 import { ArchitectureNode, LayerNode } from './ArchitectureNode';
 import NodeDetails from './NodeDetails';
 import { buildCanvas, layerColors, CARD_WIDTH, CARD_HEIGHT } from './graph';
 import { parseState, serializeState, selectGraph, relations } from './state';
 import type { ExplorerState, ArchitectureSnapshot } from './types';
-const data: ArchitectureSnapshot = snapshot;
 const nodeTypes = { module: ArchitectureNode, layer: LayerNode };
 
 function CanvasTools() {
@@ -126,11 +124,13 @@ function ReadingViewport({
   return null;
 }
 
-function Explorer() {
+function Explorer({ data }: { data: ArchitectureSnapshot }) {
   const initial = useMemo(() => parseState(location.hash, data), []);
   const [state, setState] = useState<ExplorerState>(initial.state);
   const [notice, setNotice] = useState(initial.notices.join(' '));
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    const requested = new URLSearchParams(location.search).get('theme');
+    if (requested === 'dark' || requested === 'light') return requested;
     try {
       return localStorage.getItem('architecture-academic-theme') === 'dark' ? 'dark' : 'light';
     } catch {
@@ -636,10 +636,10 @@ function MouseIcon() {
     </svg>
   );
 }
-export default function App() {
+export default function App({ data }: { data: ArchitectureSnapshot }) {
   return (
     <ReactFlowProvider>
-      <Explorer />
+      <Explorer data={data} />
     </ReactFlowProvider>
   );
 }

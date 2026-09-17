@@ -1,8 +1,7 @@
 # Architecture Explorer preview
 
 A static, read-only frontend for inspecting EmbodiChain's architecture. This
-iteration consumes generated, source-validated data. Sphinx integration remains
-a separate milestone.
+iteration consumes generated, source-validated data and supports Sphinx embedding.
 
 ## Run locally
 
@@ -59,8 +58,11 @@ keyboard access. Open the relationship menu to toggle types or clear all filters
 
 ## Data and limits
 
-The frontend imports `../generated/architecture.json` at build time using the
-shared `../architecture.schema.json` contract. The current snapshot has 34 unique
+The frontend fetches the `architecture.json` served beside its HTML entry and
+validates it against `../architecture.schema.json`. Vite serves and bundles
+`../generated/architecture.json` for standalone development; Sphinx builds supply
+the freshly generated JSON through `ARCHITECTURE_DATA_PATH`. Loading and invalid
+data have explicit states. The current snapshot has 34 unique
 nodes and 65 unique edges; views share nodes and relationships. Its `revision`
 identifies the committed source being described, independently of the frontend
 implementation commit.
@@ -81,10 +83,11 @@ with known evidence means filters or local focus hide those links. Nodes without
 recorded relationships are labeled Not mapped. Their inspector explicitly states
 that this is incomplete coverage, not proof of having no dependencies. The overview is not a complete dependency or runtime call graph.
 
-Documentation links currently open the documentation **source** at the pinned
-commit. The app does not claim that a matching published documentation version
-exists. A Sphinx-aware documentation URL resolver, build orchestration,
-and CI publishing remain separate work in the implementation plan.
+Standalone documentation links open the documentation **source** at the pinned
+commit. In Sphinx, `?docsRoot=../../&theme=light` explicitly supplies the current
+version root and initial theme; documentation links open in the parent page.
+The full-screen URL retains this context and its fragment restores exploration.
+Both embedded and standalone views provide a user-controlled theme toggle.
 
 ## Verification
 
@@ -92,6 +95,7 @@ and CI publishing remain separate work in the implementation plan.
 npm test
 npx playwright install chromium
 npm run test:browser
+npm run test:docs
 npm run build
 npm run format:check
 ```
@@ -104,3 +108,8 @@ exercise real browser interactions rather than mocked React components.
 `npm run test:browser` starts its own dev server on port 4179. The production
 preview on 4183 can remain running independently for visual review. Build outputs,
 dependencies, and browser test reports are ignored by Git.
+
+`npm run test:docs` needs the Python documentation requirements. It builds a real
+Sphinx HTML/text fixture with lightweight documentation targets, then serves the
+built assets on port 4180 to test version prefixes and snapshot failure states.
+This is independent of the simulator and the full API documentation import chain.

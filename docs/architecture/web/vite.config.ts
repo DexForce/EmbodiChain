@@ -14,10 +14,39 @@
 // limitations under the License.
 // ----------------------------------------------------------------------------
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+const snapshotPath =
+  process.env.ARCHITECTURE_DATA_PATH ??
+  fileURLToPath(new URL('../generated/architecture.json', import.meta.url));
 export default defineConfig({
   base: './',
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: 'architecture-snapshot',
+      configureServer(server) {
+        server.middlewares.use((request, response, next) => {
+          if (request.url?.split('?')[0] !== '/architecture.json') return next();
+          try {
+            response.setHeader('Content-Type', 'application/json');
+            response.end(readFileSync(snapshotPath));
+          } catch {
+            response.statusCode = 500;
+            response.end('Snapshot unavailable');
+          }
+        });
+      },
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'architecture.json',
+          source: readFileSync(snapshotPath, 'utf8'),
+        });
+      },
+    },
+  ],
   test: { include: ['tests/*.test.ts'] },
 });

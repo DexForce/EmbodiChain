@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react';
+import { documentationUrl, resolveDocsRoot } from './links';
 import { relations, sourceUrl, documentationSourceUrl } from './state';
 import type {
   ArchitectureSnapshot,
@@ -51,6 +52,7 @@ export default function NodeDetails({
   onSelect: (id: string) => void;
   onClose: () => void;
 }) {
+  const docsRoot = resolveDocsRoot(new URL(location.href));
   const linked = edges.filter((e) => e.source === node?.id || e.target === node?.id);
   const allCount = data.edges.filter(
     (e) => view.edge_ids.includes(e.id) && (e.source === node?.id || e.target === node?.id),
@@ -243,17 +245,21 @@ export default function NodeDetails({
             {node.documentation.length > 0 && (
               <section className="documentation-links">
                 <div className="section-title">
-                  <BookOpen size={14} /> Documentation source
+                  <BookOpen size={14} /> {docsRoot ? 'Documentation' : 'Documentation source'}
                 </div>
                 {node.documentation.map((doc) => (
                   <a
                     key={doc.docname}
-                    href={documentationSourceUrl(
-                      data.revision,
-                      doc.docname,
-                      doc.docname.startsWith('api_reference/') ? '.rst' : '.md',
-                    )}
-                    target="_blank"
+                    href={
+                      docsRoot
+                        ? documentationUrl(doc.docname, docsRoot)
+                        : documentationSourceUrl(
+                            data.revision,
+                            doc.docname,
+                            doc.docname.startsWith('api_reference/') ? '.rst' : '.md',
+                          )
+                    }
+                    target={docsRoot ? '_parent' : '_blank'}
                     rel="noreferrer"
                   >
                     {doc.label}

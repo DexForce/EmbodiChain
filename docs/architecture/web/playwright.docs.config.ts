@@ -17,12 +17,13 @@
 import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './tests',
-  testMatch: 'explorer.spec.ts',
-  use: { baseURL: 'http://127.0.0.1:4179', viewport: { width: 1600, height: 1000 } },
+  testMatch: 'docs.spec.ts',
+  use: { baseURL: 'http://127.0.0.1:4180', viewport: { width: 1600, height: 1000 } },
   webServer: {
-    command: 'npm run dev -- --port 4179 --strictPort',
-    url: 'http://127.0.0.1:4179',
-    reuseExistingServer: !process.env.CI,
+    command:
+      'python -m http.server 4180 --bind 127.0.0.1 --directory ../../build/architecture-fixture',
+    url: 'http://127.0.0.1:4180',
+    reuseExistingServer: false,
   },
   reporter: 'list',
 });

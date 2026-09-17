@@ -1660,3 +1660,12 @@ h1 > span {
     transition: none !important;
   }
 }
+
+.startup-state {
+  max-width: 48rem;
+  margin: 10vh auto;
+  padding: 2rem;
+  color: #28323b;
+  background: #fbfaf7;
+  line-height: 1.6;
+}

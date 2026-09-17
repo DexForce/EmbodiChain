@@ -3,8 +3,8 @@
 A static [frontend](web/README.md) provides a 28-module overview and a 16-object
 Task Program view, with search, relationship filters, direct-neighbour exploration,
 source evidence, and shareable navigation. It consumes a
-[generated snapshot](generated/architecture.json); Sphinx embedding and CI
-publishing remain the next milestones.
+[generated snapshot](generated/architecture.json); the Sphinx documentation embeds the viewer and a searchable text reference.
+Local and CI Sphinx builds regenerate their own version-specific assets.
 
 - [Design and scope](../superpowers/specs/2026-09-17-architecture-explorer-design.md)
 - [Implementation plan](../superpowers/plans/2026-09-17-architecture-explorer.md)
@@ -62,8 +62,9 @@ the pinned revision. Python module evidence uses `<module>`; non-Python text use
 
 A snapshot's revision identifies the source it describes, not the later commit
 that stores the generated artifact. `source_ref` is descriptive; all source links
-use the immutable revision. Documentation links currently open the documentation
-**source at that revision**, not a possibly mismatched published site.
+use the immutable revision. Standalone preview documentation links open the documentation **source at that
+revision**. Sphinx supplies a same-origin version root so embedded and full-screen
+documentation links open the corresponding HTML page in the parent context.
 
 Static extraction handles absolute imports in selected modules and unambiguous
 class bases with unique static bindings. Conditional/type-only imports retain
@@ -84,5 +85,32 @@ python -m pytest -q -c /dev/null -p no:cacheprovider --noconftest \
 
 Frontend checks are documented in its [README](web/README.md). The original sample
 remains pinned to `3224ac1ee28b6730b245d5cb69dc25a8d2d8dd94`; it is not copied as
-current release data. Sphinx will next supply a version-relative documentation
-root, searchable text entry, embedded viewer, and full-screen link.
+current release data. The Sphinx extension supplies a version-relative documentation root, searchable
+text entry, embedded viewer, and full-screen link.
+
+## Documentation integration
+
+Install `docs/requirements.txt`, Node.js 22.12+, and the frontend lockfile with
+`npm --prefix docs/architecture/web ci`. Run `make -C docs current-docs` in the
+project's full documentation environment, or use `sphinx-build` directly. Both
+routes trigger the same `architecture_sphinx` extension. To build only the static
+assets, run `python docs/scripts/build_architecture_assets.py`.
+
+The asset builder stages JSON, summary, and the compiled app together. Failed
+generation or frontend builds leave the previous complete bundle untouched and
+abort Sphinx. Generated resources live in the ignored
+`docs/source/_static/architecture/` directory. The summary is read into the entry
+page during source processing, so Sphinx indexes its text. Non-HTML builders
+produce the summary without requiring Node. Only the architecture page embeds
+application scripts, via its titled iframe.
+
+The full documentation setup is described in
+[Build Documentation](../source/quick_start/docs.md). For a simulator-independent
+integration check, run `npm run test:docs` from `docs/architecture/web`. It builds
+a small real Sphinx site with lightweight API targets, checks HTML and text
+builders, then browser-tests `/`, `/main/`, `/v0.2.4/`, and `/EmbodiChain/main/`.
+
+CI installs Node and npm dependencies after checking out the ref being documented.
+Refs predating this feature skip those steps and retain their own Sphinx config.
+The docs test lane checks Python generation, frontend state, browser interactions,
+and the Sphinx fixture. No generated snapshot is shared between refs.
