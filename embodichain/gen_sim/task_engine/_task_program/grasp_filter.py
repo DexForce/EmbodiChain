@@ -36,7 +36,7 @@ from .e6_clearance import HandClearance
 
 __all__: list[str] = []
 
-GRASP_FILTER_REVISION = 2
+GRASP_FILTER_REVISION = 3
 
 
 def geometry_key(vertices: torch.Tensor, triangles: torch.Tensor) -> str:
@@ -294,7 +294,7 @@ class E6ApproachGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         return self._delegate.get_best_grasp_poses(**kwargs)
 
     def get_grasp_candidates(self, **kwargs: Any) -> Any:
-        """Preserve widths and costs while applying the handle approach policy."""
+        """Preserve stock candidates and add one cross-axis handle variant."""
         kwargs = dict(kwargs)
         kwargs["approach_direction"] = self._approach_direction(
             kwargs["mesh_vertices"],
@@ -307,7 +307,50 @@ class E6ApproachGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             and geometry_key(kwargs["mesh_vertices"], kwargs["mesh_triangles"])
             in self._geometry_keys
         ):
-            rows = [self._clearance.filter(*row) for row in rows]
+            rotation = kwargs["obj_poses"].new_tensor(
+                [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+            )
+            augmented = []
+            for row, (poses, widths, costs) in enumerate(rows):
+                filtered = self._clearance.filter(poses, widths, costs)
+                if torch.isfinite(filtered[2]).any():
+                    augmented.append(filtered)
+                    continue
+                centered = kwargs["mesh_vertices"].to(poses)
+                centered = centered - centered.mean(dim=0, keepdim=True)
+                _, singular_values, principal_axes = torch.linalg.svd(
+                    centered, full_matrices=False
+                )
+                if (
+                    singular_values.shape[0] < 2
+                    or singular_values[0] <= 2.0 * singular_values[1]
+                ):
+                    augmented.append(filtered)
+                    continue
+                longest_axis = principal_axes[0]
+                stock_closing_local = (
+                    kwargs["obj_poses"][row, :3, :3].to(poses).T @ poses[:, :3, 0].T
+                ).T
+                long_axis_candidates = torch.abs(
+                    stock_closing_local @ longest_axis
+                ) >= math.cos(math.radians(20.0))
+                if not long_axis_candidates.any():
+                    augmented.append(filtered)
+                    continue
+                rotated = poses.clone()
+                rotated[:, :3, :3] = poses[:, :3, :3] @ rotation
+                closing_local = (
+                    kwargs["obj_poses"][row, :3, :3].to(rotated).T @ rotated[:, :3, 0].T
+                ).T
+                projections = kwargs["mesh_vertices"].to(rotated) @ closing_local.T
+                rotated_widths = projections.amax(dim=0) - projections.amin(dim=0)
+                rotated_costs = torch.where(
+                    long_axis_candidates, costs, torch.full_like(costs, torch.inf)
+                )
+                augmented.append(
+                    self._clearance.filter(rotated, rotated_widths, rotated_costs)
+                )
+            rows = augmented
         return rows
 
     def get_dual_arm_valid_grasp_poses(self, **kwargs: Any) -> Any:

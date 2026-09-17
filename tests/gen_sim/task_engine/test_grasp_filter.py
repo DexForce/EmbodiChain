@@ -71,7 +71,7 @@ def test_e6_clearance_provider_fails_closed_and_preserves_unrelated_grasps() -> 
     provider = E6ApproachGraspPoseGenerator(
         delegate,
         frozenset({geometry_key(VERTICES, TRIANGLES)}),
-        clearance=HandClearance(torch.zeros(1, 3), 0.01, 0.028, 0.0),
+        clearance=HandClearance(torch.zeros(1, 3), 0.001, 0.028, 0.0),
     )
     kwargs = dict(
         mesh_vertices=VERTICES,
@@ -150,7 +150,13 @@ def test_e6_short_pads_reject_all_candidates_without_extrapolating() -> None:
 
 
 class CandidateGenerator(ParallelJawGraspPoseGenerator):
-    def __init__(self, rows: tuple[tuple[float, ...], ...]) -> None:
+    def __init__(
+        self,
+        rows: tuple[tuple[float, ...], ...],
+        *,
+        opening_width: float = 0.05,
+        candidate_rotation: torch.Tensor | None = None,
+    ) -> None:
         super().__init__(
             ParallelJawGripperModelCfg(
                 model_id="test",
@@ -160,6 +166,8 @@ class CandidateGenerator(ParallelJawGraspPoseGenerator):
             )
         )
         self.rows = rows
+        self.opening_width = opening_width
+        self.candidate_rotation = candidate_rotation
         self.best_directions = []
 
     def get_valid_grasp_poses(self, **kwargs):
@@ -167,6 +175,8 @@ class CandidateGenerator(ParallelJawGraspPoseGenerator):
         results = []
         for row, heights in enumerate(self.rows):
             local = torch.eye(4).repeat(len(heights), 1, 1)
+            if self.candidate_rotation is not None:
+                local[:, :3, :3] = self.candidate_rotation
             local[:, 2, 3] = torch.tensor(heights)
             results.append(
                 (poses[row] @ local, torch.arange(len(heights), dtype=torch.float32))
@@ -179,13 +189,13 @@ class CandidateGenerator(ParallelJawGraspPoseGenerator):
         return (
             torch.ones(len(poses), dtype=torch.bool),
             poses.clone(),
-            torch.full((len(poses),), 0.05),
+            torch.full((len(poses),), self.opening_width),
         )
 
     def get_grasp_candidates(self, **kwargs):
         self.best_directions.append(kwargs["approach_direction"].clone())
         return [
-            (poses, torch.full((len(poses),), 0.05), costs)
+            (poses, torch.full((len(poses),), self.opening_width), costs)
             for poses, costs in self.get_valid_grasp_poses(**kwargs)
         ]
 
@@ -210,6 +220,90 @@ def test_e6_candidate_metadata_preserves_widths_and_approach() -> None:
     assert torch.allclose(
         delegate.best_directions[0], torch.tensor([0.0, -(0.5**0.5), -(0.5**0.5)])
     )
+
+
+def test_e6_clearance_adds_short_axis_variant_for_legacy_grip_bar() -> None:
+    from embodichain.gen_sim.task_engine._task_program.e6_clearance import HandClearance
+
+    vertices = torch.tensor(
+        [
+            [x, y, z]
+            for x in (-0.05, 0.05)
+            for y in (-0.005, 0.005)
+            for z in (-0.005, 0.005)
+        ]
+    )
+    triangles = torch.tensor([[0, 1, 2]])
+    provider = E6ApproachGraspPoseGenerator(
+        CandidateGenerator(((0.1,),), opening_width=0.1),
+        frozenset({geometry_key(vertices, triangles)}),
+        clearance=HandClearance(torch.zeros(1, 3), 0.02, 0.028, 0.0),
+    )
+    poses, widths, costs = provider.get_grasp_candidates(
+        mesh_vertices=vertices,
+        mesh_triangles=triangles,
+        obj_poses=torch.eye(4)[None],
+        approach_direction=torch.tensor([0.0, -1.0, 0.0]),
+    )[0]
+    assert poses.shape == (1, 4, 4)
+    assert widths.tolist() == pytest.approx([0.01])
+    assert torch.isfinite(costs).all()
+    assert torch.allclose(poses[0, :3, 0], torch.tensor([0.0, 1.0, 0.0]))
+    success, _, selected_width = provider.get_best_grasp_poses(
+        mesh_vertices=vertices,
+        mesh_triangles=triangles,
+        obj_poses=torch.eye(4)[None],
+        approach_direction=torch.tensor([0.0, -1.0, 0.0]),
+    )
+    assert success.tolist() == [True]
+    assert selected_width.tolist() == pytest.approx([0.01])
+
+
+def test_e6_short_axis_variant_does_not_replace_valid_stock_candidate() -> None:
+    from embodichain.gen_sim.task_engine._task_program.e6_clearance import HandClearance
+
+    provider = E6ApproachGraspPoseGenerator(
+        CandidateGenerator(((0.1,),), opening_width=0.005),
+        frozenset({geometry_key(VERTICES, TRIANGLES)}),
+        clearance=HandClearance(torch.zeros(1, 3), 0.2, 0.028, 0.0),
+    )
+    success, pose, width = provider.get_best_grasp_poses(
+        mesh_vertices=VERTICES,
+        mesh_triangles=TRIANGLES,
+        obj_poses=torch.eye(4)[None],
+        approach_direction=torch.tensor([0.0, -1.0, 0.0]),
+    )
+    assert success.tolist() == [True]
+    assert width.tolist() == pytest.approx([0.005])
+    assert torch.allclose(pose[0, :3, :3], torch.eye(3))
+    assert pose[0, 2, 3].item() == pytest.approx(0.08)
+
+
+def test_e6_short_axis_fallback_requires_stock_closing_along_long_axis() -> None:
+    from embodichain.gen_sim.task_engine._task_program.e6_clearance import HandClearance
+
+    vertices = torch.tensor(
+        [
+            [x, y, z]
+            for x in (-0.05, 0.05)
+            for y in (-0.005, 0.005)
+            for z in (-0.005, 0.005)
+        ]
+    )
+    triangles = torch.tensor([[0, 1, 2]])
+    rotation = torch.tensor([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+    provider = E6ApproachGraspPoseGenerator(
+        CandidateGenerator(((0.1,),), opening_width=0.1, candidate_rotation=rotation),
+        frozenset({geometry_key(vertices, triangles)}),
+        clearance=HandClearance(torch.zeros(1, 3), 0.02, 0.028, 0.0),
+    )
+    success, _, _ = provider.get_best_grasp_poses(
+        mesh_vertices=vertices,
+        mesh_triangles=triangles,
+        obj_poses=torch.eye(4)[None],
+        approach_direction=torch.tensor([0.0, -1.0, 0.0]),
+    )
+    assert success.tolist() == [False]
 
 
 def rule(*, upper_half=True, margin=0.02) -> GraspRule:
