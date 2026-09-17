@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "dc2e78c0568a83177b33e3918faa016cbfd9a4d9",
+  "revision": "0fcc27da33b72e1d9a98db43d1ea314dab3b4ae3",
   "source_ref": "HEAD",
   "package_version": "0.2.4",
   "topic_index": "agent_context/MAP.yaml",
@@ -37,10 +37,17 @@
       ],
       "documentation": [
         {
+          "docname": "overview/sim/atomic_actions/index",
+          "label": "Atomic Skills guide",
+          "source_extension": ".md"
+        },
+        {
           "docname": "api_reference/embodichain/embodichain.lab.sim.atomic_actions",
-          "label": "AtomicActionEngine documentation"
+          "label": "AtomicActionEngine documentation",
+          "source_extension": ".rst"
         }
-      ]
+      ],
+      "details": "Atomic Skills form the typed boundary between semantic intent and executable action plans. The engine owns planning resources and creates execution sessions. A runner and command sink dispatch commands; the engine itself does not advance the environment."
     },
     {
       "id": "base-env",
@@ -65,9 +72,11 @@
       "documentation": [
         {
           "docname": "overview/gym/env",
-          "label": "BaseEnv documentation"
+          "label": "BaseEnv documentation",
+          "source_extension": ".md"
         }
-      ]
+      ],
+      "details": "This is the common Gymnasium-compatible lifecycle beneath embodied tasks. It initializes the simulation manager and coordinates reset, stepping, and environment timing. Higher-level environments add task-specific scene assembly and behavior."
     },
     {
       "id": "cli",
@@ -89,7 +98,14 @@
           "excerpt": "\"\"\"Dispatcher for unified EmbodiChain CLI commands.\"\"\""
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "guides/cli",
+          "label": "CLI reference",
+          "source_extension": ".md"
+        }
+      ],
+      "details": "The unified embodichain command resolves a requested subcommand and loads its handler lazily. Use the CLI reference to find launch options for environments, training, assets, and other tools; task behavior stays in the handler-owned subsystem."
     },
     {
       "id": "command-sink",
@@ -113,10 +129,17 @@
       ],
       "documentation": [
         {
+          "docname": "overview/task_program/index",
+          "label": "Task Program guide",
+          "source_extension": ".md"
+        },
+        {
           "docname": "api_reference/embodichain/embodichain.lab.gym.envs.task_program",
-          "label": "BufferedGymCommandSink documentation"
+          "label": "BufferedGymCommandSink documentation",
+          "source_extension": ".rst"
         }
-      ]
+      ],
+      "details": "This sink validates and encodes runtime commands, then buffers controller actions for the Gym demonstration generator. It is the handoff between command dispatch and later environment consumption, rather than a direct call to simulation stepping."
     },
     {
       "id": "compiled-program",
@@ -140,10 +163,17 @@
       ],
       "documentation": [
         {
+          "docname": "overview/task_program/index",
+          "label": "Task Program guide",
+          "source_extension": ".md"
+        },
+        {
           "docname": "api_reference/embodichain/embodichain.lab.task_program.compiler",
-          "label": "CompiledTaskProgram documentation"
+          "label": "CompiledTaskProgram documentation",
+          "source_extension": ".rst"
         }
-      ]
+      ],
+      "details": "The compiler expands the task into immutable, already materialized segments. Consumers can iterate those segments and inspect analyses before handing them to an execution integration. The object describes intended work, not its physical outcome."
     },
     {
       "id": "components",
@@ -165,7 +195,14 @@
           "excerpt": "\"\"\"Resolve reusable environment and embodiment Gym components.\"\"\""
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "guides/configuration",
+          "label": "Configuration guide",
+          "source_extension": ".md"
+        }
+      ],
+      "details": "Reusable environment and embodiment components separate physical scene ownership from robot, sensor, and Task Program selections. Composition resolves those selections into the deployment configuration and rejects duplicated component-owned fields."
     },
     {
       "id": "compute",
@@ -187,7 +224,14 @@
           "excerpt": "\"\"\"Array and tensor computations shared across simulation, planning, and tools.\n\nDomain packages own their algorithms; private ``_warp`` packages contain Warp\nimplementations. Importing this package does not initialize a simulator or\nload any computation backend.\"\"\""
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.compute",
+          "label": "Compute API reference",
+          "source_extension": ".rst"
+        }
+      ],
+      "details": "Compute provides reusable numerical routines for kinematics, trajectories, geometry, and images. Its dependency boundary excludes lab objects and environment managers, allowing higher-level robotics modules to share algorithms without owning their runtime lifecycle."
     },
     {
       "id": "config-loader",
@@ -209,7 +253,14 @@
           "excerpt": "def build_env_cfg_from_args("
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "guides/configuration",
+          "label": "Configuration guide",
+          "source_extension": ".md"
+        }
+      ],
+      "details": "The loader decodes deployment files, resolves reusable components, and assembles typed environment configuration. It connects command-line inputs to environment construction, while leaving simulation stepping to the environment lifecycle."
     },
     {
       "id": "data-pipeline",
@@ -231,7 +282,14 @@
           "excerpt": "from __future__ import annotations"
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "features/online_data",
+          "label": "Online data streaming guide",
+          "source_extension": ".md"
+        }
+      ],
+      "details": "The online data workflow connects simulation producers with training consumers. An OnlineDataEngine manages shared trajectory data, while OnlineDataset exposes sampling through PyTorch dataset patterns. See the streaming guide for lifecycle, buffering, and sampling behavior."
     },
     {
       "id": "devices",
@@ -251,7 +309,14 @@
           "excerpt": "import abc  # for abstract base class definitions"
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab",
+          "label": "Laboratory and device API reference",
+          "source_extension": ".rst"
+        }
+      ],
+      "details": "Real-device controllers expose interfaces for physical robot deployment. They are owned separately from simulated Robot entities. The laboratory API reference documents the device layer and its relationship to the rest of the robotics package."
     },
     {
       "id": "embodied-env",
@@ -276,9 +341,11 @@
       "documentation": [
         {
           "docname": "overview/gym/env",
-          "label": "EmbodiedEnv documentation"
+          "label": "EmbodiedEnv documentation",
+          "source_extension": ".md"
         }
-      ]
+      ],
+      "details": "Use this configuration-driven environment to assemble a robot task from scene objects, sensors, and manager-owned behavior. It extends the shared Gym lifecycle and optionally connects Task Program compilation and demonstrations through an environment adapter."
     },
     {
       "id": "env-launcher",
@@ -300,7 +367,14 @@
           "excerpt": "def cli(argv: Sequence[str] | None = None) -> None:"
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "guides/run_env",
+          "label": "Environment launch guide",
+          "source_extension": ".md"
+        }
+      ],
+      "details": "The run-env launcher discovers task packages, decodes the selected deployment, and creates the registered Gym environment. Use its launch guide to inspect a task, configure a run, and understand where configuration becomes a live environment."
     },
     {
       "id": "environment-adapter",
@@ -324,10 +398,17 @@
       ],
       "documentation": [
         {
+          "docname": "overview/task_program/index",
+          "label": "Task Program guide",
+          "source_extension": ".md"
+        },
+        {
           "docname": "api_reference/embodichain/embodichain.lab.task_program.integrations",
-          "label": "TaskProgramEnvironmentAdapter documentation"
+          "label": "TaskProgramEnvironmentAdapter documentation",
+          "source_extension": ".rst"
         }
-      ]
+      ],
+      "details": "This adapter connects the task language to a concrete environment. It validates the chosen integration and assembles the semantic executor, command buffer, shared clock, and demonstration bridge used by the Gym workflow."
     },
     {
       "id": "execution-runner",
@@ -351,10 +432,17 @@
       ],
       "documentation": [
         {
+          "docname": "overview/sim/atomic_actions/index",
+          "label": "Atomic Skills execution guide",
+          "source_extension": ".md"
+        },
+        {
           "docname": "api_reference/embodichain/embodichain.lab.sim.atomic_actions",
-          "label": "ExecutionRunner documentation"
+          "label": "ExecutionRunner documentation",
+          "source_extension": ".rst"
         }
-      ]
+      ],
+      "details": "The runner advances an atomic session through observation, command, and clock interfaces. Its command sink determines where commands go. Acknowledgement of a command is distinct from confirmation that a physical effect has occurred."
     },
     {
       "id": "gym-bridge",
@@ -378,10 +466,17 @@
       ],
       "documentation": [
         {
+          "docname": "overview/task_program/index",
+          "label": "Task Program guide",
+          "source_extension": ".md"
+        },
+        {
           "docname": "api_reference/embodichain/embodichain.lab.gym.envs.task_program",
-          "label": "TaskProgramDemoBridge documentation"
+          "label": "TaskProgramDemoBridge documentation",
+          "source_extension": ".rst"
         }
-      ]
+      ],
+      "details": "The bridge exposes program execution as incremental Gym demonstrations. It shares a buffered command sink and environment-step clock with the semantic runtime, so action consumption and time progression stay coordinated with the host environment."
     },
     {
       "id": "managers",
@@ -403,7 +498,14 @@
           "excerpt": "\"\"\"Managers that orchestrate collections of functors (observation, reward, event, action, dataset) running at specific points in the environment step loop.\n\nEach manager owns a typed ``@configclass`` config whose attributes are ``FunctorCfg`` instances; the config attribute name becomes the functor's unique identifier.\n\"\"\""
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "overview/gym/index",
+          "label": "Gym managers and environment lifecycle",
+          "source_extension": ".rst"
+        }
+      ],
+      "details": "Managers organize task behavior around observations, actions, rewards, events, and dataset recording. Each manager invokes functors with its own contract, letting tasks compose behavior while sharing the environment reset and step lifecycle."
     },
     {
       "id": "motion-generator",
@@ -427,10 +529,17 @@
       ],
       "documentation": [
         {
+          "docname": "overview/sim/motion/motion_generator",
+          "label": "Motion generation guide",
+          "source_extension": ".md"
+        },
+        {
           "docname": "api_reference/embodichain/embodichain.lab.sim.motion.motion_generator",
-          "label": "MotionGenerator documentation"
+          "label": "MotionGenerator documentation",
+          "source_extension": ".rst"
         }
-      ]
+      ],
+      "details": "Use this entry point to turn joint or end-effector goals into timed trajectories. It composes planner backends behind one motion interface, while simulation playback or Atomic Skills consume the generated motion."
     },
     {
       "id": "physics",
@@ -452,7 +561,14 @@
           "excerpt": "\"\"\"Physics backend registry and factory.\n\nSelects a concrete :class:`PhysicsBackend` from a physics config via\n:func:`embodichain.lab.sim.cfg.physics_backend_from_cfg` and instantiates it\nwith the owning :class:`SimulationManager` as its back-reference.\n\"\"\""
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "overview/sim/sim_manager/physics/index",
+          "label": "Physics backend guide",
+          "source_extension": ".md"
+        }
+      ],
+      "details": "The physics layer constructs the backend selected by the environment file and connects scene state to physics solving. Default and Newton configurations have separate owners; a launcher can confirm the file selection but does not switch its backend."
     },
     {
       "id": "planners",
@@ -474,7 +590,14 @@
           "excerpt": "\"\"\"Motion planning stack.\n\n``BasePlanner`` trajectory planners (TOPPRA, trapezoidal, neural, and cuRobo)\nproduce joint trajectories from waypoints. Motion generation composes these\nbackends in ``embodichain.lab.sim.motion.motion_generator``.\n\"\"\""
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "overview/sim/motion/planners/index",
+          "label": "Motion planner guide",
+          "source_extension": ".rst"
+        }
+      ],
+      "details": "Planning backends produce robot trajectories with different timing, geometric, or collision constraints. Choose a backend through motion configuration; use MotionGenerator as the composition entry point when building a complete motion request."
     },
     {
       "id": "program-compiler",
@@ -498,10 +621,17 @@
       ],
       "documentation": [
         {
+          "docname": "overview/task_program/index",
+          "label": "Task Program guide",
+          "source_extension": ".md"
+        },
+        {
           "docname": "api_reference/embodichain/embodichain.lab.task_program.compiler",
-          "label": "TaskProgramCompiler documentation"
+          "label": "TaskProgramCompiler documentation",
+          "source_extension": ".rst"
         }
-      ]
+      ],
+      "details": "This is the static compilation stage. It validates a task against scene contracts and materializes bounded program segments. Runtime lowering remains a separate concern, so inspecting a compiled program does not require executing its robot actions."
     },
     {
       "id": "rl",
@@ -523,7 +653,14 @@
           "excerpt": "from __future__ import annotations"
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "overview/rl/index",
+          "label": "Reinforcement learning overview",
+          "source_extension": ".rst"
+        }
+      ],
+      "details": "The reinforcement learning layer organizes algorithms, policies, rollout collection, training, evaluation, and model persistence. Training reaches simulation through the environment interface. Start with the RL overview for the roles and configuration of each part."
     },
     {
       "id": "robot",
@@ -545,7 +682,14 @@
           "excerpt": "from __future__ import annotations"
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "overview/sim/sim_articulation",
+          "label": "Robots and articulations",
+          "source_extension": ".md"
+        }
+      ],
+      "details": "The robot facade exposes simulated joint state, control parts, and kinematic capabilities. SimulationManager creates and retains the live entity; robot presets and configuration describe how it should be assembled."
     },
     {
       "id": "scene-generation",
@@ -567,7 +711,14 @@
           "excerpt": "from __future__ import annotations"
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "features/generative_sim/scene_engine",
+          "label": "Scene Engine guide",
+          "source_extension": ".md"
+        }
+      ],
+      "details": "The Scene Engine turns image inputs into scene-state and asset workflows for simulation preparation. Scene generation has its own pipeline lifecycle; loading and executing the resulting scene in a simulation is a separate responsibility."
     },
     {
       "id": "semantic-compiler",
@@ -591,10 +742,17 @@
       ],
       "documentation": [
         {
+          "docname": "overview/task_program/index",
+          "label": "Task Program guide",
+          "source_extension": ".md"
+        },
+        {
           "docname": "api_reference/embodichain/embodichain.lab.task_program.compiler",
-          "label": "SemanticCallCompiler documentation"
+          "label": "SemanticCallCompiler documentation",
+          "source_extension": ".rst"
         }
-      ]
+      ],
+      "details": "Semantic Calls express high-level task intent. This compiler analyzes and lowers those calls against the bound scene and skill integration, keeping semantic interpretation separate from transport and environment stepping."
     },
     {
       "id": "semantic-executor",
@@ -618,10 +776,17 @@
       ],
       "documentation": [
         {
+          "docname": "overview/task_program/index",
+          "label": "Task Program guide",
+          "source_extension": ".md"
+        },
+        {
           "docname": "api_reference/embodichain/embodichain.lab.task_program.runtime",
-          "label": "SemanticCallExecutor documentation"
+          "label": "SemanticCallExecutor documentation",
+          "source_extension": ".rst"
         }
-      ]
+      ],
+      "details": "At runtime, the executor lowers a call and starts an atomic execution session for its grounded invocation. It connects that session to observations, the selected command sink, and the execution clock through an ExecutionRunner."
     },
     {
       "id": "sensors",
@@ -643,7 +808,14 @@
           "excerpt": "\"\"\"Sensors attached to the simulation scene.\n\n``Camera``, ``StereoCamera``, and ``ContactSensor`` all derive from ``BaseSensor`` and expose batched ``TensorDict`` data buffers.\n\"\"\""
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "overview/sim/sensors/index",
+          "label": "Sensor guide",
+          "source_extension": ".rst"
+        }
+      ],
+      "details": "Sensors turn simulation state into batched observations. Camera, stereo, and contact sensors expose different data contracts and configuration choices. Sensor-specific adaptation stays here, while reusable numerical image and geometry routines belong to compute."
     },
     {
       "id": "simulation-factory",
@@ -667,10 +839,17 @@
       ],
       "documentation": [
         {
+          "docname": "overview/task_program/index",
+          "label": "Task Program guide",
+          "source_extension": ".md"
+        },
+        {
           "docname": "api_reference/embodichain/embodichain.lab.task_program.integrations.simulation",
-          "label": "Simulation integration API"
+          "label": "Simulation integration API",
+          "source_extension": ".rst"
         }
-      ]
+      ],
+      "details": "The simulation factory supplies the concrete robot and planning services required by a Task Program integration. It resolves planner configuration, creates the motion generator, and constructs an atomic engine with the selected control profile."
     },
     {
       "id": "simulation-manager",
@@ -695,9 +874,11 @@
       "documentation": [
         {
           "docname": "overview/sim/sim_manager",
-          "label": "SimulationManager documentation"
+          "label": "SimulationManager documentation",
+          "source_extension": ".md"
         }
-      ]
+      ],
+      "details": "The simulation manager is the central owner of the simulated world. It creates and retains scene entities, coordinates physics and sensors, and starts optional browser visualization. Environment and task layers access the world through this API."
     },
     {
       "id": "solvers",
@@ -719,7 +900,14 @@
           "excerpt": "\"\"\"Inverse-kinematics solvers sharing the ``BaseSolver`` interface.\n\nProvides analytic (SRS, OPW, UR), numerical (Pinocchio, Pink, Differential), and learning-based (PyTorch, NeuralIK) solvers, one per robot control part.\n\"\"\""
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "overview/sim/motion/solvers/index",
+          "label": "Kinematic solver guide",
+          "source_extension": ".rst"
+        }
+      ],
+      "details": "Kinematic solvers map joint positions to poses and find joint positions for target poses. This layer contains robot-aware solver state and backend selection. Shared numerical routines belong to compute, while timed trajectories belong to motion planning."
     },
     {
       "id": "step-clock",
@@ -743,10 +931,17 @@
       ],
       "documentation": [
         {
+          "docname": "overview/task_program/index",
+          "label": "Task Program guide",
+          "source_extension": ".md"
+        },
+        {
           "docname": "api_reference/embodichain/embodichain.lab.gym.envs.task_program",
-          "label": "Gym Task Program API"
+          "label": "Gym Task Program API",
+          "source_extension": ".rst"
         }
-      ]
+      ],
+      "details": "Execution time is tied to the environment step grid. The Gym bridge and command sink use the same clock instance, allowing timing checks to stay aligned with the environment handshake instead of wall-clock sleeps."
     },
     {
       "id": "task-discovery",
@@ -768,7 +963,14 @@
           "excerpt": "def discover_task_packages() -> list[str]:"
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "resources/task/index",
+          "label": "Task discovery and supported tasks",
+          "source_extension": ".rst"
+        }
+      ],
+      "details": "Task discovery loads installed packages declared through the embodichain.tasks entry-point group. These imports populate the environment registry. The official task package is one selected example; actual discovery depends on the installed packages."
     },
     {
       "id": "task-program-config",
@@ -792,10 +994,17 @@
       ],
       "documentation": [
         {
+          "docname": "overview/task_program/index",
+          "label": "Task Program guide",
+          "source_extension": ".md"
+        },
+        {
           "docname": "api_reference/embodichain/embodichain.lab.task_program.language",
-          "label": "TaskProgramCfg documentation"
+          "label": "TaskProgramCfg documentation",
+          "source_extension": ".rst"
         }
-      ]
+      ],
+      "details": "Start here when describing an embodied task declaratively. The configuration records the program structure and targets that the compiler validates before execution; the same language can be supplied through JSON, YAML, or Python."
     },
     {
       "id": "tasks",
@@ -817,7 +1026,14 @@
           "excerpt": "\"\"\"Official task environments for EmbodiChain.\n\nImporting this package triggers auto-registration of all task environments\nvia recursive module import. Each task-named module executes its\n``@register_env`` decorator, registering the environment in gymnasium's global\nregistry.\n\"\"\""
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "resources/task/index",
+          "label": "Supported tasks",
+          "source_extension": ".rst"
+        }
+      ],
+      "details": "Official tasks are bundled in the same distribution under the embodichain_tasks import package. Import-backed tasks register during discovery, while supported configuration-defined Task Programs register when their Gym configuration is loaded."
     },
     {
       "id": "visualization",
@@ -839,7 +1055,14 @@
           "excerpt": "from __future__ import annotations"
         }
       ],
-      "documentation": []
+      "documentation": [
+        {
+          "docname": "overview/sim/viser_visualization",
+          "label": "Browser visualization guide",
+          "source_extension": ".md"
+        }
+      ],
+      "details": "The browser runtime publishes simulation snapshots and interactive controls. Simulation reads remain on the simulation thread, while the visualization worker handles backend updates. This module visualizes a running world; this architecture explorer visualizes code structure."
     }
   ],
   "edges": [

@@ -262,3 +262,15 @@ def test_summary_reports_unmapped_topics_and_edges_from_pinned_inputs(seed):
     assert "Overview nodes without mapped relationships: Alpha, Beta" in summary
     assert "Uncommitted topic" not in summary
     assert "Missing edges do not imply architectural independence." in summary
+
+
+def test_generation_records_actual_document_source_extensions(seed):
+    data, root, path, _ = seed
+    write(root, "docs/source/guide.rst", "Guide\n=====\n")
+    commit(root)
+    data["nodes"][0]["documentation"].append({"docname": "guide", "label": "Guide"})
+    path.write_text(json.dumps(data))
+    snapshot = build_snapshot(root, path)
+    docs = snapshot["nodes"][0]["documentation"]
+    assert docs[0]["source_extension"] == ".md"
+    assert docs[-1]["source_extension"] == ".rst"

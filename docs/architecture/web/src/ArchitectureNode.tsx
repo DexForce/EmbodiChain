@@ -39,27 +39,33 @@ export const ArchitectureNode = memo(function ArchitectureNode({ data }: NodePro
       style={{ '--module-color': color } as CSSProperties}
     >
       <Handle type="target" position={Position.Top} />
-      <div className="module-topline">
-        <Box size={12} />
-        <span>{module.kind === 'class' ? 'CLASS' : 'MODULE'}</span>
-        <span
-          className="module-count"
-          title={
-            recordedCount
-              ? `${count} visible of ${recordedCount} recorded relationships`
-              : 'Relationships not yet mapped; dependencies may exist'
-          }
-        >
-          {recordedCount ? `${count} links` : 'Not mapped'}
+      <button
+        type="button"
+        className="module-open nodrag"
+        aria-label={`Explore ${module.label}`}
+        aria-pressed={active}
+      >
+        <span className="module-topline">
+          <Box size={13} />
+          <span>{module.kind === 'class' ? 'CORE OBJECT' : 'MODULE'}</span>
+          <span
+            className="module-count"
+            title={
+              recordedCount
+                ? `${count} visible of ${recordedCount} recorded relationships`
+                : 'Relationships not yet mapped; dependencies may exist'
+            }
+          >
+            {recordedCount ? `${count} links` : 'Not mapped'}
+          </span>
         </span>
-      </div>
-      <div className="module-name">{module.label}</div>
-      <div className="module-summary">{module.summary}</div>
-      {active && (
-        <span className="selected-indicator">
-          <ArrowUpRight size={12} />
+        <span className="module-name">{module.label}</span>
+        <span className="module-summary">{module.summary}</span>
+        <span className="module-action">
+          {active ? 'Reading module' : 'Explore module'}
+          <ArrowUpRight size={14} />
         </span>
-      )}
+      </button>
       <Handle type="source" position={Position.Bottom} />
     </div>
   );

@@ -26,6 +26,12 @@ const read = (path: string) =>
   execFileSync('git', ['show', `${data.revision}:${path}`], { cwd: root, encoding: 'utf8' });
 
 describe('generated architecture data', () => {
+  it('provides a reading introduction and documentation for every module', () => {
+    for (const node of data.nodes) {
+      expect('details' in node, node.id).toBe(true);
+      expect(node.documentation.length, node.id).toBeGreaterThan(0);
+    }
+  });
   it('conforms to the architecture contract', () => {
     const validate = new Ajv2020({ allErrors: true }).compile(schema);
     expect(validate(data), JSON.stringify(validate.errors)).toBe(true);
@@ -43,7 +49,7 @@ describe('generated architecture data', () => {
     for (const node of data.nodes) {
       for (const topic of node.topic_ids) expect(topics.has(topic)).toBe(true);
       for (const doc of node.documentation) {
-        const extension = doc.docname.startsWith('api_reference/') ? '.rst' : '.md';
+        const extension = doc.source_extension;
         expect(read(`docs/source/${doc.docname}${extension}`).length).toBeGreaterThan(0);
       }
     }

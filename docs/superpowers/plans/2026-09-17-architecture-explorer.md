@@ -401,3 +401,28 @@ The generated page was inspected in the browser in both themes; the real Sphinx
 theme button updates the iframe immediately. The live preview is retained at
 http://127.0.0.1:4184/overview/architecture/index.html. Standalone production
 assets were refreshed on port 4183. The Vite bundle-size advisory remains nonfatal.
+
+
+## Typography, Module Introductions, and Documentation — 2026-09-17
+
+- [x] Consult public Sphinx Book Theme typography, uv documentation, and React Flow
+  custom-node examples while retaining the approved English academic direction.
+- [x] Increase type sizes and spacing, widen cards to 280px and details panels,
+  and provide an explicit keyboard-accessible Explore module button per card.
+- [x] Add source-reviewed extended introductions and guide/API links to all 34
+  selected nodes. Put documentation before relationships; reset scroll and focus
+  the heading when the selected module changes.
+- [x] Resolve actual documentation source extensions from the pinned revision.
+  Validate explicit extensions and keep the new schema properties optional for
+  historical snapshots. Test both Markdown and reStructuredText navigation.
+- [x] Verify 59 Python tests, 16 frontend unit tests, 7 standalone browser tests,
+  and 9 Sphinx browser tests. The new tests first reproduced absent card controls,
+  absent introductions, and missing source-extension metadata. Existing mobile,
+  focus, sharing, themes, and version-relative links remain covered.
+
+Independent source and interaction review reports no actionable findings.
+The production frontend build passes with its existing nonfatal chunk-size advisory.
+The refreshed embedded page was inspected with the module reading panel open.
+The full-site build retains the same 714 baseline warnings; all 731 normalized
+diagnostic lines match main. Browser checks passed again after the final
+responsive-layout adjustment.

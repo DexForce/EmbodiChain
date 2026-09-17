@@ -131,3 +131,24 @@ test('large neighbourhoods keep the selected module readable above the fold', as
   await expect(page.locator('.react-flow__node-module')).toHaveCount(9);
   await expect.poll(titleIsInsideCanvas).toBe(true);
 });
+
+test('module cards expose a keyboard-accessible reading panel with documentation first', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const card = page.getByRole('button', { name: 'Explore CLI', exact: true });
+  await card.focus();
+  await page.keyboard.press('Enter');
+  const details = page.getByRole('complementary', { name: 'Node details' });
+  await expect(details.getByRole('heading', { name: 'CLI', exact: true })).toBeVisible();
+  await expect(details.getByRole('heading', { name: 'About this module' })).toBeVisible();
+  await expect(details.getByRole('link', { name: 'CLI reference', exact: true })).toBeVisible();
+  const documentation = await details.locator('.documentation-links').boundingBox();
+  const relationships = await details.locator('.relations-section').boundingBox();
+  expect(documentation!.y).toBeLessThan(relationships!.y);
+  await page.getByRole('button', { name: 'Select Official tasks', exact: true }).click();
+  await expect(details.getByRole('link', { name: 'Supported tasks', exact: true })).toHaveAttribute(
+    'href',
+    /resources\/task\/index\.rst$/,
+  );
+});

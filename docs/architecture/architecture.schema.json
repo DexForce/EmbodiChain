@@ -128,6 +128,12 @@
         "label": {
           "type": "string",
           "minLength": 1
+        },
+        "source_extension": {
+          "enum": [
+            ".md",
+            ".rst"
+          ]
         }
       }
     },
@@ -196,6 +202,10 @@
             "$ref": "#/$defs/documentation"
           },
           "minItems": 0
+        },
+        "details": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },

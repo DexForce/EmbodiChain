@@ -253,3 +253,10 @@ def test_module_excerpt_cannot_overlap_a_definition(valid_snapshot):
     )
     with pytest.raises(ArchitectureDataError, match="scope"):
         validate_snapshot(data, repo_root=root, schema_path=schema)
+
+
+def test_rejects_incorrect_documentation_source_extension(valid_snapshot):
+    data, root, schema = valid_snapshot
+    data["nodes"][0]["documentation"][0]["source_extension"] = ".rst"
+    with pytest.raises(ArchitectureDataError, match="source extension"):
+        validate_snapshot(data, repo_root=root, schema_path=schema)

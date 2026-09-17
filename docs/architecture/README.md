@@ -49,12 +49,15 @@ Outputs have deterministic ordering and contain no timestamps or absolute paths.
 
 The validator checks schema, IDs, edge endpoints, view/group membership, topic IDs,
 exact evidence text and lexical containment, VERSION, and unambiguous docnames at
-the pinned revision. Python module evidence uses `<module>`; non-Python text uses
+the pinned revision. Generated documentation entries include their actual
+`source_extension` so standalone links correctly resolve both `.md` and `.rst`.
+The optional `details` and `source_extension` fields remain compatible with historical v1 samples. Python module evidence uses `<module>`; non-Python text uses
 `<document>`. Prose interpretation still requires human review.
 
 ## Maintain the data
 
-1. Edit `curated.json` for responsibilities, boundaries, selected nodes, and semantic
+1. Edit `curated.json` for summaries, extended introductions (`details`), relevant
+   guide/API docnames, boundaries, selected nodes, and semantic
    relations. Reuse node IDs across views and keep scope explicit.
 2. After source changes, review affected evidence. Pure line moves are resolved
    automatically; rename or behavior changes require updating selectors/excerpts.

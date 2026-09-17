@@ -19,8 +19,8 @@ import { MarkerType } from '@xyflow/react';
 import { relations, selectGraph } from './state';
 import type { ArchitectureSnapshot, ExplorerState } from './types';
 export const layerColors = ['#4b6b86', '#6c6589', '#957444', '#4c7976', '#7d6c64'];
-export const CARD_WIDTH = 240;
-export const CARD_HEIGHT = 128;
+export const CARD_WIDTH = 280;
+export const CARD_HEIGHT = 196;
 export function buildCanvas(
   data: ArchitectureSnapshot,
   state: ExplorerState,

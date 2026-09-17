@@ -14,6 +14,7 @@
 // limitations under the License.
 // ----------------------------------------------------------------------------
 
+import { useEffect, useRef } from 'react';
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -52,6 +53,12 @@ export default function NodeDetails({
   onSelect: (id: string) => void;
   onClose: () => void;
 }) {
+  const scroll = useRef<HTMLDivElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (scroll.current) scroll.current.scrollTop = 0;
+    if (node) heading.current?.focus({ preventScroll: true });
+  }, [node?.id]);
   const docsRoot = resolveDocsRoot(new URL(location.href));
   const linked = edges.filter((e) => e.source === node?.id || e.target === node?.id);
   const allCount = data.edges.filter(
@@ -71,7 +78,7 @@ export default function NodeDetails({
           <span className="small-label">INSPECTOR</span>
         )}
       </div>
-      <div className="inspector-scroll">
+      <div className="inspector-scroll" ref={scroll}>
         {!node ? (
           <>
             <div className="eyebrow">ARCHITECTURE NOTES</div>
@@ -126,8 +133,49 @@ export default function NodeDetails({
               {node.kind === 'class' ? 'Core object' : 'Module'}
               <span>{node.kind.toUpperCase()}</span>
             </div>
-            <h2 className="node-title">{node.label}</h2>
+            <h2 className="node-title" tabIndex={-1} ref={heading}>
+              {node.label}
+            </h2>
             <p className="node-description">{node.summary}</p>
+            {node.documentation.length > 0 && (
+              <section className="documentation-links">
+                <div className="section-title">
+                  <BookOpen size={14} /> {docsRoot ? 'Documentation' : 'Documentation source'}
+                </div>
+                {node.documentation.map((doc) => (
+                  <a
+                    key={doc.docname}
+                    aria-label={doc.label}
+                    href={
+                      docsRoot
+                        ? documentationUrl(doc.docname, docsRoot)
+                        : documentationSourceUrl(
+                            data.revision,
+                            doc.docname,
+                            doc.source_extension ??
+                              (doc.docname.startsWith('api_reference/') ? '.rst' : '.md'),
+                          )
+                    }
+                    target={docsRoot ? '_parent' : '_blank'}
+                    rel="noreferrer"
+                  >
+                    <span>
+                      <small>
+                        {doc.docname.startsWith('api_reference/') ? 'API REFERENCE' : 'GUIDE'}
+                      </small>
+                      {doc.label}
+                    </span>
+                    <ArrowUpRight size={13} />
+                  </a>
+                ))}
+              </section>
+            )}
+            {node.details && (
+              <section className="module-introduction">
+                <h3 className="section-title">About this module</h3>
+                <p>{node.details}</p>
+              </section>
+            )}
             <a
               className="source-path"
               href={sourceUrl(data.revision, node.evidence[0])}
@@ -242,32 +290,6 @@ export default function NodeDetails({
                 );
               })}
             </section>
-            {node.documentation.length > 0 && (
-              <section className="documentation-links">
-                <div className="section-title">
-                  <BookOpen size={14} /> {docsRoot ? 'Documentation' : 'Documentation source'}
-                </div>
-                {node.documentation.map((doc) => (
-                  <a
-                    key={doc.docname}
-                    href={
-                      docsRoot
-                        ? documentationUrl(doc.docname, docsRoot)
-                        : documentationSourceUrl(
-                            data.revision,
-                            doc.docname,
-                            doc.docname.startsWith('api_reference/') ? '.rst' : '.md',
-                          )
-                    }
-                    target={docsRoot ? '_parent' : '_blank'}
-                    rel="noreferrer"
-                  >
-                    {doc.label}
-                    <ArrowUpRight size={13} />
-                  </a>
-                ))}
-              </section>
-            )}
             <div className="evidence-footer">
               <Check size={12} /> Source revision <code>{data.revision.slice(0, 8)}</code>
             </div>

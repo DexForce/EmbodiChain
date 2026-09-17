@@ -27,9 +27,10 @@ export interface ArchitectureNode {
   kind: string;
   topic_ids: string[];
   summary: string;
+  details?: string;
   boundaries: string[];
   evidence: Evidence[];
-  documentation: { docname: string; label: string }[];
+  documentation: { docname: string; label: string; source_extension?: string }[];
 }
 export interface ArchitectureEdge {
   id: string;

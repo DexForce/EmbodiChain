@@ -28,7 +28,22 @@ Fonts are bundled locally. No simulation, GPU, API key, or backend is required.
 The interface and descriptive snapshot text are in English. The default academic
 theme uses a paper-white canvas, serif headings, restrained category colours,
 numbered layers, and static directional edges. An optional dark theme remains
-available. Source excerpts and pinned source references are unchanged.
+available. Card titles use 16px Inter, summaries 13px, and extended descriptions
+14px with generous line spacing. Each card has an explicit **Explore module**
+button usable with a pointer or keyboard. Selecting a different module resets the
+inspector to its introduction and focuses its heading.
+
+All 34 selected modules provide an introduction and documentation links. The
+inspector puts guide/API cards before relationship evidence. Sphinx links open
+the corresponding HTML in the current documentation version; standalone links
+open the pinned Markdown or reStructuredText source using its resolved extension.
+
+The typography and reading hierarchy were informed by the public
+[Sphinx Book Theme typography examples](https://sphinx-book-theme.readthedocs.io/en/stable/reference/kitchen-sink/typography.html)
+and [uv documentation](https://docs.astral.sh/uv/). Interactive card affordances
+follow the capabilities demonstrated by
+[React Flow custom nodes](https://reactflow.dev/examples/nodes/custom-node).
+The implementation and visual styling are specific to this explorer.
 
 ## Included
 

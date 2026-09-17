@@ -147,3 +147,18 @@ test('invalid snapshot shows its format error', async ({ page }) => {
   await page.goto('/_static/architecture/index.html');
   await expect(page.getByRole('alert')).toContainText('unsupported or invalid format');
 });
+
+test('a module guide opens the rendered documentation in the same version', async ({ page }) => {
+  await page.goto('/main/overview/architecture/index.html');
+  const frame = page.frameLocator('iframe.architecture-frame');
+  const menu = frame.getByRole('button', { name: 'Show module list', exact: true });
+  if (await menu.isVisible()) await menu.click();
+  await frame.getByRole('button', { name: 'Select Official tasks', exact: true }).click();
+  const guide = frame.getByRole('link', { name: 'Supported tasks', exact: true });
+  await expect(guide).toHaveAttribute(
+    'href',
+    'http://127.0.0.1:4180/main/resources/task/index.html',
+  );
+  await guide.click();
+  await expect(page).toHaveURL('/main/resources/task/index.html');
+});

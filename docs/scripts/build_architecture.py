@@ -396,6 +396,15 @@ def build_snapshot(
             view["edge_ids"].append(edge["id"])
     data["nodes"].sort(key=lambda n: n["id"])
     data["edges"].sort(key=lambda e: e["id"])
+    for node in data["nodes"]:
+        for doc in node["documentation"]:
+            matches = [
+                ext
+                for ext in (".md", ".rst")
+                if f"docs/source/{doc['docname']}{ext}" in source.files
+            ]
+            if len(matches) == 1:
+                doc["source_extension"] = matches[0]
     validate_snapshot(data, repo_root=repo_root)
     return data
 

@@ -288,6 +288,10 @@ def validate_snapshot(
                 raise ArchitectureDataError(
                     f"{node['id']}: docname {doc['docname']} is missing or ambiguous"
                 )
+            if doc.get("source_extension", matches[0]) != matches[0]:
+                raise ArchitectureDataError(
+                    f"{node['id']}: incorrect documentation source extension"
+                )
     for edge in edges.values():
         for endpoint in ("source", "target"):
             if edge[endpoint] not in nodes:
