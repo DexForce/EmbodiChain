@@ -33,6 +33,8 @@ class _FakeQuery:
             4: ContactActorInfo(4, "arena_0/cube", None, "arena_0", 0),
             7: ContactActorInfo(7, "arena_1/cube", None, "arena_1", 1),
         }
+        self.actors = tuple(self._actors.values())
+        self.actor_info_calls = 0
         self.buffer = ContactBuffer.allocate(4, "cpu")
         self.buffer.count = 2
         self.buffer.data[0] = torch.tensor(
@@ -45,6 +47,7 @@ class _FakeQuery:
         self.buffer.env_ids[:2] = torch.tensor([0, 1], dtype=torch.int32)
 
     def actor_info(self, actor_id: int) -> ContactActorInfo:
+        self.actor_info_calls += 1
         return self._actors[actor_id]
 
     def fetch(self) -> ContactBuffer:
@@ -82,6 +85,13 @@ def test_contact_sensor_consumes_scene_query_and_explicit_env_ids() -> None:
 
     sensor = ContactSensor(cfg, torch.device("cpu"), owner=owner)
     sensor.update()
+    original_ids = sensor.item_user_ids
+    original_env_ids = sensor.item_env_ids
+    assert query.actor_info_calls == len(query.selected_actor_ids)
+    sensor.update()
+    assert sensor.item_user_ids is original_ids
+    assert sensor.item_env_ids is original_env_ids
+    assert query.actor_info_calls == len(query.selected_actor_ids)
     data = sensor.get_data()
 
     assert captured["targets"] == handles
@@ -96,3 +106,26 @@ def test_contact_sensor_consumes_scene_query_and_explicit_env_ids() -> None:
     assert data["user_ids"][1, 0].tolist() == [-1, 7]
     assert sensor.get_actor_info(7).path == "arena_1/cube"
     assert sensor.contact_capabilities.impulse
+
+
+def test_contact_metadata_refreshes_when_actor_table_changes() -> None:
+    """A topology refresh may change environment IDs while retaining actor IDs."""
+    query = _FakeQuery()
+    sensor = ContactSensor.__new__(ContactSensor)
+    sensor.device = torch.device("cpu")
+    sensor._query = query
+    sensor._metadata_actor_table = None
+    sensor._metadata_selected_ids = None
+    sensor._sync_filter_actor_metadata()
+    assert sensor.item_user_env_ids_map[7].item() == 1
+
+    query._actors[7] = ContactActorInfo(7, "arena_0/other", None, "arena_0", 0)
+    query.actors = tuple(query._actors.values())
+    sensor._sync_filter_actor_metadata()
+    assert sensor.item_env_ids.tolist() == [0, 0]
+    assert sensor.item_user_env_ids_map[7].item() == 0
+
+    query.selected_actor_ids = (7,)
+    sensor._sync_filter_actor_metadata()
+    assert sensor.item_user_ids.tolist() == [7]
+    assert sensor.item_user_env_ids_map[4].item() == -1

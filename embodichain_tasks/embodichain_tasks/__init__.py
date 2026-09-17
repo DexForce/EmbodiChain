@@ -24,10 +24,21 @@ registry.
 
 from __future__ import annotations
 
+from embodichain.lab.gym.utils.gym_utils import register_manager_modules
+
 from .utils.importer import import_packages
 
 __all__: list[str] = []
 
 _BLACKLIST = ["utils"]
+
+register_manager_modules(
+    [
+        "embodichain_tasks.locomotion.managers.actions",
+        "embodichain_tasks.locomotion.managers.events",
+        "embodichain_tasks.locomotion.managers.observations",
+        "embodichain_tasks.locomotion.managers.rewards",
+    ]
+)
 
 import_packages(__name__, _BLACKLIST)

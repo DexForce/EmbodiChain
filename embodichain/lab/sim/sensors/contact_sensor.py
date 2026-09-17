@@ -61,6 +61,12 @@ class ContactSensorCfg(SensorCfg):
     max_contacts_per_env: int = 64
     """Maximum number of contacts per environment the sensor can handle."""
 
+    track_substeps: bool = False
+    """Request per-physics-step history from an environment that supports it."""
+
+    self_collision_force_threshold: float | None = None
+    """Force threshold (N) for environment-owned self-contact history."""
+
     sensor_type: str = "ContactSensor"
 
 
@@ -144,7 +150,10 @@ class ContactSensor(BaseSensor):
         self.device = device
         self.cfg = config
         self._query: ContactQuery | None = None
+        self._metadata_actor_table: tuple[ContactActorInfo, ...] | None = None
+        self._metadata_selected_ids: tuple[int, ...] | None = None
 
+        self._query_dropped_count = 0
         self._num_contacts_per_env: torch.Tensor | None = None
         """Number of contacts per environment."""
 
@@ -273,7 +282,15 @@ class ContactSensor(BaseSensor):
 
     def _sync_filter_actor_metadata(self) -> None:
         assert self._query is not None
+        # ContactQuery replaces these immutable tables when topology refreshes.
+        # Avoid visiting every actor and copying metadata on every physics step.
+        actors = self._query.actors
         actor_ids = self._query.selected_actor_ids
+        if (
+            actors is self._metadata_actor_table
+            and actor_ids is self._metadata_selected_ids
+        ):
+            return
         self.item_user_ids = torch.as_tensor(
             actor_ids, dtype=torch.int32, device=self.device
         )
@@ -292,6 +309,8 @@ class ContactSensor(BaseSensor):
             self.item_user_env_ids_map[self.item_user_ids.to(torch.long)] = (
                 self.item_env_ids
             )
+        self._metadata_actor_table = actors
+        self._metadata_selected_ids = actor_ids
 
     def update(self, **kwargs) -> None:
         """Update the sensor state based on the current simulation state.
@@ -307,6 +326,7 @@ class ContactSensor(BaseSensor):
         self._data_buffer["is_valid"].zero_()
 
         contact_buffer = self._query.fetch()
+        self._query_dropped_count = contact_buffer.dropped_count
         self._sync_filter_actor_metadata()
         if contact_buffer.count == 0:
             return
@@ -339,6 +359,18 @@ class ContactSensor(BaseSensor):
             ],
             device=str(self.device),
         )
+
+    @property
+    def dropped_contacts(self) -> int:
+        """Number of contact rows discarded by query or per-environment capacity."""
+        overflow = 0
+        if self._num_contacts_per_env is not None:
+            overflow = int(
+                (self._num_contacts_per_env - self.cfg.max_contacts_per_env)
+                .clamp_min(0)
+                .sum()
+            )
+        return self._query_dropped_count + overflow
 
     def get_arena_pose(self, to_matrix: bool = False) -> torch.Tensor | None:
         """Not used.

@@ -594,6 +594,10 @@ class BaseEnv(gym.Env):
         """Initialize the simulation state at the beginning of scene creation."""
         pass
 
+    def _advance_physics(self) -> None:
+        """Advance one control interval; tasks may sample physics substeps here."""
+        self.sim.update(self.physics_dt, self.cfg.sim_steps_per_control)
+
     def _update_sim_state(self, **kwargs):
         """Update the simulation state at each step.
 
@@ -949,7 +953,7 @@ class BaseEnv(gym.Env):
                 action = self._step_action(action=action)
 
             with self._profiler.section("sim_update"):
-                self.sim.update(self.physics_dt, self.cfg.sim_steps_per_control)
+                self._advance_physics()
             with self._profiler.section("update_sim_state"):
                 self._update_sim_state(**kwargs)
 

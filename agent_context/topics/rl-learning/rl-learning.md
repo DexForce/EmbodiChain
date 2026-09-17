@@ -93,6 +93,24 @@ but currently rejects distributed training and environment profiling.
 
 ## Rollout and Trainer Routing
 
+### Native locomotion tasks
+
+Official velocity tasks live in `embodichain_tasks/embodichain_tasks/locomotion/velocity/`;
+Humanoid Run lives under `classic_control/humanoid/`. The matching task config
+directories contain separate default/Newton environment and PPO files. The package
+init hook registers `locomotion.managers` for actions, observations, rewards and
+root-velocity disturbances.
+
+`velocity/_embodichain.py` overrides `BaseEnv._advance_physics()` to sample contacts
+after each physics substep. Per-environment reset clears the selected task state;
+`EmbodiedEnv._setup_robot()` creates an instance-owned joint-index list. The root
+velocity event writes linear and angular components through
+`Articulation.set_root_velocity()` and a single Scene batch selection.
+Asset resolution and download failures are owned by
+[data assets](../data-assets/data-assets.md).
+
+### Algorithm selection
+
 `BaseAlgorithm.rollout_kind` is the routing contract:
 
 ```text
