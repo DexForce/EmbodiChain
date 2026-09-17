@@ -104,10 +104,13 @@ def test_row_selection_scores_only_the_requested_task_directions() -> None:
 
 
 def test_low_precision_jacobians_are_scored_without_determinant_underflow() -> None:
-    # float32 det() of a 1e-4-scaled Jacobian underflows to exactly zero and
-    # would report a healthy posture as singular.
-    jacobians = diagonal_jacobians(torch.full((2,), 1e-4)).to(torch.float32)
-    assert describe_manipulability(jacobians).bottleneck == pytest.approx(1e-12)
+    # det(J @ J.T) of a 1e-4-scaled 6x6 Jacobian is 1e-48, below the smallest
+    # float32 subnormal. Scoring in float32 returns exactly zero and reports a
+    # healthy posture as singular, so the tolerance here stays purely relative.
+    jacobians = (torch.eye(6, dtype=torch.float32) * 1e-4).repeat(2, 1, 1)
+    assert describe_manipulability(jacobians).bottleneck == pytest.approx(
+        1e-24, rel=1e-6, abs=0
+    )
 
 
 @pytest.mark.parametrize(

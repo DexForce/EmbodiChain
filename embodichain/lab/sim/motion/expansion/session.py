@@ -138,7 +138,7 @@ class GenerationSession:
             tuple[SceneCase, torch.Tensor, tuple[str, ...], float | None],
         ] = {}
         self._coverage: dict[str, CoverageIndex] = {}
-        self._bands: dict[str, ManipulabilityBands] = {}
+        self._bands: dict[tuple[str, str], ManipulabilityBands] = {}
         self._ordinals: dict[tuple[str, ...], int] = {}
         self._attempts: dict[str, _Attempt] = {}
         self._commits: dict[str, str] = {}
@@ -167,6 +167,9 @@ class GenerationSession:
         ``manipulability_reference`` normalizes measured manipulability into the
         configured bands and is usually the reference trajectory's bottleneck
         score. It is required exactly when the manipulability factor is enabled.
+        Because it describes one reference trajectory rather than the scene, it
+        belongs to a single initial state and may differ between the initial
+        states of one case; band quotas stay shared by scene case.
 
         Args:
             case: Scene and initial-state identity with fixed robot conditions.
@@ -218,17 +221,18 @@ class GenerationSession:
             ):
                 raise ValueError("A registered case's fixed conditions cannot change.")
             return
+        # The reference manipulability describes one reference trajectory, not
+        # the scene, so it is deliberately excluded from the shared conditions.
         for (case_id, _), (
             previous,
             previous_limits,
             previous_names,
-            previous_reference,
+            _,
         ) in self._cases.items():
             if case_id == case.scene_case_id and (
                 replace(previous, initial_state_id=case.initial_state_id) != case
                 or not torch.equal(previous_limits, limits)
                 or previous_names != names
-                or previous_reference != manipulability_reference
             ):
                 raise ValueError(
                     "Initial states in one case must share scene and robot conditions."
@@ -241,10 +245,10 @@ class GenerationSession:
                 target_per_geometry=coverage.target_per_cell,
                 target_per_band=factor.target_per_band if factor.enabled else None,
             )
-            if factor.enabled:
-                self._bands[case.scene_case_id] = ManipulabilityBands(
-                    factor.band_edges, reference=manipulability_reference
-                )
+        if factor.enabled:
+            self._bands[key] = ManipulabilityBands(
+                factor.band_edges, reference=manipulability_reference
+            )
 
     def propose(
         self,
@@ -522,8 +526,14 @@ class GenerationSession:
         return count, size
 
     def _measured_band(self, episode: ExpertEpisode) -> int | None:
-        """Classify measured manipulability; planned scores are never accepted."""
-        bands = self._bands.get(episode.identity.scene_case_id)
+        """Classify measured manipulability; planned scores are never accepted.
+
+        The normalizer belongs to the episode's own initial state, so rollouts
+        started from different reference trajectories are ranked against the
+        reference each one was registered with.
+        """
+        identity = episode.identity
+        bands = self._bands.get((identity.scene_case_id, identity.initial_state_id))
         if bands is None:
             return None
         scores = episode.observations.get("manipulability")

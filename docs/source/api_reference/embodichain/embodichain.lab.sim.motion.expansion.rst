@@ -169,8 +169,8 @@ joint geometry; it does not provide EEF workspace coverage.
 ``describe_manipulability`` scores caller-supplied Jacobians with
 :func:`~embodichain.compute.kinematics.yoshikawa_manipulability` and aligns the
 result with trajectory phases. ``ManipulabilityBands`` partitions those scores
-into ordered bands normalized by a per-case reference, usually the reference
-trajectory's bottleneck. ``manipulability_guided_residual`` draws several
+into ordered bands normalized by a reference registered for one initial state,
+usually that state's reference trajectory bottleneck. ``manipulability_guided_residual`` draws several
 residual proposals from one local generator and keeps the proposal nearest a
 requested band, returning a ``GuidedResidual`` with the measured profile.
 

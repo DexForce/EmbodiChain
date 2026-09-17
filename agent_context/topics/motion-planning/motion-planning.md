@@ -85,11 +85,12 @@ the object nor certifies the grasp.
 `embodichain.compute.kinematics.yoshikawa_manipulability` to profile a
 trajectory's posture conditioning. Jacobians are supplied by the caller, so the
 module stays host-independent. `ManipulabilityBands` normalizes scores by a
-per-case reference bottleneck; `manipulability_guided_residual` scores several
+reference bottleneck held per initial state; `manipulability_guided_residual` scores several
 `joint_residual` draws from one local generator and keeps the proposal nearest
 a requested band. The feature is opt-in through
 `augmentation.factors.manipulability`, disabled by default. When enabled,
-`register_case` requires a positive `manipulability_reference`, `CoverageIndex`
+`register_case` requires a positive `manipulability_reference` per initial
+state, which may differ between the initial states of one case, `CoverageIndex`
 enforces a per-band quota so one well-conditioned posture cannot absorb the
 collection budget, and `GenerationSession` classifies bands from the measured
 `manipulability` observation rather than any planned score. Manipulability

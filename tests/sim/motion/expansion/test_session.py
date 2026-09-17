@@ -626,6 +626,31 @@ def test_banded_coverage_classifies_the_measured_bottleneck() -> None:
     assert session.snapshot()["manipulability_bands"]["case"] == {0: 1}
 
 
+def test_initial_states_may_hold_different_manipulability_references() -> None:
+    session = _banded_session()
+    second = replace(CASE, initial_state_id="second")
+    # A reference bottleneck describes one reference trajectory, not the scene,
+    # so a tighter second reference is not a change of shared case conditions.
+    session.register_case(
+        second, LIMITS, joint_names=JOINT_NAMES, manipulability_reference=0.1
+    )
+    with pytest.raises(ValueError, match="fixed conditions"):
+        session.register_case(
+            second, LIMITS, joint_names=JOINT_NAMES, manipulability_reference=0.2
+        )
+    # One measured score of 0.3 is tight against 1.0 and comfortable against 0.1.
+    tight = _episode(session, _start(session), manipulability=0.3)
+    assert session.accept_episode(tight)
+    comfortable = _episode(
+        session, _start(session, second), position=-0.5, manipulability=0.3
+    )
+    assert session.accept_episode(comfortable)
+    session.apply_receipt(_receipt(tight))
+    session.apply_receipt(_receipt(comfortable))
+    # Quotas stay shared by scene case, and the two rollouts land in own bands.
+    assert session.snapshot()["manipulability_bands"]["case"] == {0: 1, 2: 1}
+
+
 def test_banded_coverage_requires_measured_manipulability_evidence() -> None:
     session = _banded_session()
     with pytest.raises(ValueError, match="measured manipulability"):

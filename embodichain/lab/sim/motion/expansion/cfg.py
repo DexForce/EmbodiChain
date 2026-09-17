@@ -163,10 +163,11 @@ class _TimingCfg:
 class _ManipulabilityCfg:
     """Manipulability-guided proposal steering and banded coverage quotas.
 
-    Bands are ratios against a per-case reference manipulability supplied at
-    scene-case registration, so one set of edges transfers across robots. A
-    per-band quota spreads accepted episodes over well- and poorly-conditioned
-    postures instead of concentrating them near the reference posture.
+    Bands are ratios against the reference manipulability registered for one
+    initial state, so one set of edges transfers across robots and across the
+    initial states of a case. A per-band quota, shared by scene case, spreads
+    accepted episodes over well- and poorly-conditioned postures instead of
+    concentrating them near the reference posture.
     """
 
     enabled: bool = False
