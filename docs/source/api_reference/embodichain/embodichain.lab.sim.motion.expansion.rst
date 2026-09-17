@@ -35,9 +35,21 @@ and persistence confirmations; this package does not instantiate them.
    describe_trajectory
    CoverageIndex
    rotate_grasp_about_object_axis
+   perturb_approach_direction
    joint_residual
+   via_points
+   nullspace_residual
    retime
+   TIMING_PROFILES
    validate_motion_limits
+   NOMINAL_OPERATOR
+   TrajectoryVariant
+   TrajectoryVariantSet
+   plan_trajectory_variants
+   apply_trajectory_variant
+   expand_trajectory_variants
+   expand_row_variants
+   sample_approach_cone
    GenerationSession
 
 Values and Evidence
@@ -109,7 +121,8 @@ Configuration and Preflight
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``TrajectoryAugmentationCfg`` owns the local seed, provided-start declaration,
-spatial and timing factors, and joint-geometry coverage limits.
+the spatial, redundancy (``ik``), approach and timing factors, and the
+joint-geometry coverage limits.
 ``TrajectoryGenerationJobCfg`` adds the nested ``source``, ``planning``,
 ``execution``, ``reset``, ``validation``, ``collection``, and ``persistence``
 sections used by a standalone generation job. Both ``from_mapping`` methods
@@ -120,15 +133,16 @@ The initial schema requires ``planning.batch_mode: env_rows``,
 ``execution.pool_mode: per_env_case``, ``execution.scheduler: full_batch``,
 provided initial states, and synchronous persistence. It limits each candidate
 to one rollout attempt. Write retries reuse the same episode and commit ID.
-Other scheduling modes, overlapping planning and physics, and unsupported
-enabled factors are rejected. Control periods remain owned by the host.
+Other scheduling modes, overlapping planning and physics, and the still
+unimplemented ``contact``, ``contact_timing`` and ``recovery`` factors are
+rejected. Control periods remain owned by the host.
 
 Configuration IDs, including the default ``lerobot`` sink name, do not create
 services. ``validate_capabilities`` requires explicit trusted source, validator,
 profile, sink, and operator registries; configuration values are not imported
-or evaluated. In particular, accepting a restoration profile ID or a supplied
-``via_points`` capability does not implement physical restoration or an EEF
-planner in this package. Deployment preflight must still verify those services.
+or evaluated. In particular, accepting a restoration profile ID does not implement physical
+restoration in this package, and accepting the ``perturb_approach_direction``
+capability does not implement the EEF replanning its poses require. Deployment preflight must still verify those services.
 
 .. autoclass:: TrajectoryAugmentationCfg
    :members:
@@ -147,11 +161,28 @@ the fixed object origin. The caller selects rotations appropriate to the
 object's geometry, such as quarter turns for a cube, and replans each candidate.
 The operator does not move the object or establish contact/IK validity.
 
+``perturb_approach_direction`` places standoff poses on a cone around a
+nominal approach direction while leaving the contact transform itself exact.
+Because it produces Cartesian poses, it must be consumed before IK and path
+planning by whichever component builds the waypoints; it cannot be applied to
+a qpos template.
+
 ``joint_residual`` samples one smooth residual per explicitly permitted free
-phase and preserves its endpoints and uncontrolled joints. ``retime`` rescales
-permitted free phases and resamples on the supplied host control period,
-remapping phase indices. Contact and hold durations are preserved. Generated
-paths still need dynamic, collision, and task checks.
+phase and preserves its endpoints and uncontrolled joints. ``via_points``
+routes a phase through several sampled interior knots instead, using clamped
+cubic Hermite segments, so two or more knots produce paths that differ in
+shape rather than only in amplitude. ``nullspace_residual`` projects a residual
+onto the null space of caller-supplied task Jacobians, changing arm posture
+while holding the declared task rows to **first order**; its phase endpoints
+remain exact because the envelope vanishes there, and interior samples require
+forward-kinematics verification by the host.
+
+``retime`` rescales permitted free phases and resamples on the supplied host
+control period, remapping phase indices. Contact and hold durations are
+preserved. Its ``profile`` argument additionally redistributes time within a
+phase without changing that phase's total duration or its geometric path, which
+turns one path into several velocity profiles; ``TIMING_PROFILES`` lists the
+available warps. Generated paths still need dynamic, collision, and task checks.
 ``validate_motion_limits`` supplies a sampled finite-difference speed and
 acceleration check; it does not assert collision freedom or task success.
 
@@ -170,9 +201,17 @@ release collection and coverage reservations before an explicit write retry.
 
 .. autofunction:: rotate_grasp_about_object_axis
 
+.. autofunction:: perturb_approach_direction
+
 .. autofunction:: joint_residual
 
+.. autofunction:: via_points
+
+.. autofunction:: nullspace_residual
+
 .. autofunction:: retime
+
+.. autodata:: TIMING_PROFILES
 
 .. autofunction:: validate_motion_limits
 
@@ -186,6 +225,56 @@ release collection and coverage reservations before an explicit write retry.
 
 .. autoclass:: GenerationSession
    :members:
+
+Trajectory Variants
+~~~~~~~~~~~~~~~~~~~
+
+These helpers answer a narrower question than affordance expansion: given a
+reference trajectory whose annotated waypoints are already settled, how many
+genuinely different ways are there to execute it? Only the free motion between
+annotated phase endpoints changes, so contacts, grasps, and placements stay
+exactly where planning put them.
+
+``plan_trajectory_variants`` enumerates deterministic factor combinations without
+touching a trajectory. Ordinal zero is always the unmodified reference, and
+later ordinals cycle through the enabled spatial operators, then the duration
+scales, then the time warps. ``apply_trajectory_variant`` applies one such
+combination, running at most one joint-path operator so a null-space
+projection is never stacked on an already displaced joint path.
+
+``expand_trajectory_variants`` collects several modes for one fixed scene. It
+rejects proposals that an operator refuses, that fail sampled motion limits, or
+whose measured geometry and timing duplicate an accepted row, and it reports
+every rejection rather than dropping it silently. ``expand_row_variants`` instead
+gives one mode to each of several independent execution rows, such as one per
+parallel environment with its own randomized scene. Rows from different scenes
+are not comparable, so nothing is deduplicated across them and a rejected row
+falls back to its own reference instead of leaving an environment without a
+command stream.
+
+Deduplication compares measured joint geometry and elapsed phase time. It does
+not certify collision freedom, task success, or dynamic feasibility; each
+accepted row must still be executed and validated by the host.
+``sample_approach_cone`` samples angles for the Cartesian approach operator and
+is likewise a geometric proposal only.
+
+.. autoclass:: TrajectoryVariant
+   :members:
+
+.. autoclass:: TrajectoryVariantSet
+   :members:
+
+.. autodata:: NOMINAL_OPERATOR
+
+.. autofunction:: plan_trajectory_variants
+
+.. autofunction:: apply_trajectory_variant
+
+.. autofunction:: expand_trajectory_variants
+
+.. autofunction:: expand_row_variants
+
+.. autofunction:: sample_approach_cone
 
 Implementation Modules
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -232,9 +321,27 @@ The package import path above is convenient for callers combining them.
    :nosignatures:
 
    rotate_grasp_about_object_axis
+   perturb_approach_direction
    joint_residual
+   via_points
+   nullspace_residual
    retime
+   TIMING_PROFILES
    validate_motion_limits
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.variants
+
+.. autosummary::
+   :nosignatures:
+
+   NOMINAL_OPERATOR
+   TrajectoryVariant
+   TrajectoryVariantSet
+   plan_trajectory_variants
+   apply_trajectory_variant
+   expand_trajectory_variants
+   expand_row_variants
+   sample_approach_cone
 
 .. currentmodule:: embodichain.lab.sim.motion.expansion.session
 

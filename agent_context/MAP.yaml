@@ -157,10 +157,13 @@ topics:
 - id: motion-planning
   title: Motion Planning
   aliases: [motion planning, trajectory planning, trajectory playback, fixed-cadence trajectory playback, motion expansion,
-    trajectory expansion, trajectory augmentation, fixed scene trajectory augmentation, 轨迹播放, 轨迹扩增, 运动规划,
-    轨迹规划]
+    trajectory expansion, trajectory augmentation, fixed scene trajectory augmentation, trajectory variants,
+    trajectory variant expansion, 轨迹播放, 轨迹扩增, 运动规划, 轨迹规划, 轨迹变体]
   keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
     expansion, GenerationSession, TrajectoryAugmentationCfg, CandidateTrajectoryBatch,
+    TrajectoryVariant, plan_trajectory_variants, apply_trajectory_variant, expand_trajectory_variants, expand_row_variants,
+    via_points, nullspace_residual, perturb_approach_direction, sample_approach_cone, TIMING_PROFILES,
+    trajectory variant, 轨迹变体, 固定路点,
     collision world, compute trajectory, trajectory resampling, trajectory warping, retime_to_control_grid,
     JointTrajectoryPlaybackCfg, play_joint_trajectory, quaternion, xyzw, wxyz]
   paths: [topics/motion-planning/motion-planning.md]

@@ -38,11 +38,25 @@ from .contracts import (
     ValidationResult,
 )
 from .coverage import CoverageIndex, TrajectoryDescriptor, describe_trajectory
+from .variants import (
+    NOMINAL_OPERATOR,
+    TrajectoryVariant,
+    TrajectoryVariantSet,
+    apply_trajectory_variant,
+    expand_row_variants,
+    expand_trajectory_variants,
+    plan_trajectory_variants,
+    sample_approach_cone,
+)
 from .operators import (
+    TIMING_PROFILES,
     joint_residual,
+    nullspace_residual,
+    perturb_approach_direction,
     retime,
     rotate_grasp_about_object_axis,
     validate_motion_limits,
+    via_points,
 )
 from .session import GenerationSession
 
@@ -62,9 +76,21 @@ __all__ = [
     "CoverageIndex",
     "TrajectoryDescriptor",
     "describe_trajectory",
+    "NOMINAL_OPERATOR",
+    "TrajectoryVariant",
+    "TrajectoryVariantSet",
+    "apply_trajectory_variant",
+    "expand_row_variants",
+    "expand_trajectory_variants",
+    "plan_trajectory_variants",
+    "sample_approach_cone",
+    "TIMING_PROFILES",
     "joint_residual",
+    "nullspace_residual",
+    "perturb_approach_direction",
     "retime",
     "rotate_grasp_about_object_axis",
     "validate_motion_limits",
+    "via_points",
     "GenerationSession",
 ]
