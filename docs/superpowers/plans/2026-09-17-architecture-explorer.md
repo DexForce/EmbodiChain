@@ -13,8 +13,8 @@
 ## Global Constraints
 
 - `schema_version` 固定为 `1`。
-- 两个视图：全局架构、Task Program 集成。全局默认展示下面的 24 个节点。
-  The referenced 24-node inventory is in the spec, not an additional topic map.
+- 两个视图：全局架构、Task Program 集成。全局采用已扩展的 28 个节点。
+  This supersedes the original 24-node spec inventory, without adding a topic map.
 - `source_ref` 仅用于说明，源码链接必须绑定 `revision`。
 - 样例保持当前历史提交，作为契约参考。正式发布快照每次从对应 checkout 重新生成，禁止直接把历史样例复制成最新版架构数据。
 - 不 import `embodichain`，不要求 GPU、DexSim 或运行中的环境。
@@ -27,7 +27,7 @@
 
 The scope, schema, and pinned sample are ready for review. The user subsequently
 requested a frontend version to inspect first. The static prototype is implemented
-under `docs/architecture/web/`, consuming `preview.snapshot.json` at build time;
+under `docs/architecture/web/`, initially consuming `preview.snapshot.json`;
 the original sample is preserved. This deliberately advances the visual portion
 of Task 3 before the production generator in Tasks 1–2.
 
@@ -42,10 +42,13 @@ relationships covering launcher/configuration and simulation ownership paths.
 `src/graph.ts` owns canvas projection. Documentation links intentionally use the
 pinned Git source until Sphinx supplies its version root.
 
-The production generator and Sphinx/CI integration remain unimplemented; the
-checkboxes below describe those original production milestones and are not a claim
-that the prototype completes them. Continue with data generation before publishing
-versioned documentation. Do not add a backend server, database, graph editor,
+Tasks 1–2 now provide source-pinned validation and deterministic generation. The
+frontend consumes `generated/architecture.json` (34 nodes, 65 relationships;
+overview 28/43, Task Program 16/41). Both tools and their focused tests are delivered
+together. The user-reviewed expanded 28-node overview supersedes the original
+24-node target. The generator also supports explicit `--revision` selection.
+Summary documentation links currently point to the source at the same revision;
+Sphinx URL resolution remains Task 4. Sphinx/CI integration remains unimplemented. Do not add a backend server, database, graph editor,
 runtime tracer, or automatic-layout dependency.
 
 ## Task 1: Validated Architecture Snapshots
@@ -65,10 +68,10 @@ runtime tracer, or automatic-layout dependency.
 - Validation reads source and MAP using the exact `revision`, never by importing
   modules. `ArchitectureDataError` includes the node/edge ID or JSON field path.
 
-- [ ] Read the spec, schema, README validation example, and existing
+- [x] Read the spec, schema, README validation example, and existing
   `tests/docs/test_check_api_docs.py` module-loading pattern. Add the Apache header,
   future annotations, and typed public functions to the new script.
-- [ ] Add failing tests using temporary Git repositories: create a tiny class,
+- [x] Add failing tests using temporary Git repositories: create a tiny class,
   commit it, construct valid evidence, then mutate one property at a time.
   Reuse a `valid_snapshot` fixture that creates the temporary repository and schema.
   Include these concrete rejection cases:
@@ -88,21 +91,21 @@ def test_rejects_stale_excerpt(valid_snapshot):
         validate_snapshot(data, repo_root=root, schema_path=schema_path)
 ```
 
-- [ ] Cover duplicate IDs, unknown relation, parent-traversal paths, reversed
+- [x] Cover duplicate IDs, unknown relation, parent-traversal paths, reversed
   line ranges, wrong lexical symbols, absent topics, missing/ambiguous docnames,
   view edges with excluded endpoints, and duplicated/omitted group members.
   Support `<module>` for Python module-level evidence and `<document>` for
   non-Python text evidence; test each without importing or executing source.
   Add a historical-source test that changes the working-tree file and still
   validates the original committed snapshot.
-- [ ] Run `python -m pytest -q -c /dev/null -p no:cacheprovider --noconftest tests/docs/test_architecture_data.py`
+- [x] Run `python -m pytest -q -c /dev/null -p no:cacheprovider --noconftest tests/docs/test_architecture_data.py`
   and confirm failures correspond to the missing validator.
-- [ ] Implement structural validation with `Draft202012Validator`, then the
+- [x] Implement structural validation with `Draft202012Validator`, then the
   reference/evidence checks in the README. Cache Git source reads and ASTs.
   Add `jsonschema` and `PyYAML` as documentation-tool dependencies; no package
   runtime dependency change. Missing Git revisions must fail with an actionable
   fetch message rather than fall back to HEAD.
-- [ ] Run the focused tests and validate the pinned sample. Record the exact
+- [x] Run the focused tests and validate the pinned sample. Record the exact
   dependency versions used. Format, review, and commit this independently useful
   data-validation tool.
 
@@ -125,10 +128,10 @@ def test_rejects_stale_excerpt(valid_snapshot):
   the checked-out commit and replaces revision/package metadata. The original
   `task-program.sample.json` remains unchanged.
 
-- [ ] Add fixtures with a class/method moved by leading comments, a renamed
+- [x] Add fixtures with a class/method moved by leading comments, a renamed
   symbol, and two matching excerpts inside the same symbol. Require unique
   resolution within the lexical symbol. Do not use global first-match search.
-- [ ] Add these tests before implementing generation:
+- [x] Add these tests before implementing generation:
 
 ```python
 def test_generation_is_deterministic(source_fixture):
@@ -145,26 +148,26 @@ def test_changed_evidence_is_not_silently_relocated(changed_source_fixture):
         build_snapshot(root, curated_path)
 ```
 
-- [ ] Run the new tests and confirm the intended failures. Implement generation
+- [x] Run the new tests and confirm the intended failures. Implement generation
   in stable ID order, preserving explicit view/group order. Read tracked source
   from HEAD; reject uncommitted changes to relevant source, MAP, or doc targets
   so links cannot claim a commit that does not contain the displayed evidence.
   Semantic seed edits can be reviewed independently; this is a source snapshot,
   not a claim that prose already exists in the pinned commit.
-- [ ] Expand `curated.json` to the spec's 24-node overview and the Task Program
+- [x] Expand `curated.json` to the spec's 24-node overview and the Task Program
   view. Reuse shared node IDs between views. Verify each new semantic relationship
   against source and retain its scope; do not manufacture edges to make a
   disconnected graph look complete.
-- [ ] Extract only unambiguous class inheritance and module-level absolute
+- [x] Extract only unambiguous class inheritance and module-level absolute
   imports between selected nodes. Label these `static-extracted`; describe
   conditional/type-only imports in scope. Skip unresolved aliases, dynamic
   imports, nested-function imports, and protocol-to-concrete bindings unless
   covered by reviewed evidence. Merge by source/target/relation/evidence identity.
-- [ ] Test that generation does not import `embodichain`, resolves line moves,
+- [x] Test that generation does not import `embodichain`, resolves line moves,
   rejects ambiguous excerpts, validates its own output, and keeps topics tied
   to the pinned MAP. Test summary output includes every overview node with a
   same-version docname link and plain-text responsibility.
-- [ ] Run both data test files, generate into a temporary directory twice and
+- [x] Run both data test files, generate into a temporary directory twice and
   compare bytes. Format, review the two views' evidence, and commit.
 
 ## Task 3: Static Explorer with Testable Navigation
@@ -308,9 +311,22 @@ await expect(page.getByRole('heading', { name: 'AtomicActionEngine', exact: true
 
 ## Completion Evidence
 
-- Two usable views, including exactly the 24 scoped overview nodes.
+- Two usable views, including the 28 scoped overview nodes in the expanded preview.
 - Every semantic edge has source evidence and an explicit scope.
 - Stable node IDs, typed relations, searchable descriptions, and same-version links.
 - Browser-tested embedded/full-screen interactions and fragment restoration.
 - All local and CI documentation build routes generate from their own checkout.
 - No modifications to simulation execution, runtime dependencies, or project topic ownership.
+
+## Data Generation Verification — 2026-09-17
+
+Tasks 1–2 were delivered together, preserving the historical sample. Validation
+covered 41 isolated generator/validator tests and 8 existing API-doc checker tests,
+10 frontend data/state tests, 6 Chromium interaction tests, the production bundle,
+Prettier, Black 26.3.1, and the API coverage gate (2075/2075). The context affected
+check reported no routed topics. Two CLI generations and the checked-in artifacts
+were byte-identical; historical and generated snapshots passed validation.
+Independent review findings for dangling view references, decorated class bases,
+and cross-scope module excerpts were reproduced and fixed with regression tests.
+The existing frontend preview was refreshed and inspected with generated data.
+Sphinx embedding, published-version documentation URLs, and CI remain outstanding.

@@ -1,119 +1,88 @@
 # Architecture Explorer
 
-A runnable [frontend preview](web/README.md) is now available. It provides the
-28-module overview and 16-object Task Program view, with search, relationship
-filters, direct-neighbour exploration, source evidence, and shareable navigation. Run it with the commands in
-the frontend README. It uses [a pinned preview snapshot](preview.snapshot.json);
-automatic generation and Sphinx integration are still pending.
-
-The data contract and original sample below remain the reference for the preview
-and future generator. Neither snapshot represents a runtime trace or a complete graph.
+A static [frontend](web/README.md) provides a 28-module overview and a 16-object
+Task Program view, with search, relationship filters, direct-neighbour exploration,
+source evidence, and shareable navigation. It consumes a
+[generated snapshot](generated/architecture.json); Sphinx embedding and CI
+publishing remain the next milestones.
 
 - [Design and scope](../superpowers/specs/2026-09-17-architecture-explorer-design.md)
 - [Implementation plan](../superpowers/plans/2026-09-17-architecture-explorer.md)
-- [JSON Schema](architecture.schema.json)
-- [Task Program sample](task-program.sample.json): 16 nodes, 25 scoped relations.
+- [JSON Schema](architecture.schema.json): closed v1 contract.
+- [Curated seed](curated.json): responsibilities, boundaries, groups, and reviewed relations.
+- [Generated text overview](generated/summary.md): readable fallback with pinned evidence links.
+- [Original Task Program sample](task-program.sample.json): unchanged historical contract example.
+- [Earlier frontend snapshot](preview.snapshot.json): retained as a reference, no longer consumed by the app.
 
-The sample is pinned to `3224ac1ee28b6730b245d5cb69dc25a8d2d8dd94`.
-`agent_context/MAP.yaml` remains the sole topic inventory. A view group is a
-presentation choice, not a new topic or proof of a dependency. Every relationship
-has a source excerpt and an explicit scope. Follow `evidence` to inspect a claim;
-do not infer runtime order from adjacency or interpret `holds` as exclusive ownership.
+`agent_context/MAP.yaml` remains the sole topic inventory. Groups are presentation
+choices. Neither import declarations nor adjacency establish runtime order. Every
+relationship includes source evidence and scope; `holds` does not imply exclusive
+ownership. This is selected static coverage, not a complete dependency graph.
 
-`architecture.schema.json` uses JSON Schema Draft 2020-12. Source and documentation
-paths are repository-relative. Documentation uses Sphinx docnames without an
-extension; no symbol anchor is claimed. All evidence in one snapshot refers to
-its root `revision`. The schema validates structure; the graph and source checks
-below validate references and exact excerpts. They do not prove that prose
-correctly interprets a source fragment; that remains a review responsibility.
+## Generate and validate
 
-## Reproduce the sample checks
-
-Run from the repository root with Python, `jsonschema`, and `PyYAML` available.
-These are validation-tool requirements, not new simulator runtime dependencies.
-The pinned commit must exist locally. The historical sample is checked against
-that commit even after later source edits; a future release generator must instead
-produce a fresh snapshot from the checkout being documented.
+From the repository root, with Python 3.11+ and Git available:
 
 ```bash
-python - <<'PY'
-import ast
-import json
-import subprocess
-from functools import cache
-from pathlib import Path
-
-import jsonschema
-import yaml
-
-root = Path.cwd()
-folder = root / "docs/architecture"
-schema = json.loads((folder / "architecture.schema.json").read_text())
-data = json.loads((folder / "task-program.sample.json").read_text())
-jsonschema.Draft202012Validator.check_schema(schema)
-jsonschema.Draft202012Validator(schema).validate(data)
-
-@cache
-def source(path):
-    return subprocess.check_output(
-        ["git", "show", f"{data['revision']}:{path}"], text=True
-    )
-
-def symbols(text):
-    result = {}
-    def visit(node, parents=()):
-        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-            parents = (*parents, node.name)
-            result[".".join(parents)] = (node.lineno, node.end_lineno)
-        for child in ast.iter_child_nodes(node):
-            visit(child, parents)
-    visit(ast.parse(text))
-    return result
-
-def index(items):
-    result = {item["id"]: item for item in items}
-    assert len(result) == len(items), "Duplicate ID"
-    return result
-
-nodes, edges, views = (index(data[key]) for key in ("nodes", "edges", "views"))
-topics = {topic["id"] for topic in yaml.safe_load(source(data["topic_index"]))["topics"]}
-tracked = set(subprocess.check_output(
-    ["git", "ls-tree", "-r", "--name-only", data["revision"]], text=True
-).splitlines())
-assert source("VERSION").strip() == data["package_version"]
-proof_count = 0
-for item in [*nodes.values(), *edges.values()]:
-    for proof in item["evidence"]:
-        text = source(proof["path"])
-        lines = text.splitlines()
-        start, end = proof["start_line"], proof["end_line"]
-        assert 1 <= start <= end <= len(lines), item["id"]
-        assert "\n".join(lines[start - 1:end]) == proof["excerpt"], item["id"]
-        first, last = symbols(text)[proof["symbol"]]
-        assert first <= start <= end <= last, item["id"]
-        proof_count += 1
-for node in nodes.values():
-    assert set(node["topic_ids"]) <= topics, node["id"]
-    for doc in node["documentation"]:
-        matches = [suffix for suffix in (".md", ".rst")
-                   if f"docs/source/{doc['docname']}{suffix}" in tracked]
-        assert len(matches) == 1, doc["docname"]
-for edge in edges.values():
-    assert edge["source"] in nodes and edge["target"] in nodes, edge["id"]
-for view in views.values():
-    selected = set(view["node_ids"])
-    assert selected <= nodes.keys(), view["id"]
-    assert set(view["edge_ids"]) <= edges.keys(), view["id"]
-    groups = index(view["groups"])
-    members = [node for group in groups.values() for node in group["node_ids"]]
-    assert len(members) == len(set(members)) and set(members) == selected
-    for edge_id in view["edge_ids"]:
-        edge = edges[edge_id]
-        assert {edge["source"], edge["target"]} <= selected, edge_id
-print(f"PASS: {len(nodes)} nodes, {len(edges)} edges, {proof_count} source excerpts")
-PY
+python -m pip install -r docs/architecture/requirements.txt
+python docs/scripts/build_architecture.py --output-dir docs/architecture/generated
+python docs/scripts/architecture_data.py docs/architecture/generated/architecture.json
+python docs/scripts/architecture_data.py docs/architecture/task-program.sample.json
 ```
 
-The future production validator and its regression tests are specified in the
-implementation plan. This inline check keeps the current design/data-only change
-independently inspectable without introducing a new production script.
+These dependencies are documentation tools only. Generation never imports or
+executes EmbodiChain modules and needs no simulator or GPU. The default source is
+`HEAD`; `--revision <commit-or-ref>` explicitly selects another locally available
+commit. Missing revisions fail with a fetch instruction. Relevant uncommitted
+source, MAP, VERSION, or documentation changes are rejected when generating HEAD.
+Historical generation and validation read their pinned Git objects independently
+of the working tree.
+
+Generation updates the revision and package version, uniquely relocates each
+curated excerpt within its declared lexical symbol, extracts selected AST facts,
+and validates the result before replacing outputs. Missing/ambiguous evidence
+fails with the owning node or edge. Validation failures preserve existing outputs.
+Outputs have deterministic ordering and contain no timestamps or absolute paths.
+
+The validator checks schema, IDs, edge endpoints, view/group membership, topic IDs,
+exact evidence text and lexical containment, VERSION, and unambiguous docnames at
+the pinned revision. Python module evidence uses `<module>`; non-Python text uses
+`<document>`. Prose interpretation still requires human review.
+
+## Maintain the data
+
+1. Edit `curated.json` for responsibilities, boundaries, selected nodes, and semantic
+   relations. Reuse node IDs across views and keep scope explicit.
+2. After source changes, review affected evidence. Pure line moves are resolved
+   automatically; rename or behavior changes require updating selectors/excerpts.
+3. Run the generator and validator above. Review both generated views and the text
+   summary, especially added relationships and unchanged semantic claims.
+4. Run `npm run build` in `docs/architecture/web`, then inspect the frontend and
+   expanded evidence. Commit seed, generated output, and associated source changes.
+
+A snapshot's revision identifies the source it describes, not the later commit
+that stores the generated artifact. `source_ref` is descriptive; all source links
+use the immutable revision. Documentation links currently open the documentation
+**source at that revision**, not a possibly mismatched published site.
+
+Static extraction handles absolute imports in selected modules and unambiguous
+class bases with unique static bindings. Conditional/type-only imports retain
+conditions in their scope. A file's unique selected module/package (or sole
+selected node) represents its module-level imports; this is explicitly not proof
+that a specific class uses each import. Ambiguous file ownership, relative and
+wildcard imports, dynamic imports, re-exports without an exact selected match,
+nested-function imports, rebound aliases, and protocol-to-concrete bindings are
+not resolved. Semantic relations remain reviewed seed data. Extraction adds a
+relationship to each view containing both endpoints; view/group ordering is preserved.
+
+## Verification
+
+```bash
+python -m pytest -q -c /dev/null -p no:cacheprovider --noconftest \
+  tests/docs/test_architecture_data.py tests/docs/test_build_architecture.py
+```
+
+Frontend checks are documented in its [README](web/README.md). The original sample
+remains pinned to `3224ac1ee28b6730b245d5cb69dc25a8d2d8dd94`; it is not copied as
+current release data. Sphinx will next supply a version-relative documentation
+root, searchable text entry, embedded viewer, and full-screen link.

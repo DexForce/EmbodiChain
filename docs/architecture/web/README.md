@@ -1,8 +1,8 @@
 # Architecture Explorer preview
 
 A static, read-only frontend for inspecting EmbodiChain's architecture. This
-iteration is intended for visual and interaction review before the documentation
-generator and Sphinx integration are implemented.
+iteration consumes generated, source-validated data. Sphinx integration remains
+a separate milestone.
 
 ## Run locally
 
@@ -33,8 +33,8 @@ available. Source excerpts and pinned source references are unchanged.
 
 ## Included
 
-- Overview: 28 modules and 40 recorded relationships, organized into five layers.
-- Task Program: 16 objects and 25 recorded relationships, organized into four layers.
+- Overview: 28 modules and 43 recorded relationships, organized into five layers.
+- Task Program: 16 objects and 41 recorded relationships, organized into four layers.
 - Search by module name, responsibility, topic, or source path.
 - Relationship filters, adjacent-node highlighting, zoom, pan, and a minimap.
 - A readable 100% initial scale with responsive columns and scroll-to-pan navigation.
@@ -59,17 +59,22 @@ keyboard access. Open the relationship menu to toggle types or clear all filters
 
 ## Data and limits
 
-The frontend imports `../preview.snapshot.json` at build time, using the shared
-`../architecture.schema.json` contract. The snapshot has 34 unique nodes and 53
-unique edges; views share nodes and relationships. Its source revision is
-`3224ac1ee28b6730b245d5cb69dc25a8d2d8dd94`, not the frontend implementation commit.
+The frontend imports `../generated/architecture.json` at build time using the
+shared `../architecture.schema.json` contract. The current snapshot has 34 unique
+nodes and 65 unique edges; views share nodes and relationships. Its `revision`
+identifies the committed source being described, independently of the frontend
+implementation commit.
 
-The original `../task-program.sample.json` remains unchanged. The preview adds
-curated module summaries and selected static import declarations to that source
-baseline. Static imports are labeled separately from reviewed semantic relations;
-conditional imports carry their condition in the evidence scope. The overview also
-includes reviewed CLI dispatch, task discovery, configuration composition, environment
-inheritance, and simulation ownership links.
+To refresh it, install the Python requirements in `../requirements.txt`, then run
+`npm run data` followed by `npm run build`. See the [data workflow](../README.md)
+for evidence review and validation. Generation reads HEAD by default and rejects
+relevant uncommitted source changes. It never imports simulator code.
+
+The original `../task-program.sample.json` remains unchanged. Curated summaries
+and semantic relationships live in `../curated.json`; selected AST imports and
+inheritance are added during generation. Static imports are labeled separately
+from reviewed semantic relations; conditional imports carry their condition in
+scope. Module-level imports do not prove that a specific class uses a symbol.
 
 Cards show the number of relationships visible in the current diagram. A zero
 with known evidence means filters or local focus hide those links. Nodes without
@@ -78,7 +83,7 @@ that this is incomplete coverage, not proof of having no dependencies. The overv
 
 Documentation links currently open the documentation **source** at the pinned
 commit. The app does not claim that a matching published documentation version
-exists. An Sphinx-aware documentation URL resolver, automatic source refresh,
+exists. A Sphinx-aware documentation URL resolver, build orchestration,
 and CI publishing remain separate work in the implementation plan.
 
 ## Verification

@@ -48,7 +48,7 @@ import {
   Sun,
   X,
 } from 'lucide-react';
-import snapshot from '../../preview.snapshot.json';
+import snapshot from '../../generated/architecture.json';
 import { ArchitectureNode, LayerNode } from './ArchitectureNode';
 import NodeDetails from './NodeDetails';
 import { buildCanvas, layerColors, CARD_WIDTH, CARD_HEIGHT } from './graph';

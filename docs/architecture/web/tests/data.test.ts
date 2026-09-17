@@ -19,13 +19,13 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import Ajv2020 from 'ajv/dist/2020';
 import { parse } from 'yaml';
-import data from '../../preview.snapshot.json';
+import data from '../../generated/architecture.json';
 import schema from '../../architecture.schema.json';
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const read = (path: string) =>
   execFileSync('git', ['show', `${data.revision}:${path}`], { cwd: root, encoding: 'utf8' });
 
-describe('reviewed preview data', () => {
+describe('generated architecture data', () => {
   it('conforms to the architecture contract', () => {
     const validate = new Ajv2020({ allErrors: true }).compile(schema);
     expect(validate(data), JSON.stringify(validate.errors)).toBe(true);

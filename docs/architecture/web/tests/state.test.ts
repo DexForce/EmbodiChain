@@ -15,7 +15,7 @@
 // ----------------------------------------------------------------------------
 
 import { describe, it, expect } from 'vitest';
-import data from '../../preview.snapshot.json';
+import data from '../../generated/architecture.json';
 import { buildCanvas } from '../src/graph';
 import {
   parseState,
@@ -82,8 +82,8 @@ describe('shareable exploration', () => {
     const { state } = parseState('#view=task-program&node=atomic-engine&focus=1', data);
     const canvas = buildCanvas(data, state, 2);
     const executor = canvas.nodes.find((n) => n.id === 'semantic-executor')!;
-    expect(executor.data.count).toBe(2);
-    expect(executor.data.recordedCount).toBe(6);
+    expect(executor.data.count).toBe(3);
+    expect(executor.data.recordedCount).toBe(9);
   });
   it('pins source and documentation evidence to the reviewed revision', () => {
     const p = { path: 'embodichain/cli/main.py', start_line: 24, end_line: 29 };
