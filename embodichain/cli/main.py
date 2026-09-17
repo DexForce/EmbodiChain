@@ -39,6 +39,11 @@ class Command:
 
 COMMANDS = (
     Command(
+        name="analyze-data",
+        target="embodichain.data_analysis.cli:main",
+        help="Analyze dataset diversity and replay recorded episodes.",
+    ),
+    Command(
         name="data",
         target="embodichain.data.download:main",
         help="List and download EmbodiChain data assets.",

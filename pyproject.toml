@@ -52,6 +52,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+analysis = [
+  "gradio>=6.17.3,<6.18",
+  "matplotlib",
+]
 policy-deploy = [
   # ORT 1.27+ defaults to CUDA 13; EmbodiChain's supported stack uses CUDA 12.
   "onnxruntime-gpu>=1.20,<1.27",

@@ -360,3 +360,15 @@ topics:
     embodichain/cli/workspace_cache.py, tests/sim/motion/workspace/]
   related_topics: [robot-system, ik-solvers, randomization, motion-planning]
   status: active
+
+- id: data-analysis
+  title: Data Diversity Analysis
+  aliases: [data diversity, analysis workbench, 数据多样性, 数据分析工作台, 数据分布统计]
+  keywords: [analyze-data, collect-preview, ReplayViewer, catalog.sqlite, dataset snapshot]
+  paths: [topics/data-analysis/data-analysis.md]
+  source_of_truth:
+  - embodichain/data_analysis/
+  - embodichain/cli/main.py
+  watch_paths: [embodichain/data_analysis/, tests/data_analysis/, embodichain/lab/__init__.py]
+  related_topics: [data-pipeline, sim-visualization, gen-sim, task-programs]
+  status: active
