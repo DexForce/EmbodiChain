@@ -1,7 +1,13 @@
-# Architecture Explorer data proposal
+# Architecture Explorer
 
-This directory contains a proposed v1 contract and a curated source snapshot.
-It does **not** contain a running explorer, a runtime trace, or a complete graph.
+A runnable [frontend preview](web/README.md) is now available. It provides the
+24-module overview and 16-object Task Program view, with search, relationship
+filters, source evidence, and shareable navigation. Run it with the commands in
+the frontend README. It uses [a pinned preview snapshot](preview.snapshot.json);
+automatic generation and Sphinx integration are still pending.
+
+The data contract and original sample below remain the reference for the preview
+and future generator. Neither snapshot represents a runtime trace or a complete graph.
 
 - [Design and scope](../superpowers/specs/2026-09-17-architecture-explorer-design.md)
 - [Implementation plan](../superpowers/plans/2026-09-17-architecture-explorer.md)

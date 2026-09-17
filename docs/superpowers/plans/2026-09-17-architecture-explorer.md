@@ -25,10 +25,24 @@
 
 ## Current Deliverable and Execution Order
 
-The scope, schema, and pinned sample are ready for review. The application,
-production generator, and Sphinx integration below are not implemented.
-Tasks are sequential: each consumes the preceding deliverable. Do not add a
-server, database, graph editor, runtime tracer, or automatic-layout dependency.
+The scope, schema, and pinned sample are ready for review. The user subsequently
+requested a frontend version to inspect first. The static prototype is implemented
+under `docs/architecture/web/`, consuming `preview.snapshot.json` at build time;
+the original sample is preserved. This deliberately advances the visual portion
+of Task 3 before the production generator in Tasks 1–2.
+
+Completed for the preview: both views, search/filter/highlight, evidence inspector,
+pinned source and documentation-source links, URL restoration and browser history,
+responsive navigation, local fonts, light/dark themes, data/state/browser tests,
+and a production build. `src/state.ts` owns navigation and links together;
+`src/graph.ts` owns canvas projection. Documentation links intentionally use the
+pinned Git source until Sphinx supplies its version root.
+
+The production generator and Sphinx/CI integration remain unimplemented; the
+checkboxes below describe those original production milestones and are not a claim
+that the prototype completes them. Continue with data generation before publishing
+versioned documentation. Do not add a backend server, database, graph editor,
+runtime tracer, or automatic-layout dependency.
 
 ## Task 1: Validated Architecture Snapshots
 
