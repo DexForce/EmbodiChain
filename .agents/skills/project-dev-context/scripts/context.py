@@ -45,8 +45,8 @@ _LIST_FIELDS = {"aliases", "keywords", "paths", "source_of_truth", "related_topi
 _LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]*)\)")
 _CJK_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 _EXTERNAL_SCHEME = re.compile(r"^[a-z][a-z0-9+.-]*:", re.IGNORECASE)
+_MAP_PATH = "agent_context/MAP.yaml"
 _GLOBAL_CONTEXT_PATHS = (
-    "agent_context/MAP.yaml",
     "agent_context/conventions",
     ".agents/skills/project-dev-context",
     ".claude/skills/project-dev-context",
@@ -385,53 +385,150 @@ def _path_matches(changed_path: str, mapped_path: str) -> bool:
     return bool(mapped) and (changed == mapped or changed.startswith(f"{mapped}/"))
 
 
-def affected_topics(data: dict[str, Any], paths: Sequence[str]) -> list[str]:
+def affected_topics(
+    data: dict[str, Any],
+    paths: Sequence[str],
+    *,
+    previous_data: dict[str, Any] | None = None,
+) -> list[str]:
     """Identify topics to review after source or context changes.
 
     Args:
         data: Context registry with source and optional watch paths.
         paths: Changed repository-relative paths, including deleted paths.
+        previous_data: Baseline map for entry-level comparison and old source
+            scopes. Without a baseline, a MAP change selects all active topics.
 
     Returns:
         Candidate topic ids in registry order; this does not prove stale prose.
     """
-    changed_paths = list(paths)
-    global_context_change = any(
-        _path_matches(changed_path, mapped_path)
-        for changed_path in changed_paths
-        for mapped_path in _GLOBAL_CONTEXT_PATHS
-    )
-    affected: list[str] = []
-    for topic in data.get("topics", []):
-        if not isinstance(topic, dict) or not isinstance(topic.get("id"), str):
-            continue
-        mapped_paths = [
-            value
-            for field in ("source_of_truth", "watch_paths")
-            for value in topic.get(field, [])
-            if isinstance(value, str)
-        ]
-        context_paths = [
-            f"agent_context/{posixpath.dirname(value)}"
-            for value in topic.get("paths", [])
-            if isinstance(value, str) and posixpath.dirname(value)
-        ]
-        if (global_context_change and topic.get("status") == "active") or any(
-            _path_matches(changed_path, mapped_path)
-            for changed_path in changed_paths
-            for mapped_path in (*mapped_paths, *context_paths)
-        ):
-            affected.append(topic["id"])
+    return list(_affected_reasons(data, paths, previous_data=previous_data))
+
+
+def _topics_by_id(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        topic["id"]: topic
+        for topic in data.get("topics", [])
+        if isinstance(topic, dict) and isinstance(topic.get("id"), str)
+    }
+
+
+def _affected_reasons(
+    data: dict[str, Any],
+    paths: Sequence[str],
+    *,
+    previous_data: dict[str, Any] | None = None,
+) -> dict[str, list[str]]:
+    current = _topics_by_id(data)
+    previous = _topics_by_id(previous_data or {})
+    changed_paths = list(dict.fromkeys(_normalize_repo_path(path) for path in paths))
+    global_reasons = [
+        f"global context rules: {path}"
+        for path in changed_paths
+        if any(_path_matches(path, scope) for scope in _GLOBAL_CONTEXT_PATHS)
+    ]
+    map_changed = _MAP_PATH in changed_paths
+    if map_changed:
+        if previous_data is None:
+            global_reasons.append("MAP changed; no baseline available (use --base REF)")
+        elif {key: value for key, value in data.items() if key != "topics"} != {
+            key: value for key, value in previous_data.items() if key != "topics"
+        }:
+            global_reasons.append("MAP global settings changed")
+
+    affected: dict[str, list[str]] = {}
+    for topic_id in dict.fromkeys([*current, *previous]):
+        topic = current.get(topic_id, previous.get(topic_id, {}))
+        reasons = list(global_reasons) if topic.get("status") == "active" else []
+        if map_changed and previous_data is not None:
+            if current.get(topic_id) != previous.get(topic_id):
+                change = (
+                    "added"
+                    if topic_id not in previous
+                    else "removed" if topic_id not in current else "updated"
+                )
+                reasons.append(f"MAP entry {change}: {topic_id}")
+        versions = [("", current.get(topic_id, {}))]
+        if previous.get(topic_id) != current.get(topic_id):
+            versions.append(("previous ", previous.get(topic_id, {})))
+        seen_scopes: set[tuple[str, str]] = set()
+        for prefix, version in versions:
+            scopes = [
+                (field, scope)
+                for field in ("source_of_truth", "watch_paths")
+                for scope in version.get(field, [])
+                if isinstance(scope, str)
+            ]
+            scopes.extend(
+                ("context", f"agent_context/{posixpath.dirname(path)}")
+                for path in version.get("paths", [])
+                if isinstance(path, str) and posixpath.dirname(path)
+            )
+            scopes = [
+                scope for scope in dict.fromkeys(scopes) if scope not in seen_scopes
+            ]
+            seen_scopes.update(scopes)
+            for path in changed_paths:
+                for field, scope in scopes:
+                    if _path_matches(path, scope):
+                        reasons.append(f"{path} matches {prefix}{field}: {scope}")
+        if reasons:
+            affected[topic_id] = list(dict.fromkeys(reasons))
     return affected
 
 
-def _git_changed_paths(root: Path, base: str) -> list[str]:
-    merge_base = subprocess.run(
+def _git_merge_base(root: Path, base: str) -> str:
+    return subprocess.run(
         ["git", "-C", str(root), "merge-base", base, "HEAD"],
         check=True,
         capture_output=True,
         text=True,
     ).stdout.strip()
+
+
+def _git_text(root: Path, revision: str, path: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), "show", f"{revision}:{path}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def _git_context_files(root: Path, revision: str) -> list[str]:
+    return (
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "ls-tree",
+                "-r",
+                "--name-only",
+                "-z",
+                revision,
+                "--",
+                "agent_context",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        .stdout.rstrip("\0")
+        .split("\0")
+    )
+
+
+def _git_map(root: Path, revision: str) -> dict[str, Any] | None:
+    if _MAP_PATH not in _git_context_files(root, revision):
+        return None
+    data = yaml.safe_load(_git_text(root, revision, _MAP_PATH))
+    if not isinstance(data, dict):
+        raise ValueError(f"{revision}:{_MAP_PATH} must contain a mapping")
+    return data
+
+
+def _git_changed_paths(root: Path, merge_base: str) -> list[str]:
     diff = subprocess.run(
         [
             "git",
@@ -474,6 +571,70 @@ def _git_changed_paths(root: Path, base: str) -> list[str]:
     )
 
 
+def _print_stats(
+    root: Path,
+    data: dict[str, Any],
+    revision: str | None,
+    previous_data: dict[str, Any] | None,
+) -> None:
+    current_text = {
+        str(path.relative_to(root)): path.read_text(encoding="utf-8")
+        for path in (root / "agent_context").rglob("*.md")
+    }
+    previous_text = (
+        {
+            path: _git_text(root, revision, path)
+            for path in _git_context_files(root, revision)
+            if path.endswith(".md")
+        }
+        if revision
+        else {}
+    )
+
+    def count(texts: dict[str, str], metric: str) -> int:
+        if metric == "files":
+            return len(texts)
+        if metric == "lines":
+            return sum(len(text.splitlines()) for text in texts.values())
+        return sum(len(text.split()) for text in texts.values())
+
+    def value(current: int, previous: int) -> str:
+        return f"{current} ({current - previous:+d})" if revision else str(current)
+
+    print("Whitespace words (not tokens); overview sizes are advisory, not a CI gate.")
+    if revision:
+        print(f"Baseline: merge base {revision}")
+    for metric in ("files", "lines", "words"):
+        print(
+            f"Total Markdown {metric}: {value(count(current_text, metric), count(previous_text, metric))}"
+        )
+    overview_paths = dict.fromkeys(
+        f"agent_context/{path}"
+        for registry in (data, previous_data or {})
+        for topic in _topics_by_id(registry).values()
+        for path in topic.get("paths", [])
+    )
+    print("Overview words (delta) | path")
+    for path in sorted(
+        overview_paths,
+        key=lambda path: (-len(current_text.get(path, "").split()), path),
+    ):
+        current = len(current_text.get(path, "").split())
+        previous = len(previous_text.get(path, "").split())
+        flags = []
+        if current > 1200:
+            flags.append("over 1200 words")
+        if (
+            revision
+            and previous
+            and current - previous >= 100
+            and current > previous * 1.25
+        ):
+            flags.append("growth over 25% and at least 100 words")
+        suffix = f" [REVIEW: {', '.join(flags)}]" if flags else ""
+        print(f"{value(current, previous)} | {path}{suffix}")
+
+
 def _repository_root() -> Path:
     return Path(__file__).resolve().parents[4]
 
@@ -482,6 +643,12 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("check", help="validate MAP.yaml and local Markdown links")
+    stats_parser = subparsers.add_parser(
+        "stats", help="report context size and advisory overview growth"
+    )
+    stats_parser.add_argument(
+        "--base", help="compare sizes with the merge base of a Git ref"
+    )
 
     route_parser = subparsers.add_parser("route", help="route a context query")
     route_parser.add_argument("query", nargs="+", help="query text")
@@ -493,6 +660,9 @@ def _parser() -> argparse.ArgumentParser:
     affected_parser.add_argument(
         "--base",
         help="include tracked changes and untracked files relative to a Git ref",
+    )
+    affected_parser.add_argument(
+        "--explain", action="store_true", help="show matching paths and impact reasons"
     )
     return parser
 
@@ -537,22 +707,54 @@ def main(argv: Sequence[str] | None = None, *, root: str | Path | None = None) -
             print(f"{topic_id}: {', '.join(paths)}")
         return 0
 
-    if not args.paths and not args.base:
+    if args.command == "affected" and not args.paths and not args.base:
         print("affected requires PATH... and/or --base REF", file=sys.stderr)
         return 2
-    changed_paths = list(args.paths)
-    if args.base:
-        try:
-            changed_paths.extend(_git_changed_paths(repository_root, args.base))
-        except subprocess.CalledProcessError as error:
-            detail = error.stderr.strip() if error.stderr else str(error)
-            print(f"failed to inspect Git changes: {detail}", file=sys.stderr)
-            return 2
-    topic_ids = affected_topics(data, list(dict.fromkeys(changed_paths)))
-    if not topic_ids:
+    changed_paths = list(args.paths) if args.command == "affected" else []
+    revision = None
+    previous_data = None
+    try:
+        if args.base:
+            revision = _git_merge_base(repository_root, args.base)
+            previous_data = _git_map(repository_root, revision)
+            if args.command == "affected":
+                changed_paths.extend(_git_changed_paths(repository_root, revision))
+        if args.command == "stats":
+            _print_stats(repository_root, data, revision, previous_data)
+            return 0
+    except (
+        subprocess.CalledProcessError,
+        OSError,
+        ValueError,
+        yaml.YAMLError,
+    ) as error:
+        detail = (
+            error.stderr.strip()
+            if isinstance(error, subprocess.CalledProcessError) and error.stderr
+            else str(error)
+        )
+        print(f"failed to inspect Git/context data: {detail}", file=sys.stderr)
+        return 2
+    reasons = _affected_reasons(data, changed_paths, previous_data=previous_data)
+    if not reasons:
         print("no affected topics")
     else:
-        print("\n".join(topic_ids))
+        shared = (
+            set.intersection(*(set(matches) for matches in reasons.values()))
+            if args.explain and len(reasons) > 1
+            else set()
+        )
+        if shared:
+            print("Shared reasons (apply to every topic below):")
+            for reason in next(iter(reasons.values())):
+                if reason in shared:
+                    print(f"  - {reason}")
+        for topic_id, matches in reasons.items():
+            print(topic_id)
+            if args.explain:
+                for reason in matches:
+                    if reason not in shared:
+                        print(f"  - {reason}")
     return 0
 
 

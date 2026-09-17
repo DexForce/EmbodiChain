@@ -98,8 +98,10 @@ not switch it. Use a separate environment config for each backend.
   build with `pip install -r docs/requirements.txt`, then `make -C docs html`.
   For locale errors use `LC_ALL=C.UTF-8` and `LANG=C.UTF-8`.
 - When routed behavior changes, review affected context in the same change:
-  `python .agents/skills/project-dev-context/scripts/context.py affected --base origin/main`.
-  Follow the context skill for updating and checking it.
+  `python .agents/skills/project-dev-context/scripts/context.py affected --base origin/main --explain`.
+  Follow the context skill's no-update/revise/add decision. Review does not
+  require an edit when guidance remains accurate and sufficient; state the
+  reason in the PR or task result.
 
 ## Contribution routes
 

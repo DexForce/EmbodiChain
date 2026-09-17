@@ -101,7 +101,7 @@ topics:
   - embodichain/lab/sim/utility/solver_utils.py
   - embodichain/compute/kinematics/
   watch_paths: [embodichain/lab/sim/motion/solvers/, embodichain/lab/sim/utility/solver_utils.py, embodichain/compute/kinematics/,
-    tests/sim/motion/solvers/, tests/compute/]
+    tests/sim/motion/solvers/, tests/compute/test_imports.py]
   related_topics: [simulation-system, robot-system, motion-planning]
   status: active
 - id: robot-system

@@ -127,7 +127,7 @@ behavior:
 |---|---|
 | `.github/workflows/**` only | `actionlint` on changed workflows; run related script tests only when workflow scripts changed |
 | Human-facing docs content only | Relevant Sphinx build or docs-specific tests |
-| `agent_context/**` or its routing helper | Run `context.py check` and `tests/test_agent_context_{map,tools}.py`; exercise representative routes when routing changes |
+| `agent_context/**` or its routing helper | Run `context.py check` and `tests/test_agent_context_{map,tools}.py`; use advisory `stats --base REF` and representative overview-to-owner lookups when restructuring; exercise representative routes when routing changes |
 | `.agents/skills/**` and thin adapters | Run `quick_validate.py` for each changed canonical skill; compile/run any bundled scripts |
 | Task Program components/deployments | Run the `$add-task-program` static deployment inspector plus the closest configured-integration/package-data tests |
 | Other packaged JSON/YAML | Parse through the production loader and run the closest config/layout tests |
