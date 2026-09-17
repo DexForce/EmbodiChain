@@ -4023,7 +4023,9 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
         *,
         obj_longest_axis: torch.Tensor,
         is_positive_part: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        context: PlanningContext,
+        sample_key: str,
+    ) -> AffordanceSample:
         del sampled_affordance, approach_direction, grasp_target_id, obj_longest_axis
         grasp_pose = sampled_object_pose.clone()
         if bool(is_positive_part[0].item()):
@@ -4034,7 +4036,11 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
             grasp_pose[:, :3, :3] = torch.tensor(
                 [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
             )
-        return grasp_pose, torch.ones(NUM_ENVS, dtype=torch.bool)
+        return AffordanceSample(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            poses=grasp_pose,
+            metadata={"key": sample_key},
+        )
 
     action._resolve_grasp = Mock(side_effect=resolve_grasp)
 
@@ -4166,7 +4172,9 @@ def test_handover_horizontal_mode_uses_downward_opposite_end_grasps() -> None:
         *,
         obj_longest_axis: torch.Tensor,
         is_positive_part: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        context: PlanningContext,
+        sample_key: str,
+    ) -> AffordanceSample:
         del (
             affordance,
             approach_direction,
@@ -4174,7 +4182,11 @@ def test_handover_horizontal_mode_uses_downward_opposite_end_grasps() -> None:
             obj_longest_axis,
             is_positive_part,
         )
-        return sampled_object_pose.clone(), torch.ones(NUM_ENVS, dtype=torch.bool)
+        return AffordanceSample(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            poses=sampled_object_pose,
+            metadata={"key": sample_key},
+        )
 
     action._resolve_grasp = Mock(side_effect=resolve_grasp)
     invocation = ActionInvocation(
@@ -4277,7 +4289,9 @@ def test_handover_reports_failed_semantic_waypoint(
         *,
         obj_longest_axis: torch.Tensor,
         is_positive_part: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        context: PlanningContext,
+        sample_key: str,
+    ) -> AffordanceSample:
         nonlocal grasp_call_count
         del (
             affordance,
@@ -4290,7 +4304,9 @@ def test_handover_reports_failed_semantic_waypoint(
         success = torch.ones(NUM_ENVS, dtype=torch.bool)
         if grasp_call_count == 2:
             success[0] = False
-        return sampled_object_pose.clone(), success
+        return AffordanceSample(
+            success=success, poses=sampled_object_pose, metadata={"key": sample_key}
+        )
 
     warnings: list[str] = []
     action._resolve_grasp = Mock(side_effect=resolve_grasp)
@@ -4377,6 +4393,132 @@ def test_handover_reports_path_failure_between_reachable_waypoints(
         and "pickup_grasp" in warning
         and "env_ids=[0]" in warning
         for warning in warnings
+    )
+
+
+@pytest.mark.parametrize("object_x", ((-0.8, -0.8), (0.8, 0.8), (-0.8, 0.8)))
+@pytest.mark.parametrize("sampling_enabled", (False, True))
+def test_handover_samples_both_grasps_and_selects_active_arm_metadata(
+    object_x: tuple[float, float], sampling_enabled: bool
+) -> None:
+    action = _bind_action(_dual_motion_generator(), HandOver())
+    semantics, _ = _handover_semantics()
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    object_pose[:, 0, 3] = torch.tensor(object_x)
+    object_pose[:, 1, 3] = 0.2
+    object_pose[:, 2, 3] = 0.5
+    grasp_offset = 0.02
+
+    def candidates(
+        *, obj_poses: torch.Tensor, is_positive_part: torch.Tensor, **_: object
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        rows = []
+        for row, pose in enumerate(obj_poses):
+            poses = pose.repeat(3, 1, 1)
+            # A lower-cost but nonfinite pose must never displace a legal grasp.
+            poses[0, 0, 3] = torch.nan
+            poses[2, 1, 3] += grasp_offset
+            poses[:, 2, 3] += 0.04 if is_positive_part[row] else -0.04
+            rows.append((poses, torch.tensor([-1.0, 0.0, 0.1])))
+        return rows
+
+    service = _GRASP_GENERATORS[id(action)]
+    service.get_valid_grasp_poses = Mock(side_effect=candidates)
+    invocation = ActionInvocation(
+        skill_id="hand_over",
+        invocation_id="transfer",
+        goal=HandOverGoal(semantics, target_pose=torch.eye(4)),
+        binding=_dual_binding(action, "source", "destination"),
+        motion_policy=MotionPolicy(sample_count=24),
+        skill_options=HandOverOptions(hand_interp_steps=2),
+    )
+    sampling = (
+        AffordanceSamplingContext(count=NUM_ENVS, seed=7, attempt_id=2)
+        if sampling_enabled
+        else None
+    )
+    context = replace(_handover_context(object_pose), affordance_sampling=sampling)
+    plan = _plan_action(action, invocation, context)
+
+    assert plan.plan_success.all()
+    metadata = plan.diagnostics.metadata["affordance_sample"]
+    expected_ids = [1, 2] if sampling_enabled else [1, 1]
+    pickup_parts = ["left_arm" if x < 0 else "right_arm" for x in object_x]
+    receive_parts = ["right_arm" if x < 0 else "left_arm" for x in object_x]
+    for name, parts in (
+        ("pickup_grasp", pickup_parts),
+        ("receive_grasp", receive_parts),
+    ):
+        sample = metadata[name]
+        assert sample["key"] == f"transfer:{name}"
+        assert sample["sampling"] == (None if sampling is None else sampling.metadata())
+        assert sample["candidate_ids"] == expected_ids
+        assert sample["valid_candidate_counts"] == [2, 2]
+        assert sample["reused"] == [False, False]
+        assert sample["control_parts"] == parts
+
+    # The selected candidates also reach the plan's actual held-object frames.
+    expected_offsets = torch.tensor([0.0, grasp_offset if sampling_enabled else 0.0])
+    for arm in ("left_arm", "right_arm"):
+        held = plan.effect_candidates.held_object_updates[arm]
+        assert held is not None
+        torch.testing.assert_close(held.object_to_eef[:, 1, 3], expected_offsets)
+
+    calls = service.get_valid_grasp_poses.call_args_list
+    assert len(calls) == (4 if object_x[0] != object_x[1] else 2)
+    for pickup_call, receive_call in zip(calls[::2], calls[1::2]):
+        torch.testing.assert_close(
+            pickup_call.kwargs["obj_longest_axis"],
+            receive_call.kwargs["obj_longest_axis"],
+        )
+        assert torch.equal(
+            pickup_call.kwargs["is_positive_part"],
+            ~receive_call.kwargs["is_positive_part"],
+        )
+
+    repeated = _plan_action(action, invocation, context)
+    assert repeated.diagnostics.metadata["affordance_sample"] == metadata
+
+
+@pytest.mark.parametrize("empty_row", (False, True))
+def test_handover_sampling_preserves_failed_rows_and_reports_reuse(
+    empty_row: bool,
+) -> None:
+    action = _bind_action(_dual_motion_generator(), HandOver())
+    semantics, _ = _handover_semantics()
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    object_pose[:, :3, 3] = torch.tensor([-0.8, 0.2, 0.5])
+    invalid = (
+        (torch.empty(0, 4, 4), torch.empty(0))
+        if empty_row
+        else (torch.eye(4).unsqueeze(0), torch.tensor([torch.inf]))
+    )
+    _GRASP_GENERATORS[id(action)].get_valid_grasp_poses = Mock(
+        return_value=[invalid, (object_pose[1:2], torch.zeros(1))]
+    )
+    invocation = ActionInvocation(
+        skill_id="hand_over",
+        goal=HandOverGoal(semantics, target_pose=torch.eye(4)),
+        binding=_dual_binding(action, "source", "destination"),
+        motion_policy=MotionPolicy(sample_count=24),
+        skill_options=HandOverOptions(hand_interp_steps=2),
+    )
+    context = replace(
+        _handover_context(object_pose),
+        affordance_sampling=AffordanceSamplingContext(count=NUM_ENVS, seed=7),
+    )
+
+    plan = _plan_action(action, invocation, context)
+
+    assert plan.plan_success.tolist() == [False, True]
+    for sample in plan.diagnostics.metadata["affordance_sample"].values():
+        assert sample["candidate_ids"] == [-1, 0]
+        assert sample["valid_candidate_counts"] == [0, 1]
+        assert sample["unique_candidate_counts"] == [0, 1]
+        assert sample["reused"] == [False, True]
+    torch.testing.assert_close(
+        _joint_trajectory(plan).positions[0],
+        context.robot.qpos[0].expand(24, -1),
     )
 
 

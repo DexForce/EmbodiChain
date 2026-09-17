@@ -29,8 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    ActionPlan,
-    AffordanceSamplingContext,
     ControlPartCommandProfile,
     create_simulation_atomic_action_engine,
     GraspGoal,
@@ -44,6 +42,7 @@ from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_tutorial_robot,
     clone_local_pose_from_first_env,
+    create_affordance_sampling_context,
     create_antipodal_semantics,
     create_curobo_motion_generator,
     create_parallel_jaw_grasp_pose_generator,
@@ -53,7 +52,9 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     draw_axis_marker,
     get_hand_open_close_qpos,
     initialize_pre_pick_robot_pose,
+    log_affordance_branch_diagnostics,
     make_clear_dynamics_callback,
+    parse_affordance_sampling_arguments,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
@@ -75,81 +76,13 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the PickUp tutorial."""
     parser = create_tutorial_argument_parser(
         "Demonstrate PickUp on a cube.",
-        features=("grasp_sampling", "visualize_axes"),
+        features=("affordance_sampling", "grasp_sampling", "visualize_axes"),
     )
     parser.add_argument(
         "--approach", choices=[*APPROACH_DIRECTIONS, "custom"], default="top"
     )
     parser.add_argument("--custom_approach_direction", type=float, nargs=3)
-    parser.add_argument(
-        "--affordance_branches",
-        type=int,
-        default=None,
-        help=(
-            "Number of reproducible Affordance branches and simulation rows; "
-            "defaults to --num_envs."
-        ),
-    )
-    parser.add_argument(
-        "--sampling_seed",
-        type=int,
-        default=0,
-        help="Base seed for Affordance sampling streams.",
-    )
-    parser.add_argument(
-        "--sampling_attempt",
-        type=int,
-        default=0,
-        help="Explicit resampling-attempt identity.",
-    )
-    args = parser.parse_args()
-    if args.affordance_branches is None:
-        args.affordance_branches = args.num_envs
-    if args.affordance_branches < 1:
-        parser.error("--affordance_branches must be positive.")
-    if args.sampling_seed < 0:
-        parser.error("--sampling_seed must be non-negative.")
-    if args.sampling_attempt < 0:
-        parser.error("--sampling_attempt must be non-negative.")
-    if args.num_envs not in (1, args.affordance_branches):
-        parser.error(
-            "--num_envs must be omitted or match --affordance_branches in the "
-            "PickUp sampling tutorial."
-        )
-    args.num_envs = args.affordance_branches
-    return args
-
-
-def create_affordance_sampling_context(
-    args: argparse.Namespace,
-) -> AffordanceSamplingContext | None:
-    """Build tutorial sampling identity without owning mutable sampler state."""
-    if args.affordance_branches == 1:
-        return None
-    return AffordanceSamplingContext(
-        count=args.affordance_branches,
-        seed=args.sampling_seed,
-        attempt_id=args.sampling_attempt,
-    )
-
-
-def log_affordance_branch_diagnostics(plan: ActionPlan) -> None:
-    """Log the selected candidate and reuse status for each simulation row."""
-    metadata = plan.diagnostics.metadata.get("affordance_sample", {})
-    if not isinstance(metadata, dict):
-        return
-    grasp = metadata.get("grasp", {})
-    if not isinstance(grasp, dict):
-        return
-    candidate_ids = grasp.get("candidate_ids")
-    reused = grasp.get("reused")
-    if not isinstance(candidate_ids, list) or not isinstance(reused, list):
-        return
-    for row, (candidate_id, is_reused) in enumerate(zip(candidate_ids, reused)):
-        logger.log_info(
-            f"Affordance branch {row}: success={bool(plan.plan_success[row])}, "
-            f"candidate_id={candidate_id}, reused={is_reused}."
-        )
+    return parse_affordance_sampling_arguments(parser)
 
 
 def create_pick_object(sim) -> RigidObject:
