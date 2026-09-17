@@ -48,6 +48,8 @@ from scripts.tutorials.atomic_action.scenario_utils import (
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
     TutorialRobot,
+    clone_local_pose_from_first_env,
+    create_affordance_sampling_context,
     create_antipodal_semantics,
     create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
@@ -55,7 +57,8 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     get_hand_open_close_qpos,
-    clone_local_pose_from_first_env,
+    log_affordance_branch_diagnostics,
+    parse_affordance_sampling_arguments,
     prepare_tutorial_scene,
     publish_tutorial_scene,
     replay_trajectory,
@@ -104,7 +107,12 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the demo."""
     parser = create_tutorial_argument_parser(
         "Dual-arm handover demo",
-        features=("diagnose_plan", "headless_play"),
+        features=(
+            "affordance_sampling",
+            "grasp_sampling",
+            "diagnose_plan",
+            "headless_play",
+        ),
         default_device="cpu",
         default_renderer="hybrid",
     )
@@ -113,7 +121,7 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Use the horizontal WaterBasin object instead of the vertical soda can.",
     )
-    return parser.parse_args()
+    return parse_affordance_sampling_arguments(parser)
 
 
 def create_dual_robot(
@@ -220,8 +228,8 @@ def run_handover_demo(
         hand_interp_steps=HANDOVER_HAND_INTERP_STEPS,
     )
     grasp_pose_generator = create_parallel_jaw_grasp_pose_generator(
-        n_sample=10_000,
-        force_refresh=False,
+        n_sample=args.n_sample,
+        force_refresh=args.force_reannotate,
     )
     engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
@@ -269,8 +277,12 @@ def run_handover_demo(
                 skill_options=handover_options,
             ),
         ),
-        engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        engine.initial_context(
+            control_dt=sim.sim_config.physics_dt,
+            affordance_sampling=create_affordance_sampling_context(args),
+        ),
     )
+    log_affordance_branch_diagnostics(compiled.action_plans[0])
     success = compiled.plan_success
     traj = compiled.trajectory.positions
 
