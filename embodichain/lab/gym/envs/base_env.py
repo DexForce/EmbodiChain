@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import zlib
+
 import math
 from collections.abc import Mapping
 from numbers import Integral, Real
@@ -595,8 +597,19 @@ class BaseEnv(gym.Env):
         pass
 
     def _advance_physics(self) -> None:
-        """Advance one control interval; tasks may sample physics substeps here."""
-        self.sim.update(self.physics_dt, self.cfg.sim_steps_per_control)
+        """Advance physics and sample opted-in sensors after each substep."""
+        sensors = [
+            sensor for sensor in self.sensors.values() if sensor.requires_substep_update
+        ]
+        if not sensors:
+            self.sim.update(self.physics_dt, self.cfg.sim_steps_per_control)
+            return
+        for sensor in sensors:
+            sensor.begin_control_step()
+        for _ in range(self.cfg.sim_steps_per_control):
+            self.sim.update(self.physics_dt, 1)
+            for sensor in sensors:
+                sensor.update_physics_step(self.physics_dt)
 
     def _update_sim_state(self, **kwargs):
         """Update the simulation state at each step.
@@ -902,6 +915,9 @@ class BaseEnv(gym.Env):
                     env_ids=reset_ids, excluded_uids=self._detached_uids_for_reset
                 )
 
+            for sensor in self.sensors.values():
+                sensor.reset(env_ids=reset_ids)
+
             # Reset hook for user to perform any custom reset logic.
             with self._profiler.section("initialize_episode"):
                 self._initialize_episode(reset_ids, **options)
@@ -917,6 +933,30 @@ class BaseEnv(gym.Env):
 
         return obs, info
 
+    @staticmethod
+    def _component_seed(name: str, seed: int) -> int:
+        return (seed + zlib.crc32(name.encode("utf-8"))) % (2**63 - 1)
+
+    def get_generator(self, name: str) -> torch.Generator:
+        """Return a named component RNG rewound by explicit reset seeds.
+
+        Each name has its own stream on the environment device. Ordinary
+        selective resets consume the existing stream without rewinding it.
+
+        Args:
+            name: Stable name identifying the owning component.
+
+        Returns:
+            Persistent Torch generator for this component.
+        """
+        if not hasattr(self, "_component_generators"):
+            self._component_generators: dict[str, torch.Generator] = {}
+        if name not in self._component_generators:
+            generator = torch.Generator(device=self.device)
+            generator.manual_seed(self._component_seed(name, self.cfg.seed or 0))
+            self._component_generators[name] = generator
+        return self._component_generators[name]
+
     def _set_seed(self, seed: int) -> int:
         """Set the effective environment seed and rewind seeded managers."""
         cudnn_benchmark = torch.backends.cudnn.benchmark
@@ -929,6 +969,8 @@ class BaseEnv(gym.Env):
             torch.backends.cudnn.benchmark = cudnn_benchmark
             torch.backends.cudnn.deterministic = cudnn_deterministic
         self.cfg.seed = effective_seed
+        for name, generator in getattr(self, "_component_generators", {}).items():
+            generator.manual_seed(self._component_seed(name, effective_seed))
         event_manager = getattr(self, "event_manager", None)
         if event_manager is not None:
             event_manager.set_seed(effective_seed)

@@ -53,6 +53,7 @@ class ANYmalCState:
     episode_step: torch.Tensor
     root_height: torch.Tensor
     foot_air_time: torch.Tensor
+    last_foot_air_time: torch.Tensor
     first_foot_contact: torch.Tensor
     illegal_contact_force_by_body: torch.Tensor
 
@@ -144,7 +145,7 @@ def _reward_terms(
     ).to(state.joint_pos.dtype)
     moving = torch.linalg.vector_norm(state.command[:, :2], dim=-1) > 0.1
     air_time = (
-        (state.foot_air_time - float(rewards["feet_air_time"]["threshold"]))
+        (state.last_foot_air_time - float(rewards["feet_air_time"]["threshold"]))
         * state.first_foot_contact
     ).sum(dim=-1) * moving
     return {

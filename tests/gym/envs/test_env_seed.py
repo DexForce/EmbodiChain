@@ -117,3 +117,20 @@ def test_reset_publishes_episode_state_before_visual_observation() -> None:
         "capture",
         "get_obs",
     ]
+
+
+def test_named_component_stream_rewinds_on_explicit_seed_and_is_independent():
+    env = _ResetEnv()
+    command = env.get_generator("commands")
+    noise = env.get_generator("noise")
+    env.reset(seed=42)
+    first = torch.rand(6, generator=command)
+    torch.rand(17, generator=noise)
+    env.reset(seed=42)
+    assert env.get_generator("commands") is command
+    assert torch.equal(first, torch.rand(6, generator=command))
+    env.reset()
+    continued = torch.rand(6, generator=command)
+    env.reset(seed=42)
+    torch.rand(6, generator=command)
+    assert torch.equal(continued, torch.rand(6, generator=command))

@@ -146,3 +146,16 @@ device, not assumed to share `env.device`.
 | Deprecated warning on `randomize_rigid_object_body_scale` | Migrate to `randomize_rigid_object_scale` with `scale_factor_range` parameter |
 | Pose randomization leaves residual velocity | `clear_dynamics()` is called, but if `physics_update_step` is not set, objects may still drift on next step |
 | `env_ids` is `None` at `interval` mode | `_normalize_env_ids` converts `None` to `torch.arange(env.num_envs)` — this is safe |
+
+### Component-owned Torch streams
+
+`BaseEnv.get_generator(name)` returns a persistent device-local generator for
+a named component. Explicit `reset(seed=...)` rewinds every registered stream;
+ordinary selective reset preserves stream progress. Streams are independent by
+component name, not by environment row. EventManager retains its existing scoped
+RNG contract, and environment reset now invokes stateful event reset before
+reset-mode events. Per-row interval counters reset only for selected rows.
+
+`push_articulation_by_setting_velocity` lives in `managers/randomization/physics.py`.
+It adds sampled disturbances to the selected articulation's root velocity and
+maintains independently sampled per-row timers through EventManager reset.

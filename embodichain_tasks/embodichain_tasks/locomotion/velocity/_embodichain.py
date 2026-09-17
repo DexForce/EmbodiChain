@@ -34,54 +34,6 @@ from .._robot import apply_task_joint_drive_properties
 __all__ = ["EmbodiChainVelocityEnv"]
 
 
-def _aggregate_contacts(
-    user_ids: torch.Tensor,
-    valid: torch.Tensor,
-    normal: torch.Tensor,
-    tangential_impulse: torch.Tensor,
-    normal_impulse: torch.Tensor,
-    target_user_ids: torch.Tensor,
-    physics_dt: float,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Aggregate signed contact force for selected articulation links."""
-    impulse = normal * normal_impulse.unsqueeze(-1) + tangential_impulse
-    force = impulse / physics_dt
-    actor0 = user_ids[:, :, 0].unsqueeze(-1) == target_user_ids.unsqueeze(1)
-    actor1 = user_ids[:, :, 1].unsqueeze(-1) == target_user_ids.unsqueeze(1)
-    matches = valid.unsqueeze(-1) & (actor0 | actor1)
-    sign = actor1.to(force.dtype) - actor0.to(force.dtype)
-    selected_force = (
-        force.unsqueeze(2) * sign.unsqueeze(-1) * valid[:, :, None, None]
-    ).sum(dim=1)
-    return matches.any(dim=1), selected_force
-
-
-def _count_self_collisions(
-    user_ids: torch.Tensor,
-    valid: torch.Tensor,
-    normal: torch.Tensor,
-    tangential_impulse: torch.Tensor,
-    normal_impulse: torch.Tensor,
-    robot_user_ids: torch.Tensor,
-    force_threshold: float,
-    physics_dt: float,
-) -> torch.Tensor:
-    """Mark environments with a force-qualified articulation self-contact."""
-    actor0_is_robot = (
-        user_ids[:, :, 0].unsqueeze(-1) == robot_user_ids.unsqueeze(1)
-    ).any(dim=-1)
-    actor1_is_robot = (
-        user_ids[:, :, 1].unsqueeze(-1) == robot_user_ids.unsqueeze(1)
-    ).any(dim=-1)
-    impulse = normal * normal_impulse.unsqueeze(-1) + tangential_impulse
-    force = torch.linalg.vector_norm(impulse, dim=-1) / physics_dt
-    return (
-        (valid & actor0_is_robot & actor1_is_robot & (force > force_threshold))
-        .any(dim=-1)
-        .to(dtype=torch.float32)
-    )
-
-
 def _site_velocity_b(
     link_pose: torch.Tensor,
     link_velocity: torch.Tensor,
@@ -128,6 +80,19 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
     def __init__(self, cfg: EmbodiedEnvCfg | None = None, **kwargs) -> None:
         cfg = EmbodiedEnvCfg() if cfg is None else cfg
         if cfg.robot is not MISSING and self.velocity_task_config is not None:
+            term_cfg = (
+                cfg.actions.get("joint_position")
+                if isinstance(cfg.actions, dict)
+                else getattr(cfg.actions, "joint_position", None)
+            )
+            if term_cfg is not None:
+                mapping = {
+                    "joint_names": self.velocity_task_config.joint_names,
+                    "offset": self.velocity_task_config.default_joint_position,
+                    "scale": self.velocity_task_config.action_scale,
+                }
+                for name, value in mapping.items():
+                    term_cfg.params.setdefault(name, value)
             apply_task_joint_drive_properties(cfg.robot, self.velocity_task_config)
             if self.explicit_pd_effort_control:
                 cfg.robot.joint_drive_props.stiffness = 0.0
@@ -191,33 +156,28 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             device=self.device,
         )
         sensor = self.get_sensor("locomotion_contacts")
-        actor_ids = {}
-        for actor_id in sensor.item_user_ids.cpu().tolist():
-            info = sensor.get_actor_info(actor_id)
-            actor_ids[info.env_id, info.link_name] = actor_id
-
-        def contact_ids(names: Sequence[str]) -> torch.Tensor:
-            return torch.tensor(
-                [
-                    [actor_ids[env_id, name] for name in names]
-                    for env_id in range(self.num_envs)
-                ],
-                dtype=torch.int32,
-                device=self.device,
-            ).reshape(self.num_envs, len(names))
-
-        self._foot_user_ids = contact_ids(self.foot_link_names)
-        self._illegal_contact_user_ids = contact_ids(self.illegal_contact_link_names)
-        self._robot_user_ids = contact_ids(
-            tuple(name for name in self.robot.link_names if (0, name) in actor_ids)
+        robot_ids = sensor.get_actor_ids(self.robot.uid, self.robot.link_names)
+        self._foot_contacts = sensor.create_history(
+            "feet",
+            sensor.get_actor_ids(self.robot.uid, self.foot_link_names),
+            counterpart_ids=sensor.get_actor_ids("default_plane"),
+            # These flat scenes have only one static contact surface. The query
+            # can omit static counterpart identities, represented by -1.
+            include_unknown_counterpart=True,
         )
-
-        seed = int(self.cfg.seed if self.cfg.seed is not None else 0)
-        self._locomotion_generator = torch.Generator(device=self.device)
-        self._locomotion_generator.manual_seed(seed)
+        self._illegal_contacts = sensor.create_history(
+            "illegal",
+            sensor.get_actor_ids(self.robot.uid, self.illegal_contact_link_names),
+        )
+        self._self_contacts = sensor.create_history(
+            "self",
+            robot_ids,
+            counterpart_ids=robot_ids,
+            force_threshold=sensor.cfg.self_collision_force_threshold or 0.0,
+        )
+        self._locomotion_generator = self.get_generator("locomotion.commands_and_noise")
         action_shape = (self.num_envs, config.action_dim)
         foot_shape = (self.num_envs, len(self.foot_link_names))
-        illegal_shape = (self.num_envs, len(self.illegal_contact_link_names))
         self.command = torch.zeros((self.num_envs, 3), device=self.device)
         self.reward_command = torch.zeros_like(self.command)
         self._heading_target = torch.zeros(self.num_envs, device=self.device)
@@ -231,16 +191,17 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         self._command_steps_remaining = torch.zeros(
             self.num_envs, dtype=torch.long, device=self.device
         )
-        self.locomotion_action = torch.zeros(action_shape, device=self.device)
-        self.last_locomotion_action = torch.zeros_like(self.locomotion_action)
-        self.encoder_bias = torch.zeros_like(self.locomotion_action)
+        action_term = self.action_manager.get_term("joint_position")
+        self.locomotion_action = action_term.action
+        self.last_locomotion_action = action_term.previous_action
+        self.encoder_bias = action_term.position_bias
         bias = config.data.get("events", {}).get("encoder_bias")
         if bias is not None:
             minimum, maximum = bias["params"]["bias_range"]
             self.encoder_bias.uniform_(
                 float(minimum),
                 float(maximum),
-                generator=self._locomotion_generator,
+                generator=self.get_generator("locomotion.encoder_bias"),
             )
         self._episode_step = torch.zeros(
             self.num_envs, dtype=torch.long, device=self.device
@@ -255,25 +216,9 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             (self.num_envs, 3), device=self.device
         )
         self._filtered_base_ang_vel_b = torch.zeros_like(self._filtered_base_lin_vel_b)
-        self._foot_air_time = torch.zeros(foot_shape, device=self.device)
-        self._last_foot_contact = torch.zeros(
-            foot_shape, dtype=torch.bool, device=self.device
-        )
-        self._first_foot_contact = torch.zeros_like(
-            self._foot_air_time, dtype=torch.float32
-        )
-        self._contact_history_step = torch.zeros(
-            self.num_envs, dtype=torch.long, device=self.device
-        )
         self._foot_peak_height = torch.zeros(foot_shape, device=self.device)
-        self._substep_illegal_contact_force = torch.zeros(
-            illegal_shape, device=self.device
-        )
-        self._substep_self_collision_count = torch.zeros(
-            self.num_envs, device=self.device
-        )
-        self._last_illegal_contact_force_by_body = torch.zeros(
-            illegal_shape, device=self.device
+        self._foot_swing_height_cost = torch.zeros(
+            self.num_envs, len(self.foot_link_names), device=self.device
         )
         self._global_control_step = 0
         self._state_cache: Any | None = None
@@ -291,11 +236,6 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             shape=(config.action_dim,),
             dtype=np.float32,
         )
-
-    def record_locomotion_action(self, action: torch.Tensor) -> None:
-        """Record policy actions before converting them to joint targets."""
-        self.last_locomotion_action.copy_(self.locomotion_action)
-        self.locomotion_action.copy_(action)
 
     def velocity_command_bounds(self) -> tuple[np.ndarray, np.ndarray]:
         """Return configured planar and yaw command bounds in SI units."""
@@ -520,6 +460,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         )
         self._filtered_base_lin_vel_b.lerp_(base_lin_vel_b, filter_weight)
         self._filtered_base_ang_vel_b.lerp_(base_ang_vel_b, filter_weight)
+        self._update_foot_swing_height()
         self._episode_step += 1
         self._global_control_step += 1
         self._gait_process.add_(self.step_dt * self._gait_frequency).remainder_(1.0)
@@ -588,8 +529,6 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             env_ids=ids,
             target=True,
         )
-        self.locomotion_action[ids] = 0.0
-        self.last_locomotion_action[ids] = 0.0
         self._episode_step[ids] = 0
         self._previous_joint_velocity[ids] = 0.0
         self._joint_acceleration[ids] = 0.0
@@ -597,14 +536,8 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         self._root_acceleration_w[ids] = 0.0
         self._filtered_base_lin_vel_b[ids] = 0.0
         self._filtered_base_ang_vel_b[ids] = 0.0
-        self._foot_air_time[ids] = 0.0
-        self._last_foot_contact[ids] = False
-        self._first_foot_contact[ids] = 0.0
-        self._contact_history_step[ids] = 0
         self._foot_peak_height[ids] = 0.0
-        self._substep_illegal_contact_force[ids] = 0.0
-        self._substep_self_collision_count[ids] = 0.0
-        self._last_illegal_contact_force_by_body[ids] = 0.0
+        self._foot_swing_height_cost[ids] = 0.0
         self._resample_commands(ids)
         self._update_heading_commands()
         self.reward_command[ids] = self.command[ids]
@@ -613,122 +546,6 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
     def _invalidate_task_cache(self) -> None:
         self._state_cache = None
         self._reward_cache = None
-
-    def _read_contacts(
-        self,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        sensor = self.get_sensor("locomotion_contacts")
-        if getattr(sensor, "supports_body_contact_reduction", False):
-            foot_contact = sensor.get_body_contact_found(
-                self._foot_user_ids, ground_only=True
-            )
-            foot_force = sensor.get_body_contact_force(
-                self._foot_user_ids, ground_only=True
-            )
-            illegal_force_by_body = sensor.get_body_contact_force(
-                self._illegal_contact_user_ids, peak=True
-            )
-            self._last_illegal_contact_force_by_body.copy_(illegal_force_by_body)
-            return foot_contact, foot_force, illegal_force_by_body
-
-        contact = sensor.get_data()
-        args = (
-            contact["user_ids"],
-            contact["is_valid"],
-            contact["normal"],
-            contact["friction"],
-            contact["impulse"],
-        )
-        foot_contact, foot_force = _aggregate_contacts(
-            *args,
-            self._foot_user_ids,
-            self.physics_dt,
-        )
-        _, illegal_force = _aggregate_contacts(
-            *args,
-            self._illegal_contact_user_ids,
-            self.physics_dt,
-        )
-        illegal_force_by_body = torch.linalg.vector_norm(illegal_force, dim=-1)
-        illegal_force_by_body = torch.maximum(
-            illegal_force_by_body, self._substep_illegal_contact_force
-        )
-        self._last_illegal_contact_force_by_body.copy_(illegal_force_by_body)
-        return foot_contact, foot_force, illegal_force_by_body
-
-    def _advance_physics(self) -> None:
-        """Collect contacts after each substep of the control interval."""
-        sensor = self.get_sensor("locomotion_contacts")
-        if not sensor.cfg.track_substeps:
-            super()._advance_physics()
-            return
-        for substep_index in range(self.cfg.sim_steps_per_control):
-            self.sim.update(self.physics_dt, 1)
-            self._capture_contact_substep(substep_index)
-
-    def _capture_contact_substep(self, substep_index: int) -> None:
-        sensor = self.get_sensor("locomotion_contacts")
-        if getattr(sensor, "supports_body_contact_reduction", False):
-            if substep_index == 0:
-                sensor.begin_contact_history()
-            sensor.update_body_contacts()
-            return
-
-        if substep_index == 0:
-            self._substep_illegal_contact_force.zero_()
-            self._substep_self_collision_count.zero_()
-        sensor.update()
-        contact = sensor.get_data()
-        _, illegal_force = _aggregate_contacts(
-            contact["user_ids"],
-            contact["is_valid"],
-            contact["normal"],
-            contact["friction"],
-            contact["impulse"],
-            self._illegal_contact_user_ids,
-            self.physics_dt,
-        )
-        torch.maximum(
-            self._substep_illegal_contact_force,
-            torch.linalg.vector_norm(illegal_force, dim=-1),
-            out=self._substep_illegal_contact_force,
-        )
-        threshold = sensor.cfg.self_collision_force_threshold
-        if threshold is not None:
-            self_collision_count = _count_self_collisions(
-                contact["user_ids"],
-                contact["is_valid"],
-                contact["normal"],
-                contact["friction"],
-                contact["impulse"],
-                self._robot_user_ids,
-                threshold,
-                self.physics_dt,
-            )
-            self._substep_self_collision_count.add_(self_collision_count)
-
-    def _read_self_collision_count(self) -> torch.Tensor:
-        sensor = self.get_sensor("locomotion_contacts")
-        if getattr(sensor, "supports_self_collision_reduction", False):
-            return sensor.get_self_collision_count()
-        return self._substep_self_collision_count
-
-    def _advance_contact_history(self, foot_contact: torch.Tensor) -> None:
-        advance = self._episode_step > self._contact_history_step
-        self._first_foot_contact.zero_()
-        if not advance.any():
-            return
-        first = foot_contact & ~self._last_foot_contact
-        self._first_foot_contact[advance] = first[advance].to(
-            self._first_foot_contact.dtype
-        )
-        self._foot_air_time[advance] = torch.where(
-            foot_contact[advance],
-            torch.zeros_like(self._foot_air_time[advance]),
-            self._foot_air_time[advance] + self.step_dt,
-        )
-        self._last_foot_contact[advance] = foot_contact[advance]
-        self._contact_history_step[advance] = self._episode_step[advance]
 
     def _orbital_angular_momentum(
         self,
@@ -747,6 +564,38 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         )
         return torch.cross(relative_position, linear_momentum, dim=-1).sum(dim=1)
 
+    def _update_foot_swing_height(self) -> None:
+        """Advance task-specific swing-height state once per control step."""
+        pose = self.robot.body_data.body_link_pose[:, self.foot_link_ids]
+        offset = self._foot_offsets.unsqueeze(0).expand(self.num_envs, -1, -1)
+        foot_position = pose[:, :, :3] + quat_apply(pose[:, :, 3:7], offset)
+        foot_contact = self._foot_contacts.found
+        first_foot_contact = self._foot_contacts.first_contact.to(foot_position.dtype)
+        self._foot_peak_height.copy_(
+            torch.where(
+                ~foot_contact,
+                torch.maximum(self._foot_peak_height, foot_position[:, :, 2]),
+                self._foot_peak_height,
+            )
+        )
+        target_height = float(
+            self.velocity_task_config.data.get("rewards", {})
+            .get("foot_swing_height", {})
+            .get("params", {})
+            .get("target_height", 1.0)
+        )
+        self._foot_swing_height_cost.copy_(
+            torch.square(self._foot_peak_height / target_height - 1.0)
+            * first_foot_contact
+        )
+        self._foot_peak_height.copy_(
+            torch.where(
+                first_foot_contact.bool(),
+                torch.zeros_like(self._foot_peak_height),
+                self._foot_peak_height,
+            )
+        )
+
     def _common_state(self) -> dict[str, torch.Tensor]:
         root_pose = self.robot.body_data.root_pose
         root_quaternion = root_pose[:, 3:7]
@@ -764,32 +613,10 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         foot_velocity = selected_velocity[:, :, :3] + torch.cross(
             selected_velocity[:, :, 3:], world_offset, dim=-1
         )
-        foot_contact, foot_force, illegal_force_by_body = self._read_contacts()
-        self._advance_contact_history(foot_contact)
-        self._foot_peak_height.copy_(
-            torch.where(
-                ~foot_contact,
-                torch.maximum(self._foot_peak_height, foot_position[:, :, 2]),
-                self._foot_peak_height,
-            )
-        )
-        target_height = float(
-            self.velocity_task_config.data.get("rewards", {})
-            .get("foot_swing_height", {})
-            .get("params", {})
-            .get("target_height", 1.0)
-        )
-        foot_swing_height_cost = (
-            torch.square(self._foot_peak_height / target_height - 1.0)
-            * self._first_foot_contact
-        )
-        self._foot_peak_height.copy_(
-            torch.where(
-                self._first_foot_contact.bool(),
-                torch.zeros_like(self._foot_peak_height),
-                self._foot_peak_height,
-            )
-        )
+        foot_contact = self._foot_contacts.found
+        foot_force = self._foot_contacts.peak_force
+        illegal_force_by_body = self._illegal_contacts.peak_force.norm(dim=-1)
+        first_foot_contact = self._foot_contacts.first_contact.to(foot_force.dtype)
         limits = self.robot.body_data.qpos_limits[0, self.policy_joint_ids]
         limit_factor = float(
             self.velocity_task_config.data["robot"].get(
@@ -834,8 +661,9 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             "foot_vel_w": foot_velocity,
             "foot_contact": foot_contact,
             "foot_force_w": foot_force,
-            "foot_air_time": self._foot_air_time,
-            "first_foot_contact": self._first_foot_contact,
+            "foot_air_time": self._foot_contacts.current_air_time,
+            "last_foot_air_time": self._foot_contacts.last_air_time,
+            "first_foot_contact": first_foot_contact,
             "soft_joint_lower": (midpoint - half_range).unsqueeze(0),
             "soft_joint_upper": (midpoint + half_range).unsqueeze(0),
             "reward_body_ang_vel_w": orientation_velocity[:, 3:],
@@ -851,9 +679,9 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             "orientation_projected_gravity_b": quat_apply_inverse(
                 orientation_pose[:, 3:7], gravity_w
             ),
-            "self_collision_count": self._read_self_collision_count(),
+            "self_collision_count": self._self_contacts.contact_count,
             "encoder_bias": self.encoder_bias,
-            "foot_swing_height_cost": foot_swing_height_cost,
+            "foot_swing_height_cost": self._foot_swing_height_cost,
         }
 
     def _make_task_state(self, common: dict[str, torch.Tensor]) -> Any:

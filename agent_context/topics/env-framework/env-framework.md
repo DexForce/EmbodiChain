@@ -137,3 +137,10 @@ if resource cleanup also fails. The caller drains `SimulationManager.flush_clean
 after the failed constructor has unwound and its traceback is released, as for
 ordinary deferred destruction. Draining inside the exception handler is unsafe:
 the traceback can retain native resources not yet registered with the manager.
+
+### Stateful sensor and action lifecycle
+
+BaseEnv owns physics-substep sampling for sensors that opt in through
+`requires_substep_update`. See the sensor-owned [contact history contract](../sensor-system/contact-history.md)
+for interval accumulation, counterpart filtering and selective reset.
+EmbodiedEnv resets action and event managers before applying reset-mode events.

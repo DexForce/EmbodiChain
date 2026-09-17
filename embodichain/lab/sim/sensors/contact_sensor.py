@@ -27,6 +27,7 @@ from tensordict import TensorDict
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.lab.sim.sensors._warp.contact import scatter_contact_data
+from embodichain.lab.sim.sensors.contact_history import ContactHistory
 from embodichain.utils import configclass, logger
 
 if TYPE_CHECKING:
@@ -62,10 +63,10 @@ class ContactSensorCfg(SensorCfg):
     """Maximum number of contacts per environment the sensor can handle."""
 
     track_substeps: bool = False
-    """Request per-physics-step history from an environment that supports it."""
+    """Sample registered contact histories after every physics substep."""
 
     self_collision_force_threshold: float | None = None
-    """Force threshold (N) for environment-owned self-contact history."""
+    """Force threshold (N) used when configuring self-contact history."""
 
     sensor_type: str = "ContactSensor"
 
@@ -154,6 +155,7 @@ class ContactSensor(BaseSensor):
         self._metadata_selected_ids: tuple[int, ...] | None = None
 
         self._query_dropped_count = 0
+        self._histories: dict[str, ContactHistory] = {}
         self._num_contacts_per_env: torch.Tensor | None = None
         """Number of contacts per environment."""
 
@@ -425,6 +427,106 @@ class ContactSensor(BaseSensor):
         """Resolve an ID from the ``user_ids`` field to its Spawn identity."""
         assert self._query is not None
         return self._query.actor_info(actor_id)
+
+    def get_actor_ids(
+        self, uid: str, link_names: Sequence[str] | None = None
+    ) -> torch.Tensor:
+        """Resolve a scene entity's ordered contact IDs for every environment.
+
+        Args:
+            uid: Robot, articulation or rigid-object UID in the Spawn scene.
+            link_names: Ordered articulation links; None selects the rigid actor.
+
+        Returns:
+            IDs shaped (environments, selected bodies). Global actors are broadcast.
+        """
+        assert self._query is not None
+        handles = self._sim._spawn_scene.handles(uid)
+        paths = {handle.path for handle in handles}
+        names = (None,) if link_names is None else tuple(link_names)
+        actors = {
+            (actor.env_id, actor.link_name): actor.actor_id
+            for actor in self._query.actors
+            if actor.path in paths
+        }
+        rows = []
+        for env_id in range(self.num_instances):
+            row = []
+            for name in names:
+                key = (env_id, name) if (env_id, name) in actors else (-1, name)
+                if key not in actors:
+                    raise ValueError(
+                        f"No contact actor for {uid}/{name} in row {env_id}."
+                    )
+                row.append(actors[key])
+            rows.append(row)
+        return torch.tensor(rows, device=self.device, dtype=torch.int32).reshape(
+            self.num_instances, len(names)
+        )
+
+    def create_history(
+        self,
+        name: str,
+        actor_ids: torch.Tensor,
+        *,
+        counterpart_ids: torch.Tensor | None = None,
+        include_unknown_counterpart: bool = False,
+        force_threshold: float = 0.0,
+    ) -> ContactHistory:
+        """Register a sensor-owned reduction with explicit counterpart filtering.
+
+        Args:
+            name: Unique history name within the sensor.
+            actor_ids: Body IDs to monitor, in per-environment order.
+            counterpart_ids: Allowed counterparts; None accepts all contacts.
+            include_unknown_counterpart: Also accept unidentified query counterparts.
+            force_threshold: Minimum contact force in newtons for timing events.
+
+        Returns:
+            History updated and reset by the environment's sensor lifecycle.
+        """
+        if name in self._histories:
+            raise ValueError(f"Contact history {name!r} already exists.")
+        history = ContactHistory(
+            actor_ids,
+            counterpart_ids=counterpart_ids,
+            include_unknown_counterpart=include_unknown_counterpart,
+            force_threshold=force_threshold,
+        )
+        self._histories[name] = history
+        return history
+
+    @property
+    def requires_substep_update(self) -> bool:
+        """Whether this sensor participates in the physics-substep lifecycle."""
+        return self.cfg.track_substeps and bool(self._histories)
+
+    def begin_control_step(self) -> None:
+        """Start a new interval without discarding persistent contact timing."""
+        for history in self._histories.values():
+            history.begin_control_step()
+
+    def update_physics_step(self, dt: float) -> None:
+        """Sample contacts and advance registered histories after physics.
+
+        Args:
+            dt: Elapsed physics time in seconds.
+        """
+        self.update()
+        for history in self._histories.values():
+            history.update(self.get_data(), dt)
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        """Clear contact samples and histories only for the selected rows.
+
+        Args:
+            env_ids: Rows to reset. None selects every row.
+        """
+        ids = slice(None) if env_ids is None else env_ids
+        self._data_buffer["is_valid"][ids] = False
+        self._num_contacts_per_env[ids] = 0
+        for history in self._histories.values():
+            history.reset(env_ids)
 
     def filter_by_user_ids(
         self, item_user_ids: torch.Tensor, env_ids: Sequence[int] | None = None

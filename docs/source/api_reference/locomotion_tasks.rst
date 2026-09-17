@@ -7,15 +7,15 @@ Package entry points
 --------------------
 
 The Humanoid package exports its effort-controlled running environment. The
-manager package exports joint-position actions, timed root-velocity pushes,
-actor/critic observation builders and reward functions used by the task YAMLs.
+task manager package exports actor/critic observation builders and reward
+functions. Joint-position actions and root-velocity disturbances are standard
+EmbodiChain manager components configured by these tasks.
 
 .. autosummary::
 
    embodichain_tasks.classic_control.humanoid.HumanoidRunEnv
-   embodichain_tasks.locomotion.managers.DefaultJointPositionTerm
-   embodichain_tasks.locomotion.managers.DelayedDefaultJointPositionTerm
-   embodichain_tasks.locomotion.managers.push_articulation_by_setting_velocity
+   embodichain.lab.gym.envs.managers.actions.DefaultJointPositionTerm
+   embodichain.lab.gym.envs.managers.randomization.physics.push_articulation_by_setting_velocity
    embodichain_tasks.locomotion.managers.velocity_locomotion_observation
    embodichain_tasks.locomotion.managers.velocity_locomotion_reward
    embodichain_tasks.locomotion.managers.velocity_locomotion_total_reward
@@ -44,16 +44,6 @@ action scale, observation dimensions and control timing.
 
 Implementation reference
 ------------------------
-
-.. automodule:: embodichain_tasks.locomotion.managers.actions
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: embodichain_tasks.locomotion.managers.events
-   :members:
-   :undoc-members:
-   :show-inheritance:
 
 .. automodule:: embodichain_tasks.locomotion.managers.observations
    :members:

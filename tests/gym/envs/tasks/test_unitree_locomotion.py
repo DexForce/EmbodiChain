@@ -23,7 +23,6 @@ from pathlib import Path
 import pytest
 import torch
 
-from embodichain_tasks.locomotion.velocity._embodichain import _aggregate_contacts
 from embodichain_tasks.locomotion.velocity.contracts.g1 import config as g1_config
 from embodichain_tasks.locomotion.velocity.contracts.g1 import mdp as g1_mdp
 from embodichain_tasks.locomotion.velocity.contracts.go1 import config as go1_config
@@ -82,34 +81,6 @@ def test_contract_package_has_no_backend_imports():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imports.add(node.module)
     assert not any(name.startswith(forbidden) for name in imports)
-
-
-def test_contact_aggregation_sums_actor_sides_with_opposite_signs():
-    user_ids = torch.tensor([[[10, 1], [20, 10], [30, 1], [1, 30]]])
-    valid = torch.ones((1, 4), dtype=torch.bool)
-    normal = torch.tensor(
-        [[[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]]
-    )
-    friction = torch.tensor(
-        [[[0.1, 0.0, 0.0], [0.0, 0.2, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]]
-    )
-    impulse = torch.tensor([[1.0, 2.0, 0.3, 0.4]])
-
-    found, force = _aggregate_contacts(
-        user_ids,
-        valid,
-        normal,
-        friction,
-        impulse,
-        torch.tensor([[10, 30]]),
-        0.1,
-    )
-
-    assert found.tolist() == [[True, True]]
-    assert torch.allclose(
-        force,
-        torch.tensor([[[-1.0, 2.0, 10.0], [1.0, 0.0, 0.0]]]),
-    )
 
 
 def test_heading_commands_consume_xyzw_quaternions() -> None:

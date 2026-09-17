@@ -34,8 +34,6 @@ _BLACKLIST = ["utils"]
 
 register_manager_modules(
     [
-        "embodichain_tasks.locomotion.managers.actions",
-        "embodichain_tasks.locomotion.managers.events",
         "embodichain_tasks.locomotion.managers.observations",
         "embodichain_tasks.locomotion.managers.rewards",
     ]

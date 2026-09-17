@@ -18,8 +18,6 @@
 
 from __future__ import annotations
 
-from .actions import DefaultJointPositionTerm, DelayedDefaultJointPositionTerm
-from .events import push_articulation_by_setting_velocity
 from .observations import velocity_locomotion_observation
 from .rewards import (
     velocity_locomotion_reward,
@@ -27,9 +25,6 @@ from .rewards import (
 )
 
 __all__ = [
-    "DefaultJointPositionTerm",
-    "DelayedDefaultJointPositionTerm",
-    "push_articulation_by_setting_velocity",
     "velocity_locomotion_observation",
     "velocity_locomotion_reward",
     "velocity_locomotion_total_reward",

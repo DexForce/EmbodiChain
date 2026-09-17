@@ -1041,8 +1041,11 @@ class EmbodiedEnv(BaseEnv):
 
         self.episode_success_status[env_ids_to_process] = False
 
-        # apply events such as randomization for environments that need a reset
+        # Stateful managers reset selected rows before reset-mode events run.
+        if self.action_manager is not None:
+            self.action_manager.reset(env_ids=env_ids)
         if self.cfg.events:
+            self.event_manager.reset(env_ids=env_ids)
             if "reset" in self.event_manager.available_modes:
                 with self._profiler.section("event_reset"):
                     self.event_manager.apply(mode="reset", env_ids=env_ids)
