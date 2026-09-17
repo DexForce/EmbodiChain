@@ -17,7 +17,10 @@ mapping key is the authoritative logical/source obstacle ID used by the
 content-cache key, `collision_world_entity_ids`, generated obstacle-name prefix,
 dynamic update key, and registry validation. Scene generation reads physical
 collision descriptors through `RigidObject.get_collision_shapes()` and emits a
-mixed tensor-backed cuRobo scene. A compound source expands to physical names
+mixed tensor-backed cuRobo scene. Geometry snapshots retain authored collision
+shapes even when physical contact response is disabled, matching native shape
+queries; a moving planner obstacle can therefore avoid exerting impulses on
+the robot. A compound source expands to physical names
 such as `registry_id__shape_0`; cache and full-world identity remain keyed by
 the unexpanded `registry_id`, and dynamic updates fan out through the physical
 shapes' local poses. A registry mapping whose source lacks physical collision

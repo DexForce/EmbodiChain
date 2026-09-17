@@ -27,6 +27,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import torch
+import trimesh
 
 from embodichain.data import get_data_path
 from embodichain.lab.sim.atomic_actions import (
@@ -87,11 +88,16 @@ def parse_arguments() -> argparse.Namespace:
 
 def create_pick_object(sim) -> RigidObject:
     """Create and settle the paper cup used by the tutorial."""
+    mesh = trimesh.load_mesh(get_data_path(OBJECT_MESH_PATH), process=False)
+    # Author cup proportions in the mesh; physical body scale must be uniform.
+    mesh.apply_scale((0.75, 0.75, 1.0))
     obj = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="paper_cup",
             shape=MeshCfg(
-                fpath=get_data_path(OBJECT_MESH_PATH),
+                vertices=mesh.vertices,
+                triangles=mesh.faces,
+                normals=mesh.vertex_normals,
                 collision=MeshCollisionCfg(
                     approximation="convex_decomposition",
                     max_hulls=16,
@@ -104,7 +110,6 @@ def create_pick_object(sim) -> RigidObject:
                 newton_contact=sim.is_newton_backend,
             ),
             init_pos=[*OBJECT_XY, OBJECT_INITIAL_Z],
-            body_scale=(0.75, 0.75, 1.0),
         )
     )
     sim.prepare()

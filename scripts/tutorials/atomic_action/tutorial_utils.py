@@ -267,10 +267,8 @@ def _tutorial_physics_cfg(
 ) -> PhysicsBackendCfg:
     """Build the shared physics configuration for atomic-action tutorials.
 
-    Newton tutorials intentionally use MuJoCo Warp's native collision path.
-    It generates contacts inside every solver substep, so an external Newton
-    collision pipeline would be unused and would only allocate unnecessary
-    contact buffers.
+    MJVBD V2 owns collision detection and retains MuJoCo articulation drives.
+    Free rigid bodies use VBD with the solver's native one-way coupling.
     """
     physics_cfg = physics_cfg_for_backend(backend)
     if isinstance(physics_cfg, NewtonPhysicsCfg):
@@ -279,20 +277,21 @@ def _tutorial_physics_cfg(
         # contacts and fast-changing manipulator loads. DexSim sizes
         # contact/constraint buffers from the finalized scene, including the
         # contact dimensions authored on gripper and object surfaces.
-        # MultiCCD retains up to four contacts per gripper-mesh/object pair,
-        # which prevents a marginal two-finger grasp from sliding away.
+        # Retain the existing MuJoCo articulation tuning. Free-body contacts
+        # remain VBD-owned and do not inherit these MuJoCo contact options.
         physics_cfg.num_substeps = 20
         physics_cfg.collision_cfg = None
         physics_cfg.solver_cfg = {
-            "solver_type": "mujoco_warp",
-            "solver": "newton",
-            "integrator": "implicitfast",
-            "iterations": 20,
-            "ls_iterations": 100,
-            "cone": "elliptic",
-            "impratio": 1_000.0,
-            "use_mujoco_contacts": True,
-            "enable_multiccd": True,
+            "solver_type": "mjvbd_v2",
+            "mujoco_options": {
+                "solver": "newton",
+                "integrator": "implicitfast",
+                "iterations": 20,
+                "ls_iterations": 100,
+                "cone": "elliptic",
+                "impratio": 1_000.0,
+                "enable_multiccd": True,
+            },
         }
     return physics_cfg
 

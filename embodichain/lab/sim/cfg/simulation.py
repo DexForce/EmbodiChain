@@ -530,14 +530,16 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     Genuine Newton/Warp warnings and errors are not suppressed.
     """
 
-    solver_cfg: Mapping[str, Any] | NewtonSolverCfg | None = None
+    solver_cfg: Mapping[str, Any] | NewtonSolverCfg | None = field(
+        default_factory=lambda: {"solver_type": "mjvbd_v2"}
+    )
     """Optional Newton solver configuration.
 
     A mapping is converted to the matching DexSim Newton solver config. Include
     ``solver_type`` or ``class_type`` to select the solver, then add any
-    parameters accepted by that DexSim solver config. If omitted, EmbodiChain
-    preserves DexSim's scene-aware ``AutoSolverCfg`` default. A DexSim build
-    exporting ``AutoSolverCfg`` is required; no concrete-solver fallback is used.
+    parameters accepted by that DexSim solver config. The default is
+    ``mjvbd_v2`` for rigid bodies and articulations. Explicit ``None`` or
+    ``solver_type="auto"`` preserves DexSim's scene-aware ``AutoSolverCfg``.
     """
 
     collision_cfg: NewtonCollisionPipelineCfg | Mapping[str, Any] | None = field(
@@ -545,10 +547,10 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     )
     """Optional external collision-pipeline configuration.
 
-    The default preserves external contact generation for ordinary rigid-body
-    scenes. Set to ``None`` to avoid constructing or executing the external
-    pipeline, for example when particle solvers use rigid shapes solely as
-    one-way SDF boundaries.
+    MJVBD V2 owns collision detection and does not construct this pipeline.
+    Other solvers use these settings unless explicitly set to ``None``, for
+    example when particle solvers use rigid shapes solely as one-way SDF
+    boundaries.
     """
 
     def __post_init__(self) -> None:
@@ -566,6 +568,7 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             DexUniSolverCfg,
             FeatherstoneSolverCfg,
             MJWarpSolverCfg,
+            MJVBDV2SolverCfg,
             NewtonCfg,
             NewtonCollisionPipelineCfg as DexsimNewtonCollisionPipelineCfg,
             SemiImplicitSolverCfg,
@@ -586,6 +589,7 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             "auto": AutoSolverCfg,
             "dexuni": DexUniSolverCfg,
             "mujoco_warp": MJWarpSolverCfg,
+            "mjvbd_v2": MJVBDV2SolverCfg,
             "xpbd": XPBDSolverCfg,
             "semi_implicit": SemiImplicitSolverCfg,
             "featherstone": FeatherstoneSolverCfg,
@@ -606,7 +610,9 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             )
 
         collision_pipeline_cfg = None
-        if self.collision_cfg is not None:
+        if self.collision_cfg is not None and (
+            solver_cfg is None or solver_cfg.solver_type != "mjvbd_v2"
+        ):
             collision_values = {
                 item.name: getattr(self.collision_cfg, item.name)
                 for item in fields(self.collision_cfg)
@@ -655,6 +661,10 @@ def _normalize_newton_solver_type(solver_type: str) -> str:
         "mujocowarp": "mujoco_warp",
         "mujocowarpsolver": "mujoco_warp",
         "mujocowarpsolvercfg": "mujoco_warp",
+        "mjvbd2": "mjvbd_v2",
+        "mjvbdv2": "mjvbd_v2",
+        "mjvbd_v2": "mjvbd_v2",
+        "mjvbdv2solvercfg": "mjvbd_v2",
         "dexuni": "dexuni",
         "dexunisolver": "dexuni",
         "dexunisolvercfg": "dexuni",
@@ -677,7 +687,7 @@ def _normalize_newton_solver_type(solver_type: str) -> str:
     if key not in aliases:
         logger.log_error(
             f"Unsupported Newton solver type '{solver_type}'. "
-            "Expected one of 'auto', 'dexuni', 'mjwarp', 'xpbd', 'semi_implicit', "
+            "Expected one of 'auto', 'dexuni', 'mjwarp', 'mjvbd_v2', 'xpbd', 'semi_implicit', "
             "'featherstone', or 'vbd'."
         )
     return aliases[key]
@@ -703,7 +713,7 @@ def _newton_solver_cfg_to_dexsim(
     configured_solver_type = (
         solver_cfg_data.pop("solver_type", None)
         or solver_cfg_data.pop("class_type", None)
-        or "auto"
+        or "mjvbd_v2"
     )
     normalized_solver_type = _normalize_newton_solver_type(str(configured_solver_type))
     solver_cfg_type = solver_cfg_map[normalized_solver_type]

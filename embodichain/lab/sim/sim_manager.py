@@ -537,7 +537,7 @@ class SimulationManager:
         self._requested_renderer = sim_config.render_cfg.renderer
         solver_cfg = getattr(sim_config.physics_cfg, "solver_cfg", None)
         self._requested_solver = str(
-            solver_cfg.get("solver_type", solver_cfg.get("class_type", "auto"))
+            solver_cfg.get("solver_type", solver_cfg.get("class_type", "mjvbd_v2"))
             if isinstance(solver_cfg, Mapping)
             else getattr(solver_cfg, "solver_type", "auto")
         )
@@ -4427,6 +4427,7 @@ class SimulationManager:
             None,
             "auto",
             "mujoco_warp",
+            "mjvbd_v2",
         }
         if (
             use_coordinated_newton_clear
@@ -4531,6 +4532,9 @@ class SimulationManager:
             bool: True if export is successful, False otherwise.
         """
         try:
+            # The optional USD kit registers the export methods on DexSim Env.
+            import dexsim.kit.usd
+
             self._env.export_to_usd_file(fpath)
             logger.log_info(f"Simulation scene exported to USD file: {fpath}")
             return True
@@ -4647,6 +4651,14 @@ class SimulationManager:
                 "_robots",
             ):
                 for asset in getattr(self, registry_name, {}).values():
+                    # Parsed material wrappers must die before their native renderer.
+                    for material_attr in (
+                        "_visual_material",
+                        "_original_visual_material",
+                        "_original_visual_material_inst",
+                    ):
+                        if hasattr(asset, material_attr):
+                            setattr(asset, material_attr, [])
                     if hasattr(asset, "_data"):
                         asset._data = None
                     if hasattr(asset, "_spawn_result"):

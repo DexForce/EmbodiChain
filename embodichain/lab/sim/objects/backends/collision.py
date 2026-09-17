@@ -184,9 +184,9 @@ def _from_descriptor(entity: object) -> list[CollisionShapeDesc] | None:
         dtype=torch.float32,
     ).reshape(3)
     shapes: list[CollisionShapeDesc] = []
+    # Match native shape queries: disabling contact response keeps geometry
+    # available to planners, including moving obstacles that exert no impulses.
     for shape_idx, collision in enumerate(collisions):
-        if getattr(collision, "enable_collision", True) is False:
-            continue
         geometry_type = getattr(collision, "geometry_type", None)
         geometry_type = getattr(geometry_type, "value", geometry_type)
         local_pose = torch.as_tensor(
