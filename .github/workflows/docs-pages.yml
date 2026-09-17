@@ -69,14 +69,41 @@ jobs:
             --exit-status \
             --interval 10
 
-  deploy-from-artifact:
+  inspect-docs-artifact:
     if: >
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_branch == 'main') ||
-      (github.event_name == 'workflow_dispatch' &&
-       inputs.artifact_run_id != '')
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.artifact.outputs.exists }}
+    steps:
+      - name: Check for docs site artifact
+        id: artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          artifact_count="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts?name=docs-site" \
+            --jq '[.artifacts[] | select(.name == "docs-site" and (.expired | not))] | length')"
+          if [[ "${artifact_count}" -gt 0 ]]; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "No active docs-site artifact was produced; skipping Pages deployment."
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+  deploy-from-artifact:
+    needs: inspect-docs-artifact
+    if: >
+      always() &&
+      ((github.event_name == 'workflow_run' &&
+        needs.inspect-docs-artifact.result == 'success' &&
+        needs.inspect-docs-artifact.outputs.exists == 'true') ||
+       (github.event_name == 'workflow_dispatch' &&
+        inputs.artifact_run_id != ''))
     runs-on: ubuntu-latest
     environment:
       name: github-pages
