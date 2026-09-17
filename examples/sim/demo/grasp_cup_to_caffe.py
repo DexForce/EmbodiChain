@@ -92,13 +92,9 @@ def initialize_simulation(args) -> SimulationManager:
     """
     physics_cfg = physics_cfg_for_backend(args.physics)
     if args.physics == "newton":
-        # This contact-heavy URDF scene needs Newton's collision pipeline;
-        # MuJoCo's native contact path is not reliable for these convex meshes.
         physics_cfg.solver_cfg = {
-            "solver_type": "mujoco_warp",
-            "use_mujoco_contacts": False,
-            "nconmax": 16384,
-            "njmax": 65536,
+            "solver_type": "mjvbd_v2",
+            "mujoco_options": {"nconmax": 16384, "njmax": 65536},
         }
 
     config = SimulationManagerCfg(

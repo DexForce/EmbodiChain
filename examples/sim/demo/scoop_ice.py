@@ -79,9 +79,10 @@ def initialize_simulation(args):
     """
     physics_cfg = physics_cfg_for_backend(args.physics)
     if args.physics == "newton":
-        # Hundreds of free bodies make dense Newton Hessian factorization
-        # expensive. CG avoids that factorization while retaining contacts.
-        physics_cfg.solver_cfg = {"solver_type": "mujoco_warp", "solver": "cg"}
+        physics_cfg.solver_cfg = {
+            "solver_type": "mjvbd_v2",
+            "mujoco_options": {"solver": "cg"},
+        }
     config = SimulationManagerCfg(
         headless=True,
         device=args.device,

@@ -136,6 +136,8 @@ before closing the Spawn result, environment, and World. Default backends use
 the no-op hook. Newton synchronizes its resolved Warp CUDA device and clears
 its render bridge while Spawn still owns the parent skeletons, so cached link
 views cannot be destructed after their native parents.
+Asset material and reset-baseline material caches are also cleared before
+closing the Scene, so OptiX material wrappers cannot outlive the renderer.
 
 After backend materialization, dynamic `RigidObject`, `Articulation`, and
 `RigidObjectGroup` facades capture their resolved mass, inertia diagonal, and
@@ -466,18 +468,52 @@ are both absent. Thus a config-backed launcher preserves the backend default,
 while an explicit CPU override remains authoritative even for Newton.
 Environment tensors derive from `sim.device`; do not introduce a second
 tensor-device selector.
-Leaving `NewtonPhysicsCfg.solver_cfg=None` preserves DexSim's
-`AutoSolverCfg` default. A DexSim build exporting `AutoSolverCfg` is required;
-EmbodiChain does not substitute a concrete solver. DexSim resolves that
-placeholder from the complete Spawn scene during finalization: rigid-only
-scenes select XPBD, scenes with an articulation select MuJoCo Warp, and
-supported particle families select their matching particle/deformable solver.
-A mapping with `solver_type: auto` or
-`class_type: AutoSolverCfg` is the explicit equivalent. Gradient mode must
-still select `semi_implicit` explicitly because AutoSolver does not choose a
-differentiable solver. Before finalization, EmbodiChain treats `auto` as
-unresolved; after finalization, `NewtonPhysicsBackend.solver_type` reads the
-concrete type from DexSim's World-owned backend.
+`NewtonPhysicsCfg()` selects `mjvbd_v2` by default for rigid bodies and
+articulations. V2 owns collision detection, so conversion omits the external
+pipeline even when `collision_cfg` contains its default settings. Other
+solvers retain the external pipeline unless explicitly disabled.
+Explicit `solver_cfg=None`, `solver_type: auto`, or `class_type: AutoSolverCfg`
+opts into DexSim's scene-aware selection: rigid-only scenes select XPBD,
+articulation scenes select MuJoCo Warp, and supported particle families select
+their matching solver. Gradient mode still requires explicit `semi_implicit`.
+Before finalization, explicit `auto` is unresolved; after finalization,
+`NewtonPhysicsBackend.solver_type` reads the concrete World-owned solver.
+Explicit rigid/articulation V2 configurations select `mjvbd_v2` (aliases
+`mjvbd2`, `mjvbdv2`, or `MJVBDV2SolverCfg`). Keep `joint_mode: dynamic` for
+ordinary robot control, put existing MuJoCo options under `mujoco_options`,
+and set `collision_cfg: null` because V2 owns collision detection. Joint
+targets, state access, mimic compliance, and whole-world articulation reset
+use the existing Scene/Batch path. V2's compact MuJoCo indices are translated
+by DexSim for contact queries and by its index map for mimic equality rows.
+Runtime FK updates only MuJoCo-owned articulation trees; replaying FK for
+VBD-owned FREE joints would overwrite simulated rigid-body poses with stale
+generalized coordinates. Reset completeness checks count Scene articulations,
+not the internal FREE-joint trees used to represent standalone rigid bodies.
+The pure MuJoCo branch exposes contact geometry, impulses, and friction on
+CUDA. VBD contacts expose geometry without MuJoCo impulse reporting.
+
+V2 selects MuJoCo for articulations with active scalar joints and VBD for
+unselected free rigid bodies. Its current mixed dynamic branch is one-way:
+VBD contacts do not push back on the MuJoCo robot, and MuJoCo contacts are
+disabled in that branch. Therefore switching an existing locomotion or
+manipulation scene to V2 does not by itself guarantee equivalent contact
+dynamics. In particular, adding a VBD-owned free rigid body switches a floating
+robot out of the articulation-only branch and removes its MuJoCo ground
+support, even if the new body is far away. Explicit `mujoco_articulations` or
+`mujoco_articulation_paths` can select complete joint trees; these are ownership
+choices, not automatic EmbodiChain rewrites. This integration does not extend
+deformable support.
+
+The UR5 `repeated_pick_place` and `open_drawer` deployments provide
+`task.ur5.newton.yaml` and matching `env.newton.yaml` components using V2. They share the
+existing embodiment, controller gains, and Task Programs, with the timed
+`trajectory_open_loop_slow.yaml` execution policy (80 control points). The
+40-point drawer reference allocates only five samples to pulling; at 25 Hz its
+0.2-second pull is shorter than the time needed for 18 cm at the drawer's
+authored 0.35 m/s speed limit. Evaluate measured lift, placement, and drawer
+travel separately from projected Task Program completion; a completed program
+alone is not evidence of physical success.
+
 Explicit coupled articulation/deformable configurations use `dexuni` or
 `DexUniSolverCfg`. DexUni owns collision detection and its particle-shape
 contacts, so explicit configurations set `collision_cfg=None` instead of
@@ -491,28 +527,16 @@ The `open_drawer.py` tutorial combines this option with 20 Newton substeps per
 10 ms control step, while keeping its authored robot gains, collision geometry,
 pull trajectory, success criteria, and push trajectory identical to Default.
 Atomic-action tutorials configure their shared Newton simulation in
-`scripts/tutorials/atomic_action/tutorial_utils.py` with 20 solver substeps
-per 10 ms physics step (0.5 ms solver intervals). They select `mujoco_warp` with
-`use_mujoco_contacts=True` and set the external `collision_cfg` to `None`.
-MuJoCo-Warp then generates and solves contacts internally at every solver
-substep; external-pipeline settings such as `update_interval`, contact
-reduction, and the external `rigid_contact_max` do not apply. DexSim derives
-the native per-world contact capacity from the finalized scene, avoiding the
-oversized fixed buffers formerly inherited from external-pipeline examples.
-The shared factory leaves the Default backend configuration unchanged. For
-parallel-jaw manipulation, the tutorial and packaged task components add a
-Newton-only contact overlay (`condim=4`, `ke=4e4`, `kd=4e2`, torsional friction
-`0.1`, rolling friction `0.01`) to the gripper and directly manipulated object
-contact links. `condim=4` activates torsional friction in MuJoCo-Warp; rolling
-friction is retained for solvers/`condim=6` that support it. This is a scoped
-contact/force-closure candidate profile, not a replacement for Newton's scene-aware
-`AutoSolverCfg`; rigid-only scenes still resolve to XPBD and articulation
-scenes to MuJoCo-Warp. Keep
-backend-specific overlays sparse so the Default adapter continues to use its
-existing portable contact envelope.
-The package dependency must identify the exact DexSim dev build containing
-this API; a base `==0.4.3` requirement also accepts older local-version wheels
-that do not export `AutoSolverCfg` and is therefore insufficient.
+`scripts/tutorials/atomic_action/tutorial_utils.py` with `mjvbd_v2`, retaining
+20 solver substeps per 10 ms physics step (0.5 ms solver intervals) and the
+existing articulation tuning under `mujoco_options`. The direct drawer
+tutorial and rigid manipulation examples use the same native V2 ownership.
+The shared factory leaves the Default backend configuration unchanged.
+Parallel-jaw manipulation keeps its Newton-only contact overlay (`condim=4`,
+`ke=4e4`, `kd=4e2`, torsional friction `0.1`, rolling friction `0.01`) on the
+gripper and manipulated objects. MuJoCo options affect articulation-owned
+contacts; free rigid-body contacts use VBD and need not have identical effects.
+Explicit cloth, softbody, and differentiable examples keep their selected solvers.
 Newton's `suppress_warp_kernel_logs=True` suppresses Warp's one-time runtime
 banner plus module compile/load chatter during manager startup, build, facade
 initialization, and physics updates, then restores the process-wide setting.
@@ -721,6 +745,10 @@ only the generic `newton` and `default` alternatives are eligible; do not guess
 a solver-specific preset before DexSim has inspected the complete scene. This
 is the only robot preset selection boundary; do not add a second backend
 selector to robot configs.
+For explicit `mjvbd_v2`, preset priority is `newton_mjvbd_v2`, then
+`newton_mujoco_warp` / `newton_mjwarp`, then generic `newton` / `default`.
+This preserves established articulation drive tuning while allowing a V2
+override.
 
 File-backed rigid objects and articulations share one source-independent
 physics policy: `asset_physics_mode="preserve"` keeps properties resolved from

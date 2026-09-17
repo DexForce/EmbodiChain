@@ -529,7 +529,7 @@ def test_robot_preset_accepts_newton_solver_alias() -> None:
     preset = _NewtonSolverAliasRobotPresetCfg()
 
     assert preset.resolve(DefaultPhysicsCfg()).uid == "fallback"
-    assert preset.resolve(NewtonPhysicsCfg()).uid == "fallback"
+    assert preset.resolve(NewtonPhysicsCfg()).uid == "mjwarp"
     assert (
         preset.resolve(NewtonPhysicsCfg(solver_cfg={"solver_type": "mjwarp"})).uid
         == "mjwarp"
@@ -812,6 +812,7 @@ def test_robot_cfg_merge_preserves_grouped_overrides() -> None:
 
 def test_newton_physics_inherits_common_gravity_and_collision_config() -> None:
     cfg = NewtonPhysicsCfg(
+        solver_cfg=None,
         gravity=[0.0, 0.0, -1.5],
         collision_cfg=NewtonCollisionPipelineCfg(
             broad_phase="sap",

@@ -39,7 +39,6 @@ from embodichain.lab.sim.atomic_actions import (
     PourOptions,
 )
 from embodichain.lab.sim.motion.planners import (
-    TrapezoidalPlanOptions,
     ToppraPlanOptions,
     TrajectorySampleMethod,
 )
@@ -103,14 +102,9 @@ def _create_pick_motion_policy(
             sample_method=TrajectorySampleMethod.QUANTITY,
             sample_interval=PICK_MOTION_SAMPLE_COUNT,
         )
-    elif planner == "trapezoidal":
-        plan_opts = TrapezoidalPlanOptions(
-            sample_method=TrajectorySampleMethod.QUANTITY,
-            sample_interval=PICK_MOTION_SAMPLE_COUNT,
-        )
-    elif planner == "curobo":
-        # cuRobo owns its native sampling and does not use the joint-space
-        # sample-count options above.
+    elif planner in ("trapezoidal", "curobo"):
+        # Preserve native waypoints before PickUp resamples its two motion
+        # segments. A fixed quantity can be smaller than the Cartesian IK path.
         plan_opts = None
     else:
         raise ValueError(f"Unsupported tutorial planner {planner!r}.")

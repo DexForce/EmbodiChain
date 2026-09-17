@@ -204,6 +204,6 @@ class NewtonPhysicsBackend(PhysicsBackend):
         if runtime_device is None:
             runtime_device = str(getattr(self._manager, "device", ""))
         return not (
-            solver_type.endswith("mujoco_warp")
+            solver_type in {"mujoco_warp", "mjvbd_v2"}
             and runtime_device.lower().startswith("cpu")
         )

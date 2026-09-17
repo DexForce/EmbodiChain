@@ -530,22 +530,21 @@ def _tutorial_physics_cfg(
     """Build the physics configuration used by this tutorial."""
     physics_cfg = physics_cfg_for_backend(backend)
     if isinstance(physics_cfg, NewtonPhysicsCfg):
-        # Keep the same MuJoCo-Warp solver/contact profile as the atomic-action
-        # tutorial and packaged Newton task.  The finer drawer substep cadence
-        # is intentional; per-world capacities remain auto-sized by DexSim
-        # from the finalized scene.
+        # Share the V2 articulation profile with the atomic-action tutorials.
+        # Keep the finer drawer substep cadence and native contact ownership.
         physics_cfg.num_substeps = 20
         physics_cfg.collision_cfg = None
         physics_cfg.solver_cfg = {
-            "solver_type": "mujoco_warp",
-            "solver": "newton",
-            "integrator": "implicitfast",
-            "iterations": 20,
-            "ls_iterations": 100,
-            "cone": "elliptic",
-            "impratio": 1_000.0,
-            "use_mujoco_contacts": True,
-            "enable_multiccd": True,
+            "solver_type": "mjvbd_v2",
+            "mujoco_options": {
+                "solver": "newton",
+                "integrator": "implicitfast",
+                "iterations": 20,
+                "ls_iterations": 100,
+                "cone": "elliptic",
+                "impratio": 1_000.0,
+                "enable_multiccd": True,
+            },
         }
     return physics_cfg
 
