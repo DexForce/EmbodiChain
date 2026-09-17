@@ -6,6 +6,7 @@
 :hidden:
 
 builtin_actions
+affordance_sampling
 ```
 
 ```{currentmodule} embodichain.lab.sim.atomic_actions

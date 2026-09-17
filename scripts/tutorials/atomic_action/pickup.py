@@ -42,6 +42,7 @@ from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_tutorial_robot,
     clone_local_pose_from_first_env,
+    create_affordance_sampling_context,
     create_antipodal_semantics,
     create_curobo_motion_generator,
     create_parallel_jaw_grasp_pose_generator,
@@ -51,7 +52,9 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     draw_axis_marker,
     get_hand_open_close_qpos,
     initialize_pre_pick_robot_pose,
+    log_affordance_branch_diagnostics,
     make_clear_dynamics_callback,
+    parse_affordance_sampling_arguments,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
@@ -77,13 +80,13 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the PickUp tutorial."""
     parser = create_tutorial_argument_parser(
         "Demonstrate PickUp on a cube.",
-        features=("grasp_sampling", "visualize_axes"),
+        features=("affordance_sampling", "grasp_sampling", "visualize_axes"),
     )
     parser.add_argument(
         "--approach", choices=[*APPROACH_DIRECTIONS, "custom"], default="top"
     )
     parser.add_argument("--custom_approach_direction", type=float, nargs=3)
-    return parser.parse_args()
+    return parse_affordance_sampling_arguments(parser)
 
 
 def create_pick_object(sim) -> RigidObject:
@@ -130,6 +133,7 @@ def resolve_approach_direction(
 def main() -> None:
     """Plan and replay a sampled antipodal PickUp trajectory."""
     args = parse_arguments()
+    sampling = create_affordance_sampling_context(args)
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot, tcp_z=0.15)
     obj = create_pick_object(sim)
@@ -185,8 +189,12 @@ def main() -> None:
                 ),
             ),
         ),
-        engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        engine.initial_context(
+            control_dt=sim.sim_config.physics_dt,
+            affordance_sampling=sampling,
+        ),
     )
+    log_affordance_branch_diagnostics(compiled.action_plans[0])
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan PickUp demo trajectory.")
         return

@@ -45,6 +45,11 @@ from .affordance import (
     SlideAffordance,
     TwistAffordance,
 )
+from .affordance_sampling import (
+    AffordancePoseCandidates,
+    AffordanceSample,
+    AffordanceSamplingContext,
+)
 from .bindings import (
     ActionBinding,
     EndpointBinding,
@@ -258,6 +263,9 @@ __all__ = [
     "ActionPlan",
     "ActionPlanningServices",
     "Affordance",
+    "AffordancePoseCandidates",
+    "AffordanceSample",
+    "AffordanceSamplingContext",
     "AntipodalAffordance",
     "ArticulationAffordanceGeometry",
     "ArticulationGeometryProvider",
