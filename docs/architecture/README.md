@@ -1,7 +1,7 @@
 # Architecture Explorer
 
-A static [frontend](web/README.md) provides a 28-module overview and a 16-object
-Task Program view, with search, relationship filters, direct-neighbour exploration,
+A static [frontend](web/README.md) provides a system overview and specialist views for
+Task Program, Simulation, Data & Learning, and Generation & Toolkits, with search, relationship filters, direct-neighbour exploration,
 source evidence, and shareable navigation. It consumes a
 [generated snapshot](generated/architecture.json); the Sphinx documentation embeds the viewer and a searchable text reference.
 Local and CI Sphinx builds regenerate their own version-specific assets.
@@ -21,6 +21,10 @@ ownership. This is selected static coverage, not a complete dependency graph.
 The generated text reference lists topics without represented nodes and overview
 nodes without mapped relationships, using MAP at the snapshot revision. Neither
 a represented topic nor a missing edge establishes complete coverage or independence.
+The current snapshot represents all 18 MAP topics and all 10 top-level production
+packages. Frontend data tests enforce these entry-point checks and ensure every
+selected node appears in a view. Specialist modules are included in the searchable
+text reference even when omitted from the overview.
 
 ## Generate and validate
 
@@ -61,7 +65,7 @@ The optional `details` and `source_extension` fields remain compatible with hist
    relations. Reuse node IDs across views and keep scope explicit.
 2. After source changes, review affected evidence. Pure line moves are resolved
    automatically; rename or behavior changes require updating selectors/excerpts.
-3. Run the generator and validator above. Review both generated views and the text
+3. Run the generator and validator above. Review all generated views and the text
    summary, especially added relationships and unchanged semantic claims.
 4. Run `npm run build` in `docs/architecture/web`, then inspect the frontend and
    expanded evidence. Commit seed, generated output, and associated source changes.

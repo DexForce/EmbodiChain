@@ -26,6 +26,24 @@ const read = (path: string) =>
   execFileSync('git', ['show', `${data.revision}:${path}`], { cwd: root, encoding: 'utf8' });
 
 describe('generated architecture data', () => {
+  it('represents every registered topic and top-level production package', () => {
+    const topics = parse(read(data.topic_index)).topics as { id: string }[];
+    const represented = new Set(data.nodes.flatMap((node) => node.topic_ids));
+    expect(topics.filter((topic) => !represented.has(topic.id))).toEqual([]);
+    const packages = execFileSync(
+      'git',
+      ['ls-tree', '-d', '--name-only', `${data.revision}:embodichain`],
+      { cwd: root, encoding: 'utf8' },
+    )
+      .trim()
+      .split('\n');
+    const paths = data.nodes.flatMap((node) => node.evidence.map((proof) => proof.path));
+    expect(
+      packages.filter((name) => !paths.some((path) => path.startsWith(`embodichain/${name}/`))),
+    ).toEqual([]);
+    const visible = new Set(data.views.flatMap((view) => view.node_ids));
+    expect(data.nodes.filter((node) => !visible.has(node.id))).toEqual([]);
+  });
   it('provides a reading introduction and documentation for every module', () => {
     for (const node of data.nodes) {
       expect('details' in node, node.id).toBe(true);

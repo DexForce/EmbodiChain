@@ -264,6 +264,31 @@ def test_summary_reports_unmapped_topics_and_edges_from_pinned_inputs(seed):
     assert "Missing edges do not imply architectural independence." in summary
 
 
+def test_summary_includes_modules_only_present_in_specialist_views(seed):
+    data, root, path, _ = seed
+    data["edges"] = []
+    first, second = data["nodes"]
+    data["views"] = [
+        dict(
+            id=view_id,
+            label=label,
+            description=label,
+            node_ids=[node["id"]],
+            edge_ids=[],
+            groups=[dict(id=view_id, label=label, node_ids=[node["id"]])],
+        )
+        for view_id, label, node in [
+            ("overview", "Overview", first),
+            ("specialist", "Specialist", second),
+        ]
+    ]
+    path.write_text(json.dumps(data))
+    summary = render_summary(build_snapshot(root, path), root)
+    assert "Alpha role" in summary
+    assert "Beta role" in summary
+    assert "Additional modules in specialist views" in summary
+
+
 def test_generation_records_actual_document_source_extensions(seed):
     data, root, path, _ = seed
     write(root, "docs/source/guide.rst", "Guide\n=====\n")

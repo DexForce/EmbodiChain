@@ -16,6 +16,23 @@
 
 import { test, expect } from '@playwright/test';
 
+test('specialist modules remain searchable and navigate to versioned documentation', async ({
+  page,
+}) => {
+  await page.goto('/main/overview/architecture/index.html');
+  await expect(page.locator('article')).toContainText('LeRobot recording');
+  const frame = page.frameLocator('iframe.architecture-frame');
+  const menu = frame.getByRole('button', { name: 'Show module list', exact: true });
+  if (await menu.isVisible()) await menu.click();
+  await frame.getByRole('button', { name: 'Data & Learning', exact: true }).click();
+  if (await menu.isVisible()) await menu.click();
+  await frame.getByRole('button', { name: 'Select LeRobot recording', exact: true }).click();
+  const guide = frame.getByRole('link', { name: 'LeRobot recording documentation', exact: true });
+  await expect(guide).toHaveAttribute('href', /\/main\/overview\/gym\/dataset_functors\.html$/);
+  await guide.click();
+  await expect(page).toHaveURL(/\/main\/overview\/gym\/dataset_functors\.html$/);
+});
+
 test('embedded explorer follows document theme and opens the current view full-screen', async ({
   page,
   context,

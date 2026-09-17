@@ -343,7 +343,13 @@ function Explorer({ data }: { data: ArchitectureSnapshot }) {
               </div>
               <h1 aria-label="Architecture Explorer">
                 Architecture Explorer{' '}
-                <span>{state.viewId === 'overview' ? 'FIG. 01' : 'FIG. 02'}</span>
+                <span>
+                  FIG.{' '}
+                  {String(data.views.findIndex((view) => view.id === state.viewId) + 1).padStart(
+                    2,
+                    '0',
+                  )}
+                </span>
               </h1>
               <p>{graph.view.description}</p>
             </div>

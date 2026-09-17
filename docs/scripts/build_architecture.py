@@ -442,7 +442,19 @@ def render_summary(data: dict[str, Any], repo_root: Path) -> str:
         "| Module | Responsibility | Evidence and documentation |",
         "| --- | --- | --- |",
     ]
-    for id in view["node_ids"]:
+    overview_ids = view["node_ids"]
+    additional_ids = sorted(set(nodes) - set(overview_ids))
+    for index, id in enumerate([*overview_ids, *additional_ids]):
+        if additional_ids and index == len(overview_ids):
+            lines.extend(
+                [
+                    "",
+                    "### Additional modules in specialist views",
+                    "",
+                    "| Module | Responsibility | Evidence and documentation |",
+                    "| --- | --- | --- |",
+                ]
+            )
         node = nodes[id]
         proof = node["evidence"][0]
         links = [

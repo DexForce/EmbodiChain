@@ -426,3 +426,38 @@ The refreshed embedded page was inspected with the module reading panel open.
 The full-site build retains the same 714 baseline warnings; all 731 normalized
 diagnostic lines match main. Browser checks passed again after the final
 responsive-layout adjustment.
+
+
+## Architecture Coverage Expansion — 2026-09-17
+
+The user approved filling the omissions identified by the architecture audit.
+The expansion retains the English academic presentation and the existing schema,
+while separating specialist content into navigable views.
+
+- [x] Expand from 34 to 77 selected nodes and from 65 to 150 relationships
+  (74 source-reviewed and 76 statically extracted). Represent entry points for
+  all 18 pinned context topics and all 10 top-level production packages.
+- [x] Add Simulation, Data & Learning, and Generation & Toolkits views alongside
+  the system overview and expanded Task Program view; number all five figures.
+- [x] Cover workspace and trajectory augmentation, differentiable simulation,
+  randomization and world objects, recording and learning components, SimReady
+  and tooling, and Task Program loading, integration, evidence, and parallelism.
+- [x] Supply source evidence, introductions, and direct documentation links for
+  every added node. Include specialist-only nodes in the searchable Sphinx
+  fallback, and guard topic, package, and view membership in unit tests.
+- [x] Verify 60 focused Python tests, 17 frontend unit tests, 8 standalone browser
+  tests, and 10 Sphinx browser tests (95 total), plus the production bundle.
+  API documentation remains 2075/2075; no routed context topics are affected.
+
+Independent review identified training-route attribution, integration-catalog
+ownership wording, and the unbounded asynchronous recording queue description.
+All three were corrected against source; follow-up review has no unresolved
+findings. Differentiable simulation and lightweight differentiable training
+remain explicitly separate. Coverage denotes selected module entry points,
+not every internal class or dependency; unmapped relationships remain explicit.
+
+The full documentation site generated successfully but its strict warning gate
+still exits nonzero with 714 pre-existing warnings. All 731 normalized diagnostic
+lines match the main baseline exactly, with no added or removed diagnostics.
+The standalone specialist view and refreshed embedded page were inspected locally.
+The existing nonfatal Vite bundle-size advisory remains. Remote CI is pending.

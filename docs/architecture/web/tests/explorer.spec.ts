@@ -17,6 +17,25 @@
 import { test, expect } from '@playwright/test';
 import snapshot from '../../generated/architecture.json' with { type: 'json' };
 
+test('browse subsystem views and restore a module with its documentation', async ({ page }) => {
+  await page.goto('/');
+  for (const [view, label, module, figure] of [
+    ['simulation', 'Simulation', 'Robot workspace', 'FIG. 03'],
+    ['data-learning', 'Data & Learning', 'LeRobot recording', 'FIG. 04'],
+    ['generation-tooling', 'Generation & Toolkits', 'SimReady pipeline', 'FIG. 05'],
+  ]) {
+    await page.getByRole('button', { name: label, exact: true }).click();
+    await expect(page.locator('.view-heading')).toContainText(figure);
+    await page.getByRole('button', { name: `Select ${module}`, exact: true }).click();
+    const panel = page.getByRole('complementary', { name: 'Node details' });
+    await expect(panel.getByRole('heading', { name: module, exact: true })).toBeVisible();
+    await expect(panel.locator('.documentation-links a').first()).toBeVisible();
+    await page.reload();
+    await expect(panel.getByRole('heading', { name: module, exact: true })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`view=${view}`));
+  }
+});
+
 test('navigate both views, inspect evidence, and restore a shared selection', async ({ page }) => {
   await page.goto('/');
   await expect(
@@ -82,8 +101,9 @@ test('reading view keeps text legible and local focus survives navigation', asyn
   await page.goto('/#view=task-program&node=atomic-engine');
   await expect(page.locator('.canvas-tools')).toContainText('100%');
   await page.getByRole('button', { name: 'Direct neighbours only', exact: true }).click();
-  await expect(page.locator('.react-flow__node-module')).toHaveCount(5);
-  await expect(page.locator('.react-flow__edge')).toHaveCount(7);
+  // The integration catalog adds one import neighbour to the atomic engine.
+  await expect(page.locator('.react-flow__node-module')).toHaveCount(6);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(8);
   await expect(page.locator('.react-flow__node-module[data-id="program-compiler"]')).toHaveCount(0);
   await page.reload();
   await expect(
@@ -97,7 +117,7 @@ test('reading view keeps text legible and local focus survives navigation', asyn
   await expect(
     page.getByRole('button', { name: 'Direct neighbours only', exact: true }),
   ).toBeDisabled();
-  await page.getByRole('button', { name: 'Select Devices', exact: true }).click();
+  await page.getByRole('button', { name: 'Select Trajectory augmentation', exact: true }).click();
   await expect(page.getByText('Relationships not yet mapped in this view.')).toBeVisible();
 });
 
@@ -110,7 +130,7 @@ test('mobile readers can hide details, focus neighbours, and reopen the same sel
   const focus = page.getByRole('button', { name: 'Direct neighbours only', exact: true });
   await expect(focus).toBeEnabled();
   await focus.click();
-  await expect(page.locator('.react-flow__node-module')).toHaveCount(5);
+  await expect(page.locator('.react-flow__node-module')).toHaveCount(6);
   await page.getByRole('button', { name: 'Open node details', exact: true }).click();
   await expect(
     page.getByRole('heading', { name: 'AtomicActionEngine', exact: true }),
@@ -128,7 +148,8 @@ test('large neighbourhoods keep the selected module readable above the fold', as
   };
   await expect.poll(titleIsInsideCanvas).toBe(true);
   await page.getByRole('button', { name: 'Direct neighbours only', exact: true }).click();
-  await expect(page.locator('.react-flow__node-module')).toHaveCount(9);
+  // Include dataset/event managers and the differentiable environment subclass.
+  await expect(page.locator('.react-flow__node-module')).toHaveCount(12);
   await expect.poll(titleIsInsideCanvas).toBe(true);
 });
 

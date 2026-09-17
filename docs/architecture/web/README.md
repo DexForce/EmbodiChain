@@ -33,7 +33,7 @@ available. Card titles use 16px Inter, summaries 13px, and extended descriptions
 button usable with a pointer or keyboard. Selecting a different module resets the
 inspector to its introduction and focuses its heading.
 
-All 34 selected modules provide an introduction and documentation links. The
+All 77 selected modules provide an introduction and documentation links. The
 inspector puts guide/API cards before relationship evidence. Sphinx links open
 the corresponding HTML in the current documentation version; standalone links
 open the pinned Markdown or reStructuredText source using its resolved extension.
@@ -47,8 +47,11 @@ The implementation and visual styling are specific to this explorer.
 
 ## Included
 
-- Overview: 28 modules and 43 recorded relationships, organized into five layers.
-- Task Program: 16 objects and 41 recorded relationships, organized into four layers.
+- System overview: 40 modules and 70 recorded relationships.
+- Task Program: 23 modules and 67 recorded relationships.
+- Simulation: 26 modules and 29 recorded relationships.
+- Data & Learning: 20 modules and 25 recorded relationships.
+- Generation & Toolkits: 14 modules and 15 recorded relationships.
 - Search by module name, responsibility, topic, or source path.
 - Relationship filters, adjacent-node highlighting, zoom, pan, and a minimap.
 - A readable 100% initial scale with responsive columns and scroll-to-pan navigation.
@@ -77,8 +80,8 @@ The frontend fetches the `architecture.json` served beside its HTML entry and
 validates it against `../architecture.schema.json`. Vite serves and bundles
 `../generated/architecture.json` for standalone development; Sphinx builds supply
 the freshly generated JSON through `ARCHITECTURE_DATA_PATH`. Loading and invalid
-data have explicit states. The current snapshot has 34 unique
-nodes and 65 unique edges; views share nodes and relationships. Its `revision`
+data have explicit states. The current snapshot has 77 unique
+nodes and 150 unique edges; views share nodes and relationships. Its `revision`
 identifies the committed source being described, independently of the frontend
 implementation commit.
 
@@ -86,6 +89,13 @@ To refresh it, install the Python requirements in `../requirements.txt`, then ru
 `npm run data` followed by `npm run build`. See the [data workflow](../README.md)
 for evidence review and validation. Generation reads HEAD by default and rejects
 relevant uncommitted source changes. It never imports simulator code.
+
+Every registered MAP topic and top-level production package has at least one entry.
+The data tests detect unrepresented topics/packages and nodes absent from every view.
+This measures discoverability, not complete internal coverage. Specialist-only modules
+also appear in the searchable Sphinx text reference. Trajectory augmentation and
+URDF assembly retain explicit unmapped-relationship states where host integration
+is outside the selected evidence; no dependency is invented to connect a card.
 
 The original `../task-program.sample.json` remains unchanged. Curated summaries
 and semantic relationships live in `../curated.json`; selected AST imports and

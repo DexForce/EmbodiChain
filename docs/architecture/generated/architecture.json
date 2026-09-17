@@ -3,18 +3,76 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "0fcc27da33b72e1d9a98db43d1ea314dab3b4ae3",
+  "revision": "032de9e6b1ff960fe418b8a9afb1d8ece3098879",
   "source_ref": "HEAD",
   "package_version": "0.2.4",
   "topic_index": "agent_context/MAP.yaml",
   "limitations": [
     "A curated source snapshot, not a complete import graph, runtime trace, or execution order.",
-    "The sequential Gym integration is emphasized. Parallel execution, recovery, validators, recording, and planner internals are not exhaustively modeled.",
+    "All registered context topics and top-level production packages have an entry point. Internal classes, algorithms, runtime paths, and relationships remain selectively represented.",
     "References through protocols and injected factories are scoped to the described production assembly.",
     "Source-reviewed means checked against the pinned source revision; it is not a physical qualification result.",
-    "Prototype overview imports cover selected source modules only. They do not establish runtime ordering or a complete dependency graph."
+    "Static extraction scans the selected node source files only. Topic or package representation is not a completeness claim."
   ],
   "nodes": [
+    {
+      "id": "articulations",
+      "label": "Articulations",
+      "kind": "class",
+      "topic_ids": [
+        "simulation-system"
+      ],
+      "summary": "Represents jointed scene entities and articulated state.",
+      "details": "Articulations own joint and link state interfaces. Robot extends this object family with control parts, robot presets, kinematics, and motion-facing capabilities.",
+      "boundaries": [
+        "Supported operations depend on the object type and selected physics backend."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/articulation.py",
+          "symbol": "Articulation",
+          "start_line": 687,
+          "end_line": 687,
+          "excerpt": "class Articulation(BatchEntity):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.objects",
+          "label": "Articulations documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "async-recording",
+      "label": "Async recording",
+      "kind": "class",
+      "topic_ids": [
+        "data-pipeline"
+      ],
+      "summary": "Moves durable dataset writes to one background worker.",
+      "details": "The recorder copies tensor payloads to CPU and snapshots metadata before enqueueing. A FIFO worker owns persistence; finalization drains the queue, joins the worker, and surfaces failures.",
+      "boundaries": [
+        "The queue is unbounded; writer lag can grow memory use."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/managers/async_datasets.py",
+          "symbol": "AsyncLeRobotRecorder",
+          "start_line": 55,
+          "end_line": 55,
+          "excerpt": "class AsyncLeRobotRecorder(LeRobotRecorder):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "overview/gym/dataset_functors",
+          "label": "Async recording documentation",
+          "source_extension": ".md"
+        }
+      ]
+    },
     {
       "id": "atomic-engine",
       "label": "AtomicActionEngine",
@@ -48,6 +106,64 @@
         }
       ],
       "details": "Atomic Skills form the typed boundary between semantic intent and executable action plans. The engine owns planning resources and creates execution sessions. A runner and command sink dispatch commands; the engine itself does not advance the environment."
+    },
+    {
+      "id": "augmentation",
+      "label": "Trajectory augmentation",
+      "kind": "class",
+      "topic_ids": [
+        "motion-planning"
+      ],
+      "summary": "Tracks trajectory candidates, generation budgets, coverage, and commit receipts.",
+      "details": "The expansion package provides candidate contracts, residual and retiming operators, coverage metrics, and bounded session bookkeeping. Host integrations supply rollout execution, initial-state restoration, physical validation, and durable recording.",
+      "boundaries": [
+        "GenerationSession does not step or reset environments and does not write datasets."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/motion/expansion/session.py",
+          "symbol": "GenerationSession",
+          "start_line": 108,
+          "end_line": 108,
+          "excerpt": "class GenerationSession:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.motion.expansion",
+          "label": "Trajectory augmentation documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "autograd-bridge",
+      "label": "Newton autograd bridge",
+      "kind": "class",
+      "topic_ids": [
+        "differentiable-env"
+      ],
+      "summary": "Connects Warp tape derivatives to PyTorch action and functional-state gradients.",
+      "details": "The bridge executes a supplied kinematic callback and exposes selected outputs to autograd. Task hooks own action mapping and output contracts; the bridge carries gradient information across the Warp and PyTorch boundary.",
+      "boundaries": [
+        "A differentiable kinematic step is not a differentiable dynamics simulation."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/diff/bridge.py",
+          "symbol": "NewtonStepFunc",
+          "start_line": 81,
+          "end_line": 81,
+          "excerpt": "class NewtonStepFunc(torch.autograd.Function):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.gym.envs",
+          "label": "Newton autograd bridge documentation",
+          "source_extension": ".rst"
+        }
+      ]
     },
     {
       "id": "base-env",
@@ -106,6 +222,35 @@
         }
       ],
       "details": "The unified embodichain command resolves a requested subcommand and loads its handler lazily. Use the CLI reference to find launch options for environments, training, assets, and other tools; task behavior stays in the handler-owned subsystem."
+    },
+    {
+      "id": "collector",
+      "label": "SyncCollector",
+      "kind": "class",
+      "topic_ids": [
+        "rl-learning"
+      ],
+      "summary": "Collects standard vector-environment rollouts into the training buffer.",
+      "details": "The collector connects policy inference to environment stepping and records transition fields needed by standard algorithms. Bootstrap and actor/critic observation contracts are shared with the rollout buffer.",
+      "boundaries": [
+        "Standard collection is separate from differentiable rollout collection."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/collector/sync_collector.py",
+          "symbol": "SyncCollector",
+          "start_line": 33,
+          "end_line": 33,
+          "excerpt": "class SyncCollector(BaseCollector):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.learning.rl.collector",
+          "label": "SyncCollector documentation",
+          "source_extension": ".rst"
+        }
+      ]
     },
     {
       "id": "command-sink",
@@ -234,6 +379,64 @@
       "details": "Compute provides reusable numerical routines for kinematics, trajectories, geometry, and images. Its dependency boundary excludes lab objects and environment managers, allowing higher-level robotics modules to share algorithms without owning their runtime lifecycle."
     },
     {
+      "id": "compute-kinematics",
+      "label": "Kinematics computation",
+      "kind": "package",
+      "topic_ids": [
+        "ik-solvers"
+      ],
+      "summary": "Shared numerical kinematics and manipulability algorithms.",
+      "details": "This package owns reusable numerical routines and private Warp kernels. Stateful robot solving remains in motion.solvers, while workspace analysis consumes shared metrics and kinematic computation.",
+      "boundaries": [
+        "Numerical kernels do not own live robot or environment state."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/compute/kinematics/__init__.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 22,
+          "excerpt": "\"\"\"Kinematics computations and scalar motion profiles.\n\nPrivate Warp kernels implement OPW, SRS, UR, and trapezoidal/Double-S profiles.\nStateful solver interfaces and robot configuration remain in\n``embodichain.lab.sim.motion.solvers``.\nPure batched manipulability helpers live in :mod:`.manipulability`.\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.compute",
+          "label": "Kinematics computation documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "compute-trajectory",
+      "label": "Trajectory computation",
+      "kind": "package",
+      "topic_ids": [
+        "motion-planning"
+      ],
+      "summary": "Shared interpolation, resampling, timing, and trajectory warping algorithms.",
+      "details": "Motion generators, playback adapters, and augmentation operators share these numerical operations. Timing and geometric transformations remain separate from robot state, environment stepping, and durable data storage.",
+      "boundaries": [
+        "Compute must not import simulation objects or environment managers."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/compute/trajectory/__init__.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 20,
+          "excerpt": "\"\"\"Trajectory computations on arrays and tensors.\n\nInterpolation retains keyframe boundaries; resampling treats interior points\nas optional path samples. Warping applies keyframe offsets to a trajectory.\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.compute",
+          "label": "Trajectory computation documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
       "id": "config-loader",
       "label": "Config loader",
       "kind": "module",
@@ -261,6 +464,91 @@
         }
       ],
       "details": "The loader decodes deployment files, resolves reusable components, and assembles typed environment configuration. It connects command-line inputs to environment construction, while leaving simulation stepping to the environment lifecycle."
+    },
+    {
+      "id": "configuration",
+      "label": "Configuration utilities",
+      "kind": "module",
+      "topic_ids": [
+        "configclass-pattern"
+      ],
+      "summary": "Defines typed configuration copying, serialization, and required-field validation.",
+      "details": "The configclass decorator wraps dataclasses and provides independent defaults, copying, updates, and validation. Domain loaders still own schema and value constraints. Configuration construction may leave required values unresolved until validate is called.",
+      "boundaries": [
+        "Required-field validation is not universal type or domain validation."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/utils/configclass.py",
+          "symbol": "<module>",
+          "start_line": 14,
+          "end_line": 14,
+          "excerpt": "import torch"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.utils",
+          "label": "Configuration utilities documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "convex-decomposition",
+      "label": "Convex decomposition",
+      "kind": "module",
+      "topic_ids": [],
+      "summary": "Prepares convex collision meshes for URDF assets.",
+      "details": "The decomposition command resolves input assets and conversion options, then invokes the collision-mesh preparation implementation. Resulting collision geometry can be used in later simulation asset workflows.",
+      "boundaries": [
+        "Collision-mesh preparation does not validate an entire robot task."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/acd/cli.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 17,
+          "excerpt": "\"\"\"Command-line interface for URDF convex decomposition.\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/toolkits/convex_decomposition",
+          "label": "Convex decomposition documentation",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
+      "id": "data-assets",
+      "label": "Data assets",
+      "kind": "module",
+      "topic_ids": [
+        "data-assets"
+      ],
+      "summary": "Resolves asset paths and coordinates registered dataset downloads and caches.",
+      "details": "Asset lookup can resolve a local path or instantiate a registered dataset to download and extract its assets. This layer owns asset discovery and cache roots; online trajectory sampling and demonstration recording are separate workflows.",
+      "boundaries": [
+        "Asset lookup may trigger downloads; it does not generate or record demonstrations."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/data/dataset.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 17,
+          "excerpt": "from __future__ import annotations"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "resources/assets",
+          "label": "Data assets documentation",
+          "source_extension": ".md"
+        }
+      ]
     },
     {
       "id": "data-pipeline",
@@ -292,13 +580,127 @@
       "details": "The online data workflow connects simulation producers with training consumers. An OnlineDataEngine manages shared trajectory data, while OnlineDataset exposes sampling through PyTorch dataset patterns. See the streaming guide for lifecycle, buffering, and sampling behavior."
     },
     {
+      "id": "dataset-manager",
+      "label": "DatasetManager",
+      "kind": "class",
+      "topic_ids": [
+        "data-pipeline"
+      ],
+      "summary": "Coordinates dataset functors for frame collection, saving, and finalization.",
+      "details": "Environment lifecycle operations dispatch recording actions through this manager. Recorders own their persistence backends. Finalization drains committed work; the host must explicitly decide which episodes to save or discard.",
+      "boundaries": [
+        "Finalization is not an implicit commit of a live rollout."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/managers/dataset_manager.py",
+          "symbol": "DatasetManager",
+          "start_line": 39,
+          "end_line": 39,
+          "excerpt": "class DatasetManager(ManagerBase):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "overview/gym/dataset_functors",
+          "label": "DatasetManager documentation",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
+      "id": "deformables",
+      "label": "Deformable objects",
+      "kind": "class",
+      "topic_ids": [
+        "simulation-system"
+      ],
+      "summary": "Represents Newton-backed deformable particle-set entities.",
+      "details": "Surface and volume deformable facades adapt typed particle-set state for simulation and visualization. Their creation and lifecycle are owned by SimulationManager.",
+      "boundaries": [
+        "Supported operations depend on the object type and selected physics backend."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/deformable/base.py",
+          "symbol": "DeformableObject",
+          "start_line": 49,
+          "end_line": 49,
+          "excerpt": "class DeformableObject(BatchEntity):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.objects",
+          "label": "Deformable objects documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "depth-video",
+      "label": "Depth video",
+      "kind": "class",
+      "topic_ids": [
+        "data-pipeline"
+      ],
+      "summary": "Coordinates depth-video files and metadata alongside recorded demonstrations.",
+      "details": "Depth sidecars preserve depth observations separately from the primary dataset. Writer and reader utilities own encoding, output paths, and metadata required to associate depth frames with recorded episodes.",
+      "boundaries": [
+        "Depth output is a separate persistence boundary from the LeRobot episode commit."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/data_pipeline/depth_video/writer.py",
+          "symbol": "DepthSidecarManager",
+          "start_line": 226,
+          "end_line": 226,
+          "excerpt": "class DepthSidecarManager:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.data_pipeline.depth_video",
+          "label": "Depth video documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "device-controller",
+      "label": "Device controller",
+      "kind": "class",
+      "topic_ids": [],
+      "summary": "Maps input-device state to robot joint commands with joint-limit handling.",
+      "details": "The controller retains a robot and one or more input devices. It produces actions for a host loop to consume in Gym or simulation, while device implementations own acquisition of controller state.",
+      "boundaries": [
+        "The host remains responsible for applying actions and advancing the environment."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/devices/device_controller.py",
+          "symbol": "DeviceController",
+          "start_line": 29,
+          "end_line": 29,
+          "excerpt": "class DeviceController:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab",
+          "label": "Device controller documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
       "id": "devices",
       "label": "Devices",
       "kind": "module",
       "topic_ids": [],
-      "summary": "Base interfaces for real robot controllers.",
+      "summary": "Defines start, stop, and controller-state interfaces for robot input devices.",
       "boundaries": [
-        "Device control and internal simulation objects have separate responsibilities."
+        "The interface alone does not provide a hardware driver or execute robot actions."
       ],
       "evidence": [
         {
@@ -316,7 +718,123 @@
           "source_extension": ".rst"
         }
       ],
-      "details": "Real-device controllers expose interfaces for physical robot deployment. They are owned separately from simulated Robot entities. The laboratory API reference documents the device layer and its relationship to the rest of the robotics package."
+      "details": "Device is an abstract controller-state interface. DeviceController consumes implementations to map input to robot actions. Concrete device I/O and the host action-application loop are separate responsibilities."
+    },
+    {
+      "id": "differentiable-collector",
+      "label": "Differentiable collector",
+      "kind": "class",
+      "topic_ids": [
+        "rl-learning"
+      ],
+      "summary": "Collects differentiable trajectories while preserving their autograd graph.",
+      "details": "This collector produces graph-connected rollout segments for analytic policy gradients. Environment state detachment defines truncation boundaries; scheduled complete rollouts retain the required horizon.",
+      "boundaries": [
+        "Detaching rollout rewards or actions breaks the gradient path."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/collector/differentiable.py",
+          "symbol": "DifferentiableCollector",
+          "start_line": 132,
+          "end_line": 132,
+          "excerpt": "class DifferentiableCollector:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.learning.rl.collector",
+          "label": "Differentiable collector documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "differentiable-env",
+      "label": "DifferentiableEnv",
+      "kind": "class",
+      "topic_ids": [
+        "differentiable-env"
+      ],
+      "summary": "Preserves the Gym lifecycle while bridging task-defined kinematics to autograd.",
+      "details": "A Newton-backed environment records a task-defined kinematic callback on a Warp tape and exposes gradients through PyTorch. It requires gradient-enabled Newton configuration and coordinates terminal resets with backward completion.",
+      "boundaries": [
+        "This environment does not run the Newton dynamics solver; it is not the lightweight APG trainer route."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/differentiable_env.py",
+          "symbol": "DifferentiableEnv",
+          "start_line": 46,
+          "end_line": 46,
+          "excerpt": "class DifferentiableEnv(EmbodiedEnv):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.gym.envs",
+          "label": "DifferentiableEnv documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "differentiable-trainer",
+      "label": "DifferentiableTrainer",
+      "kind": "class",
+      "topic_ids": [
+        "rl-learning"
+      ],
+      "summary": "Coordinates graph-connected rollouts and analytic policy-gradient updates.",
+      "details": "The trainer supports segmented and complete differentiable rollouts through the lightweight environment protocol. It controls gradient lifetime, optimizer updates, and evaluation without converting the rollout to the standard buffer.",
+      "boundaries": [
+        "The public training route does not connect this trainer directly to DifferentiableEnv."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/differentiable_trainer.py",
+          "symbol": "DifferentiableTrainer",
+          "start_line": 78,
+          "end_line": 78,
+          "excerpt": "class DifferentiableTrainer:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.learning.rl",
+          "label": "DifferentiableTrainer documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "effect-evidence",
+      "label": "Effect evidence",
+      "kind": "class",
+      "topic_ids": [
+        "task-programs"
+      ],
+      "summary": "Collects typed evidence from registered providers for semantic effects.",
+      "details": "Evidence queries identify the observations required for an effect. Registered providers supply typed batches which monitors evaluate against declared expectations. Command dispatch and observed physical effects are separate facts.",
+      "boundaries": [
+        "Missing or projected evidence must not be presented as measured success."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/semantics/evidence.py",
+          "symbol": "EffectEvidenceCollector",
+          "start_line": 438,
+          "end_line": 438,
+          "excerpt": "class EffectEvidenceCollector:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.task_program.semantics",
+          "label": "Effect evidence documentation",
+          "source_extension": ".rst"
+        }
+      ]
     },
     {
       "id": "embodied-env",
@@ -411,6 +929,35 @@
       "details": "This adapter connects the task language to a concrete environment. It validates the chosen integration and assembles the semantic executor, command buffer, shared clock, and demonstration bridge used by the Gym workflow."
     },
     {
+      "id": "event-manager",
+      "label": "EventManager",
+      "kind": "class",
+      "topic_ids": [
+        "manager-functor"
+      ],
+      "summary": "Dispatches configured event functors with lifecycle scheduling and scoped seeds.",
+      "details": "Events may run at startup, reset, or intervals. The manager owns callable resolution, per-event scheduling, and reproducible invocation streams. Randomization is one family of event functors, alongside deterministic scene updates.",
+      "boundaries": [
+        "Event functors follow the event-manager contract, not observation or reward signatures."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/managers/event_manager.py",
+          "symbol": "EventManager",
+          "start_line": 94,
+          "end_line": 94,
+          "excerpt": "class EventManager(ManagerBase):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.gym.envs.managers",
+          "label": "EventManager documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
       "id": "execution-runner",
       "label": "ExecutionRunner",
       "kind": "class",
@@ -443,6 +990,33 @@
         }
       ],
       "details": "The runner advances an atomic session through observation, command, and clock interfaces. Its command sink determines where commands go. Acknowledgement of a command is distinct from confirmation that a physical effect has occurred."
+    },
+    {
+      "id": "grasp-tools",
+      "label": "Grasp generation",
+      "kind": "module",
+      "topic_ids": [],
+      "summary": "Defines parallel-jaw gripper models and grasp-pose generation interfaces.",
+      "details": "GraspKit prepares candidate grasp poses using explicit gripper geometry and supported generation implementations. Interactive annotation and sampling tools expose the underlying asset-preparation capabilities.",
+      "boundaries": [
+        "A geometric grasp candidate is not proof of successful physical grasping."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/graspkit/pose_generator.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 17,
+          "excerpt": "\"\"\"Backend-neutral contracts for standalone grasp-pose generators.\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/toolkits/grasp_generator",
+          "label": "Grasp generation documentation",
+          "source_extension": ".rst"
+        }
+      ]
     },
     {
       "id": "gym-bridge",
@@ -479,6 +1053,64 @@
       "details": "The bridge exposes program execution as incremental Gym demonstrations. It shares a buffered command sink and environment-step clock with the semantic runtime, so action consumption and time progression stay coordinated with the host environment."
     },
     {
+      "id": "integration-catalog",
+      "label": "Integration catalog",
+      "kind": "class",
+      "topic_ids": [
+        "task-programs"
+      ],
+      "summary": "Describes one Task Program integration and validates compilation against its fingerprint.",
+      "details": "A task registration owns this immutable provider-free directory of scene, robot-profile, runtime, and extension declarations. Preflight checks bind compilation to the integration fingerprint before live assembly uses that registration.",
+      "boundaries": [
+        "The catalog describes a registration; it does not own physical Gym component composition."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/catalog.py",
+          "symbol": "TaskProgramIntegrationCatalog",
+          "start_line": 450,
+          "end_line": 450,
+          "excerpt": "class TaskProgramIntegrationCatalog:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.task_program.integrations",
+          "label": "Integration catalog documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "learning-env",
+      "label": "Learning environments",
+      "kind": "module",
+      "topic_ids": [
+        "rl-learning"
+      ],
+      "summary": "Defines lightweight vector-environment protocols and factory registration.",
+      "details": "Registered lightweight environments can support standard or differentiable rollouts. Differentiable protocols add state-detachment and optional scheduled-rollout hooks. This route is selected separately from simulator Gym configurations.",
+      "boundaries": [
+        "A lightweight environment protocol is distinct from the Gym DifferentiableEnv class."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/env.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 17,
+          "excerpt": "\"\"\"Contracts and registration helpers for lightweight learning environments.\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.learning.rl",
+          "label": "Learning environments documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
       "id": "managers",
       "label": "Managers",
       "kind": "module",
@@ -506,6 +1138,35 @@
         }
       ],
       "details": "Managers organize task behavior around observations, actions, rewards, events, and dataset recording. Each manager invokes functors with its own contract, letting tasks compose behavior while sharing the environment reset and step lifecycle."
+    },
+    {
+      "id": "mllm",
+      "label": "MLLM frontend",
+      "kind": "module",
+      "topic_ids": [
+        "task-programs"
+      ],
+      "summary": "Decodes untrusted model JSON and compiles it through the existing Task Program adapter.",
+      "details": "The host supplies trusted integration settings. The frontend admits a restricted sequential subset, validates model-provided content, and delegates compilation to the canonical environment adapter. It does not introduce a separate model-specific compiler.",
+      "boundaries": [
+        "This is an input boundary, not an autonomous model service or a robot execution loop."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/agents/mllm/task_program.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 17,
+          "excerpt": "\"\"\"Strict MLLM frontend for declarative Task Program JSON responses.\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "overview/task_program/index",
+          "label": "MLLM frontend documentation",
+          "source_extension": ".md"
+        }
+      ]
     },
     {
       "id": "motion-generator",
@@ -540,6 +1201,64 @@
         }
       ],
       "details": "Use this entry point to turn joint or end-effector goals into timed trajectories. It composes planner backends behind one motion interface, while simulation playback or Atomic Skills consume the generated motion."
+    },
+    {
+      "id": "online-dataset",
+      "label": "OnlineDataset",
+      "kind": "class",
+      "topic_ids": [
+        "data-pipeline"
+      ],
+      "summary": "Exposes live engine samples as an infinite PyTorch IterableDataset.",
+      "details": "The dataset samples trajectory chunks from a started OnlineDataEngine. It supports item and batch modes with fixed or sampled chunk sizes. Worker lifecycle and shared-memory ownership remain in the engine.",
+      "boundaries": [
+        "Dataset iteration does not own engine startup or shutdown."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/data_pipeline/datasets/online_data.py",
+          "symbol": "OnlineDataset",
+          "start_line": 32,
+          "end_line": 32,
+          "excerpt": "class OnlineDataset(IterableDataset):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.data_pipeline.datasets",
+          "label": "OnlineDataset documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "parallel-execution",
+      "label": "Parallel execution",
+      "kind": "class",
+      "topic_ids": [
+        "task-programs"
+      ],
+      "summary": "Coordinates parallel semantic branches through command and safety interfaces.",
+      "details": "Parallel execution coordinates branch lifecycles, lane commands, shared timing, and safety validation. It depends on integration-supplied capabilities and resource contracts rather than assuming arbitrary commands are safe to combine.",
+      "boundaries": [
+        "Parallel execution support is conditional on the selected integration and safety contracts."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/runtime/parallel_executor.py",
+          "symbol": "ParallelSemanticExecutor",
+          "start_line": 629,
+          "end_line": 629,
+          "excerpt": "class ParallelSemanticExecutor:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.task_program.runtime",
+          "label": "Parallel execution documentation",
+          "source_extension": ".rst"
+        }
+      ]
     },
     {
       "id": "physics",
@@ -600,6 +1319,64 @@
       "details": "Planning backends produce robot trajectories with different timing, geometric, or collision constraints. Choose a backend through motion configuration; use MotionGenerator as the composition entry point when building a complete motion request."
     },
     {
+      "id": "policy",
+      "label": "Policy models",
+      "kind": "class",
+      "topic_ids": [
+        "rl-learning"
+      ],
+      "summary": "Defines policy action inference and model interfaces.",
+      "details": "Actor-critic and actor-only implementations build on policy contracts and registered model configurations. Differentiable training requires graph-preserving action sampling; standard rollout collection has its own inference requirements.",
+      "boundaries": [
+        "Policy inference does not own environment or trainer lifecycles."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/models/policy.py",
+          "symbol": "Policy",
+          "start_line": 35,
+          "end_line": 35,
+          "excerpt": "class Policy(nn.Module, ABC):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "overview/rl/models",
+          "label": "Policy models documentation",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
+      "id": "policy-evaluation",
+      "label": "Policy evaluation",
+      "kind": "module",
+      "topic_ids": [
+        "rl-learning"
+      ],
+      "summary": "Runs trained policy evaluation in headless or viewer workflows.",
+      "details": "The evaluation entry point resolves model inputs and environment configuration, then builds a compatible runtime or profile workflow. Reports and viewer integration expose the resulting evaluation artifacts.",
+      "boundaries": [
+        "Evaluation consumes a trained policy; it is separate from training updates."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/policy_evaluation/cli.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 17,
+          "excerpt": "\"\"\"Unified policy evaluation for EmbodiChain training runs.\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.learning.rl.policy_evaluation",
+          "label": "Policy evaluation documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
       "id": "program-compiler",
       "label": "TaskProgramCompiler",
       "kind": "class",
@@ -634,15 +1411,131 @@
       "details": "This is the static compilation stage. It validates a task against scene contracts and materializes bounded program segments. Runtime lowering remains a separate concern, so inspecting a compiled program does not require executing its robot actions."
     },
     {
+      "id": "program-input",
+      "label": "Program loading & validation",
+      "kind": "module",
+      "topic_ids": [
+        "task-programs"
+      ],
+      "summary": "Loads bounded JSON or YAML into the canonical Task Program configuration.",
+      "details": "Input loading, strict decoding, and reference validation establish a declarative program before compilation. Host-controlled integration choices and supported language constructs remain explicit at this boundary.",
+      "boundaries": [
+        "Successful decoding is not successful execution or physical qualification."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/language/loader.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 17,
+          "excerpt": "\"\"\"Safe file and strict JSON loading for declarative Task Programs.\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.task_program.language",
+          "label": "Program loading & validation documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "randomization",
+      "label": "Domain randomization",
+      "kind": "package",
+      "topic_ids": [
+        "randomization"
+      ],
+      "summary": "Event functors randomize physical, visual, spatial, and geometric properties.",
+      "details": "Configure randomizers as EventCfg entries. EventManager dispatches them at startup, reset, or interval boundaries with the configured seed policy. Randomizers share the event mechanism while keeping property-specific behavior in their own modules.",
+      "boundaries": [
+        "Randomization scheduling belongs to EventManager."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/managers/randomization/__init__.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 20,
+          "excerpt": "\"\"\"Domain-randomization event functors (physics, visual, spatial, geometry).\n\nImplemented as event functors registered via ``EventCfg`` and dispatched by ``EventManager`` at startup / reset / interval modes.\n\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.gym.envs.managers",
+          "label": "Domain randomization documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "recording",
+      "label": "LeRobot recording",
+      "kind": "class",
+      "topic_ids": [
+        "data-pipeline"
+      ],
+      "summary": "Persists demonstrations and metadata in LeRobot datasets with optional depth sidecars.",
+      "details": "The recorder buffers environment frames, commits selected episode fragments, and tracks finalization. Action features follow the expert-action schema. Optional depth video is stored alongside the main dataset with metadata linking the outputs.",
+      "boundaries": [
+        "A sidecar failure after the LeRobot commit cannot roll back the committed episode."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/managers/datasets.py",
+          "symbol": "LeRobotRecorder",
+          "start_line": 101,
+          "end_line": 101,
+          "excerpt": "class LeRobotRecorder(Functor):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "overview/gym/dataset_functors",
+          "label": "LeRobot recording documentation",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
+      "id": "rigid-objects",
+      "label": "Rigid objects",
+      "kind": "class",
+      "topic_ids": [
+        "simulation-system"
+      ],
+      "summary": "Represents rigid scene objects and their physical state.",
+      "details": "SimulationManager creates and retains rigid entities. Their object facade exposes batched poses and physics properties through the selected backend.",
+      "boundaries": [
+        "Supported operations depend on the object type and selected physics backend."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/rigid_object.py",
+          "symbol": "RigidObject",
+          "start_line": 352,
+          "end_line": 352,
+          "excerpt": "class RigidObject(BatchEntity):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.objects",
+          "label": "Rigid objects documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
       "id": "rl",
-      "label": "RL training",
+      "label": "Standard trainer",
       "kind": "module",
       "topic_ids": [
         "rl-learning"
       ],
-      "summary": "Organises policy learning, collection, evaluation, and model persistence.",
+      "summary": "Coordinates standard rollout collection, algorithm updates, evaluation, and checkpoints.",
       "boundaries": [
-        "RL training interacts with simulation through the environment interface."
+        "Standard rollout storage is separate from the graph-connected differentiable training route."
       ],
       "evidence": [
         {
@@ -660,7 +1553,65 @@
           "source_extension": ".rst"
         }
       ],
-      "details": "The reinforcement learning layer organizes algorithms, policies, rollout collection, training, evaluation, and model persistence. Training reaches simulation through the environment interface. Start with the RL overview for the roles and configuration of each part."
+      "details": "The standard Trainer creates a SyncCollector and RolloutBuffer, retains the selected policy and algorithm, and schedules collection and updates. Simulator Gym deployments and standard lightweight environments use this path. Differentiable algorithms select a separate trainer."
+    },
+    {
+      "id": "rl-algorithms",
+      "label": "RL algorithms",
+      "kind": "package",
+      "topic_ids": [
+        "rl-learning"
+      ],
+      "summary": "Registers PPO, GRPO, and APG with their rollout contracts.",
+      "details": "Standard algorithms consume collected rollout data. APG consumes graph-connected differentiable rollouts. The algorithm registry provides configuration and construction while trainers own collection and update scheduling.",
+      "boundaries": [
+        "Standard and differentiable rollout payloads are not interchangeable."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/algo/__init__.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 17,
+          "excerpt": "\"\"\"Algorithm registry and construction helpers (``BaseAlgorithm``, ``PPO``, ``GRPO``, ``compute_gae``, ``build_algo``).\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "overview/rl/algorithm",
+          "label": "RL algorithms documentation",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
+      "id": "rl-routing",
+      "label": "Training assembly",
+      "kind": "module",
+      "topic_ids": [
+        "rl-learning"
+      ],
+      "summary": "Builds environments, policies, algorithms, and the compatible trainer from configuration.",
+      "details": "Training selects either a registered simulator Gym deployment or a lightweight learning environment. Algorithm rollout semantics determine the trainer and collector path. Evaluation, checkpointing, and runtime options are assembled here.",
+      "boundaries": [
+        "Differentiable training is supported through the lightweight learning-environment route."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/train.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 17,
+          "excerpt": "from __future__ import annotations"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "overview/rl/train_script",
+          "label": "Training assembly documentation",
+          "source_extension": ".md"
+        }
+      ]
     },
     {
       "id": "robot",
@@ -692,6 +1643,93 @@
       "details": "The robot facade exposes simulated joint state, control parts, and kinematic capabilities. SimulationManager creates and retains the live entity; robot presets and configuration describe how it should be assembled."
     },
     {
+      "id": "rollout-buffer",
+      "label": "Rollout buffer",
+      "kind": "class",
+      "topic_ids": [
+        "rl-learning"
+      ],
+      "summary": "Stores standard rollout transitions and bootstrap state in TensorDict buffers.",
+      "details": "The buffer preallocates vectorized rollout storage for collection and later updates. It preserves the transition fields and observation groups expected by algorithms and collectors.",
+      "boundaries": [
+        "Graph-connected APG rollouts do not pass through this standard buffer."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/buffer/standard_buffer.py",
+          "symbol": "RolloutBuffer",
+          "start_line": 27,
+          "end_line": 27,
+          "excerpt": "class RolloutBuffer:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "overview/rl/buffer",
+          "label": "Rollout buffer documentation",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
+      "id": "scene-editing",
+      "label": "Scene editing",
+      "kind": "module",
+      "topic_ids": [
+        "gen-sim"
+      ],
+      "summary": "Edits an existing portable scene using a typed edit plan.",
+      "details": "The editor imports scene state, interprets requested edits, prepares added assets, updates layout, and exports the result. It preserves the scene graph and object identity contracts needed for further editing.",
+      "boundaries": [
+        "Editing operates on scene artifacts rather than a live Gym environment."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/edit.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 17,
+          "excerpt": "from __future__ import annotations"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/generative_sim/scene_engine",
+          "label": "Scene editing documentation",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
+      "id": "scene-export",
+      "label": "Scene export",
+      "kind": "class",
+      "topic_ids": [
+        "gen-sim"
+      ],
+      "summary": "Writes portable scene metadata and assets for downstream simulation preparation.",
+      "details": "The export boundary packages scene state, graph metadata, and referenced mesh or articulated assets. It owns coordinate and persistence conventions for portable output; runtime scene loading is a separate operation.",
+      "boundaries": [
+        "A scene export still needs task and embodiment configuration to become a deployment."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/utils/scene_exporter.py",
+          "symbol": "SceneExporter",
+          "start_line": 43,
+          "end_line": 43,
+          "excerpt": "class SceneExporter:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/generative_sim/scene_engine",
+          "label": "Scene export documentation",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
       "id": "scene-generation",
       "label": "Scene generation",
       "kind": "module",
@@ -719,6 +1757,35 @@
         }
       ],
       "details": "The Scene Engine turns image inputs into scene-state and asset workflows for simulation preparation. Scene generation has its own pipeline lifecycle; loading and executing the resulting scene in a simulation is a separate responsibility."
+    },
+    {
+      "id": "scene-registry",
+      "label": "SceneRegistry",
+      "kind": "class",
+      "topic_ids": [
+        "task-programs"
+      ],
+      "summary": "Binds semantic entity identifiers to scene metadata and runtime providers.",
+      "details": "The registry supplies entity, affordance, geometry, and collision-world information to semantic analysis and execution. Static manifest construction and live provider access remain separate operations.",
+      "boundaries": [
+        "Registry metadata alone does not establish a measured physical outcome."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/semantics/scene.py",
+          "symbol": "SceneRegistry",
+          "start_line": 1083,
+          "end_line": 1083,
+          "excerpt": "class SceneRegistry:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "overview/task_program/scene_registry",
+          "label": "SceneRegistry documentation",
+          "source_extension": ".md"
+        }
+      ]
     },
     {
       "id": "semantic-compiler",
@@ -818,6 +1885,35 @@
       "details": "Sensors turn simulation state into batched observations. Camera, stereo, and contact sensors expose different data contracts and configuration choices. Sensor-specific adaptation stays here, while reusable numerical image and geometry routines belong to compute."
     },
     {
+      "id": "simready",
+      "label": "SimReady pipeline",
+      "kind": "module",
+      "topic_ids": [
+        "gen-sim"
+      ],
+      "summary": "Ingests raw assets through parsing and conversion stages into SimReady outputs.",
+      "details": "The general asset-ingest pipeline coordinates parser capabilities and persisted processing state for supported input formats. Scene Engine also has an internal asset-preparation flow; these are distinct entry points.",
+      "boundaries": [
+        "A converted asset is not a complete runnable Gym deployment."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 17,
+          "excerpt": "from __future__ import annotations"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/generative_sim/simready_pipeline",
+          "label": "SimReady pipeline documentation",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
       "id": "simulation-factory",
       "label": "SimulationTaskProgramFactory",
       "kind": "class",
@@ -879,6 +1975,35 @@
         }
       ],
       "details": "The simulation manager is the central owner of the simulated world. It creates and retains scene entities, coordinates physics and sensors, and starts optional browser visualization. Environment and task layers access the world through this API."
+    },
+    {
+      "id": "skill-profile",
+      "label": "RobotSkillProfile",
+      "kind": "class",
+      "topic_ids": [
+        "task-programs"
+      ],
+      "summary": "Declares robot resources, skill bindings, and effect-assurance capabilities.",
+      "details": "Profiles connect semantic intent to available robot resources and Atomic Skills. Bound profiles resolve concrete endpoints and integration choices while preserving declared capability and assurance constraints.",
+      "boundaries": [
+        "A declared capability does not replace runtime evidence or acceptance checks."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/semantics/profiles.py",
+          "symbol": "RobotSkillProfile",
+          "start_line": 1497,
+          "end_line": 1497,
+          "excerpt": "class RobotSkillProfile:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "overview/task_program/robot_profiles",
+          "label": "RobotSkillProfile documentation",
+          "source_extension": ".md"
+        }
+      ]
     },
     {
       "id": "solvers",
@@ -1036,6 +2161,60 @@
       "details": "Official tasks are bundled in the same distribution under the embodichain_tasks import package. Import-backed tasks register during discovery, while supported configuration-defined Task Programs register when their Gym configuration is loaded."
     },
     {
+      "id": "toolkits",
+      "label": "Toolkits",
+      "kind": "package",
+      "topic_ids": [],
+      "summary": "Standalone grasp sampling, collision-mesh preparation, and URDF assembly utilities.",
+      "details": "Use these tools to prepare robot and object assets before deployment. The toolkit family includes parallel-jaw grasp generation, convex decomposition, and URDF assembly, each with its own input and output contracts.",
+      "boundaries": [
+        "Toolkit operations do not own the simulation lifecycle."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/__init__.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 20,
+          "excerpt": "\"\"\"Standalone asset-preparation and manipulation utilities usable independently of the simulation loop.\n\nIncludes parallel-gripper grasp sampling, URDF convex decomposition, and URDF assembly.\n\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/toolkits/index",
+          "label": "Toolkits documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "urdf-assembly",
+      "label": "URDF assembly",
+      "kind": "class",
+      "topic_ids": [],
+      "summary": "Assembles URDF components, connections, sensors, and mesh resources.",
+      "details": "The assembly manager coordinates component naming, connection structure, sensor additions, mesh handling, and file output. Use it to prepare reusable robot descriptions before simulation or deployment.",
+      "boundaries": [
+        "Assembly prepares descriptions; it does not execute robot control."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/urdf_assembly/urdf_assembly_manager.py",
+          "symbol": "URDFAssemblyManager",
+          "start_line": 78,
+          "end_line": 78,
+          "excerpt": "class URDFAssemblyManager:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/toolkits/urdf_assembly",
+          "label": "URDF assembly documentation",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
       "id": "visualization",
       "label": "Browser visualization",
       "kind": "module",
@@ -1063,6 +2242,64 @@
         }
       ],
       "details": "The browser runtime publishes simulation snapshots and interactive controls. Simulation reads remain on the simulation thread, while the visualization worker handles backend updates. This module visualizes a running world; this architecture explorer visualizes code structure."
+    },
+    {
+      "id": "workspace",
+      "label": "Robot workspace",
+      "kind": "class",
+      "topic_ids": [
+        "robot-workspace"
+      ],
+      "summary": "Loads reachability caches and samples robot joint configurations and poses.",
+      "details": "Robot-facing workspace sampling reuses offline analysis results and recomputes poses with the current robot base. Cached samples include validity masks and optional metrics. Offline analysis and runtime cache consumption have separate lifecycles.",
+      "boundaries": [
+        "Kinematic reachability does not establish collision freedom or task success."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/motion/workspace/runtime.py",
+          "symbol": "RobotWorkspace",
+          "start_line": 53,
+          "end_line": 53,
+          "excerpt": "class RobotWorkspace:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/workspace_analyzer/runtime",
+          "label": "Robot workspace documentation",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
+      "id": "workspace-analyzer",
+      "label": "Workspace analyzer",
+      "kind": "class",
+      "topic_ids": [
+        "robot-workspace"
+      ],
+      "summary": "Analyzes robot reachability and metrics for reusable workspace caches.",
+      "details": "The analyzer combines sampling, FK or IK, constraints, metrics, and result caching. Select an analysis mode and robot control part explicitly, then consume compatible caches through the runtime workspace interface.",
+      "boundaries": [
+        "Offline analysis is distinct from runtime motion planning."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/motion/workspace/analyzer.py",
+          "symbol": "WorkspaceAnalyzer",
+          "start_line": 182,
+          "end_line": 182,
+          "excerpt": "class WorkspaceAnalyzer:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/workspace_analyzer/workspace_analyzer",
+          "label": "Workspace analyzer documentation",
+          "source_extension": ".md"
+        }
+      ]
     }
   ],
   "edges": [
@@ -1153,6 +2390,24 @@
           "start_line": 736,
           "end_line": 736,
           "excerpt": "        command_sink = BufferedGymCommandSink(command_encoder, clock)"
+        }
+      ]
+    },
+    {
+      "id": "async-recording-inherits-recording",
+      "source": "async-recording",
+      "target": "recording",
+      "relation": "inherits",
+      "description": "Extends the recorder with a background persistence worker.",
+      "provenance": "source-reviewed",
+      "scope": "Declared inheritance; queued payloads are copied before worker ownership.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/managers/async_datasets.py",
+          "symbol": "AsyncLeRobotRecorder",
+          "start_line": 55,
+          "end_line": 55,
+          "excerpt": "class AsyncLeRobotRecorder(LeRobotRecorder):"
         }
       ]
     },
@@ -1279,6 +2534,42 @@
       ]
     },
     {
+      "id": "cli-calls-convex-decomposition",
+      "source": "cli",
+      "target": "convex-decomposition",
+      "relation": "calls",
+      "description": "Dispatches URDF convex decomposition.",
+      "provenance": "source-reviewed",
+      "scope": "Conditional lazy command dispatch through the registered handler; this registry entry does not itself execute the command.",
+      "evidence": [
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "<module>",
+          "start_line": 99,
+          "end_line": 99,
+          "excerpt": "        target=\"embodichain.toolkits.acd.cli:main\","
+        }
+      ]
+    },
+    {
+      "id": "cli-calls-data-assets",
+      "source": "cli",
+      "target": "data-assets",
+      "relation": "calls",
+      "description": "Dispatches the data asset command.",
+      "provenance": "source-reviewed",
+      "scope": "Conditional lazy command dispatch through the registered handler; this registry entry does not itself execute the command.",
+      "evidence": [
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "<module>",
+          "start_line": 43,
+          "end_line": 43,
+          "excerpt": "        target=\"embodichain.data.download:main\","
+        }
+      ]
+    },
+    {
       "id": "cli-calls-env-launcher",
       "source": "cli",
       "target": "env-launcher",
@@ -1311,9 +2602,99 @@
       ]
     },
     {
-      "id": "cli-calls-rl",
+      "id": "cli-calls-grasp-tools",
       "source": "cli",
-      "target": "rl",
+      "target": "grasp-tools",
+      "relation": "calls",
+      "description": "Dispatches the GraspKit annotation entry point.",
+      "provenance": "source-reviewed",
+      "scope": "Conditional lazy command dispatch through the registered handler; this registry entry does not itself execute the command.",
+      "evidence": [
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "<module>",
+          "start_line": 94,
+          "end_line": 94,
+          "excerpt": "        target=\"embodichain.toolkits.graspkit.scripts.annotate_grasp:cli\","
+        }
+      ]
+    },
+    {
+      "id": "cli-calls-policy-evaluation",
+      "source": "cli",
+      "target": "policy-evaluation",
+      "relation": "calls",
+      "description": "Dispatches policy evaluation.",
+      "provenance": "source-reviewed",
+      "scope": "Conditional lazy command dispatch through the registered handler; this registry entry does not itself execute the command.",
+      "evidence": [
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "<module>",
+          "start_line": 89,
+          "end_line": 89,
+          "excerpt": "        target=\"embodichain.learning.rl.policy_evaluation.cli:cli\","
+        }
+      ]
+    },
+    {
+      "id": "cli-calls-scene-generation",
+      "source": "cli",
+      "target": "scene-generation",
+      "relation": "calls",
+      "description": "Dispatches the Scene Engine command, whose handler supports generation and editing.",
+      "provenance": "source-reviewed",
+      "scope": "Conditional lazy command dispatch through the registered handler; this registry entry does not itself execute the command.",
+      "evidence": [
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "<module>",
+          "start_line": 53,
+          "end_line": 53,
+          "excerpt": "        target=\"embodichain.gen_sim.scene_engine.cli.start:main\","
+        }
+      ]
+    },
+    {
+      "id": "cli-calls-simready",
+      "source": "cli",
+      "target": "simready",
+      "relation": "calls",
+      "description": "Dispatches the general SimReady asset-ingest command.",
+      "provenance": "source-reviewed",
+      "scope": "Conditional lazy command dispatch through the registered handler; this registry entry does not itself execute the command.",
+      "evidence": [
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "<module>",
+          "start_line": 48,
+          "end_line": 48,
+          "excerpt": "        target=\"embodichain.gen_sim.simready_pipeline.cli.start:main\","
+        }
+      ]
+    },
+    {
+      "id": "cli-calls-toolkits",
+      "source": "cli",
+      "target": "toolkits",
+      "relation": "calls",
+      "description": "Dispatches the toolkit convex-decomposition command.",
+      "provenance": "source-reviewed",
+      "scope": "Conditional lazy command dispatch through the registered handler; this registry entry does not itself execute the command.",
+      "evidence": [
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "<module>",
+          "start_line": 99,
+          "end_line": 99,
+          "excerpt": "        target=\"embodichain.toolkits.acd.cli:main\","
+        }
+      ]
+    },
+    {
+      "id": "cli-calls-training-assembly",
+      "source": "cli",
+      "target": "rl-routing",
       "relation": "calls",
       "description": "Dispatch the train-rl command to the training entry point.",
       "scope": "Only when the train-rl command is selected; no training is started by this explorer.",
@@ -1339,6 +2720,42 @@
           "start_line": 194,
           "end_line": 195,
           "excerpt": "    handler = _load_handler(command.target)\n    handler(arguments[1:])"
+        }
+      ]
+    },
+    {
+      "id": "cli-calls-workspace-analyzer",
+      "source": "cli",
+      "target": "workspace-analyzer",
+      "relation": "calls",
+      "description": "Dispatches offline workspace analysis.",
+      "provenance": "source-reviewed",
+      "scope": "Conditional lazy command dispatch through the registered handler; this registry entry does not itself execute the command.",
+      "evidence": [
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "<module>",
+          "start_line": 114,
+          "end_line": 114,
+          "excerpt": "        target=\"embodichain.lab.scripts.analyze_workspace:cli\","
+        }
+      ]
+    },
+    {
+      "id": "collector-holds-policy",
+      "source": "collector",
+      "target": "policy",
+      "relation": "holds",
+      "description": "Retains the supplied policy for rollout inference.",
+      "provenance": "source-reviewed",
+      "scope": "The selected trainer or collector assembly; standard and differentiable routes remain separate.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/collector/sync_collector.py",
+          "symbol": "SyncCollector.__init__",
+          "start_line": 44,
+          "end_line": 44,
+          "excerpt": "        self.policy = policy"
         }
       ]
     },
@@ -1436,6 +2853,96 @@
       ]
     },
     {
+      "id": "device-controller-holds-devices",
+      "source": "device-controller",
+      "target": "devices",
+      "relation": "holds",
+      "description": "Retains configured input-device instances.",
+      "provenance": "source-reviewed",
+      "scope": "DeviceController input mapping; implementations own their controller-state acquisition.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/devices/device_controller.py",
+          "symbol": "DeviceController.add_device",
+          "start_line": 88,
+          "end_line": 88,
+          "excerpt": "        self._devices[device_name] = device"
+        }
+      ]
+    },
+    {
+      "id": "device-controller-holds-robot",
+      "source": "device-controller",
+      "target": "robot",
+      "relation": "holds",
+      "description": "Retains the robot used to map device input into joint commands.",
+      "provenance": "source-reviewed",
+      "scope": "Caller-supplied robot; the host applies returned actions.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/devices/device_controller.py",
+          "symbol": "DeviceController.__init__",
+          "start_line": 64,
+          "end_line": 64,
+          "excerpt": "        self.robot = robot"
+        }
+      ]
+    },
+    {
+      "id": "differentiable-env-calls-autograd-bridge",
+      "source": "differentiable-env",
+      "target": "autograd-bridge",
+      "relation": "calls",
+      "description": "Bridges the task kinematic step into autograd.",
+      "provenance": "source-reviewed",
+      "scope": "Newton-backed, gradient-enabled kinematics; not a Newton dynamics solver step.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/differentiable_env.py",
+          "symbol": "DifferentiableEnv.step",
+          "start_line": 163,
+          "end_line": 163,
+          "excerpt": "        outputs = NewtonStepFunc.apply(action, sim_state, *functional_state)"
+        }
+      ]
+    },
+    {
+      "id": "differentiable-trainer-constructs-differentiable-collector",
+      "source": "differentiable-trainer",
+      "target": "differentiable-collector",
+      "relation": "constructs",
+      "description": "Creates the differentiable rollout collector.",
+      "provenance": "source-reviewed",
+      "scope": "The selected trainer or collector assembly; standard and differentiable routes remain separate.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/differentiable_trainer.py",
+          "symbol": "DifferentiableTrainer.__init__",
+          "start_line": 135,
+          "end_line": 135,
+          "excerpt": "        self.collector = DifferentiableCollector("
+        }
+      ]
+    },
+    {
+      "id": "differentiable-trainer-holds-policy",
+      "source": "differentiable-trainer",
+      "target": "policy",
+      "relation": "holds",
+      "description": "Retains the graph-preserving policy.",
+      "provenance": "source-reviewed",
+      "scope": "The selected trainer or collector assembly; standard and differentiable routes remain separate.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/differentiable_trainer.py",
+          "symbol": "DifferentiableTrainer.__init__",
+          "start_line": 122,
+          "end_line": 122,
+          "excerpt": "        self.policy = policy"
+        }
+      ]
+    },
+    {
       "id": "discovery-imports-official-tasks",
       "source": "task-discovery",
       "target": "tasks",
@@ -1471,6 +2978,42 @@
           "start_line": 400,
           "end_line": 402,
           "excerpt": "    module_name = ep.value\n    top_level = module_name.partition(\".\")[0]\n    mod = importlib.import_module(module_name)"
+        }
+      ]
+    },
+    {
+      "id": "embodied-env-constructs-dataset-manager",
+      "source": "embodied-env",
+      "target": "dataset-manager",
+      "relation": "constructs",
+      "description": "Creates the configured dataset manager.",
+      "provenance": "source-reviewed",
+      "scope": "Only when dataset recording is configured.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/embodied_env.py",
+          "symbol": "EmbodiedEnv.__init__",
+          "start_line": 407,
+          "end_line": 407,
+          "excerpt": "                self.dataset_manager = DatasetManager(self.cfg.dataset, self)"
+        }
+      ]
+    },
+    {
+      "id": "embodied-env-constructs-event-manager",
+      "source": "embodied-env",
+      "target": "event-manager",
+      "relation": "constructs",
+      "description": "Creates the configured event manager.",
+      "provenance": "source-reviewed",
+      "scope": "Only when event configuration is present.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/embodied_env.py",
+          "symbol": "EmbodiedEnv._init_sim_state",
+          "start_line": 707,
+          "end_line": 707,
+          "excerpt": "            self.event_manager = EventManager(self.cfg.events, self)"
         }
       ]
     },
@@ -1561,6 +3104,31 @@
           "start_line": 284,
           "end_line": 284,
           "excerpt": "class EmbodiedEnv(BaseEnv):"
+        }
+      ]
+    },
+    {
+      "id": "event-manager-calls-randomization",
+      "source": "event-manager",
+      "target": "randomization",
+      "relation": "calls",
+      "description": "Dispatches a configured randomization event through the common functor interface.",
+      "provenance": "source-reviewed",
+      "scope": "Conditional: the event entry must resolve to a randomization function. Other event entries dispatch other functors.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/managers/event_manager.py",
+          "symbol": "EventManager._call_event_functor",
+          "start_line": 483,
+          "end_line": 483,
+          "excerpt": "            return super()._call_functor(functor_name, functor_cfg, *args)"
+        },
+        {
+          "path": "embodichain/lab/gym/envs/managers/randomization/__init__.py",
+          "symbol": "<module>",
+          "start_line": 19,
+          "end_line": 19,
+          "excerpt": "Implemented as event functors registered via ``EventCfg`` and dispatched by ``EventManager`` at startup / reset / interval modes."
         }
       ]
     },
@@ -1716,6 +3284,258 @@
       ]
     },
     {
+      "id": "managers-imports-recording",
+      "source": "managers",
+      "target": "recording",
+      "relation": "imports",
+      "description": "Exports the synchronous recorder for manager configuration.",
+      "provenance": "source-reviewed",
+      "scope": "Package re-export only; DatasetManager dispatch is selected by each deployment.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/managers/__init__.py",
+          "symbol": "<module>",
+          "start_line": 38,
+          "end_line": 38,
+          "excerpt": "from .datasets import LeRobotRecorder"
+        }
+      ]
+    },
+    {
+      "id": "mllm-calls-environment-adapter",
+      "source": "mllm",
+      "target": "environment-adapter",
+      "relation": "calls",
+      "description": "Compiles validated model input through the canonical adapter.",
+      "provenance": "source-reviewed",
+      "scope": "The host supplies the trusted integration and adapter.",
+      "evidence": [
+        {
+          "path": "embodichain/agents/mllm/task_program.py",
+          "symbol": "compile_mllm_task_program",
+          "start_line": 238,
+          "end_line": 238,
+          "excerpt": "    return adapter.compile(config)"
+        }
+      ]
+    },
+    {
+      "id": "mllm-imports-program-input",
+      "source": "mllm",
+      "target": "program-input",
+      "relation": "imports",
+      "description": "Uses the bounded Task Program JSON loader.",
+      "provenance": "source-reviewed",
+      "scope": "Explicit source import in the named module. It does not prove runtime execution or import every submodule in the target package.",
+      "evidence": [
+        {
+          "path": "embodichain/agents/mllm/task_program.py",
+          "symbol": "<module>",
+          "start_line": 47,
+          "end_line": 47,
+          "excerpt": "from embodichain.lab.task_program.language.loader import ("
+        }
+      ]
+    },
+    {
+      "id": "motion-generator-imports-compute",
+      "source": "motion-generator",
+      "target": "compute",
+      "relation": "imports",
+      "description": "Uses trajectory algorithms from the shared compute package.",
+      "provenance": "source-reviewed",
+      "scope": "Explicit source import in the named module. It does not prove runtime execution or import every submodule in the target package.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/motion/motion_generator.py",
+          "symbol": "<module>",
+          "start_line": 45,
+          "end_line": 45,
+          "excerpt": "from embodichain.compute.trajectory import ("
+        }
+      ]
+    },
+    {
+      "id": "recording-constructs-depth-video",
+      "source": "recording",
+      "target": "depth-video",
+      "relation": "constructs",
+      "description": "Creates optional depth sidecar persistence.",
+      "provenance": "source-reviewed",
+      "scope": "Only when depth video is enabled and depth sensors are configured.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/managers/datasets.py",
+          "symbol": "LeRobotRecorder._initialize_dataset",
+          "start_line": 1142,
+          "end_line": 1142,
+          "excerpt": "            self._depth_manager = DepthSidecarManager("
+        }
+      ]
+    },
+    {
+      "id": "recording-imports-data-assets",
+      "source": "recording",
+      "target": "data-assets",
+      "relation": "imports",
+      "description": "Reads dataset storage defaults from the data package; this is not an asset-download call.",
+      "provenance": "source-reviewed",
+      "scope": "Explicit source import in the named module. It does not prove runtime execution or import every submodule in the target package.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/managers/datasets.py",
+          "symbol": "<module>",
+          "start_line": 38,
+          "end_line": 38,
+          "excerpt": "from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATASET_ROOT"
+        }
+      ]
+    },
+    {
+      "id": "rl-constructs-collector",
+      "source": "rl",
+      "target": "collector",
+      "relation": "constructs",
+      "description": "Creates the standard rollout collector.",
+      "provenance": "source-reviewed",
+      "scope": "The selected trainer or collector assembly; standard and differentiable routes remain separate.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/utils/trainer.py",
+          "symbol": "Trainer.__init__",
+          "start_line": 136,
+          "end_line": 136,
+          "excerpt": "        self.collector = SyncCollector("
+        }
+      ]
+    },
+    {
+      "id": "rl-constructs-rollout-buffer",
+      "source": "rl",
+      "target": "rollout-buffer",
+      "relation": "constructs",
+      "description": "Allocates the standard rollout buffer.",
+      "provenance": "source-reviewed",
+      "scope": "The selected trainer or collector assembly; standard and differentiable routes remain separate.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/utils/trainer.py",
+          "symbol": "Trainer.__init__",
+          "start_line": 123,
+          "end_line": 123,
+          "excerpt": "        self.buffer = RolloutBuffer("
+        }
+      ]
+    },
+    {
+      "id": "rl-holds-policy",
+      "source": "rl",
+      "target": "policy",
+      "relation": "holds",
+      "description": "Retains the supplied policy, optionally wrapped for distributed training.",
+      "provenance": "source-reviewed",
+      "scope": "The selected trainer or collector assembly; standard and differentiable routes remain separate.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/utils/trainer.py",
+          "symbol": "Trainer.__init__",
+          "start_line": 68,
+          "end_line": 68,
+          "excerpt": "        self.policy = policy"
+        }
+      ]
+    },
+    {
+      "id": "rl-routing-constructs-differentiable-trainer-train-learning-env",
+      "source": "rl-routing",
+      "target": "differentiable-trainer",
+      "relation": "constructs",
+      "description": "Constructs the trainer selected for this environment and rollout contract.",
+      "scope": "Lightweight learning_env with a differentiable-rollout algorithm.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/train.py",
+          "symbol": "_train_learning_env",
+          "start_line": 264,
+          "end_line": 264,
+          "excerpt": "            trainer = DifferentiableTrainer("
+        }
+      ]
+    },
+    {
+      "id": "rl-routing-constructs-rl-train-from-config",
+      "source": "rl-routing",
+      "target": "rl",
+      "relation": "constructs",
+      "description": "Constructs the trainer selected for this environment and rollout contract.",
+      "scope": "Simulator gym_config uses standard rollouts; differentiable algorithms are rejected on this route.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/train.py",
+          "symbol": "train_from_config",
+          "start_line": 588,
+          "end_line": 588,
+          "excerpt": "    trainer = Trainer("
+        }
+      ]
+    },
+    {
+      "id": "rl-routing-constructs-rl-train-learning-env",
+      "source": "rl-routing",
+      "target": "rl",
+      "relation": "constructs",
+      "description": "Constructs the trainer selected for this environment and rollout contract.",
+      "scope": "Lightweight learning_env with a standard-rollout algorithm.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/train.py",
+          "symbol": "_train_learning_env",
+          "start_line": 282,
+          "end_line": 282,
+          "excerpt": "            trainer = Trainer("
+        }
+      ]
+    },
+    {
+      "id": "robot-constructs-workspace",
+      "source": "robot",
+      "target": "workspace",
+      "relation": "constructs",
+      "description": "Lazily loads the configured workspace cache.",
+      "provenance": "source-reviewed",
+      "scope": "Only for a requested control part with a configured workspace cache.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/robot.py",
+          "symbol": "Robot.get_workspace",
+          "start_line": 174,
+          "end_line": 174,
+          "excerpt": "            self._workspaces[key] = RobotWorkspace.from_cache("
+        }
+      ]
+    },
+    {
+      "id": "robot-inherits-articulations",
+      "source": "robot",
+      "target": "articulations",
+      "relation": "inherits",
+      "description": "Extends articulated state with robot-specific capabilities.",
+      "provenance": "source-reviewed",
+      "scope": "Declared base class; Robot adds control parts and kinematic services.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/robot.py",
+          "symbol": "Robot",
+          "start_line": 63,
+          "end_line": 63,
+          "excerpt": "class Robot(Articulation):"
+        }
+      ]
+    },
+    {
       "id": "runner-calls-sink",
       "source": "execution-runner",
       "target": "command-sink",
@@ -1737,6 +3557,42 @@
           "start_line": 736,
           "end_line": 736,
           "excerpt": "        command_sink = BufferedGymCommandSink(command_encoder, clock)"
+        }
+      ]
+    },
+    {
+      "id": "scene-editing-imports-scene-export",
+      "source": "scene-editing",
+      "target": "scene-export",
+      "relation": "imports",
+      "description": "Uses portable scene export support after editing.",
+      "provenance": "source-reviewed",
+      "scope": "Explicit source import in the named module. It does not prove runtime execution or import every submodule in the target package.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/edit.py",
+          "symbol": "<module>",
+          "start_line": 36,
+          "end_line": 36,
+          "excerpt": "from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import ("
+        }
+      ]
+    },
+    {
+      "id": "scene-generation-imports-scene-export",
+      "source": "scene-generation",
+      "target": "scene-export",
+      "relation": "imports",
+      "description": "Uses portable scene export support.",
+      "provenance": "source-reviewed",
+      "scope": "Explicit source import in the named module. It does not prove runtime execution or import every submodule in the target package.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/generate.py",
+          "symbol": "<module>",
+          "start_line": 43,
+          "end_line": 43,
+          "excerpt": "from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import SceneExporter"
         }
       ]
     },
@@ -1802,6 +3658,60 @@
       ]
     },
     {
+      "id": "simulation-manager-constructs-rigid-objects",
+      "source": "simulation-manager",
+      "target": "rigid-objects",
+      "relation": "constructs",
+      "description": "Creates rigid object facades from scene configuration.",
+      "provenance": "source-reviewed",
+      "scope": "Conditional on the configured scene entities and supported backend.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/sim_manager.py",
+          "symbol": "SimulationManager._declare_rigid_objects",
+          "start_line": 2417,
+          "end_line": 2417,
+          "excerpt": "            rigid_obj = RigidObject(cfg=cfg, device=self.device)"
+        }
+      ]
+    },
+    {
+      "id": "simulation-manager-holds-articulations",
+      "source": "simulation-manager",
+      "target": "articulations",
+      "relation": "holds",
+      "description": "Retains registered articulation entities.",
+      "provenance": "source-reviewed",
+      "scope": "Conditional on the configured scene entities and supported backend.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/sim_manager.py",
+          "symbol": "SimulationManager.add_articulation",
+          "start_line": 2945,
+          "end_line": 2945,
+          "excerpt": "        self._articulations[uid] = articulation"
+        }
+      ]
+    },
+    {
+      "id": "simulation-manager-holds-deformables",
+      "source": "simulation-manager",
+      "target": "deformables",
+      "relation": "holds",
+      "description": "Retains registered deformable particle-set entities.",
+      "provenance": "source-reviewed",
+      "scope": "Conditional on the configured scene entities and supported backend.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/sim_manager.py",
+          "symbol": "SimulationManager.add_deformable_object",
+          "start_line": 2523,
+          "end_line": 2523,
+          "excerpt": "        self._deformable_objects[uid] = deformable"
+        }
+      ]
+    },
+    {
       "id": "sink-holds-clock",
       "source": "command-sink",
       "target": "step-clock",
@@ -1820,6 +3730,78 @@
       ]
     },
     {
+      "id": "static-imports-009eb229e628",
+      "source": "differentiable-env",
+      "target": "embodied-env",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/differentiable_env.py",
+          "symbol": "<module>",
+          "start_line": 38,
+          "end_line": 38,
+          "excerpt": "from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv, EmbodiedEnvCfg"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-095579fb8b55",
+      "source": "differentiable-trainer",
+      "target": "learning-env",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/differentiable_trainer.py",
+          "symbol": "<module>",
+          "start_line": 35,
+          "end_line": 39,
+          "excerpt": "from embodichain.learning.rl.env import (\n    DifferentiableRolloutSpec,\n    DifferentiableVecEnv,\n    ScheduledDifferentiableVecEnv,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-0c5df98e497a",
+      "source": "differentiable-trainer",
+      "target": "configuration",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/differentiable_trainer.py",
+          "symbol": "<module>",
+          "start_line": 44,
+          "end_line": 44,
+          "excerpt": "from embodichain.utils import configclass"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-16d95b2b8cb0",
+      "source": "simulation-factory",
+      "target": "effect-evidence",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
+          "symbol": "<module>",
+          "start_line": 59,
+          "end_line": 64,
+          "excerpt": "from embodichain.lab.task_program.semantics.evidence import (\n    ControlPartRobotEvidenceSource,\n    ControlPartSimulationEvidenceProvider,\n    EffectEvidenceProvider,\n    SceneArticulationEvidenceProvider,\n)"
+        }
+      ]
+    },
+    {
       "id": "static-imports-17df4f0fef66",
       "source": "robot",
       "target": "solvers",
@@ -1834,6 +3816,24 @@
           "start_line": 27,
           "end_line": 27,
           "excerpt": "from embodichain.lab.sim.motion.solvers import SolverCfg, BaseSolver"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-1a349a9bf733",
+      "source": "simulation-factory",
+      "target": "scene-registry",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
+          "symbol": "<module>",
+          "start_line": 69,
+          "end_line": 72,
+          "excerpt": "from embodichain.lab.task_program.semantics.scene import (\n    RegistrySceneProvider,\n    SceneRegistry,\n)"
         }
       ]
     },
@@ -1874,6 +3874,24 @@
       ]
     },
     {
+      "id": "static-imports-2439dce9f223",
+      "source": "integration-catalog",
+      "target": "task-program-config",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/catalog.py",
+          "symbol": "<module>",
+          "start_line": 91,
+          "end_line": 98,
+          "excerpt": "from embodichain.lab.task_program.language.schema import (\n    TaskProgramCfg,\n    TaskProgramIntegrationCfg,\n    PostPolicyCfg,\n    RegisteredSemanticCallCfg,\n    SemanticCallCfg,\n    ValidatorCfg,\n)"
+        }
+      ]
+    },
+    {
       "id": "static-imports-25644243d165",
       "source": "simulation-factory",
       "target": "motion-generator",
@@ -1910,6 +3928,60 @@
       ]
     },
     {
+      "id": "static-imports-2b77ea1ae6d0",
+      "source": "grasp-tools",
+      "target": "configuration",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/graspkit/pose_generator.py",
+          "symbol": "<module>",
+          "start_line": 28,
+          "end_line": 28,
+          "excerpt": "from embodichain.utils import configclass"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-2b8a0b73365e",
+      "source": "semantic-compiler",
+      "target": "scene-registry",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/compiler/lowering.py",
+          "symbol": "<module>",
+          "start_line": 93,
+          "end_line": 101,
+          "excerpt": "from embodichain.lab.task_program.semantics.scene import (\n    ContainerAffordance,\n    PLACEMENT_TARGET_AFFORDANCE_REVISION,\n    PLACE_IN_AFFORDANCE_CAPABILITY,\n    PLACE_ON_AFFORDANCE_CAPABILITY,\n    SceneAffordanceRef,\n    SceneObjectRef,\n    SupportSurfaceAffordance,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-35d217cf64ea",
+      "source": "differentiable-trainer",
+      "target": "rl-algorithms",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/differentiable_trainer.py",
+          "symbol": "<module>",
+          "start_line": 30,
+          "end_line": 30,
+          "excerpt": "from embodichain.learning.rl.algo import APG"
+        }
+      ]
+    },
+    {
       "id": "static-imports-36b2619c635f",
       "source": "embodied-env",
       "target": "config-loader",
@@ -1924,6 +3996,42 @@
           "start_line": 83,
           "end_line": 86,
           "excerpt": "from embodichain.lab.gym.utils.gym_utils import (\n    build_trajectory_buffer,\n    init_rollout_buffer_from_gym_space,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-374116b69d45",
+      "source": "environment-adapter",
+      "target": "skill-profile",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/environment.py",
+          "symbol": "<module>",
+          "start_line": 67,
+          "end_line": 71,
+          "excerpt": "from embodichain.lab.task_program.semantics.profiles import (\n    ResourceEndpoint,\n    ResourceEndpointAdapter,\n    RobotSkillProfile,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-384eb4d9cf38",
+      "source": "scene-registry",
+      "target": "simulation-manager",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration under if TYPE_CHECKING. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/semantics/scene.py",
+          "symbol": "<module>",
+          "start_line": 45,
+          "end_line": 45,
+          "excerpt": "    from embodichain.lab.sim.sim_manager import SimulationManager"
         }
       ]
     },
@@ -1946,6 +4054,168 @@
       ]
     },
     {
+      "id": "static-imports-3f6b0e3bb9cd",
+      "source": "semantic-executor",
+      "target": "scene-registry",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/runtime/executor.py",
+          "symbol": "<module>",
+          "start_line": 86,
+          "end_line": 86,
+          "excerpt": "from embodichain.lab.task_program.semantics.scene import SceneObjectRef, SceneRegistry"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-41cc9bb00185",
+      "source": "semantic-executor",
+      "target": "skill-profile",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/runtime/executor.py",
+          "symbol": "<module>",
+          "start_line": 82,
+          "end_line": 85,
+          "excerpt": "from embodichain.lab.task_program.semantics.profiles import (\n    EffectAssurance,\n    WorkflowRecoveryPolicy,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-490e86539325",
+      "source": "mllm",
+      "target": "task-program-config",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/agents/mllm/task_program.py",
+          "symbol": "<module>",
+          "start_line": 23,
+          "end_line": 35,
+          "excerpt": "from embodichain.lab.task_program.language.schema import (\n    TaskProgramCfg,\n    TaskProgramIntegrationCfg,\n    HandOverCfg,\n    InvokeCfg,\n    PickCfg,\n    PlaceCfg,\n    ProgramNodeCfg,\n    RepeatCfg,\n    SegmentCfg,\n    SemanticCallCfg,\n    SequenceCfg,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-4c07006a2a5a",
+      "source": "rl",
+      "target": "event-manager",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/utils/trainer.py",
+          "symbol": "<module>",
+          "start_line": 30,
+          "end_line": 30,
+          "excerpt": "from embodichain.lab.gym.envs.managers.event_manager import EventManager"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-518fab548e08",
+      "source": "scene-registry",
+      "target": "motion-generator",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration under if TYPE_CHECKING. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/semantics/scene.py",
+          "symbol": "<module>",
+          "start_line": 44,
+          "end_line": 44,
+          "excerpt": "    from embodichain.lab.sim.motion.motion_generator import MotionGenerator"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-547bae782cdb",
+      "source": "device-controller",
+      "target": "devices",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/devices/device_controller.py",
+          "symbol": "<module>",
+          "start_line": 22,
+          "end_line": 22,
+          "excerpt": "from embodichain.lab.devices.device import Device"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-5529b5ed4bec",
+      "source": "autograd-bridge",
+      "target": "simulation-manager",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration under if TYPE_CHECKING. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/diff/bridge.py",
+          "symbol": "<module>",
+          "start_line": 27,
+          "end_line": 27,
+          "excerpt": "    from embodichain.lab.sim.sim_manager import SimulationManager"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-562205c26852",
+      "source": "base-env",
+      "target": "configuration",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/base_env.py",
+          "symbol": "<module>",
+          "start_line": 42,
+          "end_line": 42,
+          "excerpt": "from embodichain.utils import configclass"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-5a790441a2e1",
+      "source": "mllm",
+      "target": "program-input",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/agents/mllm/task_program.py",
+          "symbol": "<module>",
+          "start_line": 47,
+          "end_line": 50,
+          "excerpt": "from embodichain.lab.task_program.language.loader import (\n    MAX_TASK_PROGRAM_BYTES,\n    parse_task_program_json,\n)"
+        }
+      ]
+    },
+    {
       "id": "static-imports-5ce7e9c376fd",
       "source": "environment-adapter",
       "target": "step-clock",
@@ -1964,6 +4234,114 @@
       ]
     },
     {
+      "id": "static-imports-5d4a690b4f47",
+      "source": "integration-catalog",
+      "target": "semantic-compiler",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/catalog.py",
+          "symbol": "<module>",
+          "start_line": 74,
+          "end_line": 80,
+          "excerpt": "from embodichain.lab.task_program.compiler.lowering import (\n    ContainerRelationTargetGrounder,\n    HandOverPoseProvider,\n    RegisteredSemanticLowerer,\n    RelationTargetGrounder,\n    SupportSurfaceRelationTargetGrounder,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-5eb4989e8f9a",
+      "source": "simulation-factory",
+      "target": "skill-profile",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
+          "symbol": "<module>",
+          "start_line": 68,
+          "end_line": 68,
+          "excerpt": "from embodichain.lab.task_program.semantics.profiles import RobotSkillProfile"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-662f359eaf35",
+      "source": "environment-adapter",
+      "target": "parallel-execution",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/environment.py",
+          "symbol": "<module>",
+          "start_line": 63,
+          "end_line": 66,
+          "excerpt": "from embodichain.lab.task_program.runtime.parallel_executor import (\n    ParallelCommandSafetyValidator,\n    analyze_parallel_branches,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-6887f760c2d8",
+      "source": "mllm",
+      "target": "environment-adapter",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/agents/mllm/task_program.py",
+          "symbol": "<module>",
+          "start_line": 44,
+          "end_line": 46,
+          "excerpt": "from embodichain.lab.task_program.integrations.environment import (\n    TaskProgramEnvironmentAdapter,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-688b3daedb5b",
+      "source": "workspace-analyzer",
+      "target": "compute-kinematics",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/motion/workspace/analyzer.py",
+          "symbol": "<module>",
+          "start_line": 50,
+          "end_line": 53,
+          "excerpt": "from embodichain.compute.kinematics import (\n    condition_number,\n    yoshikawa_manipulability,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-6a16cc8193b0",
+      "source": "robot",
+      "target": "workspace",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/objects/robot.py",
+          "symbol": "<module>",
+          "start_line": 30,
+          "end_line": 33,
+          "excerpt": "from embodichain.lab.sim.motion.workspace.runtime import (\n    RobotWorkspace,\n    WorkspaceSample,\n)"
+        }
+      ]
+    },
+    {
       "id": "static-imports-6b4f407022e8",
       "source": "env-launcher",
       "target": "config-loader",
@@ -1978,6 +4356,24 @@
           "start_line": 40,
           "end_line": 44,
           "excerpt": "from embodichain.lab.gym.utils.gym_utils import (\n    add_env_launcher_args_to_parser,\n    build_env_cfg_from_args,\n    load_trajectory,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-6e4557b26941",
+      "source": "differentiable-collector",
+      "target": "learning-env",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/collector/differentiable.py",
+          "symbol": "<module>",
+          "start_line": 27,
+          "end_line": 30,
+          "excerpt": "from embodichain.learning.rl.env import (\n    DifferentiableObservation,\n    DifferentiableVecEnv,\n)"
         }
       ]
     },
@@ -2018,6 +4414,24 @@
       ]
     },
     {
+      "id": "static-imports-804702892bff",
+      "source": "online-dataset",
+      "target": "data-pipeline",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/data_pipeline/datasets/online_data.py",
+          "symbol": "<module>",
+          "start_line": 24,
+          "end_line": 24,
+          "excerpt": "from embodichain.data_pipeline.engine.data import OnlineDataEngine"
+        }
+      ]
+    },
+    {
       "id": "static-imports-819e3ce626d3",
       "source": "physics",
       "target": "simulation-manager",
@@ -2054,6 +4468,24 @@
       ]
     },
     {
+      "id": "static-imports-8b4a4ae9bfdb",
+      "source": "environment-adapter",
+      "target": "effect-evidence",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/environment.py",
+          "symbol": "<module>",
+          "start_line": 55,
+          "end_line": 59,
+          "excerpt": "from embodichain.lab.task_program.semantics.evidence import (\n    EffectEvidenceCollector,\n    EffectEvidenceProvider,\n    EffectEvidenceProviderRegistry,\n)"
+        }
+      ]
+    },
+    {
       "id": "static-imports-8c8643ce3c4d",
       "source": "environment-adapter",
       "target": "task-program-config",
@@ -2068,6 +4500,24 @@
           "start_line": 93,
           "end_line": 96,
           "excerpt": "from embodichain.lab.task_program.language.schema import (\n    TaskProgramCfg,\n    TaskProgramIntegrationCfg,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-8eec00e8d07c",
+      "source": "rl-routing",
+      "target": "task-discovery",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/train.py",
+          "symbol": "<module>",
+          "start_line": 54,
+          "end_line": 58,
+          "excerpt": "from embodichain.lab.gym.utils.registration import (\n    build_env,\n    discover_task_packages,\n    execute_init_hooks,\n)"
         }
       ]
     },
@@ -2126,6 +4576,42 @@
       ]
     },
     {
+      "id": "static-imports-9bc131d4e099",
+      "source": "workspace-analyzer",
+      "target": "robot",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/motion/workspace/analyzer.py",
+          "symbol": "<module>",
+          "start_line": 39,
+          "end_line": 39,
+          "excerpt": "from embodichain.lab.sim.objects.robot import Robot"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-9e7383aa2316",
+      "source": "embodied-env",
+      "target": "configuration",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/embodied_env.py",
+          "symbol": "<module>",
+          "start_line": 88,
+          "end_line": 88,
+          "excerpt": "from embodichain.utils import configclass, logger"
+        }
+      ]
+    },
+    {
       "id": "static-imports-a32fb8db0ae1",
       "source": "simulation-manager",
       "target": "physics",
@@ -2140,6 +4626,42 @@
           "start_line": 115,
           "end_line": 115,
           "excerpt": "from embodichain.lab.sim.physics import make_physics_backend"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-a6906547dfc6",
+      "source": "semantic-compiler",
+      "target": "skill-profile",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/compiler/lowering.py",
+          "symbol": "<module>",
+          "start_line": 92,
+          "end_line": 92,
+          "excerpt": "from embodichain.lab.task_program.semantics.profiles import EffectAssurance"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-a874b77ce380",
+      "source": "environment-adapter",
+      "target": "scene-registry",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/environment.py",
+          "symbol": "<module>",
+          "start_line": 73,
+          "end_line": 73,
+          "excerpt": "from embodichain.lab.task_program.semantics.scene import SceneRegistry"
         }
       ]
     },
@@ -2162,6 +4684,60 @@
       ]
     },
     {
+      "id": "static-imports-ae929a6258a7",
+      "source": "rl-routing",
+      "target": "rl",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/train.py",
+          "symbol": "<module>",
+          "start_line": 52,
+          "end_line": 52,
+          "excerpt": "from embodichain.learning.rl.utils.trainer import Trainer"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-b09fe3ed8e44",
+      "source": "data-pipeline",
+      "target": "configuration",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/data_pipeline/engine/data.py",
+          "symbol": "<module>",
+          "start_line": 39,
+          "end_line": 39,
+          "excerpt": "from embodichain.utils import configclass"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-b49dc0306bef",
+      "source": "simulation-factory",
+      "target": "parallel-execution",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/simulation/environment.py",
+          "symbol": "<module>",
+          "start_line": 65,
+          "end_line": 67,
+          "excerpt": "from embodichain.lab.task_program.runtime.parallel_executor import (\n    ParallelCommandSafetyValidator,\n)"
+        }
+      ]
+    },
+    {
       "id": "static-imports-b7b3ac4916aa",
       "source": "environment-adapter",
       "target": "gym-bridge",
@@ -2176,6 +4752,114 @@
           "start_line": 75,
           "end_line": 86,
           "excerpt": "from embodichain.lab.gym.envs.task_program.bridge import (\n    TaskProgramDemoBridge,\n    BufferedGymCommandSink,\n    CurrentQposProvider,\n    TaskProgramBridgeError,\n    EnvironmentStepClock,\n    JointPositionGymTransportEncoder,\n    RuntimeCommandFrameEncoder,\n    RuntimeTransportActionEncoder,\n    SegmentPostPolicyPort,\n    SegmentValidatorPort,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-b7c58479a36f",
+      "source": "rl-routing",
+      "target": "differentiable-trainer",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/train.py",
+          "symbol": "<module>",
+          "start_line": 41,
+          "end_line": 44,
+          "excerpt": "from embodichain.learning.rl.differentiable_trainer import (\n    DifferentiableTrainer,\n    DifferentiableTrainerCfg,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-bba2d7266a0c",
+      "source": "simulation-manager",
+      "target": "configuration",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/sim_manager.py",
+          "symbol": "<module>",
+          "start_line": 131,
+          "end_line": 131,
+          "excerpt": "from embodichain.utils import configclass, logger"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-bc79368679c6",
+      "source": "motion-generator",
+      "target": "compute-trajectory",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/motion/motion_generator.py",
+          "symbol": "<module>",
+          "start_line": 45,
+          "end_line": 50,
+          "excerpt": "from embodichain.compute.trajectory import (\n    interpolate_with_distance,\n    interpolate_with_nums,\n    resample_in_time,\n    differentiate_positions,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-be091d31f810",
+      "source": "scene-editing",
+      "target": "scene-export",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/edit.py",
+          "symbol": "<module>",
+          "start_line": 36,
+          "end_line": 38,
+          "excerpt": "from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import (\n    SceneExporter,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-c80e3323f6a8",
+      "source": "parallel-execution",
+      "target": "skill-profile",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/runtime/parallel_executor.py",
+          "symbol": "<module>",
+          "start_line": 50,
+          "end_line": 50,
+          "excerpt": "from embodichain.lab.task_program.semantics.profiles import ResourceClaim"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-cdab27af3141",
+      "source": "skill-profile",
+      "target": "execution-runner",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/semantics/profiles.py",
+          "symbol": "<module>",
+          "start_line": 63,
+          "end_line": 63,
+          "excerpt": "from embodichain.lab.sim.atomic_actions.runner import ExecutionRunnerCfg"
         }
       ]
     },
@@ -2234,6 +4918,42 @@
       ]
     },
     {
+      "id": "static-imports-d9c602221a0e",
+      "source": "skill-profile",
+      "target": "atomic-engine",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration under if TYPE_CHECKING. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/semantics/profiles.py",
+          "symbol": "<module>",
+          "start_line": 78,
+          "end_line": 78,
+          "excerpt": "    from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-da107fa3a9fd",
+      "source": "rl-routing",
+      "target": "rl-algorithms",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/train.py",
+          "symbol": "<module>",
+          "start_line": 36,
+          "end_line": 40,
+          "excerpt": "from embodichain.learning.rl.algo import (\n    RolloutKind,\n    build_algo,\n    get_registered_algo_names,\n)"
+        }
+      ]
+    },
+    {
       "id": "static-imports-ddc442f99a40",
       "source": "embodied-env",
       "target": "gym-bridge",
@@ -2248,6 +4968,24 @@
           "start_line": 98,
           "end_line": 98,
           "excerpt": "    from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-e28cb4f07587",
+      "source": "integration-catalog",
+      "target": "parallel-execution",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/catalog.py",
+          "symbol": "<module>",
+          "start_line": 87,
+          "end_line": 89,
+          "excerpt": "from embodichain.lab.task_program.runtime.parallel_executor import (\n    ParallelCommandSafetyValidator,\n)"
         }
       ]
     },
@@ -2340,6 +5078,42 @@
           "excerpt": "from embodichain.lab.sim.sensors import BaseSensor, Camera"
         }
       ]
+    },
+    {
+      "id": "static-imports-f6f4ac515679",
+      "source": "motion-generator",
+      "target": "configuration",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/motion/motion_generator.py",
+          "symbol": "<module>",
+          "start_line": 51,
+          "end_line": 51,
+          "excerpt": "from embodichain.utils import logger, configclass"
+        }
+      ]
+    },
+    {
+      "id": "workspace-analyzer-imports-compute",
+      "source": "workspace-analyzer",
+      "target": "compute",
+      "relation": "imports",
+      "description": "Uses shared kinematic metrics from compute.",
+      "provenance": "source-reviewed",
+      "scope": "Explicit source import in the named module. It does not prove runtime execution or import every submodule in the target package.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/motion/workspace/analyzer.py",
+          "symbol": "<module>",
+          "start_line": 50,
+          "end_line": 50,
+          "excerpt": "from embodichain.compute.kinematics import ("
+        }
+      ]
     }
   ],
   "views": [
@@ -2375,7 +5149,19 @@
         "env-launcher",
         "config-loader",
         "task-discovery",
-        "base-env"
+        "base-env",
+        "configuration",
+        "randomization",
+        "differentiable-env",
+        "mllm",
+        "workspace",
+        "augmentation",
+        "data-assets",
+        "toolkits",
+        "device-controller",
+        "event-manager",
+        "rl-routing",
+        "differentiable-trainer"
       ],
       "edge_ids": [
         "adapter-calls-compiler",
@@ -2391,7 +5177,7 @@
         "env-inherits-base",
         "base-constructs-simulation",
         "cli-calls-env-launcher",
-        "cli-calls-rl",
+        "cli-calls-training-assembly",
         "launcher-calls-discovery",
         "discovery-imports-official-tasks",
         "launcher-calls-config-loader",
@@ -2401,26 +5187,53 @@
         "simulation-constructs-robot",
         "simulation-holds-robot",
         "env-calls-add-robot",
+        "motion-generator-imports-compute",
+        "cli-calls-data-assets",
+        "cli-calls-scene-generation",
+        "cli-calls-toolkits",
+        "device-controller-holds-devices",
+        "device-controller-holds-robot",
+        "robot-constructs-workspace",
+        "embodied-env-constructs-event-manager",
+        "mllm-calls-environment-adapter",
+        "event-manager-calls-randomization",
+        "rl-routing-constructs-rl-train-from-config",
+        "rl-routing-constructs-rl-train-learning-env",
+        "rl-routing-constructs-differentiable-trainer-train-learning-env",
+        "static-imports-6887f760c2d8",
+        "static-imports-b09fe3ed8e44",
+        "static-imports-547bae782cdb",
         "static-imports-f047844198f1",
         "static-imports-d383e37d25c0",
+        "static-imports-562205c26852",
+        "static-imports-009eb229e628",
         "static-imports-6efc6c8fee5c",
         "static-imports-9930294a9a0a",
         "static-imports-998c84daa8f4",
         "static-imports-36b2619c635f",
+        "static-imports-9e7383aa2316",
         "static-imports-ddc442f99a40",
         "static-imports-6b4f407022e8",
         "static-imports-eb84e6a51ed6",
         "static-imports-d3f76cbdac77",
         "static-imports-ab15f87df47f",
+        "static-imports-f6f4ac515679",
         "static-imports-17df4f0fef66",
+        "static-imports-6a16cc8193b0",
         "static-imports-819e3ce626d3",
         "static-imports-8a7d5a2a7418",
         "static-imports-a32fb8db0ae1",
+        "static-imports-bba2d7266a0c",
         "static-imports-3d4c7a13ce4e",
         "static-imports-8031f6c0ab0b",
         "static-imports-1d1929c1f98e",
         "static-imports-b7b3ac4916aa",
-        "static-imports-237cf7f458f9"
+        "static-imports-237cf7f458f9",
+        "static-imports-0c5df98e497a",
+        "static-imports-b7c58479a36f",
+        "static-imports-ae929a6258a7",
+        "static-imports-8eec00e8d07c",
+        "static-imports-4c07006a2a5a"
       ],
       "groups": [
         {
@@ -2435,7 +5248,11 @@
             "components",
             "embodied-env",
             "base-env",
-            "managers"
+            "managers",
+            "configuration",
+            "randomization",
+            "differentiable-env",
+            "event-manager"
           ]
         },
         {
@@ -2446,7 +5263,8 @@
             "semantic-compiler",
             "semantic-executor",
             "environment-adapter",
-            "gym-bridge"
+            "gym-bridge",
+            "mllm"
           ]
         },
         {
@@ -2456,7 +5274,9 @@
             "atomic-engine",
             "motion-generator",
             "planners",
-            "solvers"
+            "solvers",
+            "workspace",
+            "augmentation"
           ]
         },
         {
@@ -2478,7 +5298,12 @@
             "rl",
             "data-pipeline",
             "scene-generation",
-            "devices"
+            "devices",
+            "data-assets",
+            "toolkits",
+            "device-controller",
+            "rl-routing",
+            "differentiable-trainer"
           ]
         }
       ]
@@ -2488,6 +5313,11 @@
       "label": "Task Program",
       "description": "Compilation, runtime assembly, and Gym integration connecting task intent to robot execution.",
       "node_ids": [
+        "mllm",
+        "program-input",
+        "scene-registry",
+        "skill-profile",
+        "integration-catalog",
         "task-program-config",
         "program-compiler",
         "compiled-program",
@@ -2498,6 +5328,8 @@
         "atomic-engine",
         "motion-generator",
         "execution-runner",
+        "parallel-execution",
+        "effect-evidence",
         "gym-bridge",
         "command-sink",
         "step-clock",
@@ -2531,24 +5363,61 @@
         "runner-calls-sink",
         "env-inherits-base",
         "base-constructs-simulation",
+        "env-calls-add-robot",
+        "mllm-imports-program-input",
+        "mllm-calls-environment-adapter",
+        "static-imports-490e86539325",
+        "static-imports-6887f760c2d8",
+        "static-imports-5a790441a2e1",
         "static-imports-ddc442f99a40",
         "static-imports-d3f76cbdac77",
+        "static-imports-a6906547dfc6",
+        "static-imports-2b8a0b73365e",
+        "static-imports-5d4a690b4f47",
+        "static-imports-e28cb4f07587",
+        "static-imports-2439dce9f223",
         "static-imports-3d4c7a13ce4e",
         "static-imports-e2bc684c7e4c",
         "static-imports-8031f6c0ab0b",
+        "static-imports-8b4a4ae9bfdb",
+        "static-imports-662f359eaf35",
+        "static-imports-374116b69d45",
         "static-imports-1d1929c1f98e",
+        "static-imports-a874b77ce380",
         "static-imports-b7b3ac4916aa",
         "static-imports-ce7495ee8371",
         "static-imports-5ce7e9c376fd",
         "static-imports-8c8643ce3c4d",
         "static-imports-25644243d165",
         "static-imports-ec9087e04d68",
+        "static-imports-16d95b2b8cb0",
+        "static-imports-b49dc0306bef",
+        "static-imports-5eb4989e8f9a",
+        "static-imports-1a349a9bf733",
         "static-imports-ec4453f4d95a",
         "static-imports-292707ad785d",
         "static-imports-237cf7f458f9",
-        "static-imports-8f7173da3812"
+        "static-imports-8f7173da3812",
+        "static-imports-41cc9bb00185",
+        "static-imports-3f6b0e3bb9cd",
+        "static-imports-c80e3323f6a8",
+        "static-imports-cdab27af3141",
+        "static-imports-d9c602221a0e",
+        "static-imports-518fab548e08",
+        "static-imports-384eb4d9cf38"
       ],
       "groups": [
+        {
+          "id": "input-contracts",
+          "label": "Input & semantic contracts",
+          "node_ids": [
+            "mllm",
+            "program-input",
+            "scene-registry",
+            "skill-profile",
+            "integration-catalog"
+          ]
+        },
         {
           "id": "program-definition",
           "label": "Program definition & compilation",
@@ -2578,6 +5447,14 @@
           ]
         },
         {
+          "id": "execution-assurance",
+          "label": "Parallel execution & evidence",
+          "node_ids": [
+            "parallel-execution",
+            "effect-evidence"
+          ]
+        },
+        {
           "id": "gym-integration",
           "label": "Gym integration & simulation",
           "node_ids": [
@@ -2587,6 +5464,306 @@
             "embodied-env",
             "base-env",
             "simulation-manager"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "simulation",
+      "label": "Simulation",
+      "description": "World entities, motion capabilities, and the numerical services used by simulation.",
+      "node_ids": [
+        "simulation-manager",
+        "physics",
+        "robot",
+        "articulations",
+        "rigid-objects",
+        "deformables",
+        "sensors",
+        "visualization",
+        "atomic-engine",
+        "motion-generator",
+        "planners",
+        "solvers",
+        "workspace",
+        "workspace-analyzer",
+        "augmentation",
+        "compute",
+        "compute-trajectory",
+        "compute-kinematics",
+        "differentiable-env",
+        "autograd-bridge",
+        "configuration",
+        "data-assets",
+        "event-manager",
+        "randomization",
+        "devices",
+        "device-controller"
+      ],
+      "edge_ids": [
+        "engine-holds-motion",
+        "simulation-constructs-visualization",
+        "simulation-constructs-robot",
+        "simulation-holds-robot",
+        "motion-generator-imports-compute",
+        "workspace-analyzer-imports-compute",
+        "device-controller-holds-devices",
+        "device-controller-holds-robot",
+        "robot-constructs-workspace",
+        "differentiable-env-calls-autograd-bridge",
+        "simulation-manager-constructs-rigid-objects",
+        "simulation-manager-holds-articulations",
+        "simulation-manager-holds-deformables",
+        "robot-inherits-articulations",
+        "event-manager-calls-randomization",
+        "static-imports-547bae782cdb",
+        "static-imports-d3f76cbdac77",
+        "static-imports-5529b5ed4bec",
+        "static-imports-ab15f87df47f",
+        "static-imports-bc79368679c6",
+        "static-imports-f6f4ac515679",
+        "static-imports-9bc131d4e099",
+        "static-imports-688b3daedb5b",
+        "static-imports-17df4f0fef66",
+        "static-imports-6a16cc8193b0",
+        "static-imports-819e3ce626d3",
+        "static-imports-8a7d5a2a7418",
+        "static-imports-a32fb8db0ae1",
+        "static-imports-bba2d7266a0c"
+      ],
+      "groups": [
+        {
+          "id": "simulation-0",
+          "label": "World & entities",
+          "node_ids": [
+            "simulation-manager",
+            "physics",
+            "robot",
+            "articulations",
+            "rigid-objects",
+            "deformables",
+            "sensors",
+            "visualization"
+          ]
+        },
+        {
+          "id": "simulation-1",
+          "label": "Motion & reachability",
+          "node_ids": [
+            "atomic-engine",
+            "motion-generator",
+            "planners",
+            "solvers",
+            "workspace",
+            "workspace-analyzer",
+            "augmentation"
+          ]
+        },
+        {
+          "id": "simulation-2",
+          "label": "Computation & gradient bridge",
+          "node_ids": [
+            "compute",
+            "compute-trajectory",
+            "compute-kinematics",
+            "differentiable-env",
+            "autograd-bridge"
+          ]
+        },
+        {
+          "id": "simulation-3",
+          "label": "Configuration & control",
+          "node_ids": [
+            "configuration",
+            "data-assets",
+            "event-manager",
+            "randomization",
+            "devices",
+            "device-controller"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "data-learning",
+      "label": "Data & Learning",
+      "description": "Demonstration recording, online sampling, and separate standard and differentiable training routes.",
+      "node_ids": [
+        "embodied-env",
+        "managers",
+        "dataset-manager",
+        "recording",
+        "async-recording",
+        "depth-video",
+        "data-pipeline",
+        "online-dataset",
+        "data-assets",
+        "rl-routing",
+        "rl-algorithms",
+        "policy",
+        "policy-evaluation",
+        "learning-env",
+        "rl",
+        "collector",
+        "rollout-buffer",
+        "differentiable-trainer",
+        "differentiable-collector",
+        "cli"
+      ],
+      "edge_ids": [
+        "cli-calls-training-assembly",
+        "recording-imports-data-assets",
+        "cli-calls-data-assets",
+        "cli-calls-policy-evaluation",
+        "embodied-env-constructs-dataset-manager",
+        "rl-constructs-collector",
+        "rl-constructs-rollout-buffer",
+        "rl-holds-policy",
+        "collector-holds-policy",
+        "differentiable-trainer-holds-policy",
+        "differentiable-trainer-constructs-differentiable-collector",
+        "recording-constructs-depth-video",
+        "async-recording-inherits-recording",
+        "managers-imports-recording",
+        "rl-routing-constructs-rl-train-from-config",
+        "rl-routing-constructs-rl-train-learning-env",
+        "rl-routing-constructs-differentiable-trainer-train-learning-env",
+        "static-imports-804702892bff",
+        "static-imports-9930294a9a0a",
+        "static-imports-6e4557b26941",
+        "static-imports-35d217cf64ea",
+        "static-imports-095579fb8b55",
+        "static-imports-da107fa3a9fd",
+        "static-imports-b7c58479a36f",
+        "static-imports-ae929a6258a7"
+      ],
+      "groups": [
+        {
+          "id": "data-learning-0",
+          "label": "Environment & recording",
+          "node_ids": [
+            "embodied-env",
+            "managers",
+            "dataset-manager",
+            "recording",
+            "async-recording",
+            "depth-video"
+          ]
+        },
+        {
+          "id": "data-learning-1",
+          "label": "Online data",
+          "node_ids": [
+            "data-pipeline",
+            "online-dataset",
+            "data-assets"
+          ]
+        },
+        {
+          "id": "data-learning-2",
+          "label": "Training assembly",
+          "node_ids": [
+            "cli",
+            "rl-routing",
+            "rl-algorithms",
+            "policy",
+            "policy-evaluation",
+            "learning-env"
+          ]
+        },
+        {
+          "id": "data-learning-3",
+          "label": "Standard rollouts",
+          "node_ids": [
+            "rl",
+            "collector",
+            "rollout-buffer"
+          ]
+        },
+        {
+          "id": "data-learning-4",
+          "label": "Differentiable rollouts",
+          "node_ids": [
+            "differentiable-trainer",
+            "differentiable-collector"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "generation-tooling",
+      "label": "Generation & Toolkits",
+      "description": "Scene and asset preparation, standalone robotics tools, and downstream simulation entry points.",
+      "node_ids": [
+        "cli",
+        "data-assets",
+        "configuration",
+        "scene-generation",
+        "scene-editing",
+        "scene-export",
+        "simready",
+        "toolkits",
+        "grasp-tools",
+        "urdf-assembly",
+        "convex-decomposition",
+        "simulation-manager",
+        "robot",
+        "workspace-analyzer"
+      ],
+      "edge_ids": [
+        "simulation-constructs-robot",
+        "simulation-holds-robot",
+        "scene-generation-imports-scene-export",
+        "scene-editing-imports-scene-export",
+        "cli-calls-data-assets",
+        "cli-calls-scene-generation",
+        "cli-calls-simready",
+        "cli-calls-toolkits",
+        "cli-calls-convex-decomposition",
+        "cli-calls-grasp-tools",
+        "cli-calls-workspace-analyzer",
+        "static-imports-be091d31f810",
+        "static-imports-9bc131d4e099",
+        "static-imports-bba2d7266a0c",
+        "static-imports-2b77ea1ae6d0"
+      ],
+      "groups": [
+        {
+          "id": "generation-tooling-0",
+          "label": "Commands & assets",
+          "node_ids": [
+            "cli",
+            "data-assets",
+            "configuration"
+          ]
+        },
+        {
+          "id": "generation-tooling-1",
+          "label": "Generative simulation",
+          "node_ids": [
+            "scene-generation",
+            "scene-editing",
+            "scene-export",
+            "simready"
+          ]
+        },
+        {
+          "id": "generation-tooling-2",
+          "label": "Robotics tools",
+          "node_ids": [
+            "toolkits",
+            "grasp-tools",
+            "urdf-assembly",
+            "convex-decomposition"
+          ]
+        },
+        {
+          "id": "generation-tooling-3",
+          "label": "Runtime consumers",
+          "node_ids": [
+            "simulation-manager",
+            "robot",
+            "workspace-analyzer"
           ]
         }
       ]
