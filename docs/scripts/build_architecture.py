@@ -28,6 +28,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
+import yaml
 from jsonschema import Draft202012Validator
 
 from architecture_data import (
@@ -450,6 +451,40 @@ def render_summary(data: dict[str, Any], repo_root: Path) -> str:
         lines.append(
             f"| {cell(node['label'])} | {cell(node['summary'])} | {' · '.join(links)} |"
         )
+    topics = yaml.safe_load(source.read(data["topic_index"]))["topics"]
+    represented = {topic for node in data["nodes"] for topic in node["topic_ids"]}
+    missing_topics = [
+        topic.get("title", topic["id"])
+        for topic in topics
+        if topic["id"] not in represented
+    ]
+    view_edges = [edge for edge in data["edges"] if edge["id"] in view["edge_ids"]]
+    connected = {
+        endpoint for edge in view_edges for endpoint in (edge["source"], edge["target"])
+    }
+    unmapped = [nodes[id]["label"] for id in view["node_ids"] if id not in connected]
+    reviewed = sum(edge["provenance"] == "source-reviewed" for edge in data["edges"])
+    extracted = sum(edge["provenance"] == "static-extracted" for edge in data["edges"])
+    lines.extend(
+        [
+            "",
+            "## Coverage and interpretation",
+            "",
+            f"Snapshot: {len(data['nodes'])} nodes, {reviewed} source-reviewed relationships, and {extracted} statically extracted relationships across all views.",
+            "",
+            "Import declarations do not establish runtime calls or execution order. Missing edges do not imply architectural independence.",
+            "",
+            "Topics without represented nodes: "
+            + (", ".join(map(cell, missing_topics)) or "none")
+            + ". Topic representation does not imply complete coverage.",
+            "",
+            "Overview nodes without mapped relationships: "
+            + (", ".join(map(cell, unmapped)) or "none")
+            + ".",
+            "",
+            *["- " + cell(limit) for limit in data["limitations"]],
+        ]
+    )
     return "\n".join(lines) + "\n"
 
 

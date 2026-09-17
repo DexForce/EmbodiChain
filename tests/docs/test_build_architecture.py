@@ -242,3 +242,23 @@ def test_import_after_class_is_not_used_to_resolve_its_base(seed):
     assert not any(
         e["relation"] == "inherits" for e in build_snapshot(root, path)["edges"]
     )
+
+
+def test_summary_reports_unmapped_topics_and_edges_from_pinned_inputs(seed):
+    data, root, path, _ = seed
+    with (root / "agent_context/MAP.yaml").open("a") as stream:
+        stream.write("- id: future\n  title: Future subsystem\n")
+    commit(root)
+    data["edges"] = []
+    for view in data["views"]:
+        view["edge_ids"] = []
+    path.write_text(json.dumps(data))
+    snapshot = build_snapshot(root, path)
+    # A dirty topic index must not change a summary for the already pinned snapshot.
+    with (root / "agent_context/MAP.yaml").open("a") as stream:
+        stream.write("- id: dirty-only\n  title: Uncommitted topic\n")
+    summary = render_summary(snapshot, root)
+    assert "Topics without represented nodes: Future subsystem" in summary
+    assert "Overview nodes without mapped relationships: Alpha, Beta" in summary
+    assert "Uncommitted topic" not in summary
+    assert "Missing edges do not imply architectural independence." in summary

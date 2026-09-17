@@ -50,6 +50,7 @@ import {
 } from 'lucide-react';
 import { ArchitectureNode, LayerNode } from './ArchitectureNode';
 import NodeDetails from './NodeDetails';
+import { useDocumentTheme } from './useDocumentTheme';
 import { buildCanvas, layerColors, CARD_WIDTH, CARD_HEIGHT } from './graph';
 import { parseState, serializeState, selectGraph, relations } from './state';
 import type { ExplorerState, ArchitectureSnapshot } from './types';
@@ -128,15 +129,7 @@ function Explorer({ data }: { data: ArchitectureSnapshot }) {
   const initial = useMemo(() => parseState(location.hash, data), []);
   const [state, setState] = useState<ExplorerState>(initial.state);
   const [notice, setNotice] = useState(initial.notices.join(' '));
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    const requested = new URLSearchParams(location.search).get('theme');
-    if (requested === 'dark' || requested === 'light') return requested;
-    try {
-      return localStorage.getItem('architecture-academic-theme') === 'dark' ? 'dark' : 'light';
-    } catch {
-      return 'light';
-    }
-  });
+  const { theme, toggleTheme, embedded, shareUrl } = useDocumentTheme(serializeState(state));
   const [mobileNav, setMobileNav] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [help, setHelp] = useState(false);
@@ -174,13 +167,6 @@ function Explorer({ data }: { data: ArchitectureSnapshot }) {
       removeEventListener('hashchange', update);
     };
   }, []);
-  useEffect(() => {
-    try {
-      localStorage.setItem('architecture-academic-theme', theme);
-    } catch {
-      /* Browser storage may be unavailable. */
-    }
-  }, [theme]);
   const navigate = useCallback((patch: Partial<ExplorerState>, replace = false) => {
     setState((previous) => {
       const next = { ...previous, ...patch };
@@ -211,7 +197,7 @@ function Explorer({ data }: { data: ArchitectureSnapshot }) {
   const hasQuery = state.query.trim().length > 0;
   const share = async () => {
     try {
-      await navigator.clipboard.writeText(location.href);
+      await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -260,13 +246,15 @@ function Explorer({ data }: { data: ArchitectureSnapshot }) {
             {data.source_ref}
             <span>{data.revision.slice(0, 8)}</span>
           </a>
-          <button
-            className="icon-button"
-            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          >
-            {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
-          </button>
+          {!embedded && (
+            <button
+              className="icon-button"
+              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+              onClick={toggleTheme}
+            >
+              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
+          )}
           <button className="share-button" onClick={share}>
             {copied ? <Check size={14} /> : <Link2 size={14} />}
             <span>{copied ? 'Copied' : 'Share view'}</span>

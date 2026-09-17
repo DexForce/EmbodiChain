@@ -76,7 +76,7 @@
       "topic_ids": [
         "task-programs"
       ],
-      "summary": "Immutable compilation result with lazy task segments and analysis outputs.",
+      "summary": "Immutable compilation result with materialized task segments and analysis views.",
       "boundaries": [
         "The result is not a control command or proof of successful physical execution."
       ],
@@ -1225,9 +1225,9 @@
         {
           "path": "embodichain/lab/gym/envs/task_program/bridge.py",
           "symbol": "TaskProgramDemoBridge.__init__",
-          "start_line": 993,
-          "end_line": 994,
-          "excerpt": "        if command_sink.clock is not clock:\n            raise ValueError(\"command_sink and bridge must share the exact clock.\")"
+          "start_line": 1015,
+          "end_line": 1015,
+          "excerpt": "        self._clock = clock"
         }
       ]
     },

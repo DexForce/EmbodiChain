@@ -18,6 +18,9 @@ Local and CI Sphinx builds regenerate their own version-specific assets.
 choices. Neither import declarations nor adjacency establish runtime order. Every
 relationship includes source evidence and scope; `holds` does not imply exclusive
 ownership. This is selected static coverage, not a complete dependency graph.
+The generated text reference lists topics without represented nodes and overview
+nodes without mapped relationships, using MAP at the snapshot revision. Neither
+a represented topic nor a missing edge establishes complete coverage or independence.
 
 ## Generate and validate
 
@@ -103,6 +106,13 @@ abort Sphinx. Generated resources live in the ignored
 page during source processing, so Sphinx indexes its text. Non-HTML builders
 produce the summary without requiring Node. Only the architecture page embeds
 application scripts, via its titled iframe.
+
+The embedded explorer follows the resolved Sphinx light/dark theme, including
+changes made after loading. Theme controls remain in the documentation toolbar;
+standalone pages retain their own theme toggle. The architecture entry uses the
+available article width and a viewport-sized frame. Both **Open full-screen
+explorer** and **Share view** preserve the current module, filters, focus mode, and
+resolved theme; documentation links retain the current version root.
 
 The full documentation setup is described in
 [Build Documentation](../source/quick_start/docs.md). For a simulator-independent

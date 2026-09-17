@@ -77,15 +77,20 @@ def render_entry(app: Sphinx, docname: str) -> str:
         return summary
     origin = posixpath.dirname(app.builder.get_target_uri(docname)) or "."
     target = posixpath.relpath("_static/architecture/index.html", origin)
-    url = html.escape(target + "?docsRoot=../../&theme=light", quote=True)
+    url = html.escape(target + "?docsRoot=../../&theme=auto", quote=True)
     interactive = (
         "```{raw} html\n"
+        "<style>\n"
+        ".bd-main .bd-content .bd-article-container:has(.architecture-frame) {max-width:100%;width:100%}\n"
+        ".architecture-frame {display:block;width:100%;height:clamp(560px,calc(100svh - 6rem),1000px);"
+        "border:1px solid var(--pst-color-border,#b8c1ca);border-radius:4px}\n"
+        "</style>\n"
         f'<p><a class="architecture-fullscreen" href="{url}">Open full-screen explorer</a></p>\n'
         f'<iframe class="architecture-frame" title="EmbodiChain architecture explorer" src="{url}" '
-        'style="width:100%;height:880px;border:1px solid #b8c1ca;border-radius:4px" loading="lazy"></iframe>\n'
+        'loading="lazy"></iframe>\n'
         "```\n\n"
         "The module reference below is searchable and remains available without JavaScript. "
-        "Use **Share view** inside the explorer to copy a full-screen link with the current selection and filters.\n\n"
+        "The explorer follows the documentation theme. Open full-screen to keep your current selection, or use **Share view** inside the explorer to copy a full-screen link with the current selection and filters.\n\n"
     )
     return interactive + summary
 

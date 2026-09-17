@@ -133,7 +133,7 @@ def test_sphinx_entry_uses_searchable_summary_and_relative_links(tmp_path):
     assert "{doc}`Engine docs </api_reference/engine>`" in result
     assert "../../_static/architecture/index.html?docsRoot=../../" in result
     assert 'title="EmbodiChain architecture explorer"' in result
-    assert "theme=light" in result
+    assert "theme=auto" in result
     assert dependencies
     app.builder.format = "text"
     text = render_entry(app, "overview/architecture/index")

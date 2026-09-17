@@ -363,3 +363,41 @@ and docstring markup). No warning was reported for the architecture entry. The
 isolated strict Sphinx fixture passes; the full site's warning backlog remains
 outside this architecture change. CI workflow execution and publication have not
 been performed locally. The named worktree is retained for review.
+
+
+## Reading Polish and Content Review — 2026-09-17
+
+- [x] Follow the embedding Sphinx document's resolved theme without overwriting
+  standalone preferences. Observe later theme changes and clean up the observer.
+- [x] Give the architecture entry the available article width, remove its secondary
+  sidebar, and size the iframe for the viewport with a usable minimum height.
+- [x] Preserve selected node, view, filters, focus and resolved theme when opening
+  the full-screen link or copying a share link. Standalone theme changes survive reload.
+- [x] Review all 34 node responsibilities and 36 semantic edge directions/scopes
+  against current source. Correct CompiledTaskProgram's materialized segments and
+  use the bridge's actual clock assignment as retention evidence.
+- [x] Generate coverage information from pinned MAP and graph inputs: missing
+  topics, overview nodes without mapped edges, provenance counts, and limitations.
+- [x] Compare full documentation warnings against the main baseline in a separate
+  detached worktree under the same Python 3.11 documentation environment.
+
+Focused checks: 57 Python tests, 15 frontend unit tests, 6 standalone browser
+checks, and 8 Sphinx browser checks pass. The new tests first reproduced the light
+iframe inside dark documentation and 688px-wide frame at a 1280px desktop viewport.
+They now cover theme changes after load, clipboard completion, full-screen state,
+standalone theme reload, desktop width and 390px mobile navigation. Coverage tests
+prove the summary reads pinned topic inventory even when the worktree MAP changes.
+API documentation remains 2075/2075; no routed context topics are affected.
+Independent review found the materialization wording issue, now fixed; the follow-up
+review reports no actionable findings.
+
+Baseline `3224ac1e` and the previous integrated feature build both emit 714 Sphinx
+warnings. All 731 normalized diagnostic lines (including docutils warning/error
+lines) match as multisets after replacing checkout paths. The architecture feature
+does not account for those existing failures. Local strict fixture builds pass;
+GitHub Actions and publication have not been run. The polished full-site build
+also emits exactly the same 714 warnings and identical normalized diagnostics.
+The generated page was inspected in the browser in both themes; the real Sphinx
+theme button updates the iframe immediately. The live preview is retained at
+http://127.0.0.1:4184/overview/architecture/index.html. Standalone production
+assets were refreshed on port 4183. The Vite bundle-size advisory remains nonfatal.

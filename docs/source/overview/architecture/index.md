@@ -1,3 +1,7 @@
+---
+html_theme.sidebar_secondary.remove: true
+---
+
 # Architecture Explorer
 
 Explore EmbodiChain through a system overview and a detailed Task Program view.
