@@ -723,8 +723,8 @@ h1 > span {
   letter-spacing: 0.3px;
 }
 .module-card {
-  height: 110px;
-  width: 192px;
+  height: 128px;
+  width: 240px;
   position: relative;
   border: 1px solid var(--line);
   border-left: 2px solid var(--module-color);
@@ -767,12 +767,15 @@ h1 > span {
   letter-spacing: 0;
   color: var(--muted);
 }
+.module-card.active .module-count {
+  padding-right: 14px;
+}
 .module-count span {
   margin-left: 2px;
   color: var(--subtle);
 }
 .module-name {
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.2;
   font-weight: 600;
   letter-spacing: -0.2px;
@@ -780,12 +783,12 @@ h1 > span {
   color: var(--text);
 }
 .module-summary {
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.4;
   color: var(--muted);
   margin-top: 5px;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
   letter-spacing: 0.1px;
@@ -1350,6 +1353,61 @@ h1 > span {
 .app[data-theme='dark'] .node-kind,
 .app[data-theme='dark'] .relation-direction {
   filter: brightness(1.7) saturate(0.7);
+}
+.reading-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+.focus-toggle,
+.fit-overview {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+.focus-toggle.active {
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-color: var(--accent);
+}
+.focus-toggle:disabled {
+  opacity: 0.55;
+}
+.fit-overview {
+  margin-left: auto;
+}
+.reading-context {
+  color: var(--muted);
+  font-size: 10px;
+}
+.coverage-note {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.7;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  margin-top: 20px;
+}
+.canvas-tools button.reading-size {
+  width: 48px;
+  font:
+    10px 'IBM Plex Mono',
+    monospace;
+}
+@media (max-width: 1360px) {
+  .reading-context {
+    display: none;
+  }
 }
 @media (min-width: 1800px) {
   .workspace {

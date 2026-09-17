@@ -19,9 +19,12 @@ import { MarkerType } from '@xyflow/react';
 import { relations, selectGraph } from './state';
 import type { ArchitectureSnapshot, ExplorerState } from './types';
 export const layerColors = ['#4b6b86', '#6c6589', '#957444', '#4c7976', '#7d6c64'];
+export const CARD_WIDTH = 240;
+export const CARD_HEIGHT = 128;
 export function buildCanvas(
   data: ArchitectureSnapshot,
   state: ExplorerState,
+  columns = 3,
 ): { nodes: Node[]; edges: Edge[] } {
   const graph = selectGraph(data, state);
   const nodes: Node[] = [];
@@ -29,33 +32,50 @@ export function buildCanvas(
   const nodeGroups = new Map<string, number>();
   const positions = new Map<string, { x: number; y: number }>();
   graph.view.groups.forEach((group, index) => {
-    const rows = Math.ceil(group.node_ids.length / 5);
-    const height = 34 + rows * 124 - 12 + 10;
-    nodes.push({
-      id: 'layer-' + group.id,
-      type: 'layer',
-      position: { x: 0, y },
-      data: {
-        label: group.label,
-        index,
-        count: group.node_ids.length,
-        color: layerColors[index % layerColors.length],
-      },
-      style: { width: 1060, height },
-      selectable: false,
-      draggable: false,
-      connectable: false,
-      zIndex: -1,
-    });
-    group.node_ids.forEach((id, i) => {
-      nodeGroups.set(id, index);
-      positions.set(id, { x: 18 + (i % 5) * 208, y: y + 34 + Math.floor(i / 5) * 124 });
-    });
-    y += height + 14;
+    group.node_ids.forEach((id) => nodeGroups.set(id, index));
   });
-  for (const module of graph.nodes) {
+  if (state.focus && state.nodeId) {
+    const ordered = [...graph.visibleNodes].sort((a, b) =>
+      a.id === state.nodeId ? -1 : b.id === state.nodeId ? 1 : 0,
+    );
+    ordered.forEach((node, index) =>
+      positions.set(node.id, {
+        x: 18 + (index % columns) * (CARD_WIDTH + 20),
+        y: 18 + Math.floor(index / columns) * (CARD_HEIGHT + 52),
+      }),
+    );
+  } else {
+    graph.view.groups.forEach((group, index) => {
+      const rows = Math.ceil(group.node_ids.length / columns);
+      const height = 38 + rows * (CARD_HEIGHT + 20);
+      nodes.push({
+        id: 'layer-' + group.id,
+        type: 'layer',
+        position: { x: 0, y },
+        data: {
+          label: group.label,
+          index,
+          count: group.node_ids.length,
+          color: layerColors[index % layerColors.length],
+        },
+        style: { width: 16 + columns * (CARD_WIDTH + 20), height },
+        selectable: false,
+        draggable: false,
+        connectable: false,
+        zIndex: -1,
+      });
+      group.node_ids.forEach((id, i) =>
+        positions.set(id, {
+          x: 18 + (i % columns) * (CARD_WIDTH + 20),
+          y: y + 38 + Math.floor(i / columns) * (CARD_HEIGHT + 20),
+        }),
+      );
+      y += height + 24;
+    });
+  }
+  for (const module of graph.visibleNodes) {
     const selected = module.id === state.nodeId;
-    const count = graph.edges.filter(
+    const count = graph.visibleEdges.filter(
       (e) => e.source === module.id || e.target === module.id,
     ).length;
     nodes.push({
@@ -68,15 +88,20 @@ export function buildCanvas(
         active: selected,
         faded: !graph.focusedNodeIds.has(module.id) || !graph.matchedNodeIds.has(module.id),
         count,
+        recordedCount: data.edges.filter(
+          (e) =>
+            graph.view.edge_ids.includes(e.id) &&
+            (e.source === module.id || e.target === module.id),
+        ).length,
       },
       selected,
-      width: 192,
-      height: 110,
+      width: CARD_WIDTH,
+      height: CARD_HEIGHT,
       zIndex: 2,
       ariaLabel: module.label,
     });
   }
-  const edges: Edge[] = graph.edges.map((edge) => {
+  const edges: Edge[] = graph.visibleEdges.map((edge) => {
     const incident = edge.source === state.nodeId || edge.target === state.nodeId;
     const matches = graph.matchedNodeIds.has(edge.source) && graph.matchedNodeIds.has(edge.target);
     const color = relations[edge.relation].color;

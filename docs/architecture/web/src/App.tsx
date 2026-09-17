@@ -14,7 +14,7 @@
 // limitations under the License.
 // ----------------------------------------------------------------------------
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -22,6 +22,7 @@ import {
   Panel,
   useReactFlow,
   useViewport,
+  useStore,
   applyNodeChanges,
   type Node,
   type NodeChange,
@@ -50,7 +51,7 @@ import {
 import snapshot from '../../preview.snapshot.json';
 import { ArchitectureNode, LayerNode } from './ArchitectureNode';
 import NodeDetails from './NodeDetails';
-import { buildCanvas, layerColors } from './graph';
+import { buildCanvas, layerColors, CARD_WIDTH, CARD_HEIGHT } from './graph';
 import { parseState, serializeState, selectGraph, relations } from './state';
 import type { ExplorerState, ArchitectureSnapshot } from './types';
 const data: ArchitectureSnapshot = snapshot;
@@ -64,7 +65,14 @@ function CanvasTools() {
       <button aria-label="Zoom out" onClick={() => flow.zoomOut({ duration: 180 })}>
         <Minus size={16} />
       </button>
-      <span>{Math.round(zoom * 100)}%</span>
+      <button
+        className="reading-size"
+        aria-label="Read at 100 percent"
+        title="Read at 100%"
+        onClick={() => flow.zoomTo(1, { duration: 180 })}
+      >
+        {Math.round(zoom * 100)}%
+      </button>
       <button aria-label="Zoom in" onClick={() => flow.zoomIn({ duration: 180 })}>
         <Plus size={16} />
       </button>
@@ -78,14 +86,43 @@ function CanvasTools() {
     </div>
   );
 }
-function FitOnView({ viewId }: { viewId: string }) {
+function ReadingViewport({
+  layoutKey,
+  nodeId,
+  focus,
+}: {
+  layoutKey: string;
+  nodeId: string | null;
+  focus: boolean;
+}) {
   const flow = useReactFlow();
+  const width = useStore((store) => store.width);
+  const height = useStore((store) => store.height);
   useEffect(() => {
     const timer = setTimeout(() => {
-      void flow.fitView({ padding: 0.07, duration: 300 });
+      if (focus) {
+        const bounds = flow.getNodesBounds(flow.getNodes());
+        // Centre small diagrams; top-align large ones so the selected first card stays visible.
+        void flow.setViewport(
+          {
+            x: Math.max(24, (width - bounds.width) / 2) - bounds.x,
+            y: Math.max(24, (height - bounds.height) / 2) - bounds.y,
+            zoom: 1,
+          },
+          { duration: 180 },
+        );
+      } else {
+        const node = nodeId ? flow.getNode(nodeId) : undefined;
+        if (node)
+          void flow.setCenter(node.position.x + CARD_WIDTH / 2, node.position.y + CARD_HEIGHT / 2, {
+            zoom: 1,
+            duration: 180,
+          });
+        else void flow.setViewport({ x: 24, y: 24, zoom: 1 }, { duration: 180 });
+      }
     }, 50);
     return () => clearTimeout(timer);
-  }, [viewId, flow]);
+  }, [layoutKey, nodeId, focus, flow, width, height]);
   return null;
 }
 
@@ -101,11 +138,25 @@ function Explorer() {
     }
   });
   const [mobileNav, setMobileNav] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [help, setHelp] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const graph = useMemo(() => selectGraph(data, state), [state]);
-  const canvas = useMemo(() => buildCanvas(data, state), [state]);
+  const canvasElement = useRef<HTMLDivElement>(null);
+  const [columns, setColumns] = useState(3);
+  useEffect(() => {
+    const element = canvasElement.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setColumns(
+        Math.max(1, Math.min(5, Math.floor((entry.contentRect.width - 64) / (CARD_WIDTH + 20)))),
+      );
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const canvas = useMemo(() => buildCanvas(data, state, columns), [state, columns]);
   const [nodes, setNodes] = useState<Node[]>(canvas.nodes);
   const flow = useReactFlow();
   useEffect(() => setNodes(canvas.nodes), [canvas.nodes]);
@@ -113,6 +164,7 @@ function Explorer() {
     const update = () => {
       const parsed = parseState(location.hash, data);
       setState(parsed.state);
+      setInspectorOpen(true);
       setNotice(parsed.notices.join(' '));
     };
     addEventListener('popstate', update);
@@ -132,6 +184,7 @@ function Explorer() {
   const navigate = useCallback((patch: Partial<ExplorerState>, replace = false) => {
     setState((previous) => {
       const next = { ...previous, ...patch };
+      if (!next.nodeId) next.focus = false;
       const hash = serializeState(next);
       if (location.hash !== hash) history[replace ? 'replaceState' : 'pushState'](null, '', hash);
       return next;
@@ -141,12 +194,13 @@ function Explorer() {
   const selectNode = useCallback(
     (id: string) => {
       navigate({ nodeId: id });
+      setInspectorOpen(true);
       setMobileNav(false);
     },
     [navigate],
   );
   const switchView = (id: string) => {
-    navigate({ viewId: id, nodeId: null, query: '' });
+    navigate({ viewId: id, nodeId: null, query: '', focus: false });
     setMobileNav(false);
   };
   const selected = data.nodes.find((n) => n.id === state.nodeId);
@@ -307,17 +361,25 @@ function Explorer() {
             </div>
             <div className="view-metrics">
               <div>
-                <strong>{graph.nodes.length}</strong>
+                <strong>{graph.visibleNodes.length}</strong>
                 <span>nodes</span>
               </div>
               <i />
               <div>
-                <strong>{graph.edges.length}</strong>
+                <strong>{graph.visibleEdges.length}</strong>
                 <span>edges</span>
               </div>
               <i />
               <div>
-                <strong>{graph.view.groups.length}</strong>
+                <strong>
+                  {
+                    graph.view.groups.filter((group) =>
+                      group.node_ids.some((id) =>
+                        graph.visibleNodes.some((node) => node.id === id),
+                      ),
+                    ).length
+                  }
+                </strong>
                 <span>layers</span>
               </div>
             </div>
@@ -380,6 +442,42 @@ function Explorer() {
               <CircleHelp size={16} />
             </button>
           </div>
+          <div className="reading-bar">
+            <button
+              className={`focus-toggle ${state.focus ? 'active' : ''}`}
+              aria-label="Direct neighbours only"
+              aria-pressed={state.focus}
+              disabled={!selected}
+              title={
+                selected
+                  ? 'Show the selected module and its direct relationships only'
+                  : 'Select a module first'
+              }
+              onClick={() => navigate({ focus: !state.focus })}
+            >
+              <Network size={14} /> Direct neighbours only
+            </button>
+            <span className="reading-context">
+              {state.focus
+                ? `${graph.visibleNodes.length} of ${graph.nodes.length} modules shown`
+                : 'Reading view · scroll to explore'}
+            </span>
+            {selected && !inspectorOpen && (
+              <button
+                className="focus-toggle"
+                aria-label="Open node details"
+                onClick={() => setInspectorOpen(true)}
+              >
+                <Box size={13} /> Details
+              </button>
+            )}
+            <button
+              className="fit-overview"
+              onClick={() => void flow.fitView({ padding: 0.07, duration: 250 })}
+            >
+              <Maximize size={13} /> Fit overview
+            </button>
+          </div>
           {showFilters && (
             <div className="filter-menu">
               <div className="filter-menu-title">
@@ -426,7 +524,7 @@ function Explorer() {
               </button>
             </div>
           )}
-          <div className="canvas-shell">
+          <div className="canvas-shell" ref={canvasElement}>
             <ReactFlow
               nodes={nodes}
               edges={canvas.edges}
@@ -440,18 +538,22 @@ function Explorer() {
               }}
               onNodeDoubleClick={(_, node) => {
                 if (node.type === 'module') {
-                  void flow.setCenter(node.position.x + 96, node.position.y + 55, {
-                    zoom: 1.15,
-                    duration: 300,
-                  });
+                  void flow.setCenter(
+                    node.position.x + CARD_WIDTH / 2,
+                    node.position.y + CARD_HEIGHT / 2,
+                    {
+                      zoom: 1.15,
+                      duration: 300,
+                    },
+                  );
                 }
               }}
               onPaneClick={() => {
                 setShowFilters(false);
                 setHelp(false);
               }}
-              fitView
-              fitViewOptions={{ padding: 0.07 }}
+              panOnScroll
+              zoomOnScroll={false}
               minZoom={0.25}
               maxZoom={1.8}
               nodesConnectable={false}
@@ -460,7 +562,11 @@ function Explorer() {
               onlyRenderVisibleElements={false}
               proOptions={{ hideAttribution: false }}
             >
-              <FitOnView viewId={state.viewId} />
+              <ReadingViewport
+                layoutKey={`${state.viewId}:${columns}:${state.focus ? state.relations.join() : ''}`}
+                nodeId={state.nodeId}
+                focus={state.focus}
+              />
               <Panel position="bottom-left">
                 <CanvasTools />
               </Panel>
@@ -474,14 +580,6 @@ function Explorer() {
                 maskColor={theme === 'dark' ? '#090e1455' : '#dce5e555'}
                 position="bottom-right"
               />
-              <Panel position="top-left">
-                <div className="canvas-caption">
-                  <span className="status-dot" />
-                  {state.nodeId ? 'Local neighbourhood' : 'Structural overview'}
-                  <span>·</span>
-                  {state.nodeId ? selected?.label : 'Modules grouped by responsibility'}
-                </div>
-              </Panel>
             </ReactFlow>
             {hasQuery && graph.matchedNodeIds.size === 0 && (
               <div className="empty-search">
@@ -496,7 +594,8 @@ function Explorer() {
                 <strong>Reading the diagram</strong>
                 <p>Select a module to inspect its role and source evidence.</p>
                 <p>
-                  Drag to pan and scroll to zoom. The module index supports keyboard navigation.
+                  Drag or scroll to pan; use the zoom controls or pinch to scale. The module index
+                  supports keyboard navigation.
                 </p>
                 <p>
                   Filter relationships to focus the diagram. Shared links preserve your selection.
@@ -507,21 +606,21 @@ function Explorer() {
           </div>
           <div className="canvas-footer">
             <span>
-              <MouseIcon /> Double-click to zoom · Drag to pan · Scroll to scale
+              <MouseIcon /> Scroll to pan · Double-click a module to zoom
             </span>
             <span>
-              Static relationships; not a runtime trace <ArrowUpRight size={11} />
+              Curated sample · Not a complete dependency graph <ArrowUpRight size={11} />
             </span>
           </div>
         </main>
         <NodeDetails
           data={data}
-          node={selected}
+          node={inspectorOpen ? selected : undefined}
           view={graph.view}
           edges={graph.edges}
           color={layerColors[Math.max(0, selectedGroup) % layerColors.length]}
           onSelect={selectNode}
-          onClose={() => navigate({ nodeId: null })}
+          onClose={() => setInspectorOpen(false)}
         />
       </div>
       <div className="sr-only" aria-live="polite">

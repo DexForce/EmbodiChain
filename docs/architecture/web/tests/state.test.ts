@@ -16,6 +16,7 @@
 
 import { describe, it, expect } from 'vitest';
 import data from '../../preview.snapshot.json';
+import { buildCanvas } from '../src/graph';
 import {
   parseState,
   serializeState,
@@ -30,6 +31,7 @@ describe('shareable exploration', () => {
     expect(state).toEqual({
       viewId: 'task-program',
       nodeId: 'atomic-engine',
+      focus: false,
       relations: [],
       query: 'engine',
     });
@@ -53,6 +55,35 @@ describe('shareable exploration', () => {
     const { state } = parseState('#view=overview&q=from input images', data);
     expect(selectGraph(data, state).matchedNodeIds).toEqual(new Set(['scene-generation']));
     expect(selectGraph(data, { ...state, query: 'no-match-xyz' }).matchedNodeIds.size).toBe(0);
+  });
+  it('restores local focus and keeps only incident edges after filtering', () => {
+    const { state } = parseState(
+      '#view=task-program&node=atomic-engine&focus=1&relations=holds',
+      data,
+    );
+    expect(state.focus).toBe(true);
+    expect(parseState(serializeState(state), data).state).toEqual(state);
+    const graph = selectGraph(data, state);
+    expect(graph.visibleNodes.map((n) => n.id).sort()).toEqual([
+      'atomic-engine',
+      'motion-generator',
+      'semantic-executor',
+    ]);
+    expect(graph.visibleEdges.map((e) => e.id)).toEqual([
+      'engine-holds-motion',
+      'executor-holds-engine',
+    ]);
+    const empty = selectGraph(data, { ...state, relations: [] });
+    expect(empty.visibleNodes.map((n) => n.id)).toEqual(['atomic-engine']);
+    expect(empty.visibleEdges).toEqual([]);
+    expect(parseState('#view=overview&focus=1', data).state.focus).toBe(false);
+  });
+  it('counts only displayed links on neighbour cards in a local diagram', () => {
+    const { state } = parseState('#view=task-program&node=atomic-engine&focus=1', data);
+    const canvas = buildCanvas(data, state, 2);
+    const executor = canvas.nodes.find((n) => n.id === 'semantic-executor')!;
+    expect(executor.data.count).toBe(2);
+    expect(executor.data.recordedCount).toBe(6);
   });
   it('pins source and documentation evidence to the reviewed revision', () => {
     const p = { path: 'embodichain/cli/main.py', start_line: 24, end_line: 29 };

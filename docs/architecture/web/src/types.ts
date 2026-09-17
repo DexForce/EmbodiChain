@@ -62,6 +62,7 @@ export interface ArchitectureSnapshot {
 export interface ExplorerState {
   viewId: string;
   nodeId: string | null;
+  focus: boolean;
   relations: string[];
   query: string;
 }

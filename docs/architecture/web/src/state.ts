@@ -54,6 +54,7 @@ export function parseState(
     state: {
       viewId: view.id,
       nodeId,
+      focus: params.get('focus') === '1' && nodeId !== null,
       relations: [...new Set(selected)],
       query: params.get('q') ?? '',
     },
@@ -63,6 +64,7 @@ export function parseState(
 export function serializeState(state: ExplorerState): string {
   const p = new URLSearchParams({ view: state.viewId });
   if (state.nodeId) p.set('node', state.nodeId);
+  if (state.focus && state.nodeId) p.set('focus', '1');
   p.set('relations', state.relations.join(','));
   if (state.query) p.set('q', state.query);
   return '#' + p.toString();
@@ -88,7 +90,10 @@ export function selectGraph(data: ArchitectureSnapshot, state: ExplorerState) {
   const focusedNodeIds = state.nodeId
     ? new Set([state.nodeId, ...incident.flatMap((e) => [e.source, e.target])])
     : new Set(nodes.map((n) => n.id));
-  return { view, nodes, edges, matchedNodeIds, focusedNodeIds };
+  const focused = state.focus && state.nodeId !== null;
+  const visibleNodes = focused ? nodes.filter((n) => focusedNodeIds.has(n.id)) : nodes;
+  const visibleEdges = focused ? incident : edges;
+  return { view, nodes, edges, visibleNodes, visibleEdges, matchedNodeIds, focusedNodeIds };
 }
 export function sourceUrl(
   revision: string,

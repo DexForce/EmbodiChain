@@ -1,8 +1,8 @@
 # Architecture Explorer
 
 A runnable [frontend preview](web/README.md) is now available. It provides the
-24-module overview and 16-object Task Program view, with search, relationship
-filters, source evidence, and shareable navigation. Run it with the commands in
+28-module overview and 16-object Task Program view, with search, relationship
+filters, direct-neighbour exploration, source evidence, and shareable navigation. Run it with the commands in
 the frontend README. It uses [a pinned preview snapshot](preview.snapshot.json);
 automatic generation and Sphinx integration are still pending.
 

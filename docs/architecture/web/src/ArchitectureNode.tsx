@@ -20,11 +20,18 @@ import { Box, ArrowUpRight } from 'lucide-react';
 import type { ArchitectureNode as Module } from './types';
 
 export type ModuleNode = Node<
-  { module: Module; color: string; faded: boolean; active: boolean; count: number },
+  {
+    module: Module;
+    color: string;
+    faded: boolean;
+    active: boolean;
+    count: number;
+    recordedCount: number;
+  },
   'module'
 >;
 export const ArchitectureNode = memo(function ArchitectureNode({ data }: NodeProps<ModuleNode>) {
-  const { module, color, faded, active, count } = data;
+  const { module, color, faded, active, count, recordedCount } = data;
   return (
     <div
       title={`${module.label} — ${module.summary}`}
@@ -35,8 +42,15 @@ export const ArchitectureNode = memo(function ArchitectureNode({ data }: NodePro
       <div className="module-topline">
         <Box size={12} />
         <span>{module.kind === 'class' ? 'CLASS' : 'MODULE'}</span>
-        <span className="module-count">
-          {count} <span>↗</span>
+        <span
+          className="module-count"
+          title={
+            recordedCount
+              ? `${count} visible of ${recordedCount} recorded relationships`
+              : 'Relationships not yet mapped; dependencies may exist'
+          }
+        >
+          {recordedCount ? `${count} links` : 'Not mapped'}
         </span>
       </div>
       <div className="module-name">{module.label}</div>

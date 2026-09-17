@@ -159,6 +159,10 @@ export default function NodeDetails({
                 ))}
               </div>
             )}
+            <p className="coverage-note">
+              Curated source sample. Relationship counts indicate recorded evidence, not complete
+              dependency coverage.
+            </p>
             <section className="relations-section">
               <div className="section-title">
                 Direct relationships{' '}
@@ -168,9 +172,13 @@ export default function NodeDetails({
               </div>
               {!linked.length && (
                 <div className="empty-relations">
-                  No direct relationships match these filters.
+                  {allCount
+                    ? 'No direct relationships match these filters.'
+                    : 'Relationships not yet mapped in this view.'}
                   <br />
-                  Adjust relationship types in the toolbar.
+                  {allCount
+                    ? 'Adjust relationship types in the toolbar.'
+                    : 'This does not mean the module has no dependencies.'}
                 </div>
               )}
               {linked.map((edge) => {

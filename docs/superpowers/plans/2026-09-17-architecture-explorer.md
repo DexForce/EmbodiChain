@@ -33,8 +33,12 @@ of Task 3 before the production generator in Tasks 1–2.
 
 Completed for the preview: both views, search/filter/highlight, evidence inspector,
 pinned source and documentation-source links, URL restoration and browser history,
-responsive navigation, local fonts, light/dark themes, data/state/browser tests,
-and a production build. `src/state.ts` owns navigation and links together;
+responsive navigation, local fonts, English academic light/dark themes, data/state/browser tests,
+and a production build. The reading refinement adds responsive columns at a
+readable initial scale, URL-persisted direct-neighbour mode, and explicit unmapped
+coverage notices. The overview now includes 28 nodes and 40 evidence-backed
+relationships covering launcher/configuration and simulation ownership paths.
+`src/state.ts` owns navigation and links together;
 `src/graph.ts` owns canvas projection. Documentation links intentionally use the
 pinned Git source until Sphinx supplies its version root.
 

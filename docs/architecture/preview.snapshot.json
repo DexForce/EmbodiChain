@@ -774,6 +774,72 @@
         }
       ],
       "documentation": []
+    },
+    {
+      "id": "env-launcher",
+      "label": "Environment launcher",
+      "kind": "module",
+      "topic_ids": [
+        "env-framework"
+      ],
+      "summary": "Runs task discovery, configuration loading, and Gym environment creation.",
+      "boundaries": [
+        "Environment creation is dispatched through the registered Gym ID; task-specific behaviour stays with the environment."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/scripts/run_env.py",
+          "symbol": "cli",
+          "start_line": 994,
+          "end_line": 994,
+          "excerpt": "def cli(argv: Sequence[str] | None = None) -> None:"
+        }
+      ],
+      "documentation": []
+    },
+    {
+      "id": "config-loader",
+      "label": "Config loader",
+      "kind": "module",
+      "topic_ids": [
+        "env-framework"
+      ],
+      "summary": "Loads deployment files, resolves components, and assembles the typed environment configuration.",
+      "boundaries": [
+        "Configuration assembly precedes runtime creation. This module does not itself step the environment."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/utils/gym_utils.py",
+          "symbol": "build_env_cfg_from_args",
+          "start_line": 1210,
+          "end_line": 1210,
+          "excerpt": "def build_env_cfg_from_args("
+        }
+      ],
+      "documentation": []
+    },
+    {
+      "id": "task-discovery",
+      "label": "Task discovery",
+      "kind": "module",
+      "topic_ids": [
+        "env-framework"
+      ],
+      "summary": "Imports installed task packages through entry points to populate the environment registry.",
+      "boundaries": [
+        "Discovery is dynamic and depends on installed task packages; this view only links the official package."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/utils/registration.py",
+          "symbol": "discover_task_packages",
+          "start_line": 430,
+          "end_line": 430,
+          "excerpt": "def discover_task_packages() -> list[str]:"
+        }
+      ],
+      "documentation": []
     }
   ],
   "edges": [
@@ -1567,6 +1633,274 @@
           "excerpt": "from embodichain.lab.gym.envs.managers.event_manager import EventManager"
         }
       ]
+    },
+    {
+      "id": "cli-calls-env-launcher",
+      "source": "cli",
+      "target": "env-launcher",
+      "relation": "calls",
+      "description": "Dispatch the run-env command to the environment launcher.",
+      "scope": "Lazy command dispatch for run-env (and its run-task alias), not an unconditional startup call.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "COMMANDS",
+          "start_line": 68,
+          "end_line": 68,
+          "excerpt": "        target=\"embodichain.lab.scripts.run_env:cli\","
+        },
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "_load_handler",
+          "start_line": 155,
+          "end_line": 157,
+          "excerpt": "    module_name, attribute = target.split(\":\", maxsplit=1)\n    module = importlib.import_module(module_name)\n    return getattr(module, attribute)"
+        },
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "main",
+          "start_line": 194,
+          "end_line": 195,
+          "excerpt": "    handler = _load_handler(command.target)\n    handler(arguments[1:])"
+        }
+      ]
+    },
+    {
+      "id": "cli-calls-rl",
+      "source": "cli",
+      "target": "rl",
+      "relation": "calls",
+      "description": "Dispatch the train-rl command to the training entry point.",
+      "scope": "Only when the train-rl command is selected; no training is started by this explorer.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "COMMANDS",
+          "start_line": 84,
+          "end_line": 84,
+          "excerpt": "        target=\"embodichain.learning.rl.train:cli\","
+        },
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "_load_handler",
+          "start_line": 155,
+          "end_line": 157,
+          "excerpt": "    module_name, attribute = target.split(\":\", maxsplit=1)\n    module = importlib.import_module(module_name)\n    return getattr(module, attribute)"
+        },
+        {
+          "path": "embodichain/cli/main.py",
+          "symbol": "main",
+          "start_line": 194,
+          "end_line": 195,
+          "excerpt": "    handler = _load_handler(command.target)\n    handler(arguments[1:])"
+        }
+      ]
+    },
+    {
+      "id": "launcher-calls-discovery",
+      "source": "env-launcher",
+      "target": "task-discovery",
+      "relation": "calls",
+      "description": "Discover installed task packages before loading the deployment.",
+      "scope": "Environment launcher setup path, before configuration decoding.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/lab/scripts/run_env.py",
+          "symbol": "cli",
+          "start_line": 1018,
+          "end_line": 1018,
+          "excerpt": "    discover_task_packages()"
+        }
+      ]
+    },
+    {
+      "id": "discovery-imports-official-tasks",
+      "source": "task-discovery",
+      "target": "tasks",
+      "relation": "imports",
+      "description": "Import the official task package through its declared entry point.",
+      "scope": "Dynamic package discovery for an installed official distribution; additional third-party packages may also be discovered.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "pyproject.toml",
+          "symbol": "project.entry-points.embodichain.tasks",
+          "start_line": 79,
+          "end_line": 80,
+          "excerpt": "[project.entry-points.\"embodichain.tasks\"]\nembodichain_tasks = \"embodichain_tasks\""
+        },
+        {
+          "path": "embodichain/lab/gym/utils/registration.py",
+          "symbol": "discover_task_packages",
+          "start_line": 442,
+          "end_line": 442,
+          "excerpt": "        eps = importlib.metadata.entry_points(group=\"embodichain.tasks\")"
+        },
+        {
+          "path": "embodichain/lab/gym/utils/registration.py",
+          "symbol": "discover_task_packages",
+          "start_line": 449,
+          "end_line": 449,
+          "excerpt": "            _import_task_package(ep)"
+        },
+        {
+          "path": "embodichain/lab/gym/utils/registration.py",
+          "symbol": "_import_task_package",
+          "start_line": 400,
+          "end_line": 402,
+          "excerpt": "    module_name = ep.value\n    top_level = module_name.partition(\".\")[0]\n    mod = importlib.import_module(module_name)"
+        }
+      ]
+    },
+    {
+      "id": "launcher-calls-config-loader",
+      "source": "env-launcher",
+      "target": "config-loader",
+      "relation": "calls",
+      "description": "Build the typed environment configuration from launcher arguments.",
+      "scope": "After discovery and init hooks, before gymnasium.make.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/lab/scripts/run_env.py",
+          "symbol": "cli",
+          "start_line": 1023,
+          "end_line": 1023,
+          "excerpt": "    env_cfg, gym_config, action_config = build_env_cfg_from_args(args)"
+        }
+      ]
+    },
+    {
+      "id": "config-loader-calls-components",
+      "source": "config-loader",
+      "target": "components",
+      "relation": "calls",
+      "description": "Resolve reusable physical and embodiment components while decoding the deployment.",
+      "scope": "config_to_cfg resolves the component-owned configuration before required-field and physics validation.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/utils/gym_utils.py",
+          "symbol": "config_to_cfg",
+          "start_line": 514,
+          "end_line": 515,
+          "excerpt": "    component_resolution = _resolve_gym_components(config, base_dir=base_dir)\n    config = component_resolution.config"
+        }
+      ]
+    },
+    {
+      "id": "config-loader-configures-env",
+      "source": "config-loader",
+      "target": "embodied-env",
+      "relation": "configures",
+      "description": "Assemble EmbodiedEnvCfg for the environment launcher.",
+      "scope": "Configuration construction, not creation of an EmbodiedEnv instance. The launcher passes this config to the registered Gym environment.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/utils/gym_utils.py",
+          "symbol": "config_to_cfg",
+          "start_line": 489,
+          "end_line": 489,
+          "excerpt": "    env_cfg = EmbodiedEnvCfg()"
+        },
+        {
+          "path": "embodichain/lab/gym/utils/gym_utils.py",
+          "symbol": "build_env_cfg_from_args",
+          "start_line": 1244,
+          "end_line": 1249,
+          "excerpt": "    cfg: EmbodiedEnvCfg = config_to_cfg(\n        gym_config,\n        manager_modules=get_manager_modules(),\n        source_path=gym_config_source_path,\n        task_program_path_override=getattr(args, \"task_program\", None),\n    )"
+        },
+        {
+          "path": "embodichain/lab/scripts/run_env.py",
+          "symbol": "cli",
+          "start_line": 1028,
+          "end_line": 1028,
+          "excerpt": "    env = gymnasium.make(id=gym_config[\"id\"], cfg=env_cfg, **action_config)"
+        }
+      ]
+    },
+    {
+      "id": "simulation-constructs-visualization",
+      "source": "simulation-manager",
+      "target": "visualization",
+      "relation": "constructs",
+      "description": "Create the browser visualisation runtime with a simulation scene exporter.",
+      "scope": "Optional start_visualization path; requires an enabled visualisation configuration.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/sim_manager.py",
+          "symbol": "SimulationManager.start_visualization",
+          "start_line": 999,
+          "end_line": 1003,
+          "excerpt": "        runtime = VisualizationRuntime(\n            SceneExporter(self, visualization_cfg),\n            visualization_cfg,\n        )\n        runtime.start()"
+        }
+      ]
+    },
+    {
+      "id": "simulation-constructs-robot",
+      "source": "simulation-manager",
+      "target": "robot",
+      "relation": "constructs",
+      "description": "Declare a Robot facade through the shared articulation factory.",
+      "scope": "add_robot creates the facade; physical materialisation belongs to the prepare boundary.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/sim_manager.py",
+          "symbol": "SimulationManager.add_robot",
+          "start_line": 3020,
+          "end_line": 3021,
+          "excerpt": "        robot = self._declare_spawn_articulation(cfg, Robot)\n        self._robots[uid] = robot"
+        },
+        {
+          "path": "embodichain/lab/sim/sim_manager.py",
+          "symbol": "SimulationManager._declare_spawn_articulation",
+          "start_line": 3054,
+          "end_line": 3057,
+          "excerpt": "        facade = facade_type(\n            cfg=cfg,\n            device=self.device,\n        )"
+        }
+      ]
+    },
+    {
+      "id": "simulation-holds-robot",
+      "source": "simulation-manager",
+      "target": "robot",
+      "relation": "holds",
+      "description": "Retain declared robots in the simulation robot registry.",
+      "scope": "Registry ownership after add_robot; the same handle is returned to callers.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/sim_manager.py",
+          "symbol": "SimulationManager.add_robot",
+          "start_line": 3021,
+          "end_line": 3024,
+          "excerpt": "        self._robots[uid] = robot\n        if was_materialized:\n            self.prepare()\n        return robot"
+        }
+      ]
+    },
+    {
+      "id": "env-calls-add-robot",
+      "source": "embodied-env",
+      "target": "simulation-manager",
+      "relation": "calls",
+      "description": "Delegate robot declaration to the simulation manager.",
+      "scope": "EmbodiedEnv._declare_robot uses the robot configuration owned by the assembled environment.",
+      "provenance": "source-reviewed",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/embodied_env.py",
+          "symbol": "EmbodiedEnv._declare_robot",
+          "start_line": 1987,
+          "end_line": 1987,
+          "excerpt": "        return self.sim.add_robot(self.cfg.robot)"
+        }
+      ]
     }
   ],
   "views": [
@@ -1598,7 +1932,11 @@
         "rl",
         "data-pipeline",
         "scene-generation",
-        "devices"
+        "devices",
+        "env-launcher",
+        "config-loader",
+        "task-discovery",
+        "base-env"
       ],
       "edge_ids": [
         "adapter-calls-compiler",
@@ -1627,7 +1965,20 @@
         "import-simulation-manager-physics",
         "import-robot-solvers",
         "import-physics-simulation-manager",
-        "import-rl-managers"
+        "import-rl-managers",
+        "env-inherits-base",
+        "base-constructs-simulation",
+        "cli-calls-env-launcher",
+        "cli-calls-rl",
+        "launcher-calls-discovery",
+        "discovery-imports-official-tasks",
+        "launcher-calls-config-loader",
+        "config-loader-calls-components",
+        "config-loader-configures-env",
+        "simulation-constructs-visualization",
+        "simulation-constructs-robot",
+        "simulation-holds-robot",
+        "env-calls-add-robot"
       ],
       "groups": [
         {
@@ -1635,9 +1986,13 @@
           "label": "Entry points & environments",
           "node_ids": [
             "cli",
+            "env-launcher",
+            "task-discovery",
             "tasks",
+            "config-loader",
             "components",
             "embodied-env",
+            "base-env",
             "managers"
           ]
         },
