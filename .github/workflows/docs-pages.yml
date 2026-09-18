@@ -199,6 +199,17 @@ jobs:
             --site-base-url "${SITE_URL}" \
             --skip-version "${SKIP_VERSION}"
 
+      - name: Set up architecture frontend toolchain
+        if: hashFiles('docs/scripts/build_architecture_assets.py') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: docs/architecture/web/package-lock.json
+      - name: Install architecture frontend dependencies
+        if: hashFiles('docs/scripts/build_architecture_assets.py') != ''
+        run: npm --prefix docs/architecture/web ci
+
       - name: Build docs site
         shell: bash
         run: |
