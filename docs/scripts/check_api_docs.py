@@ -221,7 +221,7 @@ def discover_public_modules(
             )
             if relative_parts[-1] == "__init__":
                 relative_parts.pop()
-            if any(part.startswith("_") for part in relative_parts):
+            if any(part.startswith(("_", ".")) for part in relative_parts):
                 continue
 
             tree = ast.parse(

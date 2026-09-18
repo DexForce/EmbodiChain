@@ -21,38 +21,52 @@ This script demonstrates how to export a simulation scene to a usd file using th
 from __future__ import annotations
 
 import argparse
-import numpy as np
-from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim.objects import Robot, RigidObject
-from embodichain.lab.sim.cfg import (
-    RenderCfg,
-    LightCfg,
-    JointDrivePropertiesCfg,
-    RigidObjectCfg,
-    RigidBodyAttributesCfg,
-    ArticulationCfg,
-)
-from embodichain.lab.sim.shapes import MeshCfg
-from embodichain.data import get_data_path
-from embodichain.utils import logger
-
-from embodichain.lab.sim.robots.dexforce_w1.cfg import DexforceW1Cfg
+from embodichain.cli.sim import add_sim_args_to_parser
 
 
-def parse_arguments():
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create and simulate a robot in SimulationManager"
+    )
+    add_sim_args_to_parser(parser)
+    return parser
+
+
+def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     """
     Parse command-line arguments to configure the simulation.
 
     Returns:
         argparse.Namespace: Parsed arguments including number of environments and rendering options.
     """
-    parser = argparse.ArgumentParser(
-        description="Create and simulate a robot in SimulationManager"
-    )
-    add_env_launcher_args_to_parser(parser)
-    return parser.parse_args()
+    parser = build_parser()
+    return parser.parse_args() if argv is None else parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = parse_arguments()
+
+
+import numpy as np
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
+from embodichain.lab.sim.objects import Robot, RigidObject
+from embodichain.lab.sim.cfg import (
+    RenderCfg,
+    physics_cfg_for_backend,
+    LightCfg,
+    JointDrivePropertiesCfg,
+    RigidObjectCfg,
+    RigidBodyPhysicsCfg,
+    ArticulationCfg,
+)
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
+from embodichain.data import get_data_path
+from embodichain.utils import logger
+
+from embodichain.lab.sim.robots.dexforce_w1.cfg import DexforceW1Cfg
 
 
 def initialize_simulation(args) -> SimulationManager:
@@ -67,8 +81,9 @@ def initialize_simulation(args) -> SimulationManager:
     """
     config = SimulationManagerCfg(
         headless=True,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         physics_dt=1.0 / 100.0,
         num_envs=1,
         arena_space=2.5,
@@ -180,11 +195,12 @@ def create_table(sim: SimulationManager) -> RigidObject:
         uid="table",
         shape=MeshCfg(
             fpath=get_data_path("MultiW1Data/table_a.obj"),
+            collision=MeshCollisionCfg(
+                approximation="convex_decomposition",
+                max_hulls=8,
+            ),
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=0.5,
-        ),
-        max_convex_hull_num=8,
+        attrs=RigidBodyPhysicsCfg.from_dict({"mass_props": {"mass": 0.5}}),
         body_type="kinematic",
         init_pos=[1.1, -0.5, 0.08],
         init_rot=[0.0, 0.0, 0.0],
@@ -206,12 +222,11 @@ def create_caffe(sim: SimulationManager) -> Robot:
     container_cfg = ArticulationCfg(
         uid="caffe",
         fpath=get_data_path("MultiW1Data/cafe/cafe.urdf"),
+        asset_physics_mode="overlay",
         init_pos=[1.05, -0.5, 0.79],
         init_rot=[0, 0, -30],
-        attrs=RigidBodyAttributesCfg(
-            mass=1.0,
-        ),
-        drive_pros=JointDrivePropertiesCfg(
+        attrs=RigidBodyPhysicsCfg.from_dict({"mass_props": {"mass": 1.0}}),
+        joint_drive_props=JointDrivePropertiesCfg(
             stiffness=1.0, damping=0.1, max_effort=100.0, drive_type="force"
         ),
     )
@@ -235,10 +250,7 @@ def create_cup(sim: SimulationManager) -> RigidObject:
         shape=MeshCfg(
             fpath=get_data_path("MultiW1Data/paper_cup_2.obj"),
         ),
-        attrs=RigidBodyAttributesCfg(
-            mass=0.3,
-        ),
-        max_convex_hull_num=1,
+        attrs=RigidBodyPhysicsCfg.from_dict({"mass_props": {"mass": 0.3}}),
         body_type="dynamic",
         init_pos=[0.86, -0.76, 0.841],
         init_rot=[0.0, 0.0, 0.0],
@@ -247,13 +259,13 @@ def create_cup(sim: SimulationManager) -> RigidObject:
     return scoop
 
 
-def main():
+def main(args: argparse.Namespace | None = None) -> None:
     """
     Main function to create simulation scene.
 
     Initializes the simulation and creates the robot and objects in the scene.
     """
-    args = parse_arguments()
+    args = parse_arguments() if args is None else args
     sim = initialize_simulation(args)
 
     robot = create_robot(sim)
@@ -261,7 +273,9 @@ def main():
     caffe = create_caffe(sim)
     cup = create_cup(sim)
 
-    sim.export_usd("w1_coffee_scene.usda")
+    sim.prepare()
+
+    sim.export_usd("w1_coffee_scene.usd")
 
     logger.log_info("Scene exported successfully.")
 
@@ -276,4 +290,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

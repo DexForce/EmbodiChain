@@ -263,8 +263,7 @@ class _RigidConstraintTestSim:
         self._robots = {}
         self._rigid_objects = {}
         self._rigid_object_groups = {}
-        self._soft_objects = {}
-        self._cloth_objects = {}
+        self._deformable_objects = {}
         self._articulations = {}
         self._constraints = {}
         self.device = torch.device("cpu")
@@ -332,6 +331,29 @@ def test_create_rigid_constraint_resolves_both_objects_all_envs():
         assert arena.created[0][0] == f"weld_{i}"
         assert arena.created[0][1] is sim._rigid_objects["cube"]._entities[i]
         assert arena.created[0][2] is sim._rigid_objects["block"]._entities[i]
+
+
+def test_create_rigid_constraint_resolves_spawned_native_actors():
+    """Spawn-bound objects pass their native actors to the arena constraint API."""
+    sim = _RigidConstraintTestSim(num_envs=1, arenas=[MockArena()])
+    cube = _register_object(sim, "cube", 1)
+    block = _register_object(sim, "block", 1)
+    native_cube = object()
+    native_block = object()
+    cube.is_spawn_bound = True
+    block.is_spawn_bound = True
+    cube._entities[0].native.return_value = native_cube
+    block._entities[0].native.return_value = native_block
+
+    sim.create_rigid_constraint(
+        RigidConstraintCfg(
+            name="weld", rigid_object_a_uid="cube", rigid_object_b_uid="block"
+        )
+    )
+
+    _, actor_a, actor_b, _, _ = sim._env.created[0]
+    assert actor_a is native_cube
+    assert actor_b is native_block
 
 
 def test_asset_uids_excludes_constraint_names():

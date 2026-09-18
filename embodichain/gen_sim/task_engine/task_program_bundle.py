@@ -264,7 +264,7 @@ def generate_task_program_bundle(
     _bind_embodiment_to_scene(embodiment_payload, table_top_z=scene.table_top_z)
     if articulation_bindings:
         # Calibrate this generated E6 deployment, not shared robot defaults.
-        stiffness = embodiment_payload["simulation"]["drive_pros"]["stiffness"]
+        stiffness = embodiment_payload["simulation"]["joint_drive_props"]["stiffness"]
         for resource in embodiment_payload["skill_profile"]["resources"]:
             for endpoint in resource.get("endpoints", []):
                 if endpoint["endpoint_id"] == "motion":
@@ -316,7 +316,8 @@ def generate_task_program_bundle(
     for articulation in scene_payload["simulation"]["articulation"]:
         if articulation["uid"] not in bound_uids:
             continue
-        drive = articulation.setdefault("drive_pros", {})
+        articulation.setdefault("asset_physics_mode", "overlay")
+        drive = articulation.setdefault("joint_drive_props", {})
         if drive.get("drive_type", "none") == "none":
             drive.setdefault("drive_type", "none")
             if "friction" not in drive:
@@ -335,6 +336,10 @@ def generate_task_program_bundle(
             ),
             "num_envs": 1,
             "arena_space": 2.5,
+            # Gym configs own the physics backend explicitly.  Generated
+            # bundles retain the calibrated DexSim/Default path that the
+            # legacy scene attributes and CCD setting were authored for.
+            "physics": "default",
             "physics_config": {"enable_ccd": True},
             "env": {
                 "sim_steps_per_control": 4,
@@ -357,6 +362,7 @@ def generate_task_program_bundle(
                             "check_interval_steps": 2,
                             "required_stable_checks": 3,
                             "timeout_behavior": "raise",
+                            "restore_initial_xy": True,
                         },
                     }
                 },
@@ -1384,11 +1390,15 @@ def _integration_payload(
                         -0.08,
                         _handover_position_z(scene.table_top_z),
                     ],
-                    "final_quaternion_wxyz": [
-                        0.7071067812,
+                    # Task Program poses use EmbodiChain's public ``xyzw``
+                    # quaternion order.  The former generated bundle wrote
+                    # this 90-degree x rotation as ``wxyz``; keep the same
+                    # orientation while crossing into the configured service.
+                    "final_quaternion_xyzw": [
                         0.7071067812,
                         0.0,
                         0.0,
+                        0.7071067812,
                     ],
                 }
             ],
@@ -1462,6 +1472,29 @@ def _integration_payload(
 
 
 def _scene_payload(scene: Any, *, program_id: str) -> dict[str, Any]:
+    def runtime_rigid(config: Any) -> dict[str, Any]:
+        result = deepcopy(config)
+        max_hulls = int(result.pop("max_convex_hull_num", 1))
+        acd_method = str(result.pop("acd_method", "coacd"))
+        shape = result.get("shape")
+        if isinstance(shape, dict) and shape.get("shape_type") == "Mesh":
+            shape.pop("max_convex_hull_num", None)
+            shape.pop("acd_method", None)
+            shape.setdefault(
+                "collision",
+                {
+                    "approximation": (
+                        "convex_hull" if max_hulls == 1 else "convex_decomposition"
+                    ),
+                    **(
+                        {"max_hulls": max_hulls, "acd_method": acd_method}
+                        if max_hulls > 1
+                        else {}
+                    ),
+                },
+            )
+        return result
+
     articulations = [deepcopy(value) for value in scene.articulations]
     for articulation in articulations:
         for semantic_only_key in (
@@ -1474,8 +1507,14 @@ def _scene_payload(scene: Any, *, program_id: str) -> dict[str, Any]:
             "name",
             "proxy_body_scale",
             "proxy_glb_fpath",
+            "proxy_init_pos",
         ):
             articulation.pop(semantic_only_key, None)
+        fixed_base = articulation.pop("fix_base", None)
+        if fixed_base is not None:
+            articulation.setdefault("root_props", {})["fixed_base"] = fixed_base
+        if articulation.get("joint_drive_props") is not None:
+            articulation.setdefault("asset_physics_mode", "overlay")
         suffix = Path(str(articulation.get("fpath", ""))).suffix.lower()
         if suffix in {".usd", ".usda", ".usdc"}:
             # pytorch-kinematics accepts URDF XML only.  These task skills use
@@ -1494,8 +1533,8 @@ def _scene_payload(scene: Any, *, program_id: str) -> dict[str, Any]:
                     }
                 ]
             },
-            "background": [deepcopy(value) for value in scene.background],
-            "rigid_object": [deepcopy(value) for value in scene.rigid_objects],
+            "background": [runtime_rigid(value) for value in scene.background],
+            "rigid_object": [runtime_rigid(value) for value in scene.rigid_objects],
             "rigid_object_group": [],
             "articulation": articulations,
         },
@@ -1602,7 +1641,7 @@ def _add_handover_staging(graph: SemanticTaskGraph, scene: Any) -> SemanticTaskG
             "values": [
                 {
                     "position": position.tolist(),
-                    "quaternion_wxyz": [float(quat[3]), *quat[:3].tolist()],
+                    "quaternion_xyzw": quat.tolist(),
                 }
             ],
         }
@@ -2101,8 +2140,8 @@ def _single_target_pose(
         not isinstance(pose, dict)
         or not isinstance(pose.get("position"), list)
         or len(pose["position"]) != 3
-        or not isinstance(pose.get("quaternion_wxyz"), list)
-        or len(pose["quaternion_wxyz"]) != 4
+        or not isinstance(pose.get("quaternion_xyzw"), list)
+        or len(pose["quaternion_xyzw"]) != 4
     ):
         raise ValueError(f"Generated target {target_id!r} has an invalid pose.")
     return pose
@@ -2246,7 +2285,7 @@ def _refine_upright_targets(
         position[2] = table_top + clearance - local_minimum
         if target_id.endswith("_upright_staging_target"):
             position[2] += _UPRIGHT_STAGING_CLEARANCE
-        values[0]["quaternion_wxyz"] = _upright_target_quaternion(
+        values[0]["quaternion_xyzw"] = _upright_target_quaternion(
             source,
             axis,
             world_yaw=(math.pi if resource == "right" else 0.0),

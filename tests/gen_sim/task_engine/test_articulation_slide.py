@@ -474,14 +474,19 @@ def test_e6_bundle_uses_standard_registration_and_complete_recipe(
     assert options["approach_along_grasp_axis"] is True
     assert options["release_retreat_distance"] == 0.04
     embodiment = load_config(paths.embodiment)["simulation"]
-    assert embodiment["drive_pros"]["stiffness"]["left_arm"] == 50000.0
-    assert embodiment["drive_pros"]["stiffness"]["left_eef"] == 50.0
+    assert embodiment["joint_drive_props"]["stiffness"]["left_arm"] == 50000.0
+    assert embodiment["joint_drive_props"]["stiffness"]["left_eef"] == 50.0
     assert "mimic_pros" not in embodiment
-    assert load_config(paths.scene)["simulation"]["articulation"][0]["drive_pros"] == {
+    articulation = load_config(paths.scene)["simulation"]["articulation"][0]
+    assert articulation["joint_drive_props"] == {
         "drive_type": "none",
         "friction": {"slide": 0.01},
     }
-    assert "drive_pros" not in scene.articulations[0]
+    assert articulation["root_props"] == {"fixed_base": True}
+    assert articulation["asset_physics_mode"] == "overlay"
+    assert "fix_base" not in articulation
+    assert "proxy_init_pos" not in articulation
+    assert "joint_drive_props" not in scene.articulations[0]
     deployment = load_deployment(
         task_program=load_config(paths.deployment)["task_program"],
         skill_profile=load_config(paths.embodiment)["skill_profile"],
@@ -516,13 +521,13 @@ def test_e6_preserves_authored_passive_friction(
     scene: PreparedScene, tmp_path: Path, friction: object
 ) -> None:
     config = deepcopy(scene.articulations[0])
-    config["drive_pros"] = {"drive_type": "none", "friction": friction}
+    config["joint_drive_props"] = {"drive_type": "none", "friction": friction}
     prepared = replace(scene, articulations=(config,))
     _, paths = generate_task_program_bundle(
         _graph(prepared), prepared, tmp_path / "bundle", robot_profile="dual_franka"
     )
     assert (
-        load_config(paths.scene)["simulation"]["articulation"][0]["drive_pros"][
+        load_config(paths.scene)["simulation"]["articulation"][0]["joint_drive_props"][
             "friction"
         ]
         == friction
@@ -702,8 +707,13 @@ def _runtime(scene: PreparedScene):
     binding = inspect_prismatic(cfg)
     position = torch.tensor([[binding.target("open")]])
     cached_limits = torch.tensor([[[-0.4, 0.0]]])
+    runtime_cfg = dict(cfg)
+    fixed_base = runtime_cfg.pop("fix_base")
     art = SimpleNamespace(
-        cfg=SimpleNamespace(**cfg),
+        cfg=SimpleNamespace(
+            **runtime_cfg,
+            root_props=SimpleNamespace(fixed_base=fixed_base),
+        ),
         joint_names=["slide"],
         get_qpos=lambda: position.clone(),
         get_qpos_limits=lambda: cached_limits.clone(),

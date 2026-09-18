@@ -37,6 +37,13 @@ WITHDRAW_CALL = "gen_sim.articulation_withdraw"
 PARK_CALL = "gen_sim.articulation_park"
 
 
+def _fixed_base(config: dict[str, Any]) -> bool:
+    if "fix_base" in config:
+        return config["fix_base"] is True
+    root_props = config.get("root_props")
+    return isinstance(root_props, dict) and root_props.get("fixed_base") is True
+
+
 @dataclass(frozen=True, slots=True)
 class PrismaticBinding:
     object_id: str
@@ -244,7 +251,7 @@ def discover_prismatic_parts(
     """
     from pxr import Gf, UsdGeom, UsdPhysics
 
-    if config.get("fix_base") is not True:
+    if not _fixed_base(config):
         raise ValueError("GenSim E6 requires a declared fixed base.")
     scale = np.asarray(config.get("body_scale", (1.0, 1.0, 1.0)), dtype=float)
     if (

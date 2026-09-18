@@ -219,12 +219,6 @@ class TaskAdapterFactory:
                         world=CuroboWorldCfg(
                             rigid_objects=obstacles,
                             dynamic_obstacle_names=dynamic,
-                            obstacle_representation="mesh",
-                            # Unused cuboid caches can intercept named mesh updates
-                            # in cuRobo's obstacle-type dispatcher.
-                            collision_cache={
-                                "mesh": len(obstacles),
-                            },
                         ),
                     )
                 )

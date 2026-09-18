@@ -19,7 +19,7 @@ Configured via the {class}`~cfg.RigidObjectGroupCfg` class.
 | `ext` | `str` | `".obj"` | File extension filter when loading assets from `folder_path`. |
 | `init_pos` / `init_rot` | `Sequence` (optional) | group-level transform | Optional transform to apply as a base offset to all members. |
 
-Refer to {class}`~cfg.RigidObjectCfg` and {class}`~cfg.RigidBodyAttributesCfg` for per-member configuration options (mass, friction, restitution, collision options, shapes, etc.).
+Refer to {class}`~cfg.RigidObjectCfg` and {class}`~cfg.RigidBodyPhysicsCfg` for per-member configuration options (mass, friction, restitution, collision options, shapes, etc.).
 
 ### Folder-based initialization
 
@@ -40,19 +40,25 @@ from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.objects import (
     RigidObjectGroup, RigidObjectGroupCfg, RigidObjectCfg
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+from embodichain.lab.sim.cfg import (
+    MassPropertiesCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
+)
 
 # 1. Initialize Simulation
 device = "cuda" if torch.cuda.is_available() else "cpu"
-sim_cfg = SimulationManagerCfg(sim_device=device)
+sim_cfg = SimulationManagerCfg(device=device)
 sim = SimulationManager(sim_cfg)
 
 # 2. Define shared physics attributes
-physics_attrs = RigidBodyAttributesCfg(
-    mass=1.0,
-    dynamic_friction=0.5,
-    static_friction=0.5,
-    restitution=0.1,
+physics_attrs = RigidBodyPhysicsCfg(
+    mass_props=MassPropertiesCfg(mass=1.0),
+    material_props=RigidBodyMaterialCfg(
+        dynamic_friction=0.5,
+        static_friction=0.5,
+        restitution=0.1,
+    ),
 )
 
 # 3. Create group config with multiple members
@@ -68,7 +74,8 @@ group_cfg = RigidObjectGroupCfg(
 # 4. Spawn the rigid object group
 obj_group: RigidObjectGroup = sim.add_rigid_object_group(cfg=group_cfg)
 
-# 5. Run or step simulation
+# 5. Commit the complete scene, then run or step simulation
+sim.prepare()
 sim.update()
 ```
 
@@ -83,9 +90,9 @@ A group provides batch operations on multiple rigid objects. Key APIs include:
 | :--- | :--- | :--- |
 | `num_objects` | `int` | Number of objects in each group instance. |
 | `body_data` | `RigidBodyGroupData` | Data manager providing `pose`, `lin_vel`, `ang_vel` properties. |
-| `body_state` | `(N, M, 13)` | Full body state of all members: [x, y, z, qw, qx, qy, qz, lin_x, lin_y, lin_z, ang_x, ang_y, ang_z]. |
-| `get_local_pose(to_matrix=False)` | `(N, M, 7)` or `(N, M, 4, 4)` | Poses of all members across N envs; M = number of members. |
-| `set_local_pose(pose, env_ids=None, obj_ids=None)` | `pose: (N, M, 7)` or `(N, M, 4, 4)` | Set poses for specific environments and/or objects; requires `sim.update()` to apply. |
+| `body_state` | `(N, M, 13)` | Full body state of all members: [x, y, z, qx, qy, qz, qw, lin_x, lin_y, lin_z, ang_x, ang_y, ang_z]. |
+| `get_local_pose(to_matrix=False)` | `(N, M, 7)` or `(N, M, 4, 4)` | Poses of all members as `[x, y, z, qx, qy, qz, qw]` or matrices; M = number of members. |
+| `set_local_pose(pose, env_ids=None, obj_ids=None)` | `pose: (N, M, 7)` or `(N, M, 4, 4)` | Set poses in `[x, y, z, qx, qy, qz, qw]` or matrix form; requires `sim.update()` to apply. |
 | `get_user_ids()` | `(N, M)` | Get user IDs tensor for all members in the group. |
 | `clear_dynamics(env_ids=None)` | - | Reset velocities and clear all forces/torques for the group. |
 | `set_visual_material(mat, env_ids=None)` | `mat: VisualMaterial` | Change visual appearance for all members. |
@@ -106,10 +113,12 @@ Use these shapes when collecting vectorized observations for multi-environment t
 
 - Groups are convenient for batch operations: resetting, setting visibility, and applying transforms to multiple objects together.
 - Use `obj_ids` parameter in `set_local_pose()` to control specific objects within the group rather than all members.
-- Prefer providing simplified collision meshes or enabling convex decomposition (`max_convex_hull_num` > 1) for complex visual meshes to improve physics stability.
+- Prefer simplified collision meshes or an explicit `MeshCfg.collision` convex-decomposition strategy with a bounded `max_hulls` for complex visual meshes.
 - `RigidObjectGroup` only supports `dynamic` and `kinematic` body types (not `static`).
 - When teleporting many members, batch pose updates and call `sim.update()` once to avoid synchronization overhead.
-- For GPU physics, set `SimulationManagerCfg.sim_device` to `cuda` and call `sim.init_gpu_physics()` before running simulations.
+- Add every initial scene asset, then call the backend-neutral `sim.prepare()`
+  before reading state or stepping. `BaseEnv` performs this boundary
+  automatically.
 - Use `clear_dynamics()` to reset velocities without changing poses.
 
 ## Example: Working with Group Poses
@@ -137,7 +146,11 @@ sim.update()
 
 ## Integration with Sensors 
 
-Members in a group behave like normal `RigidObject`s: they can be observed by cameras, attached to contact sensors. You can operate on individual members or treat the group as a single unit depending on your scenario.
+Members in a group behave like normal `RigidObject`s and can be observed by
+cameras. They can also be included in a `ContactSensor` on the Default backend;
+Newton currently rejects that sensor through its capability boundary. You can
+operate on individual members or treat the group as a single unit depending on
+your scenario.
 
 ## Related Topics
 

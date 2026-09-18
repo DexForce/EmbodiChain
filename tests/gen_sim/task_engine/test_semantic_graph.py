@@ -50,7 +50,7 @@ from embodichain.gen_sim.task_engine.task_program_bundle import (
     _support_target_pose,
     _task_settle_rigid_objects,
 )
-from embodichain.gen_sim.task_engine.semantic_planner import _initial_quaternion_wxyz
+from embodichain.gen_sim.task_engine.semantic_planner import _initial_quaternion_xyzw
 from embodichain.utils.utility import load_config, save_config
 from embodichain.gen_sim.task_engine.orchestration.source_scene import PreparedScene
 
@@ -160,7 +160,7 @@ def test_handover_staging_preserves_dependencies_and_is_idempotent(monkeypatch) 
     stage = result["nodes"][1]
     pose = result["targets"][stage["call"]["arguments"]["target"]]["values"][0]
     assert pose["position"] == pytest.approx([2.2, 3.1, 0.86])
-    assert pose["quaternion_wxyz"] == pytest.approx([2**-0.5, 0.0, 0.0, 2**-0.5])
+    assert pose["quaternion_xyzw"] == pytest.approx([0.0, 0.0, 2**-0.5, 2**-0.5])
     assert stage["depends_on"] == [graph["nodes"][0]["id"]]
     assert result["nodes"][2]["depends_on"] == [stage["id"]]
     assert result["task_groups"][0]["node_ids"] == [
@@ -195,8 +195,8 @@ def test_handover_staging_does_not_predict_cross_task_holds() -> None:
 
 
 def test_e3_return_pose_preserves_scene_rotation() -> None:
-    quaternion = _initial_quaternion_wxyz([90.0, 0.0, 0.0])
-    assert quaternion == pytest.approx([2**-0.5, 2**-0.5, 0.0, 0.0], abs=1.0e-6)
+    quaternion = _initial_quaternion_xyzw([90.0, 0.0, 0.0])
+    assert quaternion == pytest.approx([2**-0.5, 0.0, 0.0, 2**-0.5], abs=1.0e-6)
 
 
 def _program(graph: dict) -> dict:
@@ -849,7 +849,7 @@ def test_upright_target_uses_the_normalized_mesh_origin_offset(tmp_path: Path) -
                 "values": [
                     {
                         "position": [0.1, 0.2, 0.85],
-                        "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
                     }
                 ],
             },
@@ -858,7 +858,7 @@ def test_upright_target_uses_the_normalized_mesh_origin_offset(tmp_path: Path) -
                 "values": [
                     {
                         "position": [0.1, 0.2, 0.85],
-                        "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
                     }
                 ],
             },
@@ -1077,7 +1077,7 @@ def test_task_pick_directions_are_declared_per_policy_not_injected_by_lowerers()
         name: {
             "kind": "cyclic_pose",
             "values": [
-                {"position": [0.0, 0.0, 0.9], "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0]}
+                {"position": [0.0, 0.0, 0.9], "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0]}
             ],
         }
         for name in ("one", "two")
@@ -1258,7 +1258,7 @@ def test_explicit_orientation_bundle_uses_shared_preflight_and_terminal_post(
                 "values": [
                     {
                         "position": [0.1, -0.2, 1.05],
-                        "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
                     }
                 ],
             }
@@ -1446,8 +1446,15 @@ def test_coordinated_bundle_composes_against_unmodified_public_options(
         robot_profile="dual_franka",
         max_episode_steps=max_episode_steps,
     )
-    assert load_config(paths.deployment)["max_episode_steps"] == (
+    deployment = load_config(paths.deployment)
+    assert deployment["max_episode_steps"] == (
         10000 if max_episode_steps is None else max_episode_steps
+    )
+    assert (
+        deployment["env"]["events"]["settle_objects_on_reset"]["params"][
+            "restore_initial_xy"
+        ]
+        is True
     )
     _verify_program_projection(paths.program, generated)
     integration = load_config(paths.integration)
@@ -1484,7 +1491,7 @@ def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
             "values": [
                 {
                     "position": [0.1, -0.2, 0.85],
-                    "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                    "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
                 }
             ],
         }

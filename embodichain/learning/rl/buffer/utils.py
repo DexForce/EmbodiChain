@@ -58,6 +58,12 @@ def transition_view(rollout: TensorDict, flatten: bool = False) -> TensorDict:
         device=rollout.device,
     )
 
+    if "critic_obs" in rollout.keys():
+        td["critic_obs"] = rollout["critic_obs"][:, :-1]
+    for key in ("action_mean", "action_std"):
+        if key in rollout.keys():
+            td[key] = rollout[key][:, :-1]
+
     for key in ("advantage", "return", "seq_mask", "seq_return", "entropy"):
         if key in rollout.keys():
             td[key] = rollout[key][:, :-1]

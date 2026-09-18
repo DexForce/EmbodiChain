@@ -42,4 +42,3 @@ embodichain.lab.task_program.language
       parse_task_program_json
       render_config_path
       validate_task_program
-

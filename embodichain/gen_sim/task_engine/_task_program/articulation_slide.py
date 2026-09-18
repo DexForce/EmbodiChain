@@ -147,7 +147,7 @@ def _bind(
         config = {
             "uid": binding.object_id,
             "fpath": art.cfg.fpath,
-            "fix_base": art.cfg.fix_base,
+            "fix_base": art.cfg.root_props.fixed_base,
             "body_scale": art.cfg.body_scale,
         }
         checked = (

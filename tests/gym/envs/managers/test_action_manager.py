@@ -160,11 +160,10 @@ def test_eef_pose_term_process_action_7d():
     cfg = ActionTermCfg(func=EefPoseTerm, params={"scale": 1.0, "pose_dim": 7})
     term = EefPoseTerm(cfg, env)
 
-    # 7D: position + quaternion (w,x,y,z)
+    # 7D: position + quaternion (x,y,z,w)
     action = torch.zeros(2, 7)
     action[:, :3] = 0.1
-    action[:, 3] = 1.0  # quat w
-    action[:, 4:7] = 0.0  # quat x,y,z (identity)
+    action[:, 6] = 1.0  # xyzw identity
     result = term.process_action(action)
 
     assert "qpos" in result

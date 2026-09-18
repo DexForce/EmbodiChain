@@ -15,13 +15,16 @@ The simulation is configured using the {class}`SimulationManagerCfg` class.
 
 ```python
 from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.sim.cfg import DefaultPhysicsCfg
 
 sim_config = SimulationManagerCfg(
     width=1920,               # Window width
     height=1080,              # Window height
     num_envs=10,              # Number of parallel environments
-    physics_dt=0.01,          # Physics time step
-    sim_device="cpu",         # Simulation device ("cpu" or "cuda:0", etc.)
+    device="cpu",             # Simulation device ("cpu" or "cuda:0", etc.)
+    physics_cfg=DefaultPhysicsCfg(
+        physics_dt=0.01,      # Physics time step
+    ),
     arena_space=5.0           # Spacing between environments
 )
 ```
@@ -34,33 +37,22 @@ sim_config = SimulationManagerCfg(
 | `height` | `int` | `1080` | The height of the simulation window. |
 | `headless` | `bool` | `False` | Whether to run the simulation in headless mode (no Window). |
 | `render_cfg` | `RenderCfg` | `RenderCfg()` | The rendering configuration parameters. |
-| `gpu_id` | `int` | `0` | The gpu index that the simulation engine will be used. Affects gpu physics device. |
+| `gpu_id` | `int` | `0` | Rendering GPU index; also resolves an unindexed CUDA compute device. |
 | `thread_mode` | `ThreadMode` | `RENDER_SHARE_ENGINE` | The threading mode for the simulation engine. |
 | `cpu_num` | `int` | `1` | The number of CPU threads to use for the simulation engine. |
 | `num_envs` | `int` | `1` | The number of parallel environments (arenas) to simulate. |
 | `arena_space` | `float` | `5.0` | The distance between each arena when building multiple arenas. |
-| `physics_dt` | `float` | `0.01` | The time step for the physics simulation. |
+| `device` | `str` \| `torch.device` \| `None` | `None` | Optional explicit compute-device override. When omitted, the selected physics config keeps its backend default. |
+| `physics_cfg` | `DefaultPhysicsCfg` \| `NewtonPhysicsCfg` | `DefaultPhysicsCfg()` | Physics backend configuration (class selects default vs Newton). |
 | `profiler` | `ProfilerCfg` \| `None` | `None` | Optional hierarchical wall-time profiler for simulation updates. |
-| `sim_device` | `str` \| `torch.device` | `"cpu"` | The device for the physics simulation. |
-| `physics_config` | `PhysicsCfg` | `PhysicsCfg()` | The physics configuration parameters. |
-| `gpu_memory_config` | `GPUMemoryCfg` | `GPUMemoryCfg()` | The GPU memory configuration parameters. |
 | `visualization` | `VisualizationCfg` | `VisualizationCfg()` | Browser visualization, opt-in Gizmo commands, and Viser server settings. |
 
-### Physics Configuration
+### Physics
 
-The {class}`~cfg.PhysicsCfg` class controls the global physics simulation parameters.
-
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `gravity` | `np.ndarray` | `[0, 0, -9.81]` | Gravity vector for the simulation environment. |
-| `bounce_threshold` | `float` | `2.0` | The speed threshold below which collisions will not produce bounce effects. |
-| `enable_ccd` | `bool` | `False` | Enable continuous collision detection (CCD) for fast-moving objects. |
-| `length_tolerance` | `float` | `0.05` | The length tolerance for the simulation. Larger values increase speed. |
-| `speed_tolerance` | `float` | `0.25` | The speed tolerance for the simulation. Larger values increase speed. |
-
-PCM and TGS remain enabled, enhanced determinism remains disabled, and friction
-is evaluated on every solver iteration. These solver implementation details use
-fixed defaults and are not exposed by `PhysicsCfg`.
+Physics backend selection, capability comparisons, shared device settings, and
+time stepping are covered in {doc}`sim_manager/physics/index`. See
+{doc}`sim_manager/physics/default` and {doc}`sim_manager/physics/newton` for
+backend-specific settings.
 
 ### Rendering
 
@@ -74,6 +66,7 @@ availability/fallback notes.
 ```{toctree}
 :maxdepth: 2
 
+sim_manager/physics/index
 sim_manager/rendering/index
 ```
 
@@ -88,6 +81,29 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 sim_config = SimulationManagerCfg()
 sim = SimulationManager(sim_config)
 ```
+
+### Declare, prepare, then step
+
+Use the same readiness boundary with both physics backends:
+
+1. Construct the manager and declare the initial assets and sensors.
+2. Register any Newton trajectory or contact-material schedules.
+3. Call `sim.prepare()` before reading asset state, joint/link metadata, or
+   native handles.
+4. Apply controls and advance time with `sim.update(step=1)`.
+5. Release resources when the simulation finishes.
+
+Newton defers physical model construction until preparation; Default may
+materialize assets earlier, but its CUDA buffers also require preparation.
+`prepare()` is idempotent for an unchanged scene and binds declared facades in
+place. It publishes initial render state without advancing simulation time.
+Declare all deformables before the first preparation. After supported topology
+changes, prepare again before consuming state and reacquire native views.
+
+The compatibility methods `init_gpu_physics()` and
+`finalize_newton_physics()` delegate to `prepare()`; new examples should use
+the shared method. See {doc}`sim_manager/physics/default` for a complete minimal loop and
+{doc}`sim_manager/physics/newton` for the matching backend configuration.
 
 ## Profiling simulation updates
 
@@ -202,14 +218,14 @@ EmbodiChain supports importing USD files (`.usd`, `.usda`, `.usdc`) for both rig
 # Import rigid object with USD properties
 rigid_cfg = RigidObjectCfg(
     shape=MeshCfg(fpath=get_data_path("path/to/object.usd")),
-    use_usd_properties=True  # Use properties from USD file
+    asset_physics_mode="preserve",
 )
 obj = sim.add_rigid_object(cfg=rigid_cfg)
 
 # Import articulation with USD properties
 robot_cfg = ArticulationCfg(
     fpath=get_data_path("path/to/robot.usd"),
-    use_usd_properties=True  # Use joint drive properties from USD
+    asset_physics_mode="preserve",
 )
 robot = sim.add_articulation(cfg=robot_cfg)
 ```

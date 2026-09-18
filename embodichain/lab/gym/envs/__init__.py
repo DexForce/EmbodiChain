@@ -21,6 +21,7 @@ from __future__ import annotations
 from .base_env import *
 from .demo import *
 from .embodied_env import *
+from .expert_trajectory import *
 from .settling import *
 from .types import *
 from .wrapper import *

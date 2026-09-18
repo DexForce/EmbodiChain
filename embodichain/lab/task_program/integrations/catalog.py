@@ -322,6 +322,36 @@ def _builtin_relation_grounders(
     return tuple(values)
 
 
+def _configured_relation_grounders(
+    scene_binding: SimulationSceneBinding,
+    values: tuple[RelationTargetGrounder, ...],
+) -> tuple[RelationTargetGrounder, ...]:
+    """Remove standard grounders already materialized on a registration.
+
+    ``SimulationTaskProgramRegistration`` exposes the complete grounder tuple,
+    including the scene-derived standard entries.  Immutable registration
+    transforms commonly use :func:`dataclasses.replace`, which feeds that
+    exposed tuple back through the constructor.  Treat one exact instance of a
+    standard grounder as already installed so those transforms remain
+    idempotent while duplicate custom declarations still fail below.
+    """
+    builtins = _builtin_relation_grounders(scene_binding)
+    builtin_by_key = {
+        _relation_grounder_key(grounder): grounder for grounder in builtins
+    }
+    consumed: set[tuple[str, type[Affordance], str]] = set()
+    configured: list[RelationTargetGrounder] = []
+    for grounder in values:
+        key = _relation_grounder_key(grounder)
+        builtin = builtin_by_key.get(key)
+        if builtin is not None and type(grounder) is type(builtin):
+            if key not in consumed:
+                consumed.add(key)
+                continue
+        configured.append(grounder)
+    return tuple(configured)
+
+
 def _snapshot_relation_grounder_keys(
     values: frozenset[tuple[str, type[Affordance], str]],
 ) -> frozenset[tuple[str, type[Affordance], str]]:
@@ -1127,8 +1157,9 @@ class SimulationTaskProgramRegistration:
             raise TypeError("call_catalog must be exactly SemanticCallCatalog.")
         settle_presets = _snapshot_settle_presets(self.settle_presets)
         object.__setattr__(self, "settle_presets", settle_presets)
-        configured_relation_grounders = _snapshot_relation_grounders(
-            self.relation_grounders
+        configured_relation_grounders = _configured_relation_grounders(
+            self.scene_binding,
+            _snapshot_relation_grounders(self.relation_grounders),
         )
         relation_grounders = _snapshot_relation_grounders(
             (

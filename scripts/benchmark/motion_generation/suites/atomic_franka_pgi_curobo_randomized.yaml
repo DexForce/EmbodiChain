@@ -1,0 +1,188 @@
+schema_version: 1
+name: atomic_skill_franka_pgi_curobo_randomized
+suite_version: atomic_franka_pgi_curobo_randomized_v1
+profile: coverage
+
+robot:
+  id: franka_pgi
+  provider: franka_pgi
+  config: {}
+
+planners:
+  - id: nmg
+    adapter: nmg_onnx
+    role: candidate
+    enabled: false
+    config:
+      onnx_model_path: null
+      num_waypoints: 3
+      max_steps: 240
+      action_scale: 0.2
+      use_relative_obs: true
+      intermediate_orientation: true
+      pos_eps: 0.01
+      rot_eps: 0.1
+      joint_eps: 0.02
+      policy_frame_from_world:
+        - [-1.0, 0.0, 0.0, 0.0]
+        - [0.0, -1.0, 0.0, 0.0]
+        - [0.0, 0.0, 1.0, 0.0]
+        - [0.0, 0.0, 0.0, 1.0]
+      runtime_tcp_from_policy_tcp:
+        - [0.70710678, 0.70710678, 0.0, 0.0]
+        - [-0.70710678, 0.70710678, 0.0, 0.0]
+        - [0.0, 0.0, 1.0, -0.0466]
+        - [0.0, 0.0, 0.0, 1.0]
+  - id: curobo
+    adapter: curobo
+    role: primary_baseline
+    enabled: true
+    config:
+      max_attempts: 5
+      max_planning_time: null
+      interpolation_dt: 0.025
+      collision_activation_distance: 0.01
+      use_cuda_graph: true
+      cuda_graph_fallback: true
+      warmup_iterations: 1
+      preserve_plan_samples: false
+      world:
+        obstacle_representation: sphere
+        multi_env: false
+      auto_gen:
+        fit_type: voxel
+        sphere_density: 0.1
+        collision_sphere_buffer: 0.0
+
+protocol:
+  warmup_trials: 0
+  measured_trials: 1
+  sample_interval: 80
+  validation_samples: 128
+  position_threshold_m: 0.01
+  rotation_threshold_rad: 0.1
+  joint_limit_tolerance_rad: 0.00001
+
+tracks:
+  - id: atomic-task-randomized
+    scenario: atomic_task
+    enabled: true
+    config:
+      batch_sizes: [1]
+      seeds: [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116]
+      physics:
+        steps_per_waypoint: 4
+        hold_steps: 80
+        hold_sim_steps: 2
+        joint_tracking_tolerance_rad: 0.05
+      gripper:
+        control_part: hand
+        open_qpos: [0.0]
+        grasp_qpos: [0.024]
+      objects:
+        - id: cube_50mm
+          kind: cube
+          size: [0.05, 0.05, 0.05]
+          position: [-0.42, -0.08, 0.05]
+          mass: 0.05
+          dynamic_friction: 0.97
+          static_friction: 0.99
+          contact_offset: 0.003
+          rest_offset: 0.001
+          settle_steps: 10
+      skills:
+        - id: move_end_effector
+          sample_count: 80
+          start_qpos_jitter_rad: [0.15, 0.15, 0.15, 0.12, 0.15, 0.12, 0.15]
+          target_offset_jitter_m: [0.03, 0.03, 0.02]
+          cases:
+            - name: randomized_two_waypoint
+              task_difficulty: medium
+              target_offsets_m:
+                - [-0.08, -0.08, 0.08]
+                - [0.04, 0.12, 0.04]
+              difficulty_factors:
+                waypoint_count: 2
+                randomized_start: true
+                randomized_targets: true
+        - id: move_joints
+          sample_count: 80
+          joint_limit_margin_rad: 0.05
+          joint_threshold_rad: 0.02
+          start_qpos_jitter_rad: [0.15, 0.15, 0.15, 0.12, 0.15, 0.12, 0.15]
+          target_offset_jitter_rad: [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
+          cases:
+            - name: randomized_multi_joint
+              task_difficulty: medium
+              target_offsets_rad:
+                - [0.12, -0.08, 0.10, 0.12, -0.08, 0.10, -0.10]
+              difficulty_factors:
+                waypoint_count: 1
+                active_joints: 7
+                randomized_start: true
+                randomized_target: true
+        - id: pick_up
+          sample_count: 120
+          grasp_source: fixed
+          hand_interp_steps: 12
+          pre_grasp_distance_m: 0.15
+          lift_height_m: 0.16
+          minimum_object_lift_m: 0.04
+          approach_direction: [0.0, 0.0, -1.0]
+          pre_pick_height_m: 0.36
+          object_position_jitter_m: [0.05, 0.05, 0.0]
+          object_yaw_jitter_rad: 0.40
+          cases:
+            - name: randomized_cube_pick
+              object: cube_50mm
+              task_difficulty: medium
+              grasp_offset_m: [0.0, 0.0, 0.0]
+              difficulty_factors:
+                approach: top
+                randomized_object_pose: true
+        - id: move_held_object
+          sample_count: 80
+          held_object_offset_m: [0.0, 0.0, 0.18]
+          held_object_offset_jitter_m: [0.02, 0.02, 0.015]
+          target_object_offset_m: [0.08, 0.08, 0.04]
+          target_object_offset_jitter_m: [0.04, 0.04, 0.02]
+          object_position_jitter_m: [0.04, 0.04, 0.0]
+          object_yaw_jitter_rad: 0.40
+          object_position_threshold_m: 0.04
+          cases:
+            - name: randomized_cube_transport
+              object: cube_50mm
+              task_difficulty: medium
+              difficulty_factors:
+                object_preheld: true
+                randomized_start_and_target: true
+        - id: place
+          sample_count: 120
+          held_object_offset_m: [0.0, 0.0, 0.18]
+          held_object_offset_jitter_m: [0.02, 0.02, 0.015]
+          target_object_offset_m: [0.10, 0.10, 0.0]
+          target_object_offset_jitter_m: [0.04, 0.04, 0.0]
+          object_position_jitter_m: [0.04, 0.04, 0.0]
+          object_yaw_jitter_rad: 0.40
+          retract_height_m: 0.10
+          hand_interp_steps: 12
+          object_position_threshold_m: 0.05
+          cases:
+            - name: randomized_cube_place
+              object: cube_50mm
+              task_difficulty: medium
+              difficulty_factors:
+                object_preheld: true
+                randomized_start_and_target: true
+        - id: press
+          sample_count: 80
+          hand_interp_steps: 8
+          start_qpos_jitter_rad: [0.15, 0.15, 0.15, 0.12, 0.15, 0.12, 0.15]
+          target_offset_jitter_m: [0.03, 0.03, 0.015]
+          cases:
+            - name: randomized_vertical_press
+              task_difficulty: medium
+              target_offset_m: [0.0, 0.0, -0.08]
+              difficulty_factors:
+                randomized_start: true
+                randomized_target: true

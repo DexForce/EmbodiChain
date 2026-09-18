@@ -507,25 +507,21 @@ class SimulationExecutionAdapter:
                     joint_ids=joint_ids,
                     env_ids=self._robot_env_indices,
                 )
-                velocities = payload.velocities
-                if velocities is None and not command.active_mask.all().item():
-                    observed_velocities = self._read_optional_tensor("get_qvel")
-                    velocities = (
-                        torch.zeros_like(observed_positions[:, joint_ids])
-                        if observed_velocities is None
-                        else observed_velocities[:, joint_ids]
-                    )
-                if velocities is not None:
-                    velocities = torch.where(
-                        command.active_mask[:, None],
-                        velocities,
-                        torch.zeros_like(velocities),
-                    )
-                    self.robot.set_qvel(
-                        velocities,
-                        joint_ids=joint_ids,
-                        env_ids=self._robot_env_indices,
-                    )
+                velocities = (
+                    torch.zeros_like(positions)
+                    if payload.velocities is None
+                    else payload.velocities
+                )
+                velocities = torch.where(
+                    command.active_mask[:, None],
+                    velocities,
+                    torch.zeros_like(velocities),
+                )
+                self.robot.set_qvel(
+                    velocities,
+                    joint_ids=joint_ids,
+                    env_ids=self._robot_env_indices,
+                )
             return CommandAcknowledgement.accepted_ack()
         except Exception as exc:
             return CommandAcknowledgement(

@@ -370,6 +370,7 @@ class _AntipodalGraspPoseGeneratorFactory:
     approach_deviation_angle: float | None = None
     approach_direction_samples: int | None = None
     max_candidates: int | None = None
+    center_mode: str | None = None
     opening_margin: float | None = None
     point_sample_density: float | None = None
     filter_ground_collision: bool | None = None
@@ -396,6 +397,8 @@ class _AntipodalGraspPoseGeneratorFactory:
             )
         if self.max_candidates is not None:
             algorithm_kwargs["max_candidates"] = self.max_candidates
+        if self.center_mode is not None:
+            algorithm_kwargs["center_mode"] = self.center_mode
 
         collision_kwargs: dict[str, object] = {}
         if self.opening_margin is not None:

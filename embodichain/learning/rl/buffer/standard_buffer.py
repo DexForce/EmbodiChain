@@ -40,10 +40,14 @@ class RolloutBuffer:
         obs_dim: int,
         action_dim: int,
         device: torch.device,
+        critic_obs_dim: int | None = None,
+        distribution_param_dim: int | None = None,
     ) -> None:
         self.num_envs = num_envs
         self.rollout_len = rollout_len
         self.obs_dim = obs_dim
+        self.critic_obs_dim = critic_obs_dim
+        self.distribution_param_dim = distribution_param_dim
         self.action_dim = action_dim
         self.device = device
         self._rollout = self._allocate_rollout()
@@ -97,59 +101,77 @@ class RolloutBuffer:
 
     def _allocate_rollout(self) -> TensorDict:
         """Preallocate rollout storage with uniform `[num_envs, time + 1]` shape."""
+        fields = {
+            "obs": torch.empty(
+                self.num_envs,
+                self.rollout_len + 1,
+                self.obs_dim,
+                dtype=torch.float32,
+                device=self.device,
+            ),
+            "action": torch.empty(
+                self.num_envs,
+                self.rollout_len + 1,
+                self.action_dim,
+                dtype=torch.float32,
+                device=self.device,
+            ),
+            "sample_log_prob": torch.empty(
+                self.num_envs,
+                self.rollout_len + 1,
+                dtype=torch.float32,
+                device=self.device,
+            ),
+            "value": torch.empty(
+                self.num_envs,
+                self.rollout_len + 1,
+                dtype=torch.float32,
+                device=self.device,
+            ),
+            "reward": torch.empty(
+                self.num_envs,
+                self.rollout_len + 1,
+                dtype=torch.float32,
+                device=self.device,
+            ),
+            "done": torch.empty(
+                self.num_envs,
+                self.rollout_len + 1,
+                dtype=torch.bool,
+                device=self.device,
+            ),
+            "terminated": torch.empty(
+                self.num_envs,
+                self.rollout_len + 1,
+                dtype=torch.bool,
+                device=self.device,
+            ),
+            "truncated": torch.empty(
+                self.num_envs,
+                self.rollout_len + 1,
+                dtype=torch.bool,
+                device=self.device,
+            ),
+        }
+        if self.critic_obs_dim is not None:
+            fields["critic_obs"] = torch.empty(
+                self.num_envs,
+                self.rollout_len + 1,
+                self.critic_obs_dim,
+                dtype=torch.float32,
+                device=self.device,
+            )
+        if self.distribution_param_dim is not None:
+            for name in ("action_mean", "action_std"):
+                fields[name] = torch.empty(
+                    self.num_envs,
+                    self.rollout_len + 1,
+                    self.distribution_param_dim,
+                    dtype=torch.float32,
+                    device=self.device,
+                )
         return TensorDict(
-            {
-                "obs": torch.empty(
-                    self.num_envs,
-                    self.rollout_len + 1,
-                    self.obs_dim,
-                    dtype=torch.float32,
-                    device=self.device,
-                ),
-                "action": torch.empty(
-                    self.num_envs,
-                    self.rollout_len + 1,
-                    self.action_dim,
-                    dtype=torch.float32,
-                    device=self.device,
-                ),
-                "sample_log_prob": torch.empty(
-                    self.num_envs,
-                    self.rollout_len + 1,
-                    dtype=torch.float32,
-                    device=self.device,
-                ),
-                "value": torch.empty(
-                    self.num_envs,
-                    self.rollout_len + 1,
-                    dtype=torch.float32,
-                    device=self.device,
-                ),
-                "reward": torch.empty(
-                    self.num_envs,
-                    self.rollout_len + 1,
-                    dtype=torch.float32,
-                    device=self.device,
-                ),
-                "done": torch.empty(
-                    self.num_envs,
-                    self.rollout_len + 1,
-                    dtype=torch.bool,
-                    device=self.device,
-                ),
-                "terminated": torch.empty(
-                    self.num_envs,
-                    self.rollout_len + 1,
-                    dtype=torch.bool,
-                    device=self.device,
-                ),
-                "truncated": torch.empty(
-                    self.num_envs,
-                    self.rollout_len + 1,
-                    dtype=torch.bool,
-                    device=self.device,
-                ),
-            },
+            fields,
             batch_size=[self.num_envs, self.rollout_len + 1],
             device=self.device,
         )
@@ -170,6 +192,9 @@ class RolloutBuffer:
         self._rollout["done"][:, last_idx].fill_(False)
         self._rollout["terminated"][:, last_idx].fill_(False)
         self._rollout["truncated"][:, last_idx].fill_(False)
+        for name in ("action_mean", "action_std"):
+            if name in self._rollout.keys():
+                self._rollout[name][:, last_idx].zero_()
 
     def _validate_rollout_layout(self, rollout: TensorDict) -> None:
         """Validate the expected tensor shapes for the shared rollout."""
@@ -183,6 +208,19 @@ class RolloutBuffer:
             "terminated": (self.num_envs, self.rollout_len + 1),
             "truncated": (self.num_envs, self.rollout_len + 1),
         }
+        if self.critic_obs_dim is not None:
+            expected_shapes["critic_obs"] = (
+                self.num_envs,
+                self.rollout_len + 1,
+                self.critic_obs_dim,
+            )
+        if self.distribution_param_dim is not None:
+            for name in ("action_mean", "action_std"):
+                expected_shapes[name] = (
+                    self.num_envs,
+                    self.rollout_len + 1,
+                    self.distribution_param_dim,
+                )
         for key, expected_shape in expected_shapes.items():
             actual_shape = tuple(rollout[key].shape)
             if actual_shape != expected_shape:

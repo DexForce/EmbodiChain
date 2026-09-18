@@ -50,7 +50,8 @@ def get_object_pose(
         env: The environment instance.
         obs: The observation dictionary.
         entity_cfg: The configuration of the scene entity.
-        to_matrix: Whether to return the pose as a 4x4 transformation matrix. If False, returns as (position, quaternion).
+        to_matrix: Whether to return the pose as a 4x4 transformation matrix. If
+            False, returns ``(x, y, z, qx, qy, qz, qw)``.
 
     Returns:
         A tensor of shape (num_envs, 7) or (num_envs, 4, 4) representing the world poses of the objects.
@@ -90,7 +91,8 @@ def get_rigid_object_pose(
         env: The environment instance.
         obs: The observation dictionary.
         entity_cfg: The configuration of the scene entity.
-        to_matrix: Whether to return the pose as a 4x4 transformation matrix. If False, returns as (position, quaternion).
+        to_matrix: Whether to return the pose as a 4x4 transformation matrix. If
+            False, returns ``(x, y, z, qx, qy, qz, qw)``.
 
     Returns:
         A tensor of shape (num_envs, 7) or (num_envs, 4, 4) representing the world poses of the rigid objects.
@@ -1157,14 +1159,9 @@ class get_articulation_joint_drive(Functor):
                 device=env.device,
             )
         else:
-            (
-                stiffness,
-                damping,
-                max_effort,
-                max_velocity,
-                friction,
-                armature,
-            ) = art.get_joint_drive()
+            stiffness, damping, max_effort, max_velocity, friction, armature = (
+                art.get_joint_drive()
+            )
             result = TensorDict(
                 {
                     "stiffness": stiffness,

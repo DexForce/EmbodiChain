@@ -199,7 +199,11 @@ def plan_trajectory(
         ee_state_list_select: List to append gripper states to (modified in-place).
     """
     motion_generator = MotionGenerator(
-        cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=env.robot.uid))
+        cfg=MotionGenCfg(
+            planner_cfg=ToppraPlannerCfg(
+                robot_uid=env.robot.uid, sim_instance_id=env.sim.instance_id
+            )
+        )
     )
 
     plan_state = [

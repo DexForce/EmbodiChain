@@ -120,6 +120,23 @@ class _BaseSRSSolverImpl:
         # Initialize transformation matrices
         self._parse_params()
 
+    def _default_qpos_seed(self, num_targets: int, dtype: torch.dtype) -> torch.Tensor:
+        """Feasibility-safe default seed: the joint-range midpoint.
+
+        Args:
+            num_targets: Number of target poses to repeat the seed for.
+            dtype: Output dtype.
+
+        Returns:
+            torch.Tensor: Seed batch with shape (num_targets, 7).
+        """
+        midpoint = (self.qpos_limits_np[:, 0] + self.qpos_limits_np[:, 1]) / 2
+        return (
+            torch.as_tensor(midpoint, dtype=dtype, device=self.device)
+            .unsqueeze(0)
+            .repeat(num_targets, 1)
+        )
+
     def _parse_params(self):
         # Compute the inverse transformation matrices for TCP, end-effector, and base.
         self.tcp_xpos = self.cfg.tcp
@@ -753,9 +770,7 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
         num_targets = target_xpos.shape[0]
         # Validate and normalize qpos_seed
         if qpos_seed is None:
-            qpos_seed = torch.zeros(
-                (target_xpos.shape[0], 7), dtype=torch.float32, device=self.device
-            )
+            qpos_seed = self._default_qpos_seed(num_targets, torch.float32)
         else:
             qpos_seed = (
                 qpos_seed.to(self.device, dtype=torch.float32)
@@ -1272,11 +1287,7 @@ class _CUDASRSSolverImpl(_BaseSRSSolverImpl):
 
         # Define configurations and angles
         if qpos_seed is None:
-            qpos_seed = torch.zeros(
-                (target_xpos.shape[0], 7),
-                dtype=target_xpos.dtype,
-                device=self.device,
-            )
+            qpos_seed = self._default_qpos_seed(target_xpos.shape[0], target_xpos.dtype)
         else:
             qpos_seed = (
                 qpos_seed.to(self.device, dtype=torch.float32)

@@ -24,7 +24,10 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    arm_qpos_from_state,
+    resample_planned_trajectory,
+)
 from embodichain.lab.sim.atomic_actions.affordance import PressAffordance
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
@@ -359,7 +362,9 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
-        return result.success, result.positions
+        return result.success, resample_planned_trajectory(
+            result.positions, sample_count
+        )
 
 
 __all__ = ["Press", "PressGoal", "PressOptions"]

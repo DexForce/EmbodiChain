@@ -82,7 +82,6 @@ def test_registry_id_remains_authoritative_through_curobo_binding() -> None:
     geometry = registry.collision_geometry_by_id()
     world_cfg = CuroboWorldCfg(
         rigid_objects=geometry,  # type: ignore[arg-type]
-        obstacle_representation="cuboid",
         dynamic_obstacle_names=list(registry.dynamic_collision_entity_ids),
         multi_env=mode is SceneCollisionWorldMode.PER_ENV,
     )

@@ -53,6 +53,7 @@ from embodichain.lab.task_program.integrations import (
     create_simulation_task_program_adapter,
 )
 import embodichain.lab.task_program.integrations.simulation.environment as simulation_environment_module
+from embodichain.lab.gym.envs.expert_trajectory import ExpertTrajectoryCfg
 from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
 from embodichain.lab.task_program.integrations.simulation.environment import (
     SharedTickSceneProvider,
@@ -148,7 +149,7 @@ _DUAL_ROBOT_DOF = 4
 _RELEASE_SEPARATION = 0.2
 _DIRECT_PLACE_TARGET = SemanticPose(
     position=(0.0, 0.0, 0.0),
-    quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
+    quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
 )
 
 
@@ -566,7 +567,7 @@ class _ForwardedHandOverPoseProvider(HandOverPoseProvider):
         del call, context, bound
         pose = SemanticPose(
             position=(0.0, 0.0, 0.5),
-            quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
+            quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
         )
         return HandOverPoseTargets(
             final=SemanticObjectTarget(pose=pose),
@@ -1136,8 +1137,8 @@ def _pick_place_program_data() -> dict[str, object]:
                 "values": [
                     {
                         "position": _DIRECT_PLACE_TARGET.position.tolist(),
-                        "quaternion_wxyz": (
-                            _DIRECT_PLACE_TARGET.quaternion_wxyz.tolist()
+                        "quaternion_xyzw": (
+                            _DIRECT_PLACE_TARGET.quaternion_xyzw.tolist()
                         ),
                     }
                 ],
@@ -1474,6 +1475,33 @@ def test_simulation_factory_returns_exact_environment_adapter() -> None:
     assert factory.segment_policy_port is not None
 
 
+def test_simulation_factory_uses_environment_expert_joint_command_mode() -> None:
+    robot = _Robot()
+    simulation = _Simulation(robot)
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
+    )
+    environment = SimpleNamespace(
+        sim=simulation,
+        robot=robot,
+        step_dt=_STEP_DT,
+        cfg=SimpleNamespace(
+            expert_trajectory=ExpertTrajectoryCfg(
+                joint_command_mode="position_velocity"
+            )
+        ),
+    )
+
+    factory = SimulationTaskProgramFactory.from_environment(
+        environment,
+        registration=registration,
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+
+    assert factory.create_adapter().joint_command_mode == "position_velocity"
+
+
 def test_adapter_factory_binds_registration_to_initialized_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1708,7 +1736,7 @@ def test_pick_place_effects_require_physical_constraint_and_live_pose() -> None:
                 object=SceneObjectRef("cube"),
                 at=SemanticPose(
                     position=(0.0, 0.0, 0.0),
-                    quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
+                    quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
                 ),
             ),
         ),
@@ -1817,3 +1845,27 @@ def test_pick_place_effects_require_physical_constraint_and_live_pose() -> None:
         result = assembly.runtime.step()
     assert result.status is SemanticExecutionStatus.COMPLETED
     assert assembly.command_sink.accepted_action_count >= 4
+
+
+@pytest.mark.parametrize("explicit_config", [False, True])
+def test_factory_planner_config_uses_owner_without_mutating_input(
+    monkeypatch: pytest.MonkeyPatch, explicit_config: bool
+) -> None:
+    factory, robot = _factory()
+    factory._simulation.instance_id = 3
+    factory._motion_generator_factory = None
+    supplied = simulation_environment_module.ToppraPlannerCfg(robot_uid=robot.uid)
+    factory._planner_cfg = supplied if explicit_config else None
+    captured = []
+
+    def initialize(generator, cfg):
+        captured.append(cfg.planner_cfg)
+        generator.robot = robot
+
+    monkeypatch.setattr(MotionGenerator, "__init__", initialize)
+    generator = factory._create_motion_generator()
+    assert generator.robot is robot
+    assert captured[0].sim_instance_id == factory._simulation.instance_id
+    assert captured[0].robot_uid == robot.uid
+    assert captured[0] is not supplied
+    assert supplied.sim_instance_id == 0

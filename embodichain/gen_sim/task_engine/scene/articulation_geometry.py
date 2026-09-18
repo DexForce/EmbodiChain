@@ -55,6 +55,13 @@ def _vector(value: object, name: str) -> np.ndarray:
     return result
 
 
+def _fixed_base(config: Mapping[str, Any]) -> bool:
+    if "fix_base" in config:
+        return config["fix_base"] is True
+    root_props = config.get("root_props")
+    return isinstance(root_props, Mapping) and root_props.get("fixed_base") is True
+
+
 def read_articulation_geometry(path: str | Path) -> ArticulationGeometry:
     """Measure collision meshes relative to the unique native root rigid body.
 
@@ -176,7 +183,7 @@ def fit_articulation_to_proxy(
     A nearly level fixed base is aligned with the horizontal support plane;
     larger tilts require an explicit orientation decision instead of guessing.
     """
-    if config.get("fix_base") is not True or not np.isfinite(table_top_z):
+    if not _fixed_base(config) or not np.isfinite(table_top_z):
         raise ValueError("Proxy fitting requires a fixed base and measured tabletop.")
     proxy = np.asarray(proxy_vertices, dtype=float)
     if (

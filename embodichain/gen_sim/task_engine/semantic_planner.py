@@ -250,7 +250,7 @@ class SemanticTaskPlanner:
                             "position": [
                                 float(value) for value in objects[object_id]["init_pos"]
                             ],
-                            "quaternion_wxyz": _initial_quaternion_wxyz(
+                            "quaternion_xyzw": _initial_quaternion_xyzw(
                                 objects[object_id].get("init_rot", [0.0, 0.0, 0.0])
                             ),
                         }
@@ -942,14 +942,14 @@ def _upright_targets(step_id: str, position: list[float]) -> dict[str, Any]:
         f"{step_id}_{suffix}": {
             "kind": "cyclic_pose",
             "values": [
-                {"position": list(position), "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0]}
+                {"position": list(position), "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0]}
             ],
         }
         for suffix in ("upright_target", "upright_staging_target")
     }
 
 
-def _initial_quaternion_wxyz(rotation: Any) -> list[float]:
+def _initial_quaternion_xyzw(rotation: Any) -> list[float]:
     """Convert the scene's XYZ degree rotation into the original object pose."""
     if not isinstance(rotation, (list, tuple)) or len(rotation) != 3:
         raise ValueError("E3 return pose requires a three-value init_rot.")
@@ -957,10 +957,10 @@ def _initial_quaternion_wxyz(rotation: Any) -> list[float]:
     cx, cy, cz = math.cos(x), math.cos(y), math.cos(z)
     sx, sy, sz = math.sin(x), math.sin(y), math.sin(z)
     return [
-        cx * cy * cz + sx * sy * sz,
         sx * cy * cz - cx * sy * sz,
         cx * sy * cz + sx * cy * sz,
         cx * cy * sz - sx * sy * cz,
+        cx * cy * cz + sx * sy * sz,
     ]
 
 

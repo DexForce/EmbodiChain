@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
-import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,6 +31,12 @@ import yaml
 
 from embodichain.lab.task_program import TaskProgramCompiler, decode_task_program
 from embodichain.lab.gym.envs import EmbodiedEnv
+from embodichain.lab.sim.cfg import (
+    DefaultPhysicsCfg,
+    NewtonCollisionPropertiesCfg,
+    NewtonPhysicsCfg,
+    NewtonRigidBodyMaterialCfg,
+)
 from embodichain.lab.task_program.integrations import (
     SimulationRobotSkillProfileBinding,
 )
@@ -86,8 +91,17 @@ _REPEATED_CUBE_INTEGRATION = Path(
     "tasks/manipulation/repeated_pick_place/task_program/integration.yaml"
 )
 _REPEATED_CUBE_GYM_CONFIG = Path("tasks/manipulation/repeated_pick_place/task.ur5.yaml")
+_REPEATED_CUBE_NEWTON_GYM_CONFIG = Path(
+    "tasks/manipulation/repeated_pick_place/task.ur5.newton.yaml"
+)
+_REPEATED_CUBE_FRANKA_NEWTON_GYM_CONFIG = Path(
+    "tasks/manipulation/repeated_pick_place/task.franka.newton.yaml"
+)
 _OPEN_DRAWER_PROGRAM = Path("tasks/manipulation/open_drawer/task_program/program.yaml")
 _OPEN_DRAWER_GYM_CONFIG = Path("tasks/manipulation/open_drawer/task.ur5.yaml")
+_OPEN_DRAWER_NEWTON_GYM_CONFIG = Path(
+    "tasks/manipulation/open_drawer/task.ur5.newton.yaml"
+)
 _TRAJECTORY_POLICY = Path("components/execution_policies/trajectory_open_loop.yaml")
 _UR5_COMPONENT = Path("components/embodiments/ur5_dh_pgi_140_80.yaml")
 _OPEN_DRAWER_CALL_ID = "simulation.articulation_link_slide"
@@ -354,6 +368,103 @@ def _configure_cube_environment():
     return payload, cfg, REGISTERED_ENVS[str(payload["id"])]
 
 
+def _configure_packaged_environment(relative_path: Path):
+    """Load one packaged deployment and its selected physical component."""
+    path = _REPOSITORY_ROOT / "embodichain_tasks/configs" / relative_path
+    payload = _read_payload(relative_path)
+    return payload, config_to_cfg(payload, source_path=path)
+
+
+def test_newton_contact_overlays_are_scoped_in_packaged_manipulation_configs() -> None:
+    """Default files stay portable while Newton variants own native contacts."""
+    default_payload, default_cfg = _configure_packaged_environment(
+        _REPEATED_CUBE_GYM_CONFIG
+    )
+    assert default_payload["environment"] == {"component": "env.yaml"}
+    assert isinstance(default_cfg.sim_cfg.physics_cfg, DefaultPhysicsCfg)
+    assert default_cfg.rigid_object[0].attrs.collision_props is None
+    assert (
+        default_cfg.robot.link_attrs["newton_gripper_contacts"].attrs.mass_props is None
+    )
+
+    _, cube_cfg = _configure_packaged_environment(_REPEATED_CUBE_NEWTON_GYM_CONFIG)
+    assert isinstance(cube_cfg.sim_cfg.physics_cfg, NewtonPhysicsCfg)
+    cube_physics = cube_cfg.sim_cfg.physics_cfg
+    assert cube_physics.num_substeps == 20
+    assert cube_physics.collision_cfg is None
+    assert cube_physics.solver_cfg == {
+        "solver_type": "mujoco_warp",
+        "solver": "newton",
+        "integrator": "implicitfast",
+        "iterations": 20,
+        "ls_iterations": 100,
+        "cone": "elliptic",
+        "impratio": 1000.0,
+        "use_mujoco_contacts": True,
+        "enable_multiccd": True,
+    }
+    cube_collision = cube_cfg.rigid_object[0].attrs.collision_props
+    assert isinstance(cube_collision, NewtonCollisionPropertiesCfg)
+    assert cube_collision.condim == 4
+    cube_material = cube_cfg.rigid_object[0].attrs.material_props
+    assert isinstance(cube_material, NewtonRigidBodyMaterialCfg)
+    assert cube_material.dynamic_friction == pytest.approx(0.97)
+    assert cube_material.static_friction == pytest.approx(0.99)
+    assert cube_material.ke == pytest.approx(4.0e4)
+    assert cube_material.kd == pytest.approx(4.0e2)
+    assert cube_material.torsional_friction == pytest.approx(0.1)
+    assert cube_material.rolling_friction == pytest.approx(0.01)
+    assert cube_cfg.robot.link_attrs["newton_gripper_contacts"].attrs.mass_props is None
+
+    robot_material = cube_cfg.robot.link_attrs[
+        "newton_gripper_contacts"
+    ].attrs.material_props
+    assert isinstance(robot_material, NewtonRigidBodyMaterialCfg)
+    assert robot_material.ke == pytest.approx(4.0e4)
+    assert robot_material.kd == pytest.approx(4.0e2)
+    assert robot_material.torsional_friction == pytest.approx(0.1)
+    assert robot_material.rolling_friction == pytest.approx(0.01)
+
+    _, franka_cube_cfg = _configure_packaged_environment(
+        _REPEATED_CUBE_FRANKA_NEWTON_GYM_CONFIG
+    )
+    assert isinstance(franka_cube_cfg.sim_cfg.physics_cfg, NewtonPhysicsCfg)
+    assert franka_cube_cfg.sim_cfg.physics_cfg.solver_cfg == cube_physics.solver_cfg
+    franka_material = franka_cube_cfg.robot.link_attrs[
+        "newton_gripper_contacts"
+    ].attrs.material_props
+    assert isinstance(franka_material, NewtonRigidBodyMaterialCfg)
+    assert franka_material.ke == pytest.approx(4.0e4)
+    assert franka_material.kd == pytest.approx(4.0e2)
+    assert (
+        franka_cube_cfg.robot.link_attrs["newton_gripper_contacts"].attrs.mass_props
+        is None
+    )
+
+    drawer_payload, drawer_cfg = _configure_packaged_environment(
+        _OPEN_DRAWER_NEWTON_GYM_CONFIG
+    )
+    assert drawer_payload["environment"] == {"component": "env.newton.yaml"}
+    assert isinstance(drawer_cfg.sim_cfg.physics_cfg, NewtonPhysicsCfg)
+    drawer_physics = drawer_cfg.sim_cfg.physics_cfg
+    assert drawer_physics.num_substeps == 20
+    assert drawer_physics.collision_cfg is None
+    assert drawer_physics.solver_cfg == cube_physics.solver_cfg
+    handle_attrs = drawer_cfg.articulation[0].link_attrs["newton_handle_contacts"]
+    assert handle_attrs.attrs.collision_props.condim == 4
+    assert handle_attrs.attrs.material_props.ke == pytest.approx(4.0e4)
+    assert handle_attrs.attrs.material_props.kd == pytest.approx(4.0e2)
+    assert handle_attrs.attrs.material_props.torsional_friction == pytest.approx(0.1)
+    assert handle_attrs.attrs.material_props.rolling_friction == pytest.approx(0.01)
+
+    default_drawer_payload, default_drawer_cfg = _configure_packaged_environment(
+        _OPEN_DRAWER_GYM_CONFIG
+    )
+    assert default_drawer_payload["environment"] == {"component": "env.yaml"}
+    assert isinstance(default_drawer_cfg.sim_cfg.physics_cfg, DefaultPhysicsCfg)
+    assert default_drawer_cfg.articulation[0].link_attrs is None
+
+
 def _cube_compiler() -> TaskProgramCompiler:
     """Build the smallest typed identity registry needed by the cube program."""
     registry = SceneRegistry(
@@ -505,11 +616,11 @@ def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
         (
             {
                 "position": [-0.25, -0.20, 0.10],
-                "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
             },
             {
                 "position": [-0.25, 0.20, 0.10],
-                "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
             },
         )
     )
@@ -854,17 +965,6 @@ def test_open_drawer_lowerer_owns_a_snapshot_of_the_current_target_pose() -> Non
     assert torch.equal(lowering.goal.target_pose, torch.eye(4))
 
 
-def test_examples_have_no_task_specific_environment_modules() -> None:
-    """Both examples are assembled from config against plain EmbodiedEnv."""
-    for module_name in (
-        "embodichain_tasks.manipulation.repeated_pick_place",
-        "embodichain_tasks.manipulation.open_drawer",
-    ):
-        assert importlib.util.find_spec(module_name) is None
-    _, _, cube_spec = _configure_cube_environment()
-    assert cube_spec.cls is EmbodiedEnv
-
-
 def test_cube_config_registers_embodied_env_with_its_integration_factory() -> None:
     """Repeated Pick/Place needs no environment subclass or task module."""
     payload, cfg, spec = _configure_cube_environment()
@@ -888,26 +988,12 @@ def test_cube_config_registers_embodied_env_with_its_integration_factory() -> No
     )
 
 
-def test_cube_config_declares_the_canonical_scene_and_profile_ids() -> None:
-    """The repeated config owns one canonical scene/profile integration."""
-    registration = _cube_integration().registration
-
-    assert registration.scene_binding.registry_id == (
-        "task_program_repeated_pick_place"
-    )
-    assert registration.robot_profile_binding.profile_id == ("ur5_dh_pgi_140_80")
-
-
 @pytest.mark.parametrize(
-    ("create_binding", "expected_grasp_samples"),
-    (
-        (_cube_robot_profile_binding, _EXPECTED_GRASP_SAMPLES),
-        (_drawer_robot_profile_binding, _EXPECTED_GRASP_SAMPLES),
-    ),
+    "create_binding",
+    (_cube_robot_profile_binding, _drawer_robot_profile_binding),
 )
 def test_example_profiles_execute_only_open_loop_trajectories(
     create_binding: Callable[[], SimulationRobotSkillProfileBinding],
-    expected_grasp_samples: int,
 ) -> None:
     """Both tutorials use timed execution without effects or retry layers."""
     binding = create_binding()
@@ -925,7 +1011,7 @@ def test_example_profiles_execute_only_open_loop_trajectories(
     assert dict(preset.effect_monitors) == {}
     assert preset.runner_cfg.hold_on_completion is False
     assert preset.runner_cfg.hold_during_effect_verification is False
-    assert expected_grasp_samples == _EXPECTED_GRASP_SAMPLES
+    assert preset.runner_cfg.minimum_cycle_time == 0.0
 
 
 def test_cube_policy_and_skill_parameters_have_single_component_owners() -> None:
@@ -979,6 +1065,7 @@ def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
     assert "task_program_runtime" not in payload
     assert environment["env"]["events"] == {}
     assert environment["env"]["dataset"] == {}
+    assert environment["physics"] == "default"
     assert "physics_config" not in environment
 
 

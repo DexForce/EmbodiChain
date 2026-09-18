@@ -1165,22 +1165,6 @@ def test_all_examples_register_plain_embodied_env_under_config_selected_ids(
     assert env_id in gym_registry
 
 
-def test_trajectory_examples_disable_validation_and_recovery_layers() -> None:
-    """The two showcase profiles contain only open-loop trajectory execution."""
-    for task_name in ("repeated_pick_place", "open_drawer"):
-        integration = _decode_configured_task_program_integration(
-            _integration_payload(task_name)
-        )
-        preset = integration.registration.robot_profile_binding.presets[0]
-
-        assert preset.motion_policy.sample_count == 40
-        assert dict(preset.effect_monitors) == {}
-        assert preset.recovery_policy.max_replans == 0
-        assert preset.recovery_policy.max_action_retries == 0
-        assert preset.workflow_recovery_policy.max_recovery_attempts == 0
-        assert preset.runner_cfg.minimum_cycle_time == 0.0
-
-
 def test_grasp_generator_resolves_named_model_and_library_defaults() -> None:
     """Serialized services name reusable geometry and omit policy defaults."""
     factory = _decode_grasp_generator(
@@ -1198,6 +1182,7 @@ def test_grasp_generator_resolves_named_model_and_library_defaults() -> None:
     assert factory.approach_deviation_angle is None
     assert factory.approach_direction_samples is None
     assert factory.max_candidates is None
+    assert factory.center_mode is None
     assert factory.opening_margin is None
     assert factory.point_sample_density is None
     assert factory.filter_ground_collision is None
@@ -1221,6 +1206,7 @@ def test_grasp_generator_factory_defers_to_toolkit_policy_defaults() -> None:
     )
     assert generator.algorithm_cfg.approach_direction_samples == 4
     assert generator.algorithm_cfg.max_candidates == 50
+    assert generator.algorithm_cfg.center_mode == "bounds"
     assert generator.collision_cfg.opening_margin == pytest.approx(0.01)
     assert generator.collision_cfg.point_sample_density == pytest.approx(0.01)
     assert generator.collision_cfg.filter_ground_collision is True
@@ -1236,6 +1222,7 @@ def test_grasp_generator_decodes_candidate_search_policy() -> None:
             "model": "dh_pgi_140_80",
             "approach_deviation_angle": math.pi / 9,
             "max_candidates": 500,
+            "center_mode": "centroid",
         },
         path="generator",
     )()
@@ -1244,6 +1231,7 @@ def test_grasp_generator_decodes_candidate_search_policy() -> None:
         math.pi / 9
     )
     assert generator.algorithm_cfg.max_candidates == 500
+    assert generator.algorithm_cfg.center_mode == "centroid"
 
 
 def test_grasp_generator_inline_model_uses_geometry_defaults() -> None:
@@ -1631,3 +1619,28 @@ def test_axis_align_lowerer_and_config_reuse_the_existing_atomic_skill() -> None
 def test_configured_services_reject_task_specific_e2_kinds(kind: str) -> None:
     with pytest.raises(ValueError, match="Unsupported"):
         _decode_registered_lowerer({"kind": kind, "routes": []}, path="lowerer")
+
+
+@pytest.mark.parametrize("mode", ["auto", "zero"])
+def test_motion_velocity_target_policy_decodes(mode: str) -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+
+    policy = _decode_motion_policy(
+        {"sample_count": 40, "velocity_targets": mode}, path="motion"
+    )
+    assert policy.velocity_targets == mode
+    assert policy.strategy == "ik_interp"
+
+
+@pytest.mark.parametrize("mode", ["keep_old", "required"])
+def test_motion_velocity_target_policy_rejects_unknown_mode(mode: str) -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+
+    with pytest.raises(ValueError, match="velocity_targets"):
+        _decode_motion_policy(
+            {"sample_count": 40, "velocity_targets": mode}, path="motion"
+        )

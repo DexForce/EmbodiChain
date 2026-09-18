@@ -52,7 +52,7 @@ class TestNeuralIKSolver:
 
     def _setup(self, tmp_path):
         checkpoint_path = _create_fake_checkpoint(tmp_path)
-        config = SimulationManagerCfg(headless=True, sim_device="cpu")
+        config = SimulationManagerCfg(headless=True, device="cpu")
         self.sim = SimulationManager(config)
 
         cfg = FrankaPandaCfg.from_dict({"robot_type": "panda"})
@@ -75,6 +75,7 @@ class TestNeuralIKSolver:
         )
 
         self.robot = self.sim.add_robot(cfg=cfg)
+        self.sim.prepare()
         self.sim.update(step=100)
 
     def teardown_method(self):

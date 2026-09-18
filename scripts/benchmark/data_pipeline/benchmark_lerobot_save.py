@@ -143,7 +143,11 @@ def _run_child(args: argparse.Namespace) -> int:
         shutil.rmtree(save_root / args.variant, ignore_errors=True)
 
     parser = argparse.ArgumentParser()
-    add_env_launcher_args_to_parser(parser)
+    # This child consumes a Gym config, so let the file own the physics
+    # backend and its device default.  The shared standalone-parser defaults
+    # (``physics=default``/``renderer=auto``) would otherwise be interpreted
+    # as explicit overrides before a Newton config is decoded.
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
     launcher_args = parser.parse_args(["--gym_config", args.gym_config, "--headless"])
     env_cfg, gcfg, action_config = build_env_cfg_from_args(
         launcher_args,

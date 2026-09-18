@@ -16,6 +16,29 @@
 
 from __future__ import annotations
 
+import argparse
+from embodichain.cli.sim import (
+    add_sim_args_to_parser,
+    add_seed_arg_to_parser,
+    resolve_seed,
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Demo for running a random reach environment."
+    )
+    add_sim_args_to_parser(parser)
+    add_seed_arg_to_parser(parser, scope="task environment")
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
 import torch
 import numpy as np
 import gymnasium as gym
@@ -28,9 +51,11 @@ from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     RobotCfg,
     RigidObjectCfg,
-    RigidBodyAttributesCfg,
+    CollisionPropertiesCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.lab.gym.utils.registration import register_env
 
@@ -46,17 +71,21 @@ class RandomReachEnv(BaseEnv):
         self,
         num_envs=1,
         headless=False,
-        device="cpu",
+        device: str | torch.device | None = None,
         renderer="hybrid",
+        physics_cfg="default",
+        seed: int | None = None,
         visualization: VisualizationCfg | None = None,
         **kwargs,
     ) -> None:
         env_cfg = EnvCfg(
+            seed=seed,
             sim_cfg=SimulationManagerCfg(
                 headless=headless,
                 arena_space=2.0,
-                sim_device=device,
+                device=device,
                 render_cfg=RenderCfg(renderer=renderer),
+                physics_cfg=physics_cfg_for_backend(physics_cfg),
                 visualization=visualization or VisualizationCfg(),
             ),
             num_envs=num_envs,
@@ -67,12 +96,12 @@ class RandomReachEnv(BaseEnv):
             **kwargs,
         )
 
-    def _setup_robot(self, **kwargs) -> Robot:
+    def _declare_robot(self, **kwargs) -> Robot:
         from embodichain.data import get_data_path
 
         file_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
 
-        robot: Robot = self.sim.add_robot(
+        return self.sim.add_robot(
             cfg=RobotCfg(
                 uid="ur10",
                 fpath=file_path,
@@ -80,6 +109,11 @@ class RandomReachEnv(BaseEnv):
                 init_qpos=self.robot_init_qpos,
             )
         )
+
+    def _setup_robot(self, **kwargs) -> Robot:
+        robot = self.robot
+        if robot is None:
+            raise RuntimeError("UR10 was not declared before simulation prepare.")
 
         qpos_limits = robot.body_data.qpos_limits[0].cpu().numpy()
         self.single_action_space = gym.spaces.Box(
@@ -96,7 +130,11 @@ class RandomReachEnv(BaseEnv):
             cfg=RigidObjectCfg(
                 uid="cube",
                 shape=CubeCfg(size=[size, size, size]),
-                attrs=RigidBodyAttributesCfg(enable_collision=False),
+                attrs=RigidBodyPhysicsCfg(
+                    collision_props=CollisionPropertiesCfg(
+                        collision_enabled=False,
+                    ),
+                ),
                 init_pos=(0.0, 0.0, 0.5),
                 body_type="kinematic",
             ),
@@ -122,21 +160,26 @@ if __name__ == "__main__":
     import argparse
     import time
 
-    from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+    from embodichain.cli.sim import (
+        add_sim_args_to_parser,
+        add_seed_arg_to_parser,
+        resolve_seed,
+    )
     from embodichain.lab.visualization import visualization_cfg_from_args
 
-    parser = argparse.ArgumentParser(
-        description="Demo for running a random reach environment."
-    )
-    add_env_launcher_args_to_parser(parser)
-    args = parser.parse_args()
+    parser = build_parser()
+    args = _cli_args
+    seed = resolve_seed(args.seed)
+    print(f"[INFO]: Environment seed: {seed}", flush=True)
 
     env = gym.make(
         "RandomReach-v1",
+        seed=seed,
         num_envs=args.num_envs,
         headless=args.headless,
         device=args.device,
         renderer=args.renderer,
+        physics_cfg=args.physics,
         visualization=visualization_cfg_from_args(args),
     )
 

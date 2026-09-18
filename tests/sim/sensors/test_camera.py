@@ -16,13 +16,13 @@
 
 from __future__ import annotations
 
-import pytest
-import torch
 import os
-
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
+import torch
 from tensordict import TensorDict
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -38,6 +38,7 @@ from embodichain.lab.sim.sensors.stereo import PairCameraView
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.sim.cfg import ArticulationCfg, RenderCfg
 from embodichain.data import get_data_path
+from scripts.tutorials.sim.create_sensor import create_sensor as create_tutorial_sensor
 
 FULL_NUM_ENVS = 4
 FULL_WIDTH = 640
@@ -61,7 +62,7 @@ class CameraTest:
         # Setup SimulationManager
         config = SimulationManagerCfg(
             headless=True,
-            sim_device=sim_device,
+            device=sim_device,
             render_cfg=RenderCfg(renderer=renderer),
             num_envs=num_envs,
         )
@@ -78,6 +79,7 @@ class CameraTest:
         }
         cfg = SensorCfg.from_dict(cfg_dict)
         self.camera: Camera = self.sim.add_sensor(cfg)
+        self.sim.prepare()
 
     def test_get_data(self):
 
@@ -151,6 +153,7 @@ class CameraTest:
         self.art: Articulation = self.sim.add_articulation(
             cfg=ArticulationCfg.from_dict(cfg_dict)
         )
+        self.sim.prepare()
         self.camera: Camera = self.sim.add_sensor(
             sensor_cfg=CameraCfg(
                 uid="test",
@@ -213,6 +216,30 @@ class TestCameraHybridCUDA(CameraTest):
         self.setup_simulation("cuda", renderer="hybrid")
 
 
+def test_create_sensor_tutorial_preserves_attached_camera_view() -> None:
+    """Keep the wrist-camera view stable after the xyzw convention migration."""
+    sim = MagicMock()
+
+    create_tutorial_sensor(sim, SimpleNamespace(attach_sensor=True))
+
+    cfg = sim.add_sensor.call_args.kwargs["sensor_cfg"]
+    expected_rotation = torch.tensor(
+        [
+            [0.579228, 0.573576, 0.579228],
+            [0.405580, -0.819152, 0.405580],
+            [0.707107, 0.0, -0.707107],
+        ],
+        dtype=torch.float32,
+    )
+    assert cfg.extrinsics.parent == "ee_link"
+    torch.testing.assert_close(
+        cfg.extrinsics.transformation[:3, :3],
+        expected_rotation,
+        atol=1.0e-6,
+        rtol=1.0e-6,
+    )
+
+
 @pytest.mark.parametrize(
     ("sim_device", "renderer"),
     [("cpu", "hybrid"), ("cpu", "fast-rt"), ("cuda", "fast-rt")],
@@ -232,6 +259,23 @@ def test_camera_backend_smoke(sim_device, renderer):
         test.camera.update()
         data = test.camera.get_data()
         assert data["color"].shape == (SMOKE_NUM_ENVS, SMOKE_HEIGHT, SMOKE_WIDTH, 4)
+    finally:
+        test.teardown_method()
+
+
+def test_camera_parent_attachment_cpu() -> None:
+    """Attach a camera to a materialized articulation link on the CPU backend."""
+    test = CameraTest()
+    test.setup_simulation(
+        "cpu",
+        renderer="hybrid",
+        num_envs=SMOKE_NUM_ENVS,
+        width=SMOKE_WIDTH,
+        height=SMOKE_HEIGHT,
+        enable_auxiliary_data=False,
+    )
+    try:
+        test.test_attach_to_parent()
     finally:
         test.teardown_method()
 
@@ -290,11 +334,16 @@ def test_camera_parent_config_does_not_imply_attachment(
     monkeypatch.setattr(
         BaseSensor,
         "__init__",
-        lambda self, config, device: setattr(self, "cfg", config),
+        lambda self, config, device, *, num_instances: setattr(self, "cfg", config),
     )
     cfg_type = StereoCameraCfg if stereo else CameraCfg
     camera_type = StereoCamera if stereo else Camera
-    camera = camera_type(cfg_type(extrinsics=CameraCfg.ExtrinsicsCfg(parent="wrist")))
+    monkeypatch.setattr(Camera, "reset", lambda self: None)
+    owner = MagicMock(num_envs=1)
+    camera = camera_type(
+        cfg_type(extrinsics=CameraCfg.ExtrinsicsCfg(parent="wrist")), owner=owner
+    )
+    owner.get_env.assert_called_once_with(0)
     assert not camera.is_attached
 
 
@@ -335,3 +384,22 @@ if __name__ == "__main__":
     test = TestCameraHybridCUDA()
     test.setup_method()
     test.test_attach_to_parent()
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("stereo", [False, True])
+def test_camera_detaches_all_views_before_parent_removal(stereo: bool) -> None:
+    camera = object.__new__(StereoCamera if stereo else Camera)
+    camera._is_attached = True
+    views = [MagicMock() for _ in range(4 if stereo else 2)]
+    camera._entities = (
+        [PairCameraView(*views[i : i + 2], np.eye(4)) for i in (0, 2)]
+        if stereo
+        else views
+    )
+
+    camera._detach_from_parent_nodes()
+
+    assert not camera.is_attached
+    for view in views:
+        view.get_node.return_value.detach_parent.assert_called_once_with()
