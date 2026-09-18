@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Opt-in, uniform grasp-fit scaling for one E2 tabletop rigid object."""
+"""Opt-in, uniform grasp-fit scaling for grasped rigid objects."""
 
 from __future__ import annotations
 
@@ -30,57 +30,148 @@ from .source_scene import PreparedScene
 
 __all__: list[str] = []
 
-_POLICY = "e2_single_rigid_grasp_fit/v1"
+_POLICY = "semantic_grasp_fit/v2"
 _MIN_SCALE = 0.25
 _PAD_MARGIN = 0.002
 _FIT_MARGIN = 0.001
+_COORDINATED_CALLS = {
+    "simulation.coordinated_hold",
+    "simulation.coordinated_transport",
+}
 
 
-def fit_e2_grasp_asset(
+def fit_grasp_assets(
     scene: PreparedScene,
     graph: dict[str, Any],
     *,
-    opening: float,
+    openings: dict[str, float],
 ) -> tuple[PreparedScene, dict[str, Any]]:
-    """Shrink only the bound E2 target; never change a source mesh or tolerance."""
-    groups = graph["task_groups"]
-    if len(groups) != 1 or groups[0]["task_type"] != "E2":
-        raise ValueError("Grasp-fit scaling supports one E2 task group only.")
-    nodes = graph["nodes"]
-    picks = [
-        node["call"]
-        for node in nodes
-        if node["call"]["kind"] == "pick"
-        or node["call"].get("call_id", "").startswith("gen_sim.pick.")
-        or node["call"].get("call_id") == "simulation.pick"
-    ]
-    if len(picks) != 1:
-        raise ValueError("Grasp-fit scaling requires exactly one E2 Pick.")
-    pick = picks[0]
-    object_id = str(pick.get("object", pick.get("arguments", {}).get("object")))
-    if any(node["task_type"] != "E2" for node in nodes):
-        raise ValueError("Grasp-fit scaling cannot modify a mixed task graph.")
-    if any(
-        node["call"].get("arguments", {}).get("reference") not in {None, "table"}
-        for node in nodes
-    ):
-        raise ValueError("Grasp-fit scaling supports only tabletop E2 relations.")
+    """Uniformly shrink graph-acquired rigid meshes within a bounded policy."""
+    requests = _grasp_requests(graph, openings)
     rigid = [deepcopy(item) for item in scene.rigid_objects]
     planner = [deepcopy(item) for item in scene.planner_objects]
-    matches = [item for item in rigid if item["uid"] == object_id]
-    if len(matches) != 1:
-        raise ValueError("Grasp-fit target must be one rigid object.")
-    obj = matches[0]
+    rigid_by_uid = {str(item["uid"]): item for item in rigid}
+    planner_by_uid = {
+        str(item["runtime_uid"]): item
+        for item in planner
+        if item.get("role") == "rigid_object"
+    }
+    records = []
+    for object_id, request in sorted(requests.items()):
+        obj = rigid_by_uid.get(object_id)
+        planner_obj = planner_by_uid.get(object_id)
+        if obj is None or planner_obj is None:
+            raise ValueError(
+                f"Grasp-fit target {object_id!r} must be one bound rigid object."
+            )
+        records.append(
+            _fit_object(
+                obj,
+                planner_obj,
+                object_id=object_id,
+                opening=request["opening"],
+                fit_mode=request["fit_mode"],
+                task_types=sorted(request["task_types"]),
+                resources=sorted(request["resources"]),
+                source_sha256=scene.asset_hashes.get(object_id),
+            )
+        )
+    status = (
+        "not_applicable"
+        if not records
+        else (
+            "scaled"
+            if any(record["status"] == "scaled" for record in records)
+            else "unchanged"
+        )
+    )
+    report = {
+        "schema_version": "gen_sim.asset-adaptation/v2",
+        "policy": _POLICY,
+        "enabled": True,
+        "minimum_scale": _MIN_SCALE,
+        "status": status,
+        "records": records,
+    }
+    if status != "scaled":
+        return scene, report
+    return (
+        replace(scene, rigid_objects=tuple(rigid), planner_objects=tuple(planner)),
+        report,
+    )
+
+
+def _grasp_requests(
+    graph: dict[str, Any], openings: dict[str, float]
+) -> dict[str, dict[str, Any]]:
+    """Collect objects acquired by single-arm Pick or coordinated E5 calls."""
+    requests: dict[str, dict[str, Any]] = {}
+    for node in graph["nodes"]:
+        call = node["call"]
+        call_id = str(call.get("call_id", ""))
+        is_pick = call.get("kind") == "pick" or call_id == "simulation.pick"
+        is_pick |= call_id.startswith("gen_sim.pick.")
+        coordinated = call_id in _COORDINATED_CALLS
+        if not is_pick and not coordinated:
+            continue
+        arguments = call.get("arguments", {})
+        object_id = str(call.get("object", arguments.get("object", ""))).strip()
+        if not object_id:
+            raise ValueError("Grasp-fit acquisition has no object identifier.")
+        resources = (
+            tuple(str(value) for value in call["resources"].values())
+            if coordinated
+            else (str(call["resources"]["primary"]),)
+        )
+        missing = [resource for resource in resources if resource not in openings]
+        if missing:
+            raise ValueError(f"Grasp-fit has no calibrated opening for {missing}.")
+        opening = min(openings[resource] for resource in resources)
+        task_type = str(node["task_type"])
+        fit_mode = "minimum_axis" if coordinated else "single_arm_transverse"
+        current = requests.setdefault(
+            object_id,
+            {
+                "opening": opening,
+                "fit_mode": fit_mode,
+                "task_types": set(),
+                "resources": set(),
+            },
+        )
+        current["opening"] = min(current["opening"], opening)
+        if fit_mode == "single_arm_transverse":
+            current["fit_mode"] = fit_mode
+        current["task_types"].add(task_type)
+        current["resources"].update(resources)
+    return requests
+
+
+def _fit_object(
+    obj: dict[str, Any],
+    planner_obj: dict[str, Any],
+    *,
+    object_id: str,
+    opening: float,
+    fit_mode: str,
+    task_types: list[str],
+    resources: list[str],
+    source_sha256: str | None,
+) -> dict[str, Any]:
+    """Apply one uniform scale while retaining the original support bottom."""
     shape = obj.get("shape", {})
     if shape.get("shape_type") != "Mesh" or not shape.get("fpath"):
-        raise ValueError("Grasp-fit target requires a GLB rigid mesh.")
+        raise ValueError(f"Grasp-fit target {object_id!r} requires a GLB rigid mesh.")
     if not math.isfinite(opening) or opening <= 2 * _PAD_MARGIN + _FIT_MARGIN:
         raise ValueError("Grasp-fit requires a finite, positive calibrated opening.")
 
     import trimesh
 
     loaded = trimesh.load(str(shape["fpath"]), force="scene")
-    geometry = loaded.to_geometry()
+    geometry = (
+        loaded.to_geometry()
+        if hasattr(loaded, "to_geometry")
+        else loaded.dump(concatenate=True)
+    )
     vertices = np.asarray(geometry.vertices, dtype=np.float64)
     if (
         vertices.ndim != 2
@@ -88,8 +179,7 @@ def fit_e2_grasp_asset(
         or not vertices.size
         or not np.isfinite(vertices).all()
     ):
-        raise ValueError("Grasp-fit target has invalid mesh vertices.")
-    # Match the runtime GLB Y-up to DexSim Z-up conversion before applying body scale.
+        raise ValueError(f"Grasp-fit target {object_id!r} has invalid vertices.")
     sim_vertices = np.column_stack((vertices[:, 0], -vertices[:, 2], vertices[:, 1]))
     old_scale = np.asarray(obj.get("body_scale", [1.0] * 3), dtype=np.float64)
     if (
@@ -97,38 +187,41 @@ def fit_e2_grasp_asset(
         or not np.isfinite(old_scale).all()
         or (old_scale <= 0).any()
     ):
-        raise ValueError("Grasp-fit target has invalid body_scale.")
+        raise ValueError(f"Grasp-fit target {object_id!r} has invalid body_scale.")
     sim_vertices *= old_scale
     extents = np.ptp(sim_vertices, axis=0)
-    major = int(np.argmax(extents))
-    transverse = np.delete(extents, major)
-    span = float(transverse.max())
+    if fit_mode == "single_arm_transverse":
+        span = float(np.delete(extents, int(np.argmax(extents))).max())
+    else:
+        span = float(extents.min())
     if not math.isfinite(span) or span <= 0:
-        raise ValueError("Grasp-fit target has no measurable transverse span.")
+        raise ValueError(f"Grasp-fit target {object_id!r} has no measurable span.")
     usable = opening - 2 * _PAD_MARGIN
     factor = min(1.0, (usable - _FIT_MARGIN) / span)
     if factor < _MIN_SCALE:
         raise ValueError(
-            f"Grasp-fit requires scale {factor:.6f} below minimum {_MIN_SCALE:.2f}."
+            f"Grasp-fit target {object_id!r} requires scale {factor:.6f} "
+            f"below minimum {_MIN_SCALE:.2f}."
         )
 
     record = {
-        "policy": _POLICY,
         "object_id": object_id,
+        "task_types": task_types,
+        "resources": resources,
+        "fit_mode": fit_mode,
         "source_path": str(shape["fpath"]),
-        "source_sha256": scene.asset_hashes.get(object_id),
+        "source_sha256": source_sha256,
         "calibrated_opening_m": opening,
         "pad_margin_m": _PAD_MARGIN,
         "fit_margin_m": _FIT_MARGIN,
         "usable_span_m": usable,
-        "original_transverse_span_m": span,
+        "original_fit_span_m": span,
         "scale_factor": factor,
-        "minimum_scale": _MIN_SCALE,
         "mass_policy": "preserve",
         "status": "unchanged" if factor == 1.0 else "scaled",
     }
     if factor == 1.0:
-        return scene, record
+        return record
 
     rotation = Rotation.from_euler("XYZ", obj["init_rot"], degrees=True)
     original_z = float(obj["init_pos"][2])
@@ -138,10 +231,8 @@ def fit_e2_grasp_asset(
     new_scale = (old_scale * factor).tolist()
     obj["body_scale"] = new_scale
     obj["init_pos"][2] = new_z
-    for item in planner:
-        if item["runtime_uid"] == object_id:
-            item["body_scale"] = new_scale.copy()
-            item["init_pos"][2] = new_z
+    planner_obj["body_scale"] = new_scale.copy()
+    planner_obj["init_pos"][2] = new_z
     record.update(
         original_body_scale=old_scale.tolist(),
         adapted_body_scale=new_scale,
@@ -151,7 +242,4 @@ def fit_e2_grasp_asset(
         original_origin_z=original_z,
         adapted_origin_z=new_z,
     )
-    return (
-        replace(scene, rigid_objects=tuple(rigid), planner_objects=tuple(planner)),
-        record,
-    )
+    return record

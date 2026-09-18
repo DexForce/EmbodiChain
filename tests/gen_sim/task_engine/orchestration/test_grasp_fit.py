@@ -14,17 +14,19 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Opt-in E2 grasp-fit geometry and source preservation."""
+"""Opt-in semantic grasp-fit geometry and source preservation."""
 
 from __future__ import annotations
 
 import hashlib
+from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 import trimesh
 
-from embodichain.gen_sim.task_engine.orchestration.grasp_fit import fit_e2_grasp_asset
+from embodichain.gen_sim.task_engine.orchestration.grasp_fit import fit_grasp_assets
 from embodichain.gen_sim.task_engine.orchestration.scene_assets import (
     normalize_scene_assets,
 )
@@ -59,17 +61,26 @@ def _scene(tmp_path: Path, extents: tuple[float, float, float]) -> PreparedScene
     )
 
 
-def _graph() -> dict:
+def _graph(task_type: str = "E2", *, coordinated: bool = False) -> dict:
+    call = (
+        {
+            "kind": "registered",
+            "call_id": "simulation.coordinated_transport",
+            "arguments": {"object": "cup"},
+            "resources": {"left": "left", "right": "right"},
+        }
+        if coordinated
+        else {
+            "kind": "pick",
+            "object": "cup",
+            "resources": {"primary": "left"},
+        }
+    )
     return {
-        "task_groups": [{"task_type": "E2"}],
         "nodes": [
             {
-                "task_type": "E2",
-                "call": {
-                    "kind": "pick",
-                    "object": "cup",
-                    "resources": {"primary": "left"},
-                },
+                "task_type": task_type,
+                "call": call,
             }
         ],
     }
@@ -80,7 +91,10 @@ def test_grasp_fit_scales_only_target_and_preserves_support(tmp_path: Path) -> N
     source = Path(scene.rigid_objects[0]["shape"]["fpath"])
     original_bytes = source.read_bytes()
 
-    fitted, record = fit_e2_grasp_asset(scene, _graph(), opening=0.128)
+    fitted, report = fit_grasp_assets(
+        scene, _graph(), openings={"left": 0.128, "right": 0.128}
+    )
+    record = report["records"][0]
     normalized = normalize_scene_assets(fitted, tmp_path / "bundle")
 
     assert record["scale_factor"] == pytest.approx(0.123 / 0.133)
@@ -91,23 +105,103 @@ def test_grasp_fit_scales_only_target_and_preserves_support(tmp_path: Path) -> N
     assert normalized.rigid_objects[0]["body_scale"] == [1.0, 1.0, 1.0]
     assert normalized.asset_provenance[0]["source_sha256"] == record["source_sha256"]
     assert source.read_bytes() == original_bytes
+    assert report["schema_version"] == "gen_sim.asset-adaptation/v2"
+    assert record["task_types"] == ["E2"]
+    assert record["fit_mode"] == "single_arm_transverse"
 
 
 def test_grasp_fit_skips_compatible_asset_and_rejects_excess_shrink(
     tmp_path: Path,
 ) -> None:
-    compatible = _scene(tmp_path, (0.06, 0.19, 0.06))
-    unchanged, record = fit_e2_grasp_asset(compatible, _graph(), opening=0.128)
+    compatible = _scene(tmp_path, (0.06, 0.12, 0.06))
+    unchanged, report = fit_grasp_assets(
+        compatible, _graph("E1"), openings={"left": 0.128}
+    )
     assert unchanged is compatible
-    assert record["status"] == "unchanged"
+    assert report["status"] == "unchanged"
 
-    oversized = _scene(tmp_path, (0.51, 0.8, 0.51))
+    oversized = _scene(tmp_path, (0.51, 0.8, 0.6))
     with pytest.raises(ValueError, match="below minimum"):
-        fit_e2_grasp_asset(oversized, _graph(), opening=0.128)
+        fit_grasp_assets(oversized, _graph("E3"), openings={"left": 0.128})
 
 
-def test_grasp_fit_rejects_non_e2_graph(tmp_path: Path) -> None:
-    graph = _graph()
-    graph["task_groups"][0]["task_type"] = "E1"
-    with pytest.raises(ValueError, match="one E2 task group"):
-        fit_e2_grasp_asset(_scene(tmp_path, (0.133, 0.19, 0.132)), graph, opening=0.128)
+@pytest.mark.parametrize("task_type", ["E1", "E3", "E4"])
+def test_grasp_fit_supports_single_arm_pick_task_families(
+    tmp_path: Path, task_type: str
+) -> None:
+    fitted, report = fit_grasp_assets(
+        _scene(tmp_path, (0.14, 0.19, 0.13)),
+        _graph(task_type),
+        openings={"left": 0.128},
+    )
+    assert fitted is not None
+    assert report["records"][0]["task_types"] == [task_type]
+    assert report["records"][0]["fit_mode"] == "single_arm_transverse"
+
+
+def test_grasp_fit_supports_e5_coordinated_acquisition(tmp_path: Path) -> None:
+    _, report = fit_grasp_assets(
+        _scene(tmp_path, (0.13, 0.30, 0.20)),
+        _graph("E5", coordinated=True),
+        openings={"left": 0.128, "right": 0.128},
+    )
+    record = report["records"][0]
+    assert record["task_types"] == ["E5"]
+    assert record["resources"] == ["left", "right"]
+    assert record["scale_factor"] == pytest.approx(0.123 / 0.13)
+
+
+def test_grasp_fit_safely_skips_graph_without_acquisition(tmp_path: Path) -> None:
+    scene = _scene(tmp_path, (0.13, 0.30, 0.20))
+    graph = {
+        "nodes": [
+            {
+                "task_type": "E8",
+                "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.park",
+                    "arguments": {},
+                    "resources": {"primary": "left"},
+                },
+            }
+        ]
+    }
+    fitted, report = fit_grasp_assets(scene, graph, openings={"left": 0.128})
+    assert fitted is scene
+    assert report["status"] == "not_applicable"
+    assert report["records"] == []
+
+
+def test_grasp_fit_adapts_multiple_acquired_objects_only(tmp_path: Path) -> None:
+    scene = _scene(tmp_path, (0.14, 0.19, 0.13))
+    second_path = tmp_path / "bottle.glb"
+    trimesh.creation.box(extents=(0.15, 0.2, 0.14)).export(second_path)
+    second = deepcopy(scene.rigid_objects[0])
+    second["uid"] = "bottle"
+    second["shape"]["fpath"] = str(second_path)
+    second_planner = {**second, "runtime_uid": "bottle", "role": "rigid_object"}
+    scene = replace(
+        scene,
+        rigid_objects=(*scene.rigid_objects, second),
+        planner_objects=(*scene.planner_objects, second_planner),
+        asset_hashes={
+            **scene.asset_hashes,
+            "bottle": hashlib.sha256(second_path.read_bytes()).hexdigest(),
+        },
+    )
+    graph = _graph("E1")
+    graph["nodes"].append(
+        {
+            "task_type": "E3",
+            "call": {
+                "kind": "pick",
+                "object": "bottle",
+                "resources": {"primary": "right"},
+            },
+        }
+    )
+
+    _, report = fit_grasp_assets(scene, graph, openings={"left": 0.128, "right": 0.128})
+
+    assert [record["object_id"] for record in report["records"]] == ["bottle", "cup"]
+    assert [record["task_types"] for record in report["records"]] == [["E3"], ["E1"]]

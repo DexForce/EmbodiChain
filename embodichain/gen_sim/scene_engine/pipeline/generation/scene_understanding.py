@@ -54,15 +54,23 @@ _CATEGORY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 # Segmentation models are less reliable for compound object names than their
 # visual nouns; aliases improve recall without changing semantic IDs.
 _SEGMENTATION_PROMPT_ALIASES: dict[str, tuple[str, ...]] = {
-    "service_bell": ("bell", "desk bell", "call bell"),
-    "call_bell": ("bell", "desk bell", "service bell"),
-    "desk_bell": ("bell", "service bell", "call bell"),
+    "bell": ("hotel bell",),
+    "service_bell": ("bell", "desk bell", "call bell", "hotel bell"),
+    "call_bell": ("bell", "desk bell", "service bell", "hotel bell"),
+    "desk_bell": ("bell", "service bell", "call bell", "hotel bell"),
+    "water_dispenser": ("dispenser",),
     "placemat": ("blue placemat", "table mat"),
     "folder": ("placemat", "blue placemat", "table mat"),
     "mat": ("placemat", "blue placemat", "table mat"),
     "button_device": ("button", "push button", "emergency stop button"),
     "push_button": ("button", "push button", "emergency stop button"),
-    "hot_plate": ("hot plate", "electric hot plate", "cooktop"),
+    "hot_plate": (
+        "hot plate",
+        "electric hot plate",
+        "cooktop",
+        "stove",
+        "stainless steel stove",
+    ),
     "electric_hot_plate": ("hot plate", "electric hot plate", "cooktop"),
     "button_box": ("button", "push button", "button box"),
     "sheet": ("sheet of paper", "paper sheet", "blue placemat"),
@@ -84,6 +92,11 @@ _FORCED_ARTICULATION_CATEGORIES = {
     "switch",
     "switch_box",
     "knob",
+    "stove",
+    "electric_cooktop",
+    "coffee_machine",
+    "coffee_maker",
+    "water_dispenser",
     "control_panel",
     "knob_panel",
     "hot_plate",
@@ -473,7 +486,11 @@ def _analyze_image_objects(
 def _force_known_movable_objects_articulated(scene: Scene) -> None:
     """Promote known interactive object categories before generation dispatch."""
     for scene_object in scene.assets:
-        if scene_object.category in _FORCED_ARTICULATION_CATEGORIES:
+        semantic_text = " ".join((scene_object.name, scene_object.description)).lower()
+        button_box = (
+            scene_object.category in {"box", "toy"} and "button" in semantic_text
+        )
+        if scene_object.category in _FORCED_ARTICULATION_CATEGORIES or button_box:
             scene_object.is_articulated = True
 
 
