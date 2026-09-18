@@ -44,11 +44,16 @@ topics:
   keywords: [BaseEnv, EmbodiedEnv, EnvCfg, register_env, list-task, run-env, target_control_frequency,
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
-    ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema]
+    ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema,
+    show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标]
   paths: [topics/env-framework/env-framework.md]
   source_of_truth:
   - embodichain/cli/main.py
   - embodichain/cli/list_task.py
+  - embodichain/cli/_task_catalog.py
+  - embodichain/cli/show_task.py
+  - embodichain/lab/gym/envs/objectives/
+  - embodichain/lab/scripts/evaluate_task_objective.py
   - embodichain/lab/scripts/run_env.py
   - embodichain/lab/gym/utils/gym_utils.py
   - embodichain/lab/gym/utils/_component_composition.py
@@ -62,7 +67,8 @@ topics:
   watch_paths: [embodichain/lab/gym/envs/base_env.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/gym/envs/expert_trajectory.py,
     embodichain/lab/gym/envs/demo.py,
     embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_env.py,
-    embodichain_tasks/, tests/gym/envs/]
+    embodichain_tasks/, tests/gym/envs/, embodichain/lab/gym/envs/objectives/,
+    embodichain/lab/scripts/evaluate_task_objective.py, tests/lab/scripts/test_evaluate_task_objective.py]
   related_topics: [simulation-system, manager-functor, sim-visualization, task-programs, data-pipeline]
   status: active
 - id: manager-functor
