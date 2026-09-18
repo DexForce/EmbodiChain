@@ -98,6 +98,25 @@ def test_articulation_promotion_preserves_rigid_objects(category: str) -> None:
     assert scene.assets[0].is_articulated is False
 
 
+def test_button_box_description_promotes_generic_box() -> None:
+    scene = scene_understanding._parse_image_object_analysis_response(_response())
+    scene.assets[0].category = "box"
+    scene.assets[0].name = "gray box with green button"
+    scene.assets[0].description = "gray rectangular box with a push button on top"
+    scene_understanding._force_known_movable_objects_articulated(scene)
+    assert scene.assets[0].is_articulated is True
+
+
+@pytest.mark.parametrize(
+    ("category", "required_alias"),
+    [("bell", "hotel bell"), ("water_dispenser", "dispenser")],
+)
+def test_segmentation_aliases_cover_observed_service_vocabulary(
+    category: str, required_alias: str
+) -> None:
+    assert required_alias in scene_understanding._SEGMENTATION_PROMPT_ALIASES[category]
+
+
 def test_image_analysis_promotes_bell_before_generation(tmp_path: Path) -> None:
     payload = json.loads(_response())
     payload["assets"][0].update(category="bell", name="silver service bell")
