@@ -608,6 +608,12 @@ class BaseEnv(gym.Env):
         # TODO: Add randomization event here.
         pass
 
+    def _update_physical_objective(self) -> None:
+        """Observe optional physical objectives after all per-step state updates."""
+
+    def _reset_physical_objective(self, env_ids: Sequence[int] | torch.Tensor) -> None:
+        """Reset optional objective rows after episode initialization and recording."""
+
     def _hook_after_sim_step(
         self,
         obs: EnvObs,
@@ -901,6 +907,7 @@ class BaseEnv(gym.Env):
             # Reset hook for user to perform any custom reset logic.
             with self._profiler.section("initialize_episode"):
                 self._initialize_episode(reset_ids, **options)
+            self._reset_physical_objective(reset_ids)
             self._elapsed_steps[reset_ids] = 0
 
             self.sim.sync_render_state()
@@ -952,6 +959,7 @@ class BaseEnv(gym.Env):
                 self.sim.update(self.physics_dt, self.cfg.sim_steps_per_control)
             with self._profiler.section("update_sim_state"):
                 self._update_sim_state(**kwargs)
+            self._update_physical_objective()
 
             with self._profiler.section("get_obs"):
                 obs = self.get_obs(**kwargs)
