@@ -4,8 +4,8 @@ html_theme.sidebar_secondary.remove: true
 
 # Architecture Explorer
 
-Explore EmbodiChain through a system overview and four specialist views:
-Task Program, Simulation, Data & Learning, and Generation & Toolkits.
+Explore EmbodiChain through a system overview and five specialist views:
+Task Program, Simulation, Data & Learning, Generation & Toolkits, and Toolkits.
 Select a module to inspect its responsibility, follow direct relationships, and
 read the source evidence behind each connection. Source links identify the exact
 commit being documented; documentation links stay within this documentation version.

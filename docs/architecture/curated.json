@@ -1075,11 +1075,11 @@
     },
     {
       "id": "toolkits",
-      "label": "Toolkits",
+      "label": "Toolkit directory",
       "kind": "package",
       "topic_ids": [],
       "summary": "Standalone grasp sampling, collision-mesh preparation, and URDF assembly utilities.",
-      "details": "Use these tools to prepare robot and object assets before deployment. The toolkit family includes parallel-jaw grasp generation, convex decomposition, and URDF assembly, each with its own input and output contracts.",
+      "details": "Three standalone asset-preparation branches: GraspKit, URDF Assembly, and Convex Decomposition. Choose a branch for its input/output contract and public entry point. This package directory does not execute the tools as one pipeline.",
       "boundaries": [
         "Toolkit operations do not own the simulation lifecycle."
       ],
@@ -1967,11 +1967,11 @@
     },
     {
       "id": "grasp-tools",
-      "label": "Grasp generation",
+      "label": "GraspKit",
       "kind": "module",
       "topic_ids": [],
       "summary": "Defines parallel-jaw gripper models and grasp-pose generation interfaces.",
-      "details": "GraspKit prepares candidate grasp poses using explicit gripper geometry and supported generation implementations. Interactive annotation and sampling tools expose the underlying asset-preparation capabilities.",
+      "details": "Input: target meshes and explicit parallel-jaw gripper geometry. Output: candidate grasp poses or annotated contact pairs, depending on the operation. Entry: the public AntipodalGraspPoseGenerator API for generation, or embodichain annotate-grasp for interactive region annotation. Shared interfaces and gripper models are defined by graspkit.pose_generator.",
       "boundaries": [
         "A geometric grasp candidate is not proof of successful physical grasping."
       ],
@@ -1997,7 +1997,7 @@
       "kind": "class",
       "topic_ids": [],
       "summary": "Assembles URDF components, connections, sensors, and mesh resources.",
-      "details": "The assembly manager coordinates component naming, connection structure, sensor additions, mesh handling, and file output. Use it to prepare reusable robot descriptions before simulation or deployment.",
+      "details": "Input: registered URDF components, connection rules, sensor attachments, and mesh resources. Output: merged URDF XML, a saved URDF file, and copied mesh resources. Entry: construct URDFAssemblyManager, call add_component()/attach_sensor(), then merge_urdfs(output_path). This branch is a Python API, not a registered unified CLI command.",
       "boundaries": [
         "Assembly prepares descriptions; it does not execute robot control."
       ],
@@ -2023,7 +2023,7 @@
       "kind": "module",
       "topic_ids": [],
       "summary": "Prepares convex collision meshes for URDF assets.",
-      "details": "The decomposition command resolves input assets and conversion options, then invokes the collision-mesh preparation implementation. Resulting collision geometry can be used in later simulation asset workflows.",
+      "details": "Input: a URDF and its referenced meshes, with optional scale and inertia-recomputation settings. Output: convex collision meshes and an updated URDF. Entry: embodichain decompose-urdf --urdf_path <path>; the CLI delegates to generate_urdf_collision_convexes().",
       "boundaries": [
         "Collision-mesh preparation does not validate an entire robot task."
       ],
@@ -2884,6 +2884,318 @@
         {
           "docname": "api_reference/embodichain/embodichain.learning.rl",
           "label": "Running observation normalization documentation"
+        }
+      ]
+    },
+    {
+      "id": "gripper-model",
+      "label": "Parallel-jaw gripper model",
+      "kind": "class",
+      "topic_ids": [],
+      "summary": "Defines physical gripper dimensions independently of the sampling algorithm.",
+      "details": "Input: opening limits, finger dimensions, palm depth, and a model identifier. Output: validated geometry configuration shared by compatible parallel-jaw generators. Entry: ParallelJawGripperModelCfg or get_parallel_jaw_gripper_model().",
+      "boundaries": [
+        "A gripper geometry description is not a robot controller."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/graspkit/pose_generator.py",
+          "symbol": "ParallelJawGripperModelCfg",
+          "start_line": 49,
+          "end_line": 49,
+          "excerpt": "class ParallelJawGripperModelCfg:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/toolkits/grasp_generator",
+          "label": "Grasp generation documentation"
+        }
+      ]
+    },
+    {
+      "id": "antipodal-generator",
+      "label": "Antipodal grasp generator",
+      "kind": "class",
+      "topic_ids": [],
+      "summary": "Generates candidate grasp poses through a reusable parallel-jaw interface.",
+      "details": "Input: target mesh vertices/triangles, gripper geometry, sampling and collision policies. Output: valid or ranked grasp poses; prepare_mesh() also exposes annotated antipodal pairs. Entry: AntipodalGraspPoseGenerator.prepare_mesh(), get_valid_grasp_poses(), or get_best_grasp_poses().",
+      "boundaries": [
+        "Geometric candidates do not prove reachability or physical grasp success."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
+          "symbol": "AntipodalGraspPoseGenerator",
+          "start_line": 172,
+          "end_line": 172,
+          "excerpt": "class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/toolkits/grasp_generator",
+          "label": "Grasp generation documentation"
+        }
+      ]
+    },
+    {
+      "id": "grasp-backend",
+      "label": "Mesh grasp backend",
+      "kind": "class",
+      "topic_ids": [],
+      "summary": "Coordinates sampling, annotation, collision checks, and caches for one mesh.",
+      "details": "Input: one target-local mesh and resolved generation/collision settings. Output: cached antipodal pairs and mesh-specific grasp candidates. Entry: created lazily by AntipodalGraspPoseGenerator._backend().",
+      "boundaries": [
+        "Private implementation detail; applications should use the public generator API."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py",
+          "symbol": "_AntipodalMeshBackend",
+          "start_line": 56,
+          "end_line": 56,
+          "excerpt": "class _AntipodalMeshBackend:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/toolkits/grasp_generator",
+          "label": "Grasp generation documentation"
+        }
+      ]
+    },
+    {
+      "id": "grasp-sampler",
+      "label": "Antipodal sampling",
+      "kind": "class",
+      "topic_ids": [],
+      "summary": "Samples opposing surface contacts using mesh ray casting.",
+      "details": "Input: a triangle mesh and sampling/deviation parameters. Output: antipodal point pairs used to construct grasp candidates. Entry: AntipodalSampler, normally created by the mesh backend.",
+      "boundaries": [
+        "Contact-pair sampling alone does not check the complete gripper collision geometry."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/graspkit/pg_grasp/antipodal_sampler.py",
+          "symbol": "AntipodalSampler",
+          "start_line": 52,
+          "end_line": 52,
+          "excerpt": "class AntipodalSampler:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/toolkits/grasp_generator",
+          "label": "Grasp generation documentation"
+        }
+      ]
+    },
+    {
+      "id": "grasp-collision",
+      "label": "Gripper collision checks",
+      "kind": "class",
+      "topic_ids": [],
+      "summary": "Checks gripper geometry against the target mesh.",
+      "details": "Input: object mesh, gripper dimensions, and candidate grasp transforms. Output: collision results used to filter grasp candidates. Entry: GripperCollisionChecker through the mesh backend.",
+      "boundaries": [
+        "Target-mesh collision checking is not full-scene motion planning."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/graspkit/pg_grasp/gripper_collision_checker.py",
+          "symbol": "GripperCollisionChecker",
+          "start_line": 85,
+          "end_line": 85,
+          "excerpt": "class GripperCollisionChecker:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/toolkits/grasp_generator",
+          "label": "Grasp generation documentation"
+        }
+      ]
+    },
+    {
+      "id": "grasp-annotation",
+      "label": "Interactive grasp annotation",
+      "kind": "function",
+      "topic_ids": [],
+      "summary": "Offers browser selection of a graspable mesh region.",
+      "details": "Input: a mesh path and CLI sampling, gripper-width, and viewer settings. Output: selected-region antipodal pairs and backend annotation cache data. Entry: embodichain annotate-grasp; invokes the public generator with interactive annotation enabled.",
+      "boundaries": [
+        "Annotation prepares geometry; it does not execute a grasp."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/graspkit/scripts/annotate_grasp.py",
+          "symbol": "cli",
+          "start_line": 35,
+          "end_line": 35,
+          "excerpt": "def cli(argv: Sequence[str] | None = None) -> None:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/toolkits/grasp_generator",
+          "label": "Grasp generation documentation"
+        }
+      ]
+    },
+    {
+      "id": "urdf-components",
+      "label": "URDF components",
+      "kind": "class",
+      "topic_ids": [],
+      "summary": "Processes component links, joints, naming, and mesh references.",
+      "details": "Input: registered component descriptions and a shared mesh manager. Output: processed component elements with consistent names and rewritten mesh references. Entry: URDFAssemblyManager.add_component() registers inputs; merge_urdfs() delegates component processing.",
+      "boundaries": [
+        "Components describe robot structure; they are not live simulation entities."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/urdf_assembly/component.py",
+          "symbol": "URDFComponentManager",
+          "start_line": 85,
+          "end_line": 85,
+          "excerpt": "class URDFComponentManager:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/toolkits/urdf_assembly",
+          "label": "URDF assembly documentation"
+        }
+      ]
+    },
+    {
+      "id": "urdf-connections",
+      "label": "URDF connections",
+      "kind": "class",
+      "topic_ids": [],
+      "summary": "Applies component connection rules and sensor attachment joints.",
+      "details": "Input: processed links/joints, a base link, connection rules, and attachment transforms. Output: connection joints forming the assembled robot description. Entry: URDFConnectionManager inside URDFAssemblyManager.merge_urdfs().",
+      "boundaries": [
+        "Connection rules encode assembly structure, not runtime motion constraints."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/urdf_assembly/connection.py",
+          "symbol": "URDFConnectionManager",
+          "start_line": 30,
+          "end_line": 30,
+          "excerpt": "class URDFConnectionManager:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/toolkits/urdf_assembly",
+          "label": "URDF assembly documentation"
+        }
+      ]
+    },
+    {
+      "id": "urdf-sensors",
+      "label": "URDF sensor attachments",
+      "kind": "class",
+      "topic_ids": [],
+      "summary": "Processes sensor descriptions and attachment metadata for assembly.",
+      "details": "Input: sensor sources, names, types, parent links, and transforms. Output: processed sensor elements and attachment data for URDF assembly. Entry: URDFAssemblyManager.attach_sensor() and the sensor manager used during merge.",
+      "boundaries": [
+        "Sensor description assembly does not start a device driver or simulated sensor stream."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/urdf_assembly/sensor.py",
+          "symbol": "URDFSensorManager",
+          "start_line": 73,
+          "end_line": 73,
+          "excerpt": "class URDFSensorManager:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/toolkits/urdf_assembly",
+          "label": "URDF assembly documentation"
+        }
+      ]
+    },
+    {
+      "id": "urdf-meshes",
+      "label": "URDF mesh resources",
+      "kind": "class",
+      "topic_ids": [],
+      "summary": "Copies mesh resources and rewrites references for the assembled robot.",
+      "details": "Input: source mesh files, output directory, and component/sensor naming. Output: copied mesh resources and updated mesh references. Entry: URDFMeshManager shared by component and sensor managers.",
+      "boundaries": [
+        "Resource copying is separate from convex collision decomposition."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/urdf_assembly/mesh.py",
+          "symbol": "URDFMeshManager",
+          "start_line": 28,
+          "end_line": 28,
+          "excerpt": "class URDFMeshManager:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/toolkits/urdf_assembly",
+          "label": "URDF assembly documentation"
+        }
+      ]
+    },
+    {
+      "id": "urdf-writer",
+      "label": "URDF file output",
+      "kind": "class",
+      "topic_ids": [],
+      "summary": "Formats and persists the assembled URDF document.",
+      "details": "Input: merged XML elements, output path, and optional module metadata. Output: a formatted URDF file with assembly sections. Entry: URDFFileWriter.write_urdf(), called by merge_urdfs().",
+      "boundaries": [
+        "Writing a URDF does not validate a complete simulation task."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/urdf_assembly/file_writer.py",
+          "symbol": "URDFFileWriter",
+          "start_line": 28,
+          "end_line": 28,
+          "excerpt": "class URDFFileWriter:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/toolkits/urdf_assembly",
+          "label": "URDF assembly documentation"
+        }
+      ]
+    },
+    {
+      "id": "collision-processor",
+      "label": "URDF collision processor",
+      "kind": "module",
+      "topic_ids": [],
+      "summary": "Replaces mesh collisions with convex pieces and optionally recomputes inertia.",
+      "details": "Input: a URDF, referenced meshes, hull-count limit, and optional scale/inertia flags. Output: convex collision mesh files and a rewritten URDF. Entry: generate_urdf_collision_convexes() orchestrates URDFModifider.decompose_collisions() and save_urdf().",
+      "boundaries": [
+        "Inertia recomputation and scaling are optional; non-mesh geometries are not decomposed."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/acd/urdf_modifider.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 17,
+          "excerpt": "from __future__ import annotations"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/toolkits/convex_decomposition",
+          "label": "Convex decomposition documentation"
         }
       ]
     }
@@ -3805,24 +4117,6 @@
       ]
     },
     {
-      "id": "cli-calls-toolkits",
-      "source": "cli",
-      "target": "toolkits",
-      "relation": "calls",
-      "description": "Dispatches the toolkit convex-decomposition command.",
-      "provenance": "source-reviewed",
-      "scope": "Conditional lazy command dispatch through the registered handler; this registry entry does not itself execute the command.",
-      "evidence": [
-        {
-          "path": "embodichain/cli/main.py",
-          "symbol": "<module>",
-          "start_line": 99,
-          "end_line": 99,
-          "excerpt": "        target=\"embodichain.toolkits.acd.cli:main\","
-        }
-      ]
-    },
-    {
       "id": "cli-calls-convex-decomposition",
       "source": "cli",
       "target": "convex-decomposition",
@@ -3841,9 +4135,9 @@
       ]
     },
     {
-      "id": "cli-calls-grasp-tools",
+      "id": "cli-calls-grasp-annotation",
       "source": "cli",
-      "target": "grasp-tools",
+      "target": "grasp-annotation",
       "relation": "calls",
       "description": "Dispatches the GraspKit annotation entry point.",
       "provenance": "source-reviewed",
@@ -4836,6 +5130,222 @@
           "excerpt": "    \"apg\": (APGCfg, APG),"
         }
       ]
+    },
+    {
+      "id": "grasp-annotation-constructs-antipodal-generator",
+      "source": "grasp-annotation",
+      "target": "antipodal-generator",
+      "relation": "constructs",
+      "description": "Creates the public generator for interactive mesh annotation.",
+      "provenance": "source-reviewed",
+      "scope": "Invoked by annotate-grasp with interactive selection enabled.",
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/graspkit/scripts/annotate_grasp.py",
+          "symbol": "cli",
+          "start_line": 107,
+          "end_line": 107,
+          "excerpt": "    generator = AntipodalGraspPoseGenerator("
+        }
+      ]
+    },
+    {
+      "id": "antipodal-generator-constructs-grasp-backend",
+      "source": "antipodal-generator",
+      "target": "grasp-backend",
+      "relation": "constructs",
+      "description": "Creates a private backend for a previously uncached mesh/configuration key.",
+      "provenance": "source-reviewed",
+      "scope": "Lazy creation; existing compatible backends may be reused.",
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
+          "symbol": "AntipodalGraspPoseGenerator._backend",
+          "start_line": 303,
+          "end_line": 303,
+          "excerpt": "        backend = _AntipodalMeshBackend("
+        }
+      ]
+    },
+    {
+      "id": "antipodal-generator-reads-gripper-model",
+      "source": "antipodal-generator",
+      "target": "gripper-model",
+      "relation": "reads",
+      "description": "Reads physical gripper dimensions when preparing a mesh backend.",
+      "provenance": "source-reviewed",
+      "scope": "The model configuration is separate from algorithm and collision policies.",
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
+          "symbol": "AntipodalGraspPoseGenerator._backend",
+          "start_line": 299,
+          "end_line": 299,
+          "excerpt": "        model = self._gripper_model"
+        }
+      ]
+    },
+    {
+      "id": "antipodal-generator-imports-grasp-tools",
+      "source": "antipodal-generator",
+      "target": "grasp-tools",
+      "relation": "imports",
+      "description": "Imports shared grasp interfaces and gripper geometry contracts.",
+      "provenance": "source-reviewed",
+      "scope": "Imports the contracts through graspkit package re-exports; package grouping is not a runtime call.",
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/graspkit/pg_grasp/pose_generator.py",
+          "symbol": "<module>",
+          "start_line": 27,
+          "end_line": 27,
+          "excerpt": "from embodichain.toolkits.graspkit import ("
+        }
+      ]
+    },
+    {
+      "id": "grasp-backend-constructs-grasp-sampler",
+      "source": "grasp-backend",
+      "target": "grasp-sampler",
+      "relation": "constructs",
+      "description": "Creates the mesh-specific sampling or collision service.",
+      "provenance": "source-reviewed",
+      "scope": "Private mesh backend composition behind the public generator.",
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py",
+          "symbol": "_AntipodalMeshBackend.__init__",
+          "start_line": 118,
+          "end_line": 118,
+          "excerpt": "        self._antipodal_sampler = AntipodalSampler(cfg=sampler_cfg)"
+        }
+      ]
+    },
+    {
+      "id": "grasp-backend-constructs-grasp-collision",
+      "source": "grasp-backend",
+      "target": "grasp-collision",
+      "relation": "constructs",
+      "description": "Creates the mesh-specific sampling or collision service.",
+      "provenance": "source-reviewed",
+      "scope": "Private mesh backend composition behind the public generator.",
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/graspkit/pg_grasp/_antipodal_backend.py",
+          "symbol": "_AntipodalMeshBackend.__init__",
+          "start_line": 105,
+          "end_line": 105,
+          "excerpt": "        self._collision_checker = GripperCollisionChecker("
+        }
+      ]
+    },
+    {
+      "id": "urdf-assembly-constructs-urdf-components",
+      "source": "urdf-assembly",
+      "target": "urdf-components",
+      "relation": "constructs",
+      "description": "Creates the assembly helper for this responsibility.",
+      "provenance": "source-reviewed",
+      "scope": "Fresh local helper created during merge_urdfs; constructor injection does not select this merge-time instance.",
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/urdf_assembly/urdf_assembly_manager.py",
+          "symbol": "URDFAssemblyManager.merge_urdfs",
+          "start_line": 875,
+          "end_line": 875,
+          "excerpt": "        component_manager = URDFComponentManager("
+        }
+      ]
+    },
+    {
+      "id": "urdf-assembly-constructs-urdf-sensors",
+      "source": "urdf-assembly",
+      "target": "urdf-sensors",
+      "relation": "constructs",
+      "description": "Creates the assembly helper for this responsibility.",
+      "provenance": "source-reviewed",
+      "scope": "Fresh local helper created during merge_urdfs; constructor injection does not select this merge-time instance.",
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/urdf_assembly/urdf_assembly_manager.py",
+          "symbol": "URDFAssemblyManager.merge_urdfs",
+          "start_line": 883,
+          "end_line": 883,
+          "excerpt": "        sensor_manager = URDFSensorManager(mesh_manager)"
+        }
+      ]
+    },
+    {
+      "id": "urdf-assembly-constructs-urdf-meshes",
+      "source": "urdf-assembly",
+      "target": "urdf-meshes",
+      "relation": "constructs",
+      "description": "Creates the assembly helper for this responsibility.",
+      "provenance": "source-reviewed",
+      "scope": "Fresh local helper created during merge_urdfs; constructor injection does not select this merge-time instance.",
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/urdf_assembly/urdf_assembly_manager.py",
+          "symbol": "URDFAssemblyManager.merge_urdfs",
+          "start_line": 873,
+          "end_line": 873,
+          "excerpt": "        mesh_manager = URDFMeshManager(output_dir)"
+        }
+      ]
+    },
+    {
+      "id": "urdf-assembly-constructs-urdf-writer",
+      "source": "urdf-assembly",
+      "target": "urdf-writer",
+      "relation": "constructs",
+      "description": "Creates the assembly helper for this responsibility.",
+      "provenance": "source-reviewed",
+      "scope": "File writer is created during assembly-manager initialization and used by merge_urdfs.",
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/urdf_assembly/urdf_assembly_manager.py",
+          "symbol": "URDFAssemblyManager.__init__",
+          "start_line": 213,
+          "end_line": 213,
+          "excerpt": "        self.file_writer = URDFFileWriter()"
+        }
+      ]
+    },
+    {
+      "id": "urdf-assembly-constructs-urdf-connections",
+      "source": "urdf-assembly",
+      "target": "urdf-connections",
+      "relation": "constructs",
+      "description": "Creates the assembly helper for this responsibility.",
+      "provenance": "source-reviewed",
+      "scope": "Fresh local connection helper created during merge_urdfs.",
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/urdf_assembly/urdf_assembly_manager.py",
+          "symbol": "URDFAssemblyManager.merge_urdfs",
+          "start_line": 878,
+          "end_line": 878,
+          "excerpt": "        connection_manager = URDFConnectionManager("
+        }
+      ]
+    },
+    {
+      "id": "convex-decomposition-calls-collision-processor",
+      "source": "convex-decomposition",
+      "target": "collision-processor",
+      "relation": "calls",
+      "description": "Delegates CLI options to the URDF collision preparation entry.",
+      "provenance": "source-reviewed",
+      "scope": "The target module entry constructs URDFModifider and runs decomposition followed by save.",
+      "evidence": [
+        {
+          "path": "embodichain/toolkits/acd/cli.py",
+          "symbol": "main",
+          "start_line": 73,
+          "end_line": 73,
+          "excerpt": "    generate_urdf_collision_convexes("
+        }
+      ]
     }
   ],
   "views": [
@@ -4923,7 +5433,6 @@
         "policy-evaluation",
         "devices",
         "device-controller",
-        "toolkits",
         "grasp-tools",
         "urdf-assembly",
         "convex-decomposition"
@@ -4959,9 +5468,7 @@
         "cli-calls-data-assets",
         "cli-calls-scene-generation",
         "cli-calls-simready",
-        "cli-calls-toolkits",
         "cli-calls-convex-decomposition",
-        "cli-calls-grasp-tools",
         "cli-calls-policy-evaluation",
         "device-controller-holds-devices",
         "device-controller-holds-robot",
@@ -5133,12 +5640,17 @@
           ]
         },
         {
-          "id": "tools",
-          "label": "Devices & asset tools",
+          "id": "devices",
+          "label": "Input devices & control",
           "node_ids": [
             "devices",
-            "device-controller",
-            "toolkits",
+            "device-controller"
+          ]
+        },
+        {
+          "id": "toolkits",
+          "label": "Asset preparation toolkits",
+          "node_ids": [
             "grasp-tools",
             "urdf-assembly",
             "convex-decomposition"
@@ -5555,6 +6067,7 @@
         "cli",
         "data-assets",
         "configuration",
+        "toolkits",
         "scene-generation",
         "scene-understanding",
         "scene-assets",
@@ -5566,7 +6079,6 @@
         "simready",
         "asset-parsers",
         "gen-sim-sessions",
-        "toolkits",
         "grasp-tools",
         "urdf-assembly",
         "convex-decomposition",
@@ -5582,9 +6094,7 @@
         "cli-calls-data-assets",
         "cli-calls-scene-generation",
         "cli-calls-simready",
-        "cli-calls-toolkits",
         "cli-calls-convex-decomposition",
-        "cli-calls-grasp-tools",
         "cli-calls-workspace-analyzer",
         "scene-generation-calls-scene-understanding",
         "scene-generation-calls-scene-assets",
@@ -5596,11 +6106,12 @@
       "groups": [
         {
           "id": "generation-tooling-0",
-          "label": "Commands & assets",
+          "label": "Commands & directories",
           "node_ids": [
             "cli",
             "data-assets",
-            "configuration"
+            "configuration",
+            "toolkits"
           ]
         },
         {
@@ -5634,9 +6145,8 @@
         },
         {
           "id": "generation-tooling-2",
-          "label": "Robotics tools",
+          "label": "Asset preparation toolkits",
           "node_ids": [
-            "toolkits",
             "grasp-tools",
             "urdf-assembly",
             "convex-decomposition"
@@ -5649,6 +6159,89 @@
             "simulation-manager",
             "robot",
             "workspace-analyzer"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "toolkits",
+      "label": "Toolkits",
+      "description": "Three independent asset-preparation branches: grasp generation, URDF assembly, and convex collision preparation.",
+      "node_ids": [
+        "toolkits",
+        "cli",
+        "grasp-tools",
+        "gripper-model",
+        "antipodal-generator",
+        "grasp-backend",
+        "grasp-sampler",
+        "grasp-collision",
+        "grasp-annotation",
+        "urdf-assembly",
+        "urdf-components",
+        "urdf-connections",
+        "urdf-sensors",
+        "urdf-meshes",
+        "urdf-writer",
+        "convex-decomposition",
+        "collision-processor"
+      ],
+      "edge_ids": [
+        "cli-calls-convex-decomposition",
+        "cli-calls-grasp-annotation",
+        "grasp-annotation-constructs-antipodal-generator",
+        "antipodal-generator-constructs-grasp-backend",
+        "antipodal-generator-reads-gripper-model",
+        "antipodal-generator-imports-grasp-tools",
+        "grasp-backend-constructs-grasp-sampler",
+        "grasp-backend-constructs-grasp-collision",
+        "urdf-assembly-constructs-urdf-components",
+        "urdf-assembly-constructs-urdf-sensors",
+        "urdf-assembly-constructs-urdf-meshes",
+        "urdf-assembly-constructs-urdf-writer",
+        "urdf-assembly-constructs-urdf-connections",
+        "convex-decomposition-calls-collision-processor"
+      ],
+      "groups": [
+        {
+          "id": "toolkit-directory",
+          "label": "Toolkit directory & commands",
+          "node_ids": [
+            "toolkits",
+            "cli"
+          ]
+        },
+        {
+          "id": "graspkit",
+          "label": "GraspKit",
+          "node_ids": [
+            "grasp-tools",
+            "gripper-model",
+            "antipodal-generator",
+            "grasp-backend",
+            "grasp-sampler",
+            "grasp-collision",
+            "grasp-annotation"
+          ]
+        },
+        {
+          "id": "urdf-assembly",
+          "label": "URDF Assembly",
+          "node_ids": [
+            "urdf-assembly",
+            "urdf-components",
+            "urdf-connections",
+            "urdf-sensors",
+            "urdf-meshes",
+            "urdf-writer"
+          ]
+        },
+        {
+          "id": "convex-decomposition",
+          "label": "Convex Decomposition",
+          "node_ids": [
+            "convex-decomposition",
+            "collision-processor"
           ]
         }
       ]

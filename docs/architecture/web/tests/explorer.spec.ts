@@ -29,6 +29,9 @@ test('browse subsystem views and restore a module with its documentation', async
     ['simulation', 'Simulation', 'Object backend views', 'FIG. 03'],
     ['data-learning', 'Data & Learning', 'LeRobot recording', 'FIG. 04'],
     ['generation-tooling', 'Generation & Toolkits', 'SimReady pipeline', 'FIG. 05'],
+    ['toolkits', 'Toolkits', 'Antipodal grasp generator', 'FIG. 06'],
+    ['toolkits', 'Toolkits', 'URDF connections', 'FIG. 06'],
+    ['toolkits', 'Toolkits', 'URDF collision processor', 'FIG. 06'],
   ]) {
     await page.getByRole('button', { name: label, exact: true }).click();
     await expect(page.locator('.view-heading')).toContainText(figure);
@@ -36,6 +39,11 @@ test('browse subsystem views and restore a module with its documentation', async
     const panel = page.getByRole('complementary', { name: 'Node details' });
     await expect(panel.getByRole('heading', { name: module, exact: true })).toBeVisible();
     await expect(panel.locator('.documentation-links a').first()).toBeVisible();
+    if (view === 'toolkits') {
+      await expect(panel).toContainText('Input:');
+      await expect(panel).toContainText('Output:');
+      await expect(panel).toContainText('Entry:');
+    }
     await page.reload();
     await expect(panel.getByRole('heading', { name: module, exact: true })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`view=${view}`));

@@ -1,7 +1,7 @@
 # Architecture Explorer
 
 A static [frontend](web/README.md) provides a system overview and specialist views for
-Task Program, Simulation, Data & Learning, and Generation & Toolkits, with search, relationship filters, direct-neighbour exploration,
+Task Program, Simulation, Data & Learning, Generation & Toolkits, and Toolkits, with search, relationship filters, direct-neighbour exploration,
 source evidence, and shareable navigation. It consumes a
 [generated snapshot](generated/architecture.json); the Sphinx documentation embeds the viewer and a searchable text reference.
 Local and CI Sphinx builds regenerate their own version-specific assets.

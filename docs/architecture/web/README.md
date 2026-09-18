@@ -33,7 +33,7 @@ available. Card titles use 16px Inter, summaries 13px, and extended descriptions
 button usable with a pointer or keyboard. Selecting a different module resets the
 inspector to its introduction and focuses its heading.
 
-All 101 selected modules provide an introduction and documentation links. The
+All 113 selected modules provide an introduction and documentation links. The
 inspector puts guide/API cards before relationship evidence. Sphinx links open
 the corresponding HTML in the current documentation version; standalone links
 open the pinned Markdown or reStructuredText source using its resolved extension.
@@ -47,18 +47,23 @@ The implementation and visual styling are specific to this explorer.
 
 ## Included
 
-- System overview: 83 modules and 139 recorded relationships.
+- System overview: 82 modules and 137 recorded relationships.
 - Task Program: 23 modules and 67 recorded relationships.
 - Simulation: 34 modules and 56 recorded relationships, including rigid bodies and groups,
   articulations and robots, surface/volume deformables, lights, constraints, gizmos,
   and shared object interfaces/backend views.
 - Data & Learning: 29 modules and 36 recorded relationships.
-- Generation & Toolkits: 21 modules and 27 recorded relationships.
+- Generation & Toolkits: 21 modules and 25 recorded relationships.
+- Toolkits: 17 modules and 24 recorded relationships across GraspKit, URDF Assembly,
+  and Convex Decomposition; the toolkit directory is separate from executable entries.
 - Overview sections separate shared computation, data pipeline/persistence, generative
-  simulation, learning/policy optimization, and devices/asset tools.
+  simulation, learning/policy optimization, input devices/control, and asset-preparation toolkits.
 - Data & Learning separates online sampling, recording, depth sidecars, algorithm/model
   selection, and standard/differentiable rollouts. Generation & Toolkits separates
   image-to-scene generation, edit/import/export, and general asset ingestion.
+- Toolkit details state Input, Output, and Entry contracts. Private mesh backends
+  are identified explicitly; CLI dispatch targets the concrete annotation/decomposition
+  entry, and URDF Assembly is documented as a Python API.
 - Search by module name, responsibility, topic, or source path.
 - Relationship filters, adjacent-node highlighting, zoom, pan, and a minimap.
 - A readable 100% initial scale with responsive columns and scroll-to-pan navigation.
@@ -87,8 +92,8 @@ The frontend fetches the `architecture.json` served beside its HTML entry and
 validates it against `../architecture.schema.json`. Vite serves and bundles
 `../generated/architecture.json` for standalone development; Sphinx builds supply
 the freshly generated JSON through `ARCHITECTURE_DATA_PATH`. Loading and invalid
-data have explicit states. The current snapshot has 101 unique
-nodes and 205 unique edges; views share nodes and relationships. Its `revision`
+data have explicit states. The current snapshot has 113 unique
+nodes and 226 unique edges; views share nodes and relationships. Its `revision`
 identifies the committed source being described, independently of the frontend
 implementation commit.
 

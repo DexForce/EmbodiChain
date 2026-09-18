@@ -530,3 +530,39 @@ global packages. The recovered clean build generated the site and retained
 exactly 714 baseline warnings; all 731 normalized diagnostic lines match main.
 The embedded page was refreshed and visually inspected. The whole-site strict
 warning gate remains blocked by the existing backlog; isolated fixtures pass.
+
+
+## Toolkit Organization and Reading Contracts — 2026-09-18
+
+- [x] Separate runtime input devices from offline asset-preparation toolkits in
+  the overview. Keep the toolkit package in a directory group, apart from the
+  three executable/API branches.
+- [x] Add a sixth Toolkits view: directory/commands, GraspKit, URDF Assembly,
+  and Convex Decomposition. Add 12 nodes covering gripper geometry, public
+  generation, the private mesh backend, sampling/collision/annotation, URDF
+  components/connections/sensors/mesh/output, and collision processing.
+- [x] State Input, Output, and Entry in branch/helper introductions. Preserve
+  private/public boundaries and distinguish Python URDF assembly from the
+  registered annotate-grasp and decompose-urdf commands.
+- [x] Remove the duplicate CLI-to-toolkit-package relation; target the actual
+  annotation CLI entry and connect it to the public generator. Pin helper
+  construction and API/module references to source evidence.
+- [x] Extend the browser navigation check through each toolkit branch and
+  assert all three reading fields, documentation, and reload restoration.
+  It first failed on the absent sixth view; all 17 frontend unit, 8 standalone
+  browser, and 10 Sphinx browser tests now pass.
+
+Snapshot: 113 nodes and 226 edges (113 reviewed, 113 static). Toolkits contains
+17 nodes and 24 relationships. Overview contains 82 nodes / 137 relationships
+in 10 groups; Generation & Toolkits retains 21 nodes with 25 relationships.
+Independent source review clarified that merge_urdfs creates fresh component,
+mesh, and sensor helpers regardless of constructor injection. Evidence and
+scopes now cite those merge-time constructors; follow-up review has no findings.
+The six-view navigation and toolkit reading panel were visually inspected.
+Production bundle, Prettier, Black 26.3.1, source-data validation and API coverage
+(2075/2075) pass. No routed context topic is affected.
+
+The clean complete documentation build generated the refreshed embedded entry
+with six views. Its strict warning gate still reports the existing 714 warnings;
+all 731 normalized diagnostic lines match main exactly. The build used the same
+command-scoped DexSim package path documented above. No new diagnostics appeared.
