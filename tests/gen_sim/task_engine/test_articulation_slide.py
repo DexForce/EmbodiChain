@@ -439,6 +439,12 @@ def test_multi_part_bundle_keeps_distinct_bindings(
     assert len(integration["scene_binding"]["links"]) == 2
     lowerers = integration["runtime_services"]["registered_semantic_lowerers"]
     assert len(lowerers[0]["bindings"]) == 2
+    final_validators = load_config(paths.program)["program"]["items"][-1]["validators"]
+    assert {
+        (validator["articulation"], validator["joint"])
+        for validator in final_validators
+        if validator["kind"] == "articulation_joint_position"
+    } == {("drawer", "slide"), ("drawer", "right_slide")}
 
 
 @pytest.mark.parametrize("states", [("open",), ("closed",), ("open", "closed")])

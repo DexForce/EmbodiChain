@@ -549,6 +549,7 @@ def _program_payload(
     ]
     by_name = {item["name"]: item for item in items}
     articulation_bindings = graph_bindings(graph, scene)
+    final_articulation_validators: dict[tuple[str, str], dict[str, Any]] = {}
     for group in graph["task_groups"]:
         if group["task_type"] == "E6":
             first = next(n for n in graph["nodes"] if n["id"] == group["node_ids"][0])
@@ -562,6 +563,16 @@ def _program_payload(
             target, tolerance = binding.target(args["state"]), binding.tolerance(
                 args["state"]
             )
+            validator = {
+                "kind": "articulation_joint_position",
+                "articulation": binding.object_id,
+                "joint": binding.joint,
+                "minimum_position": target - tolerance,
+                "maximum_position": target + tolerance,
+            }
+            final_articulation_validators[(binding.object_id, binding.joint)] = (
+                validator
+            )
             for node_id in group["node_ids"]:
                 by_name[node_id]["post"] = [
                     {
@@ -570,15 +581,7 @@ def _program_payload(
                         "preset": preset_id(binding, args["state"]),
                     }
                 ]
-                by_name[node_id]["validators"] = [
-                    {
-                        "kind": "articulation_joint_position",
-                        "articulation": binding.object_id,
-                        "joint": binding.joint,
-                        "minimum_position": target - tolerance,
-                        "maximum_position": target + tolerance,
-                    }
-                ]
+                by_name[node_id]["validators"] = [deepcopy(validator)]
             continue
         terminal = by_name[group["node_ids"][-1]]
         for node_id in reversed(group["node_ids"]):
@@ -598,6 +601,16 @@ def _program_payload(
                 terminal.setdefault("post", []).extend(deepcopy(policies))
                 terminal.setdefault("validators", []).extend(deepcopy(validators))
             break
+    if final_articulation_validators:
+        terminal_validators = items[-1].setdefault("validators", [])
+        by_joint = {
+            (item["articulation"], item["joint"]): item
+            for item in terminal_validators
+            if item.get("kind") == "articulation_joint_position"
+        }
+        for joint_key, validator in final_articulation_validators.items():
+            if joint_key not in by_joint:
+                terminal_validators.append(deepcopy(validator))
     return {
         "program_id": program_id,
         "targets": deepcopy(graph["targets"]),
