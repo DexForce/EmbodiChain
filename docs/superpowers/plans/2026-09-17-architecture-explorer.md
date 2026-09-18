@@ -491,3 +491,42 @@ incremental Sphinx build emitted 1017 warnings; a clean rebuild returned to the
 714-warning baseline, with all 731 normalized diagnostic lines matching main
 exactly. The strict whole-site warning gate still fails on that existing backlog;
 the strict isolated Sphinx fixtures pass.
+
+
+## Data, GenSim, and Learning Breakdown — 2026-09-18
+
+- [x] Split the overview's Computation & applications section into shared
+  computation, data pipeline/persistence, generative simulation, learning/policy
+  optimization, and devices/asset tools, reusing specialist node identities.
+- [x] Add chunk-length sampling, depth reading/quantization, scene understanding,
+  geometry/refinement, internal scene asset preparation, scene edit layout/import,
+  asset parser dispatch, Gradio process ownership, PPO/GRPO/APG, ActorCritic/
+  ActorOnly, and running observation normalization (16 new nodes).
+- [x] Separate online data and depth sidecars, algorithms/policies, and standard/
+  differentiable rollouts in Data & Learning; separate scene generation, scene
+  editing/interchange, and general asset ingestion in Generation & Toolkits.
+- [x] Extend the existing browser navigation test to select a module from each
+  new overview section and verify details, documentation, and reload restoration.
+  The test failed on absent Chunk samplers before implementation. Update the
+  large-neighbourhood fixture for DatasetManager's new overview membership.
+
+Snapshot: 101 nodes, 205 relationships (102 reviewed, 103 statically extracted).
+Overview: 83 nodes / 139 relationships / 9 sections; Data & Learning: 29 / 36;
+Generation & Toolkits: 21 / 27. All 17 frontend unit, 8 standalone browser, and
+10 Sphinx browser tests pass. Production bundle, current/historical source-data
+validation, Prettier, Black 26.3.1, and 2075/2075 API-doc coverage pass; no routed
+context topics are affected.
+
+Independent review corrected item-mode chunk-length sampling cadence and the
+optional PPO value-clipping description. Follow-up review has no unresolved
+findings. Standalone rendering was inspected with GenSim and data-pipeline
+modules selected. GenSim session management intentionally has no inferred
+in-process dependency on every pipeline stage.
+
+The full-site build initially failed because the local editable DexSim install
+pointed at a removed build_Release directory. A command-scoped PYTHONPATH using
+the existing dexsim-package-preview build restored imports without changing
+global packages. The recovered clean build generated the site and retained
+exactly 714 baseline warnings; all 731 normalized diagnostic lines match main.
+The embedded page was refreshed and visually inspected. The whole-site strict
+warning gate remains blocked by the existing backlog; isolated fixtures pass.

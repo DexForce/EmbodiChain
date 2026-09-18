@@ -33,7 +33,7 @@ available. Card titles use 16px Inter, summaries 13px, and extended descriptions
 button usable with a pointer or keyboard. Selecting a different module resets the
 inspector to its introduction and focuses its heading.
 
-All 85 selected modules provide an introduction and documentation links. The
+All 101 selected modules provide an introduction and documentation links. The
 inspector puts guide/API cards before relationship evidence. Sphinx links open
 the corresponding HTML in the current documentation version; standalone links
 open the pinned Markdown or reStructuredText source using its resolved extension.
@@ -47,13 +47,18 @@ The implementation and visual styling are specific to this explorer.
 
 ## Included
 
-- System overview: 47 modules and 86 recorded relationships.
+- System overview: 83 modules and 139 recorded relationships.
 - Task Program: 23 modules and 67 recorded relationships.
 - Simulation: 34 modules and 56 recorded relationships, including rigid bodies and groups,
   articulations and robots, surface/volume deformables, lights, constraints, gizmos,
   and shared object interfaces/backend views.
-- Data & Learning: 20 modules and 25 recorded relationships.
-- Generation & Toolkits: 14 modules and 15 recorded relationships.
+- Data & Learning: 29 modules and 36 recorded relationships.
+- Generation & Toolkits: 21 modules and 27 recorded relationships.
+- Overview sections separate shared computation, data pipeline/persistence, generative
+  simulation, learning/policy optimization, and devices/asset tools.
+- Data & Learning separates online sampling, recording, depth sidecars, algorithm/model
+  selection, and standard/differentiable rollouts. Generation & Toolkits separates
+  image-to-scene generation, edit/import/export, and general asset ingestion.
 - Search by module name, responsibility, topic, or source path.
 - Relationship filters, adjacent-node highlighting, zoom, pan, and a minimap.
 - A readable 100% initial scale with responsive columns and scroll-to-pan navigation.
@@ -82,8 +87,8 @@ The frontend fetches the `architecture.json` served beside its HTML entry and
 validates it against `../architecture.schema.json`. Vite serves and bundles
 `../generated/architecture.json` for standalone development; Sphinx builds supply
 the freshly generated JSON through `ARCHITECTURE_DATA_PATH`. Loading and invalid
-data have explicit states. The current snapshot has 85 unique
-nodes and 177 unique edges; views share nodes and relationships. Its `revision`
+data have explicit states. The current snapshot has 101 unique
+nodes and 205 unique edges; views share nodes and relationships. Its `revision`
 identifies the committed source being described, independently of the frontend
 implementation commit.
 

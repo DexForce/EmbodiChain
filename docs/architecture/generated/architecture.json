@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "80b1d4591d6f403547a271b781ae9fcff0da4de3",
+  "revision": "e98d726e0e46013b6114c2c0853c046aed34ed21",
   "source_ref": "HEAD",
   "package_version": "0.2.4",
   "topic_index": "agent_context/MAP.yaml",
@@ -15,6 +15,93 @@
     "Static extraction scans the selected node source files only. Topic or package representation is not a completeness claim."
   ],
   "nodes": [
+    {
+      "id": "actor-critic",
+      "label": "ActorCritic",
+      "kind": "class",
+      "topic_ids": [
+        "rl-learning"
+      ],
+      "summary": "Provides Gaussian actions and value estimates with separate actor and critic inputs.",
+      "details": "The policy composes actor and critic networks, action-distribution parameters, and optional per-stream empirical observation normalization. Ordered observation groups can differ between actor and critic.",
+      "boundaries": [
+        "This model owns policy inference; the algorithm and trainer own optimization and rollout execution."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/models/actor_critic.py",
+          "symbol": "ActorCritic",
+          "start_line": 34,
+          "end_line": 34,
+          "excerpt": "class ActorCritic(Policy):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.learning.rl.models",
+          "label": "ActorCritic documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "actor-only",
+      "label": "ActorOnly",
+      "kind": "class",
+      "topic_ids": [
+        "rl-learning"
+      ],
+      "summary": "Provides Gaussian actions without a learned value network.",
+      "details": "ActorOnly implements the Policy interface with zero value outputs and supports reparameterized action sampling for differentiable consumers. The actor network and trainable distribution scale define its action distribution.",
+      "boundaries": [
+        "The absence of a critic does not select the trainer; rollout kind is selected by the algorithm."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/models/actor_only.py",
+          "symbol": "ActorOnly",
+          "start_line": 31,
+          "end_line": 31,
+          "excerpt": "class ActorOnly(Policy):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.learning.rl.models",
+          "label": "ActorOnly documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "apg",
+      "label": "APG",
+      "kind": "class",
+      "topic_ids": [
+        "rl-learning"
+      ],
+      "summary": "Optimizes policy parameters through differentiable rollout rewards.",
+      "details": "APG supports segmented and complete-rollout gradient accumulation before optimizer updates. DifferentiableTrainer and DifferentiableCollector retain the required computation graph.",
+      "boundaries": [
+        "Requires differentiable learning environments and graph-preserving actions; the simulator Gym training route rejects this algorithm."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/algo/apg.py",
+          "symbol": "APG",
+          "start_line": 103,
+          "end_line": 103,
+          "excerpt": "class APG(BaseAlgorithm[DifferentiableRollout]):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.learning.rl.algo",
+          "label": "APG documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
     {
       "id": "articulations",
       "label": "Articulations",
@@ -41,6 +128,35 @@
           "docname": "api_reference/embodichain/embodichain.lab.sim.objects",
           "label": "Articulations documentation",
           "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "asset-parsers",
+      "label": "Asset parser stages",
+      "kind": "class",
+      "topic_ids": [
+        "gen-sim"
+      ],
+      "summary": "Dispatches inspector, geometry, physics, USD, and internal asset parsers.",
+      "details": "ParserManager registers the supported parser implementations and runs the selected stage names for an ingested asset. Individual parsers own their metadata and resume behavior; the manager records parsed status after the pipeline completes.",
+      "boundaries": [
+        "Pipeline stages belong to single-asset ingestion, not the Scene Engine geometry processor."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/simready_pipeline/parser/base.py",
+          "symbol": "ParserManager",
+          "start_line": 46,
+          "end_line": 46,
+          "excerpt": "class ParserManager:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/generative_sim/simready_pipeline",
+          "label": "SimReady pipeline documentation",
+          "source_extension": ".md"
         }
       ]
     },
@@ -219,6 +335,35 @@
         {
           "docname": "api_reference/embodichain/embodichain.lab.sim.objects",
           "label": "BatchEntity documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "chunk-samplers",
+      "label": "Chunk samplers",
+      "kind": "module",
+      "topic_ids": [
+        "data-pipeline"
+      ],
+      "summary": "Selects fixed-shape time windows using configurable chunk-length distributions.",
+      "details": "ChunkSizeSampler defines the length-selection interface. UniformChunkSampler draws integer lengths from a closed interval; GMMChunkSampler draws from a Gaussian mixture. In batch mode, OnlineDataset draws one length per yield, shared across trajectories. Item mode fixes one length per iterator for consistent DataLoader collation.",
+      "boundaries": [
+        "Length selection does not determine whether the engine has an eligible, unlocked continuous trajectory window."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/data_pipeline/datasets/sampler.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 17,
+          "excerpt": "from __future__ import annotations"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.data_pipeline.datasets",
+          "label": "Chunk samplers documentation",
           "source_extension": ".rst"
         }
       ]
@@ -581,7 +726,7 @@
     },
     {
       "id": "data-pipeline",
-      "label": "Data pipeline",
+      "label": "OnlineDataEngine",
       "kind": "module",
       "topic_ids": [
         "data-pipeline"
@@ -667,8 +812,66 @@
       ]
     },
     {
+      "id": "depth-reader",
+      "label": "Depth sidecar reader",
+      "kind": "module",
+      "topic_ids": [
+        "data-pipeline"
+      ],
+      "summary": "Loads depth metadata and decodes episode/sensor depth video frames.",
+      "details": "DepthVideoLibrary indexes sidecars by episode and sensor. DepthVideoReader lazily decodes and caches one video, then dequantizes frames using its metadata. load_depth_dataset pairs a LeRobot dataset with its depth library.",
+      "boundaries": [
+        "Reader access consumes persisted sidecars; it does not read the online engine shared-memory buffer."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/data_pipeline/depth_video/reader.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 23,
+          "excerpt": "\"\"\"Readers for compressed depth sidecar videos.\n\nDecodes the ``gray12le``/HEVC MP4s written by :class:`DepthSidecarManager` and\ndequantizes them back to metres or millimetres. ``load_depth_dataset`` composes\na LeRobot dataset with its depth sidecar library so callers can read RGB, state,\naction, mask and depth together.\n\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.data_pipeline.depth_video",
+          "label": "Depth sidecar reader documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "depth-transforms",
+      "label": "Depth quantization",
+      "kind": "module",
+      "topic_ids": [
+        "data-pipeline"
+      ],
+      "summary": "Converts depth values to and from the sidecar video representation.",
+      "details": "The writer quantizes depth maps into 12-bit integer codes; the reader dequantizes decoded frames using the recorded range and mapping. Logarithmic and linear modes share a metadata contract.",
+      "boundaries": [
+        "Video codec losslessness does not eliminate quantization error in the original floating-point depth."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/data_pipeline/depth_video/depth_utils.py",
+          "symbol": "<module>",
+          "start_line": 24,
+          "end_line": 35,
+          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0…DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.data_pipeline.depth_video",
+          "label": "Depth quantization documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
       "id": "depth-video",
-      "label": "Depth video",
+      "label": "Depth sidecar writer",
       "kind": "class",
       "topic_ids": [
         "data-pipeline"
@@ -1021,6 +1224,35 @@
       "details": "The runner advances an atomic session through observation, command, and clock interfaces. Its command sink determines where commands go. Acknowledgement of a command is distinct from confirmation that a physical effect has occurred."
     },
     {
+      "id": "gen-sim-sessions",
+      "label": "GenSim UI sessions",
+      "kind": "class",
+      "topic_ids": [
+        "gen-sim"
+      ],
+      "summary": "Tracks one replaceable subprocess per Gradio session.",
+      "details": "SessionProcessRegistry coordinates session-owned subprocess replacement, cancellation, and cleanup for the GenSim web interface. Command construction and environment handling live alongside this registry.",
+      "boundaries": [
+        "This is web-session process ownership, not an in-process call edge to every generation stage."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/gradio_ui/app_processes.py",
+          "symbol": "SessionProcessRegistry",
+          "start_line": 109,
+          "end_line": 109,
+          "excerpt": "class SessionProcessRegistry:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/generative_sim/scene_engine",
+          "label": "Scene Engine guide",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
       "id": "gizmo",
       "label": "Gizmo",
       "kind": "class",
@@ -1072,6 +1304,35 @@
         {
           "docname": "features/toolkits/grasp_generator",
           "label": "Grasp generation documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "grpo",
+      "label": "GRPO",
+      "kind": "class",
+      "topic_ids": [
+        "rl-learning"
+      ],
+      "summary": "Optimizes policies with group-relative advantages from standard rollouts.",
+      "details": "GRPO uses grouped environments and relative-return advantages while consuming the standard collection/storage path. Actor-only policies can provide its action-distribution interface without a learned value function.",
+      "boundaries": [
+        "The configured environment count must satisfy the algorithm grouping contract."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/algo/grpo.py",
+          "symbol": "GRPO",
+          "start_line": 47,
+          "end_line": 47,
+          "excerpt": "class GRPO(BaseAlgorithm[TensorDict]):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.learning.rl.algo",
+          "label": "GRPO documentation",
           "source_extension": ".rst"
         }
       ]
@@ -1319,6 +1580,35 @@
       ]
     },
     {
+      "id": "observation-normalizer",
+      "label": "Running observation normalization",
+      "kind": "class",
+      "topic_ids": [
+        "rl-learning"
+      ],
+      "summary": "Normalizes continuous observation fields with explicit running-statistic updates.",
+      "details": "Running Welford statistics support a mask that preserves semantic fields. DifferentiableTrainer optionally creates or accepts this normalizer; normalize itself does not update statistics, allowing a fixed transform during complete rollouts.",
+      "boundaries": [
+        "This differentiable-training helper is distinct from ActorCritic per-stream empirical normalizers."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/normalization.py",
+          "symbol": "RunningObservationNormalizer",
+          "start_line": 29,
+          "end_line": 29,
+          "excerpt": "class RunningObservationNormalizer:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.learning.rl",
+          "label": "Running observation normalization documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
       "id": "online-dataset",
       "label": "OnlineDataset",
       "kind": "class",
@@ -1488,6 +1778,35 @@
         {
           "docname": "api_reference/embodichain/embodichain.learning.rl.policy_evaluation",
           "label": "Policy evaluation documentation",
+          "source_extension": ".rst"
+        }
+      ]
+    },
+    {
+      "id": "ppo",
+      "label": "PPO",
+      "kind": "class",
+      "topic_ids": [
+        "rl-learning"
+      ],
+      "summary": "Optimizes an actor-critic policy from standard TensorDict rollouts.",
+      "details": "PPO computes generalized advantage estimates and a clipped policy objective with configurable value loss over shuffled rollout minibatches. Collection and bootstrap storage belong to SyncCollector and RolloutBuffer.",
+      "boundaries": [
+        "Uses standard rollouts; it does not backpropagate through environment dynamics."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/algo/ppo.py",
+          "symbol": "PPO",
+          "start_line": 51,
+          "end_line": 51,
+          "excerpt": "class PPO(BaseAlgorithm[TensorDict]):"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.learning.rl.algo",
+          "label": "PPO documentation",
           "source_extension": ".rst"
         }
       ]
@@ -1851,6 +2170,35 @@
       ]
     },
     {
+      "id": "scene-assets",
+      "label": "Asset generation & refinement",
+      "kind": "function",
+      "topic_ids": [
+        "gen-sim"
+      ],
+      "summary": "Generates geometry and articulated assets, then refines scene placement.",
+      "details": "This stage generates coarse geometry from masks, optionally generates articulated USDC assets, runs the Scene Engine SimReady processor, and refines object placement using the validated support graph.",
+      "boundaries": [
+        "External geometry and articulation services are configured clients; scene generation does not register a runnable Gym deployment."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/generation/scene_generation.py",
+          "symbol": "generate_scene_and_refine",
+          "start_line": 94,
+          "end_line": 94,
+          "excerpt": "def generate_scene_and_refine("
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/generative_sim/scene_engine",
+          "label": "Scene Engine guide",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
       "id": "scene-editing",
       "label": "Scene editing",
       "kind": "module",
@@ -1938,6 +2286,64 @@
       "details": "The Scene Engine turns image inputs into scene-state and asset workflows for simulation preparation. Scene generation has its own pipeline lifecycle; loading and executing the resulting scene in a simulation is a separate responsibility."
     },
     {
+      "id": "scene-import",
+      "label": "Scene import",
+      "kind": "class",
+      "topic_ids": [
+        "gen-sim"
+      ],
+      "summary": "Reconstructs an editable scene and graph from a portable scene export.",
+      "details": "The importer validates scene_export metadata and object/graph identity, reconstructs assets and editable scene state, and supplies the edit pipeline. Import/export form the portable scene boundary.",
+      "boundaries": [
+        "Editable scene coordinates and portable runtime coordinates differ; body scale remains separate from mesh geometry."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/utils/scene_importer.py",
+          "symbol": "SceneExportImporter",
+          "start_line": 50,
+          "end_line": 50,
+          "excerpt": "class SceneExportImporter:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/generative_sim/scene_engine",
+          "label": "Scene export documentation",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
+      "id": "scene-layout",
+      "label": "Scene edit layout",
+      "kind": "function",
+      "topic_ids": [
+        "gen-sim"
+      ],
+      "summary": "Reconstructs scene placement against an edited goal graph.",
+      "details": "The edit pipeline identifies add/move variables and delegates graph-constrained placement to SceneLayoutConstructor. The previous scene, added assets, and updated graph define the inputs; the resulting scene is exported by the caller.",
+      "boundaries": [
+        "This entry owns the edit-layout stage; image-generation refinement is a separate entry."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/editing/scene_edit_layout_generation.py",
+          "symbol": "edit_layout",
+          "start_line": 32,
+          "end_line": 32,
+          "excerpt": "def edit_layout("
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/generative_sim/scene_engine",
+          "label": "Scene editing documentation",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
       "id": "scene-registry",
       "label": "SceneRegistry",
       "kind": "class",
@@ -1962,6 +2368,64 @@
         {
           "docname": "overview/task_program/scene_registry",
           "label": "SceneRegistry documentation",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
+      "id": "scene-simready",
+      "label": "Scene asset preparation",
+      "kind": "class",
+      "topic_ids": [
+        "gen-sim"
+      ],
+      "summary": "Prepares generated Scene Engine geometry for layout and export.",
+      "details": "The Scene Engine processor consumes coarse assets and layout metadata, then prepares the geometry used during placement refinement and export. Its configuration controls scale and pose processing within scene generation.",
+      "boundaries": [
+        "This internal Scene Engine processor is separate from the general single-asset SimReady ingestion pipeline."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/utils/simready_processor.py",
+          "symbol": "SimReadyProcessor",
+          "start_line": 90,
+          "end_line": 90,
+          "excerpt": "class SimReadyProcessor:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/generative_sim/scene_engine",
+          "label": "Scene Engine guide",
+          "source_extension": ".md"
+        }
+      ]
+    },
+    {
+      "id": "scene-understanding",
+      "label": "Scene understanding",
+      "kind": "function",
+      "topic_ids": [
+        "gen-sim"
+      ],
+      "summary": "Interprets an image, segments objects, and initializes a validated support graph.",
+      "details": "The image-generation entry calls this stage with VLM and segmentation clients. It builds semantic objects, validates masks, and obtains a scene graph keyed by known object IDs.",
+      "boundaries": [
+        "Model output and segmentation results are validated before downstream geometry generation."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/generation/scene_understanding.py",
+          "symbol": "understand_scene",
+          "start_line": 194,
+          "end_line": 194,
+          "excerpt": "def understand_scene("
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "features/generative_sim/scene_engine",
+          "label": "Scene Engine guide",
           "source_extension": ".md"
         }
       ]
@@ -2540,6 +3004,42 @@
     }
   ],
   "edges": [
+    {
+      "id": "actor-critic-inherits-policy",
+      "source": "actor-critic",
+      "target": "policy",
+      "relation": "inherits",
+      "description": "Implements the shared policy interface.",
+      "provenance": "source-reviewed",
+      "scope": "Direct Python inheritance; not an algorithm-to-model compatibility matrix.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/models/actor_critic.py",
+          "symbol": "ActorCritic",
+          "start_line": 34,
+          "end_line": 34,
+          "excerpt": "class ActorCritic(Policy):"
+        }
+      ]
+    },
+    {
+      "id": "actor-only-inherits-policy",
+      "source": "actor-only",
+      "target": "policy",
+      "relation": "inherits",
+      "description": "Implements the shared policy interface.",
+      "provenance": "source-reviewed",
+      "scope": "Direct Python inheritance; not an algorithm-to-model compatibility matrix.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/models/actor_only.py",
+          "symbol": "ActorOnly",
+          "start_line": 31,
+          "end_line": 31,
+          "excerpt": "class ActorOnly(Policy):"
+        }
+      ]
+    },
     {
       "id": "adapter-calls-compiler",
       "source": "environment-adapter",
@@ -3126,6 +3626,42 @@
       ]
     },
     {
+      "id": "depth-reader-imports-depth-transforms",
+      "source": "depth-reader",
+      "target": "depth-transforms",
+      "relation": "imports",
+      "description": "Imports the depth representation conversion helpers.",
+      "provenance": "source-reviewed",
+      "scope": "Static relative import; encoding and decoding are separate persistence operations.",
+      "evidence": [
+        {
+          "path": "embodichain/data_pipeline/depth_video/reader.py",
+          "symbol": "<module>",
+          "start_line": 36,
+          "end_line": 36,
+          "excerpt": "from .depth_utils import DEPTH_METER_UNIT, dequantize_depth"
+        }
+      ]
+    },
+    {
+      "id": "depth-video-imports-depth-transforms",
+      "source": "depth-video",
+      "target": "depth-transforms",
+      "relation": "imports",
+      "description": "Imports the depth representation conversion helpers.",
+      "provenance": "source-reviewed",
+      "scope": "Static relative import; encoding and decoding are separate persistence operations.",
+      "evidence": [
+        {
+          "path": "embodichain/data_pipeline/depth_video/writer.py",
+          "symbol": "<module>",
+          "start_line": 41,
+          "end_line": 41,
+          "excerpt": "from .depth_utils import DEPTH_QMAX, quantize_depth"
+        }
+      ]
+    },
+    {
       "id": "device-controller-holds-devices",
       "source": "device-controller",
       "target": "devices",
@@ -3194,6 +3730,24 @@
           "start_line": 135,
           "end_line": 135,
           "excerpt": "        self.collector = DifferentiableCollector("
+        }
+      ]
+    },
+    {
+      "id": "differentiable-trainer-constructs-observation-normalizer",
+      "source": "differentiable-trainer",
+      "target": "observation-normalizer",
+      "relation": "constructs",
+      "description": "Creates running observation statistics when normalization is enabled.",
+      "provenance": "source-reviewed",
+      "scope": "Only when enabled in configuration and no normalizer instance was supplied.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/differentiable_trainer.py",
+          "symbol": "DifferentiableTrainer.__init__",
+          "start_line": 129,
+          "end_line": 129,
+          "excerpt": "            observation_normalizer = RunningObservationNormalizer("
         }
       ]
     },
@@ -3773,6 +4327,60 @@
       ]
     },
     {
+      "id": "rl-algorithms-holds-apg",
+      "source": "rl-algorithms",
+      "target": "apg",
+      "relation": "holds",
+      "description": "Maps the registered algorithm name to its configuration and implementation.",
+      "provenance": "source-reviewed",
+      "scope": "Registry retains class references; this is not a running algorithm instance.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/algo/__init__.py",
+          "symbol": "<module>",
+          "start_line": 43,
+          "end_line": 43,
+          "excerpt": "    \"apg\": (APGCfg, APG),"
+        }
+      ]
+    },
+    {
+      "id": "rl-algorithms-holds-grpo",
+      "source": "rl-algorithms",
+      "target": "grpo",
+      "relation": "holds",
+      "description": "Maps the registered algorithm name to its configuration and implementation.",
+      "provenance": "source-reviewed",
+      "scope": "Registry retains class references; this is not a running algorithm instance.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/algo/__init__.py",
+          "symbol": "<module>",
+          "start_line": 45,
+          "end_line": 45,
+          "excerpt": "    \"grpo\": (GRPOCfg, GRPO),"
+        }
+      ]
+    },
+    {
+      "id": "rl-algorithms-holds-ppo",
+      "source": "rl-algorithms",
+      "target": "ppo",
+      "relation": "holds",
+      "description": "Maps the registered algorithm name to its configuration and implementation.",
+      "provenance": "source-reviewed",
+      "scope": "Registry retains class references; this is not a running algorithm instance.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/algo/__init__.py",
+          "symbol": "<module>",
+          "start_line": 44,
+          "end_line": 44,
+          "excerpt": "    \"ppo\": (PPOCfg, PPO),"
+        }
+      ]
+    },
+    {
       "id": "rl-constructs-collector",
       "source": "rl",
       "target": "collector",
@@ -3942,6 +4550,60 @@
       ]
     },
     {
+      "id": "scene-assets-constructs-scene-simready",
+      "source": "scene-assets",
+      "target": "scene-simready",
+      "relation": "constructs",
+      "description": "Creates the internal generated-asset processor.",
+      "provenance": "source-reviewed",
+      "scope": "Internal Scene Engine preparation, distinct from general asset ingest.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/generation/scene_generation.py",
+          "symbol": "generate_scene_and_refine",
+          "start_line": 155,
+          "end_line": 155,
+          "excerpt": "    simready_processor = SimReadyProcessor("
+        }
+      ]
+    },
+    {
+      "id": "scene-editing-calls-scene-layout",
+      "source": "scene-editing",
+      "target": "scene-layout",
+      "relation": "calls",
+      "description": "Runs placement reconstruction for the edited scene graph.",
+      "provenance": "source-reviewed",
+      "scope": "After preparing newly added scene assets.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/edit.py",
+          "symbol": "edit_scene",
+          "start_line": 106,
+          "end_line": 106,
+          "excerpt": "    post_edit_scene = edit_layout("
+        }
+      ]
+    },
+    {
+      "id": "scene-editing-constructs-scene-import",
+      "source": "scene-editing",
+      "target": "scene-import",
+      "relation": "constructs",
+      "description": "Creates the importer for the existing portable scene.",
+      "provenance": "source-reviewed",
+      "scope": "Before interpreting and applying the edit.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/edit.py",
+          "symbol": "edit_scene",
+          "start_line": 62,
+          "end_line": 62,
+          "excerpt": "    scene_importer = SceneExportImporter(output_root=output_root)"
+        }
+      ]
+    },
+    {
       "id": "scene-editing-imports-scene-export",
       "source": "scene-editing",
       "target": "scene-export",
@@ -3960,6 +4622,42 @@
       ]
     },
     {
+      "id": "scene-generation-calls-scene-assets",
+      "source": "scene-generation",
+      "target": "scene-assets",
+      "relation": "calls",
+      "description": "Runs this stage of image-to-scene generation.",
+      "provenance": "source-reviewed",
+      "scope": "Selected pipeline stage, not a complete execution trace.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/generate.py",
+          "symbol": "generate_scene_from_image",
+          "start_line": 86,
+          "end_line": 86,
+          "excerpt": "        scene = generate_scene_and_refine("
+        }
+      ]
+    },
+    {
+      "id": "scene-generation-calls-scene-understanding",
+      "source": "scene-generation",
+      "target": "scene-understanding",
+      "relation": "calls",
+      "description": "Runs this stage of image-to-scene generation.",
+      "provenance": "source-reviewed",
+      "scope": "Selected pipeline stage, not a complete execution trace.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/generate.py",
+          "symbol": "generate_scene_from_image",
+          "start_line": 64,
+          "end_line": 64,
+          "excerpt": "        scene, scene_graph = understand_scene("
+        }
+      ]
+    },
+    {
       "id": "scene-generation-imports-scene-export",
       "source": "scene-generation",
       "target": "scene-export",
@@ -3974,6 +4672,24 @@
           "start_line": 43,
           "end_line": 43,
           "excerpt": "from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import SceneExporter"
+        }
+      ]
+    },
+    {
+      "id": "simready-calls-asset-parsers",
+      "source": "simready",
+      "target": "asset-parsers",
+      "relation": "calls",
+      "description": "Dispatches parser stages for the ingested asset.",
+      "provenance": "source-reviewed",
+      "scope": "Caller supplies the ParserManager instance.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
+          "symbol": "ingest_one_asset",
+          "start_line": 178,
+          "end_line": 178,
+          "excerpt": "    manager.parse(asset, asset_root)"
         }
       ]
     },
@@ -4201,6 +4917,24 @@
       ]
     },
     {
+      "id": "static-imports-06051215554a",
+      "source": "simready",
+      "target": "asset-parsers",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
+          "symbol": "<module>",
+          "start_line": 38,
+          "end_line": 38,
+          "excerpt": "from embodichain.gen_sim.simready_pipeline.parser.base import ParserManager"
+        }
+      ]
+    },
+    {
       "id": "static-imports-095579fb8b55",
       "source": "differentiable-trainer",
       "target": "learning-env",
@@ -4417,6 +5151,42 @@
       ]
     },
     {
+      "id": "static-imports-27250ed2f690",
+      "source": "differentiable-trainer",
+      "target": "observation-normalizer",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/differentiable_trainer.py",
+          "symbol": "<module>",
+          "start_line": 42,
+          "end_line": 42,
+          "excerpt": "from embodichain.learning.rl.normalization import RunningObservationNormalizer"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-28b0ba416298",
+      "source": "scene-editing",
+      "target": "scene-import",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/edit.py",
+          "symbol": "<module>",
+          "start_line": 33,
+          "end_line": 35,
+          "excerpt": "from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (\n    SceneExportImporter,\n)"
+        }
+      ]
+    },
+    {
       "id": "static-imports-292707ad785d",
       "source": "simulation-factory",
       "target": "simulation-manager",
@@ -4539,6 +5309,24 @@
           "start_line": 45,
           "end_line": 45,
           "excerpt": "    from embodichain.lab.sim.sim_manager import SimulationManager"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-3c5c9b9d4364",
+      "source": "recording",
+      "target": "sensors",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/managers/datasets.py",
+          "symbol": "<module>",
+          "start_line": 45,
+          "end_line": 45,
+          "excerpt": "from embodichain.lab.sim.sensors import Camera, ContactSensor"
         }
       ]
     },
@@ -4795,6 +5583,24 @@
       ]
     },
     {
+      "id": "static-imports-630120740178",
+      "source": "policy-evaluation",
+      "target": "task-discovery",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/policy_evaluation/cli.py",
+          "symbol": "<module>",
+          "start_line": 32,
+          "end_line": 35,
+          "excerpt": "from embodichain.lab.gym.utils.registration import (\n    discover_task_packages,\n    execute_init_hooks,\n)"
+        }
+      ]
+    },
+    {
       "id": "static-imports-662f359eaf35",
       "source": "environment-adapter",
       "target": "parallel-execution",
@@ -4863,6 +5669,24 @@
           "start_line": 30,
           "end_line": 33,
           "excerpt": "from embodichain.lab.sim.motion.workspace.runtime import (\n    RobotWorkspace,\n    WorkspaceSample,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-6aa818d63f6a",
+      "source": "scene-generation",
+      "target": "scene-understanding",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/generate.py",
+          "symbol": "<module>",
+          "start_line": 35,
+          "end_line": 37,
+          "excerpt": "from embodichain.gen_sim.scene_engine.pipeline.generation.scene_understanding import (\n    understand_scene,\n)"
         }
       ]
     },
@@ -4971,6 +5795,42 @@
           "start_line": 35,
           "end_line": 35,
           "excerpt": "    from embodichain.lab.sim.sim_manager import SimulationManager"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-838e20361fa9",
+      "source": "ppo",
+      "target": "configuration",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/algo/ppo.py",
+          "symbol": "<module>",
+          "start_line": 26,
+          "end_line": 26,
+          "excerpt": "from embodichain.utils import configclass"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-853d19def5ce",
+      "source": "apg",
+      "target": "configuration",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/algo/apg.py",
+          "symbol": "<module>",
+          "start_line": 28,
+          "end_line": 28,
+          "excerpt": "from embodichain.utils import configclass"
         }
       ]
     },
@@ -5101,6 +5961,42 @@
       ]
     },
     {
+      "id": "static-imports-8fb0e4d5119f",
+      "source": "scene-generation",
+      "target": "scene-assets",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/generate.py",
+          "symbol": "<module>",
+          "start_line": 40,
+          "end_line": 42,
+          "excerpt": "from embodichain.gen_sim.scene_engine.pipeline.generation.scene_generation import (\n    generate_scene_and_refine,\n)"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-94a1dd303d9e",
+      "source": "grpo",
+      "target": "configuration",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/algo/grpo.py",
+          "symbol": "<module>",
+          "start_line": 27,
+          "end_line": 27,
+          "excerpt": "from embodichain.utils import configclass"
+        }
+      ]
+    },
+    {
       "id": "static-imports-9930294a9a0a",
       "source": "embodied-env",
       "target": "managers",
@@ -5191,6 +6087,24 @@
       ]
     },
     {
+      "id": "static-imports-a2ed85aaf8e4",
+      "source": "scene-assets",
+      "target": "scene-simready",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/generation/scene_generation.py",
+          "symbol": "<module>",
+          "start_line": 82,
+          "end_line": 85,
+          "excerpt": "from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (\n    SimReadyProcessor,\n    SimReadyProcessorConfig,\n)"
+        }
+      ]
+    },
+    {
       "id": "static-imports-a32fb8db0ae1",
       "source": "simulation-manager",
       "target": "physics",
@@ -5205,6 +6119,24 @@
           "start_line": 115,
           "end_line": 115,
           "excerpt": "from embodichain.lab.sim.physics import make_physics_backend"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-a595aa28bca6",
+      "source": "differentiable-collector",
+      "target": "observation-normalizer",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/learning/rl/collector/differentiable.py",
+          "symbol": "<module>",
+          "start_line": 36,
+          "end_line": 36,
+          "excerpt": "from embodichain.learning.rl.normalization import RunningObservationNormalizer"
         }
       ]
     },
@@ -5421,6 +6353,24 @@
           "start_line": 50,
           "end_line": 50,
           "excerpt": "from embodichain.lab.task_program.semantics.profiles import ResourceClaim"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-ccdd4adf0e59",
+      "source": "online-dataset",
+      "target": "chunk-samplers",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/data_pipeline/datasets/online_data.py",
+          "symbol": "<module>",
+          "start_line": 25,
+          "end_line": 25,
+          "excerpt": "from embodichain.data_pipeline.datasets.sampler import ChunkSizeSampler"
         }
       ]
     },
@@ -5695,6 +6645,24 @@
       ]
     },
     {
+      "id": "static-imports-f385bb6c0702",
+      "source": "scene-editing",
+      "target": "scene-layout",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/edit.py",
+          "symbol": "<module>",
+          "start_line": 45,
+          "end_line": 47,
+          "excerpt": "from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_layout_generation import (\n    edit_layout,\n)"
+        }
+      ]
+    },
+    {
       "id": "static-imports-f67e0a6b3152",
       "source": "gizmo",
       "target": "batch-entity",
@@ -5846,52 +6814,88 @@
       "description": "Module responsibilities and direct dependencies, from task entry points to motion execution.",
       "node_ids": [
         "cli",
+        "env-launcher",
+        "task-discovery",
         "tasks",
+        "config-loader",
         "components",
         "embodied-env",
+        "base-env",
         "managers",
+        "configuration",
+        "randomization",
+        "differentiable-env",
+        "event-manager",
         "program-compiler",
         "semantic-compiler",
         "semantic-executor",
         "environment-adapter",
         "gym-bridge",
+        "mllm",
         "atomic-engine",
         "motion-generator",
         "planners",
         "solvers",
+        "workspace",
+        "augmentation",
         "simulation-manager",
         "robot",
         "sensors",
         "physics",
         "visualization",
-        "compute",
-        "rl",
-        "data-pipeline",
-        "scene-generation",
-        "devices",
-        "env-launcher",
-        "config-loader",
-        "task-discovery",
-        "base-env",
-        "configuration",
-        "randomization",
-        "differentiable-env",
-        "mllm",
-        "workspace",
-        "augmentation",
-        "data-assets",
-        "toolkits",
-        "device-controller",
-        "event-manager",
-        "rl-routing",
-        "differentiable-trainer",
         "rigid-objects",
         "rigid-object-groups",
         "articulations",
         "deformables",
         "lights",
         "rigid-constraints",
-        "gizmo"
+        "gizmo",
+        "compute",
+        "compute-trajectory",
+        "compute-kinematics",
+        "dataset-manager",
+        "recording",
+        "async-recording",
+        "depth-video",
+        "depth-reader",
+        "depth-transforms",
+        "data-pipeline",
+        "online-dataset",
+        "chunk-samplers",
+        "data-assets",
+        "scene-generation",
+        "scene-understanding",
+        "scene-assets",
+        "scene-simready",
+        "scene-editing",
+        "scene-layout",
+        "scene-import",
+        "scene-export",
+        "simready",
+        "asset-parsers",
+        "gen-sim-sessions",
+        "rl-routing",
+        "rl-algorithms",
+        "ppo",
+        "grpo",
+        "apg",
+        "policy",
+        "actor-critic",
+        "actor-only",
+        "learning-env",
+        "rl",
+        "collector",
+        "rollout-buffer",
+        "differentiable-trainer",
+        "differentiable-collector",
+        "observation-normalizer",
+        "policy-evaluation",
+        "devices",
+        "device-controller",
+        "toolkits",
+        "grasp-tools",
+        "urdf-assembly",
+        "convex-decomposition"
       ],
       "edge_ids": [
         "adapter-calls-compiler",
@@ -5918,19 +6922,36 @@
         "simulation-holds-robot",
         "env-calls-add-robot",
         "motion-generator-imports-compute",
+        "recording-imports-data-assets",
+        "scene-generation-imports-scene-export",
+        "scene-editing-imports-scene-export",
         "cli-calls-data-assets",
         "cli-calls-scene-generation",
+        "cli-calls-simready",
         "cli-calls-toolkits",
+        "cli-calls-convex-decomposition",
+        "cli-calls-grasp-tools",
+        "cli-calls-policy-evaluation",
         "device-controller-holds-devices",
         "device-controller-holds-robot",
         "robot-constructs-workspace",
+        "embodied-env-constructs-dataset-manager",
         "embodied-env-constructs-event-manager",
         "mllm-calls-environment-adapter",
         "simulation-manager-constructs-rigid-objects",
         "simulation-manager-holds-articulations",
         "simulation-manager-holds-deformables",
         "robot-inherits-articulations",
+        "rl-constructs-collector",
+        "rl-constructs-rollout-buffer",
+        "rl-holds-policy",
+        "collector-holds-policy",
+        "differentiable-trainer-holds-policy",
+        "differentiable-trainer-constructs-differentiable-collector",
+        "recording-constructs-depth-video",
+        "async-recording-inherits-recording",
         "event-manager-calls-randomization",
+        "managers-imports-recording",
         "rl-routing-constructs-rl-train-from-config",
         "rl-routing-constructs-rl-train-learning-env",
         "rl-routing-constructs-differentiable-trainer-train-learning-env",
@@ -5939,8 +6960,31 @@
         "simulation-manager-constructs-gizmo",
         "simulation-manager-constructs-rigid-constraints",
         "rigid-constraints-holds-rigid-objects",
+        "scene-generation-calls-scene-understanding",
+        "scene-generation-calls-scene-assets",
+        "scene-assets-constructs-scene-simready",
+        "scene-editing-constructs-scene-import",
+        "scene-editing-calls-scene-layout",
+        "simready-calls-asset-parsers",
+        "depth-video-imports-depth-transforms",
+        "depth-reader-imports-depth-transforms",
+        "actor-critic-inherits-policy",
+        "actor-only-inherits-policy",
+        "differentiable-trainer-constructs-observation-normalizer",
+        "rl-algorithms-holds-ppo",
+        "rl-algorithms-holds-grpo",
+        "rl-algorithms-holds-apg",
         "static-imports-6887f760c2d8",
+        "static-imports-804702892bff",
+        "static-imports-ccdd4adf0e59",
         "static-imports-b09fe3ed8e44",
+        "static-imports-28b0ba416298",
+        "static-imports-be091d31f810",
+        "static-imports-f385bb6c0702",
+        "static-imports-6aa818d63f6a",
+        "static-imports-8fb0e4d5119f",
+        "static-imports-a2ed85aaf8e4",
+        "static-imports-06051215554a",
         "static-imports-547bae782cdb",
         "static-imports-f047844198f1",
         "static-imports-d383e37d25c0",
@@ -5952,10 +6996,12 @@
         "static-imports-36b2619c635f",
         "static-imports-9e7383aa2316",
         "static-imports-ddc442f99a40",
+        "static-imports-3c5c9b9d4364",
         "static-imports-6b4f407022e8",
         "static-imports-eb84e6a51ed6",
         "static-imports-d3f76cbdac77",
         "static-imports-ab15f87df47f",
+        "static-imports-bc79368679c6",
         "static-imports-f6f4ac515679",
         "static-imports-e80669c4fea7",
         "static-imports-fcfdcbea1ddf",
@@ -5975,11 +7021,22 @@
         "static-imports-1d1929c1f98e",
         "static-imports-b7b3ac4916aa",
         "static-imports-237cf7f458f9",
+        "static-imports-853d19def5ce",
+        "static-imports-94a1dd303d9e",
+        "static-imports-838e20361fa9",
+        "static-imports-6e4557b26941",
+        "static-imports-a595aa28bca6",
+        "static-imports-35d217cf64ea",
+        "static-imports-095579fb8b55",
+        "static-imports-27250ed2f690",
         "static-imports-0c5df98e497a",
+        "static-imports-630120740178",
+        "static-imports-da107fa3a9fd",
         "static-imports-b7c58479a36f",
         "static-imports-ae929a6258a7",
         "static-imports-8eec00e8d07c",
-        "static-imports-4c07006a2a5a"
+        "static-imports-4c07006a2a5a",
+        "static-imports-2b77ea1ae6d0"
       ],
       "groups": [
         {
@@ -6044,19 +7101,79 @@
           ]
         },
         {
-          "id": "foundation",
-          "label": "Computation & applications",
+          "id": "compute",
+          "label": "Shared computation",
           "node_ids": [
             "compute",
-            "rl",
+            "compute-trajectory",
+            "compute-kinematics"
+          ]
+        },
+        {
+          "id": "data-pipeline",
+          "label": "Data pipeline & persistence",
+          "node_ids": [
+            "dataset-manager",
+            "recording",
+            "async-recording",
+            "depth-video",
+            "depth-reader",
+            "depth-transforms",
             "data-pipeline",
+            "online-dataset",
+            "chunk-samplers",
+            "data-assets"
+          ]
+        },
+        {
+          "id": "gen-sim",
+          "label": "Generative simulation",
+          "node_ids": [
             "scene-generation",
-            "devices",
-            "data-assets",
-            "toolkits",
-            "device-controller",
+            "scene-understanding",
+            "scene-assets",
+            "scene-simready",
+            "scene-editing",
+            "scene-layout",
+            "scene-import",
+            "scene-export",
+            "simready",
+            "asset-parsers",
+            "gen-sim-sessions"
+          ]
+        },
+        {
+          "id": "learning",
+          "label": "Learning & policy optimization",
+          "node_ids": [
             "rl-routing",
-            "differentiable-trainer"
+            "rl-algorithms",
+            "ppo",
+            "grpo",
+            "apg",
+            "policy",
+            "actor-critic",
+            "actor-only",
+            "learning-env",
+            "rl",
+            "collector",
+            "rollout-buffer",
+            "differentiable-trainer",
+            "differentiable-collector",
+            "observation-normalizer",
+            "policy-evaluation"
+          ]
+        },
+        {
+          "id": "tools",
+          "label": "Devices & asset tools",
+          "node_ids": [
+            "devices",
+            "device-controller",
+            "toolkits",
+            "grasp-tools",
+            "urdf-assembly",
+            "convex-decomposition"
           ]
         }
       ]
@@ -6228,12 +7345,20 @@
       "node_ids": [
         "simulation-manager",
         "physics",
+        "sensors",
+        "visualization",
         "robot",
         "articulations",
         "rigid-objects",
+        "rigid-object-groups",
         "deformables",
-        "sensors",
-        "visualization",
+        "surface-deformables",
+        "volume-deformables",
+        "lights",
+        "rigid-constraints",
+        "gizmo",
+        "batch-entity",
+        "object-backends",
         "atomic-engine",
         "motion-generator",
         "planners",
@@ -6251,15 +7376,7 @@
         "event-manager",
         "randomization",
         "devices",
-        "device-controller",
-        "rigid-object-groups",
-        "lights",
-        "rigid-constraints",
-        "gizmo",
-        "surface-deformables",
-        "volume-deformables",
-        "object-backends",
-        "batch-entity"
+        "device-controller"
       ],
       "edge_ids": [
         "engine-holds-motion",
@@ -6403,20 +7520,29 @@
         "recording",
         "async-recording",
         "depth-video",
+        "depth-reader",
+        "depth-transforms",
         "data-pipeline",
         "online-dataset",
+        "chunk-samplers",
         "data-assets",
+        "cli",
         "rl-routing",
-        "rl-algorithms",
-        "policy",
-        "policy-evaluation",
         "learning-env",
+        "policy-evaluation",
+        "rl-algorithms",
+        "ppo",
+        "grpo",
+        "apg",
+        "policy",
+        "actor-critic",
+        "actor-only",
         "rl",
         "collector",
         "rollout-buffer",
         "differentiable-trainer",
         "differentiable-collector",
-        "cli"
+        "observation-normalizer"
       ],
       "edge_ids": [
         "cli-calls-training-assembly",
@@ -6436,51 +7562,82 @@
         "rl-routing-constructs-rl-train-from-config",
         "rl-routing-constructs-rl-train-learning-env",
         "rl-routing-constructs-differentiable-trainer-train-learning-env",
+        "depth-video-imports-depth-transforms",
+        "depth-reader-imports-depth-transforms",
+        "actor-critic-inherits-policy",
+        "actor-only-inherits-policy",
+        "differentiable-trainer-constructs-observation-normalizer",
+        "rl-algorithms-holds-ppo",
+        "rl-algorithms-holds-grpo",
+        "rl-algorithms-holds-apg",
         "static-imports-804702892bff",
+        "static-imports-ccdd4adf0e59",
         "static-imports-9930294a9a0a",
         "static-imports-6e4557b26941",
+        "static-imports-a595aa28bca6",
         "static-imports-35d217cf64ea",
         "static-imports-095579fb8b55",
+        "static-imports-27250ed2f690",
         "static-imports-da107fa3a9fd",
         "static-imports-b7c58479a36f",
         "static-imports-ae929a6258a7"
       ],
       "groups": [
         {
-          "id": "data-learning-0",
+          "id": "data-recording",
           "label": "Environment & recording",
           "node_ids": [
             "embodied-env",
             "managers",
             "dataset-manager",
             "recording",
-            "async-recording",
-            "depth-video"
+            "async-recording"
           ]
         },
         {
-          "id": "data-learning-1",
-          "label": "Online data",
+          "id": "depth-storage",
+          "label": "Depth sidecars",
+          "node_ids": [
+            "depth-video",
+            "depth-reader",
+            "depth-transforms"
+          ]
+        },
+        {
+          "id": "online-data",
+          "label": "Online data & sampling",
           "node_ids": [
             "data-pipeline",
             "online-dataset",
+            "chunk-samplers",
             "data-assets"
           ]
         },
         {
-          "id": "data-learning-2",
+          "id": "learning-assembly",
           "label": "Training assembly",
           "node_ids": [
             "cli",
             "rl-routing",
-            "rl-algorithms",
-            "policy",
-            "policy-evaluation",
-            "learning-env"
+            "learning-env",
+            "policy-evaluation"
           ]
         },
         {
-          "id": "data-learning-3",
+          "id": "learning-algorithms",
+          "label": "Algorithms & policies",
+          "node_ids": [
+            "rl-algorithms",
+            "ppo",
+            "grpo",
+            "apg",
+            "policy",
+            "actor-critic",
+            "actor-only"
+          ]
+        },
+        {
+          "id": "standard-rollouts",
           "label": "Standard rollouts",
           "node_ids": [
             "rl",
@@ -6489,11 +7646,12 @@
           ]
         },
         {
-          "id": "data-learning-4",
+          "id": "differentiable-rollouts",
           "label": "Differentiable rollouts",
           "node_ids": [
             "differentiable-trainer",
-            "differentiable-collector"
+            "differentiable-collector",
+            "observation-normalizer"
           ]
         }
       ]
@@ -6507,9 +7665,16 @@
         "data-assets",
         "configuration",
         "scene-generation",
+        "scene-understanding",
+        "scene-assets",
+        "scene-simready",
         "scene-editing",
+        "scene-layout",
+        "scene-import",
         "scene-export",
         "simready",
+        "asset-parsers",
+        "gen-sim-sessions",
         "toolkits",
         "grasp-tools",
         "urdf-assembly",
@@ -6530,7 +7695,19 @@
         "cli-calls-convex-decomposition",
         "cli-calls-grasp-tools",
         "cli-calls-workspace-analyzer",
+        "scene-generation-calls-scene-understanding",
+        "scene-generation-calls-scene-assets",
+        "scene-assets-constructs-scene-simready",
+        "scene-editing-constructs-scene-import",
+        "scene-editing-calls-scene-layout",
+        "simready-calls-asset-parsers",
+        "static-imports-28b0ba416298",
         "static-imports-be091d31f810",
+        "static-imports-f385bb6c0702",
+        "static-imports-6aa818d63f6a",
+        "static-imports-8fb0e4d5119f",
+        "static-imports-a2ed85aaf8e4",
+        "static-imports-06051215554a",
         "static-imports-9bc131d4e099",
         "static-imports-bba2d7266a0c",
         "static-imports-2b77ea1ae6d0"
@@ -6546,13 +7723,32 @@
           ]
         },
         {
-          "id": "generation-tooling-1",
-          "label": "Generative simulation",
+          "id": "scene-generation",
+          "label": "Image-to-scene generation",
           "node_ids": [
             "scene-generation",
+            "scene-understanding",
+            "scene-assets",
+            "scene-simready"
+          ]
+        },
+        {
+          "id": "scene-editing",
+          "label": "Scene editing & interchange",
+          "node_ids": [
             "scene-editing",
-            "scene-export",
-            "simready"
+            "scene-layout",
+            "scene-import",
+            "scene-export"
+          ]
+        },
+        {
+          "id": "asset-ingest",
+          "label": "Asset ingestion & UI sessions",
+          "node_ids": [
+            "simready",
+            "asset-parsers",
+            "gen-sim-sessions"
           ]
         },
         {

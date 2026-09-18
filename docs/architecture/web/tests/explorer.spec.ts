@@ -21,6 +21,9 @@ test('browse subsystem views and restore a module with its documentation', async
   await page.goto('/');
   for (const [view, label, module, figure] of [
     ['overview', 'System overview', 'Rigid object groups', 'FIG. 01'],
+    ['overview', 'System overview', 'Chunk samplers', 'FIG. 01'],
+    ['overview', 'System overview', 'Scene understanding', 'FIG. 01'],
+    ['overview', 'System overview', 'PPO', 'FIG. 01'],
     ['simulation', 'Simulation', 'Surface deformables', 'FIG. 03'],
     ['simulation', 'Simulation', 'Gizmo', 'FIG. 03'],
     ['simulation', 'Simulation', 'Object backend views', 'FIG. 03'],
@@ -151,8 +154,8 @@ test('large neighbourhoods keep the selected module readable above the fold', as
   };
   await expect.poll(titleIsInsideCanvas).toBe(true);
   await page.getByRole('button', { name: 'Direct neighbours only', exact: true }).click();
-  // Include dataset/event managers and the differentiable environment subclass.
-  await expect(page.locator('.react-flow__node-module')).toHaveCount(12);
+  // The expanded overview includes DatasetManager as a direct neighbour.
+  await expect(page.locator('.react-flow__node-module')).toHaveCount(13);
   await expect.poll(titleIsInsideCanvas).toBe(true);
 });
 
