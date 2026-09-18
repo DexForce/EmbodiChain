@@ -2647,6 +2647,10 @@ class Articulation(BatchEntity):
     ) -> None:
         """Set root-link linear and angular velocity in world coordinates.
 
+        If a native write fails, restore both velocity components for the
+        selected rows before propagating the error. A failed restoration raises
+        a rollback error chained from the original write error.
+
         Args:
             velocity: Selected root velocities with shape ``(N, 6)``; linear
                 velocity precedes angular velocity.
