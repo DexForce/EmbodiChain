@@ -41,6 +41,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
 )
 from embodichain.data import get_data_path
+from embodichain.utils.math import matrix_from_quat
 from dexsim.types import ActorType, DriveType
 
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
@@ -49,6 +50,12 @@ NUM_ARENAS = 10
 NEWTON_EFFORT_TARGET_MODE = 4
 DRIVE_TEST_STIFFNESS = 12.0
 DRIVE_TEST_DAMPING = 4.0
+
+
+def _inertia_tensor(inertia: torch.Tensor, com_pose: torch.Tensor) -> torch.Tensor:
+    """Compare physical inertia independently of the chosen principal axes."""
+    rotation = matrix_from_quat(com_pose[..., 3:])
+    return rotation @ torch.diag_embed(inertia) @ rotation.transpose(-1, -2)
 
 
 @pytest.mark.parametrize("physics", ["default", "newton"])
@@ -599,7 +606,14 @@ class BaseArticulationTest:
         assert data.default_com_pose.shape == data.com_pose.shape
         assert torch.allclose(self.art.default_link_masses, data.default_mass)
 
-    def test_reset_restores_default_link_mass_properties(self):
+    @pytest.mark.parametrize(
+        "principal_moments",
+        [(0.02, 0.02, 0.03), (0.02, 0.025, 0.03)],
+        ids=["repeated-moments", "distinct-moments"],
+    )
+    def test_reset_restores_default_link_mass_properties(
+        self, principal_moments: tuple[float, float, float]
+    ) -> None:
         """Partial reset restores mass, inertia, and COM only for selected rows."""
         data = self.art.body_data
         link_name = self.art.link_names[0]
@@ -609,7 +623,11 @@ class BaseArticulationTest:
         default_inertia = data.default_inertia[env_ids, link_id : link_id + 1].clone()
         default_com_pose = data.default_com_pose[env_ids, link_id : link_id + 1].clone()
         changed_mass = default_mass + 0.5
-        changed_inertia = default_inertia * 1.25
+        changed_inertia = (
+            torch.tensor(principal_moments, device=self.sim.device)
+            .expand_as(default_inertia)
+            .clone()
+        )
         changed_com_pose = default_com_pose.clone()
         changed_com_pose[..., 0] += 0.02
         changed_com_pose[..., 3:7] = torch.tensor(
@@ -622,12 +640,34 @@ class BaseArticulationTest:
             link_names=[link_name],
             env_ids=env_ids,
         )
+        # Matrix writes may reorder principal axes. The COM setter rotates the
+        # principal moments currently exposed by the backend.
+        moments_for_com = self.art.get_inertia(
+            link_names=[link_name], env_ids=env_ids
+        ).clone()
+        torch.testing.assert_close(
+            moments_for_com.sort(dim=-1).values,
+            changed_inertia.sort(dim=-1).values,
+            atol=1e-5,
+            rtol=0.0,
+        )
+        expected_tensor = _inertia_tensor(moments_for_com, changed_com_pose)
+        default_tensor = _inertia_tensor(default_inertia, default_com_pose)
         self.art.set_com_pose(
             changed_com_pose,
             link_names=[link_name],
             env_ids=env_ids,
         )
         self.sim.prepare()
+        torch.testing.assert_close(
+            _inertia_tensor(
+                self.art.get_inertia(link_names=[link_name], env_ids=env_ids),
+                self.art.get_com_pose(link_names=[link_name], env_ids=env_ids),
+            ),
+            expected_tensor,
+            atol=1e-5,
+            rtol=0.0,
+        )
 
         assert torch.allclose(
             data.default_mass[env_ids, link_id : link_id + 1], default_mass
@@ -651,10 +691,27 @@ class BaseArticulationTest:
 
         assert torch.allclose(mass_after_partial[0], default_mass[0], atol=1e-5)
         assert torch.allclose(mass_after_partial[1], changed_mass[1], atol=1e-5)
-        assert torch.allclose(inertia_after_partial[0], default_inertia[0], atol=1e-5)
-        assert torch.allclose(inertia_after_partial[1], changed_inertia[1], atol=1e-5)
-        assert torch.allclose(com_after_partial[0], default_com_pose[0], atol=1e-5)
-        assert torch.allclose(com_after_partial[1], changed_com_pose[1], atol=1e-5)
+        # Repeated eigenvalues permit different equivalent principal frames;
+        # the body-frame tensor and COM position must still round-trip.
+        tensor_after_partial = _inertia_tensor(inertia_after_partial, com_after_partial)
+        torch.testing.assert_close(
+            tensor_after_partial[0], default_tensor[0], atol=1e-5, rtol=0.0
+        )
+        torch.testing.assert_close(
+            tensor_after_partial[1], expected_tensor[1], atol=1e-5, rtol=0.0
+        )
+        torch.testing.assert_close(
+            com_after_partial[0, ..., :3],
+            default_com_pose[0, ..., :3],
+            atol=1e-5,
+            rtol=0.0,
+        )
+        torch.testing.assert_close(
+            com_after_partial[1, ..., :3],
+            changed_com_pose[1, ..., :3],
+            atol=1e-5,
+            rtol=0.0,
+        )
 
         self.art.reset(env_ids=[env_ids[1]])
         self.sim.prepare()
@@ -663,15 +720,23 @@ class BaseArticulationTest:
             default_mass,
             atol=1e-5,
         )
-        assert torch.allclose(
-            self.art.get_inertia(link_names=[link_name], env_ids=env_ids),
-            default_inertia,
-            atol=1e-5,
+        restored_com_pose = self.art.get_com_pose(
+            link_names=[link_name], env_ids=env_ids
         )
-        assert torch.allclose(
-            self.art.get_com_pose(link_names=[link_name], env_ids=env_ids),
-            default_com_pose,
+        torch.testing.assert_close(
+            _inertia_tensor(
+                self.art.get_inertia(link_names=[link_name], env_ids=env_ids),
+                restored_com_pose,
+            ),
+            default_tensor,
             atol=1e-5,
+            rtol=0.0,
+        )
+        torch.testing.assert_close(
+            restored_com_pose[..., :3],
+            default_com_pose[..., :3],
+            atol=1e-5,
+            rtol=0.0,
         )
 
     def test_control_api(self):
