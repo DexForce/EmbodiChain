@@ -439,8 +439,8 @@ class ArticulationData:
         """Refresh current mass, inertia diagonal, and local COM pose buffers.
 
         COM poses use the EmbodiChain convention ``xyz + xyzw`` and all
-        tensors use the public link ordering. DexSim physical-property
-        descriptors use ``wxyz`` and are converted at this boundary. Newton
+        tensors use the public link ordering. Legacy DexSim physical attributes
+        use ``wxyz`` and are converted at this boundary. Newton
         reads use the Scene batch to avoid per-link device-to-host transfers.
         """
         if self.is_newton_backend:
@@ -1338,17 +1338,19 @@ class Articulation(BatchEntity):
         inertia_changed = not torch.allclose(current_inertia, default_inertia)
         if mass_changed:
             self.set_mass(default_mass, link_names=self.link_names, env_ids=env_list)
-        if mass_changed or inertia_changed:
-            self.set_inertia(
-                default_inertia,
-                link_names=self.link_names,
-                env_ids=env_list,
-            )
-        if not torch.allclose(current_com_pose, default_com_pose):
-            self.set_com_pose(
-                default_com_pose,
-                link_names=self.link_names,
-                env_ids=env_list,
+        if (
+            mass_changed
+            or inertia_changed
+            or not torch.allclose(current_com_pose, default_com_pose)
+        ):
+            # Restore the saved pair together: a matrix write can reorder its
+            # principal axes, so an intervening read cannot supply the old frame.
+            if not self.is_spawn_bound:
+                self.set_inertia(
+                    default_inertia, link_names=self.link_names, env_ids=env_list
+                )
+            self._apply_com_pose(
+                default_com_pose, default_inertia, env_list, list(self.link_names)
             )
 
     @property
@@ -2060,7 +2062,7 @@ class Articulation(BatchEntity):
         """Set principal moments of inertia for selected links."""
         env_index = self._resolve_env_ids(env_ids)
         env_list = env_index.detach().cpu().tolist()
-        names, _ = self._resolve_link_names(link_names)
+        names, link_index = self._resolve_link_names(link_names)
         inertia = torch.as_tensor(inertia, dtype=torch.float32, device=self.device)
         expected_shape = (len(env_list), len(names), 3)
         if tuple(inertia.shape) != expected_shape:
@@ -2069,6 +2071,14 @@ class Articulation(BatchEntity):
                 f"got {tuple(inertia.shape)}."
             )
 
+        frames = (
+            self.body_data.com_pose[env_index[:, None], link_index[None, :], 3:7]
+            .detach()
+            .cpu()
+            .numpy()
+            if self.is_spawn_bound
+            else None
+        )
         values = inertia.detach().cpu().numpy()
         for i, env_idx in enumerate(env_list):
             entity = self._entities[env_idx]
@@ -2078,6 +2088,7 @@ class Articulation(BatchEntity):
                     entity,
                     name,
                     value,
+                    quaternion_xyzw=frames[i, j] if frames is not None else None,
                     is_spawn_bound=self.is_spawn_bound,
                     is_newton=self._data.is_newton_backend,
                 )
@@ -2109,7 +2120,7 @@ class Articulation(BatchEntity):
         """Set local COM poses in EmbodiChain ``xyz + xyzw`` convention."""
         env_index = self._resolve_env_ids(env_ids)
         env_list = env_index.detach().cpu().tolist()
-        names, _ = self._resolve_link_names(link_names)
+        names, link_index = self._resolve_link_names(link_names)
         com_pose = torch.as_tensor(com_pose, dtype=torch.float32, device=self.device)
         expected_shape = (len(env_list), len(names), 7)
         if tuple(com_pose.shape) != expected_shape:
@@ -2118,6 +2129,22 @@ class Articulation(BatchEntity):
                 f"got {tuple(com_pose.shape)}."
             )
 
+        inertia = (
+            self.body_data.inertia[env_index[:, None], link_index[None, :]]
+            if self.is_spawn_bound
+            else None
+        )
+        self._apply_com_pose(com_pose, inertia, env_list, names)
+
+    def _apply_com_pose(
+        self,
+        com_pose: torch.Tensor,
+        inertia: torch.Tensor | None,
+        env_list: list[int],
+        names: list[str],
+    ) -> None:
+        """Write a coherent pair of principal moments and local COM frames."""
+        moments = inertia.detach().cpu().numpy() if inertia is not None else None
         values = com_pose.detach().cpu().numpy()
         for i, env_idx in enumerate(env_list):
             entity = self._entities[env_idx]
@@ -2132,6 +2159,7 @@ class Articulation(BatchEntity):
                     name,
                     position,
                     quaternion,
+                    inertia=moments[i, j] if moments is not None else None,
                     is_spawn_bound=self.is_spawn_bound,
                     is_newton=self._data.is_newton_backend,
                 )
@@ -2216,8 +2244,8 @@ class Articulation(BatchEntity):
             environment-major order.
 
         .. attention::
-            The returned Spawn descriptor is a backend-native object;
-            ``com_quaternion`` is stored in ``wxyz`` order. Use
+            The returned Spawn descriptor stores a body-frame ``(3, 3)`` inertia
+            tensor and COM position, with no separate quaternion. Use
             :meth:`get_com_pose` for the EmbodiChain ``xyz + xyzw`` view.
         """
         if not (

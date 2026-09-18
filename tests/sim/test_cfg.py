@@ -338,9 +338,9 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         newton_fields == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields
     )
 
-    assert names(NewtonCollisionPipelineCfg) == names(
+    assert names(NewtonCollisionPipelineCfg) - {"soft_contact_margin"} == names(
         SpawnNewtonCollisionPipelineCfg
-    ) - {"requires_grad"}
+    ) - {"requires_grad", "soft_contact_gap"}
 
 
 def test_rigid_physics_from_dict_selects_backend_subclasses() -> None:
@@ -826,6 +826,10 @@ def test_newton_physics_inherits_common_gravity_and_collision_config() -> None:
     assert dexsim_cfg.collision_pipeline_cfg.broad_phase == "sap"
     assert dexsim_cfg.collision_pipeline_cfg.rigid_contact_max == 1234
     assert dexsim_cfg.collision_pipeline_cfg.update_interval == 4
+    assert (
+        dexsim_cfg.collision_pipeline_cfg.soft_contact_gap
+        == cfg.collision_cfg.soft_contact_margin
+    )
 
 
 def test_newton_physics_normalizes_mapping_collision_config() -> None:
