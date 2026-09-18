@@ -59,8 +59,10 @@ poses are `xyz + xyzw`, with identity quaternion `(0, 0, 0, 1)`. This covers
 object/link/COM state, FK/IK, sensor offsets, task configuration and math.
 
 Convert exactly once at external boundaries. DexSim Scene pose buffers use
-`xyzw + xyz` (layout permutation only); DexSim mass/COM descriptors use `wxyz`
-and require explicit `quat_xyzw_to_wxyz()`/`quat_wxyz_to_xyzw()` conversions.
+`xyzw + xyz` (layout permutation only). DexSim Spawn mass descriptors store a
+body-frame mat33 and COM position; EmbodiChain composes principal moments and
+`xyzw` orientation before that boundary. Legacy `PhysicalAttr` retains `wxyz`
+and requires explicit quaternion conversion.
 Newton/Warp transforms already use position plus `xyzw`. Explicit external
 formats such as visualization `*wxyz`, cuRobo poses and GenSim
 `rotation_quaternion_wxyz` must be converted before EmbodiChain math. Adapter

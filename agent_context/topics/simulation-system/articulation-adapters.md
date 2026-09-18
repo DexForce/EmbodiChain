@@ -43,6 +43,10 @@ full-batch tensors when partial writes must preserve other rows/DOFs. Avoid
 DexSim's host-materialized selected-DOF path. Pose conversions follow the
 [public quaternion contract](simulation-system.md#quaternion-and-pose-convention).
 
+`Articulation.set_root_velocity()` writes selected world-frame linear and
+angular velocities as `(N, 6)` rows. The Scene adapter validates the complete
+input before writing one selected batch; other environment rows are preserved.
+
 Newton root-pose writes filter unchanged rows before forwarding genuine
 changes, preserving CUDA graphs on ordinary fixed-root reset. Intentional
 initial anchor changes should occur after `prepare()` and before the first
@@ -53,6 +57,12 @@ FREE-joint state in both runtime buffers. Keep that compatibility access in
 `objects/backends/newton.py`; its selection cache is invalidated by topology
 revision. Remove the workaround only when the public Scene batch guarantees
 the same synchronization.
+
+Newton physical-property reads use the finalized Scene batch and reusable
+output tensors. Public inertia/COM remain principal moments plus `xyz + xyzw`;
+scalar descriptors expose body-frame mat33. Runtime writes compose the pair
+before DexSim, and reset restores the saved pair together to avoid reordering
+principal axes between two writes.
 
 ## Mimic coupling
 

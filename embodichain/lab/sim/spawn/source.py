@@ -32,6 +32,9 @@ from dexsim.spawn import (
     RigidBodyPhysicsDesc,
 )
 
+from embodichain.lab.sim._inertia import _principal_inertia_matrix
+from embodichain.utils.math import quat_wxyz_to_xyzw
+
 if TYPE_CHECKING:
     from dexsim.spawn import SceneBuilder
 
@@ -246,7 +249,6 @@ def _clear_invalid_source_com(desc: ArticulationDesc) -> None:
             continue
         body.inertia = None
         body.com_position = None
-        body.com_quaternion = None
         link._inertia_from_source = False
 
 
@@ -305,14 +307,7 @@ def _native_source_rigid_body(
     com_position: np.ndarray | None,
     com_quaternion: np.ndarray | None,
 ) -> RigidBodyPhysicsDesc:
-    """Convert one native ``PhysicalAttr`` into a sparse Spawn body snapshot.
-
-    This helper deliberately preserves DexSim Spawn's native ``wxyz``
-    ``com_quaternion`` because the returned descriptor is consumed by the
-    Default/Newton Spawn adapters, not exposed as an EmbodiChain config.
-    Public config conversion happens in ``RigidBodyPhysicsCfg`` at the
-    boundary before this snapshot is applied.
-    """
+    """Convert native principal moments and a wxyz frame into a mat33 snapshot."""
     dexsim_values = {
         item.name: getattr(attrib, item.name, None)
         for item in fields(DexsimPhysicsDesc)
@@ -320,9 +315,12 @@ def _native_source_rigid_body(
     return RigidBodyPhysicsDesc.dynamic(
         mass=mass,
         density=density,
-        inertia=inertia,
+        inertia=(
+            _principal_inertia_matrix(inertia, quat_wxyz_to_xyzw(com_quaternion))
+            if inertia is not None and com_quaternion is not None
+            else None
+        ),
         com_position=com_position,
-        com_quaternion=com_quaternion,
         dexsim=DexsimPhysicsDesc(**dexsim_values),
     )
 
@@ -462,28 +460,9 @@ def _restore_dexsim_mass_override(rigid_body: Any, link: Any) -> None:
         return
     set_mass(float(physics.mass))
 
-    if physics.inertia is not None:
-        set_inertia = getattr(rigid_body, "set_mass_space_inertia_tensor", None)
-        if set_inertia is not None:
-            set_inertia(np.asarray(physics.inertia, dtype=np.float32).reshape(-1)[:3])
-    if physics.com_position is not None or physics.com_quaternion is not None:
-        get_com = getattr(rigid_body, "get_cmass_local_pose", None)
-        set_com = getattr(rigid_body, "set_cmass_local_pose", None)
-        if get_com is not None and set_com is not None:
-            position, quaternion = get_com()
-            if physics.com_position is not None:
-                position = np.asarray(
-                    physics.com_position,
-                    dtype=np.float32,
-                ).reshape(
-                    -1
-                )[:3]
-            if physics.com_quaternion is not None:
-                quaternion = np.asarray(
-                    physics.com_quaternion,
-                    dtype=np.float32,
-                ).reshape(-1)[:4]
-            set_com(position, quaternion)
+    from dexsim.spawn.adapters.dexsim_adapter import _apply_rigid_body_mass_properties
+
+    _apply_rigid_body_mass_properties(rigid_body, physics, apply_inertia=True)
 
 
 def _read_urdf_inertial_states(
