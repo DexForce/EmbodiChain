@@ -494,12 +494,19 @@ CUDA. VBD contacts expose geometry without MuJoCo impulse reporting.
 
 V2 selects MuJoCo for articulations with active scalar joints and VBD for
 unselected free rigid bodies. Its current mixed dynamic branch is one-way:
-VBD contacts do not push back on the MuJoCo robot, and MuJoCo contacts are
-disabled in that branch. Therefore switching an existing locomotion or
-manipulation scene to V2 does not by itself guarantee equivalent contact
-dynamics. In particular, adding a VBD-owned free rigid body switches a floating
-robot out of the articulation-only branch and removes its MuJoCo ground
-support, even if the new body is far away. Explicit `mujoco_articulations` or
+VBD contacts do not push back on the MuJoCo robot. The local, uncommitted DexSim
+patch enables a second MuJoCo-Warp collision/contact pipeline by default; explicitly setting
+`mujoco_options.disable_contacts=True` still disables them. The compact
+MuJoCo view contains owned links and world-attached static shapes, but excludes
+VBD-owned free bodies and independent kinematic bodies. A stationary fixture
+declared kinematic therefore does not provide robot contact reaction in this
+view; use static for fixtures that never move. The stationary tables in
+`examples/sim/demo/grasp_cup_to_caffe.py` and
+`scripts/tutorials/atomic_action/coordinated_placement.py` use this declaration.
+Moving kinematic obstacles and
+dynamic-object reaction remain separate limitations. Mixed contact queries
+still lack equivalent impulse reporting, even when robot ground support is
+restored. Explicit `mujoco_articulations` or
 `mujoco_articulation_paths` can select complete joint trees; these are ownership
 choices, not automatic EmbodiChain rewrites. This integration does not extend
 deformable support.
@@ -536,6 +543,33 @@ Parallel-jaw manipulation keeps its Newton-only contact overlay (`condim=4`,
 `ke=4e4`, `kd=4e2`, torsional friction `0.1`, rolling friction `0.01`) on the
 gripper and manipulated objects. MuJoCo options affect articulation-owned
 contacts; free rigid-body contacts use VBD and need not have identical effects.
+The UR5 `pickup.py` and `axis_align.py` tutorials use a 0.013 m
+DH-gripper close target for their 5 cm cube under V2
+(`MJVBD_V2_CUBE_CLOSE_QPOS` in `tutorial_utils.py`). The old
+0.036 m target relies on contact feedback to stop the fingers; V2's one-way
+proxies instead reach that target and squeeze the cube out. This calibration
+is specific to that object and gripper, not a general grasp-width mapping.
+These two cube tutorials retain native VBD defaults. Their calibrated target
+does not make the original oversized command compatible with one-way contact.
+The UR5 `move_held_object.py` paper-cup tutorial uses a 0.0115 m candidate close target,
+gripper-only sliding friction 4, VBD contact history, and collision matching
+`latest`, retaining the native contact alpha. The shared simulation helper
+accepts scene-specific `newton_solver_options`; robot creation accepts
+`newton_gripper_friction` before spawning. The cup candidate has not achieved repeatable orientation alignment. These are explicit tutorial choices,
+not world defaults, and leave the cup and ground materials unchanged. The UR5-only `pour.py` tutorial uses the same contact history and gripper
+friction with a 0.013 m cube close target; its V2 initial height includes the
+ground's 1 mm contact margin. Other robot selections and physics solvers keep
+their existing targets and materials.
+The UR5 V2 `place.py` tutorial additionally uses contact alpha 0.5 and arm
+damping 1000 with the same cube target, gripper friction, and contact history.
+`add_tutorial_robot(arm_damping=...)` authors this drive override before spawn;
+other callers retain their configured gains. Release waypoints are unchanged,
+and landing orientation remains sensitive to contact variation.
+The `examples/sim/demo/scoop_ice.py` scene sets
+`vbd_options.rigid_body_contact_buffer_size=256` for dense ice contacts.
+This per-body VBD capacity is independent of MuJoCo's `nconmax`/`njmax`;
+overflow truncates the contacts used by each affected VBD body. The larger
+scene-specific capacity does not establish stable friction grasping.
 Explicit cloth, softbody, and differentiable examples keep their selected solvers.
 Newton's `suppress_warp_kernel_logs=True` suppresses Warp's one-time runtime
 banner plus module compile/load chatter during manager startup, build, facade
@@ -545,6 +579,10 @@ information is controlled separately by `dexsim_startup_info`.
 
 EmbodiChain-authored Newton collision shapes use a default margin and gap of
 `0.001 m` each only when no portable or Newton-native envelope is authored.
+The Pour tutorial starts its cube center at half its height. Under V2, Pour
+and Place add 1 mm initial clearance for the default ground's contact margin,
+avoiding penetration recovery before grasp planning. The global ground
+configuration stays unchanged to preserve the pure-MuJoCo locomotion path.
 `CollisionPropertiesCfg.contact_offset/rest_offset` are portable: Default uses
 them directly, while the Spawn compiler maps `rest_offset → margin` and
 `contact_offset - rest_offset → gap`. Both values must be present to derive a
@@ -1049,3 +1087,15 @@ Default source-physics capture preserves each link's replication collision
 filter while filling mass/COM properties. Spawn articulation mass-property
 writes use the live handle's `set_link_inertia` and `set_link_com_pose`; native
 COM quaternions are converted from EmbodiChain `xyzw` to DexSim `wxyz`.
+
+## Current MJVBD V2 validation dependency
+
+The local mixed-scene validation uses an uncommitted DexSim patch that defaults
+`mujoco_options.disable_contacts` to `False` while retaining
+`use_mujoco_contacts=True`. This runs MuJoCo-Warp collision/contact solving for
+its articulation/static compact view alongside Newton/VBD contacts. It differs
+from native V2 mixed-mode contact configuration and is not an accepted final
+architecture. Mixed locomotion alignment measurements depend on this patch;
+they do not establish native single-pipeline mixed-mode equivalence. A second
+local DexSim patch fixes convex mesh import coordinates. Neither patch is
+contained in this EmbodiChain commit.

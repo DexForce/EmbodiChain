@@ -42,6 +42,8 @@ from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    DEFAULT_GRIPPER_CLOSE_QPOS,
+    MJVBD_V2_CUBE_CLOSE_QPOS,
     add_tutorial_robot,
     broadcast_pose_batch,
     broadcast_waypoint_pose_batch,
@@ -81,6 +83,8 @@ def parse_arguments() -> argparse.Namespace:
 
 def create_pick_object(sim) -> RigidObject:
     """Create a settled cube for the PickUp and Place sequence."""
+    # Start outside the default ground's 1 mm VBD contact margin.
+    ground_clearance = 0.001 if sim.physics.solver_type == "mjvbd_v2" else 0.0
     obj = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="cube",
@@ -93,7 +97,7 @@ def create_pick_object(sim) -> RigidObject:
                 angular_damping=0.2,
                 newton_contact=sim.is_newton_backend,
             ),
-            init_pos=[*OBJECT_XY, 0.5 * OBJECT_SIZE[2]],
+            init_pos=[*OBJECT_XY, 0.5 * OBJECT_SIZE[2] + ground_clearance],
         )
     )
     sim.prepare()
@@ -125,15 +129,41 @@ def make_place_eef_poses(device: torch.device) -> torch.Tensor:
 def main() -> None:
     """Plan and replay PickUp followed by a multi-waypoint Place."""
     args = parse_arguments()
-    sim = create_tutorial_simulation(args)
-    robot = add_tutorial_robot(sim, args.robot, tcp_z=0.15)
+    sim = create_tutorial_simulation(
+        args,
+        newton_solver_options=(
+            {
+                "vbd_options": {
+                    "rigid_contact_history": True,
+                    "rigid_avbd_contact_alpha": 0.5,
+                },
+                "collision_options": {"contact_matching": "latest"},
+            }
+            if args.physics == "newton" and args.robot == "ur5"
+            else None
+        ),
+    )
+    use_vbd_grasp = sim.physics.solver_type == "mjvbd_v2" and args.robot == "ur5"
+    robot = add_tutorial_robot(
+        sim,
+        args.robot,
+        tcp_z=0.15,
+        newton_gripper_friction=4.0 if use_vbd_grasp else None,
+        # Reach the release waypoint before the fingers finish opening.
+        arm_damping=1000.0 if use_vbd_grasp else None,
+    )
     obj = create_pick_object(sim)
     sim.prepare()
     motion_gen = create_curobo_motion_generator(
         robot,
         planner=getattr(args, "planner", "trapezoidal"),
     )
-    hand_open, hand_close = get_hand_open_close_qpos(robot)
+    hand_open, hand_close = get_hand_open_close_qpos(
+        robot,
+        close_qpos=(
+            MJVBD_V2_CUBE_CLOSE_QPOS if use_vbd_grasp else DEFAULT_GRIPPER_CLOSE_QPOS
+        ),
+    )
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
 
     engine = create_simulation_atomic_action_engine(

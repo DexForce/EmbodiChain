@@ -161,6 +161,8 @@ PICKMENT_LIFT_HEIGHT = 0.10
 PICKMENT_HAND_INTERP_STEPS = 10
 PICKMENT_HOLD_STEPS = 4
 ROBOTIQ_2F_140_CLOSE_QPOS = 0.7
+# Calibrated for the plastic tray and UR5/DH PGI one-way contact.
+MJVBD_V2_TRAY_CLOSE_QPOS = 0.023
 TRAJECTORY_SIM_STEPS = 4
 
 
@@ -189,6 +191,8 @@ def parse_arguments() -> argparse.Namespace:
 def create_dual_robot(
     sim: SimulationManager,
     robot_type: TutorialRobot,
+    *,
+    newton_gripper_friction: float | None = None,
 ) -> Robot:
     """Create the selected dual-arm robot with its matching grippers."""
     return add_dual_tutorial_robot(
@@ -198,6 +202,7 @@ def create_dual_robot(
         urdf_name=f"dual_{robot_type}_coordinated_pickment",
         tcp_z=GRIPPER_TCP_Z,
         solver="pytorch",
+        newton_gripper_friction=newton_gripper_friction,
     )
 
 
@@ -395,6 +400,12 @@ def run_coordinated_pickment_demo(
     hand_close_qpos = (
         ROBOTIQ_2F_140_CLOSE_QPOS if args.robot == "ur10" else preset.hand_close_qpos
     )
+    if (
+        args.robot == "ur5"
+        and args.object == "plastic_tray"
+        and sim.physics.solver_type == "mjvbd_v2"
+    ):
+        hand_close_qpos = MJVBD_V2_TRAY_CLOSE_QPOS
     left_open, left_close = get_hand_open_close_qpos(
         robot,
         hand_control_part="left_hand",
@@ -527,8 +538,27 @@ def main() -> None:
     sim = create_tutorial_simulation(
         args,
         arena_space=3.0,
+        newton_solver_options=(
+            {
+                "vbd_options": {"rigid_contact_history": True},
+                "collision_options": {"contact_matching": "latest"},
+            }
+            if args.physics == "newton"
+            and args.robot == "ur5"
+            and args.object == "plastic_tray"
+            else None
+        ),
     )
-    robot = create_dual_robot(sim, args.robot)
+    use_vbd_grasp = (
+        args.robot == "ur5"
+        and args.object == "plastic_tray"
+        and sim.physics.solver_type == "mjvbd_v2"
+    )
+    robot = create_dual_robot(
+        sim,
+        args.robot,
+        newton_gripper_friction=4.0 if use_vbd_grasp else None,
+    )
     run_coordinated_pickment_demo(args, sim, robot)
 
 

@@ -92,6 +92,35 @@ repeated-pick/open-drawer environment components carry the same Newton-only
 overlays, while their declared Default backend continues to consume only the
 portable fields.
 
+For UR5 with `mjvbd_v2`, the paper-cup `move_held_object.py` tutorial opts into
+VBD contact history with `latest` collision matching, sliding friction 4 on the
+gripper alone, and a 0.0115 m candidate close target. Transport orientation
+is not yet repeatably aligned. The native contact alpha and the cup
+and ground materials are unchanged. `create_tutorial_simulation` accepts
+`newton_solver_options`, and `add_tutorial_robot` accepts
+`newton_gripper_friction` and optional `arm_damping`; these are authored before
+model construction. This
+calibration also applies to the UR5-only `pour.py` tutorial with its 0.013 m
+cube close target. The UR5 plastic-tray `coordinated_pickment.py` tutorial uses
+the same contact settings with a 0.023 m close target; the dual-arm helper
+`add_dual_tutorial_robot` also accepts `newton_gripper_friction`.
+The UR5 vertical-can `hand_over.py` tutorial uses those contact settings with
+left/right close targets of 0.007/0.0055 m and retains its original arm drives.
+Its replay callback holds the current targets for one second immediately before
+the compiled `receive_release` segment so the receiving arm can settle before
+opening. The wait uses segment metadata, not a fixed waypoint index, and is
+scoped to that same profile. This scene-specific calibration does not promise
+identical final poses or stability across initial-state changes. Horizontal
+objects and other robot families retain their prior configuration.
+The UR5 V2 `place.py` profile uses a 0.013 m close target, gripper friction 4,
+contact history with `latest` matching, contact alpha 0.5, and arm damping 1000.
+The lower arm damping reduces tracking lag when the fingers open; finger
+drives and authored release waypoints remain unchanged. Complete cached
+replays preserve the grasp to release, but landing orientation still varies;
+this is a scoped improvement, not a claim of full solver equivalence.
+These explicit scene choices do not change world defaults
+or establish a generic object-width-to-gripper-target mapping.
+
 ## Semantic integration boundary
 
 `semantics` contains:

@@ -111,6 +111,9 @@ TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
     palm_depth=0.096,
 )
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.036
+# Calibrated for the UR5's DH-PGI gripper holding the tutorial's 5 cm cube.
+# V2's one-way contacts cannot stop the fingers at an oversized close target.
+MJVBD_V2_CUBE_CLOSE_QPOS = 0.013
 NEWTON_GRASP_CONTACT_STIFFNESS = 4.0e4
 NEWTON_GRASP_CONTACT_DAMPING = 4.0e2
 # MuJoCo-Warp's default contact dimension (3) has no torsional friction.  A
@@ -301,6 +304,7 @@ def create_tutorial_simulation(
     *,
     arena_space: float = 2.5,
     sun_direction: Sequence[float] = DEFAULT_TUTORIAL_SUN_DIRECTION,
+    newton_solver_options: Mapping[str, object] | None = None,
 ) -> SimulationManager:
     """Create the shared simulation setup used by atomic-action tutorials.
 
@@ -310,10 +314,17 @@ def create_tutorial_simulation(
         arena_space: Spacing between parallel simulation arenas in meters.
         sun_direction: Direction of the single global sun light. The vector
             points from the light toward the scene.
+        newton_solver_options: Scene-specific overrides for the Newton solver
+            configuration, such as VBD contact history and collision matching.
 
     Returns:
         A simulation manager with the tutorial key light configured.
     """
+    physics_cfg = _tutorial_physics_cfg(getattr(args, "physics", "default"))
+    if newton_solver_options is not None:
+        if not isinstance(physics_cfg, NewtonPhysicsCfg):
+            raise ValueError("Newton solver options require the Newton backend.")
+        physics_cfg.solver_cfg = {**physics_cfg.solver_cfg, **newton_solver_options}
     sim = SimulationManager(
         SimulationManagerCfg(
             width=VIEWER_WIDTH,
@@ -321,7 +332,7 @@ def create_tutorial_simulation(
             headless=True,
             num_envs=args.num_envs,
             device=args.device,
-            physics_cfg=_tutorial_physics_cfg(getattr(args, "physics", "default")),
+            physics_cfg=physics_cfg,
             render_cfg=RenderCfg(renderer=args.renderer),
             physics_dt=1.0 / 100.0,
             arena_space=arena_space,
@@ -406,6 +417,9 @@ def add_tutorial_robot(
     robot_type: TutorialRobot,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    *,
+    newton_gripper_friction: float | None = None,
+    arm_damping: float | None = None,
     **kwargs,
 ) -> Robot:
     """Add a selected tutorial robot with the shared PGI gripper.
@@ -415,6 +429,9 @@ def add_tutorial_robot(
         robot_type: Tutorial robot family to construct.
         init_pos: Root position of the robot in its arena.
         init_qpos: Optional full robot joint configuration.
+        newton_gripper_friction: Optional sliding-friction coefficient for the
+            Newton gripper collision links; object materials are unaffected.
+        arm_damping: Optional drive damping for the arm control part.
 
     Returns:
         The added robot instance.
@@ -428,7 +445,9 @@ def add_tutorial_robot(
         init_qpos=init_qpos,
         **kwargs,
     )
-    configure_newton_gripper_contacts(sim, robot_cfg)
+    if arm_damping is not None:
+        robot_cfg.joint_drive_props.damping["arm"] = arm_damping
+    configure_newton_gripper_contacts(sim, robot_cfg, friction=newton_gripper_friction)
     return sim.add_robot(cfg=robot_cfg)
 
 
@@ -617,9 +636,19 @@ def configure_newton_link_contacts(
 def configure_newton_gripper_contacts(
     sim: SimulationManager,
     robot_cfg: RobotCfg,
+    *,
+    friction: float | None = None,
 ) -> None:
-    """Configure Newton gripper contacts and recompute their source inertia."""
+    """Configure Newton gripper contacts and recompute their source inertia.
+
+    Args:
+        sim: Simulation manager that owns the robot.
+        robot_cfg: Robot configuration to update before spawning.
+        friction: Optional static and dynamic sliding-friction coefficient.
+    """
     if not sim.is_newton_backend:
+        if friction is not None:
+            raise ValueError("Newton gripper friction requires the Newton backend.")
         return
 
     configure_newton_link_contacts(
@@ -628,9 +657,11 @@ def configure_newton_gripper_contacts(
         group_name="newton_gripper_contacts",
         link_names_expr=[_GRIPPER_CONTACT_LINK_PATTERN],
     )
-    robot_cfg.link_attrs["newton_gripper_contacts"].attrs.mass_props = (
-        MassPropertiesCfg(recompute_inertia=True)
-    )
+    attrs = robot_cfg.link_attrs["newton_gripper_contacts"].attrs
+    attrs.mass_props = MassPropertiesCfg(recompute_inertia=True)
+    if friction is not None:
+        attrs.material_props.static_friction = friction
+        attrs.material_props.dynamic_friction = friction
 
 
 def create_trapezoidal_motion_generator(
@@ -1544,6 +1575,7 @@ __all__ = [
     "DEFAULT_AXIS_LEN",
     "DEFAULT_AXIS_SIZE",
     "DEFAULT_GRIPPER_CLOSE_QPOS",
+    "MJVBD_V2_CUBE_CLOSE_QPOS",
     "DEFAULT_TUTORIAL_SUN_DIRECTION",
     "DEFAULT_TUTORIAL_SUN_INTENSITY",
     "GRIPPER_HAND_JOINT_PATTERN",

@@ -234,6 +234,7 @@ def add_dual_tutorial_robot(
     hand_stiffness: float = 1e3,
     hand_damping: float = 1e2,
     hand_max_effort: float = 1e4,
+    newton_gripper_friction: float | None = None,
 ) -> Robot:
     """Add a supported dual-arm tutorial robot to a simulation.
 
@@ -254,6 +255,7 @@ def add_dual_tutorial_robot(
         hand_stiffness: Hand joint drive stiffness.
         hand_damping: Hand joint drive damping.
         hand_max_effort: Hand joint maximum effort.
+        newton_gripper_friction: Optional Newton gripper sliding friction.
 
     Returns:
         The added dual-arm robot instance.
@@ -274,7 +276,7 @@ def add_dual_tutorial_robot(
         hand_damping=hand_damping,
         hand_max_effort=hand_max_effort,
     )
-    configure_newton_gripper_contacts(sim, robot_cfg)
+    configure_newton_gripper_contacts(sim, robot_cfg, friction=newton_gripper_friction)
     return sim.add_robot(cfg=robot_cfg)
 
 

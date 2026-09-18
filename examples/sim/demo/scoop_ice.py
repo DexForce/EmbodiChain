@@ -82,6 +82,8 @@ def initialize_simulation(args):
         physics_cfg.solver_cfg = {
             "solver_type": "mjvbd_v2",
             "mujoco_options": {"solver": "cg"},
+            # Dense ice contacts exceed VBD's default per-body capacity of 64.
+            "vbd_options": {"rigid_body_contact_buffer_size": 256},
         }
     config = SimulationManagerCfg(
         headless=True,

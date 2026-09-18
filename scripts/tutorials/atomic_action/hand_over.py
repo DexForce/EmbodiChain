@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from pathlib import Path
 
@@ -88,6 +89,9 @@ FINAL_OBJECT_XYZ = (0.0, -0.2, 0.6)
 # ---------------------------------------------------------------------------
 
 HAND_CLOSE_QPOS = 0.04
+MJVBD_V2_CAN_LEFT_CLOSE_QPOS = 0.007
+MJVBD_V2_CAN_RIGHT_CLOSE_QPOS = 0.0055
+MJVBD_V2_RELEASE_SETTLE_DURATION = 1.0
 HANDOVER_SAMPLE_INTERVAL = 220
 HANDOVER_HAND_INTERP_STEPS = 10
 HANDOVER_PRE_GRASP_DISTANCE = 0.08
@@ -119,6 +123,8 @@ def parse_arguments() -> argparse.Namespace:
 def create_dual_robot(
     sim: SimulationManager,
     robot_type: TutorialRobot,
+    *,
+    newton_gripper_friction: float | None = None,
 ) -> Robot:
     """Create the selected dual-arm robot with its matching grippers."""
     return add_dual_tutorial_robot(
@@ -131,6 +137,7 @@ def create_dual_robot(
         hand_stiffness=1e3,
         hand_damping=1e2,
         hand_max_effort=1e4,
+        newton_gripper_friction=newton_gripper_friction,
     )
 
 
@@ -204,11 +211,20 @@ def run_handover_demo(
         planner=getattr(args, "planner", "trapezoidal"),
     )
 
+    use_vbd_grasp = (
+        args.robot == "ur5"
+        and not args.is_horizontal
+        and sim.physics.solver_type == "mjvbd_v2"
+    )
     left_open, left_close = get_hand_open_close_qpos(
-        robot, hand_control_part="left_hand", close_qpos=HAND_CLOSE_QPOS
+        robot,
+        hand_control_part="left_hand",
+        close_qpos=MJVBD_V2_CAN_LEFT_CLOSE_QPOS if use_vbd_grasp else HAND_CLOSE_QPOS,
     )
     right_open, right_close = get_hand_open_close_qpos(
-        robot, hand_control_part="right_hand", close_qpos=HAND_CLOSE_QPOS
+        robot,
+        hand_control_part="right_hand",
+        close_qpos=MJVBD_V2_CAN_RIGHT_CLOSE_QPOS if use_vbd_grasp else HAND_CLOSE_QPOS,
     )
 
     final_pose = torch.eye(4, dtype=torch.float32)
@@ -285,6 +301,17 @@ def run_handover_demo(
     if wait_for_user:
         input("Press Enter to execute the handover...")
 
+    release_start = compiled.segment(0, "receive_release").start
+
+    def settle_before_release(step_index: int, _total_steps: int) -> None:
+        if step_index == release_start - 1:
+            # Let the receiving arm stop before opening the gripper.
+            sim.update(
+                step=math.ceil(
+                    MJVBD_V2_RELEASE_SETTLE_DURATION / sim.sim_config.physics_dt
+                )
+            )
+
     replay_trajectory(
         sim,
         robot,
@@ -293,6 +320,7 @@ def run_handover_demo(
         video_prefix="handover_auto_play",
         hold_steps=0,
         trajectory_sim_steps=TRAJECTORY_SIM_STEPS,
+        on_trajectory_step=settle_before_release if use_vbd_grasp else None,
         look_at=HANDOVER_RECORD_LOOK_AT,
     )
     if wait_for_user:
@@ -305,8 +333,27 @@ def main() -> None:
     sim = create_tutorial_simulation(
         args,
         arena_space=3.0,
+        newton_solver_options=(
+            {
+                "vbd_options": {"rigid_contact_history": True},
+                "collision_options": {"contact_matching": "latest"},
+            }
+            if args.physics == "newton"
+            and args.robot == "ur5"
+            and not args.is_horizontal
+            else None
+        ),
     )
-    robot = create_dual_robot(sim, args.robot)
+    use_vbd_grasp = (
+        args.robot == "ur5"
+        and not args.is_horizontal
+        and sim.physics.solver_type == "mjvbd_v2"
+    )
+    robot = create_dual_robot(
+        sim,
+        args.robot,
+        newton_gripper_friction=4.0 if use_vbd_grasp else None,
+    )
     run_handover_demo(args, sim, robot)
     serve_tutorial_scene(sim, args)
 

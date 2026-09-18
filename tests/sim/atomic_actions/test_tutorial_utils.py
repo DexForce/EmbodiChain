@@ -268,7 +268,7 @@ def _run_obstacle_animation(*, pace_wall_time: bool) -> tuple[MagicMock, MagicMo
     return obstacle, adapter
 
 
-def test_atomic_action_tutorial_uses_native_mujoco_contact_settings() -> None:
+def test_atomic_action_tutorial_uses_native_mjvbd_v2_settings() -> None:
     module = importlib.import_module("scripts.tutorials.atomic_action.tutorial_utils")
 
     default_cfg = module._tutorial_physics_cfg("default")
@@ -279,29 +279,24 @@ def test_atomic_action_tutorial_uses_native_mujoco_contact_settings() -> None:
     assert newton_cfg.num_substeps == 20
     assert newton_cfg.collision_cfg is None
     assert newton_cfg.solver_cfg == {
-        "solver_type": "mujoco_warp",
-        "solver": "newton",
-        "integrator": "implicitfast",
-        "iterations": 20,
-        "ls_iterations": 100,
-        "cone": "elliptic",
-        "impratio": 1_000.0,
-        "use_mujoco_contacts": True,
-        "enable_multiccd": True,
+        "solver_type": "mjvbd_v2",
+        "mujoco_options": {
+            "solver": "newton",
+            "integrator": "implicitfast",
+            "iterations": 20,
+            "ls_iterations": 100,
+            "cone": "elliptic",
+            "impratio": 1_000.0,
+            "enable_multiccd": True,
+        },
     }
 
     dexsim_cfg = newton_cfg.to_dexsim_cfg(gpu_id=0)
-    assert dexsim_cfg.solver_cfg.solver_type == "mujoco_warp"
-    assert dexsim_cfg.solver_cfg.solver == "newton"
-    assert dexsim_cfg.solver_cfg.integrator == "implicitfast"
-    assert dexsim_cfg.solver_cfg.iterations == 20
-    assert dexsim_cfg.solver_cfg.ls_iterations == 100
-    assert dexsim_cfg.solver_cfg.nconmax is None
-    assert dexsim_cfg.solver_cfg.njmax is None
-    assert dexsim_cfg.solver_cfg.cone == "elliptic"
-    assert dexsim_cfg.solver_cfg.impratio == pytest.approx(1_000.0)
-    assert dexsim_cfg.solver_cfg.use_mujoco_contacts is True
-    assert dexsim_cfg.solver_cfg.enable_multiccd is True
+    assert dexsim_cfg.solver_cfg.solver_type == "mjvbd_v2"
+    assert (
+        dexsim_cfg.solver_cfg.mujoco_options == newton_cfg.solver_cfg["mujoco_options"]
+    )
+    assert dexsim_cfg.solver_cfg.vbd_options == {}
     assert dexsim_cfg.collision_pipeline_cfg is None
 
 
@@ -1023,6 +1018,7 @@ def test_place_tutorial_registers_pick_object_with_simulation_engine_factory() -
         n_sample=1,
         no_vis_eef_axis=True,
         robot="ur5",
+        physics="default",
     )
     sim = MagicMock()
     sim.device = torch.device("cpu")
@@ -1316,9 +1312,13 @@ def test_pour_tutorial_uses_configured_pickup_and_local_rotation_axis() -> None:
     assert module.POUR_INTERNAL_AXIS == (1.0, 0.0, 0.0)
     pick_policy = module._create_pick_motion_policy()
     assert pick_policy.sample_count == module.PICK_SAMPLE_INTERVAL
-    assert isinstance(pick_policy.plan_opts, module.TrapezoidalPlanOptions)
-    assert pick_policy.plan_opts.sample_method is module.TrajectorySampleMethod.QUANTITY
-    assert pick_policy.plan_opts.sample_interval == module.PICK_MOTION_SAMPLE_COUNT
+    assert pick_policy.plan_opts is None
+    toppra_policy = module._create_pick_motion_policy("toppra")
+    assert isinstance(toppra_policy.plan_opts, module.ToppraPlanOptions)
+    assert (
+        toppra_policy.plan_opts.sample_method is module.TrajectorySampleMethod.QUANTITY
+    )
+    assert toppra_policy.plan_opts.sample_interval == module.PICK_MOTION_SAMPLE_COUNT
 
 
 def test_replay_timed_trajectory_uses_arrival_intervals() -> None:

@@ -213,7 +213,8 @@ def create_table(sim: SimulationManager) -> RigidObject:
         attrs=RigidBodyPhysicsCfg(
             mass_props=MassPropertiesCfg(mass=0.5),
         ),
-        body_type="kinematic",
+        # This fixture never moves; static shapes also enter V2's MuJoCo view.
+        body_type="static",
         init_pos=[1.1, -0.5, 0.08],
         init_rot=[0.0, 0.0, 0.0],
     )
