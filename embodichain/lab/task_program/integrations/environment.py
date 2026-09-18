@@ -489,6 +489,7 @@ class TaskProgramEnvironmentAdapter:
             )
 
         self._factory = factory
+        self._configured_integration_fingerprint: str | None = None
         self._scene_registry_id = scene_registry_id
         self._robot_profile_id = robot_profile_id
         self._step_dt = float(step_dt)
@@ -791,6 +792,36 @@ class TaskProgramEnvironmentAdapter:
             parallel_safety_validator=parallel_safety_validator,
             runtime=runtime,
         )
+
+    def validate_measured_acceptance(self, program: CompiledTaskProgram) -> None:
+        """Qualify and reset physical acceptance for one collection attempt.
+
+        Args:
+            program: Exact compiled program to execute with this adapter.
+        """
+        self._validate_selection(program.integration)
+        validator = getattr(self._validator_port, "validate_measured_acceptance", None)
+        if not callable(validator):
+            raise ValueError(
+                "The integration does not support measured offline acceptance."
+            )
+        validator(program)
+
+    def measured_success_mask(self, program: CompiledTaskProgram) -> torch.Tensor:
+        """Read physical acceptance collected for the qualified program.
+
+        Args:
+            program: The program qualified for the current attempt.
+
+        Returns:
+            Boolean acceptance mask; unobserved results cannot pass.
+        """
+        reader = getattr(self._validator_port, "measured_success_mask", None)
+        if not callable(reader):
+            raise ValueError(
+                "The integration does not support measured offline acceptance."
+            )
+        return reader(program)
 
     def create_bridge(self, program: CompiledTaskProgram) -> TaskProgramDemoBridge:
         """Create a fresh Gym bridge for one provider-free compiled program.

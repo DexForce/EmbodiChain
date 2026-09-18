@@ -15,11 +15,12 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
 | Background persistence | `embodichain/lab/gym/envs/managers/async_datasets.py`: `AsyncLeRobotRecorder` |
 | Depth sidecars | `embodichain/data_pipeline/depth_video/writer.py`, `reader.py` |
-| Offline collection retries and final partial batch | `embodichain/lab/scripts/run_env.py` |
+| Offline collection retries and final partial batch | `embodichain/lab/scripts/run_env.py`; opt-in Affordance collector in `_affordance_collection.py` |
+| Synchronous episode acknowledgement | `embodichain/lab/gym/envs/managers/episode_commit.py`: `DemoCommitReceipt` |
 
 Read [online sampling](online-sampling.md) for worker states, refill, shared
 errors, continuity and DataLoader behavior. Read [persistence](persistence.md)
-for fragment transactions, async ownership, depth output and shutdown.
+for fragment transactions, offline episode receipts, async ownership, depth output and shutdown.
 
 ## Online worker contract
 

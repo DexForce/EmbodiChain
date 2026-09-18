@@ -43,6 +43,7 @@ import torch
 from embodichain.lab.gym.envs.expert_trajectory import JointCommandMode
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
+    AffordanceSamplingContext,
     EntityState,
     ObservedArticulationJointState,
     PlanningContext,
@@ -324,6 +325,9 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         env_ids: torch.Tensor,
         *,
         owner_token: object,
+        affordance_sampling_provider: (
+            Callable[[], AffordanceSamplingContext | None] | None
+        ) = None,
     ) -> None:
         if type(scene_provider) is not SharedTickSceneProvider:
             raise TypeError("scene_provider must be exactly SharedTickSceneProvider.")
@@ -346,6 +350,11 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
         self._clock = clock
         self._env_ids = env_ids.clone()
         self._owner_token = owner_token
+        if affordance_sampling_provider is not None and not callable(
+            affordance_sampling_provider
+        ):
+            raise TypeError("affordance_sampling_provider must be callable or None.")
+        self._affordance_sampling_provider = affordance_sampling_provider
         super().__init__(self._capture)
 
     @property
@@ -401,6 +410,11 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
             scene=scene,
             env_ids=self._env_ids,
             control_dt=self._clock.step_dt,
+            affordance_sampling=(
+                None
+                if self._affordance_sampling_provider is None
+                else self._affordance_sampling_provider()
+            ),
         )
 
 
@@ -413,6 +427,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         registration: Frozen scene, profile, and extension declarations.
         step_dt: Authoritative Gym control cadence.
         joint_command_mode: Environment-owned expert joint command mode.
+        affordance_sampling_provider: Optional getter for the current host attempt.
         planner_cfg: Explicit planner configuration.  ``None`` selects TOPPRA
             for ``robot.uid``.
         motion_generator_factory: Optional fresh-generator factory.  It is
@@ -436,6 +451,9 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         *,
         step_dt: float,
         joint_command_mode: JointCommandMode = "position",
+        affordance_sampling_provider: (
+            Callable[[], AffordanceSamplingContext | None] | None
+        ) = None,
         planner_cfg: BasePlannerCfg | None = None,
         motion_generator_factory: MotionGeneratorFactory | None = None,
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
@@ -495,6 +513,11 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         self._robot_profile_binding = selected_profile_binding
         self._step_dt = _positive_finite(step_dt, field_name="step_dt")
         self._joint_command_mode = joint_command_mode
+        if affordance_sampling_provider is not None and not callable(
+            affordance_sampling_provider
+        ):
+            raise TypeError("affordance_sampling_provider must be callable or None.")
+        self._affordance_sampling_provider = affordance_sampling_provider
         self._planner_cfg = selected_planner_cfg
         self._motion_generator_factory = motion_generator_factory
         self._grasp_pose_generators = (
@@ -524,6 +547,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             selected_scene_binding,
             settle_presets=selected_settle_presets,
             env_ids=self._env_ids,
+            robot_profile=selected_profile_binding.declare(),
         )
 
     @classmethod
@@ -563,6 +587,9 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             registration,
             step_dt=step_dt,
             joint_command_mode=joint_command_mode,
+            affordance_sampling_provider=getattr(
+                environment, "get_affordance_sampling_context", None
+            ),
             planner_cfg=planner_cfg,
             motion_generator_factory=motion_generator_factory,
             grasp_pose_generators=grasp_pose_generators,
@@ -683,6 +710,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             clock,
             self._env_ids,
             owner_token=self._owner_token,
+            affordance_sampling_provider=self._affordance_sampling_provider,
         )
 
     def create_effect_evidence_providers(

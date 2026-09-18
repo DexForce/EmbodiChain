@@ -235,3 +235,45 @@ from the event config before the event manager is created.
 - **CLI**: `run-env --replay --replay_trajectory <path> --replay_mode {kinematic,dynamic,control}`.
 
 ---
+
+
+## Offline Affordance collection
+
+`ExpertTrajectoryCfg.affordance_augmentation` opts the `run-env` launcher into
+`embodichain/lab/scripts/_affordance_collection.py`. `AffordanceAugmentationCfg`
+in `gym/envs/augmentation.py` requires an explicit non-negative seed and either
+one nominal branch or `branches == num_envs`. It does not expand or remap
+physical scene slots. `max_batches` bounds all vector attempts, including
+failures; `demo_max_attempts` bounds retries for one batch. `max_episodes` is a
+quota of confirmed episodes, not vector batches.
+
+Preflight requires a configured Task Program, an expert rollout buffer,
+measured acceptance, and a supported synchronous recorder. Every attempt resets
+the full physical batch without saving, installs caller-owned run/batch/attempt
+identity, and requalifies current evidence before execution. The simulation
+adapter reads `EmbodiedEnv.get_affordance_sampling_context()` when building the
+planning context. One branch returns no sampling context and keeps nominal
+selection. The context is cleared on exit and reset, including failures.
+
+Only completed, successful, measured, nonempty rows can be selected, capped by
+the remaining quota. `commit_demo_rows()` commits that subset and resets the
+full batch. In this augmented path, optional trajectory auto-save uses only
+the accepted subset; unrelated camera event recording is discarded. Ordinary
+expert collection retains its existing reset behavior. See
+[measured qualification](../task-programs/execution.md#measured-offline-pickplace-qualification)
+and [receipt persistence](../data-pipeline/persistence.md#offline-episode-receipts)
+for the acceptance and storage boundaries.
+
+Each row records run, batch, attempt, physical row, group/branch, episode and
+commit identities, config/source hashes, program identity, and measured/commit
+selection flags. Segment Affordance samples project explicit row fields and
+retain `pool_candidate_index`; candidate IDs remain local to a pool.
+An atomically replaced `affordance_collection_<run_id>.json` in the dataset
+directory tracks attempts, accepted rows, receipts, and final status. A failed
+run can contain already committed rows; the manifest is not a resume journal.
+
+The reference deployment is
+`embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.augmentation.yaml`:
+four physical environments, four branches, and a five-episode quota. Launch with
+`python -m embodichain run-env --gym_config <deployment-path> --headless`.
+There is no online refill, coverage selection, or `GenerationSession` integration.

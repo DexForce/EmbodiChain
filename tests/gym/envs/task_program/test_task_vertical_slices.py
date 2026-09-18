@@ -1096,3 +1096,46 @@ def test_vertical_slice_payloads_expose_no_motion_layer_fields() -> None:
 
 
 __all__: list[str] = []
+
+
+def test_affordance_augmentation_deployment_decodes_measured_offline_contract() -> None:
+    """The opt-in deployment composes through the production config boundary."""
+    deployment_path = Path(
+        "tasks/manipulation/repeated_pick_place/task.ur5.augmentation.yaml"
+    )
+    payload, cfg = _configure_packaged_environment(deployment_path)
+    physical = _resolve_gym_components(
+        payload,
+        base_dir=(
+            _REPOSITORY_ROOT / "embodichain_tasks/configs" / deployment_path
+        ).parent,
+    )
+    assert cfg.num_envs == 4
+    assert cfg.seed == 42
+    assert physical.config["max_episodes"] == 5
+    assert cfg.expert_trajectory.affordance_augmentation.branches == 4
+    assert (
+        cfg.expert_trajectory.affordance_augmentation.required_assurance == "measured"
+    )
+    assert cfg.dataset.lerobot.func.__name__ == "LeRobotRecorder"
+    program = _decode_deployed_program(
+        _read_payload(
+            Path(
+                "tasks/manipulation/repeated_pick_place/task_program/program.augmentation.yaml"
+            )
+        ),
+        deployment_path=deployment_path,
+    )
+    compiled = _deployment(deployment_path).integration.registration.catalog.preflight(
+        program
+    )
+    assert compiled.segment_count == 3
+    for segment in compiled.iter_segments():
+        validator = segment.validators[0]
+        assert validator.cfg.release_resource == "primary_manipulator"
+        assert validator.cfg.release_tolerance == 0.002
+        assert validator.cfg.position_tolerance == 0.02
+        assert segment.post_policies[0].cfg.kind == "wait_stable"
+        assert torch.equal(
+            validator.target_pose.position, segment.calls[-1].call.at.position
+        )

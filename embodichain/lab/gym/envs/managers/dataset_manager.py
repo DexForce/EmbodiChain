@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import inspect
 import threading
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
@@ -29,11 +31,13 @@ from prettytable import PrettyTable
 from embodichain.utils import logger
 from .manager_base import ManagerBase
 from .cfg import DatasetFunctorCfg
+from .episode_commit import DemoCommitReceipt
 
 __all__ = ["DatasetManager"]
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
+    from .datasets import LeRobotRecorder
 
 
 class DatasetManager(ManagerBase):
@@ -248,6 +252,44 @@ class DatasetManager(ManagerBase):
                 env_ids,
                 **functor_cfg.params,
             )
+
+    def _episode_commit_recorder(self) -> LeRobotRecorder:
+        from .datasets import LeRobotRecorder
+
+        configs = self._mode_functor_cfgs.get("save", [])
+        if len(configs) != 1 or type(configs[0].func) is not LeRobotRecorder:
+            raise ValueError(
+                "Episode receipts require exactly one synchronous LeRobotRecorder save sink"
+            )
+        return configs[0].func
+
+    def validate_episode_commit_support(self) -> None:
+        """Validate the synchronous full-episode persistence contract before rollout."""
+        self._episode_commit_recorder().validate_episode_commit_support()
+
+    @property
+    def episode_commit_path(self) -> Path:
+        """Return the qualified synchronous dataset directory for run manifests."""
+        return Path(self._episode_commit_recorder().dataset_full_path)
+
+    @property
+    def episode_commit_receipts(self) -> tuple[DemoCommitReceipt, ...]:
+        """Return completed receipts, including those preceding a later row failure."""
+        return self._episode_commit_recorder().episode_commit_receipts
+
+    def commit_episode_rows(
+        self, env_ids: Sequence[int] | torch.Tensor
+    ) -> tuple[DemoCommitReceipt, ...]:
+        """Synchronously persist selected augmented episodes and acknowledge each row.
+
+        Args:
+            env_ids: Unique physical rows whose full episodes should be saved.
+
+        Returns:
+            Completed receipts in the requested row order.
+        """
+        self.validate_episode_commit_support()
+        return self._episode_commit_recorder().commit_episode_rows(env_ids)
 
     def finalize(self) -> Optional[str]:
         """Finalize every dataset functor exactly once.

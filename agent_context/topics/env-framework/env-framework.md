@@ -17,6 +17,7 @@ Lightweight RL environments have a separate owner in
 | Import registration | `embodichain/lab/gym/utils/registration.py`; official task imports under `embodichain_tasks/embodichain_tasks/` |
 | Environment timing and loop | `embodichain/lab/gym/envs/base_env.py`: `EnvCfg`, `BaseEnv` |
 | Scene, manager and demonstration integration | `embodichain/lab/gym/envs/embodied_env.py` |
+| Offline Affordance host policy / bounded collector | `embodichain/lab/gym/envs/augmentation.py`, `embodichain/lab/scripts/_affordance_collection.py` |
 | Expert trajectory control and stored-action schema | `embodichain/lab/gym/envs/expert_trajectory.py` |
 | Controller-ready commands | `embodichain/lab/gym/envs/types.py`: `ControllerAction` |
 | Demo segment execution / outcomes | `embodichain/lab/gym/envs/demo.py` |
@@ -26,7 +27,7 @@ Lightweight RL environments have a separate owner in
 Read [configuration and registration](configuration.md) for task-first layout,
 component ownership, path resolution, config-owned IDs, and task listing.
 Read [execution](execution.md) for hooks, bridge acceptance, reset ordering,
-wrappers, and replay. Read [profiling](profiling.md) only for instrumentation.
+wrappers, replay, and opt-in offline Affordance collection. Read [profiling](profiling.md) only for instrumentation.
 
 ## Launcher argument ownership
 

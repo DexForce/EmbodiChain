@@ -41,6 +41,26 @@ trajectory tasks use the same `DemoSegment` field for a known fixed trajectory
 and settle suffix; paths whose emitted action count depends on runtime state
 remain indeterminate in both execution styles.
 
+## Measured offline Pick/Place qualification
+
+`integrations/simulation/policies.py` owns the supported collection evidence
+contract. Before each attempt, `validate_measured_acceptance()` clears prior
+evidence and qualifies the exact compiled program. Only sequential Pick/Place
+calls are supported. Each segment must end every touched object with an
+absolute Place, a matching `object_near_target` validator that checks the
+placing resource's release, and a `wait_stable` post-policy for that object.
+Parallel blocks, arbitrary calls, and incomplete terminal outcomes fail preflight.
+
+Target proximity comes from observed object position, release from measured
+(non-target) gripper qpos against the bound open position, and settling from
+observed object motion. The final mask requires completed current-attempt
+policy and validator evidence for the qualified compiled instance and fails
+closed if evidence is missing. This qualifies those terminal outcomes; it does
+not convert projected intermediate effects into verified grasp evidence.
+The [offline host](../env-framework/execution.md#offline-affordance-collection)
+also requires whole-episode completion and successful bridge acceptance before
+any row becomes eligible for persistence.
+
 ## Demonstration outcome and persistence
 
 The bridge's accepted mask remains the sole segment-quality authority. The

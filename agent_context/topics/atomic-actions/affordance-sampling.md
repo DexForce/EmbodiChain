@@ -25,7 +25,7 @@ Action/Goal inputs rather than Affordance variation.
 
 ## Current host boundary
 
-The only host integration is direct simulation. The PickUp, AxisAlign,
+Direct simulation remains a supported host. The PickUp, AxisAlign,
 HandOver, OpenDoor, Press, Slide, and Twist tutorials map
 `--affordance_branches` one-to-one to simulation rows and inject the context
 through the shared host helpers in
@@ -45,9 +45,18 @@ sampling disabled. See the human-facing
 [tutorial matrix](../../../docs/source/overview/sim/atomic_actions/affordance_sampling.md)
 for supported geometric freedom and CLI examples.
 
-Do not route this feature through Task Program, the Gym bridge, environment
-configuration, episode retry/commit, or dataset recording until those hosts
-define an explicit expansion policy.
+Offline Gym collection also supports an explicit
+`ExpertTrajectoryCfg.affordance_augmentation` policy. The environment getter
+`get_affordance_sampling_context()` supplies the current attempt identity to
+the simulation Task Program adapter, which injects it into planning. Sampling
+stays inside Affordances; the host owns bounded attempts, measured acceptance,
+reset, and persistence. See [offline collection](../env-framework/execution.md#offline-affordance-collection)
+for that contract. This path does not use trajectory coverage or
+`GenerationSession` and does not alter online dataset generation.
+
+Scene-slot-independent RNG is not supported: candidate generation still depends
+on upstream RNG and physical row pools. Persisted candidate indices identify
+positions in each row's pool, not a globally unique geometric candidate.
 
 ## Change and validation sites
 

@@ -24,6 +24,7 @@ positions and explicit timing.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Mapping
 from typing import Literal, Sequence, cast
 
 import torch
@@ -32,6 +33,7 @@ from tensordict import TensorDictBase
 from embodichain.compute.trajectory import retime_to_control_grid
 from embodichain.lab.sim.motion.planners import PlanResult
 from embodichain.utils import configclass
+from .augmentation import AffordanceAugmentationCfg
 
 JointCommandMode = Literal["position", "position_velocity"]
 EXPERT_TRAJECTORY_SCHEMA_VERSION = 1
@@ -61,13 +63,27 @@ class ExpertTrajectoryCfg:
 
     Args:
         joint_command_mode: Position-only or position-velocity expert targets.
+        affordance_augmentation: Optional measured offline sampling policy.
     """
 
     joint_command_mode: JointCommandMode = "position"
     """Joint targets emitted and stored by expert trajectory generation."""
 
+    affordance_augmentation: AffordanceAugmentationCfg | None = None
+    """Optional offline collection policy; ordinary expert execution is unchanged."""
+
     def __post_init__(self) -> None:
         self.joint_command_mode = _validate_joint_command_mode(self.joint_command_mode)
+        if isinstance(self.affordance_augmentation, Mapping):
+            self.affordance_augmentation = AffordanceAugmentationCfg(
+                **self.affordance_augmentation
+            )
+        elif self.affordance_augmentation is not None and not isinstance(
+            self.affordance_augmentation, AffordanceAugmentationCfg
+        ):
+            raise TypeError(
+                "affordance_augmentation must be AffordanceAugmentationCfg or None."
+            )
 
 
 @dataclass(frozen=True, slots=True)

@@ -44,7 +44,7 @@ topics:
   keywords: [BaseEnv, EmbodiedEnv, EnvCfg, register_env, list-task, run-env, target_control_frequency,
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
-    ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema]
+    ExpertTrajectoryCfg, AffordanceAugmentationCfg, offline affordance collection, joint_command_mode, position_velocity, qpos qvel, expert action schema]
   paths: [topics/env-framework/env-framework.md]
   source_of_truth:
   - embodichain/cli/main.py
@@ -57,10 +57,13 @@ topics:
   - embodichain/lab/gym/envs/_startup_summary.py
   - embodichain/lab/gym/envs/embodied_env.py
   - embodichain/lab/gym/envs/expert_trajectory.py
+  - embodichain/lab/gym/envs/augmentation.py
+  - embodichain/lab/scripts/_affordance_collection.py
   - embodichain/lab/gym/envs/demo.py
   - embodichain/lab/gym/utils/profiler.py
   watch_paths: [embodichain/lab/gym/envs/base_env.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/gym/envs/expert_trajectory.py,
-    embodichain/lab/gym/envs/demo.py,
+    embodichain/lab/gym/envs/demo.py, embodichain/lab/gym/envs/augmentation.py,
+    embodichain/lab/scripts/_affordance_collection.py,
     embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_env.py,
     embodichain_tasks/, tests/gym/envs/]
   related_topics: [simulation-system, manager-functor, sim-visualization, task-programs, data-pipeline]
@@ -327,12 +330,14 @@ topics:
   aliases: [online data, online dataset, async recorder, dataset persistence, 数据管线, 在线数据, 数据集持久化, 数据保存,
     深度视频]
   keywords: [OnlineDataEngine, OnlineDataset, sample_batch, lock_index, LeRobotRecorder, AsyncLeRobotRecorder,
-    DepthSidecarManager, depth_meta.json, fragment_id, finalize, expert action schema, qpos_slice, qvel_slice]
+    DepthSidecarManager, depth_meta.json, fragment_id, finalize, DemoCommitReceipt, expert action schema, qpos_slice, qvel_slice]
   paths: [topics/data-pipeline/data-pipeline.md]
   source_of_truth:
   - embodichain/data_pipeline/engine/data.py
   - embodichain/data_pipeline/datasets/online_data.py
   - embodichain/lab/gym/envs/managers/dataset_manager.py
+  - embodichain/lab/gym/envs/managers/episode_commit.py
+  - embodichain/lab/scripts/_affordance_collection.py
   - embodichain/lab/gym/envs/managers/datasets.py
   - embodichain/lab/gym/envs/managers/async_datasets.py
   - embodichain/data_pipeline/depth_video/writer.py
@@ -340,6 +345,7 @@ topics:
   - embodichain/lab/scripts/run_env.py
   watch_paths: [embodichain/data_pipeline/, embodichain/lab/gym/envs/managers/dataset_manager.py, embodichain/lab/gym/envs/managers/datasets.py,
     embodichain/lab/gym/envs/managers/async_datasets.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/scripts/run_env.py,
+    embodichain/lab/gym/envs/managers/episode_commit.py, embodichain/lab/scripts/_affordance_collection.py,
     tests/data_pipeline/]
   related_topics: [manager-functor, env-framework, task-programs, sensor-system]
   status: active

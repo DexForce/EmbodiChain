@@ -50,6 +50,39 @@
     replaced as one atomic file. A JSONL append failure is therefore a surfaced post-commit
     failure, not a rollback point.
 
+### Offline episode receipts
+
+The opt-in Affordance collector uses `DatasetManager.commit_episode_rows()`
+with exactly one save sink whose exact type is synchronous `LeRobotRecorder`.
+Async recorders, additional save sinks, deferred video encoding, fragment mode,
+and saving failed episodes are unsupported. Preflight rejects unsupported
+sinks before the first collection reset; row payload validation rejects empty
+or duplicate rows and missing episode/commit identity.
+
+`DemoCommitReceipt` identifies the physical row, episode, commit, LeRobot index,
+and confirmed modalities. The recorder returns it only after primary dataset,
+metadata, and configured depth outputs finish. If enabled, trajectory auto-save
+adds `trajectory` confirmation at the environment boundary; only that complete
+host receipt advances the collection quota. Dataset receipts remain inspectable
+when a later row or trajectory save fails, so a failed run cannot be mistaken
+for a rollback of earlier writes. A receipt says nothing about an absent modality.
+
+LeRobot v3 keeps Parquet writers open after `save_episode()`. The receipt path
+finalizes and locally reloads the dataset for each accepted episode, then uses
+the public resumed-recording path for the next append. This ensures readable
+footers and avoids reopening an existing file for truncating writes, at the
+cost of a dataset reload per episode.
+
+Commit IDs deduplicate within one recorder process. Once a LeRobot save starts,
+any persistence failure is treated as uncertain and blocks further writes to
+the sink; it cannot safely be retried under a different commit ID. This provides no
+cross-process recovery. Optional trajectory files and LeRobot are not one
+atomic transaction. The host records accepted rows, completed host receipts,
+and underlying dataset receipts separately in the run manifest. See
+[offline collection](../env-framework/execution.md#offline-affordance-collection)
+for reset, quota, provenance, and run status ownership. The online and ordinary
+async collection contracts are unchanged.
+
 ### Common failures and recommended change sites
 
 | Symptom | Likely cause / change site |

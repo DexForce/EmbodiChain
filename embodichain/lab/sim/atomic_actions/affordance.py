@@ -28,6 +28,7 @@ from .affordance_sampling import (
     AffordancePoseCandidates,
     AffordanceSample,
     AffordanceSamplingContext,
+    _pose_sampling_metadata,
     _roll_poses,
     _sample_pose_candidates,
     _validate_range,
@@ -78,12 +79,13 @@ class Affordance:
         """Select poses from a legal candidate set for each logical branch.
 
         Args:
-            candidates: Batched poses, costs, and validity produced by geometry.
+            candidates: Batched world poses, costs, and validity produced by geometry.
             sampling: Optional reproducible branch stream. ``None`` selects the
                 lowest-cost candidate in every row.
             env_ids: Stable environment identities matching candidate rows.
             key: Sampling operation identity.
-            reference_poses: Optional frames used to compare candidate geometry.
+            reference_poses: Optional world poses of frames used to compare
+                candidate geometry and recorded in the sampling provenance.
 
         Returns:
             Per-row success, selected poses, and selection metadata.
@@ -523,10 +525,12 @@ class TwistAffordance(Affordance):
                 key=key,
             ).to(nominal)
         poses = _roll_poses(nominal, rolls - self.grasp_roll)
+        success = torch.ones(len(poses), dtype=torch.bool, device=poses.device)
         return AffordanceSample(
-            success=torch.ones(len(poses), dtype=torch.bool, device=poses.device),
+            success=success,
             poses=poses,
             metadata={
+                **_pose_sampling_metadata(poses, success, env_ids, target_pose),
                 "key": key,
                 "sampling": None if sampling is None else sampling.metadata(),
                 "roll": rolls.cpu().tolist(),
@@ -920,10 +924,12 @@ class PressAffordance(Affordance):
                 key=key,
             ).to(poses)
             poses = _roll_poses(poses, rolls)
+        success = torch.ones(len(poses), dtype=torch.bool, device=poses.device)
         return AffordanceSample(
-            success=torch.ones(len(poses), dtype=torch.bool, device=poses.device),
+            success=success,
             poses=poses,
             metadata={
+                **_pose_sampling_metadata(poses, success, env_ids, target_pose),
                 "key": key,
                 "sampling": None if sampling is None else sampling.metadata(),
                 "roll": rolls.cpu().tolist(),
