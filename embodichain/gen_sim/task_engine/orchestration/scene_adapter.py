@@ -26,6 +26,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+from scipy.spatial.transform import Rotation
+
 from embodichain.gen_sim.task_engine.orchestration.grounding import (
     GroundingCaller,
     ground_articulation_parts,
@@ -33,6 +36,11 @@ from embodichain.gen_sim.task_engine.orchestration.grounding import (
 )
 from embodichain.gen_sim.task_engine._task_program.articulation_binding import (
     discover_prismatic_parts,
+    handle_mesh,
+    inspect_prismatic_part,
+)
+from embodichain.gen_sim.task_engine.scene.articulation_geometry import (
+    read_articulation_geometry,
 )
 from embodichain.gen_sim.task_engine.orchestration.scene_inventory import (
     SceneInventory,
@@ -97,8 +105,62 @@ def _discover_part_catalogs(
             parts = discover_prismatic_parts(dict(config))
         except (KeyError, TypeError, ValueError):
             continue
-        catalogs[str(config["uid"])] = tuple(part.payload() for part in parts)
+        payloads = []
+        for part in parts:
+            payload = part.payload()
+            try:
+                payload["handle_center_world"] = _part_handle_center_world(
+                    config, part.part_id
+                )
+            except (KeyError, TypeError, ValueError):
+                pass
+            payloads.append(payload)
+        catalogs[str(config["uid"])] = _rank_parts_by_vertical_position(payloads)
     return catalogs
+
+
+def _part_handle_center_world(config: Mapping[str, Any], part_id: str) -> list[float]:
+    binding = inspect_prismatic_part(dict(config), part_id)
+    geometry = read_articulation_geometry(config["fpath"])
+    vertices, _ = handle_mesh(binding, config["fpath"])
+    link_pose = geometry.link_poses[binding.link]
+    center = (
+        vertices.mean(axis=0) @ link_pose[:3, :3].T + link_pose[:3, 3] * binding.scale
+    )
+    rotation = Rotation.from_euler(
+        "XYZ", config.get("init_rot", [0.0, 0.0, 0.0]), degrees=True
+    )
+    center = rotation.apply(center) + np.asarray(
+        config.get("init_pos", [0.0, 0.0, 0.0]), dtype=float
+    )
+    if center.shape != (3,) or not np.isfinite(center).all():
+        raise ValueError("Articulation handle center must be finite and 3D.")
+    return [float(value) for value in center]
+
+
+def _rank_parts_by_vertical_position(
+    parts: Sequence[Mapping[str, Any]], *, tolerance: float = 1e-4
+) -> tuple[dict[str, Any], ...]:
+    ranked = [deepcopy(dict(part)) for part in parts]
+    if len(ranked) < 2:
+        return tuple(ranked)
+    centers = [
+        np.asarray(part.get("handle_center_world", ()), dtype=float) for part in ranked
+    ]
+    if any(center.shape != (3,) or not np.isfinite(center).all() for center in centers):
+        return tuple(ranked)
+    order = sorted(range(len(ranked)), key=lambda index: float(centers[index][2]))
+    heights = [float(centers[index][2]) for index in order]
+    if any(right - left <= tolerance for left, right in zip(heights, heights[1:])):
+        return tuple(ranked)
+    for vertical_index, part_index in enumerate(order):
+        ranked[part_index]["vertical_index"] = vertical_index
+        ranked[part_index]["part_count"] = len(ranked)
+    ranked[order[0]]["vertical_rank"] = "bottom"
+    ranked[order[-1]]["vertical_rank"] = "top"
+    if len(ranked) % 2 == 1:
+        ranked[order[len(ranked) // 2]]["vertical_rank"] = "middle"
+    return tuple(ranked)
 
 
 def _augment_grounding_objects(

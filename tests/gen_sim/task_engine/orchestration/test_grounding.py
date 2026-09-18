@@ -379,3 +379,99 @@ def test_part_grounding_selects_only_catalog_ids() -> None:
         caller,
     )
     assert result == {"slide.object": "part_right"}
+
+
+def test_part_grounding_uses_vertical_geometry_over_preselection() -> None:
+    intent = {
+        "steps": [
+            {
+                "id": "top",
+                "task_type": "E6",
+                "object": _selector("上面的抽屉"),
+            },
+            {
+                "id": "middle",
+                "task_type": "E6",
+                "object": _selector("中间的抽屉"),
+            },
+            {
+                "id": "bottom",
+                "task_type": "E6",
+                "object": _selector("最下面的抽屉"),
+            },
+        ]
+    }
+    catalogs = {
+        "drawer_unit": [
+            {
+                "part_id": "part_1",
+                "joint": "drawer_1_slide",
+                "vertical_rank": "bottom",
+            },
+            {
+                "part_id": "part_2",
+                "joint": "drawer_2_slide",
+                "vertical_rank": "middle",
+            },
+            {
+                "part_id": "part_3",
+                "joint": "drawer_3_slide",
+                "vertical_rank": "top",
+            },
+        ]
+    }
+
+    def caller(**_kwargs):
+        raise AssertionError("deterministic vertical grounding must not call the model")
+
+    result = ground_articulation_parts(
+        "依次拉开上面、中间和最下面的抽屉",
+        intent,
+        {
+            "top.object": ["drawer_unit"],
+            "middle.object": ["drawer_unit"],
+            "bottom.object": ["drawer_unit"],
+        },
+        catalogs,
+        "test-model",
+        caller,
+        preselected={
+            "top.object": "part_1",
+            "middle.object": "part_2",
+            "bottom.object": "part_3",
+        },
+    )
+
+    assert result == {
+        "top.object": "part_3",
+        "middle.object": "part_2",
+        "bottom.object": "part_1",
+    }
+
+
+def test_part_grounding_rejects_unavailable_vertical_rank() -> None:
+    intent = {
+        "steps": [
+            {
+                "id": "middle",
+                "task_type": "E6",
+                "object": _selector("middle drawer"),
+            }
+        ]
+    }
+    catalogs = {
+        "drawer_unit": [
+            {"part_id": "part_lower", "vertical_rank": "bottom"},
+            {"part_id": "part_upper", "vertical_rank": "top"},
+        ]
+    }
+
+    with pytest.raises(ValueError, match="middle.*not uniquely available"):
+        ground_articulation_parts(
+            "open the middle drawer",
+            intent,
+            {"middle.object": ["drawer_unit"]},
+            catalogs,
+            "test-model",
+            lambda **_kwargs: {},
+        )

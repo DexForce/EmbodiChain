@@ -47,6 +47,36 @@ from embodichain.gen_sim.task_engine.agent import (
 _UPRIGHT_CAN_INSTRUCTION = "test-instruction"
 
 
+def test_vertical_part_ranks_follow_handle_height_not_joint_name() -> None:
+    parts = [
+        {
+            "part_id": "part_1",
+            "joint": "drawer_1_slide",
+            "handle_center_world": [0.0, 0.0, 0.74],
+        },
+        {
+            "part_id": "part_2",
+            "joint": "drawer_2_slide",
+            "handle_center_world": [0.0, 0.0, 0.85],
+        },
+        {
+            "part_id": "part_3",
+            "joint": "drawer_3_slide",
+            "handle_center_world": [0.0, 0.0, 0.96],
+        },
+    ]
+
+    ranked = scene_adapter_module._rank_parts_by_vertical_position(parts)
+
+    assert [part["vertical_rank"] for part in ranked] == [
+        "bottom",
+        "middle",
+        "top",
+    ]
+    assert [part["vertical_index"] for part in ranked] == [0, 1, 2]
+    assert all(part["part_count"] == 3 for part in ranked)
+
+
 @pytest.fixture
 def scene_export(tmp_path: Path) -> Path:
     export = tmp_path / "scene_export"

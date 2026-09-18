@@ -23,6 +23,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 import json
 import math
+import re
 from time import perf_counter
 from typing import Any
 
@@ -149,7 +150,8 @@ def ground_articulation_parts(
 
     This is a GenSim-specific extension of scene grounding.  The model sees
     only part IDs and semantic summaries; native USD paths remain code-owned.
-    Single-part articulations are resolved without an additional model call.
+    Single-part articulations and explicit vertical selectors are resolved
+    without an additional model call.
     """
     requests = [
         {
@@ -165,12 +167,25 @@ def ground_articulation_parts(
     resolved: dict[str, str] = dict(preselected or {})
     for request in requests:
         uids = tuple(reference_bindings.get(request["reference_id"], ()))
-        if request["reference_id"] in resolved:
-            continue
         if len(uids) != 1 or uids[0] not in part_catalogs:
             continue
         parts = tuple(part_catalogs[uids[0]])
-        if len(parts) == 1:
+        vertical_rank = _requested_vertical_rank(str(request["reference"]))
+        if vertical_rank is not None and len(parts) > 1:
+            matches = [
+                part
+                for part in parts
+                if str(part.get("vertical_rank", "")) == vertical_rank
+            ]
+            if len(matches) != 1:
+                raise ValueError(
+                    f"Requested vertical rank {vertical_rank!r} is not uniquely "
+                    f"available for {request['reference_id']!r}."
+                )
+            resolved[request["reference_id"]] = str(matches[0]["part_id"])
+        elif request["reference_id"] in resolved:
+            continue
+        elif len(parts) == 1:
             resolved[request["reference_id"]] = str(parts[0]["part_id"])
         elif parts:
             pending.append({**request, "articulation_id": uids[0], "parts": parts})
@@ -217,6 +232,9 @@ def ground_articulation_parts(
                     "part_id": str(part["part_id"]),
                     "joint": str(part.get("joint", "")),
                     "link": str(part.get("link", "")),
+                    "vertical_rank": str(part.get("vertical_rank", "")),
+                    "vertical_index": part.get("vertical_index"),
+                    "part_count": part.get("part_count"),
                     "semantic_labels": _part_labels(part),
                 }
                 for part in item["parts"]
@@ -273,9 +291,57 @@ def ground_articulation_parts(
     return resolved
 
 
+_VERTICAL_REFERENCE_TERMS = {
+    "top": (
+        "最上",
+        "上面",
+        "上方",
+        "上层",
+        "顶部",
+        "顶层",
+        "top",
+        "upper",
+        "highest",
+    ),
+    "middle": ("中间", "中部", "中层", "middle", "center", "central"),
+    "bottom": (
+        "最下",
+        "下面",
+        "下方",
+        "下层",
+        "底部",
+        "底层",
+        "bottom",
+        "lower",
+        "lowest",
+    ),
+}
+
+
+def _requested_vertical_rank(reference: str) -> str | None:
+    normalized = reference.strip().lower()
+    matches = {
+        rank
+        for rank, terms in _VERTICAL_REFERENCE_TERMS.items()
+        if any(
+            (
+                term in normalized
+                if not term.isascii()
+                else re.search(rf"\b{re.escape(term)}\b", normalized) is not None
+            )
+            for term in terms
+        )
+    }
+    if len(matches) > 1:
+        raise ValueError(
+            f"Articulation reference {reference!r} contains conflicting vertical ranks."
+        )
+    return next(iter(matches), None)
+
+
 def _part_labels(part: Mapping[str, Any]) -> list[str]:
     labels: set[str] = set()
-    for key in ("joint", "link", "joint_path", "link_path"):
+    for key in ("joint", "link", "joint_path", "link_path", "vertical_rank"):
         value = str(part.get(key, "")).strip().lower()
         if not value:
             continue
