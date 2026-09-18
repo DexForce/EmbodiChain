@@ -72,6 +72,7 @@ def make_env_for_episode_selection(
             dataset=None,
         ),
         event_manager=None,
+        action_manager=None,
         observation_manager=None,
         reward_manager=None,
         rollout_buffer=None,
@@ -248,6 +249,7 @@ def test_initialize_episode_commits_only_explicit_vector_rows() -> None:
     env.cfg.events = object()
     env.event_manager = SimpleNamespace(
         _mode_functor_cfgs={"interval": [SimpleNamespace(func=recorder)]},
+        reset=MagicMock(),
         available_modes=[],
     )
     env._traj_buffer = object()
@@ -315,6 +317,7 @@ def test_discard_reset_clears_camera_frames_without_saving() -> None:
     env.cfg.events = object()
     env.event_manager = SimpleNamespace(
         _mode_functor_cfgs={"interval": [SimpleNamespace(func=recorder)]},
+        reset=MagicMock(),
         available_modes=[],
     )
 
