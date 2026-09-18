@@ -6,8 +6,6 @@ source evidence, and shareable navigation. It consumes a
 [generated snapshot](generated/architecture.json); the Sphinx documentation embeds the viewer and a searchable text reference.
 Local and CI Sphinx builds regenerate their own version-specific assets.
 
-- [Design and scope](../superpowers/specs/2026-09-17-architecture-explorer-design.md)
-- [Implementation plan](../superpowers/plans/2026-09-17-architecture-explorer.md)
 - [JSON Schema](architecture.schema.json): closed v1 contract.
 - [Curated seed](curated.json): responsibilities, boundaries, groups, and reviewed relations.
 - [Generated text overview](generated/summary.md): readable fallback with pinned evidence links.
