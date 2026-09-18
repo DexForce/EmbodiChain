@@ -52,6 +52,11 @@ _PROGRAMS = {
     ): "pour_water_with_right_arm",
 }
 _DEPLOYMENTS = {
+    Path("tasks/manipulation/repeated_pick_place/task.ur5.objective.yaml"): (
+        "repeated_cube_pick_place",
+        "task_program_repeated_pick_place",
+        "ur5_dh_pgi_140_80",
+    ),
     Path("tasks/manipulation/repeated_pick_place/task.ur5.yaml"): (
         "repeated_cube_pick_place",
         "task_program_repeated_pick_place",
@@ -102,6 +107,14 @@ _RESOURCE_PATHS = frozenset(
     {
         *_PROGRAMS,
         *_DEPLOYMENTS,
+        Path("tasks/manipulation/repeated_pick_place/objective.yaml"),
+        Path("tasks/manipulation/repeated_pick_place/catalog.yaml"),
+        Path("tasks/manipulation/repeated_pick_place/README.md"),
+        Path("tasks/manipulation/repeated_pick_place/validation/default-startup.json"),
+        Path("tasks/manipulation/push_cube/catalog.yaml"),
+        Path("tasks/manipulation/push_cube/README.md"),
+        Path("tasks/manipulation/tableware/stack_cups/catalog.yaml"),
+        Path("tasks/manipulation/tableware/stack_cups/README.md"),
         Path("components/execution_policies/motion_gen_verified.yaml"),
         Path("components/execution_policies/trajectory_open_loop.yaml"),
         Path("components/execution_policies/trajectory_open_loop_dense.yaml"),
@@ -213,6 +226,7 @@ def test_setup_stages_all_official_task_programs(
         "**/*.json",
         "**/*.yaml",
         "**/*.yml",
+        "**/README.md",
     ]
     expected_outputs = {
         Path("embodichain_tasks") / "configs" / relative_path
