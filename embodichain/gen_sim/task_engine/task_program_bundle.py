@@ -185,47 +185,32 @@ def generate_task_program_bundle(
     _calibrate_task_gripper_opening(embodiment_payload)
     adaptation = None
     if fit_grasp_assets:
-        from .orchestration.grasp_fit import fit_e2_grasp_asset
+        from .orchestration.grasp_fit import fit_grasp_assets as fit_assets
 
-        pick = next(
-            (
-                node["call"]
-                for node in selected_graph["nodes"]
-                if node["call"].get("kind") == "pick"
-                or node["call"].get("call_id") == "simulation.pick"
-                or node["call"].get("call_id", "").startswith("gen_sim.pick.")
-            ),
-            None,
-        )
-        if pick is None:
-            raise ValueError("Grasp-fit scaling requires an E2 Pick.")
-        resource = pick["resources"]["primary"]
         generators = embodiment_payload["skill_profile"]["runtime_services"][
             "grasp_pose_generators"
         ]
-        opening = float(generators[f"{resource}_eef"]["model"]["max_opening_width"])
-        prepared_scene, adaptation = fit_e2_grasp_asset(
-            prepared_scene, selected_graph, opening=opening
+        openings = {
+            resource: float(generators[f"{resource}_eef"]["model"]["max_opening_width"])
+            for resource in ("left", "right")
+        }
+        prepared_scene, adaptation = fit_assets(
+            prepared_scene, selected_graph, openings=openings
         )
     scene = normalize_scene_assets(prepared_scene, root)
     if adaptation is not None:
-        provenance = next(
-            (
-                item
-                for item in scene.asset_provenance
-                if item["uid"] == adaptation["object_id"]
-            ),
-            None,
-        )
-        if adaptation["status"] == "scaled" and (
-            provenance is None or provenance["status"] not in {"generated", "reused"}
-        ):
-            raise ValueError(
-                "Scaled grasp asset could not be baked into a runtime GLB."
-            )
-        if provenance is not None:
-            adaptation["runtime_sha256"] = provenance["runtime_sha256"]
-            adaptation["runtime_path"] = provenance["runtime_path"]
+        provenance = {item["uid"]: item for item in scene.asset_provenance}
+        for record in adaptation["records"]:
+            runtime = provenance.get(record["object_id"])
+            if record["status"] == "scaled" and (
+                runtime is None or runtime["status"] not in {"generated", "reused"}
+            ):
+                raise ValueError(
+                    f"Scaled grasp asset {record['object_id']!r} could not be baked."
+                )
+            if runtime is not None:
+                record["runtime_sha256"] = runtime["runtime_sha256"]
+                record["runtime_path"] = runtime["runtime_path"]
         _write_json(root / "asset_adaptation.json", adaptation)
     selected_graph = _refine_upright_targets(selected_graph, scene)
     selected_graph = _refine_coordinated_targets(selected_graph, scene)
