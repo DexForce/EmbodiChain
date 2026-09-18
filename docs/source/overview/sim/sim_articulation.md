@@ -83,6 +83,28 @@ already provides a valid tensor. An all-zero or otherwise invalid source
 tensor is not preserved: when the link has collision geometry, both backends
 derive a fallback tensor from that geometry.
 
+### Reading current mass properties
+
+`articulation.body_data.read_physical_properties()` refreshes and returns mass,
+principal inertia and local center-of-mass (COM) pose tensors. Shapes are
+`(N, num_links)`, `(N, num_links, 3)` and `(N, num_links, 7)` respectively, in
+the public `link_names` order. COM poses use `(x, y, z, qx, qy, qz, qw)`.
+
+On Newton, this read uses DexSim's batch property APIs and reuses the output
+buffers, avoiding per-link transfers to the host. Clone returned tensors when
+retaining a snapshot across subsequent reads. Other backends retain their
+existing property read path.
+
+`set_inertia()` keeps the current principal frame; `set_com_pose()` keeps the
+current principal moments and changes their orientation and COM position.
+EmbodiChain composes `R diag(I) R.T` before writing DexSim's body-frame mat33.
+`get_newton_link_properties()` exposes that matrix plus `com_position`, without
+a separate quaternion. Principal axes can differ by ordering or quaternion sign;
+compare reconstructed matrices when checking physical equivalence.
+
+Initialization defaults remain separate. `reset(env_ids=...)` restores the
+saved inertia/frame pair and COM position only for selected environments.
+
 ### Drive Configuration
 
 The `joint_drive_props` parameter uses `JointDrivePropertiesCfg` for sparse

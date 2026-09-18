@@ -291,6 +291,25 @@ class ArticulationViewBase(ABC):
         """Return backend articulation ids for the given environment ids."""
         ...
 
+    def fetch_link_physical_properties(
+        self,
+        mass: torch.Tensor,
+        inertia: torch.Tensor,
+        com_pose: torch.Tensor,
+    ) -> None:
+        """Refresh current link properties in public link order.
+
+        Args:
+            mass: Output buffer with shape ``(N, num_links)``.
+            inertia: Output principal moments, shape ``(N, num_links, 3)``.
+            com_pose: Output local COM poses, shape ``(N, num_links, 7)``,
+                using ``xyz + xyzw``.
+
+        Raises:
+            NotImplementedError: If this view has no batch property reader.
+        """
+        raise NotImplementedError("This view does not expose batch link properties.")
+
     @abstractmethod
     def fetch_root_pose(self, data: torch.Tensor) -> torch.Tensor:
         """Fetch root poses into ``data`` and return a view/result tensor."""

@@ -439,6 +439,7 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
             len(batch), dtype=torch.int32, device=device
         )
         self._joint_apply_scratch: dict[str, torch.Tensor] = {}
+        self._link_com_scratch: torch.Tensor | None = None
 
     def _validate_homogeneous_layout(self) -> None:
         """Require the uniform topology promised by one EC Articulation."""
@@ -512,6 +513,32 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
         self, env_ids: Sequence[int] | torch.Tensor
     ) -> torch.Tensor:
         return self._articulation_ids[env_ids]
+
+    def fetch_link_physical_properties(
+        self,
+        mass: torch.Tensor,
+        inertia: torch.Tensor,
+        com_pose: torch.Tensor,
+    ) -> None:
+        """Read live batch properties into caller-owned output buffers.
+
+        Args:
+            mass: Output masses, shape ``(N, num_links)``.
+            inertia: Output principal moments, shape ``(N, num_links, 3)``.
+            com_pose: Output local poses, shape ``(N, num_links, 7)``,
+                in EmbodiChain's ``xyz + xyzw`` convention.
+        """
+        scratch = self._link_com_scratch
+        if scratch is None or scratch.shape != com_pose.shape:
+            scratch = torch.empty_like(
+                com_pose, dtype=torch.float32, device=self.device
+            )
+            self._link_com_scratch = scratch
+        _checked_batch_call(self.batch, "fetch_link_mass", mass)
+        _checked_batch_call(self.batch, "fetch_link_inertia_diagonal", inertia)
+        _checked_batch_call(self.batch, "fetch_link_com_local_pose", scratch)
+        com_pose[..., :3].copy_(scratch[..., 4:])
+        com_pose[..., 3:].copy_(scratch[..., :4])
 
     def fetch_root_pose(self, data: torch.Tensor) -> torch.Tensor:
         batch_pose = torch.empty_like(data, dtype=torch.float32, device=self.device)
