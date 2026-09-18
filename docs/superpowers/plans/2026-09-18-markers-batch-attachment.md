@@ -95,7 +95,7 @@ Keep isolated worktrees and do not delete user work.
 - Native batch issue created as DexSim #227; scalar debug-mesh MR is !1423,
   commit `fdd747e0a`. It is a prerequisite and does not close the batch issue.
 - Environment batch/attachment implementation and selected-update tests complete.
-- CPU marker/visualization/manager suite: 277 passed, three known pre-existing
+- CPU marker/visualization/manager suite: 282 passed, three known pre-existing
   COM schema cases deselected. API coverage remains 2089/2089.
 - Private native validation: two passed and one explicit dependency skip. The
   skipped registered-articulation attachment case is blocked before attachment:
@@ -126,3 +126,15 @@ capability check until an engine release contains the MR; changing a pin to an
 unpublished version would make installation fail. GPU instancing, arbitrary USD
 marker import, text and new streaming point-cloud machinery remain separate
 follow-up scope from this approved batch/attachment delivery.
+
+Final review also corrected automatic attachment publication: it now updates
+native overlays without forcing browser captures, skips unchanged parent poses,
+and preserves the existing browser cadence. Simulation counters advance with
+completed physics steps even when visual refresh fails; automatic failures are
+logged and rolled back. Manual mutations still publish synchronously. Regression
+tests cover capture counts across multiple groups and injected failures.
+
+The Sphinx dummy build completed with 720 warnings; this is not a warning-free
+documentation result. API coverage and 48 focused documentation/context checks
+passed. An isolated temporary dependency directory supplied the missing Mermaid
+extension without changing project runtime dependencies.

@@ -1695,9 +1695,9 @@ class SimulationManager:
                             self.sim_config.physics_cfg
                         ):
                             self._world.update(physics_dt)
-                    self._refresh_marker_attachments()
                     self._visualization_sim_step += 1
                     self._visualization_sim_time += physics_dt
+                    self._refresh_marker_attachments()
                     if (
                         self._window_record_state is not None
                         and self._window_record_state.capture_from_sim_update
@@ -3757,9 +3757,16 @@ class SimulationManager:
         return asset.get_local_pose()[env_ids]
 
     def _refresh_marker_attachments(self) -> None:
-        """Refresh attached overlays on the simulation thread before capture."""
+        """Refresh native overlays; browser capture keeps the host's cadence."""
         for group in tuple(getattr(self, "_marker_groups", {}).values()):
-            group._refresh_attachments()
+            try:
+                group._refresh_attachments(on_change=self._publish_native_marker_group)
+            except Exception as error:
+                # Automatic visual refresh must not interrupt physics/accounting.
+                # Group publication rolls back, allowing a later host sync to retry.
+                logger.log_warning(
+                    f"Marker attachment refresh failed for {group.name!r}: {error!r}"
+                )
 
     def get_marker_group(self, name: str) -> MarkerGroup:
         """Return a registered marker group.
@@ -3784,9 +3791,12 @@ class SimulationManager:
             for mesh in group.snapshot()
         )
 
-    def _publish_marker_group(self, group: MarkerGroup) -> None:
+    def _publish_native_marker_group(self, group: MarkerGroup) -> None:
         if self._native_markers is not None:
             self._native_markers.publish(group.name, group.snapshot())
+
+    def _publish_marker_group(self, group: MarkerGroup) -> None:
+        self._publish_native_marker_group(group)
         self._capture_marker_groups(raise_errors=True)
 
     def _remove_marker_group(self, group: MarkerGroup) -> None:

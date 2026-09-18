@@ -251,7 +251,11 @@ class MarkerGroup:
                 env_id, {key: value[row] for key, value in batches.items()}
             )
         if ids:
-            self._commit(states=states, parent_poses=self._resolve_attachments())
+            self._commit(
+                on_change=self._on_change,
+                states=states,
+                parent_poses=self._resolve_attachments(),
+            )
 
     def _updated_state(
         self, env_id: int, arrays: dict[str, np.ndarray]
@@ -318,7 +322,12 @@ class MarkerGroup:
             raise ValueError("Combined scales must be positive float32 values.")
         return state
 
-    def _commit(self, **changes: object) -> None:
+    def _commit(
+        self,
+        *,
+        on_change: Callable[[MarkerGroup], None] | None,
+        **changes: object,
+    ) -> None:
         previous = {key: getattr(self, "_" + key) for key in changes}
         changed_envs = set()
         if "states" in changes:
@@ -349,8 +358,8 @@ class MarkerGroup:
                     np.abs(positions) > np.finfo(np.float32).max
                 ):
                     raise ValueError("World positions must be finite float32 values.")
-            if self._on_change is not None:
-                self._on_change(self)
+            if on_change is not None:
+                on_change(self)
         except Exception:
             for key, value in previous.items():
                 setattr(self, "_" + key, value)
@@ -429,7 +438,7 @@ class MarkerGroup:
         values = self._visible.copy()
         values[ids] = visible
         if ids:
-            self._commit(visible=values)
+            self._commit(on_change=self._on_change, visible=values)
 
     def clear(self, *, env_ids: object | None = None) -> None:
         """Remove selected instances, retaining prototypes and attachment state.
@@ -443,7 +452,7 @@ class MarkerGroup:
         for env_id in ids:
             states[env_id] = self._defaults(0)
         if ids:
-            self._commit(states=states)
+            self._commit(on_change=self._on_change, states=states)
 
     def attach(
         self,
@@ -480,6 +489,7 @@ class MarkerGroup:
             attachments[env_id] = (parent, link_name)
         if ids:
             self._commit(
+                on_change=self._on_change,
                 attachments=attachments,
                 parent_poses=self._resolve_attachments(attachments),
             )
@@ -505,9 +515,19 @@ class MarkerGroup:
             result.update(zip(ids, poses))
         return result
 
-    def _refresh_attachments(self) -> None:
-        if self._attachments:
-            self._commit(parent_poses=self._resolve_attachments())
+    def _refresh_attachments(
+        self, *, on_change: Callable[[MarkerGroup], None] | None = None
+    ) -> None:
+        """Refresh changed poses using the host's automatic publication policy."""
+        if not self._attachments:
+            return
+        poses = self._resolve_attachments()
+        if all(
+            np.array_equal(pose, self._parent_poses.get(env_id))
+            for env_id, pose in poses.items()
+        ):
+            return
+        self._commit(on_change=on_change, parent_poses=poses)
 
     def detach(
         self, *, env_ids: object | None = None, keep_world_pose: bool = True
@@ -548,7 +568,12 @@ class MarkerGroup:
             del attachments[env_id]
             poses.pop(env_id, None)
         if ids:
-            self._commit(states=states, attachments=attachments, parent_poses=poses)
+            self._commit(
+                on_change=self._on_change,
+                states=states,
+                attachments=attachments,
+                parent_poses=poses,
+            )
 
     def _detach_parent(self, parent: str) -> None:
         ids = [

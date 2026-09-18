@@ -2531,3 +2531,110 @@ def test_marker_publication_failure_rolls_back_selected_environment_state():
         [m.position for m in group.snapshot()], [[11, 0, 0], [2, 20, 0]]
     )
     assert sim._visualization_error_reported
+
+
+def _attach_groups_for_host_update(group_count):
+    from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
+
+    sim, group = _make_attachment_sim()
+    pose = torch.tensor([[2.0, 0, 0, 0, 0, 0, 1], [3.0, 0, 0, 0, 0, 0, 1]])
+    sim._rigid_objects["target"] = SimpleNamespace(
+        is_spawn_bound=True, get_local_pose=lambda: pose
+    )
+    groups = [group]
+    for index in range(1, group_count):
+        extra = sim.add_marker_group(
+            MarkerGroupCfg(
+                name=f"attached_{index}", prototypes={"box": MarkerPrototypeCfg()}
+            )
+        )
+        extra.update(translations=[[[1, 0, 0]], [[2, 0, 0]]])
+        groups.append(extra)
+    for attached in groups:
+        attached.attach("target")
+    sim._visualization_manifest_topology_revision = sim._visualization_topology_revision
+    runtime = sim._visualization_runtime
+    sim.start_visualization = lambda: runtime
+    sim.sync_render_state = lambda: SimulationManager.sync_render_state(sim)
+    sim.update_gizmos = lambda: None
+    sim._log_scene_summary = lambda: None
+    runtime.capture_calls.clear()
+    return sim, groups, pose
+
+
+@pytest.mark.parametrize("group_count", [1, 3])
+def test_automatic_attachment_refresh_preserves_host_capture_cadence(group_count):
+    sim, groups, pose = _attach_groups_for_host_update(group_count)
+    # Changed parents must still be refreshed through every host synchronization.
+    pose[:, 0] += 1
+    sim.update(step=2)
+    captures = sim._visualization_runtime.capture_calls
+    assert [
+        (item["sim_step"], item["force"], item["capture_camera_images"])
+        for item in captures
+    ] == [(1, False, False), (2, False, True)]
+    for group in groups:
+        np.testing.assert_allclose(
+            [marker.position for marker in group.snapshot()], [[14, 0, 0], [6, 20, 0]]
+        )
+    # A caller-requested mutation still publishes immediately.
+    groups[0].update(env_ids=[0], translations=[[2, 0, 0]])
+    assert len(captures) == 3
+    assert captures[-1]["force"] is True
+
+
+def test_automatic_attachment_capture_failure_does_not_interrupt_physics_or_recording():
+    sim, groups, pose = _attach_groups_for_host_update(2)
+    pose[:, 0] += 1
+    attempts = []
+
+    def fail_capture(**kwargs):
+        attempts.append(kwargs)
+        raise RuntimeError("worker capture failed")
+
+    sim._visualization_runtime.capture = fail_capture
+    recorded = []
+    sim._window_record_state = SimpleNamespace(capture_from_sim_update=True)
+    sim._step_window_record_from_sim_update = lambda state, dt: recorded.append(
+        (sim._visualization_sim_step, groups[0].snapshot()[0].position.copy())
+    )
+    sim.update(step=2)
+    assert len(sim._world.physics_updates) == sim._visualization_sim_step == 2
+    assert sim._visualization_sim_time == pytest.approx(0.02)
+    assert [step for step, _ in recorded] == [1, 2]
+    for _, position in recorded:
+        np.testing.assert_allclose(position, [14, 0, 0])
+    assert len(attempts) == 1 and attempts[0]["force"] is False
+    assert sim._visualization_error_reported
+
+
+def test_automatic_attachment_native_publication_only_when_parent_changes():
+    sim, groups, pose = _attach_groups_for_host_update(1)
+    published = []
+    sim._native_markers = SimpleNamespace(
+        publish=lambda name, markers: published.append((name, markers))
+    )
+    SimulationManager.sync_render_state(sim)
+    assert published == []
+    pose[:, 0] += 1
+    SimulationManager.sync_render_state(sim)
+    SimulationManager.sync_render_state(sim)
+    assert len(published) == 1
+    np.testing.assert_allclose(published[0][1][0].position, [14, 0, 0])
+    assert sim._visualization_runtime.capture_calls == []
+
+
+def test_automatic_attachment_native_failure_preserves_step_accounting():
+    sim, groups, pose = _attach_groups_for_host_update(1)
+    sim.sim_config.visualization.backend = "none"
+    pose[:, 0] += 1
+
+    def fail_publish(name, markers):
+        raise RuntimeError("native marker upload failed")
+
+    sim._native_markers = SimpleNamespace(publish=fail_publish)
+    sim.update(step=2)
+    assert len(sim._world.physics_updates) == sim._visualization_sim_step == 2
+    assert sim._visualization_sim_time == pytest.approx(0.02)
+    # Failed native publication keeps the previous detached transforms.
+    np.testing.assert_allclose(groups[0].snapshot()[0].position, [13, 0, 0])
