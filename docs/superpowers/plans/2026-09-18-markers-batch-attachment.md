@@ -138,3 +138,11 @@ The Sphinx dummy build completed with 720 warnings; this is not a warning-free
 documentation result. API coverage and 48 focused documentation/context checks
 passed. An isolated temporary dependency directory supplied the missing Mermaid
 extension without changing project runtime dependencies.
+
+PR validation exposed a pre-existing architecture evidence checkout gap: the
+snapshot pins a pre-squash commit outside current branch history. The docs test
+workflow now explicitly fetches that exact revision when absent, preserving all
+exact-source assertions and the committed snapshot. A fresh bare repository
+reproduced absence and verified the fetch resolves the required source paths;
+workflow actionlint passed. The final-head Sphinx repeat completed with 1023
+warnings (the earlier run above reported 720).
