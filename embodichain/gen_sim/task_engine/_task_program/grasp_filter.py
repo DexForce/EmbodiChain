@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import math
 from typing import Any
 
 import torch
@@ -31,10 +32,11 @@ from embodichain.lab.task_program.semantics import (
 )
 from embodichain.utils import logger
 from embodichain.utils.math import pose_inv
+from .e6_clearance import HandClearance
 
 __all__: list[str] = []
 
-GRASP_FILTER_REVISION = 2
+GRASP_FILTER_REVISION = 4
 
 
 def opening_envelope_mask(
@@ -230,9 +232,187 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         """Retain the baseline articulation-service protocol, not used by GenSim Pick."""
         return self._delegate.get_best_grasp_poses(**kwargs)
 
+    def get_grasp_candidates(self, **kwargs: Any) -> Any:
+        """Forward articulation metadata; Pick uses the filtered pose protocol."""
+        return self._delegate.get_grasp_candidates(**kwargs)
+
     def get_dual_arm_valid_grasp_poses(self, **kwargs: Any) -> Any:
         """Coordinated grasps have a separate, unchanged paired-contact contract."""
         return self._delegate.get_dual_arm_valid_grasp_poses(**kwargs)
+
+
+class E6ApproachGraspPoseGenerator(ParallelJawGraspPoseGenerator):
+    """Apply the E6 diagonal approach only to bound handle geometries.
+
+    Matching uses immutable handle geometry so the task-scoped policy cannot
+    alter unrelated grasps that use the same robot end-effector.
+    """
+
+    def __init__(
+        self,
+        delegate: ParallelJawGraspPoseGenerator,
+        geometry_keys: frozenset[str],
+        *,
+        clearance: HandClearance | None = None,
+    ) -> None:
+        super().__init__(delegate.gripper_model)
+        self._delegate = delegate
+        self._geometry_keys = geometry_keys
+        self._clearance = clearance
+
+    def _approach_direction(
+        self,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        approach_direction: torch.Tensor,
+    ) -> torch.Tensor:
+        if geometry_key(mesh_vertices, mesh_triangles) not in self._geometry_keys:
+            return approach_direction
+        if approach_direction.ndim == 1:
+            direction = approach_direction.unsqueeze(0)
+            squeeze = True
+        elif approach_direction.ndim == 2 and approach_direction.shape[-1] == 3:
+            direction = approach_direction
+            squeeze = False
+        else:
+            raise ValueError(
+                "E6 grasp approach direction must have shape (3,) or (B,3)."
+            )
+        horizontal = direction.clone()
+        horizontal[:, 2] = 0.0
+        norm = torch.linalg.vector_norm(horizontal, dim=-1, keepdim=True)
+        valid = norm.squeeze(-1) > 1.0e-6
+        if valid.any():
+            diagonal = horizontal[valid] / norm[valid]
+            diagonal = diagonal * math.sqrt(0.5)
+            diagonal[:, 2] = -math.sqrt(0.5)
+            direction = direction.clone()
+            direction[valid] = diagonal
+        return direction[0] if squeeze else direction
+
+    def get_valid_grasp_poses(self, **kwargs: Any) -> Any:
+        if (
+            self._clearance is not None
+            and geometry_key(kwargs["mesh_vertices"], kwargs["mesh_triangles"])
+            in self._geometry_keys
+        ):
+            return [
+                (poses, costs)
+                for poses, _, costs in self.get_grasp_candidates(**kwargs)
+            ]
+        kwargs = dict(kwargs)
+        kwargs["approach_direction"] = self._approach_direction(
+            kwargs["mesh_vertices"],
+            kwargs["mesh_triangles"],
+            kwargs["approach_direction"],
+        )
+        return self._delegate.get_valid_grasp_poses(**kwargs)
+
+    def get_best_grasp_poses(self, **kwargs: Any) -> Any:
+        if (
+            self._clearance is not None
+            and geometry_key(kwargs["mesh_vertices"], kwargs["mesh_triangles"])
+            in self._geometry_keys
+        ):
+            rows = self.get_grasp_candidates(**kwargs)
+            poses = kwargs["obj_poses"].clone()
+            widths = poses.new_zeros(len(rows))
+            success = torch.zeros(len(rows), dtype=torch.bool, device=poses.device)
+            for row, (proposals, openings, costs) in enumerate(rows):
+                if torch.isfinite(costs).any():
+                    index = costs.argmin()
+                    poses[row], widths[row] = proposals[index], openings[index]
+                    success[row] = True
+            return success, poses, widths
+        kwargs = dict(kwargs)
+        kwargs["approach_direction"] = self._approach_direction(
+            kwargs["mesh_vertices"],
+            kwargs["mesh_triangles"],
+            kwargs["approach_direction"],
+        )
+        return self._delegate.get_best_grasp_poses(**kwargs)
+
+    def get_grasp_candidates(self, **kwargs: Any) -> Any:
+        """Preserve stock candidates and add one cross-axis handle variant."""
+        kwargs = dict(kwargs)
+        kwargs["approach_direction"] = self._approach_direction(
+            kwargs["mesh_vertices"],
+            kwargs["mesh_triangles"],
+            kwargs["approach_direction"],
+        )
+        rows = self._delegate.get_grasp_candidates(**kwargs)
+        if (
+            self._clearance is not None
+            and geometry_key(kwargs["mesh_vertices"], kwargs["mesh_triangles"])
+            in self._geometry_keys
+        ):
+            rotation = kwargs["obj_poses"].new_tensor(
+                [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+            )
+            augmented = []
+            for row, (poses, widths, costs) in enumerate(rows):
+                filtered = self._clearance.filter(poses, widths, costs)
+                if torch.isfinite(filtered[2]).any():
+                    augmented.append(filtered)
+                    continue
+                centered = kwargs["mesh_vertices"].to(poses)
+                centered = centered - centered.mean(dim=0, keepdim=True)
+                _, singular_values, principal_axes = torch.linalg.svd(
+                    centered, full_matrices=False
+                )
+                if (
+                    singular_values.shape[0] < 2
+                    or singular_values[0] <= 2.0 * singular_values[1]
+                ):
+                    augmented.append(filtered)
+                    continue
+                longest_axis = principal_axes[0]
+                stock_closing_local = (
+                    kwargs["obj_poses"][row, :3, :3].to(poses).T @ poses[:, :3, 0].T
+                ).T
+                long_axis_candidates = torch.abs(
+                    stock_closing_local @ longest_axis
+                ) >= math.cos(math.radians(20.0))
+                if not long_axis_candidates.any():
+                    augmented.append(filtered)
+                    continue
+                rotated = poses.clone()
+                rotated[:, :3, :3] = poses[:, :3, :3] @ rotation
+                closing_local = (
+                    kwargs["obj_poses"][row, :3, :3].to(rotated).T @ rotated[:, :3, 0].T
+                ).T
+                projections = kwargs["mesh_vertices"].to(rotated) @ closing_local.T
+                rotated_widths = projections.amax(dim=0) - projections.amin(dim=0)
+                rotated_costs = torch.where(
+                    long_axis_candidates, costs, torch.full_like(costs, torch.inf)
+                )
+                augmented.append(
+                    self._clearance.filter(rotated, rotated_widths, rotated_costs)
+                )
+            rows = augmented
+        return rows
+
+    def get_dual_arm_valid_grasp_poses(self, **kwargs: Any) -> Any:
+        return self._delegate.get_dual_arm_valid_grasp_poses(**kwargs)
+
+
+def install_e6_approach_filters(
+    generators: dict[str, Any],
+    geometry_keys: frozenset[str],
+    *,
+    clearances: dict[str, HandClearance] | None = None,
+) -> dict[str, Any]:
+    """Install the task-scoped E6 approach policy by handle geometry key."""
+    if not geometry_keys:
+        return generators
+    return {
+        name: E6ApproachGraspPoseGenerator(
+            generator,
+            geometry_keys,
+            clearance=None if clearances is None else clearances[name],
+        )
+        for name, generator in generators.items()
+    }
 
 
 def install_grasp_filters(

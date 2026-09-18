@@ -48,6 +48,14 @@ ActionInvocation                       semantic program
 Planning never steps simulation and never treats command completion as proof of
 a physical effect.
 
+`SlideGoal.joint_target` optionally supplies a public `SlideJointTarget` with an
+absolute prismatic coordinate and a calibrated axis sign. Slide resolves the
+remaining distance from same-timestamp joint/robot observations per planning row;
+already-satisfied rows hold, invalid observations fail, and mixed active directions
+are rejected. Omitting the target preserves fixed-distance `SlideOptions` and the
+original Slide tutorial. Slide remains open-loop; this extension does not certify
+contact or physical goal satisfaction.
+
 ## Package map
 
 | Concern | Source of truth |

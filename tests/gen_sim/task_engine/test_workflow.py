@@ -275,6 +275,7 @@ def test_packaged_workflow_configuration_uses_recovery_defaults() -> None:
     assert planning.max_episodes == 1
     assert planning.max_episode_steps == 1000000
     assert planning.fit_grasp_assets is True
+    assert TaskEnginePlanningCfg().max_episode_steps == 10000
     assert execution.num_envs == 1
     assert execution.required_successes == 1
 

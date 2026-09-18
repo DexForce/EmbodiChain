@@ -26,6 +26,9 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.gen_sim.scene_engine.pipeline.utils.articulated_usdc_utils import (
+    _read_revolute_qpos_limits,
+)
 from embodichain.lab.sim.cfg import ArticulationCfg, LightCfg, MeshCfg, RigidObjectCfg
 from embodichain.lab.visualization import (
     VisualizationCfg,
@@ -276,6 +279,7 @@ def _add_articulations(
                     fix_base=True,
                     # Generated USDC is not URDF, so it cannot build a PK chain.
                     build_pk_chain=False,
+                    qpos_limits=_read_revolute_qpos_limits(usdc_path) or None,
                 )
             )
         )

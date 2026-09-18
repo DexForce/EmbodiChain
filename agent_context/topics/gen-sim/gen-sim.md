@@ -60,6 +60,46 @@ access requires complete basic auth; repository/dotenv path restrictions belong
 to `app_env.py`. Existing process environment values take precedence over loaded
 environment files.
 
+## Task Engine semantics and execution scope
+
+`task_engine/ontology.py` owns scene-independent task meaning and capability
+requirements; `task_engine/interpretation.py` owns strict intent validation and
+model guidance. E6 is a prismatic part opened or closed (`target_state=open` or
+`closed`, `slideable`); E7 is a revolute door opened (`target_state=open`,
+`openable`). Closing a drawer remains E6 regardless of the selected arm.
+Closing a hinged door is not represented by either contract.
+
+`task_engine/agent.py` derives SceneRequest requirements from that ontology;
+`task_engine/orchestration/scene_adapter.py` checks declared capabilities without
+aliasing legacy `pullable`/`pushable` labels. Empty capability metadata remains
+unknown, not proof of native joint type. Native joint qualification is deferred
+until execution integration.
+
+Persisted candidates must match the current intent and exactly derived scene
+request. Regenerate legacy E7 closing candidates and E6/E7 candidates with old
+capability declarations; do not silently relabel them. The serialized field
+layout is unchanged. Execution admits E1-E6; E7-E9 remain rejected before graph
+generation and bundle publication. E6 uses the explicit registered
+Slide/withdraw/Park recipe in `_task_program/articulation_binding.py` and
+`articulation_slide.py`. Its first supported binding is one fixed-base,
+single-prismatic, self-contained metre-authored USD with uniform scale and an
+unambiguous handle mesh, in one simulation environment. Asset hashes, joint
+ownership, and declared limits are checked again at runtime. Public Slide owns
+planning; public Task Program and Gym own execution. Joint-target retention is
+checked after every recipe call; this is not in-flight contact qualification.
+
+`task_engine/scene/articulation_geometry.py` measures Z-up, metre-authored USD
+collision meshes in the native base-link frame, not the default prim's world
+frame that runtime reset replaces. Final inspection now measures articulated
+geometry. E6 rejects an unmeasured tabletop, more than 2 mm initial table
+penetration, or a buried handle before bundle publication and at runtime binding.
+An explicit proxy-fit repair returns a new configuration using uniform scale and
+a 1 mm placement clearance, levelling only bases within one degree while preserving
+yaw; normal loading never silently applies that repair.
+Publish repaired exports separately with asset provenance. GenSim assembly and
+E6 binding check fresh native joint limits and reapply the same values only when the
+public pre-scale cache is stale; it does not enlarge the physical travel range.
+
 ## Focused validation
 
 | Change | Tests |
@@ -68,6 +108,7 @@ environment files.
 | Edit plans and graph | `tests/gen_sim/scene_engine/test_scene_edit.py`, `test_scene_edit_plan.py`, `test_scene_graph.py` |
 | Ingest formats and metadata | `tests/gen_sim/simready_pipeline/` |
 | UI roots/auth/session workflow | `tests/gen_sim/gradio_ui/` |
+| Task intent and scene capability contracts | `tests/gen_sim/task_engine/test_agent.py`, `test_interpretation.py`, `orchestration/test_scene_adapter.py` |
 
 Select provider-backed or simulator conversion tests only when that runtime
 boundary changes; source/unit checks do not establish remote service quality.
