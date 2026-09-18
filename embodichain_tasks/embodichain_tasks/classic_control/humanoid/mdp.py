@@ -96,7 +96,7 @@ def humanoid_reward(
     death_cost: float,
     alive_reward_scale: float,
 ) -> torch.Tensor:
-    """Compute the 17-DoF Humanoid reward.
+    """Compute the 17-DoF Humanoid reward with a penalty near either joint limit.
 
     Args:
         action: Current clipped effort actions.
@@ -133,7 +133,7 @@ def humanoid_reward(
         (action * joint_velocity * joint_velocity_scale).abs()
         * motor_effort_ratio.unsqueeze(0)
     ).sum(dim=-1)
-    joint_limit_cost = (scaled_joint_position > 0.98).sum(dim=-1)
+    joint_limit_cost = (scaled_joint_position.abs() > 0.98).sum(dim=-1)
     reward = (
         progress
         + alive_reward_scale

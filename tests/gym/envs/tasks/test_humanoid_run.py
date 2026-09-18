@@ -89,6 +89,47 @@ def test_humanoid_observation_layout_and_motor_cost():
     torch.testing.assert_close(reward, torch.tensor([3.6, -1.0]))
 
 
+@pytest.mark.parametrize(
+    "position, expected_cost",
+    [
+        (-1.01, 2.0),
+        (-1.0, 2.0),
+        (-0.99, 2.0),
+        (-0.98, 0.0),
+        (0.0, 0.0),
+        (0.98, 0.0),
+        (0.99, 2.0),
+        (1.0, 2.0),
+        (1.01, 2.0),
+    ],
+)
+def test_humanoid_reward_penalizes_both_joint_limits(
+    position: float, expected_cost: float
+) -> None:
+    joint_position = torch.zeros(3, 17)
+    # Two joints approach the same limit; the first environment stays centered.
+    joint_position[1:, [0, 16]] = position
+    reward = humanoid_reward(
+        action=torch.zeros_like(joint_position),
+        terminated=torch.tensor([False, False, True]),
+        heading_projection=torch.ones(3),
+        up_projection=torch.ones(3),
+        joint_velocity=torch.zeros_like(joint_position),
+        scaled_joint_position=joint_position,
+        progress=torch.ones(3),
+        motor_effort_ratio=torch.ones(17),
+        heading_weight=0.5,
+        up_weight=0.1,
+        actions_cost_scale=0.01,
+        energy_cost_scale=0.05,
+        joint_velocity_scale=0.1,
+        death_cost=-1.0,
+        alive_reward_scale=2.0,
+    )
+    # Base reward is 3.6; each near-limit joint costs one, and death overrides it.
+    torch.testing.assert_close(reward, torch.tensor([3.6, 3.6 - expected_cost, -1.0]))
+
+
 def test_humanoid_deployment_preserves_effort_contract(monkeypatch):
     from pathlib import Path
     from embodichain.lab.sim import cfg as sim_cfg
