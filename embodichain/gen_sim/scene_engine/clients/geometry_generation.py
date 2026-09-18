@@ -97,7 +97,9 @@ class GeometryGenerationClient:
         The service represents both one-object and multi-object jobs as one
         image plus a multipart ``masks`` list. The number of list items is the
         only difference, so keeping one implementation prevents the client
-        paths from drifting apart.
+        paths from drifting apart. The parsed response objects retain the
+        server-native ``rotation_quaternion_wxyz`` field; callers entering an
+        EmbodiChain pose API must convert that field exactly once to ``xyzw``.
         """
 
         # Check, validate then wrap each content of the request.

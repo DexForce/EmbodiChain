@@ -51,6 +51,7 @@ def _validate_settle_parameters(
     required_stable_checks: int,
     timeout_behavior: str,
     allow_partial_envs: bool,
+    restore_initial_xy: bool,
 ) -> DynamicSettleMonitorCfg:
     """Validate parameters and return the reusable monitor policy."""
     cfg = DynamicSettleMonitorCfg(
@@ -65,7 +66,33 @@ def _validate_settle_parameters(
         raise ValueError("timeout_behavior must be either 'warn' or 'raise'.")
     if not isinstance(allow_partial_envs, bool):
         raise TypeError("allow_partial_envs must be a boolean.")
+    if not isinstance(restore_initial_xy, bool):
+        raise TypeError("restore_initial_xy must be a boolean.")
     return cfg
+
+
+def _restore_rigid_object_initial_xy(
+    entities: Sequence[_SettleEntity], env_ids: torch.Tensor
+) -> None:
+    """Restore configured planar layout after gravity has resolved height and tilt."""
+    selected_env_ids = env_ids.detach().cpu().tolist()
+    for kind, entity_cfg, entity in entities:
+        if kind != "rigid_object":
+            raise ValueError(
+                "restore_initial_xy supports only explicit rigid-object targets."
+            )
+        initial_position = torch.as_tensor(
+            entity.cfg.init_pos, dtype=torch.float32, device=entity.device
+        )
+        if initial_position.shape != (3,) or not torch.isfinite(initial_position).all():
+            raise ValueError(
+                f"Settle target '{entity_cfg.uid}' requires a finite cfg.init_pos."
+            )
+        pose = entity.get_local_pose(to_matrix=True)[env_ids].clone()
+        pose[:, :2, 3] = initial_position[:2]
+        entity.set_local_pose(pose, env_ids=selected_env_ids)
+        zeros = torch.zeros((env_ids.numel(), 3), device=entity.device)
+        entity.set_velocity(zeros, zeros, env_ids=selected_env_ids)
 
 
 def _normalize_settle_env_ids(
@@ -124,8 +151,9 @@ def _get_dynamic_entity_catalog(
 def _is_dynamic_entity(kind: str, entity: _DynamicEntity) -> bool:
     """Return whether an entity participates in dynamic physics.
 
-    Articulation links are physics-backed even when ``fix_base`` constrains the
-    root link, so every non-robot articulation is a valid settle target.
+    Articulation links are physics-backed even when
+    ``root_props.fixed_base`` constrains the root link, so every
+    non-robot articulation is a valid settle target.
     """
     if kind == "articulation":
         return True
@@ -284,6 +312,7 @@ def wait_for_dynamic_objects_to_settle(
     required_stable_checks: int = 3,
     timeout_behavior: Literal["warn", "raise"] = "warn",
     allow_partial_envs: bool = False,
+    restore_initial_xy: bool = False,
 ) -> None:
     """Advance physics until selected dynamic objects remain stationary.
 
@@ -321,6 +350,9 @@ def wait_for_dynamic_objects_to_settle(
             raise :class:`TimeoutError` when ``max_steps`` is reached.
         allow_partial_envs: Whether to permit a partial environment selection
             despite whole-world physics advancement.
+        restore_initial_xy: Restore configured X/Y positions after settling while
+            preserving the measured support height and orientation. This is
+            intended for generated scenes whose semantic layout is authoritative.
 
     Raises:
         IndexError: If an environment ID is outside the valid range.
@@ -339,6 +371,7 @@ def wait_for_dynamic_objects_to_settle(
         required_stable_checks=required_stable_checks,
         timeout_behavior=timeout_behavior,
         allow_partial_envs=allow_partial_envs,
+        restore_initial_xy=restore_initial_xy,
     )
     target_env_ids = _normalize_settle_env_ids(env, env_ids)
     if target_env_ids.numel() == 0:
@@ -368,6 +401,8 @@ def wait_for_dynamic_objects_to_settle(
         samples = _measure_settle_speeds(entities, target_env_ids)
         settle_state = monitor.observe(samples, elapsed_steps=step_count)
         if bool(settle_state.settled_mask.all().item()):
+            if restore_initial_xy:
+                _restore_rigid_object_initial_xy(entities, target_env_ids)
             return
 
         if step_count >= max_steps:

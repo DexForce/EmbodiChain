@@ -297,6 +297,7 @@ def test_direct_best_grasp_configures_and_reuses_private_mesh_backend(
     assert sampler_cfg.n_sample == 321
     assert sampler_cfg.min_length == 0.004
     assert sampler_cfg.max_length == 0.12
+    assert sampler_cfg.center_mode == "bounds"
     assert configured.options["max_candidates"] == 7
     assert configured.options["filter_ground_collision"] is False
     assert collision_cfg.finger_length == 0.09
@@ -339,6 +340,7 @@ def test_backend_cache_key_includes_sampling_and_annotation_policy() -> None:
     vertices, triangles = _geometry()
     generator = object.__new__(_AntipodalMeshBackend)
     generator._sampler_cfg = AntipodalSamplerCfg()
+    generator._center_mode = generator._sampler_cfg.center_mode
     generator._interactive_annotation = False
     generator._use_largest_connected_component = False
     baseline = generator._get_cache_dir(vertices, triangles)

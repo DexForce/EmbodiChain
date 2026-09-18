@@ -28,6 +28,7 @@ from embodichain.gen_sim.task_engine.orchestration.source_scene import (
     resolve_gym_config_path,
     resolve_source_scene,
 )
+from embodichain.lab.sim.cfg import RigidObjectCfg
 
 
 @pytest.mark.parametrize("ids", [["other"], ["cup", "cup"], ["cup"]])
@@ -297,8 +298,8 @@ def test_prepare_scene_normalizes_prompt2scene_export(gym_export: Path) -> None:
     assert scene.z_rotation_degrees == -90.0
     assert scene.rigid_objects[0]["init_pos"] == [2.0, -1.0, 0.7]
     assert scene.rigid_objects[0]["max_convex_hull_num"] == 16
-    assert scene.rigid_objects[0]["acd_method"] == "vhacd"
-    assert scene.rigid_objects[0]["shape"]["acd_method"] == "vhacd"
+    assert scene.rigid_objects[0]["acd_method"] == "coacd"
+    assert scene.rigid_objects[0]["shape"]["acd_method"] == "coacd"
     assert scene.rigid_objects[0]["shape"]["max_convex_hull_num"] == 16
     assert Path(scene.rigid_objects[0]["shape"]["fpath"]).is_file()
     assert scene.planner_objects[1]["source_uid"] == "interact_can_0"
@@ -344,6 +345,64 @@ def test_prepare_scene_does_not_treat_physics_attrs_as_semantics(
     )
 
     assert rigid_object["attributes"] == {}
+
+
+def test_prepare_scene_migrates_legacy_physics_attrs_to_groups(
+    gym_export: Path,
+) -> None:
+    """Legacy flat Prompt2Scene fields become valid grouped runtime config."""
+    scene = prepare_scene(gym_export)
+    runtime = scene.rigid_objects[0]
+
+    assert set(runtime["attrs"]) == {
+        "mass_props",
+        "rigid_props",
+        "collision_props",
+        "material_props",
+    }
+    assert runtime["attrs"]["mass_props"]["mass"] == pytest.approx(0.01)
+    assert runtime["attrs"]["collision_props"]["contact_offset"] == pytest.approx(0.003)
+    assert runtime["attrs"]["material_props"]["dynamic_friction"] == pytest.approx(0.9)
+    RigidObjectCfg.from_dict(runtime)
+
+
+def test_prepare_scene_prefers_canonical_physics_groups(
+    gym_export: Path,
+) -> None:
+    """An explicit grouped block wins over a stale flat value in an export."""
+    source_path = gym_export / "gym_config.json"
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    source["rigid_object"][0]["attrs"].update(
+        {
+            "mass_props": {"mass": 0.25},
+            "material_props": {"dynamic_friction": 0.35},
+        }
+    )
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+
+    runtime = prepare_scene(gym_export).rigid_objects[0]
+
+    assert runtime["attrs"]["mass_props"]["mass"] == pytest.approx(0.25)
+    assert runtime["attrs"]["material_props"]["dynamic_friction"] == pytest.approx(0.35)
+
+
+def test_prepare_scene_preserves_canonical_mesh_collision_config(
+    gym_export: Path,
+) -> None:
+    """Canonical MeshCfg collision fields are not mixed with legacy siblings."""
+    source_path = gym_export / "gym_config.json"
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    source["rigid_object"][0]["shape"]["collision"] = {
+        "approximation": "convex_hull",
+    }
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+
+    runtime = prepare_scene(gym_export).rigid_objects[0]
+
+    assert runtime["shape"]["collision"] == {"approximation": "convex_hull"}
+    assert "acd_method" not in runtime["shape"]
+    assert "max_convex_hull_num" not in runtime["shape"]
+    RigidObjectCfg.from_dict(runtime)
 
 
 @pytest.mark.parametrize(

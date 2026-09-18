@@ -118,7 +118,7 @@ def test_cargo_trajectory_rejects_escape_and_return_but_ignores_unwritten_tail()
         torch.tensor([[-0.2, -0.2, 0.0], [0.2, 0.2, 0.05]]),
         torch.tensor([True, True]),
     )
-    carrier = torch.tensor([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]).repeat(2, 3, 1)
+    carrier = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]).repeat(2, 3, 1)
     cargo = carrier.clone()
     cargo[:, :, 2] = 0.02
     cargo[:, 1, 0] = 0.3

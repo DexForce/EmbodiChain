@@ -81,7 +81,10 @@ snapshot to the exact integration registration.
 | Environment | Assurance | Source |
 |---|---|---|
 | `TaskProgramRepeatedPickPlace-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/` |
+| `TaskProgramRepeatedPickPlace-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.newton.yaml` |
+| `TaskProgramRepeatedPickPlace-Franka-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.newton.yaml` |
 | `TaskProgramOpenDrawer-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/open_drawer/` |
+| `TaskProgramOpenDrawer-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.newton.yaml` |
 | `HandOver-v1` | verified | `embodichain_tasks/configs/tasks/manipulation/hand_over/` |
 | `PourWater-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/` |
 

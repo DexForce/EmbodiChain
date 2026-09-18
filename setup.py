@@ -101,11 +101,9 @@ def get_package_dir() -> dict[str, str]:
 
 
 def get_version() -> str:
-    """Read the normalized package version from the repository version file."""
+    """Read the complete package version from the repository version file."""
     with open(os.path.join(os.path.dirname(__file__), "VERSION")) as f:
-        full_version = f.read().strip()
-        version = ".".join(full_version.split(".")[:3])
-    return version
+        return f.read().strip()
 
 
 def main():

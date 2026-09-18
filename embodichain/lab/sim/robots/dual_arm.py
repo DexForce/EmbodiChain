@@ -42,6 +42,7 @@ Example:
 
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
 from dataclasses import field
 from typing import TYPE_CHECKING, Dict, List, Union
 
@@ -265,7 +266,7 @@ def _resolve_base_cfg(base_robot: str | dict) -> RobotCfg:
 # --------------------------------------------------------------------------- #
 
 
-def _mirror_drive_pros(
+def _mirror_joint_drive_props(
     base_drive: JointDrivePropertiesCfg, name_case: dict[str, str] | None = None
 ) -> JointDrivePropertiesCfg:
     """Mirror a single-arm drive config across left/right arms.
@@ -288,13 +289,14 @@ def _mirror_drive_pros(
     Returns:
         A fresh :class:`JointDrivePropertiesCfg` for the dual arm.
     """
-    new = JointDrivePropertiesCfg(drive_type=base_drive.drive_type)
-    for prop in _DRIVE_PROPS:
+    new = type(base_drive)(drive_type=base_drive.drive_type)
+    properties = [*_DRIVE_PROPS, "target_mode"]
+    for prop in properties:
         val = getattr(base_drive, prop, None)
         if val is None:
             continue
         if isinstance(val, dict):
-            mirrored: Dict[str, float] = {}
+            mirrored: Dict[str, object] = {}
             for pattern, v in val.items():
                 mirrored[_prefixed_name(str(pattern), "left_", "joint", name_case)] = v
                 mirrored[_prefixed_name(str(pattern), "right_", "joint", name_case)] = v
@@ -404,14 +406,11 @@ def _populate_dual_cfg(
         )
     cfg.solver_cfg = new_solver
 
-    cfg.drive_pros = _mirror_drive_pros(base_cfg.drive_pros, name_case)
+    cfg.joint_drive_props = _mirror_joint_drive_props(
+        base_cfg.joint_drive_props, name_case
+    )
     cfg.attrs = base_cfg.attrs.copy()
-    cfg.min_position_iters = base_cfg.min_position_iters
-    cfg.min_velocity_iters = base_cfg.min_velocity_iters
-    cfg.fix_base = base_cfg.fix_base
-    cfg.disable_self_collision = base_cfg.disable_self_collision
-    cfg.enable_gravity = base_cfg.enable_gravity
-    cfg.sleep_threshold = base_cfg.sleep_threshold
+    cfg.root_props = base_cfg.root_props.copy()
 
 
 def build_dual_arm_cfg(
@@ -456,7 +455,7 @@ class DualArmRobotCfg(RobotCfg):
 
     Two identical arms (the ``base_robot``) are mounted on a shared synthetic
     ``base_link``. The left/right ``control_parts``, per-arm ``solver_cfg`` and
-    mirrored ``drive_pros`` are derived automatically by
+    mirrored ``joint_drive_props`` are derived automatically by
     :func:`build_dual_arm_cfg`.
 
     Example:
@@ -540,10 +539,10 @@ class DualArmRobotCfg(RobotCfg):
     ) -> Dict[str, "pk.SerialChain"]:
         """Build the per-arm pytorch-kinematics serial chains.
 
-        Each chain is built from the single-arm URDF with the (arm-local) root
-        and end link names taken from the left-arm solver, mirroring the
-        :class:`CobotMagicCfg` pattern. Both arms share one URDF; the chains are
-        keyed ``"left_arm"`` / ``"right_arm"`` for API symmetry.
+        Each chain uses its own solver root and end frames. Assembled frame
+        names are mapped back to the single-arm URDF names using the component
+        prefix and link case policy; already arm-local names are preserved.
+        Joint names and transforms remain local to the arm URDF.
 
         Args:
             device: The device to move the chains to. Defaults to CPU.
@@ -557,33 +556,60 @@ class DualArmRobotCfg(RobotCfg):
         )
 
         urdf_path = self._pk_urdf_path
-        solver = self.solver_cfg["left_arm"]
-        return {
-            "left_arm": create_pk_serial_chain(
+        link_names = [
+            link.attrib["name"] for link in ET.parse(urdf_path).findall("link")
+        ]
+        chains = {}
+        for side, _component, prefix in _SIDES:
+            part = f"{side}_{self.arm_part}"
+            solver = self.solver_cfg[part]
+            local_names = {
+                _prefixed_name(name, prefix, "link", self.urdf_cfg.name_case): name
+                for name in link_names
+            }
+            # Keep actual local names intact, including any authored side prefix.
+            local_names.update({name: name for name in link_names})
+            chains[part] = create_pk_serial_chain(
                 urdf_path=urdf_path,
                 device=device,
-                end_link_name=solver.end_link_name,
-                root_link_name=solver.root_link_name,
-            ),
-            "right_arm": create_pk_serial_chain(
-                urdf_path=urdf_path,
-                device=device,
-                end_link_name=solver.end_link_name,
-                root_link_name=solver.root_link_name,
-            ),
-        }
+                end_link_name=local_names.get(
+                    solver.end_link_name, solver.end_link_name
+                ),
+                root_link_name=local_names.get(
+                    solver.root_link_name, solver.root_link_name
+                ),
+            )
+        return chains
 
 
 if __name__ == "__main__":
+    import argparse
+
     np.set_printoptions(precision=5, suppress=True)
 
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.cfg import RenderCfg
+    from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
+
+    parser = argparse.ArgumentParser(description="Launch a dual-arm robot")
+    parser.add_argument(
+        "--physics",
+        choices=("default", "newton"),
+        default="default",
+        help="Physics backend to launch (default: default).",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Runtime device override; otherwise the selected backend default is used.",
+    )
+    args = parser.parse_args()
 
     config = SimulationManagerCfg(
         headless=True,
-        sim_device="cpu",
+        device=args.device,
         num_envs=1,
+        physics_cfg=physics_cfg_for_backend(args.physics),
         render_cfg=RenderCfg(renderer="fast-rt"),
     )
     sim = SimulationManager(config)
@@ -609,10 +635,8 @@ if __name__ == "__main__":
         }
     )
     robot = sim.add_robot(cfg=cfg)
+    sim.prepare()
     sim.open_window()
-
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     # Round-trip check: from_dict(to_dict()) reproduces the cfg.
     cfg2 = DualArmRobotCfg.from_dict(cfg.to_dict())

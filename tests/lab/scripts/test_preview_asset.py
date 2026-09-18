@@ -69,6 +69,21 @@ def test_joint_control_is_enabled_by_default_and_can_be_disabled() -> None:
     assert disabled.joint_control is False
 
 
+def test_asset_physics_mode_accepts_cli_spelling_variants() -> None:
+    parser = _create_parser()
+    default = parser.parse_args(["--asset_path", ASSET_PATH])
+    hyphenated = parser.parse_args(
+        ["--asset_path", ASSET_PATH, "--asset-physics-mode", "preserve"]
+    )
+    underscored = parser.parse_args(
+        ["--asset_path", ASSET_PATH, "--asset_physics_mode", "preserve"]
+    )
+
+    assert default.asset_physics_mode == "overlay"
+    assert hyphenated.asset_physics_mode == "preserve"
+    assert underscored.asset_physics_mode == "preserve"
+
+
 def test_loaded_assets_are_published_immediately_in_viser() -> None:
     """Assets added after manager construction should be captured before waiting."""
     sim = Mock()

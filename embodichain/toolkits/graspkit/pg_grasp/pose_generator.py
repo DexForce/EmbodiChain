@@ -78,6 +78,9 @@ class AntipodalGraspPoseGeneratorCfg:
     max_candidates: int = 50
     """Maximum number of ranked candidates returned per object pose."""
 
+    center_mode: Literal["bounds", "centroid"] = "bounds"
+    """Reference center used for ray sampling, partitioning, and ranking."""
+
     def __post_init__(self) -> None:
         self.sample_count = _positive_int(
             self.sample_count,
@@ -101,6 +104,8 @@ class AntipodalGraspPoseGeneratorCfg:
             field_name="approach_deviation_angle",
             minimum=0.0,
         )
+        if self.center_mode not in {"bounds", "centroid"}:
+            raise ValueError("center_mode must be 'bounds' or 'centroid'.")
 
 
 @configclass
@@ -308,6 +313,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 max_angle=algorithm.ray_deviation_angle,
                 max_length=model.max_opening_width,
                 min_length=model.min_opening_width,
+                center_mode=algorithm.center_mode,
             ),
             collision_cfg=GripperCollisionCfg(
                 max_open_length=model.max_opening_width,

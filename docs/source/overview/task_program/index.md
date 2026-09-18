@@ -96,9 +96,9 @@ targets:
     kind: cyclic_pose
     values:
       - position: [-0.40, 0.48, 0.10]
-        quaternion_wxyz: [1.0, 0.0, 0.0, 0.0]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
       - position: [-0.42, -0.08, 0.10]
-        quaternion_wxyz: [1.0, 0.0, 0.0, 0.0]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
 program:
   kind: repeat
   count: 3
@@ -350,7 +350,10 @@ runtime.
 | Environment | Assurance | What it demonstrates |
 |---|---|---|
 | `TaskProgramRepeatedPickPlace-v1` | projected | Bounded repeat and cyclic targets over Pick and Place. |
+| `TaskProgramRepeatedPickPlace-Newton-v1` | projected | Newton companion using a scoped grasp/contact profile selected from the Default comparison. |
+| `TaskProgramRepeatedPickPlace-Franka-Newton-v1` | projected | Newton companion for the Franka embodiment. |
 | `TaskProgramOpenDrawer-v1` | projected | An allowlisted registered call lowered to atomic Slide. |
+| `TaskProgramOpenDrawer-Newton-v1` | projected | Newton companion using the scoped drawer-handle contact profile selected from the Default comparison. |
 | `HandOver-v1` | verified | Coordinated dual-resource HandOver with measured evidence, settling, and final-target validation. |
 | `PourWater-v1` | projected | Registered held-object transport and Pour calls composed after Pick. |
 

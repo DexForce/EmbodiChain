@@ -37,9 +37,10 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     resolve_joint_target,
     resolve_pose_target,
     split_three_segments,
+    to_full_robot_trajectory,
     translate_pose_world,
 )
-from embodichain.lab.sim.motion.planners import MoveType
+from embodichain.lab.sim.motion.planners import MoveType, PlanResult
 
 CPU = torch.device("cpu")
 
@@ -459,3 +460,33 @@ class TestInterpolateJointTrajectory:
 
         with pytest.raises(ValueError, match="at least the number of keyframes"):
             interpolate_joint_trajectory(start, waypoints, n_waypoints=2)
+
+
+def test_full_robot_trajectory_uses_retimed_positions_and_velocities() -> None:
+    result = PlanResult(
+        success=torch.tensor([True]),
+        positions=torch.tensor([[[0.0, 10.0], [1.0, 12.0]]]),
+        velocities=torch.full((1, 2, 2), 99.0),
+        accelerations=torch.full((1, 2, 2), 88.0),
+        dt=torch.tensor([[0.0, 0.75]]),
+    )
+
+    success, trajectory = to_full_robot_trajectory(
+        result,
+        base_qpos=torch.tensor([[5.0, 6.0, 7.0, 8.0]]),
+        joint_ids=[1, 3],
+        env_ids=torch.tensor([7]),
+        control_dt=0.5,
+    )
+
+    expected_positions = torch.tensor(
+        [[[5.0, 0.0, 7.0, 10.0], [5.0, 0.5, 7.0, 11.0], [5.0, 1.0, 7.0, 12.0]]]
+    )
+    expected_velocities = torch.tensor(
+        [[[0.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 2.0], [0.0, 0.0, 0.0, 0.0]]]
+    )
+    assert torch.equal(success, torch.tensor([True]))
+    torch.testing.assert_close(trajectory.positions, expected_positions)
+    torch.testing.assert_close(trajectory.velocities, expected_velocities)
+    torch.testing.assert_close(trajectory.dt, torch.tensor([[0.0, 0.5, 0.5]]))
+    assert trajectory.accelerations is None

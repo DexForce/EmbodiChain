@@ -44,6 +44,7 @@ from embodichain.data_pipeline.depth_video import (
 )
 from embodichain.lab.sim.sensors import Camera, ContactSensor
 from embodichain.lab.gym.envs.demo import DEMO_ANNOTATION_KEYS, DEMO_SCHEMA_VERSION
+from embodichain.lab.gym.envs.expert_trajectory import encode_expert_action
 from .manager_base import Functor
 from .cfg import DatasetFunctorCfg
 
@@ -1183,12 +1184,19 @@ class LeRobotRecorder(Functor):
             "names": joint_names,
         }
 
-        # Use full qpos dimension for action (includes gripper)
-        action_dim = state_dim
+        expert_action_spec = getattr(self._env, "expert_action_spec", None)
+        action_dim = (
+            state_dim if expert_action_spec is None else expert_action_spec.width
+        )
+        action_names = (
+            joint_names
+            if expert_action_spec is None
+            else list(expert_action_spec.feature_names)
+        )
         features[LeRobotKey.ACTION.value] = {
             "dtype": "float32",
             "shape": (action_dim,),
-            "names": joint_names,
+            "names": action_names,
         }
         features[LEROBOT_SUBTASK_INDEX_KEY] = {
             "dtype": "int64",
@@ -1476,17 +1484,23 @@ class LeRobotRecorder(Functor):
         if isinstance(action, torch.Tensor):
             action_data = action.cpu()
         elif isinstance(action, TensorDict):
-            # Extract qpos from action dict
-            action_tensor = action.get("qpos", None)
-            if action_tensor is None:
-                # Fallback to first tensor value
-                for v in action.values():
-                    if isinstance(v, (torch.Tensor, np.ndarray)):
-                        action_tensor = v
-                        break
-
-            if isinstance(action_tensor, torch.Tensor):
-                action_data = action_tensor.cpu()
+            expert_action_spec = getattr(self._env, "expert_action_spec", None)
+            if expert_action_spec is not None:
+                action_data = encode_expert_action(
+                    action,
+                    spec=expert_action_spec,
+                    active_joint_ids=self._env.active_joint_ids,
+                ).cpu()
+            else:
+                # Compatibility for non-EmbodiedEnv recorder test doubles.
+                action_tensor = action.get("qpos", None)
+                if action_tensor is None:
+                    for value in action.values():
+                        if isinstance(value, (torch.Tensor, np.ndarray)):
+                            action_tensor = value
+                            break
+                if isinstance(action_tensor, torch.Tensor):
+                    action_data = action_tensor.cpu()
 
         frame[LeRobotKey.ACTION.value] = action_data
 

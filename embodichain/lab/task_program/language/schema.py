@@ -231,33 +231,33 @@ class TaskProgramIntegrationCfg:
 
 @configclass
 class PoseCfg:
-    """One declarative Cartesian pose using a WXYZ quaternion."""
+    """One declarative Cartesian pose using an XYZW quaternion."""
 
     position: tuple[float, float, float] = MISSING
-    quaternion_wxyz: tuple[float, float, float, float] = MISSING
+    quaternion_xyzw: tuple[float, float, float, float] = MISSING
 
     def __post_init__(self) -> None:
         """Validate pose shape, finiteness, and quaternion magnitude."""
         if type(self.position) not in (list, tuple) or len(self.position) != 3:
             raise ValueError("position must contain exactly three numbers.")
         if (
-            type(self.quaternion_wxyz) not in (list, tuple)
-            or len(self.quaternion_wxyz) != 4
+            type(self.quaternion_xyzw) not in (list, tuple)
+            or len(self.quaternion_xyzw) != 4
         ):
-            raise ValueError("quaternion_wxyz must contain exactly four numbers.")
+            raise ValueError("quaternion_xyzw must contain exactly four numbers.")
         position = tuple(
             _validate_number(value, field_name=f"position[{index}]")
             for index, value in enumerate(self.position)
         )
         quaternion = tuple(
-            _validate_number(value, field_name=f"quaternion_wxyz[{index}]")
-            for index, value in enumerate(self.quaternion_wxyz)
+            _validate_number(value, field_name=f"quaternion_xyzw[{index}]")
+            for index, value in enumerate(self.quaternion_xyzw)
         )
         norm = math.sqrt(sum(value * value for value in quaternion))
         if norm <= 1.0e-12:
-            raise ValueError("quaternion_wxyz must have non-zero magnitude.")
+            raise ValueError("quaternion_xyzw must have non-zero magnitude.")
         self.position = position  # type: ignore[assignment]
-        self.quaternion_wxyz = quaternion  # type: ignore[assignment]
+        self.quaternion_xyzw = quaternion  # type: ignore[assignment]
 
 
 @configclass

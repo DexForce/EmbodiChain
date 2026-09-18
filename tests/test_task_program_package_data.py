@@ -57,12 +57,27 @@ _DEPLOYMENTS = {
         "task_program_repeated_pick_place",
         "ur5_dh_pgi_140_80",
     ),
+    Path("tasks/manipulation/repeated_pick_place/task.ur5.newton.yaml"): (
+        "repeated_cube_pick_place",
+        "task_program_repeated_pick_place",
+        "ur5_dh_pgi_140_80",
+    ),
     Path("tasks/manipulation/repeated_pick_place/task.franka.yaml"): (
         "repeated_cube_pick_place",
         "task_program_repeated_pick_place",
         "franka_panda",
     ),
+    Path("tasks/manipulation/repeated_pick_place/task.franka.newton.yaml"): (
+        "repeated_cube_pick_place",
+        "task_program_repeated_pick_place",
+        "franka_panda",
+    ),
     Path("tasks/manipulation/open_drawer/task.ur5.yaml"): (
+        "slide_open_drawer",
+        "task_program_open_drawer",
+        "ur5_dh_pgi_140_80",
+    ),
+    Path("tasks/manipulation/open_drawer/task.ur5.newton.yaml"): (
         "slide_open_drawer",
         "task_program_open_drawer",
         "ur5_dh_pgi_140_80",
@@ -97,8 +112,10 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/hand_over/env.yaml"),
         Path("tasks/manipulation/hand_over/task_program/integration.yaml"),
         Path("tasks/manipulation/open_drawer/env.yaml"),
+        Path("tasks/manipulation/open_drawer/env.newton.yaml"),
         Path("tasks/manipulation/open_drawer/task_program/integration.yaml"),
         Path("tasks/manipulation/repeated_pick_place/env.yaml"),
+        Path("tasks/manipulation/repeated_pick_place/env.newton.yaml"),
         Path("tasks/manipulation/repeated_pick_place/task_program/integration.yaml"),
         Path("tasks/manipulation/tableware/pour_water/env.yaml"),
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),
