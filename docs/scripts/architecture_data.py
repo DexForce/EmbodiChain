@@ -72,7 +72,8 @@ class SourceRepository:
             ).strip()
         except ArchitectureDataError as error:
             raise ArchitectureDataError(
-                f"Revision {revision!r} unavailable; fetch that commit before generating or validating."
+                f"Revision {revision!r} unavailable; fetch that commit before "
+                f"generating or validating. Underlying error: {error}"
             ) from error
         self.files = set(
             self.git("ls-tree", "-rz", "--name-only", self.revision).split("\0")

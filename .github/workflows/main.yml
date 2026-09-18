@@ -244,6 +244,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: ./.github/actions/activate-conda
+      - name: Prepare Git for architecture generation
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" rev-parse \
+            --verify --end-of-options 'HEAD^{commit}'
 
       # Restore the full multi-version site from the last successful build.
       # The key never matches exactly (run_id is unique), so restore-keys is

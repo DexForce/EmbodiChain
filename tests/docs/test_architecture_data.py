@@ -30,7 +30,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_DIR = ROOT / "docs/scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
-from architecture_data import ArchitectureDataError, load_snapshot, validate_snapshot
+from architecture_data import (
+    ArchitectureDataError,
+    SourceRepository,
+    load_snapshot,
+    validate_snapshot,
+)
 
 
 def git(root: Path, *args: str) -> str:
@@ -137,6 +142,15 @@ def test_historical_validation_ignores_worktree_source(valid_snapshot):
     data, root, schema = valid_snapshot
     write(root, "pkg/a.py", "raise RuntimeError('must not import')\n")
     validate_snapshot(data, repo_root=root, schema_path=schema)
+
+
+def test_revision_resolution_preserves_git_failure(tmp_path: Path):
+    with pytest.raises(ArchitectureDataError) as failure:
+        SourceRepository(tmp_path, "HEAD")
+
+    message = str(failure.value).lower()
+    assert "git source read failed" in message
+    assert "not a git repository" in message
 
 
 @pytest.mark.parametrize(
