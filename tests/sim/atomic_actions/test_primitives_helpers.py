@@ -26,6 +26,7 @@ from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     repeat_qpos,
     resolve_batched_pose,
     resolve_object_target,
+    resample_planned_trajectory,
 )
 
 BATCH_SIZE = 2
@@ -73,6 +74,19 @@ def test_assemble_full_robot_trajectory_rejects_empty_parts() -> None:
             torch.zeros(BATCH_SIZE, ROBOT_DOF),
             (),
         )
+
+
+def test_resample_planned_trajectory_fits_native_path_to_phase_length() -> None:
+    trajectory = torch.tensor(
+        [[[0.0, 0.0], [0.25, 0.5], [1.0, 1.0], [1.5, 1.0]]],
+        dtype=torch.float32,
+    )
+
+    result = resample_planned_trajectory(trajectory, sample_count=3)
+
+    assert result.shape == (1, 3, 2)
+    torch.testing.assert_close(result[:, 0], trajectory[:, 0])
+    torch.testing.assert_close(result[:, -1], trajectory[:, -1])
 
 
 def test_resolve_object_target_uses_custom_name_in_shape_error() -> None:

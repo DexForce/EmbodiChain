@@ -25,7 +25,7 @@ This page lists all available observation functors that can be used with the Obs
 * - Functor Name
   - Description
 * - {func}`~observations.get_object_pose`
-  - Get the arena poses of objects. Returns 4x4 transformation matrices of shape (num_envs, 4, 4) by default, or (num_envs, 7) as [x, y, z, qw, qx, qy, qz] when ``to_matrix=False``. Returns zero tensor if object doesn't exist.
+  - Get the arena poses of objects. Returns 4x4 transformation matrices of shape (num_envs, 4, 4) by default, or (num_envs, 7) as [x, y, z, qx, qy, qz, qw] when ``to_matrix=False``. Returns zero tensor if object doesn't exist.
 
     ```json
     {"func": "get_object_pose", "mode": "add",
@@ -33,7 +33,7 @@ This page lists all available observation functors that can be used with the Obs
      "params": {"entity_cfg": {"uid": "bottle"}, "to_matrix": true}}
     ```
 * - {func}`~observations.get_rigid_object_pose`
-  - Get the arena poses of rigid objects. Returns 4x4 transformation matrices of shape (num_envs, 4, 4) by default, or (num_envs, 7) when ``to_matrix=False``. If the object doesn't exist, returns a zero tensor. (Deprecated: use ``get_object_pose`` instead.)
+  - Get the arena poses of rigid objects. Returns 4x4 transformation matrices of shape (num_envs, 4, 4) by default, or (num_envs, 7) as [x, y, z, qx, qy, qz, qw] when ``to_matrix=False``. If the object doesn't exist, returns a zero tensor. (Deprecated: use ``get_object_pose`` instead.)
 
     ```json
     {"func": "get_rigid_object_pose", "mode": "add",

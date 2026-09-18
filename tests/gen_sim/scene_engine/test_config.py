@@ -60,9 +60,9 @@ def test_scene_engine_help_exposes_only_runtime_arguments(
     output = capsys.readouterr().out
     assert "--image" in output
     assert "--output_root" in output
-    assert "--prompt2scene_scene_z_rotation_degrees" in output
-    assert "--prompt2scene_mesh_x_rotation_degrees" in output
-    assert "--target_body_scale_mode" in output
+    assert "--prompt2scene_scene_z_rotation_degrees" not in output
+    assert "--prompt2scene_mesh_x_rotation_degrees" not in output
+    assert "--target_body_scale_mode" not in output
     assert "gen_sim/.env" in output
     assert "--config" not in output
 
@@ -101,46 +101,23 @@ def test_scene_engine_cli_forwards_validated_paths(
     }
 
 
-def test_scene_engine_main_accepts_legacy_direct_glb_options(
-    monkeypatch: pytest.MonkeyPatch,
+def test_scene_engine_main_rejects_removed_direct_glb_options(
     tmp_path: Path,
 ) -> None:
     image_path = tmp_path / "scene.png"
     image_path.write_bytes(b"png")
-    captured: dict[str, object] = {}
-
-    def cli_scene_engine(
-        image: str,
-        output_root: str,
-        *,
-        edit_prompt: str | None,
-        scene_z_rotation_degrees: float,
-    ) -> None:
-        captured.update(
-            image=image,
-            output_root=output_root,
-            edit_prompt=edit_prompt,
-            scene_z_rotation_degrees=scene_z_rotation_degrees,
+    with pytest.raises(SystemExit) as exc_info:
+        start.main(
+            [
+                "--image",
+                str(image_path),
+                "--output_root",
+                str(tmp_path / "output"),
+                "--target_body_scale_mode",
+                "preserve",
+            ]
         )
-
-    monkeypatch.setattr(start, "cli_scene_engine", cli_scene_engine)
-
-    start.main(
-        [
-            "--image",
-            str(image_path),
-            "--output_root",
-            str(tmp_path / "output"),
-            "--target_body_scale_mode",
-            "preserve",
-            "--prompt2scene_scene_z_rotation_degrees",
-            "180",
-            "--prompt2scene_mesh_x_rotation_degrees",
-            "0",
-        ]
-    )
-
-    assert captured["scene_z_rotation_degrees"] == 180.0
+    assert exc_info.value.code == 2
 
 
 def test_scene_engine_main_rejects_legacy_mesh_x_rotation(

@@ -32,6 +32,8 @@ from embodichain.learning.rl.buffer import RolloutBuffer
 from embodichain.learning.rl.collector import SyncCollector
 from embodichain.learning.rl.evaluation import evaluate_episodes
 
+__all__ = ["Trainer"]
+
 
 class Trainer:
     """Algorithm-agnostic trainer that coordinates training loop, logging, and evaluation."""
@@ -59,6 +61,7 @@ class Trainer:
         eval_seed: int | None = None,
         best_eval_metric: str = "eval/avg_reward",
         best_eval_mode: str = "max",
+        save_frequency_updates: int = 0,
     ):
         if best_eval_mode not in {"min", "max"}:
             raise ValueError("best_eval_mode must be 'min' or 'max'.")
@@ -74,6 +77,7 @@ class Trainer:
         self.writer = writer
         self.eval_freq = eval_freq
         self.save_freq = save_freq
+        self.save_frequency_updates = save_frequency_updates
         self.checkpoint_dir = checkpoint_dir
         self.exp_name = exp_name
         self.use_wandb = use_wandb
@@ -91,6 +95,7 @@ class Trainer:
 
         self.device = self.algorithm.device
         self.global_step = 0
+        self.num_updates = 0
         self.start_time = time.time()
         self.ret_window = deque(maxlen=100)
         self.len_window = deque(maxlen=100)
@@ -104,10 +109,16 @@ class Trainer:
         num_envs = getattr(self.env, "num_envs", None)
         if num_envs is None:
             raise RuntimeError("Env must expose num_envs for trainer statistics.")
-        obs_dim = getattr(self.policy, "obs_dim", None)
-        action_dim = getattr(self.policy, "action_dim", None)
+        policy_module = getattr(self.policy, "module", self.policy)
+        obs_dim = getattr(policy_module, "obs_dim", None)
+        action_dim = getattr(policy_module, "action_dim", None)
         if obs_dim is None or action_dim is None:
             raise RuntimeError("Policy must expose obs_dim and action_dim.")
+        critic_obs_dim = (
+            getattr(policy_module, "critic_obs_dim", None)
+            if getattr(policy_module, "uses_separate_critic_obs", False)
+            else None
+        )
 
         self.buffer = RolloutBuffer(
             num_envs=num_envs,
@@ -115,6 +126,12 @@ class Trainer:
             obs_dim=obs_dim,
             action_dim=action_dim,
             device=self.device,
+            critic_obs_dim=critic_obs_dim,
+            distribution_param_dim=getattr(
+                policy_module,
+                "distribution_param_dim",
+                None,
+            ),
         )
         self.collector = SyncCollector(
             env=self.env,
@@ -171,6 +188,7 @@ class Trainer:
         while self.global_step < total_timesteps:
             self._collect_rollout()
             losses = self.algorithm.update(self.buffer.get(flatten=False))
+            self.num_updates += 1
             self._log_train(losses)
             if (
                 self._next_eval_step is not None
@@ -187,6 +205,11 @@ class Trainer:
                 self.save_checkpoint()
                 while self._next_save_step <= self.global_step:
                     self._next_save_step += self.save_freq
+            if (
+                self.save_frequency_updates > 0
+                and self.num_updates % self.save_frequency_updates == 0
+            ):
+                self.save_checkpoint()
         return self.get_summary()
 
     @torch.no_grad()
@@ -418,6 +441,7 @@ class Trainer:
         )
         checkpoint = {
             "global_step": self.global_step,
+            "num_updates": self.num_updates,
             "policy": policy_state,
             "best_eval_value": self.best_eval_value,
         }
@@ -442,6 +466,7 @@ class Trainer:
         elapsed = max(1e-6, time.time() - self.start_time)
         return {
             "global_step": int(self.global_step),
+            "num_updates": int(self.num_updates),
             "elapsed_time_sec": float(elapsed),
             "training_fps": float(self.global_step / elapsed),
             "last_train_metrics": dict(self.last_train_metrics),

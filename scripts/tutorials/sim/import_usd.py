@@ -24,11 +24,32 @@ from __future__ import annotations
 
 import argparse
 import time
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create a simulation scene with SimulationManager"
+    )
+    add_sim_args_to_parser(parser)
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
+from embodichain.lab.sim.cfg import (
+    MassPropertiesCfg,
+    RenderCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
+    physics_cfg_for_backend,
+)
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.objects import (
     RigidObject,
@@ -39,15 +60,13 @@ from embodichain.lab.sim.objects import (
 from embodichain.data import get_data_path
 
 
-def main():
+def main(args: argparse.Namespace | None = None) -> None:
     """Main function to create and run the simulation scene."""
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="Create a simulation scene with SimulationManager"
-    )
-    add_env_launcher_args_to_parser(parser)
-    args = parser.parse_args()
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
 
     # Configure the simulation
     sim_cfg = SimulationManagerCfg(
@@ -55,10 +74,11 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(
             renderer=args.renderer,
         ),  # Enable ray tracing for better visuals
+        physics_cfg=physics_cfg_for_backend(args.physics),
         num_envs=1,
         arena_space=3.0,
         visualization=visualization_cfg_from_args(args),
@@ -72,11 +92,13 @@ def main():
             uid="cube",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
             body_type="dynamic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.1,
+            attrs=RigidBodyPhysicsCfg(
+                mass_props=MassPropertiesCfg(mass=1.0),
+                material_props=RigidBodyMaterialCfg(
+                    dynamic_friction=0.5,
+                    static_friction=0.5,
+                    restitution=0.1,
+                ),
             ),
             init_pos=[0.0, 0.0, 1.0],
         )
@@ -90,7 +112,7 @@ def main():
             shape=MeshCfg(fpath=sugar_box_path),
             body_type="dynamic",
             init_pos=[0.2, 0.2, 1.0],
-            use_usd_properties=True,
+            asset_physics_mode="preserve",
         )
     )
 
@@ -103,11 +125,12 @@ def main():
             fpath=h1_path,
             build_pk_chain=False,
             init_pos=[-0.2, -0.2, 1.05],
-            use_usd_properties=False,
+            asset_physics_mode="overlay",
         )
     )
 
     # Open window when the scene has been set up
+    sim.prepare()
     if not args.headless:
         sim.open_window()
 
@@ -124,10 +147,6 @@ def run_simulation(sim: SimulationManager):
     Args:
         sim: The SimulationManager instance to run
     """
-
-    # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     step_count = 0
 
@@ -162,4 +181,4 @@ def run_simulation(sim: SimulationManager):
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

@@ -66,7 +66,10 @@ def _scene_object(
 def _physics(body_type: str) -> ObjectPhysics:
     return ObjectPhysics(
         body_type=body_type,  # type: ignore[arg-type]
-        attrs={"mass": 1.0, "static_friction": 0.8},
+        attrs={
+            "mass_props": {"mass": 1.0},
+            "material_props": {"static_friction": 0.8},
+        },
         max_convex_hull_num=16,
     )
 
@@ -272,7 +275,13 @@ def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
     assert np.allclose(imported_drawer.rot, drawer.rot)
 
 
-def test_preview_loads_exported_usdc_as_an_articulation(tmp_path: Path) -> None:
+def test_preview_loads_exported_usdc_as_an_articulation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from embodichain.gen_sim.scene_engine.cli import preview
+
+    monkeypatch.setattr(preview, "_read_revolute_qpos_limits", lambda path: {})
+
     class FakeSimulationManager:
         def __init__(self) -> None:
             self.articulation_cfgs: list[object] = []

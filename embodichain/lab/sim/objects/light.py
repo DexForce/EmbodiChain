@@ -46,6 +46,7 @@ class Light(BatchEntity):
     ) -> None:
 
         super().__init__(cfg, entities, device)
+        self.reset()
 
     def set_color(
         self, colors: torch.Tensor, env_ids: Sequence[int] | None = None

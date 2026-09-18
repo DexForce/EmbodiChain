@@ -90,8 +90,8 @@ You can customize the simulation with the following command-line options:
    # View camera frustums and all sensor RGB previews in Viser
    python scripts/tutorials/sim/create_sensor.py --viser
 
-   # Enable ray tracing rendering
-   python scripts/tutorials/sim/create_sensor.py --renderer
+   # Select a renderer backend
+   python scripts/tutorials/sim/create_sensor.py --renderer rt
 
    # Attach the camera to the robot end-effector
    python scripts/tutorials/sim/create_sensor.py --attach_sensor

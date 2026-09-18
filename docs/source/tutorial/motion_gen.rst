@@ -5,7 +5,7 @@ Motion Generator
 
 .. currentmodule:: embodichain.lab.sim.motion.motion_generator
 
-The ``MotionGenerator`` class in EmbodiChain provides a unified and extensible interface for robot trajectory planning. It supports time-optimal trajectory generation (currently via TOPPRA), joint/Cartesian interpolation, and is designed for easy integration with RL, imitation learning, and classical control scenarios.
+The ``MotionGenerator`` class in EmbodiChain provides a unified and extensible interface for robot trajectory planning. It supports time-optimal trajectory generation via TOPPRA, deterministic trapezoidal joint-space timing, joint/Cartesian interpolation, and is designed for easy integration with RL, imitation learning, and classical control scenarios.
 
 Key Features
 ------------
@@ -29,15 +29,34 @@ The tutorial corresponds to the ``motion_generator.py`` script in the ``scripts/
         :language: python
         :linenos:
 
+Run the executable from the repository root. It creates one CobotMagic arm,
+plans joint and Cartesian three-waypoint paths, and replays both paths:
+
+.. code-block:: bash
+
+   python scripts/tutorials/sim/motion_generator.py --headless --device cpu
+
+Use ``--num-envs N`` for a batched scene, ``--physics newton`` to select the
+Newton backend, or ``--viser`` to publish the scene in a browser. Headless
+runs record a whole-scene MP4 by default; pass ``--disable-record`` to skip
+recording or ``--record-save-path PATH`` to choose the output file.
+
 Typical Usage
 ~~~~~~~~~~~~~
 
 .. code-block:: python
 
+   import numpy as np
+   import torch
+
    from embodichain.lab.sim.motion.motion_generator import MotionGenerator, MotionGenCfg
-   from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
-   from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanOptions
-   from embodichain.lab.sim.motion.planners.utils import PlanState, TrajectorySampleMethod, MoveType
+   from embodichain.lab.sim.motion.planners import (
+       MoveType,
+       PlanState,
+       ToppraPlanOptions,
+       ToppraPlannerCfg,
+       TrajectorySampleMethod,
+   )
 
    # Assume you have a robot instance and arm_name
    # Constraints are now specified in ToppraPlanOptions, not in ToppraPlannerCfg
@@ -69,7 +88,10 @@ Typical Usage
 
    # Plan a joint-space trajectory (use generate() method instead of plan())
    target_states = [
-       PlanState(move_type=MoveType.JOINT_MOVE, qpos=torch.tensor([0.5, 0.2, 0., 0., 0., 0.]))
+       PlanState.from_qpos(
+           torch.tensor([[0.5, 0.2, 0., 0., 0., 0.]]),
+           move_type=MoveType.JOINT_MOVE,
+       )
    ]
    plan_result = motion_gen.generate(
        target_states=target_states,
@@ -81,6 +103,35 @@ Typical Usage
    accelerations = plan_result.accelerations
    duration = plan_result.duration
 
+Timed playback
+~~~~~~~~~~~~~~
+
+``PlanResult.positions``, ``velocities``, and ``dt`` form one timed command.
+During physical playback, send position and velocity sample ``i``, then advance
+physics by ``dt[i + 1]`` before measuring the state at sample ``i + 1``. After
+the final waypoint, write its position with a zero velocity target so the controller holds the terminal
+position instead of retaining the last feed-forward command. The complete
+tutorial script demonstrates this loop and resamples fractional planner
+intervals onto a uniform cadence no larger than the configured physics step.
+
+To compare the controller under position-only and position-plus-velocity
+commands with identical initial state, gains, reference, and cadence, run::
+
+   python examples/sim/motion/trajectory_velocity_tracking.py --headless \
+       --device cpu --output-dir trajectory_velocity_results
+
+The script restores the robot's configured initial state and clears its dynamics
+before each trial. The position-only trial explicitly sends zero target velocity. It writes ``tracking.csv`` with samples
+timestamped after each control interval and ``tracking.png`` with the aggregate
+joint error, and prints RMSE, P95, and maximum absolute joint error. Treat the
+numbers as measurements for the selected robot, drive gains, physics backend,
+and cadence; velocity targets do not imply universal improvement.
+
+DexSim must support both target-position and target-velocity writes. The
+example uses :meth:`Robot.set_qpos` and :meth:`Robot.set_qvel`, which map to
+DexSim's articulation target APIs. It is headless by default and requires the
+normal simulation assets and runtime.
+
 API Reference
 ~~~~~~~~~~~~~
 
@@ -88,7 +139,7 @@ API Reference
 
 .. code-block:: python
 
-   from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanOptions
+   from embodichain.lab.sim.motion.planners import ToppraPlanOptions, ToppraPlannerCfg
 
    motion_cfg = MotionGenCfg(
        planner_cfg=ToppraPlannerCfg(
@@ -119,7 +170,7 @@ API Reference
        start_qpos=torch.tensor([...]),     # Optional starting joint configuration
    )
 
-**generate** (formerly ``plan``)
+**generate**
 
 .. code-block:: python
 
@@ -130,8 +181,8 @@ API Reference
 
 - ``strategy="motion_gen"`` delegates to the configured backend; ``strategy="ik_interp"`` performs deterministic waypoint IK and joint interpolation and requires ``interpolation_dt``.
 - Returns a normalized, environment-batched ``PlanResult`` with explicit ``dt``
-  and derived ``duration`` whenever positions are present. Missing timing raises
-  immediately.
+  and derived ``duration`` whenever positions are present. Its ``velocities``
+  carry the matching velocity targets. Missing timing raises immediately.
 - Uses ``target_states`` (list of PlanState) and ``options`` (MotionGenOptions) instead of individual parameters.
 
 **interpolate_trajectory**
@@ -161,20 +212,25 @@ API Reference
 
 - Estimates the number of samples needed for a trajectory.
 
-**plan_with_collision**
+**Collision-world integration**
 
-.. code-block:: python
-
-   plan_with_collision(...)
-
-- (Reserved) Plan trajectory with collision checking (not yet implemented).
+Collision-capable planners expose their world contract through
+``MotionGenerator.collision_world_info`` and can bind live obstacle poses with
+``MotionGenerator.bind_collision_world(plan_opts, obstacle_poses=...)``. The
+selected planner must advertise update support; otherwise binding raises a
+clear ``ValueError``.
 
 Notes & Best Practices
 ~~~~~~~~~~~~~~~~~~~~~~
 
-- Only collision-free planning is currently supported; collision checking is a placeholder.
-- Input/outputs are numpy arrays or torch tensors; ensure type consistency.
+- TOPPRA, TrapezoidalPlanner, and NeuralPlanner do not maintain a collision
+  world. Select the optional
+  cuRobo V2 backend for collision-aware planning and exact joint-trajectory
+  collision validation; see :doc:`/overview/sim/motion/planners/curobo_planner`.
+- Planning inputs and outputs use environment-batched PyTorch tensors.
 - Robot instance must implement get_joint_ids, compute_fk, compute_ik, get_proprioception, etc.
-- For custom planners, extend the PlannerType Enum and _create_planner methods.
+- Custom planners subclass ``BasePlanner`` with a matching ``BasePlannerCfg`` and
+  declare ``supported_move_types``. Register the pair with
+  ``MotionGenerator.register_planner_type(name, planner_class, planner_cfg_class)``.
 - Constraints (velocity, acceleration) are now specified in ``ToppraPlanOptions``, not in ``ToppraPlannerCfg``.
 - Use ``PlanState.qpos`` (not ``position``) for joint positions.

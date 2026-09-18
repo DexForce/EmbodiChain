@@ -47,6 +47,13 @@ drains committed work; it does not commit a live rollout. Final partial vector
 batches use `commit_env_ids` to select dataset rows while preserving a full
 physical reset. The recorder requires an exactly representable integer FPS.
 
+Expert rollout actions use the environment's `ExpertActionSpec`, independently
+of the policy action space. The default position mode preserves active-joint
+qpos storage. Position-velocity mode stores a flat `[qpos, qvel]` vector;
+LeRobot feature width and ordered names follow that layout, while episode and
+trajectory metadata publish its version, joint names, slices, mode, and
+environment `step_dt`.
+
 `dataset.save_episode()` is the LeRobot commit point. A later depth/sidecar
 failure cannot roll back that episode. Fragment IDs provide same-recorder
 deduplication and sticky partial-commit errors; they are not a crash-recovery journal.

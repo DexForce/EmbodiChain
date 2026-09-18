@@ -288,7 +288,7 @@ def test_curobo_adapter_allocates_only_declared_mesh_cache(monkeypatch) -> None:
     assert adapter.create_adapter(env) == "adapter"
     captured["motion_generator_factory"]()
     world = cfgs[0].planner_cfg.world
-    assert world.collision_cache == {"mesh": 3}
+    assert world.representation == "auto"
     assert set(world.rigid_objects) == {b.entity_id for b in bindings}
     assert world.dynamic_obstacle_names == [b.entity_id for b in bindings]
 
@@ -608,7 +608,7 @@ def test_transport_decoder_rejects_old_alternative_pose_declarations() -> None:
     pose = {
         "kind": "pose",
         "position": [0.1, 0.2, 0.8],
-        "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
     }
     with pytest.raises(ValueError, match="alternatives"):
         decode_task_lowerer(

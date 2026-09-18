@@ -22,7 +22,6 @@ under the area it improves.
 
 | Status | Planned capability |
 | --- | --- |
-| 🚧 | Support a more efficient real-time denoiser. |
 | 🚧 | Optimize batch rendering throughput and latency on graphics cards (e.g. RTX series) and compute cards (e.g. A series). |
 | 🔬 | Add 3DGS support for rendering and data generation. |
 
@@ -30,7 +29,6 @@ under the area it improves.
 
 | Status | Planned capability |
 | --- | --- |
-| 🚧 | Add Newton backend support, along with higher-performance coupled solvers and fluid solvers. |
 | 🔬 | Develop a next-generation physics backend with high-accuracy simulation, differentiable dynamics, and neural physical models for end-to-end AI integration. |
 
 ### Sensors
