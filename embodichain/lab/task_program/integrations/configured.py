@@ -70,6 +70,7 @@ from embodichain.lab.sim.atomic_actions import (
     ExecutionRunnerCfg,
     HandOverOptions,
     MotionPolicy,
+    MoveEndEffectorOptions,
     MoveHeldObjectOptions,
     MoveJointsOptions,
     PickUpOptions,
@@ -807,6 +808,9 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "direction",
                 "approach_distance",
                 "translation_distance",
+                "preshape_fraction",
+                "approach_along_grasp_axis",
+                "release_retreat_distance",
                 "rotate_angle",
                 "approach_height",
                 "retract_height",
@@ -1013,6 +1017,9 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             required=frozenset({"kind"}),
         )
         return MoveJointsOptions()
+    if kind == "move_end_effector":
+        _mapping(value, path=path, required=frozenset({"kind"}))
+        return MoveEndEffectorOptions()
     if kind == "coordinated_pickment":
         config = _mapping(
             value,
@@ -1224,6 +1231,9 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "hand_interp_steps",
                     "approach_distance",
                     "translation_distance",
+                    "preshape_fraction",
+                    "approach_along_grasp_axis",
+                    "release_retreat_distance",
                 }
             ),
         )
@@ -1251,6 +1261,14 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 path=f"{path}.translation_distance",
                 minimum=0.0,
                 strict_minimum=True,
+            )
+        for name in ("preshape_fraction", "release_retreat_distance"):
+            if name in config:
+                kwargs[name] = _real(config[name], path=f"{path}.{name}", minimum=0.0)
+        if "approach_along_grasp_axis" in config:
+            kwargs["approach_along_grasp_axis"] = _boolean(
+                config["approach_along_grasp_axis"],
+                path=f"{path}.approach_along_grasp_axis",
             )
         return SlideOptions(**kwargs)
     if kind == "hand_over":
@@ -1315,7 +1333,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
         return HandOverOptions(**kwargs)
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
-        "['coordinated_pickment', 'hand_over', 'move_held_object', "
+        "['coordinated_pickment', 'hand_over', 'move_end_effector', 'move_held_object', "
         "'move_joints', "
         "'pick_up', 'place', 'pour', 'push_object', 'slide']."
     )

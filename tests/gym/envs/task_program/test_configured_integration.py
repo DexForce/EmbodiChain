@@ -71,6 +71,7 @@ from embodichain.lab.sim.atomic_actions import (
     HeldObjectState,
     HeldObjectPoseGoal,
     JointPositionGoal,
+    MoveEndEffectorOptions,
     MoveHeldObjectOptions,
     MoveJoints,
     MoveJointsOptions,
@@ -946,6 +947,50 @@ def test_coordinated_transport_config_decodes_closed_routes_and_options() -> Non
     assert options.release_steps == 6
     assert options.retreat_steps == 8
     assert options.grasp_seed == 17393
+
+
+def test_slide_clearance_options_decode() -> None:
+    options = _decode_action_options(
+        {
+            "kind": "slide",
+            "preshape_fraction": 0.85,
+            "release_retreat_distance": 0.04,
+            "approach_along_grasp_axis": True,
+        },
+        path="options",
+    )
+    assert options.preshape_fraction == 0.85
+    assert options.release_retreat_distance == 0.04
+    assert options.approach_along_grasp_axis is True
+    default = _decode_action_options({"kind": "slide"}, path="options")
+    assert default.preshape_fraction == 0.0
+    assert default.release_retreat_distance == 0.0
+    assert default.approach_along_grasp_axis is False
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("preshape_fraction", True),
+        ("preshape_fraction", 1.1),
+        ("release_retreat_distance", -0.1),
+        ("approach_along_grasp_axis", "true"),
+    ],
+)
+def test_slide_clearance_options_reject_invalid_values(
+    field: str, value: object
+) -> None:
+    with pytest.raises((ValueError, TypeError)):
+        _decode_action_options({"kind": "slide", field: value}, path="options")
+
+
+def test_move_end_effector_options_decode_without_task_specific_fields() -> None:
+    options = _decode_action_options({"kind": "move_end_effector"}, path="options")
+    assert type(options) is MoveEndEffectorOptions
+    with pytest.raises(ValueError):
+        _decode_action_options(
+            {"kind": "move_end_effector", "withdraw_distance": 0.1}, path="options"
+        )
 
 
 def test_park_lowerer_and_config_keep_joint_values_in_the_profile() -> None:

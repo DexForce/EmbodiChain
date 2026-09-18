@@ -565,7 +565,7 @@ def test_coordinated_placement_checks_destination_after_release_and_cleanup() ->
             },
         },
     ]
-    graph["task_groups"] = [{"node_ids": ["transport", "park"]}]
+    graph["task_groups"] = [{"task_type": "E5", "node_ids": ["transport", "park"]}]
     scene = SimpleNamespace(
         planner_objects=({"runtime_uid": "tray", "init_pos": [0.0, 0.0, 0.75]},),
         table_top_z=0.72,
@@ -606,7 +606,7 @@ def test_cleanup_rechecks_public_position_validators_without_a_local_preset() ->
             },
         },
     ]
-    graph["task_groups"] = [{"node_ids": ["restore", "park"]}]
+    graph["task_groups"] = [{"task_type": "E3", "node_ids": ["restore", "park"]}]
     restore, park = _program_payload(graph, "pour")["program"]["items"]
     assert park["post"] == restore["post"]
     assert park["validators"] == restore["validators"]
@@ -660,7 +660,7 @@ def test_phase_one_bundle_rejects_unsupported_robot_profile(tmp_path: Path) -> N
         )
 
 
-@pytest.mark.parametrize("task_type", ["E6", "E7", "E8", "E9"])
+@pytest.mark.parametrize("task_type", ["E7", "E8", "E9"])
 def test_bundle_rejects_out_of_scope_tasks_before_writing_assets(
     tmp_path: Path, task_type: str
 ) -> None:
@@ -670,7 +670,7 @@ def test_bundle_rejects_out_of_scope_tasks_before_writing_assets(
     for group in graph["task_groups"]:
         group["task_type"] = task_type
     output = tmp_path / "bundle"
-    with pytest.raises(ValueError, match="only E1-E5"):
+    with pytest.raises(ValueError, match="only E1-E6"):
         generate_task_program_bundle(graph, None, output, robot_profile="dual_franka")
     assert not output.exists()
 
@@ -1180,9 +1180,11 @@ def test_generated_usd_articulation_disables_urdf_only_pk_chain() -> None:
     assert "proxy_glb_fpath" not in articulation
 
 
-def _prepared_axis_scene(tmp_path: Path) -> PreparedScene:
+def _prepared_axis_scene(
+    tmp_path: Path, *, source_extents: tuple[float, float, float] = (0.06, 0.24, 0.06)
+) -> PreparedScene:
     mesh_path = tmp_path / "bottle.glb"
-    trimesh.creation.box(extents=[0.06, 0.24, 0.06]).export(mesh_path)
+    trimesh.creation.box(extents=source_extents).export(mesh_path)
     bottle = {
         "uid": "bottle",
         "shape": {"shape_type": "Mesh", "fpath": str(mesh_path)},
@@ -1400,8 +1402,12 @@ def test_stack_alignment_does_not_replace_support_acceptance_with_upright_only(
     "call_id", ["simulation.coordinated_hold", "simulation.coordinated_transport"]
 )
 @pytest.mark.parametrize("displacement", [[-0.1, 0.0, 0.05], [0.0, 0.0, 0.0]])
+@pytest.mark.parametrize("max_episode_steps", [None, 5000])
 def test_coordinated_bundle_composes_against_unmodified_public_options(
-    tmp_path: Path, call_id: str, displacement: list[float]
+    tmp_path: Path,
+    call_id: str,
+    displacement: list[float],
+    max_episode_steps: int | None,
 ) -> None:
     scene = _prepared_axis_scene(tmp_path)
     graph = _graph()
@@ -1434,7 +1440,14 @@ def test_coordinated_bundle_composes_against_unmodified_public_options(
         }
     ]
     generated, paths = generate_task_program_bundle(
-        graph, scene, tmp_path / "bundle", robot_profile="dual_franka"
+        graph,
+        scene,
+        tmp_path / "bundle",
+        robot_profile="dual_franka",
+        max_episode_steps=max_episode_steps,
+    )
+    assert load_config(paths.deployment)["max_episode_steps"] == (
+        10000 if max_episode_steps is None else max_episode_steps
     )
     _verify_program_projection(paths.program, generated)
     integration = load_config(paths.integration)
@@ -1448,11 +1461,21 @@ def test_coordinated_bundle_composes_against_unmodified_public_options(
     )
 
 
+@pytest.mark.parametrize(
+    ("source_extents", "expected_axis", "expected_yaw"),
+    [
+        ((0.06, 0.24, 0.06), [0.0, -0.0, 1.0], None),
+        ((0.06, 0.06, 0.24), [0.0, -1.0, 0.0], -math.pi / 3.0),
+    ],
+)
 def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
     tmp_path: Path,
+    source_extents: tuple[float, float, float],
+    expected_axis: list[float],
+    expected_yaw: float | None,
 ) -> None:
     """The merged E2 route passes real configured composition and preflight."""
-    scene = _prepared_axis_scene(tmp_path)
+    scene = _prepared_axis_scene(tmp_path, source_extents=source_extents)
     graph = _graph()
     graph["task_id"] = "upright"
     graph["targets"] = {
@@ -1543,7 +1566,10 @@ def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
         for item in integration["runtime_services"]["registered_semantic_lowerers"]
         if item["kind"] == "place_relative"
     )["routes"][0]
-    assert route["world_yaw_offset"] == pytest.approx(-math.pi / 3.0)
+    if expected_yaw is None:
+        assert "world_yaw_offset" not in route
+    else:
+        assert route["world_yaw_offset"] == pytest.approx(expected_yaw)
     assert "post" not in release and "validators" not in release
     assert terminal["validators"][0]["kind"] == "object_near_relative_target"
     # Planning includes 1 cm release clearance; acceptance uses the support surface.
@@ -1556,8 +1582,7 @@ def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
     preset = terminal["post"][-1]["preset"]
     assert constraints[preset]["kind"] == "upright"
     assert constraints[preset]["position_tolerance"] == pytest.approx(0.05)
-    # The imported rotation is baked into the normalized mesh before binding.
-    assert constraints[preset]["local_axis"] == [0.0, -0.0, 1.0]
+    assert constraints[preset]["local_axis"] == expected_axis
     assert constraints[preset]["displacement"] == pytest.approx(expected_displacement)
     assert len(terminal["validators"]) == 1
     assert terminal["steps"]["call"]["call_id"] == "simulation.park"

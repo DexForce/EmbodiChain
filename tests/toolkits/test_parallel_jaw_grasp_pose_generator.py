@@ -223,6 +223,50 @@ def test_prepare_mesh_reuses_backend_and_returns_owned_pairs(
     assert torch.equal(second, torch.ones(1, 2, 3))
 
 
+def test_candidate_metadata_keeps_pose_width_and_cost_aligned(
+    backend: type[_Backend], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def candidates(self, **kwargs):
+        poses = kwargs["object_pose"].repeat(2, 1, 1)
+        poses[:, 0, 3] += torch.tensor([0.1, 0.2])
+        return True, poses, torch.tensor([0.02, 0.06]), torch.tensor([4.0, 1.0])
+
+    monkeypatch.setattr(backend, "get_valid_grasp_poses", candidates)
+    vertices, triangles = _geometry()
+    generator = _generator()
+    kwargs = dict(
+        mesh_vertices=vertices,
+        mesh_triangles=triangles,
+        obj_poses=torch.eye(4).repeat(2, 1, 1),
+        approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+    )
+    rows = generator.get_grasp_candidates(**kwargs)
+    legacy_rows = generator.get_valid_grasp_poses(**kwargs)
+    assert len(rows) == 2
+    for (poses, widths, costs), (legacy_poses, legacy_costs) in zip(rows, legacy_rows):
+        assert torch.allclose(poses[:, 0, 3], torch.tensor([0.1, 0.2]))
+        assert torch.equal(widths, torch.tensor([0.02, 0.06]))
+        assert torch.equal(costs, torch.tensor([4.0, 1.0]))
+        assert torch.equal(poses, legacy_poses)
+        assert torch.equal(costs, legacy_costs)
+
+
+def test_candidate_metadata_preserves_failed_row_sentinel(
+    backend: type[_Backend],
+) -> None:
+    vertices, triangles = _geometry()
+    rows = _generator().get_grasp_candidates(
+        mesh_vertices=vertices,
+        mesh_triangles=triangles,
+        obj_poses=torch.eye(4)[None],
+        approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+    )
+    poses, widths, costs = rows[0]
+    assert poses.shape == (1, 4, 4)
+    assert widths.shape == costs.shape == (1,)
+    assert torch.isinf(costs).all()
+
+
 def test_direct_best_grasp_configures_and_reuses_private_mesh_backend(
     backend: type[_Backend],
 ) -> None:

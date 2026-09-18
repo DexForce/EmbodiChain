@@ -30,8 +30,23 @@ import numpy as np
 from embodichain.lab.task_program.language import load_task_program
 from embodichain.utils.utility import load_config, save_config
 
+from .config import TaskEnginePlanningCfg
 from .semantic_graph import SemanticTaskGraph, validate_semantic_task_graph
 from ._task_program.assembly import ADAPTER_CONTRACT, load_deployment
+from ._task_program.articulation_binding import (
+    PARK_CALL,
+    SLIDE_CALL,
+    WITHDRAW_CALL,
+    discover_prismatic_parts,
+    graph_bindings,
+)
+from ._task_program.articulation_slide import preset_id
+from ._task_program.e6_clearance import (
+    ARM_STIFFNESS,
+    PASSIVE_FRICTION,
+    PRESHAPE_FRACTION,
+    RELEASE_RETREAT_DISTANCE,
+)
 
 __all__ = ["TaskProgramBundlePaths", "generate_task_program_bundle"]
 
@@ -152,10 +167,11 @@ def generate_task_program_bundle(
         raise TypeError("fit_grasp_assets must be a boolean.")
     unsupported = sorted(
         {node["task_type"] for node in selected_graph["nodes"]}
-        - {"E1", "E2", "E3", "E4", "E5"}
+        - {"E1", "E2", "E3", "E4", "E5", "E6"}
     )
     if unsupported:
-        raise ValueError(f"Task Engine supports only E1-E5, not {unsupported}.")
+        raise ValueError(f"Task Engine supports only E1-E6, not {unsupported}.")
+    articulation_bindings = graph_bindings(selected_graph, prepared_scene)
     normalized_profile = str(robot_profile).strip()
     try:
         embodiment_filename = _EMBODIMENT_COMPONENTS[normalized_profile]
@@ -246,6 +262,13 @@ def generate_task_program_bundle(
         / "dual_arm_trajectory_verified.yaml"
     )
     _bind_embodiment_to_scene(embodiment_payload, table_top_z=scene.table_top_z)
+    if articulation_bindings:
+        # Calibrate this generated E6 deployment, not shared robot defaults.
+        stiffness = embodiment_payload["simulation"]["drive_pros"]["stiffness"]
+        for resource in embodiment_payload["skill_profile"]["resources"]:
+            for endpoint in resource.get("endpoints", []):
+                if endpoint["endpoint_id"] == "motion":
+                    stiffness[endpoint["control_part"]] = ARM_STIFFNESS
     save_config(paths.embodiment, embodiment_payload)
     policy_payload = load_config(policy_source)
     policy_payload["tracking"]["consecutive_acceptances"] = 5
@@ -288,21 +311,27 @@ def generate_task_program_bundle(
             collision_world=policy_payload["motion"]["strategy"] == "motion_gen",
         ),
     )
-    save_config(paths.scene, _scene_payload(scene, program_id=program_id))
+    scene_payload = _scene_payload(scene, program_id=program_id)
+    bound_uids = {binding.object_id for binding in articulation_bindings.values()}
+    for articulation in scene_payload["simulation"]["articulation"]:
+        if articulation["uid"] not in bound_uids:
+            continue
+        drive = articulation.setdefault("drive_pros", {})
+        if drive.get("drive_type", "none") == "none":
+            drive.setdefault("drive_type", "none")
+            if "friction" not in drive:
+                drive["friction"] = {
+                    part.joint: PASSIVE_FRICTION
+                    for part in discover_prismatic_parts(articulation)
+                }
+    save_config(paths.scene, scene_payload)
     save_config(
         paths.deployment,
         {
             "id": f"GenSimTaskProgram-{program_id}-v1",
             "max_episodes": int(max_episodes or 1),
             "max_episode_steps": int(
-                max_episode_steps
-                or (
-                    8000
-                    if any(
-                        cfg["kind"] == "stack" for cfg in stability["presets"].values()
-                    )
-                    else 6000
-                )
+                max_episode_steps or TaskEnginePlanningCfg().max_episode_steps
             ),
             "num_envs": 1,
             "arena_space": 2.5,
@@ -606,7 +635,38 @@ def _program_payload(
         for node in graph["nodes"]
     ]
     by_name = {item["name"]: item for item in items}
+    articulation_bindings = graph_bindings(graph, scene)
     for group in graph["task_groups"]:
+        if group.get("task_type") == "E6":
+            first = next(n for n in graph["nodes"] if n["id"] == group["node_ids"][0])
+            args = first["call"]["arguments"]
+            key = (
+                args["object"]
+                if "part" not in args
+                else f"{args['object']}::{args['part']}"
+            )
+            binding = articulation_bindings[key]
+            target, tolerance = binding.target(args["state"]), binding.tolerance(
+                args["state"]
+            )
+            for node_id in group["node_ids"]:
+                by_name[node_id]["post"] = [
+                    {
+                        "kind": "wait_stable",
+                        "entity": binding.object_id,
+                        "preset": preset_id(binding, args["state"]),
+                    }
+                ]
+                by_name[node_id]["validators"] = [
+                    {
+                        "kind": "articulation_joint_position",
+                        "articulation": binding.object_id,
+                        "joint": binding.joint,
+                        "minimum_position": target - tolerance,
+                        "maximum_position": target + tolerance,
+                    }
+                ]
+            continue
         terminal = by_name[group["node_ids"][-1]]
         for node_id in reversed(group["node_ids"]):
             accepted = by_name[node_id]
@@ -771,6 +831,7 @@ def _integration_payload(
     collision_world: bool = False,
 ) -> dict[str, Any]:
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
+    articulation_bindings = graph_bindings(graph, scene)
     referenced_objects: set[str] = set()
     inside_routes: list[tuple[str, str, str]] = []
     on_routes: list[tuple[str, str, str]] = []
@@ -814,6 +875,7 @@ def _integration_payload(
     relative_lowerer_routes = _relative_place_route_payloads(graph, scene)
     has_relative_place = False
     has_park_call = False
+    has_articulation_park_call = False
     for node in graph["nodes"]:
         call = node["call"]
         if call["kind"] in {"pick", "place", "hand_over"}:
@@ -997,6 +1059,22 @@ def _integration_payload(
             referenced_objects.add(str(call["arguments"]["object"]))
         elif call["kind"] == "registered" and call["call_id"] == "simulation.park":
             has_park_call = True
+        elif call["kind"] == "registered" and call["call_id"] == PARK_CALL:
+            has_articulation_park_call = True
+        elif call["kind"] == "registered" and call["call_id"] in {
+            SLIDE_CALL,
+            WITHDRAW_CALL,
+        }:
+            if (
+                node["task_type"] != "E6"
+                or (
+                    call["arguments"]["object"]
+                    if "part" not in call["arguments"]
+                    else f"{call['arguments']['object']}::{call['arguments']['part']}"
+                )
+                not in articulation_bindings
+            ):
+                raise ValueError("Articulation calls require an inspected E6 recipe.")
         elif call["kind"] == "registered":
             raise ValueError(
                 f"Unsupported generated registered call {call['call_id']!r}."
@@ -1104,8 +1182,18 @@ def _integration_payload(
             "contract_id": scene_contract,
             "registry_id": f"{program_id}_scene_registry",
             "rigid_objects": rigid_bindings,
-            "articulations": [],
-            "links": [],
+            "articulations": [
+                {"entity_id": uid, "simulation_uid": uid}
+                for uid in sorted({b.object_id for b in articulation_bindings.values()})
+            ],
+            "links": [
+                {
+                    "entity_id": b.link_id,
+                    "articulation_id": b.object_id,
+                    "native_link_name": b.link,
+                }
+                for b in articulation_bindings.values()
+            ],
         },
         "profile": {
             "defaults": {
@@ -1201,6 +1289,26 @@ def _integration_payload(
                     else {}
                 ),
                 **(
+                    {PARK_CALL: {"kind": "move_joints"}}
+                    if has_articulation_park_call
+                    else {}
+                ),
+                **(
+                    {
+                        SLIDE_CALL: {
+                            "kind": "slide",
+                            "approach_distance": 0.10,
+                            "hand_interp_steps": 12,
+                            "preshape_fraction": PRESHAPE_FRACTION,
+                            "release_retreat_distance": RELEASE_RETREAT_DISTANCE,
+                            "approach_along_grasp_axis": True,
+                        },
+                        WITHDRAW_CALL: {"kind": "move_end_effector"},
+                    }
+                    if articulation_bindings
+                    else {}
+                ),
+                **(
                     {
                         "simulation.coordinated_transport": {
                             "kind": "coordinated_pickment",
@@ -1285,6 +1393,19 @@ def _integration_payload(
                 }
             ],
             "registered_semantic_lowerers": [
+                *(
+                    [
+                        {
+                            "kind": kind,
+                            "bindings": [
+                                b.payload() for b in articulation_bindings.values()
+                            ],
+                        }
+                        for kind in ("articulation_slide", "articulation_withdraw")
+                    ]
+                    if articulation_bindings
+                    else []
+                ),
                 *[
                     {"kind": "pick", "call_id": call_id, "routes": routes}
                     for call_id, routes in pick_routes.items()
@@ -1320,6 +1441,11 @@ def _integration_payload(
                     else []
                 ),
                 *([{"kind": "park"}] if has_park_call else []),
+                *(
+                    [{"kind": "articulation_park"}]
+                    if has_articulation_park_call
+                    else []
+                ),
                 *(
                     [{"kind": "coordinated_hold", "routes": hold_lowerer_routes}]
                     if hold_lowerer_routes
@@ -1628,7 +1754,10 @@ def _relative_place_route_payloads(
                             math.pi / 3.0 if resource == "right" else -math.pi / 3.0
                         )
                     }
-                    if selector in upright_targets and not settled
+                    if selector in upright_targets
+                    and not settled
+                    and abs(_longest_local_axis(scene_objects[object_id])[2])
+                    < 1.0 - 1.0e-6
                     else {}
                 ),
             }

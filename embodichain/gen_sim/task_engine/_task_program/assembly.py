@@ -33,7 +33,12 @@ from embodichain.utils.utility import load_config
 from ..contracts import canonical_hash
 from .stability import StabilityConstraint, TaskStabilityPort
 from .configured import compose_deployment
-from .grasp_filter import GRASP_FILTER_REVISION, install_grasp_filters
+from .grasp_filter import (
+    GRASP_FILTER_REVISION,
+    geometry_key,
+    install_e6_approach_filters,
+    install_grasp_filters,
+)
 from .motion import (
     MOTION_VALIDATION_REVISION,
     _joint_velocity_limits,
@@ -125,7 +130,11 @@ class _TaskFactory(SimulationTaskProgramFactory):
     """Select task-owned observation services, not a different executor."""
 
     def __init__(
-        self, *args: Any, constraints: dict[str, StabilityConstraint], **kwargs: Any
+        self,
+        *args: Any,
+        constraints: dict[str, StabilityConstraint],
+        articulation_bindings: tuple = (),
+        **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._task_post_port = TaskStabilityPort(
@@ -136,6 +145,23 @@ class _TaskFactory(SimulationTaskProgramFactory):
             constraints,
             step_dt=self.step_dt,
         )
+        if articulation_bindings:
+            from .articulation_slide import (
+                ArticulationStabilityPort,
+                synchronize_joint_limits,
+            )
+
+            for binding in articulation_bindings:
+                synchronize_joint_limits(
+                    binding, self._simulation.get_articulation(binding.object_id)
+                )
+            self._task_post_port = ArticulationStabilityPort(
+                self._task_post_port,
+                self._simulation,
+                self._robot,
+                articulation_bindings,
+                self.step_dt,
+            )
 
     def registration_owned_segment_policy_ports(self) -> tuple[Any, Any]:
         return self._task_post_port, self.segment_policy_port
@@ -150,6 +176,7 @@ class TaskAdapterFactory:
     constraints: tuple[tuple[str, StabilityConstraint], ...]
     grasp_factories: tuple[tuple[str, Any], ...]
     cartesian_approaches: bool = False
+    articulation_bindings: tuple = ()
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Return the exact shared adapter; no Session or Bridge is overridden."""
@@ -217,18 +244,50 @@ class TaskAdapterFactory:
                     planner_cfg=ToppraPlannerCfg(robot_uid=environment.robot.uid)
                 )
             )
+        grasp_generators = {name: create() for name, create in self.grasp_factories}
+        grasp_generators = install_grasp_filters(
+            self.registration,
+            environment.sim,
+            grasp_generators,
+        )
+        if self.articulation_bindings:
+            import torch
+
+            from .articulation_binding import handle_mesh
+            from .e6_clearance import profile_clearances
+
+            geometry_keys = set()
+            for binding in self.articulation_bindings:
+                art = environment.sim.get_articulation(binding.object_id)
+                if art is None:
+                    raise ValueError(
+                        f"Declared articulation {binding.object_id!r} is absent."
+                    )
+                vertices, faces = handle_mesh(binding, art.cfg.fpath)
+                geometry_keys.add(
+                    geometry_key(
+                        torch.as_tensor(vertices, dtype=torch.float32),
+                        torch.as_tensor(faces, dtype=torch.int64),
+                    )
+                )
+            grasp_generators = install_e6_approach_filters(
+                grasp_generators,
+                frozenset(geometry_keys),
+                clearances=profile_clearances(
+                    self.registration,
+                    environment.robot,
+                    environment.sim.get_rigid_object("table"),
+                ),
+            )
         factory = _TaskFactory(
             environment.sim,
             environment.robot,
             self.registration,
             step_dt=environment.step_dt,
             motion_generator_factory=motion_factory,
-            grasp_pose_generators=install_grasp_filters(
-                self.registration,
-                environment.sim,
-                {name: create() for name, create in self.grasp_factories},
-            ),
+            grasp_pose_generators=grasp_generators,
             constraints=dict(self.constraints),
+            articulation_bindings=self.articulation_bindings,
         )
         return factory.create_adapter()
 
@@ -270,9 +329,43 @@ def load_deployment(
         raise ValueError("Task stability presets cannot replace core settling presets.")
     for name in constraints:
         settle_presets[name] = settle_presets["rigid_object"].snapshot()
-    # ``SimulationTaskProgramRegistration`` materializes built-in relation
-    # grounders during ``__post_init__``.  Do not feed those already-materialized
-    # entries back through ``replace`` or placement scenes get duplicate keys.
+    from .articulation_slide import (
+        ArticulationSlideFactory,
+        ArticulationWithdrawFactory,
+        preset_id,
+    )
+
+    slides = [
+        f
+        for f in base.integration.registration.registered_semantic_lowerer_factories
+        if type(f) is ArticulationSlideFactory
+    ]
+    withdrawals = [
+        f
+        for f in base.integration.registration.registered_semantic_lowerer_factories
+        if type(f) is ArticulationWithdrawFactory
+    ]
+    articulation_bindings = ()
+    if slides or withdrawals:
+        if (
+            len(slides) != 1
+            or len(withdrawals) != 1
+            or slides[0].bindings != withdrawals[0].bindings
+        ):
+            raise ValueError(
+                "E6 Slide and withdrawal require identical declared bindings."
+            )
+        articulation_bindings = slides[0].bindings
+        for binding in articulation_bindings:
+            for state in ("open", "closed"):
+                name = preset_id(binding, state)
+                if name in settle_presets:
+                    raise ValueError(
+                        "Articulation policies cannot replace existing presets."
+                    )
+                settle_presets[name] = settle_presets["rigid_object"].snapshot()
+    # Registration materializes built-in grounders during construction; feeding
+    # them back through replace would duplicate placement routes.
     registration = replace(
         base.integration.registration,
         settle_presets=settle_presets,
@@ -333,7 +426,8 @@ def load_deployment(
     )
     cartesian_approaches = any(
         item.get("steps", {}).get("call", {}).get("kind") == "hand_over"
-        or item.get("steps", {}).get("call", {}).get("call_id") == CLEAR_RELEASED_CALL
+        or item.get("steps", {}).get("call", {}).get("call_id")
+        in {CLEAR_RELEASED_CALL, "gen_sim.articulation_withdraw"}
         for item in program["program"]["items"]
     )
     fingerprint = canonical_hash(
@@ -357,6 +451,7 @@ def load_deployment(
         tuple(constraints.items()),
         grasp_factories,
         cartesian_approaches,
+        articulation_bindings,
     )
     integration = replace(
         base.integration,

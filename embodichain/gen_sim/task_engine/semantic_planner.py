@@ -121,9 +121,9 @@ class SemanticTaskPlanner:
         for step in steps:
             step_id = str(step["id"])
             task_type = str(step["task_type"])
-            if task_type not in {"E1", "E2", "E3", "E4", "E5"}:
+            if task_type not in {"E1", "E2", "E3", "E4", "E5", "E6"}:
                 raise UnsupportedSemanticCapabilityError(
-                    f"Task Engine currently supports only E1-E5, not {task_type}."
+                    f"Task Engine currently supports only E1-E6, not {task_type}."
                 )
             object_id = self._resolve_step_entity(
                 step,
@@ -468,6 +468,31 @@ class SemanticTaskPlanner:
                     cleanup_resources = ("left", "right")
                 else:
                     held_by[object_id] = "coordinated"
+            elif task_type == "E6":
+                from ._task_program.articulation_binding import recipe
+
+                requested = str(step.get("required_arm", "auto"))
+                resource = (
+                    self._nearest_resource(object_id, objects)
+                    if requested in {"auto", "none"}
+                    else _resource(requested, field="required_arm")
+                )
+                part_id = bindings["role_bindings"].get(f"{step_id}.object")
+                if part_id is None:
+                    selector = step.get("object", {})
+                    source_step = (
+                        selector.get("step_id")
+                        if isinstance(selector, Mapping)
+                        else None
+                    )
+                    if source_step:
+                        part_id = bindings["role_bindings"].get(f"{source_step}.object")
+                calls = recipe(
+                    object_id,
+                    str(step["target_state"]),
+                    resource,
+                    part_id=part_id,
+                )
             else:
                 raise UnsupportedSemanticCapabilityError(
                     f"Task type {task_type!r} has no phase-one Semantic Call route."
@@ -544,7 +569,10 @@ class SemanticTaskPlanner:
                     else:
                         calls.append(alignment)
                 upright_objects.add(object_id)
-            call_roles = [(call, "primary") for call in calls]
+            call_roles = [
+                (call, "cleanup" if task_type == "E6" and index > 0 else "primary")
+                for index, call in enumerate(calls)
+            ]
             if cleanup_resources and (
                 task_type == "E2"
                 or requested_upright

@@ -204,6 +204,27 @@ class ParallelJawGraspPoseGenerator(GraspPoseGenerator, ABC):
         """Return an owned snapshot of the physical gripper model."""
         return deepcopy(self._gripper_model)
 
+    def get_grasp_candidates(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+        obj_longest_axis: torch.Tensor | None = None,
+        is_positive_part: bool | torch.Tensor = True,
+    ) -> list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+        """Return aligned poses, opening widths and costs for each object row.
+
+        Each tuple contains tensors of shape ``(K, 4, 4)``, ``(K,)`` and
+        ``(K,)``. Infinite costs mark ineligible candidates. Services without
+        this optional metadata capability fail explicitly rather than inventing
+        opening widths for their existing pose-only candidates.
+        """
+        raise NotImplementedError(
+            "This grasp service does not expose opening metadata."
+        )
+
     @abstractmethod
     def get_dual_arm_valid_grasp_poses(
         self,
