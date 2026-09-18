@@ -128,6 +128,8 @@ from embodichain.lab.sim.spawn.scene import SpawnScene
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
 from embodichain.lab.sim.profiler import Profiler, ProfilerCfg
 from embodichain.lab.visualization.cfg import VisualizationCfg
+from embodichain.lab.visualization.markers import MarkerGroup, MarkerGroupCfg
+from embodichain.lab.visualization.markers._native import NativeMarkerRenderer
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import (
     look_at_to_pose,
@@ -145,6 +147,7 @@ if TYPE_CHECKING:
         RuntimeStats,
         SceneManifest,
         SceneOverlays,
+        MeshMarkerOverlay,
         VisualizationRuntime,
     )
 
@@ -636,6 +639,8 @@ class SimulationManager:
 
         # marker management
         self._markers: dict[str, _AxisMarkerGroup] = {}
+        self._marker_groups: dict[str, MarkerGroup] = {}
+        self._native_markers: NativeMarkerRenderer | None = None
 
         self._rigid_objects: Dict[str, RigidObject] = dict()
         self._constraints: Dict[str, RigidConstraint] = dict()
@@ -1588,6 +1593,7 @@ class SimulationManager:
             self._attach_parented_cameras()
             self._camera_attachment_topology_revision = topology_revision
         self._ready_spawn_topology_revision = topology_revision
+        self._refresh_marker_attachments()
 
     def _prepare_spawn_runtime(self, result: Scene) -> None:
         """Prepare backend runtime buffers for one Spawn topology revision."""
@@ -1623,6 +1629,7 @@ class SimulationManager:
                 "Render-state synchronization requires a prepared Spawn scene."
             )
         self.physics.sync_render_state(result)
+        self._refresh_marker_attachments()
 
     def enable_physics(self, enable: bool) -> None:
         """Enable or disable physics simulation.
@@ -1688,6 +1695,7 @@ class SimulationManager:
                             self.sim_config.physics_cfg
                         ):
                             self._world.update(physics_dt)
+                    self._refresh_marker_attachments()
                     self._visualization_sim_step += 1
                     self._visualization_sim_time += physics_dt
                     if (
@@ -3658,6 +3666,8 @@ class SimulationManager:
         if uid == "default_plane":
             raise ValueError("The Spawn-owned default plane cannot be removed.")
 
+        for group in tuple(getattr(self, "_marker_groups", {}).values()):
+            group._detach_parent(uid)
         was_materialized = scene.builder.is_finalized
         scene.remove(uid)
         if was_materialized:
@@ -3681,6 +3691,142 @@ class SimulationManager:
         self._robots.pop(uid, None)
         self.notify_visualization_topology_changed()
         return True
+
+    def add_marker_group(self, cfg: MarkerGroupCfg) -> MarkerGroup:
+        """Create an empty render-only marker group with a stable unique name.
+
+        Args:
+            cfg: Prototypes and environment/world coordinate scope. Environment
+                groups use all ``num_envs`` environments by default. Use
+                ``group.update(...)`` to populate instances. Viser groups do
+                not allocate native geometry. Native groups require DexSim's
+                ``create_debug_mesh`` overlay API.
+
+        Returns:
+            Mutable marker group owned by this simulation manager.
+
+        Raises:
+            ValueError: If the name is in use or configuration is invalid.
+            RuntimeError: If the native engine lacks debug overlay support.
+        """
+        if cfg.name in self._marker_groups or cfg.name in self._markers:
+            raise ValueError(f"Marker {cfg.name!r} already exists.")
+        cfg.validate()
+        group = MarkerGroup(
+            cfg,
+            num_envs=self.num_envs,
+            origins=self.arena_offsets if cfg.scope == "env" else None,
+            pose_resolver=self._resolve_marker_parent_poses,
+            on_change=self._publish_marker_group,
+            on_remove=self._remove_marker_group,
+        )
+        if (
+            self.sim_config.visualization.backend != "viser"
+            and self._native_markers is None
+        ):
+            self._native_markers = NativeMarkerRenderer(self.get_env())
+        self._marker_groups[group.name] = group
+        return group
+
+    def _resolve_marker_parent_poses(
+        self, parent: str, link_name: str | None, env_ids: list[int]
+    ) -> object:
+        """Read live domain poses without retaining native nodes or preparing Spawn."""
+        asset = None
+        articulated = False
+        for registry_name in ("_rigid_objects", "_robots", "_articulations"):
+            registry = getattr(self, registry_name, {})
+            if parent in registry:
+                asset = registry[parent]
+                articulated = registry_name != "_rigid_objects"
+                break
+        if asset is None:
+            raise KeyError(
+                f"Marker parent {parent!r} is not a registered rigid object, robot or articulation."
+            )
+        if self.spawn_result is None or not asset.is_spawn_bound:
+            raise RuntimeError(
+                f"Marker parent {parent!r} requires a prepared and bound scene; call prepare() explicitly."
+            )
+        if link_name is not None:
+            if not articulated:
+                raise ValueError("link_name requires a robot or articulation parent.")
+            if link_name not in asset.link_names:
+                raise ValueError(f"Marker parent {parent!r} has no link {link_name!r}.")
+            return asset.get_link_pose(link_name, env_ids=env_ids)
+        return asset.get_local_pose()[env_ids]
+
+    def _refresh_marker_attachments(self) -> None:
+        """Refresh attached overlays on the simulation thread before capture."""
+        for group in tuple(getattr(self, "_marker_groups", {}).values()):
+            group._refresh_attachments()
+
+    def get_marker_group(self, name: str) -> MarkerGroup:
+        """Return a registered marker group.
+
+        Args:
+            name: Stable group name.
+
+        Returns:
+            The existing group; unknown names raise ``KeyError``.
+        """
+        return self._marker_groups[name]
+
+    def get_marker_overlays(self) -> tuple[MeshMarkerOverlay, ...]:
+        """Capture detached group geometry and world poses for visualization.
+
+        Returns:
+            Complete marker mesh snapshots without stepping physics.
+        """
+        return tuple(
+            mesh
+            for group in getattr(self, "_marker_groups", {}).values()
+            for mesh in group.snapshot()
+        )
+
+    def _publish_marker_group(self, group: MarkerGroup) -> None:
+        if self._native_markers is not None:
+            self._native_markers.publish(group.name, group.snapshot())
+        self._capture_marker_groups(raise_errors=True)
+
+    def _remove_marker_group(self, group: MarkerGroup) -> None:
+        if self._native_markers is not None:
+            self._native_markers.remove(group.name)
+        self._marker_groups.pop(group.name, None)
+        self._capture_marker_groups()
+
+    def _capture_marker_groups(self, *, raise_errors: bool = False) -> None:
+        # Marker publication must not prepare pending declarations or synchronize
+        # an unprepared physics scene. Use only the already-published manifest;
+        # a dirty topology is refreshed by the next explicit host capture/update.
+        runtime = self._visualization_runtime
+        if (
+            runtime is None
+            or self._visualization_error_reported
+            or self._visualization_manifest_topology_revision
+            != self._visualization_topology_revision
+        ):
+            return
+        try:
+            runtime.capture(
+                sim_step=self._visualization_sim_step,
+                sim_time=self._visualization_sim_time,
+                overlays=self._visualization_overlays,
+                force=True,
+                capture_camera_images=False,
+            )
+        except Exception as error:
+            logger.log_warning(f"Viser marker update failed: {error!r}")
+            self._visualization_error_reported = True
+            if raise_errors:
+                raise
+
+    def clear_markers(self) -> None:
+        """Remove all new marker groups and legacy axes from this simulation."""
+        for group in tuple(getattr(self, "_marker_groups", {}).values()):
+            group.remove()
+        for name in tuple(self._markers):
+            self.remove_marker(name)
 
     def draw_marker(
         self,
@@ -3741,11 +3887,13 @@ class SimulationManager:
             )
             return False
 
-        original_name = cfg.name
+        original_name = (
+            f"{cfg.name}_{cfg.arena_index}" if cfg.arena_index >= 0 else cfg.name
+        )
         name = original_name
         count = 0
 
-        while name in self._markers:
+        while name in self._markers or name in getattr(self, "_marker_groups", {}):
             count += 1
             name = f"{original_name}_{count}"
         if count > 0:
@@ -3757,9 +3905,6 @@ class SimulationManager:
         if marker_num == 0:
             logger.log_warning(f"No marker poses provided.")
             return None
-
-        if cfg.arena_index >= 0:
-            name = f"{name}_{cfg.arena_index}"
 
         env = self.get_env(cfg.arena_index)
 
@@ -3808,6 +3953,9 @@ class SimulationManager:
         Returns:
             bool: True if the marker was removed successfully, False otherwise.
         """
+        if name in getattr(self, "_marker_groups", {}):
+            self._marker_groups[name].remove()
+            return True
         if name not in self._markers:
             logger.log_warning(f"Marker {name} not found.")
             return False
@@ -4600,6 +4748,12 @@ class SimulationManager:
 
     def _deferred_destroy(self) -> None:
         """Destroy all simulated assets and release resources."""
+        # Release caller-retained group callbacks and native meshes before arenas.
+        for group in tuple(getattr(self, "_marker_groups", {}).values()):
+            group.remove()
+        if getattr(self, "_native_markers", None) is not None:
+            self._native_markers.close()
+            self._native_markers = None
         # Clean up all gizmos before destroying the simulation
         for uid in list(self._gizmos.keys()):
             self.disable_gizmo(uid)

@@ -2318,3 +2318,216 @@ def test_replace_rigid_objects_prevalidates_and_prepares_once(monkeypatch, inval
         operations.clear()
         assert sim.replace_rigid_objects([]) == []
         assert operations == []
+
+
+def test_marker_group_lifecycle_and_environment_offsets_do_not_step_physics():
+    from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
+
+    sim, runtime = _make_visualization_sim_manager()
+    sim._marker_groups = {}
+    sim._native_markers = None
+    sim._markers = {}
+    sim.sim_config.num_envs = 1
+    sim.arena_offsets = torch.tensor([[10.0, 20.0, 30.0]])
+    group = sim.add_marker_group(
+        MarkerGroupCfg(
+            name="goal",
+            prototypes={"sphere": MarkerPrototypeCfg(shape="sphere")},
+        )
+    )
+    assert sim.get_marker_group("goal") is group
+    group.update(translations=[[1, 2, 3]])
+    np.testing.assert_allclose(sim.get_marker_overlays()[0].position, [11, 22, 33])
+    assert sim._world.physics_updates == []
+    assert sim._visualization_sim_step == 0
+    with pytest.raises(ValueError, match="already exists"):
+        sim.add_marker_group(
+            MarkerGroupCfg(name="goal", prototypes={"box": MarkerPrototypeCfg()})
+        )
+    group.clear()
+    assert sim.get_marker_overlays() == ()
+    group.update(translations=[[0, 0, 0]])
+    assert sim.remove_marker("goal")
+    assert sim.get_marker_overlays() == ()
+    with pytest.raises(RuntimeError, match="removed"):
+        group.update(translations=[[0, 0, 0]])
+
+
+def test_legacy_marker_arena_names_are_unique_before_registration():
+    sim, _ = _make_visualization_sim_manager()
+    sim._markers = {}
+    sim._arenas = [MagicMock()]
+    cfg = MarkerCfg(name="target", axis_xpos=np.eye(4), arena_index=0)
+    sim.draw_marker(cfg)
+    sim.draw_marker(cfg)
+    assert set(sim._markers) == {"target_0", "target_0_1"}
+
+
+def test_marker_publication_before_prepare_only_uses_existing_manifest():
+    from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
+
+    sim, runtime = _make_visualization_sim_manager()
+    sim.sim_config.num_envs = 1
+    sim._marker_groups, sim._markers, sim._native_markers = {}, {}, None
+    sim.arena_offsets = torch.zeros((1, 3))
+    sim._spawn_scene = MagicMock()
+    sim._rigid_objects = {"declared_but_not_prepared": object()}
+    sim._visualization_manifest_topology_revision = sim._visualization_topology_revision
+    sim.start_visualization = MagicMock(side_effect=AssertionError("must not prepare"))
+    sim.sync_render_state = MagicMock(side_effect=AssertionError("must not sync"))
+    group = sim.add_marker_group(
+        MarkerGroupCfg(name="only_markers", prototypes={"box": MarkerPrototypeCfg()})
+    )
+    group.update(translations=[[0, 0, 0]])
+    assert len(runtime.capture_calls) == 1
+    assert runtime.capture_calls[-1]["capture_camera_images"] is False
+    assert not sim._visualization_error_reported
+    sim.prepare.assert_not_called()
+    sim.start_visualization.assert_not_called()
+    sim.sync_render_state.assert_not_called()
+    # Declarations may invalidate captured sources. Wait for explicit host prepare.
+    sim._visualization_topology_revision += 1
+    group.update(translations=[[1, 0, 0]])
+    assert len(runtime.capture_calls) == 1
+    assert sim.get_marker_overlays()[0].position[0] == 1
+    sim.prepare.assert_not_called()
+
+
+def _make_attachment_sim():
+    from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
+
+    sim, runtime = _make_visualization_sim_manager()
+    sim.sim_config.num_envs = 2
+    sim.arena_offsets = torch.tensor([[10.0, 0, 0], [0, 20.0, 0]])
+    sim._marker_groups, sim._markers, sim._native_markers = {}, {}, None
+    sim._rigid_objects, sim._robots, sim._articulations = {}, {}, {}
+    sim._sensors, sim._deformable_objects, sim._rigid_object_groups = {}, {}, {}
+    sim._spawn_scene = MagicMock()
+    sim._spawn_scene.builder.is_finalized = True
+    sim._spawn_scene.__contains__.side_effect = lambda uid: uid in sim._rigid_objects
+    sim.physics = SimpleNamespace(sync_render_state=lambda result: None)
+    group = sim.add_marker_group(
+        MarkerGroupCfg(name="attached", prototypes={"box": MarkerPrototypeCfg()})
+    )
+    group.update(translations=[[[1, 0, 0]], [[2, 0, 0]]])
+    return sim, group
+
+
+def test_marker_manager_default_batches_root_and_link_attachment_without_prepare():
+    sim, group = _make_attachment_sim()
+    root = torch.tensor([[2.0, 0, 0, 0, 0, 0, 1], [3.0, 0, 0, 0, 0, 0, 1]])
+    tool = torch.tensor([[0.0, 4, 0, 0, 0, 0, 1], [0.0, 5, 0, 0, 0, 0, 1]])
+    sim._robots["robot"] = SimpleNamespace(
+        is_spawn_bound=True,
+        link_names=["tool"],
+        get_local_pose=lambda: root,
+        get_link_pose=lambda name, env_ids: tool[env_ids],
+    )
+    assert group.num_envs == sim.num_envs == 2
+    group.attach("robot", env_ids=[0])
+    group.attach("robot", link_name="tool", env_ids=[1])
+    np.testing.assert_allclose(
+        [m.position for m in sim.get_marker_overlays()], [[13, 0, 0], [2, 25, 0]]
+    )
+    root[0, 0] = 4
+    tool[1, 1] = 7
+    SimulationManager.sync_render_state(sim)
+    np.testing.assert_allclose(
+        [m.position for m in sim.get_marker_overlays()], [[15, 0, 0], [2, 27, 0]]
+    )
+    sim.prepare.assert_not_called()
+    assert sim._world.physics_updates == []
+
+
+def test_marker_attachment_update_precedes_recording_and_uses_live_replacement():
+    sim, group = _make_attachment_sim()
+    pose = torch.tensor([[2.0, 0, 0, 0, 0, 0, 1], [3.0, 0, 0, 0, 0, 0, 1]])
+    sim._rigid_objects["target"] = SimpleNamespace(
+        is_spawn_bound=True, get_local_pose=lambda: pose
+    )
+    group.attach("target")
+    # Replacing the registry facade must not leave borrowed parent/native handles.
+    sim._rigid_objects["target"] = SimpleNamespace(
+        is_spawn_bound=True,
+        get_local_pose=lambda: pose + torch.tensor([5.0, 0, 0, 0, 0, 0, 0]),
+    )
+    recorded = []
+    sim._window_record_state = SimpleNamespace(capture_from_sim_update=True)
+    sim._step_window_record_from_sim_update = lambda state, dt: recorded.append(
+        [m.position.copy() for m in sim.get_marker_overlays()]
+    )
+    sim.update_gizmos = lambda: None
+    sim.capture_visualization_safely = lambda **kw: None
+    sim._log_scene_summary = lambda: None
+    sim.update(step=1)
+    np.testing.assert_allclose(recorded[0], [[18, 0, 0], [10, 20, 0]])
+    assert len(sim._world.physics_updates) == 1
+
+
+def test_marker_attachment_removal_detaches_before_destroying_parent():
+    sim, group = _make_attachment_sim()
+    alive = True
+
+    def pose():
+        assert alive, "read destroyed parent"
+        return torch.tensor([[2.0, 0, 0, 0, 0, 0, 1], [3.0, 0, 0, 0, 0, 0, 1]])
+
+    def remove(uid):
+        nonlocal alive
+        alive = False
+
+    sim._rigid_objects["target"] = SimpleNamespace(
+        is_spawn_bound=True, get_local_pose=pose
+    )
+    sim._spawn_scene.remove.side_effect = remove
+    group.attach("target")
+    assert sim.remove_asset("target")
+    SimulationManager.sync_render_state(sim)
+    group.update(env_ids=[0], colors=[[0, 1, 0, 0.5]])
+    np.testing.assert_allclose(
+        [m.position for m in sim.get_marker_overlays()], [[13, 0, 0], [5, 20, 0]]
+    )
+
+
+@pytest.mark.parametrize(
+    "target,link,error",
+    [
+        ("missing", None, KeyError),
+        ("unbound", None, RuntimeError),
+        ("rigid", "tool", ValueError),
+        ("robot", "missing", ValueError),
+    ],
+)
+def test_marker_attach_rejects_missing_unprepared_and_invalid_links(
+    target, link, error
+):
+    sim, group = _make_attachment_sim()
+    sim._rigid_objects = {
+        "unbound": SimpleNamespace(is_spawn_bound=False),
+        "rigid": SimpleNamespace(is_spawn_bound=True),
+    }
+    sim._robots["robot"] = SimpleNamespace(is_spawn_bound=True, link_names=["tool"])
+    with pytest.raises(error):
+        group.attach(target, link_name=link)
+    np.testing.assert_allclose(
+        [m.position for m in group.snapshot()], [[11, 0, 0], [2, 20, 0]]
+    )
+    sim.prepare.assert_not_called()
+    assert sim._world.physics_updates == []
+
+
+def test_marker_publication_failure_rolls_back_selected_environment_state():
+    sim, group = _make_attachment_sim()
+    sim._visualization_manifest_topology_revision = sim._visualization_topology_revision
+
+    def fail_capture(**kwargs):
+        raise RuntimeError("snapshot capture failed")
+
+    sim._visualization_runtime.capture = fail_capture
+    with pytest.raises(RuntimeError, match="snapshot capture failed"):
+        group.update(env_ids=[1], translations=[[9, 0, 0], [8, 0, 0]])
+    assert group.counts == (1, 1)
+    np.testing.assert_allclose(
+        [m.position for m in group.snapshot()], [[11, 0, 0], [2, 20, 0]]
+    )
+    assert sim._visualization_error_reported

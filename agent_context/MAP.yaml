@@ -138,9 +138,10 @@ topics:
   status: active
 - id: sim-visualization
   title: Simulation Visualization
-  aliases: [browser visualization, viser, sim visualization, 仿真可视化]
+  aliases: [browser visualization, viser, sim visualization, marker visualization, 标志物可视化, 仿真可视化]
   keywords: [VisualizationCfg, ViserServerCfg, SceneManifest, visualization, EntityGizmoManipulator, robot_ik_gizmo,
-    GizmoCfg, backpressure, capture_visualization, Newton deformable, particle set, render topology, quaternion, xyzw]
+    GizmoCfg, MarkerGroup, MarkerPrototypeCfg, backpressure, capture_visualization, Newton deformable, particle set,
+    render topology, quaternion, xyzw]
   paths: [topics/sim-visualization/sim-visualization.md]
   source_of_truth:
   - embodichain/lab/visualization/protocol.py

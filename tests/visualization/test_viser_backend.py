@@ -32,6 +32,7 @@ from embodichain.lab.visualization import (
     GizmoState,
     JointControlSpec,
     JointControlState,
+    MeshMarkerOverlay,
     MeshGeometry,
     SceneFrame,
     SceneManifest,
@@ -379,6 +380,132 @@ def test_viser_backend_renders_axis_marker_frame_overlay() -> None:
     np.testing.assert_allclose(handle.position, marker.position)
     np.testing.assert_allclose(handle.wxyz, marker.wxyz)
     assert handle.visible
+    backend.stop()
+
+
+def _mesh_marker(
+    *,
+    position: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    scale: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 1.0),
+    env_id: int | None = 0,
+) -> MeshMarkerOverlay:
+    return MeshMarkerOverlay(
+        overlay_id="goal",
+        vertices=np.array(
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            dtype=np.float32,
+        ),
+        faces=np.array([[0, 1, 2]], dtype=np.uint32),
+        position=np.asarray(position, dtype=np.float32),
+        wxyz=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+        scale=np.asarray(scale, dtype=np.float32),
+        color=color,
+        env_id=env_id,
+    )
+
+
+def _empty_frame_with_mesh(
+    overlay: MeshMarkerOverlay | None, sequence: int
+) -> SceneFrame:
+    return SceneFrame(
+        run_id="run",
+        scene_revision=1,
+        sequence=sequence,
+        sim_step=sequence,
+        sim_time=sequence * 0.01,
+        node_ids=(),
+        positions=np.empty((0, 3), dtype=np.float32),
+        wxyz=np.empty((0, 4), dtype=np.float32),
+        visible=np.empty((0,), dtype=np.bool_),
+        overlays=SceneOverlays(meshes=() if overlay is None else (overlay,)),
+    )
+
+
+def test_viser_backend_reuses_mesh_marker_handles_until_geometry_changes() -> None:
+    server = _Server()
+    backend = ViserBackend(ViserServerCfg(port=8765), server_factory=lambda **_: server)
+    initial = _mesh_marker(color=(1.0, 0.0, 0.0, 0.4))
+
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (), ()))
+    assert backend.publish_frame(_empty_frame_with_mesh(initial, 1))
+    handle = server.scene.dynamic_mesh_handles[-1]
+    np.testing.assert_allclose(handle.vertices, initial.vertices)
+    assert handle.color == (255, 0, 0)
+    assert handle.opacity == 0.4
+    assert handle.side == "double"
+    assert handle.cast_shadow is False
+    assert handle.receive_shadow is False
+
+    styled = _mesh_marker(position=(1.0, 2.0, 3.0), color=(0.0, 1.0, 0.0, 0.7))
+    assert backend.publish_frame(_empty_frame_with_mesh(styled, 2))
+    assert server.scene.dynamic_mesh_handles[-1] is handle
+    np.testing.assert_allclose(handle.position, [1.0, 2.0, 3.0])
+    assert handle.color == (0, 255, 0)
+    assert handle.opacity == 0.7
+
+    scaled = _mesh_marker(scale=(2.0, 3.0, 4.0))
+    assert backend.publish_frame(_empty_frame_with_mesh(scaled, 3))
+    replacement = server.scene.dynamic_mesh_handles[-1]
+    assert replacement is not handle
+    assert handle.removed
+    np.testing.assert_allclose(
+        replacement.vertices,
+        scaled.vertices * np.array([2.0, 3.0, 4.0], dtype=np.float32),
+    )
+
+    assert backend.publish_frame(_empty_frame_with_mesh(None, 4))
+    assert replacement.removed
+    backend.stop()
+
+
+def test_viser_backend_mesh_marker_respects_environment_and_category_visibility() -> (
+    None
+):
+    server = _Server()
+    backend = ViserBackend(ViserServerCfg(port=8765), server_factory=lambda **_: server)
+    geometry = MeshGeometry(
+        "env-geometry",
+        np.empty((0, 3), dtype=np.float32),
+        np.empty((0, 3), dtype=np.uint32),
+    )
+    node = SceneNode(
+        node_id="env:0/rigid:empty",
+        path="/envs/0/rigid_objects/empty",
+        parent_id="env:0",
+        env_id=0,
+        kind="rigid_object",
+        geometry_id=geometry.geometry_id,
+    )
+    frame = replace(
+        _empty_frame_with_mesh(_mesh_marker(), 1),
+        node_ids=(node.node_id,),
+        positions=np.zeros((1, 3), dtype=np.float32),
+        wxyz=np.array([[1.0, 0.0, 0.0, 0.0]], dtype=np.float32),
+        visible=np.ones((1,), dtype=np.bool_),
+    )
+
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (node,), (geometry,)))
+    assert backend.publish_frame(frame)
+    handle = server.scene.dynamic_mesh_handles[-1]
+    assert handle.visible
+
+    server.gui.checkboxes["Environment 0"].callback(
+        SimpleNamespace(target=SimpleNamespace(value=False))
+    )
+    backend.poll()
+    assert not handle.visible
+    server.gui.checkboxes["Markers"].callback(
+        SimpleNamespace(target=SimpleNamespace(value=False))
+    )
+    backend.poll()
+    server.gui.checkboxes["Environment 0"].callback(
+        SimpleNamespace(target=SimpleNamespace(value=True))
+    )
+    backend.poll()
+    assert not handle.visible
     backend.stop()
 
 

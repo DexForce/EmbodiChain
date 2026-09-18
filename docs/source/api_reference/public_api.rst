@@ -1780,6 +1780,7 @@ embodichain.lab.visualization.protocol
    JointControlSpec
    JointControlState
    MeshGeometry
+   MeshMarkerOverlay
    PickCommand
    PointCloudOverlay
    SceneFrame
@@ -1792,6 +1793,39 @@ embodichain.lab.visualization.protocol
    estimate_frame_bytes
    estimate_manifest_bytes
    pose_to_position_wxyz
+
+embodichain.lab.visualization.markers
+------------------------------------
+
+Render-only marker groups share validated geometry and instance state between
+native simulation windows and browser visualization.
+
+.. currentmodule:: embodichain.lab.visualization.markers
+
+.. autosummary::
+
+   MarkerGroupCfg
+   MarkerPrototypeCfg
+   MarkerGroup
+
+embodichain.lab.visualization.markers.cfg
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.markers.cfg
+
+.. autosummary::
+
+   MarkerPrototypeCfg
+   MarkerGroupCfg
+
+embodichain.lab.visualization.markers.group
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.markers.group
+
+.. autosummary::
+
+   MarkerGroup
 
 embodichain.lab.visualization.runtime
 -------------------------------------

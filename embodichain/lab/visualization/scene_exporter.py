@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
 from typing import TYPE_CHECKING
 from urllib.parse import quote
@@ -39,6 +39,7 @@ from .protocol import (
     JointControlSpec,
     JointControlState,
     MeshGeometry,
+    MeshMarkerOverlay,
     PointCloudOverlay,
     SceneFrame,
     SceneManifest,
@@ -757,8 +758,14 @@ class SceneExporter:
             else None
         )
         marker_frames = self._capture_axis_marker_overlays(reserved_frame_ids)
+        reserved_mesh_ids = (
+            {mesh.overlay_id for mesh in overlays.meshes}
+            if overlays is not None
+            else set()
+        )
+        marker_meshes = self._capture_marker_mesh_overlays(reserved_mesh_ids)
         if overlays is None:
-            return SceneOverlays(frames=marker_frames)
+            return SceneOverlays(frames=marker_frames, meshes=marker_meshes)
         point_clouds: list[PointCloudOverlay] = []
         for point_cloud in overlays.point_clouds:
             point_count = point_cloud.points.shape[0]
@@ -790,7 +797,36 @@ class SceneExporter:
             trajectories=overlays.trajectories,
             targets=overlays.targets,
             point_clouds=tuple(point_clouds),
+            meshes=marker_meshes + overlays.meshes,
         )
+
+    def _capture_marker_mesh_overlays(
+        self, reserved_mesh_ids: set[str]
+    ) -> tuple[MeshMarkerOverlay, ...]:
+        """Capture world-space marker meshes supplied by the simulation."""
+        get_marker_overlays = getattr(self._sim, "get_marker_overlays", None)
+        if get_marker_overlays is None:
+            return ()
+
+        meshes: list[MeshMarkerOverlay] = []
+        used_ids = set(reserved_mesh_ids)
+        selected_env_ids = set(self._env_ids)
+        for marker in get_marker_overlays():
+            if marker.env_id is not None and marker.env_id not in selected_env_ids:
+                continue
+            base_id = marker.overlay_id
+            overlay_id = base_id
+            suffix = 1
+            while overlay_id in used_ids:
+                overlay_id = f"{base_id}#{suffix}"
+                suffix += 1
+            used_ids.add(overlay_id)
+            meshes.append(
+                marker
+                if overlay_id == base_id
+                else replace(marker, overlay_id=overlay_id)
+            )
+        return tuple(meshes)
 
     def capture(
         self,
