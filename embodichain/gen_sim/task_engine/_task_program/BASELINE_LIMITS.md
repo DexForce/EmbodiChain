@@ -1,7 +1,9 @@
 # Baseline Limits
 
-The public implementation is pinned to commit
-`2620929c82132df130ebeb43e69a2eb96791cba0`. Task Engine must not patch or
+The execution/compiler baseline is commit
+`2620929c82132df130ebeb43e69a2eb96791cba0`. A subsequent optional Slide joint target
+and existing MoveEndEffector option decoder do not resolve the gaps below.
+Task Engine must not patch or
 subclass its execution Session/Bridge to conceal a missing behavior.
 
 ## Registered Calls Do Not Inherit Phase Protection

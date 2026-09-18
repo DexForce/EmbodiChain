@@ -344,6 +344,30 @@ def test_rotate_scene_z_up_world_rejects_non_finite_angle() -> None:
         rotate_scene_z_up_world(scene=Scene(), rotation_degrees=float("nan"))
 
 
+def test_runtime_revolute_limits_convert_degrees_without_mutating_usd(
+    tmp_path: Path,
+) -> None:
+    from pxr import Usd, UsdPhysics
+    from embodichain.gen_sim.scene_engine.pipeline.utils.articulated_usdc_utils import (
+        _read_revolute_qpos_limits,
+    )
+
+    path = tmp_path / "limits.usdc"
+    stage = Usd.Stage.CreateNew(str(path))
+    joint = UsdPhysics.RevoluteJoint.Define(stage, "/rocker")
+    joint.CreateLowerLimitAttr(-8.0)
+    joint.CreateUpperLimitAttr(8.0)
+    slider = UsdPhysics.PrismaticJoint.Define(stage, "/slider")
+    slider.CreateLowerLimitAttr(0.0)
+    slider.CreateUpperLimitAttr(0.1)
+    stage.GetRootLayer().Save()
+    before = path.read_bytes()
+    limits = _read_revolute_qpos_limits(path)
+    assert limits["rocker"] == pytest.approx(np.deg2rad([-8.0, 8.0]))
+    assert "slider" not in limits
+    assert path.read_bytes() == before
+
+
 def test_articulated_usdcs_use_visible_rgba_in_scene_order(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -417,6 +441,7 @@ def test_articulated_usdcs_use_visible_rgba_in_scene_order(
     assert "white drawer with a pull handle" in client.calls[0][0]
     assert "black microwave with a hinged door" in client.calls[1][0]
     assert all("self-contained USDC" in call[0] for call in client.calls)
+    assert all("gen_sim:closedPosition" in call[0] for call in client.calls)
     assert drawer.articulated_usdc_path == str(
         tmp_path / "articulated_geometry" / "drawer_001.usdc"
     )

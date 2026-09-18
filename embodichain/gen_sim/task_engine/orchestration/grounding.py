@@ -23,12 +23,18 @@ from copy import deepcopy
 from dataclasses import dataclass
 import json
 import math
+import re
 from time import perf_counter
 from typing import Any
 
 from .scene_inventory import SceneInventory
 
-__all__ = ["GroundingCaller", "GroundingResult", "ground_scene_references"]
+__all__ = [
+    "GroundingCaller",
+    "GroundingResult",
+    "ground_articulation_parts",
+    "ground_scene_references",
+]
 
 GroundingCaller = Callable[..., Mapping[str, Any]]
 
@@ -131,6 +137,225 @@ class GroundingResult:
 
 class _UnresolvedSceneReference(ValueError):
     """Insufficient scene evidence cannot be repaired as malformed JSON."""
+
+
+def ground_articulation_parts(
+    instruction: str,
+    intent: Mapping[str, Any],
+    reference_bindings: Mapping[str, Sequence[str]],
+    part_catalogs: Mapping[str, Sequence[Mapping[str, Any]]],
+    model: str | None,
+    caller: GroundingCaller,
+    *,
+    force_most_likely: bool = False,
+    preselected: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Resolve multi-part articulations to stable catalog IDs.
+
+    This is a GenSim-specific extension of scene grounding.  The model sees
+    only part IDs and semantic summaries; native USD paths remain code-owned.
+    Single-part articulations and explicit vertical selectors are resolved
+    without an additional model call.
+    """
+    requests = [
+        {
+            "reference_id": f"{step['id']}.object",
+            "reference": step["object"].get("reference", ""),
+            "task_type": step["task_type"],
+        }
+        for step in intent.get("steps", [])
+        if step.get("task_type") == "E6"
+        and step.get("object", {}).get("kind") == "scene_ref"
+    ]
+    pending: list[dict[str, Any]] = []
+    resolved: dict[str, str] = dict(preselected or {})
+    for request in requests:
+        uids = tuple(reference_bindings.get(request["reference_id"], ()))
+        if len(uids) != 1 or uids[0] not in part_catalogs:
+            continue
+        parts = tuple(part_catalogs[uids[0]])
+        vertical_rank = _requested_vertical_rank(str(request["reference"]))
+        if vertical_rank is not None and len(parts) > 1:
+            matches = [
+                part
+                for part in parts
+                if str(part.get("vertical_rank", "")) == vertical_rank
+            ]
+            if len(matches) != 1:
+                raise ValueError(
+                    f"Requested vertical rank {vertical_rank!r} is not uniquely "
+                    f"available for {request['reference_id']!r}."
+                )
+            resolved[request["reference_id"]] = str(matches[0]["part_id"])
+        elif request["reference_id"] in resolved:
+            continue
+        elif len(parts) == 1:
+            resolved[request["reference_id"]] = str(parts[0]["part_id"])
+        elif parts:
+            pending.append({**request, "articulation_id": uids[0], "parts": parts})
+    if not pending:
+        return resolved
+    if not callable(caller):
+        raise TypeError("Part grounding caller must be callable.")
+    schema = {
+        "title": "TaskEngineArticulationPartGrounding",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["bindings"],
+        "properties": {
+            "bindings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["reference_id", "status", "part_id", "confidence"],
+                    "properties": {
+                        "reference_id": {"type": "string"},
+                        "status": {
+                            "type": "string",
+                            "enum": ["resolved", "ambiguous", "not_found"],
+                        },
+                        "part_id": {"type": "string"},
+                        "confidence": {
+                            "type": "number",
+                            "minimum": 0.0,
+                            "maximum": 1.0,
+                        },
+                    },
+                },
+            }
+        },
+    }
+    prompt_parts = [
+        {
+            "reference_id": item["reference_id"],
+            "reference": item["reference"],
+            "articulation_id": item["articulation_id"],
+            "candidates": [
+                {
+                    "part_id": str(part["part_id"]),
+                    "joint": str(part.get("joint", "")),
+                    "link": str(part.get("link", "")),
+                    "vertical_rank": str(part.get("vertical_rank", "")),
+                    "vertical_index": part.get("vertical_index"),
+                    "part_count": part.get("part_count"),
+                    "semantic_labels": _part_labels(part),
+                }
+                for part in item["parts"]
+            ],
+        }
+        for item in pending
+    ]
+    response = caller(
+        prompt=(
+            "Select the requested GenSim articulation part. Return only one "
+            "candidate part_id per reference_id from the supplied candidates. "
+            "Never return a USD path or invent an ID. Use ambiguous/not_found "
+            "when the instruction cannot be resolved.\n\n"
+            f"Instruction:\n{instruction.strip()}\n\n"
+            f"Requests:\n{json.dumps(prompt_parts, ensure_ascii=False, sort_keys=True)}"
+        ),
+        schema=schema,
+        model=model,
+    )
+    raw = response.get("bindings") if isinstance(response, Mapping) else None
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        raise ValueError("Part grounding output must contain a bindings list.")
+    request_by_id = {item["reference_id"]: item for item in pending}
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, Mapping):
+            raise ValueError("Part grounding binding must be a mapping.")
+        reference_id = str(item.get("reference_id", ""))
+        if reference_id not in request_by_id or reference_id in seen:
+            raise ValueError(
+                "Part grounding returned an unknown or duplicate reference."
+            )
+        seen.add(reference_id)
+        confidence = item.get("confidence")
+        if (
+            item.get("status") != "resolved"
+            or not isinstance(confidence, (int, float))
+            or float(confidence) < 0.5
+        ):
+            if force_most_likely:
+                part_id = str(request_by_id[reference_id]["parts"][0]["part_id"])
+            else:
+                raise ValueError(f"Part grounding for {reference_id!r} is ambiguous.")
+        else:
+            part_id = str(item.get("part_id", ""))
+        allowed = {
+            str(part["part_id"]) for part in request_by_id[reference_id]["parts"]
+        }
+        if part_id not in allowed:
+            raise ValueError(f"Part grounding selected unknown part {part_id!r}.")
+        resolved[reference_id] = part_id
+    if seen != set(request_by_id):
+        raise ValueError("Part grounding omitted one or more requested references.")
+    return resolved
+
+
+_VERTICAL_REFERENCE_TERMS = {
+    "top": (
+        "最上",
+        "上面",
+        "上方",
+        "上层",
+        "顶部",
+        "顶层",
+        "top",
+        "upper",
+        "highest",
+    ),
+    "middle": ("中间", "中部", "中层", "middle", "center", "central"),
+    "bottom": (
+        "最下",
+        "下面",
+        "下方",
+        "下层",
+        "底部",
+        "底层",
+        "bottom",
+        "lower",
+        "lowest",
+    ),
+}
+
+
+def _requested_vertical_rank(reference: str) -> str | None:
+    normalized = reference.strip().lower()
+    matches = {
+        rank
+        for rank, terms in _VERTICAL_REFERENCE_TERMS.items()
+        if any(
+            (
+                term in normalized
+                if not term.isascii()
+                else re.search(rf"\b{re.escape(term)}\b", normalized) is not None
+            )
+            for term in terms
+        )
+    }
+    if len(matches) > 1:
+        raise ValueError(
+            f"Articulation reference {reference!r} contains conflicting vertical ranks."
+        )
+    return next(iter(matches), None)
+
+
+def _part_labels(part: Mapping[str, Any]) -> list[str]:
+    labels: set[str] = set()
+    for key in ("joint", "link", "joint_path", "link_path", "vertical_rank"):
+        value = str(part.get(key, "")).strip().lower()
+        if not value:
+            continue
+        labels.add(value)
+        labels.update(
+            token
+            for token in value.replace("/", "_").replace("-", "_").split("_")
+            if token
+        )
+    return sorted(label for label in labels if label)
 
 
 def ground_scene_references(

@@ -241,6 +241,7 @@ invocations.
 
    GroundingCaller
    GroundingResult
+   ground_articulation_parts
    ground_scene_references
 
 embodichain.gen_sim.task_engine.orchestration.scene_assets
