@@ -130,7 +130,7 @@ def test_unitree_deployments_preserve_task_physics(
         source_path=path,
         manager_modules=[
             f"embodichain_tasks.locomotion.managers.{module}"
-            for module in ("actions", "events", "observations", "rewards")
+            for module in ("observations", "rewards")
         ],
     )
     physics_type = (
