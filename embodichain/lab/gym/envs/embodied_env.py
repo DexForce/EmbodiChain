@@ -1042,8 +1042,9 @@ class EmbodiedEnv(BaseEnv):
         self.episode_success_status[env_ids_to_process] = False
 
         # Stateful managers reset selected rows before reset-mode events run.
-        if self.action_manager is not None:
-            self.action_manager.reset(env_ids=env_ids)
+        action_manager = getattr(self, "action_manager", None)
+        if action_manager is not None:
+            action_manager.reset(env_ids=env_ids)
         if self.cfg.events:
             self.event_manager.reset(env_ids=env_ids)
             if "reset" in self.event_manager.available_modes:
