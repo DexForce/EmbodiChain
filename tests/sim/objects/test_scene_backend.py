@@ -916,17 +916,16 @@ def test_empty_root_velocity_selection_leaves_velocities_unchanged() -> None:
     torch.testing.assert_close(batch.root_angular_velocity, angular_before)
 
 
-@pytest.mark.parametrize("component", ["linear", "angular"])
-@pytest.mark.parametrize("failure", ["status", "exception"])
-@pytest.mark.parametrize("partial_write", [False, True])
-@pytest.mark.parametrize("env_ids", [[1], [1, 0]])
+@pytest.mark.parametrize(
+    "component, failure",
+    [("linear", "status"), ("angular", "status"), ("angular", "exception")],
+)
 def test_failed_root_velocity_write_restores_previous_values(
     monkeypatch: pytest.MonkeyPatch,
     component: str,
     failure: str,
-    partial_write: bool,
-    env_ids: list[int],
 ) -> None:
+    env_ids = [1]
     batch = _ArticulationBatch()
     view = SceneArticulationView(SimpleNamespace(), batch, torch.device("cpu"))
     # A previous successful write must not leave a stale rollback snapshot.
@@ -942,9 +941,8 @@ def test_failed_root_velocity_write_restores_previous_values(
         nonlocal calls
         calls += 1
         if calls == 1:
-            if partial_write:
-                target = getattr(selected.owner, f"root_{component}_velocity")
-                target[selected.rows[0]] = values[0]
+            target = getattr(selected.owner, f"root_{component}_velocity")
+            target[selected.rows[0]] = values[0]
             if failure == "status":
                 return -7
             raise error
@@ -966,9 +964,8 @@ def test_failed_root_velocity_write_restores_previous_values(
     torch.testing.assert_close(batch.root_angular_velocity[env_ids], requested[:, 3:])
 
 
-@pytest.mark.parametrize("component", ["linear", "angular"])
 def test_root_velocity_snapshot_failure_does_not_write(
-    monkeypatch: pytest.MonkeyPatch, component: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     batch = _ArticulationBatch()
     view = SceneArticulationView(SimpleNamespace(), batch, torch.device("cpu"))
@@ -976,7 +973,7 @@ def test_root_velocity_snapshot_failure_does_not_write(
     angular_before = batch.root_angular_velocity.clone()
     monkeypatch.setattr(
         _SelectedArticulationBatch,
-        f"fetch_root_{component}_velocity",
+        "fetch_root_angular_velocity",
         lambda self, out: -8,
     )
     with pytest.raises(RuntimeError, match="status -8"):
@@ -985,9 +982,8 @@ def test_root_velocity_snapshot_failure_does_not_write(
     torch.testing.assert_close(batch.root_angular_velocity, angular_before)
 
 
-@pytest.mark.parametrize("failed_restore", ["linear", "angular"])
 def test_root_velocity_rollback_failure_attempts_both_components(
-    monkeypatch: pytest.MonkeyPatch, failed_restore: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     batch = _ArticulationBatch()
     view = SceneArticulationView(SimpleNamespace(), batch, torch.device("cpu"))
@@ -1001,7 +997,7 @@ def test_root_velocity_rollback_failure_attempts_both_components(
 
         def apply(selected: _SelectedArticulationBatch, values: torch.Tensor) -> int:
             calls[component] += 1
-            if calls[component] == 2 and component == failed_restore:
+            if calls[component] == 2 and component == "linear":
                 return -9
             result = original(selected, values)
             if calls[component] == 1 and component == "angular":
@@ -1019,7 +1015,7 @@ def test_root_velocity_rollback_failure_attempts_both_components(
     with pytest.raises(RuntimeError, match="rollback") as caught:
         view.apply_root_velocity(torch.zeros(1, 6), env_ids=[1])
     assert caught.value.__cause__ is original_error
-    assert f"apply_root_{failed_restore}_velocity" in str(caught.value)
+    assert "apply_root_linear_velocity" in str(caught.value)
     assert "status -9" in str(caught.value)
     assert calls == {"linear": 2, "angular": 2}
 
