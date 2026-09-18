@@ -27,7 +27,15 @@ def test_standard_step_schedules_sensor_after_each_physics_substep(enabled):
     env = BaseEnv.__new__(BaseEnv)
     env.cfg = SimpleNamespace(sim_steps_per_control=3)
     env.sim_cfg = SimpleNamespace(physics_dt=0.01)
-    env.sim = SimpleNamespace(update=lambda dt, n: events.append(("physics", dt, n)))
+
+    def update(dt, n, *, after_substep=None):
+        events.append(("manager", dt, n))
+        for _ in range(n):
+            events.append(("physics", dt))
+            if after_substep is not None:
+                after_substep(dt)
+
+    env.sim = SimpleNamespace(update=update)
     sensor = SimpleNamespace(
         requires_substep_update=enabled,
         begin_control_step=lambda: events.append("begin"),
@@ -36,8 +44,8 @@ def test_standard_step_schedules_sensor_after_each_physics_substep(enabled):
     env.sensors = {"contact": sensor}
     env._advance_physics()
     expected = (
-        ["begin"] + [("physics", 0.01, 1), ("sample", 0.01)] * 3
+        ["begin", ("manager", 0.01, 3)] + [("physics", 0.01), ("sample", 0.01)] * 3
         if enabled
-        else [("physics", 0.01, 3)]
+        else [("manager", 0.01, 3)] + [("physics", 0.01)] * 3
     )
     assert events == expected

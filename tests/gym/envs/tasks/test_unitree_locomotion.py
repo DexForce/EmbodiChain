@@ -148,5 +148,4 @@ def test_unitree_deployments_preserve_task_physics(
     assert config.robot.root_props.fixed_base is False
     assert config.robot.root_props.self_collision_enabled is (robot in {"g1", "h1_2"})
     assert config.robot.asset_physics_mode == "overlay"
-    assert config.sensor[0].track_substeps
     assert config.sensor[0].articulation_cfg_list[0].link_name_list == []

@@ -606,10 +606,16 @@ class BaseEnv(gym.Env):
             return
         for sensor in sensors:
             sensor.begin_control_step()
-        for _ in range(self.cfg.sim_steps_per_control):
-            self.sim.update(self.physics_dt, 1)
+
+        def sample_substep(dt: float) -> None:
             for sensor in sensors:
-                sensor.update_physics_step(self.physics_dt)
+                sensor.update_physics_step(dt)
+
+        self.sim.update(
+            self.physics_dt,
+            self.cfg.sim_steps_per_control,
+            after_substep=sample_substep,
+        )
 
     def _update_sim_state(self, **kwargs):
         """Update the simulation state at each step.
@@ -674,7 +680,8 @@ class BaseEnv(gym.Env):
         with self._profiler.section("sensor_fetch"):
             for sensor_name, sensor in self.sensors.items():
                 with self._profiler.section(f"sensor_update.{sensor_name}"):
-                    sensor.update(fetch_only=fetch_only)
+                    if not sensor.requires_substep_update:
+                        sensor.update(fetch_only=fetch_only)
                 with self._profiler.section(f"sensor_get_data.{sensor_name}"):
                     obs[sensor_name] = sensor.get_data()
         return obs
@@ -953,7 +960,10 @@ class BaseEnv(gym.Env):
             self._component_generators: dict[str, torch.Generator] = {}
         if name not in self._component_generators:
             generator = torch.Generator(device=self.device)
-            generator.manual_seed(self._component_seed(name, self.cfg.seed or 0))
+            if self.cfg.seed is None:
+                generator.seed()
+            else:
+                generator.manual_seed(self._component_seed(name, self.cfg.seed))
             self._component_generators[name] = generator
         return self._component_generators[name]
 

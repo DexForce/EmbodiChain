@@ -111,3 +111,38 @@ def test_actor_sides_preserve_signed_impulse_and_invalid_nan_is_ignored():
     data["is_valid"][0, 2] = False
     history.update(data, 0.1)
     assert torch.equal(history.force, torch.tensor([[[0.0, 0.0, 10.0]]]))
+
+
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_sparse_rows_use_device_count_and_environment_qualified_actor_ids(device):
+    from dexsim.scene import ContactBuffer
+
+    history = ContactHistory(
+        torch.tensor([[10, 11], [10, 11]], device=device),
+        counterpart_ids=torch.tensor([[0], [0]], device=device),
+    )
+    buffer = ContactBuffer.allocate(6, device)
+    buffer.data.fill_(float("nan"))
+    buffer.data[:4] = torch.tensor(
+        [
+            [0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0],
+            [0, 0, 0, 0, 0, 1, 0, 0, 0, 3, 0],
+            [0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0],
+            [0, 0, 0, 0, 0, 1, 0, 0, 0, 100, 0],
+        ],
+        device=device,
+    )
+    buffer.env_ids[:4] = torch.tensor([0, 1, 0, 0], device=device)
+    buffer.actor_ids[:4] = torch.tensor(
+        [[0, 10], [11, 0], [0, 10], [10, 11]], device=device
+    )
+    buffer.device_counts[0] = 4
+    assert buffer.count == 0  # Host count remains unread, as with fetch_async().
+    history._update_from_query(buffer, 0.1)
+    torch.testing.assert_close(
+        history.force[:, :, 2], torch.tensor([[30.0, 0.0], [0.0, -30.0]], device=device)
+    )
+    assert history.contact.tolist() == [[True, False], [False, True]]
+    assert history.contact_count.tolist() == [1.0, 1.0]

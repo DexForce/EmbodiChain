@@ -173,7 +173,12 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             "self",
             robot_ids,
             counterpart_ids=robot_ids,
-            force_threshold=sensor.cfg.self_collision_force_threshold or 0.0,
+            force_threshold=float(
+                config.data.get("rewards", {})
+                .get("self_collisions", {})
+                .get("params", {})
+                .get("force_threshold", 0.0)
+            ),
         )
         self._locomotion_generator = self.get_generator("locomotion.commands_and_noise")
         action_shape = (self.num_envs, config.action_dim)

@@ -134,3 +134,18 @@ def test_named_component_stream_rewinds_on_explicit_seed_and_is_independent():
     env.reset(seed=42)
     torch.rand(6, generator=command)
     assert torch.equal(continued, torch.rand(6, generator=command))
+
+
+def test_unseeded_component_streams_do_not_share_a_fixed_seed():
+    first, second = _ResetEnv(), _ResetEnv()
+    a, b = first.get_generator("commands"), second.get_generator("commands")
+    assert a.initial_seed() != b.initial_seed()
+    assert not torch.equal(torch.rand(8, generator=a), torch.rand(8, generator=b))
+    assert first.get_generator("commands") is a
+
+
+def test_explicit_zero_seed_is_reproducible():
+    first, second = _ResetEnv(), _ResetEnv()
+    first.cfg.seed = second.cfg.seed = 0
+    a, b = first.get_generator("commands"), second.get_generator("commands")
+    assert torch.equal(torch.rand(8, generator=a), torch.rand(8, generator=b))

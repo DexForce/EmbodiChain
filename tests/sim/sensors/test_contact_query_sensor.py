@@ -129,3 +129,69 @@ def test_contact_metadata_refreshes_when_actor_table_changes() -> None:
     sensor._sync_filter_actor_metadata()
     assert sensor.item_user_ids.tolist() == [7]
     assert sensor.item_user_env_ids_map[4].item() == -1
+
+
+def _sensor_for_query(query, capacity=2):
+    handles = (
+        SimpleNamespace(path="arena_0/cube"),
+        SimpleNamespace(path="arena_1/cube"),
+    )
+    owner = SimpleNamespace(
+        num_envs=2,
+        arena_offsets=torch.zeros((2, 3)),
+        _spawn_scene=SimpleNamespace(handles=lambda uid: handles),
+        spawn_result=SimpleNamespace(
+            create_contact_query=lambda *args, **kwargs: query
+        ),
+    )
+    return ContactSensor(
+        ContactSensorCfg(
+            uid="contacts", rigid_uid_list=["cube"], max_contacts_per_env=capacity
+        ),
+        owner=owner,
+    )
+
+
+def test_default_history_enables_substep_sampling_and_preserves_interval_drops():
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    history = sensor.create_history("feet", torch.tensor([[4], [7]]))
+    assert sensor.requires_substep_update
+    sensor.begin_control_step()
+    query.buffer.dropped_count = 3
+    sensor.update_physics_step(0.01)
+    assert history.found.all()
+    query.buffer.count = 0
+    query.buffer.dropped_count = 0
+    sensor.update_physics_step(0.01)
+    assert not history.contact.any()
+    assert history.found.all()
+    assert sensor.dropped_contacts == 3
+    sensor.update()  # Observation refresh must not replace interval diagnostics.
+    assert sensor.dropped_contacts == 3
+    sensor.begin_control_step()
+    assert sensor.dropped_contacts == 0
+
+
+def test_scatter_overflow_is_counted_separately_and_reset_by_selected_row():
+    query = _FakeQuery()
+    query.buffer.count = 3
+    query.buffer.env_ids[:3] = torch.tensor([0, 0, 1])
+    query.buffer.actor_ids[:3] = torch.tensor([[4, -1], [4, -1], [7, -1]])
+    query.buffer.data[2] = query.buffer.data[1]
+    sensor = _sensor_for_query(query, capacity=1)
+    sensor.create_history("feet", torch.tensor([[4], [7]]))
+    sensor.begin_control_step()
+    query.buffer.dropped_count = 2
+    sensor.update_physics_step(0.01)
+    assert sensor.total_current_contacts == 2
+    assert sensor._scatter_dropped_count.tolist() == [1, 0]
+    assert sensor.dropped_contacts == 3
+    query.buffer.count = 0
+    query.buffer.dropped_count = 0
+    sensor.update_physics_step(0.01)
+    assert sensor.dropped_contacts == 3
+    sensor.reset([1])
+    assert sensor.dropped_contacts == 3
+    sensor.reset()
+    assert sensor.dropped_contacts == 0

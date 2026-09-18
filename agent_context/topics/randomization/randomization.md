@@ -159,3 +159,7 @@ reset-mode events. Per-row interval counters reset only for selected rows.
 `push_articulation_by_setting_velocity` lives in `managers/randomization/physics.py`.
 It adds sampled disturbances to the selected articulation's root velocity and
 maintains independently sampled per-row timers through EventManager reset.
+
+Named component generators use nondeterministic entropy when the environment seed
+is `None`. An explicit seed, including zero, derives stable named streams; an
+ordinary reset does not rewind them.
