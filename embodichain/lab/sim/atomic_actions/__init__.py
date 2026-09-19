@@ -237,6 +237,8 @@ from .runner import (
 )
 from .scene import SceneProvider
 from .sim_adapter import (
+    SceneEntity,
+    create_rigidized_articulation_antipodal_semantics,
     create_simulation_atomic_action_engine,
     RigidObjectSceneProvider,
     RigidObjectSceneProviderCfg,
@@ -290,6 +292,8 @@ __all__ = [
     "CommandSink",
     "ControlCommand",
     "ControlPartCommandProfile",
+    "SceneEntity",
+    "create_rigidized_articulation_antipodal_semantics",
     "create_simulation_atomic_action_engine",
     "CoordinatedHeldObjectState",
     "CoordinatedPickGoal",
