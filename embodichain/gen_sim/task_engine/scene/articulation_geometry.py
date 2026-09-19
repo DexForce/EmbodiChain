@@ -40,12 +40,31 @@ class ArticulationGeometry:
         scale = _vector(config.get("body_scale", [1, 1, 1]), "body_scale")
         if (scale <= 0).any():
             raise ValueError("Articulation body_scale must be positive.")
-        rotation = Rotation.from_euler(
+        pose = _root_pose(config)
+        return (self.vertices * scale) @ pose[:3, :3].T + pose[:3, 3]
+
+
+def _root_pose(config: Mapping[str, Any]) -> np.ndarray:
+    """Use the runtime matrix when present; source Euler angles are intrinsic XYZ."""
+    if config.get("init_local_pose") is None:
+        pose = np.eye(4)
+        pose[:3, :3] = Rotation.from_euler(
             "XYZ", _vector(config.get("init_rot", [0, 0, 0]), "init_rot"), degrees=True
+        ).as_matrix()
+        pose[:3, 3] = _vector(config.get("init_pos", [0, 0, 0]), "init_pos")
+        return pose
+    pose = np.asarray(config["init_local_pose"], dtype=float)
+    if (
+        pose.shape != (4, 4)
+        or not np.isfinite(pose).all()
+        or not np.allclose(pose[3], [0, 0, 0, 1], atol=1e-6, rtol=0)
+        or not np.allclose(pose[:3, :3].T @ pose[:3, :3], np.eye(3), atol=1e-6, rtol=0)
+        or not np.isclose(np.linalg.det(pose[:3, :3]), 1.0, atol=1e-6, rtol=0)
+    ):
+        raise ValueError(
+            "Articulation init_local_pose must be a finite rigid 4x4 pose."
         )
-        return rotation.apply(self.vertices * scale) + _vector(
-            config.get("init_pos", [0, 0, 0]), "init_pos"
-        )
+    return pose
 
 
 def _vector(value: object, name: str) -> np.ndarray:
@@ -194,10 +213,8 @@ def fit_articulation_to_proxy(
     ):
         raise ValueError("Proxy fitting requires finite three-dimensional vertices.")
     geometry = read_articulation_geometry(config["fpath"])
-    rotation = Rotation.from_euler(
-        "XYZ", _vector(config.get("init_rot", [0, 0, 0]), "init_rot"), degrees=True
-    )
-    matrix = rotation.as_matrix()
+    pose = _root_pose(config)
+    matrix = pose[:3, :3]
     if matrix[2, 2] < np.cos(np.deg2rad(1.0)):
         raise ValueError(
             "Tabletop proxy fitting requires a base within one degree of level."
@@ -215,7 +232,7 @@ def fit_articulation_to_proxy(
         raise ValueError("Proxy fitting requires non-degenerate geometry extents.")
     scale = float(np.min(proxy_extent / actual_extent))
     actual *= scale
-    position = _vector(config.get("init_pos", [0, 0, 0]), "init_pos").copy()
+    position = pose[:3, 3].copy()
     position[:2] += (
         (proxy.min(0) + proxy.max(0)) / 2 - (actual.min(0) + actual.max(0)) / 2
     )[:2]
@@ -224,4 +241,9 @@ def fit_articulation_to_proxy(
     repaired["body_scale"] = [scale] * 3
     repaired["init_pos"] = position.tolist()
     repaired["init_rot"] = [0.0, 0.0, yaw]
+    if config.get("init_local_pose") is not None:
+        pose = np.eye(4)
+        pose[:3, :3] = rotation.as_matrix()
+        pose[:3, 3] = position
+        repaired["init_local_pose"] = pose.tolist()
     return repaired

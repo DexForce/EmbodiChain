@@ -30,7 +30,7 @@ from .source_scene import PreparedScene
 
 __all__: list[str] = []
 
-_POLICY = "semantic_grasp_fit/v2"
+_POLICY = "semantic_grasp_fit/v3"
 _MIN_SCALE = 0.25
 _PAD_MARGIN = 0.002
 _FIT_MARGIN = 0.001
@@ -45,8 +45,14 @@ def fit_grasp_assets(
     graph: dict[str, Any],
     *,
     openings: dict[str, float],
+    contact_clearances: dict[str, float] | None = None,
 ) -> tuple[PreparedScene, dict[str, Any]]:
-    """Uniformly shrink graph-acquired rigid meshes within a bounded policy."""
+    """Shrink acquired rigid meshes while retaining support and bounded scale.
+
+    ``contact_clearances`` optionally supplies each target's required per-jaw
+    separation from the open gripper. When provided, every acquired object must
+    have a finite non-negative value. The geometric pad margin remains a floor.
+    """
     requests = _grasp_requests(graph, openings)
     rigid = [deepcopy(item) for item in scene.rigid_objects]
     planner = [deepcopy(item) for item in scene.planner_objects]
@@ -58,6 +64,10 @@ def fit_grasp_assets(
     }
     records = []
     for object_id, request in sorted(requests.items()):
+        if contact_clearances is not None and object_id not in contact_clearances:
+            raise ValueError(
+                f"Missing contact clearance for grasp-fit target {object_id!r}."
+            )
         obj = rigid_by_uid.get(object_id)
         planner_obj = planner_by_uid.get(object_id)
         if obj is None or planner_obj is None:
@@ -74,6 +84,9 @@ def fit_grasp_assets(
                 task_types=sorted(request["task_types"]),
                 resources=sorted(request["resources"]),
                 source_sha256=scene.asset_hashes.get(object_id),
+                contact_clearance=(
+                    0.0 if contact_clearances is None else contact_clearances[object_id]
+                ),
             )
         )
     status = (
@@ -86,7 +99,7 @@ def fit_grasp_assets(
         )
     )
     report = {
-        "schema_version": "gen_sim.asset-adaptation/v2",
+        "schema_version": "gen_sim.asset-adaptation/v3",
         "policy": _POLICY,
         "enabled": True,
         "minimum_scale": _MIN_SCALE,
@@ -156,12 +169,21 @@ def _fit_object(
     task_types: list[str],
     resources: list[str],
     source_sha256: str | None,
+    contact_clearance: float,
 ) -> dict[str, Any]:
     """Apply one uniform scale while retaining the original support bottom."""
     shape = obj.get("shape", {})
     if shape.get("shape_type") != "Mesh" or not shape.get("fpath"):
         raise ValueError(f"Grasp-fit target {object_id!r} requires a GLB rigid mesh.")
-    if not math.isfinite(opening) or opening <= 2 * _PAD_MARGIN + _FIT_MARGIN:
+    if (
+        isinstance(contact_clearance, bool)
+        or not isinstance(contact_clearance, (int, float))
+        or not math.isfinite(contact_clearance)
+        or contact_clearance < 0
+    ):
+        raise ValueError("Grasp-fit contact clearance must be finite and non-negative.")
+    pad_margin = max(_PAD_MARGIN, float(contact_clearance))
+    if not math.isfinite(opening) or opening <= 2 * pad_margin + _FIT_MARGIN:
         raise ValueError("Grasp-fit requires a finite, positive calibrated opening.")
 
     import trimesh
@@ -196,7 +218,7 @@ def _fit_object(
         span = float(extents.min())
     if not math.isfinite(span) or span <= 0:
         raise ValueError(f"Grasp-fit target {object_id!r} has no measurable span.")
-    usable = opening - 2 * _PAD_MARGIN
+    usable = opening - 2 * pad_margin
     factor = min(1.0, (usable - _FIT_MARGIN) / span)
     if factor < _MIN_SCALE:
         raise ValueError(
@@ -212,7 +234,8 @@ def _fit_object(
         "source_path": str(shape["fpath"]),
         "source_sha256": source_sha256,
         "calibrated_opening_m": opening,
-        "pad_margin_m": _PAD_MARGIN,
+        "pad_margin_m": pad_margin,
+        "contact_clearance_m": float(contact_clearance),
         "fit_margin_m": _FIT_MARGIN,
         "usable_span_m": usable,
         "original_fit_span_m": span,

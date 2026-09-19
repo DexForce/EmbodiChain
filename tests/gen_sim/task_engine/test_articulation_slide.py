@@ -35,6 +35,7 @@ from embodichain.gen_sim.task_engine.orchestration.contracts import ROLE_BINDING
 from embodichain.gen_sim.task_engine.orchestration.source_scene import PreparedScene
 from embodichain.gen_sim.task_engine.semantic_planner import SemanticTaskPlanner
 from embodichain.gen_sim.task_engine.task_program_bundle import (
+    _scene_payload,
     generate_task_program_bundle,
 )
 from embodichain.gen_sim.task_engine._task_program.articulation_binding import (
@@ -44,6 +45,7 @@ from embodichain.gen_sim.task_engine._task_program.articulation_binding import (
     WITHDRAW_CALL,
     discover_prismatic_parts,
     inspect_prismatic,
+    validate_placement,
 )
 from embodichain.gen_sim.task_engine._task_program.articulation_slide import (
     ArticulationSlideFactory,
@@ -61,6 +63,7 @@ from embodichain.lab.sim.atomic_actions import (
     SlideGoal,
     SlideOptions,
 )
+from embodichain.lab.sim.cfg import ArticulationCfg
 from embodichain.lab.task_program.semantics import (
     RegisteredSemanticCall,
     SceneArticulationRef,
@@ -714,6 +717,7 @@ def _runtime(scene: PreparedScene):
     position = torch.tensor([[binding.target("open")]])
     cached_limits = torch.tensor([[[-0.4, 0.0]]])
     runtime_cfg = dict(cfg)
+    runtime_cfg.setdefault("init_local_pose", None)
     fixed_base = runtime_cfg.pop("fix_base")
     art = SimpleNamespace(
         cfg=SimpleNamespace(
@@ -761,6 +765,115 @@ def _runtime(scene: PreparedScene):
             engine=SimpleNamespace(robot=robot, device="cpu"),
         ),
     )
+
+
+def test_e6_runtime_binding_preserves_decoded_matrix(scene: PreparedScene) -> None:
+    """Bundle decode must not feed extrinsic angles back to intrinsic validation."""
+    from scipy.spatial.transform import Rotation
+
+    config = deepcopy(scene.articulations[0])
+    roll, pitch = np.deg2rad([30.0, 20.0])
+    # This compound rotation leaves the local Y slide rail horizontal.
+    yaw = np.arctan2(-np.sin(roll), np.cos(roll) * np.sin(pitch))
+    config["init_rot"] = [30.0, 20.0, float(np.rad2deg(yaw))]
+    scene = replace(scene, articulations=(config,))
+    binding, _, art, _, kwargs = _runtime(scene)
+    validate_placement(binding, config, scene.table_top_z)
+    item = _scene_payload(scene, program_id="pose_binding")["simulation"][
+        "articulation"
+    ][0]
+    art.cfg = ArticulationCfg.from_dict(item)
+    expected = Rotation.from_euler("XYZ", config["init_rot"], degrees=True).as_matrix()
+    np.testing.assert_allclose(art.cfg.init_local_pose[:3, :3], expected, atol=1e-12)
+    assert not np.allclose(
+        Rotation.from_euler("XYZ", art.cfg.init_rot, degrees=True).as_matrix(),
+        expected,
+    )
+
+    assert ArticulationSlideFactory((binding,)).create(**kwargs) is not None
+
+
+@pytest.mark.parametrize("as_list", [True, False])
+def test_articulation_world_vertices_prefer_explicit_pose(
+    scene: PreparedScene, as_list: bool
+) -> None:
+    config = deepcopy(scene.articulations[0])
+    geometry = read_articulation_geometry(config["fpath"])
+    expected = geometry.world_vertices(config)
+    pose = np.eye(4)
+    pose[:3, 3] = config["init_pos"]
+    config["init_local_pose"] = pose.tolist() if as_list else pose
+    config["init_pos"] = [9.0, 9.0, -9.0]
+    config["init_rot"] = [40.0, 50.0, 60.0]
+
+    np.testing.assert_allclose(geometry.world_vertices(config), expected)
+    validate_placement(inspect_prismatic(config), config, scene.table_top_z)
+
+
+@pytest.mark.parametrize(
+    "pose",
+    [
+        np.eye(3),
+        np.full((4, 4), np.nan),
+        np.diag([1.0, 1.0, 1.0, 0.0]),
+        np.diag([2.0, 1.0, 1.0, 1.0]),
+        np.diag([-1.0, 1.0, 1.0, 1.0]),
+    ],
+    ids=["shape", "nonfinite", "nonhomogeneous", "scale", "reflection"],
+)
+def test_articulation_geometry_rejects_invalid_root_matrix(
+    scene: PreparedScene, pose: np.ndarray
+) -> None:
+    config = {**scene.articulations[0], "init_local_pose": pose.tolist()}
+    with pytest.raises(ValueError, match="init_local_pose"):
+        read_articulation_geometry(config["fpath"]).world_vertices(config)
+
+
+@pytest.mark.parametrize("violation", ["penetration", "tilt"])
+def test_e6_binding_rejects_invalid_matrix_placement(
+    scene: PreparedScene, violation: str
+) -> None:
+    from scipy.spatial.transform import Rotation
+
+    binding, _, art, _, kwargs = _runtime(scene)
+    item = _scene_payload(scene, program_id="invalid_pose")["simulation"][
+        "articulation"
+    ][0]
+    art.cfg = ArticulationCfg.from_dict(item)
+    if violation == "penetration":
+        art.cfg.init_local_pose[2, 3] = 0.6
+        message = "intersects the tabletop"
+    else:
+        art.cfg.init_local_pose[:3, :3] = Rotation.from_euler(
+            "X", 10.0, degrees=True
+        ).as_matrix()
+        message = "one degree"
+    # Leave cfg.init_pos/init_rot safe to prove validation reads the matrix.
+    with pytest.raises(ValueError, match=message):
+        ArticulationSlideFactory((binding,)).create(**kwargs)
+
+
+def test_proxy_fit_updates_explicit_root_matrix(scene: PreparedScene) -> None:
+    from scipy.spatial.transform import Rotation
+
+    config = deepcopy(scene.articulations[0])
+    pose = np.eye(4)
+    pose[:3, :3] = Rotation.from_euler(
+        "XYZ", [0.02, -0.01, 90], degrees=True
+    ).as_matrix()
+    pose[:3, 3] = config["init_pos"]
+    config["init_local_pose"] = pose.tolist()
+    before = deepcopy(config)
+    geometry = read_articulation_geometry(config["fpath"])
+
+    repaired = fit_articulation_to_proxy(config, geometry.vertices, table_top_z=0.72)
+
+    np.testing.assert_allclose(
+        np.asarray(repaired["init_local_pose"])[:3, 3], repaired["init_pos"]
+    )
+    assert geometry.world_vertices(repaired)[:, 2].min() == pytest.approx(0.721)
+    assert np.asarray(repaired["init_local_pose"])[2, 2] == pytest.approx(1.0)
+    assert config == before
 
 
 def test_lowerers_keep_exact_joint_goal_and_require_open_hand_for_withdrawal(

@@ -164,6 +164,7 @@ def _bind(
             {
                 "fpath": art.cfg.fpath,
                 "body_scale": art.cfg.body_scale,
+                "init_local_pose": art.cfg.init_local_pose,
                 "init_pos": art.cfg.init_pos,
                 "init_rot": art.cfg.init_rot,
             },
