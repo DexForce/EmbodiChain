@@ -132,3 +132,12 @@ def test_project_context_adapters_reference_the_canonical_skill() -> None:
     ]
 
     assert missing_references == []
+
+
+def test_trajectory_test_changes_do_not_select_unrelated_ik_context() -> None:
+    helper = _load_helper()
+    data = helper.load_map(_REPOSITORY_ROOT)
+
+    assert helper.affected_topics(
+        data, ["tests/compute/test_trajectory_timing.py"]
+    ) == ["motion-planning"]

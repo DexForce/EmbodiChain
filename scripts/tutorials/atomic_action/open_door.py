@@ -50,12 +50,15 @@ from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
     configure_newton_link_contacts,
+    create_affordance_sampling_context,
     create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
+    log_affordance_branch_diagnostics,
+    parse_affordance_sampling_arguments,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
@@ -76,7 +79,7 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the door-opening tutorial."""
     parser = create_tutorial_argument_parser(
         "Grasp a microwave handle and open its door with OpenDoor.",
-        features=("grasp_sampling", "visualize_axes"),
+        features=("affordance_sampling", "grasp_sampling", "visualize_axes"),
     )
     parser.add_argument(
         "--open_angle",
@@ -87,7 +90,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--approach_distance", type=float, default=0.10)
     parser.add_argument("--retract_distance", type=float, default=0.10)
     parser.add_argument("--door_waypoint_count", type=int, default=50)
-    return parser.parse_args()
+    return parse_affordance_sampling_arguments(parser)
 
 
 def create_microwave(sim: SimulationManager) -> Articulation:
@@ -199,7 +202,8 @@ def main() -> None:
                 ),
                 control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
                 motion_policy=MotionPolicy(
-                    strategy="motion_gen",
+                    # Contact/path segments require exact Cartesian samples.
+                    strategy="ik_interp",
                     sample_count=TRAJECTORY_SAMPLE_COUNT,
                 ),
                 skill_options=OpenDoorOptions(
@@ -222,8 +226,10 @@ def main() -> None:
                 },
             ),
             control_dt=sim.sim_config.physics_dt,
+            affordance_sampling=create_affordance_sampling_context(args),
         ),
     )
+    log_affordance_branch_diagnostics(compiled.action_plans[0])
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan the OpenDoor tutorial trajectory.")
         return

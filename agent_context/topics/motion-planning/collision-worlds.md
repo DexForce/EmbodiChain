@@ -1,105 +1,81 @@
-# Curobo collision worlds
+# Collision-world integration
 
-Read this when the request needs these details. [Topic overview](motion-planning.md).
+Read when changing planner obstacle identity, scene conversion or live pose
+binding. Return to [motion planning](motion-planning.md) for other entry points.
 
-### CuroboPlanner collision worlds
+## Owners
 
-EmbodiChain planner inputs and robot FK results use `xyz + xyzw`. CuRobo's
-native pose representation uses `xyz + wxyz`; `curobo_planner.py` and
-`curobo_yaml.py` perform that conversion exactly once with
-`quat_xyzw_to_wxyz()` when constructing CuRobo goals and obstacle YAML.
-Dynamic obstacle inputs expressed as homogeneous
-matrices do not need a quaternion-order convention until that boundary.
+| Boundary | Source |
+|---|---|
+| Generic world declaration | `embodichain/lab/sim/motion/planners/base_planner.py` → `CollisionWorldInfo` |
+| Option copying and per-attempt binding | `embodichain/lab/sim/motion/motion_generator.py` |
+| cuRobo world config, cache and updates | `embodichain/lab/sim/motion/planners/curobo/curobo_planner.py` |
+| Physical collision descriptors to native scene | `embodichain/lab/sim/motion/planners/curobo/curobo_yaml.py` |
+| Registry/provider agreement | `embodichain/lab/task_program/semantics/scene.py` → `SceneRegistry` |
 
-`CuroboWorldCfg.rigid_objects` accepts either a mapping or a sequence. Use
-`Mapping[registry_id, RigidObject]` for a registry-backed integration. The
-mapping key is the authoritative logical/source obstacle ID used by the
-content-cache key, `collision_world_entity_ids`, generated obstacle-name prefix,
-dynamic update key, and registry validation. Scene generation reads physical
-collision descriptors through `RigidObject.get_collision_shapes()` and emits a
-mixed tensor-backed cuRobo scene. A compound source expands to physical names
-such as `registry_id__shape_0`; cache and full-world identity remain keyed by
-the unexpanded `registry_id`, and dynamic updates fan out through the physical
-shapes' local poses. A registry mapping whose source lacks physical collision
-shapes fails fast instead of silently dropping the source. The sequence form is
-an advanced direct-core path that derives names from each object's `uid` or an
-`obstacle_<index>` fallback.
+## Logical identity survives geometry expansion
 
-Analytic box, plane, sphere, and capsule shapes retain their native cuRobo
-representations. Mesh-backed `MESH`, `CONVEX`, and `SDF` shapes never become
-direct cuRobo `Mesh` entries: scene generation computes one Open3D convex hull,
-then samples its signed distance into a dense ESDF `VoxelGrid`. The global or
-per-object `"voxel"` policy can apply the same conversion to an analytic shape;
-the direct `"mesh"` policy is unsupported. `max_voxel_count` guards every ESDF
-allocation and fails fast with an actionable error. `mesh_triangle_threshold`
-remains accepted only for configuration compatibility and no longer changes
-representation selection. The world cache format is versioned so caches that
-may contain direct mesh entries are not reused.
+For registry-backed planning, pass `SceneRegistry.collision_geometry_by_id()`
+into `CuroboWorldCfg.rigid_objects`. Mapping keys are canonical obstacle IDs,
+used for cache identity, full-world declarations, generated-name prefixes and
+dynamic updates. Do not infer IDs from simulator UIDs. The sequence form is a
+direct-core option that infers names and is not the registry integration path.
 
-`CuroboWorldCfg.multi_env` controls collision-world batching, not whether robot
-states or goals are batched:
+A logical source may expand into several physical collision shapes. Read those
+through `RigidObject.get_collision_shapes()`; preserve the source ID while
+fanning pose updates through each shape's local transform. Expanded physical
+names are not registry IDs. A registered source lacking collision geometry
+fails instead of disappearing from the world.
 
-- `multi_env=False` (default) shares one world. Use it when obstacle poses are
-  equal after each simulator-world pose is rebased into its environment's robot
-  base. Replicated arenas may have different world-frame offsets and still
-  safely share a world when their robot-relative layouts are identical.
-- `multi_env=True` allocates one world per batch row. Use it when obstacles have
-  different poses relative to their local robot bases, such as per-env pose
-  randomization.
+`curobo_yaml.py` keeps supported primitives analytic and converts mesh-backed
+shapes to convex-hull ESDF voxels. Direct native mesh entries are unsupported.
+Dense allocations obey `max_voxel_count`, and representation changes require
+cache-version invalidation. Compatibility-only options must not silently regain
+old representation-selection behavior; inspect their config definitions.
 
-The multi-env scene is cloned from the cached tensor-backed scene dictionary
-generated using env 0; enabling the flag does not load distinct initial
-simulator poses for other rows. Each clone remains a dictionary until cuRobo
-0.8 constructs its own `SceneCfg`, because its multi-env list parser expects a
-dictionary per environment rather than pre-built `SceneCfg` instances. Per-env
-differences require registration in `dynamic_obstacle_names` and current
-`(B, 4, 4)` world poses in
-`CuroboPlanOptions.dynamic_obstacle_poses`. Independent worlds replicate scene
-data and collision caches, so retain the shared default for identical rebased
-layouts.
+Shared pose conventions belong to [simulation](../simulation-system/simulation-system.md).
+cuRobo goal/scene adapters alone convert `xyzw` to native `wxyz`, exactly once;
+homogeneous dynamic-pose matrices need no quaternion conversion until then.
 
-`BasePlanner.collision_world_info` and
-`with_collision_world(options, obstacle_poses=...)` form the generic per-plan
-dynamic-world bridge. The base property returns `None` and the base hook leaves
-options unchanged. `CuroboPlanner` returns an immutable `CollisionWorldInfo`
-with updates enabled, clones the supplied pose tensors, and merges them into
-`CuroboPlanOptions.dynamic_obstacle_poses`.
-`MotionGenerator.supports_dynamic_collision_world` exposes the capability and
-`MotionGenerator.bind_collision_world()` owns option copying before forwarding
-to the backend hook. Atomic actions use that facade from their framework-owned
-`plan()` template when a `SceneSnapshot` declares collision entities;
-individual skills must not construct backend obstacle options themselves.
-`CollisionWorldInfo` carries the complete canonical world, its dynamic subset,
-the `"shared"` / `"per_env"` mode, and update capability as one validated
-contract. It requires unique canonical IDs and requires the dynamic subset to
-belong to the complete world. `MotionGenerator.collision_world_info` forwards
-that contract and retains derived ID/mode properties for callers. For cuRobo,
-the complete set is every mapping key (or inferred sequence name), while the
-dynamic set is exactly `CuroboWorldCfg.dynamic_obstacle_names`.
-Compound-expanded physical shape names are not part of either logical ID
-declaration.
-`CuroboWorldCfg` rejects duplicate obstacle names and requires every
-`dynamic_obstacle_name` to match an object registered in `rigid_objects`, so a
-planner-local mismatch fails before backend construction.
+## Shared versus per-environment worlds
 
-For the canonical path, pass `SceneRegistry.collision_geometry_by_id()` into
-`CuroboWorldCfg.rigid_objects`, derive dynamic names from the registry, and call
-`SceneRegistry.make_planning_scene_provider(motion_generator, batch_size=...)`
-before execution. The geometry mapping excludes `NONE` registrations. The
-factory first requires the registry's complete `STATIC ∪ DYNAMIC` set to
-equal `MotionGenerator.collision_world_entity_ids`, then requires exact
-registry/derived-provider/planner dynamic-subset agreement. It also checks
-update capability for a non-empty dynamic set and the same collision-world
-batch mode. An external perception/hardware provider instead uses
-`validate_collision_integration(..., scene_provider=provider)`.
+`multi_env` controls collision-world replication, not batched robot goals.
+Compare obstacle poses after rebasing into each environment's robot base:
+identical layouts can share one world even when arena world offsets differ.
+Different robot-relative layouts require independent worlds.
 
-One environment may infer `SHARED`; a multi-environment registry with dynamic
-entities must explicitly choose `SHARED` or `PER_ENV`. Alias normalization
-happens before planner construction, so planner IDs must never be simulator
-UIDs unless that string is also the chosen canonical registry ID.
+Enabling `multi_env` clones the cached env-0 scene; it does not automatically
+sample distinct initial poses for other environments. Objects differing by row
+must be declared dynamic and supplied current `(B, 4, 4)` world poses. Keep the
+cached raw scene representation until the backend's multi-env constructor has
+materialized it; inspect `_materialize_multi_env_scene_model()` for that boundary.
 
-`MotionGenerator.resolve_plan_options()` is the corresponding option-ownership
-boundary. It copies caller-supplied typed options, otherwise obtains backend
-defaults; for TOPPRA it maps the requested sample count and generic
-velocity/acceleration limits into `ToppraPlanOptions`. Atomic actions do not
-import or branch on concrete planner option types.
+## Bind and validate before execution
+
+`CollisionWorldInfo` declares unique complete IDs, their dynamic subset, batch
+mode and update capability. `BasePlanner.with_collision_world()` is the generic
+hook; `MotionGenerator.bind_collision_world()` copies options before invoking
+it. cuRobo clones incoming pose tensors into its typed options. Atomic Skills
+bind snapshots through the facade on each planning attempt rather than building
+backend-specific obstacle options inside individual skills.
+
+For the canonical registry path, derive dynamic names from the registry and call
+`SceneRegistry.make_planning_scene_provider()` before execution. Validation
+requires exact agreement of the complete `STATIC ∪ DYNAMIC` world, dynamic
+registry/provider/planner subsets, update capability and batch mode. `NONE`
+registrations are excluded. External perception/hardware providers use
+`validate_collision_integration(..., scene_provider=...)` at the same boundary.
+
+A single environment may infer shared mode. Multi-environment registries with
+dynamic entities must choose shared/per-env explicitly. Canonical aliases resolve
+before planner construction; duplicate or undeclared dynamic IDs fail early.
+This validation prevents apparently successful plans against stale/incomplete
+worlds, which cannot be repaired by retrying with different motion parameters.
+
+## Focused validation
+
+Use `tests/sim/motion/planners/test_curobo_planner.py` for config, conversion,
+cache and live-update behavior; `test_curobo_integration.py` in that directory
+covers the backend integration. Registry/provider contracts are exercised under
+`tests/lab/task_program/semantics/`. Include logical-ID/compound-shape and
+shared/per-env cases when changing geometry or dynamic binding.
