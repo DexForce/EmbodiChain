@@ -1,0 +1,14 @@
+{
+  "base_description": "手机支架",
+  "assemble_description": "手机",
+  "action_description": "摆放",
+  "output_dir": "../../../../outputs/assemble/phone_stand",
+  "codex": {
+    "model": null,
+    "max_turns": 10,
+    "timeout_seconds": 300
+  },
+  "validation": {
+    "collision": "visacd"
+  }
+}
