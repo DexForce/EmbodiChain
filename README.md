@@ -31,6 +31,8 @@ The figure below illustrates the overall architecture of EmbodiChain:
   <img src="assets/imgs/frameworks.jpg" alt="architecture" width="90%"/>
 </p>
 
+Explore EmbodiChain's module relationships with the [interactive architecture visualization](https://dexforce.github.io/EmbodiChain/main/overview/architecture/index.html#).
+
 
 ## Getting Started
 
