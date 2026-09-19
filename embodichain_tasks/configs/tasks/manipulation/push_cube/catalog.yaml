@@ -1,0 +1,8 @@
+task_key: push_cube
+title: Push Cube
+summary: Push a cube toward its target with the bundled PPO or GRPO training configuration.
+tags: [pushing, reinforcement_learning]
+default_deployment: default
+deployments:
+  default:
+    config: env.json

@@ -10,7 +10,7 @@ Lightweight RL environments have a separate owner in
 | Request | Owning file / resolution path |
 |---|---|
 | Command dispatch | `embodichain/cli/main.py`; `embodichain/__main__.py` is the module entry wrapper |
-| Task discovery / `list-task` | `embodichain/cli/list_task.py` → package discovery and runnable config scan |
+| Task discovery / gallery / `show-task` | `embodichain/cli/_task_catalog.py` → shared logical-task/deployment records; `list_task.py` and `show_task.py` render them |
 | Launch / CLI overrides | `embodichain/lab/scripts/run_env.py` → `build_env_cfg_from_args()` → `config_to_cfg()` |
 | Generic component expansion | `embodichain/lab/gym/utils/_component_composition.py` |
 | Config decoding | `embodichain/lab/gym/utils/gym_utils.py` |
@@ -18,6 +18,7 @@ Lightweight RL environments have a separate owner in
 | Environment timing and loop | `embodichain/lab/gym/envs/base_env.py`: `EnvCfg`, `BaseEnv` |
 | Scene, manager and demonstration integration | `embodichain/lab/gym/envs/embodied_env.py` |
 | Expert trajectory control and stored-action schema | `embodichain/lab/gym/envs/expert_trajectory.py` |
+| Optional measured physical objectives | `embodichain/lab/gym/envs/objectives/`; Gym owns observation/reset hooks, independently of expert acceptance |
 | Controller-ready commands | `embodichain/lab/gym/envs/types.py`: `ControllerAction` |
 | Demo segment execution / outcomes | `embodichain/lab/gym/envs/demo.py` |
 | Configured Task Program registration | `embodichain/lab/gym/envs/task_program/registration.py` |
@@ -89,7 +90,7 @@ owned by [randomization](../randomization/randomization.md).
 The step order is:
 
 ```text
-preprocess → robot control → physics update → interval events
+preprocess → robot control → physics update → interval events → physical objective
 → observations → evaluation/info → rewards → postprocess
 → elapsed steps and termination → rollout hook → optional reset
 ```
@@ -104,6 +105,10 @@ post-policy and validator acceptance. Segment acceptance and append-only
 dataset persistence are separate contracts; see
 [Task Programs](../task-programs/task-programs.md) and
 [data pipeline](../data-pipeline/data-pipeline.md).
+
+Optional physical objectives publish separate measured results; they do not
+change termination, program acceptance or persistence. Read [execution](execution.md)
+for snapshot/reset ordering and expert-versus-replay qualification.
 
 ## Change sites and focused validation
 

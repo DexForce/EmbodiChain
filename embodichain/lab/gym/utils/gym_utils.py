@@ -513,6 +513,12 @@ def config_to_cfg(
     )
     component_resolution = _resolve_gym_components(config, base_dir=base_dir)
     config = component_resolution.config
+    if "objective" in config:
+        from embodichain.lab.gym.envs.objectives.config import load_objective_component
+
+        env_cfg.objective = load_objective_component(
+            config["objective"], base_dir=base_dir
+        )
 
     physics_backend = _declared_physics_backend(config)
     physics_config_value = config.get("physics_config", {})
