@@ -185,3 +185,11 @@ functors) or asset resolvers, register them from an `embodichain.init` hook
 (see `register_manager_modules()` in `embodichain.lab.gym.utils.gym_utils`).
 The template uses explicit package imports; `embodichain_tasks` uses the
 `import_packages()` helper for recursive import.
+
+## Using registered tasks with RLinf
+
+RLinf workers use the same installed task packages as the EmbodiChain CLI
+through the `embodichain.tasks` entry-point group. Install the package in the
+worker environment and point the adapter at a runnable Gym deployment. See the
+[RLinf integration guide](../docs/source/guides/rlinf.md) for the integration
+boundary and current compatibility notes.

@@ -85,6 +85,7 @@ See Also
 --------
 
 - :doc:`/tutorial/rl` — Step-by-step RL training tutorial
+- :doc:`/guides/rlinf` — Train EmbodiChain environments with the external RLinf backend
 - :doc:`/overview/gym/env` — EmbodiedEnv configuration and Action Manager
 - :doc:`/features/online_data` — Online data streaming pipeline
 - :doc:`/resources/task/index` — Available RL task environments
