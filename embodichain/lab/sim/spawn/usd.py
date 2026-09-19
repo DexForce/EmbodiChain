@@ -87,7 +87,7 @@ def _overlay_rigid_body_properties(
         source.density = configured.density
     if recompute_inertia:
         source.inertia = None
-    for name in ("inertia", "com_position", "com_quaternion"):
+    for name in ("inertia", "com_position"):
         value = getattr(configured, name)
         if value is not None:
             setattr(source, name, value)

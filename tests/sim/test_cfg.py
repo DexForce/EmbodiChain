@@ -338,9 +338,9 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         newton_fields == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields
     )
 
-    assert names(NewtonCollisionPipelineCfg) == names(
+    assert names(NewtonCollisionPipelineCfg) - {"soft_contact_margin"} == names(
         SpawnNewtonCollisionPipelineCfg
-    ) - {"requires_grad"}
+    ) - {"requires_grad", "soft_contact_gap", "soft_contact_margin"}
 
 
 def test_rigid_physics_from_dict_selects_backend_subclasses() -> None:
@@ -810,13 +810,17 @@ def test_robot_cfg_merge_preserves_grouped_overrides() -> None:
     assert merged.attrs.material_props.dynamic_friction == 0.8
 
 
-def test_newton_physics_inherits_common_gravity_and_collision_config() -> None:
+@pytest.mark.parametrize("contact_distance", [0.01, 0.037])
+def test_newton_physics_inherits_common_gravity_and_collision_config(
+    contact_distance: float,
+) -> None:
     cfg = NewtonPhysicsCfg(
         gravity=[0.0, 0.0, -1.5],
         collision_cfg=NewtonCollisionPipelineCfg(
             broad_phase="sap",
             rigid_contact_max=1234,
             update_interval=4,
+            soft_contact_margin=contact_distance,
         ),
     )
 
@@ -826,6 +830,14 @@ def test_newton_physics_inherits_common_gravity_and_collision_config() -> None:
     assert dexsim_cfg.collision_pipeline_cfg.broad_phase == "sap"
     assert dexsim_cfg.collision_pipeline_cfg.rigid_contact_max == 1234
     assert dexsim_cfg.collision_pipeline_cfg.update_interval == 4
+    contact_fields = {
+        item.name for item in fields(dexsim_cfg.collision_pipeline_cfg)
+    } & {"soft_contact_gap", "soft_contact_margin"}
+    assert len(contact_fields) == 1
+    assert (
+        getattr(dexsim_cfg.collision_pipeline_cfg, contact_fields.pop())
+        == contact_distance
+    )
 
 
 def test_newton_physics_normalizes_mapping_collision_config() -> None:

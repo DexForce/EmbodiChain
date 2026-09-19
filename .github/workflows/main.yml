@@ -431,6 +431,7 @@ jobs:
         working-directory: docs/architecture/web
         run: |
           npx playwright install --with-deps chromium
+          npm run data
           npm test
           npm run test:browser
           npm run test:docs

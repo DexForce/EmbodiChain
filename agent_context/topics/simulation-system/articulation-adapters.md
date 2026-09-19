@@ -54,6 +54,12 @@ FREE-joint state in both runtime buffers. Keep that compatibility access in
 revision. Remove the workaround only when the public Scene batch guarantees
 the same synchronization.
 
+Newton physical-property reads use the finalized Scene batch and reusable
+output tensors. Public inertia/COM remain principal moments plus `xyz + xyzw`;
+scalar descriptors expose body-frame mat33. Runtime writes compose the pair
+before DexSim, and reset restores the saved pair together to avoid reordering
+principal axes between two writes.
+
 ## Mimic coupling
 
 MuJoCo-Warp mimic joints retain native equality constraints and contact-force

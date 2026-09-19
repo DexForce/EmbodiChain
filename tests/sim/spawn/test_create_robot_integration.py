@@ -37,7 +37,8 @@ from scripts.tutorials.sim.create_robot import create_robot
 pytestmark = pytest.mark.requires_sim
 
 ARM_BASE_MASS = 3.167  # SR5 base_link inertial mass from the source URDF.
-ARM_BASE_INERTIA = (5.677594, 30.912516, 31.167990)
+# Principal moments of the source URDF tensor, independent of the body frame.
+ARM_BASE_PRINCIPAL_INERTIA = (5.677594, 30.912516, 31.167990)
 ARM_STIFFNESS = 1.0e4
 ARM_DAMPING = 1.5e3
 ARM_MAX_EFFORT = 1.0e4
@@ -146,8 +147,8 @@ def test_create_robot_preserves_source_inertia_and_arm_drive() -> None:
 
     assert mass == pytest.approx(ARM_BASE_MASS)
     np.testing.assert_allclose(
-        inertia,
-        ARM_BASE_INERTIA,
+        np.linalg.eigvalsh(inertia),
+        ARM_BASE_PRINCIPAL_INERTIA,
         rtol=1.0e-5,
     )
     assert stiffness == pytest.approx(ARM_STIFFNESS)
@@ -175,7 +176,9 @@ def test_create_robot_newton_preserves_source_inertia_and_arm_drive() -> None:
     ) = _resolve_tutorial_properties(_make_world(backend="newton"), cfg)
 
     assert mass == pytest.approx(ARM_BASE_MASS)
-    np.testing.assert_allclose(inertia, ARM_BASE_INERTIA, rtol=1.0e-5)
+    np.testing.assert_allclose(
+        np.linalg.eigvalsh(inertia), ARM_BASE_PRINCIPAL_INERTIA, rtol=1.0e-5
+    )
     assert (
         stiffness,
         damping,
