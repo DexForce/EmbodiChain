@@ -1010,6 +1010,35 @@ def test_dynamic_triangle_mesh_collision_is_rejected_before_spawn() -> None:
         rigid_desc_from_cfg(cfg)
 
 
+@pytest.mark.parametrize(
+    ("method", "expected"),
+    [(None, "visacd"), ("visacd", "visacd"), ("coacd", "coacd"), ("vhacd", "vhacd")],
+)
+def test_spawn_forwards_convex_decomposition_algorithm(
+    method: str | None, expected: str
+) -> None:
+    cfg = RigidObjectCfg.from_dict(
+        {
+            "uid": "mesh",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "mesh.glb",
+                "collision": {
+                    "approximation": "convex_decomposition",
+                    "max_hulls": 8,
+                    "acd_method": method,
+                },
+            },
+        }
+    )
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+
+    collision = descriptor.collisions[0]
+    assert collision.approximation == CollisionApproximation.CONVEX_DECOMPOSITION
+    assert collision.decomp_max_hulls == 8
+    assert collision.decomp_algorithm == expected
+
+
 def test_spawn_rejects_unsupported_convex_decomposition_method() -> None:
     cfg = RigidObjectCfg(
         uid="mesh",
@@ -1018,12 +1047,13 @@ def test_spawn_rejects_unsupported_convex_decomposition_method() -> None:
             collision=MeshCollisionCfg(
                 approximation="convex_decomposition",
                 max_hulls=4,
-                acd_method="vhacd",
+                acd_method="coacd",
             ),
         ),
     )
 
-    with pytest.raises(ValueError, match="acd_method='visacd' or 'coacd'"):
+    cfg.shape.collision.acd_method = "invalid"
+    with pytest.raises(ValueError, match="acd_method"):
         rigid_desc_from_cfg(cfg)
 
 
