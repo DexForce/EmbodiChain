@@ -29,6 +29,10 @@ from embodichain.utils import logger
 from embodichain.utils.math import get_relative_rotation, pose_inv
 
 from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
+from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+    AffordancePoseCandidates,
+    AffordanceSample,
+)
 from embodichain.lab.sim.atomic_actions.bindings import (
     EndpointBinding,
     JointPositionTarget,
@@ -53,6 +57,7 @@ from embodichain.lab.sim.atomic_actions.invocation import (
 )
 from embodichain.lab.sim.atomic_actions.plans import (
     ActionPlan,
+    PlannerDiagnostics,
     TimedTrajectory,
     normalize_success_mask,
 )
@@ -186,6 +191,7 @@ class _DirectionalPlan:
     handover_grasp_xpos: torch.Tensor
     receive_object_to_eef: torch.Tensor
     receive_grasp_xpos: torch.Tensor
+    affordance_samples: dict[str, dict[str, object]]
 
 
 class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
@@ -449,6 +455,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             first_grasp_xpos = selected.handover_grasp_xpos
             second_object_to_eef = selected.receive_object_to_eef
             second_grasp_xpos = selected.receive_grasp_xpos
+            affordance_samples = selected.affordance_samples
         elif (~first_is_handover).all():
             selected = self._plan_direction(
                 context,
@@ -470,6 +477,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             first_grasp_xpos = selected.receive_grasp_xpos
             second_object_to_eef = selected.handover_object_to_eef
             second_grasp_xpos = selected.handover_grasp_xpos
+            affordance_samples = selected.affordance_samples
         else:
             first_to_second = self._plan_direction(
                 context,
@@ -537,6 +545,18 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 first_to_second.receive_grasp_xpos,
                 second_to_first.handover_grasp_xpos,
             )
+            affordance_samples = {}
+            assignment = first_is_handover.cpu().tolist()
+            for name, first_metadata in first_to_second.affordance_samples.items():
+                second_metadata = second_to_first.affordance_samples[name]
+                metadata = dict(first_metadata)
+                for field, values in first_metadata.items():
+                    if isinstance(values, list):
+                        metadata[field] = [
+                            values[row] if use_first else second_metadata[field][row]
+                            for row, use_first in enumerate(assignment)
+                        ]
+                affordance_samples[name] = metadata
 
         first_candidate = HeldObjectState(
             semantics=goal.semantics,
@@ -595,6 +615,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                     resources.first.task_state_key: first_effect_candidate,
                     resources.second.task_state_key: second_effect_candidate,
                 },
+            ),
+            diagnostics=PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                metadata={"affordance_sample": affordance_samples},
             ),
             segment_lengths=segment_lengths,
             # The object may move from contact as soon as the pickup gripper
@@ -750,7 +774,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             receive_positive = torch.ones(
                 self.num_envs, dtype=torch.bool, device=self.device
             )
-        destination_grasp, grasp_success = self._resolve_grasp(
+        destination_sample = self._resolve_grasp(
             affordance,
             exchange_pose,
             approach_direction,
@@ -758,7 +782,11 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             obj_longest_axis=receive_axis,
             is_positive_part=receive_positive,
             center_axis=receive_center_axis,
+            context=context,
+            sample_key=(request.invocation_id or self.skill_id) + ":receive_grasp",
         )
+        destination_grasp = destination_sample.poses
+        grasp_success = destination_sample.success
         destination_pre_grasp = translate_pose_world(
             destination_grasp,
             -destination_grasp[:, :3, 2] * options.pre_grasp_distance,
@@ -971,6 +999,18 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                     resources.second.task_state_key: received,
                 }
             ),
+            diagnostics=PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                metadata={
+                    "affordance_sample": {
+                        "receive_grasp": {
+                            **destination_sample.metadata,
+                            "control_parts": [resources.second.arm.control_part]
+                            * self.num_envs,
+                        }
+                    }
+                },
+            ),
             segment_lengths={name: value.shape[1] for name, value in segment_values},
             scene_dependency_monitor_until={
                 entity_id: 0 for entity_id in self._scene_dependencies(request)
@@ -1172,14 +1212,18 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             )
             >= 0.0
         )
-        handover_grasp, handover_grasp_success = self._resolve_grasp(
+        handover_sample = self._resolve_grasp(
             affordance,
             object_pose,
             handover_direction,
             handover.hand.target_id,
             obj_longest_axis=obj_longest_axis,
             is_positive_part=handover_is_positive_part,
+            context=context,
+            sample_key=(request.invocation_id or self.skill_id) + ":pickup_grasp",
         )
+        handover_grasp_success = handover_sample.success
+        handover_grasp = handover_sample.poses
         handover_grasp = self._find_symmetric_nearest_xpos(
             handover_grasp, handover_start_eef
         )
@@ -1221,14 +1265,18 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             vertical_mode[:, None], receive_diagonal, vertical_down
         )
         receive_direction_valid = ~vertical_mode | receive_diagonal_valid
-        receive_grasp, receive_grasp_success = self._resolve_grasp(
+        receive_sample = self._resolve_grasp(
             affordance,
             middle_object_pose,
             receive_direction,
             receive.hand.target_id,
             obj_longest_axis=obj_longest_axis,
             is_positive_part=~handover_is_positive_part,
+            context=context,
+            sample_key=(request.invocation_id or self.skill_id) + ":receive_grasp",
         )
+        receive_grasp_success = receive_sample.success
+        receive_grasp = receive_sample.poses
         receive_grasp = self._find_symmetric_nearest_xpos(
             receive_grasp, receive_start_eef
         )
@@ -1569,6 +1617,16 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             handover_grasp_xpos=handover_grasp,
             receive_object_to_eef=receive_object_to_eef,
             receive_grasp_xpos=receive_grasp,
+            affordance_samples={
+                "pickup_grasp": {
+                    **handover_sample.metadata,
+                    "control_parts": [handover.arm.control_part] * self.num_envs,
+                },
+                "receive_grasp": {
+                    **receive_sample.metadata,
+                    "control_parts": [receive.arm.control_part] * self.num_envs,
+                },
+            },
         )
 
     @staticmethod
@@ -1699,8 +1757,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         obj_longest_axis: torch.Tensor | None,
         is_positive_part: torch.Tensor,
         center_axis: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Select the lowest-cost grasp in the requested projected region."""
+        context: PlanningContext,
+        sample_key: str,
+    ) -> AffordanceSample:
+        """Sample one grasp after applying the requested object-region filter."""
         if object_pose.shape != (self.num_envs, 4, 4):
             raise ValueError(
                 "HandOver grasp object_pose must have shape "
@@ -1731,77 +1791,66 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             )
 
         generator = self.planning_services.grasp_pose_generator(grasp_target_id)
-        sampled = generator.get_valid_grasp_poses(
-            mesh_vertices=affordance.mesh_vertices,
-            mesh_triangles=affordance.mesh_triangles,
-            obj_poses=object_pose,
-            approach_direction=approach_direction,
+        candidates = affordance.get_grasp_candidates(
+            generator,
+            object_pose,
+            approach_direction,
             obj_longest_axis=obj_longest_axis,
             is_positive_part=is_positive_part,
         )
-        if len(sampled) != self.num_envs:
-            raise ValueError(
-                "HandOver expected exactly one grasp-sampling result per environment."
+        if center_axis is not None:
+            candidates = self._center_grasp_candidates(
+                affordance,
+                object_pose,
+                center_axis,
+                candidates,
             )
-        poses = torch.eye(
-            4,
-            dtype=torch.float32,
-            device=self.device,
-        ).repeat(self.num_envs, 1, 1)
-        success = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        for env_index, (candidates, costs) in enumerate(sampled):
-            candidates = candidates.to(device=self.device, dtype=torch.float32)
-            costs = costs.to(device=self.device, dtype=torch.float32)
-            if center_axis is not None:
-                candidates, costs = self._center_grasp_candidates(
-                    affordance,
-                    object_pose[env_index],
-                    center_axis[env_index],
-                    candidates,
-                    costs,
-                )
-            if candidates.shape[0] == 0 or not torch.isfinite(costs).any():
-                continue
-            finite_costs = torch.where(
-                torch.isfinite(costs),
-                costs,
-                torch.full_like(costs, torch.inf),
-            )
-            poses[env_index] = candidates[torch.argmin(finite_costs)]
-            success[env_index] = True
-        return poses, success
+        return affordance.sample_candidates(
+            candidates,
+            sampling=context.affordance_sampling,
+            env_ids=context.env_ids,
+            key=sample_key,
+            reference_poses=object_pose,
+        )
 
     def _center_grasp_candidates(
         self,
         affordance: AntipodalAffordance,
         object_pose: torch.Tensor,
         center_axis: torch.Tensor,
-        candidates: torch.Tensor,
-        costs: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        candidates: AffordancePoseCandidates,
+    ) -> AffordancePoseCandidates:
         """Keep grasp centers in the middle third of the object's long axis."""
         vertices = affordance.mesh_vertices
         if vertices is None:
             raise ValueError("Center HandOver grasp selection requires mesh vertices.")
         axis = center_axis.to(device=self.device, dtype=torch.float32)
-        axis_norm = torch.linalg.vector_norm(axis)
-        if not torch.isfinite(axis).all() or axis_norm <= 1.0e-8:
+        axis_norm = torch.linalg.vector_norm(axis, dim=1, keepdim=True)
+        if not torch.isfinite(axis).all() or (axis_norm <= 1.0e-8).any():
             raise ValueError("HandOver center_axis must be finite and non-zero.")
         axis = axis / axis_norm
         vertices = vertices.to(device=self.device, dtype=torch.float32)
         world_vertices = (
-            torch.matmul(vertices, object_pose[:3, :3].transpose(0, 1))
-            + object_pose[:3, 3]
+            torch.matmul(vertices[None], object_pose[:, :3, :3].transpose(1, 2))
+            + object_pose[:, None, :3, 3]
         )
-        projections = torch.matmul(world_vertices, axis)
-        span = projections.max() - projections.min()
-        if not torch.isfinite(span) or span <= 1.0e-8:
+        projections = torch.sum(world_vertices * axis[:, None], dim=2)
+        span = projections.max(dim=1).values - projections.min(dim=1).values
+        if not torch.isfinite(span).all() or (span <= 1.0e-8).any():
             raise ValueError("Center HandOver grasp selection requires finite extent.")
-        lower = projections.min() + span / 3.0
-        upper = projections.max() - span / 3.0
-        candidate_projections = torch.matmul(candidates[:, :3, 3], axis)
-        middle = (candidate_projections >= lower) & (candidate_projections <= upper)
-        return candidates[middle], costs[middle]
+        lower = projections.min(dim=1).values + span / 3.0
+        upper = projections.max(dim=1).values - span / 3.0
+        candidate_projections = torch.sum(
+            candidates.poses[:, :, :3, 3] * axis[:, None], dim=2
+        )
+        middle = (candidate_projections >= lower[:, None]) & (
+            candidate_projections <= upper[:, None]
+        )
+        return AffordancePoseCandidates(
+            poses=candidates.poses,
+            costs=candidates.costs,
+            valid=candidates.valid & middle,
+        )
 
     @staticmethod
     def _downward_diagonal_approach_direction(

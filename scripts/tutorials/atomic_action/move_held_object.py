@@ -60,6 +60,11 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     replay_trajectory,
     run_tutorial,
 )
+from scripts.tutorials.atomic_action.tutorial_utils import (
+    compute_pick_close_end_step,
+    initialize_benchmark_simulation,
+    make_eef_pose_at,
+)
 
 OBJECT_MESH_PATH = "PaperCup/paper_cup.ply"
 OBJECT_XY = (-0.42, -0.08)
@@ -226,3 +231,21 @@ def main() -> None:
 
 if __name__ == "__main__":
     run_tutorial(main)
+
+
+def initialize_simulation(args) -> "SimulationManager":
+    """Create the tutorial simulation for interactive or benchmark runs."""
+    return initialize_benchmark_simulation(args)
+
+
+def create_robot(sim: "SimulationManager") -> "Robot":
+    """Add the default MoveHeldObject tutorial robot."""
+    robot = add_tutorial_robot(sim, "ur5")
+    # DexSim binds body_data (and therefore get_qpos) only after prepare().
+    sim.prepare()
+    return robot
+
+
+def make_pre_pick_eef_pose(robot: "Robot", position) -> "torch.Tensor":
+    """Build the canonical top-down EEF pose at ``position``."""
+    return make_eef_pose_at(robot, position)

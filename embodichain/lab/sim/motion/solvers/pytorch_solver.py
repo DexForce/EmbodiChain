@@ -24,6 +24,7 @@ from copy import deepcopy
 
 from embodichain.utils import configclass, logger
 from embodichain.lab.sim.motion.solvers import SolverCfg, BaseSolver
+from embodichain.compute.kinematics import yoshikawa_manipulability
 from embodichain.lab.sim.motion.solvers.qpos_seed_sampler import QposSeedSampler
 from embodichain.lab.sim.motion.solvers.qpos_seed_sel_sampler import (
     QposSeedSelSampler,
@@ -80,6 +81,16 @@ class PytorchSolverCfg(SolverCfg):
 
     The weights influence how the solver prioritizes closeness to the seed position
     when multiple solutions are available.
+    """
+
+    ik_solution_selection: str = "nearest"
+    """How to collapse multi-seed IK candidates into one solution.
+
+    ``"nearest"`` (default) keeps the successful candidate closest to the
+    caller seed under ``ik_nearest_weight``. ``"manipulability"`` re-ranks
+    the successful candidates by their Yoshikawa manipulability
+    (:func:`embodichain.compute.kinematics.yoshikawa_manipulability`) and
+    returns the best-conditioned posture instead of the first/nearest one.
     """
 
     enable_seed_selection: bool = False
@@ -178,6 +189,12 @@ class PytorchSolver(BaseSolver):
         self._damp = cfg.damp
         self._is_only_position_constraint = cfg.is_only_position_constraint
         self._num_samples = cfg.num_samples
+        if cfg.ik_solution_selection not in ("nearest", "manipulability"):
+            raise ValueError(
+                "ik_solution_selection must be 'nearest' or 'manipulability'; "
+                f"got {cfg.ik_solution_selection!r}."
+            )
+        self._solution_selection = cfg.ik_solution_selection
 
         # Get agent joint limits.
         self.lim = torch.tensor(
@@ -489,6 +506,18 @@ class PytorchSolver(BaseSolver):
 
         if return_all_solutions:
             return all_is_success.any(dim=1), all_results
+
+        if self._solution_selection == "manipulability":
+            # Re-rank successful candidates by Yoshikawa manipulability via
+            # the shared compute helper; the best-conditioned posture wins.
+            flat_results = all_results.reshape(-1, self.dof)
+            scores = yoshikawa_manipulability(self.get_jacobian(flat_results))
+            scores = scores.reshape(batch_size, self._num_samples)
+            scores[~all_is_success] = float("-inf")
+            best_indices = torch.argmax(scores, dim=1)
+            best_qpos = all_results[torch.arange(batch_size), best_indices]
+            return all_is_success.any(dim=1), best_qpos[:, None, :]
+
         qpos_seed_repeat = qpos_seed.unsqueeze(1).repeat(1, self._num_samples, 1)
         weighed_diff = self.ik_nearest_weight * (all_results - qpos_seed_repeat)
         qpos_seed_dis = torch.norm(weighed_diff, dim=2)

@@ -41,13 +41,15 @@ planners:
     enabled: false
     config:
       onnx_model_path: null
-      num_waypoints: 8
-      max_steps: 240
+      num_waypoints: 5
+      steps_per_waypoint: 30
+      max_steps: 150
       action_scale: 0.2
       use_relative_obs: true
       intermediate_orientation: true
       pos_eps: 0.01
       rot_eps: 0.1
+      joint_eps: 0.01
 
 protocol:
   warmup_trials: 3

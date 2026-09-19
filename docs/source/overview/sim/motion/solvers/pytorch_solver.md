@@ -1,16 +1,8 @@
 # PytorchSolver
 
-`PytorchSolver` is a high-performance inverse kinematics (IK) solver for robot manipulators, leveraging [pytorch_kinematics](https://github.com/UM-ARM-Lab/pytorch_kinematics) for efficient computation and seamless integration with PyTorch workflows. It supports both position and orientation constraints, joint limits, batch sampling, and GPU acceleration, making it suitable for real-time and large-scale applications.
-
-## Key Features
-
-* Full support for position-only or full pose (position + orientation) constraints
-* Configurable convergence tolerance, damping, and iteration limits
-* Enforces joint limits during optimization
-* Batch sampling for robust IK seed initialization and solution diversity
-* Efficient batched computation for multiple target poses
-* PyTorch integration for GPU acceleration and tensor-based workflows
-* Flexible configuration via `PytorchSolverCfg` class
+`PytorchSolver` solves batched numerical IK using
+[pytorch_kinematics](https://github.com/UM-ARM-Lab/pytorch_kinematics). It supports
+position-only or full-pose targets, multiple seeds, joint limits, and GPU computation.
 
 ## Configuration
 
@@ -24,7 +16,6 @@ import torch
 
 cfg = PytorchSolverCfg(
     urdf_path=get_data_path("UniversalRobots/UR5/UR5.urdf"),
-    joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
     end_link_name="ee_link",
     root_link_name="base_link",
     max_iterations=1000,
@@ -53,59 +44,16 @@ solver.set_iteration_params(
 )
 ```
 
-## Main Methods
+## Solver-specific behavior
 
-* `get_fk(self, qpos: torch.Tensor) -> torch.Tensor`  
-  Computes the end-effector pose (homogeneous transformation matrix) for the given joint positions.
+See {ref}`shared FK/IK conventions <motion-solver-conventions>` for the
+common call pattern and return order.
 
-  **Parameters:**
-  + `qpos` (`torch.Tensor` or `list[float]`): Joint positions, shape `(num_envs, num_joints)` or `(num_joints,)`.
-
-  **Returns:**
-  + `torch.Tensor`: End-effector pose(s), shape `(num_envs, 4, 4)`.
-
-  **Example:**
-
-```python
-  fk = solver.get_fk(qpos=[0.0, 0.0, 0.0, 1.5708, 0.0, 0.0])
-  print(fk)
-  # Output:
-  # tensor([[[ 0.0,     -1.0,      0.0,     -0.722600],
-  #          [ 0.0,      0.0,     -1.0,     -0.191450],
-  #          [ 1.0,      0.0,      0.0,      0.079159],
-  #          [ 0.0,      0.0,      0.0,      1.0     ]]])
-```
-
-* `get_ik(self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor = None, return_all_solutions: bool = False, jacobian: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]`  
-  Computes joint positions (inverse kinematics) for the given target end-effector pose.
-
-  **Parameters:**
-  + `target_xpos` (`torch.Tensor`): Target end-effector pose(s), shape `(num_envs, 4, 4)`.
-  + `qpos_seed` (`torch.Tensor`, optional): Initial guess for joint positions, shape `(num_envs, num_joints)`. If `None`, a default is used.
-  + `return_all_solutions` (`bool`, optional): If `True`, returns all possible solutions. Default is `False`.
-  + `jacobian` (`torch.Tensor`, optional): Custom Jacobian. Usually not required.
-
-  **Returns:**
-  + `Tuple[torch.Tensor, torch.Tensor]`:
-    - First element: Joint positions, shape `(num_envs, num_joints)`.
-    - Second element: Convergence info or error for each environment.
-
-  **Example:**
-
-```python
-  import torch
-  xpos = torch.tensor([[[ 0.0,     -1.0,      0.0,     -0.722600],
-                        [ 0.0,      0.0,     -1.0,     -0.191450],
-                        [ 1.0,      0.0,      0.0,      0.079159],
-                        [ 0.0,      0.0,      0.0,      1.0     ]]])
-  qpos_seed = torch.zeros((1, 6))
-  qpos_sol, info = solver.get_ik(target_xpos=xpos)
-  print("IK solution:", qpos_sol)
-  print("Convergence info:", info)
-  # IK solution: tensor([True], device='cuda:0')
-  # Convergence info: tensor([[0.0, -0.244575, 0.373442, 0.853886, 0.0, 0.588007]], device='cuda:0')
-
-```
+`get_ik()` returns success flags `(B,)` and, on success, the selected solution
+`(B, 1, DOF)`. An entirely failed batch returns joint values with shape
+`(B, DOF)`. With `return_all_solutions=True`, the second dimension contains
+the sampled solutions. Tune `num_samples` and convergence settings when the
+initial seed is insufficient.
 
 ## References
 

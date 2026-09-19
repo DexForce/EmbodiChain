@@ -1,243 +1,90 @@
 # Sensor System
 
-## Entry Points
+## Find the owner
 
-| What | Path |
+| Change or question | Start here |
 |---|---|
-| Sensor registry | `embodichain/lab/sim/sensors/__init__.py` |
-| Base sensor class & config | `embodichain/lab/sim/sensors/base_sensor.py` → `BaseSensor`, `SensorCfg` |
-| Camera | `embodichain/lab/sim/sensors/camera.py` → `Camera`, `CameraCfg` |
-| Stereo camera | `embodichain/lab/sim/sensors/stereo.py` → `StereoCamera`, `StereoCameraCfg` |
-| Contact sensor | `embodichain/lab/sim/sensors/contact_sensor.py` → `ContactSensor`, `ContactSensorCfg` |
-| Sensor creation and attachment coordination | `embodichain/lab/sim/sim_manager.py` → `SimulationManager.add_sensor()` |
-| Camera parent resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_nodes()` |
-| Native link render nodes | `embodichain/lab/sim/objects/articulation.py` → `Articulation.get_link_render_nodes()` |
+| Sensor config decoding and buffer interface | `embodichain/lab/sim/sensors/base_sensor.py` → `SensorCfg`, `BaseSensor` |
+| Exported sensor/config names | `embodichain/lab/sim/sensors/__init__.py` |
+| Image configuration, data flags, extrinsics | `embodichain/lab/sim/sensors/camera.py` → `CameraCfg`, `Camera` |
+| Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
+| Parent-name resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_nodes` |
+| Creation, preparation and attachment coordination | `embodichain/lab/sim/sim_manager.py` → `add_sensor`, `prepare` |
+| Contact query adaptation and actor metadata | `embodichain/lab/sim/sensors/contact_sensor.py` |
+| Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/_warp/contact.py` |
 
-## Overview
+Sensors inherit `BaseSensor`/`BatchEntity` and expose per-environment data through
+a TensorDict buffer. `SensorCfg.from_dict()` resolves `sensor_type + "Cfg"`
+from the sensor registry, so names are case-sensitive. Read concrete config
+classes for image dimensions, enabled outputs, intrinsics and filter defaults;
+these are source-owned values.
 
-All sensors inherit from `BaseSensor`, which extends `BatchEntity`. Each sensor:
-- Is configured via a `SensorCfg` subclass (uses `@configclass`).
-- Maintains a `TensorDict` data buffer (`_data_buffer`) sized `[num_envs]`.
-- Must implement `update()` and `get_data()`.
-- Supports dynamic instantiation via `SensorCfg.from_dict()`, which resolves the config class from `sensor_type` string.
+## Ownership and resolution
 
-## Sensor Hierarchy
+Create sensors through `SimulationManager.add_sensor()`. The explicit manager
+owns the World, ordered Arenas, preparation and semantic parent resolution;
+sensors must not rediscover a singleton manager. Cameras are render features
+on both physics backends. Contact availability is a backend capability checked
+before preparation and again after Newton AutoSolver selection.
 
-```
-ObjectBaseCfg
-  └─ SensorCfg            sensor_type, OffsetCfg, from_dict(), get_data_types()
-      ├─ CameraCfg         width, height, intrinsics, extrinsics, enable_* flags
-      │   └─ StereoCameraCfg   intrinsics_right, left_to_right_pos/rot, enable_disparity
-      └─ ContactSensorCfg  rigid_uid_list, articulation_cfg_list, max_contacts_per_env
+Componentized Gym deployments select the robot and its sensor suite together
+through an embodiment component. The component/inline exclusion rules and
+resolver belong to [environment configuration](../env-framework/configuration.md),
+not sensor classes. Use
+[add-embodiment-component](../../../.agents/skills/add-embodiment-component/SKILL.md)
+when changing a reusable mounted sensor suite.
 
-BatchEntity
-  └─ BaseSensor            _data_buffer (TensorDict), SUPPORTED_DATA_TYPES
-      ├─ Camera
-      │   └─ StereoCamera
-      └─ ContactSensor
-```
+Shared pose and backend contracts belong to
+[simulation](../simulation-system/simulation-system.md). Camera offsets are
+parent-relative; `parent=None` leaves manager-created views in arena space.
+The camera's extrinsics decoder owns look-at versus explicit-pose precedence.
 
-## Available Sensors
+## Camera attachment boundary
 
-| Sensor | Config | `sensor_type` string | Data Types | Notes |
-|---|---|---|---|---|
-| Camera | `CameraCfg` | `"Camera"` | color, depth, mask, normal, position | Single RGB-D camera; configurable intrinsics/extrinsics |
-| StereoCamera | `StereoCameraCfg` | `"StereoCamera"` | color/depth/mask/normal/position (left + right), disparity | Extends Camera; adds right camera with baseline transform |
-| ContactSensor | `ContactSensorCfg` | `"ContactSensor"` | contact data tensors | Backend-neutral rigid/link contacts on Default and Newton; uses DexSim `ContactQuery` plus a Warp scatter kernel |
+`resolve_parent_nodes()` parses a canonical link name or
+`<asset_uid>/<link_name>`, disambiguates registered assets, and checks instance
+counts. It queries public `Articulation.get_link_render_nodes()`; neither the
+resolver nor camera should inspect private entity lists, guess clone suffixes,
+or search global native nodes.
 
-### Backend support
+Cameras attach only to concrete per-environment render nodes and report success
+after applying parent-relative extrinsics. Stereo attachment covers both eyes.
+Direct camera construction requires explicit attachment. A manager topology
+rebuild must detach old views before native skeletons are removed, then resolve
+and attach the new nodes after binding. See
+[sensor lifecycle contracts](lifecycle.md#camera-rebuilds) when changing rebuild
+ordering or supporting another parent type.
 
-Camera and stereo-camera creation are backend-neutral render features and are
-supported with both Default and Newton physics. `ContactSensor` uses the shared
-DexSim Scene query on both backends. The manager checks
-`PhysicsBackend.supports_contact_sensor` before preparation and again after a
-Newton AutoSolver resolves. MuJoCo-Warp on CPU and DexUni are rejected because
-those runtime paths do not publish the required contact buffers/query; other
-Newton rigid solvers can expose geometry without impulse data.
+## Contact boundary
 
-## Sensor Configuration
+`ContactSensor` consumes one Spawn `ContactQuery` after manager preparation.
+It uses arena-frame positions, explicit environment IDs and a per-environment
+quota; native actor ordering does not determine environment assignment.
+`user_ids` are query actor identities, resolved through `get_actor_info()`;
+render user IDs are not interchangeable. Consumers must honor `is_valid` and
+per-environment counts because unused fixed-buffer values are unspecified.
 
-### SensorCfg.OffsetCfg
+Read [contact lifecycle and capabilities](lifecycle.md#contact-queries) before
+changing filtering, force assumptions, topology handling or actor metadata.
+Geometry-only contacts and multiple backend-emitted rows per actor pair are
+valid; sensor adaptation does not synthesize a common contact manifold.
 
-Defines the sensor pose relative to its parent frame:
+The contact scatter kernel remains sensor-owned because its columns, IDs and
+quota are integration contracts. Generic image tiling belongs to
+`embodichain/compute/image/_warp/tiling.py`; compatibility exports under
+`utils.warp.kernels` do not change those owners.
 
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `pos` | `Tuple[float, float, float]` | `(0, 0, 0)` | Position in parent frame |
-| `quat` | `Tuple[float, float, float, float]` | `(0, 0, 0, 1)` | Orientation as `(x, y, z, w)` quaternion |
-| `parent` | `str \| None` | `None` | Parent frame name (e.g. robot link); `None` = arena frame |
+## Focused validation
 
-The `transformation` property returns a `4×4 torch.Tensor` homogeneous matrix.
+| Changed boundary | Existing coverage |
+|---|---|
+| Parent parsing and instance validation | `tests/sim/sensors/test_attachment.py` |
+| Native render-node query | `tests/sim/objects/test_articulation.py` |
+| Camera/stereo attachment and buffers | `tests/sim/sensors/test_camera.py`, `test_stereo.py` in that directory |
+| Manager coordination and rebuilds | `tests/sim/test_sim_manager.py` |
+| Query IDs, frames, quota and scatter | `tests/sim/sensors/test_contact_query_sensor.py`, `test_contact_kernels.py` in that directory |
+| Backend contact behavior | `tests/sim/sensors/test_contact_default_e2e.py`, `test_contact_newton_e2e.py` in that directory |
 
-### Dynamic Sensor Creation
-
-`SensorCfg.from_dict(init_dict)` creates the correct config class by looking up `init_dict["sensor_type"] + "Cfg"` in the sensors module. Nested configclass fields are recursively initialized via their own `from_dict()`.
-
-### Embodiment ownership in Gym deployments
-
-For any componentized Gym environment, sensors are declared in
-`configs/components/embodiments/<embodiment>.yaml` beside the embodiment's
-`simulation` robot mapping. The deployment selects that file with
-`embodiment.component`; task-local `env.yaml` does not own a `sensor` field.
-`config_to_cfg()` resolves the embodiment and passes its `sensor` list through
-the same `SensorCfg.from_dict()` boundary used by ordinary environment configs.
-Changing embodiments therefore changes the robot and its mounted sensor suite
-as one unit. Handwritten and Task Program tasks use the same physical resolver;
-only Task Program deployments additionally require the component's semantic
-`skill_profile` metadata. Inline `robot` and `sensor` fields remain valid when
-`embodiment.component` is absent.
-
-## Camera System
-
-`Camera` and `StereoCamera` are created through
-`SimulationManager.add_sensor()`. The owning manager is passed explicitly so
-each camera resolves its World and ordered per-environment Arenas through that
-manager even when multiple simulation managers are active. The manager also
-owns semantic parent resolution and deferred attachment; cameras only attach
-to concrete per-environment render nodes and report attachment after that
-operation succeeds.
-
-Before committing a topology rebuild, `SimulationManager.prepare()` detaches
-parented camera views from their old render nodes. Cameras are owned outside
-Spawn, so Spawn's own camera retention cannot protect them when Newton removes
-and recreates robot skeletons. Stereo cameras detach both eyes. After binding
-the rebuilt scene, the manager resolves the new parents and reapplies camera
-extrinsics; preparation without a topology change leaves attachments intact.
-
-### CameraCfg
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `width` | `int` | `640` | Image width in pixels |
-| `height` | `int` | `480` | Image height in pixels |
-| `near` | `float` | `0.005` | Near clipping plane (meters) |
-| `far` | `float` | `100.0` | Far clipping plane (meters) |
-| `intrinsics` | `Tuple[float, float, float, float]` | `(600, 600, 320, 240)` | `(fx, fy, cx, cy)` |
-| `enable_color` | `bool` | `True` | Enable RGBA output |
-| `enable_depth` | `bool` | `False` | Enable depth output |
-| `enable_mask` | `bool` | `False` | Enable instance segmentation mask |
-| `enable_normal` | `bool` | `False` | Enable surface normal output |
-| `enable_position` | `bool` | `False` | Enable 3D position output |
-
-### CameraCfg.ExtrinsicsCfg
-
-Extends `SensorCfg.OffsetCfg` with look-at support:
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `eye` | `Tuple[float,float,float] \| None` | `None` | Camera position |
-| `target` | `Tuple[float,float,float] \| None` | `None` | Look-at target |
-| `up` | `Tuple[float,float,float] \| None` | `None` | Up vector; defaults to `(0, 0, 1)` if `eye` is set |
-
-When `eye` is provided, the transformation is computed via `look_at_to_pose()`. Otherwise falls back to `pos`/`quat`.
-
-### Camera attachment
-
-- `SimulationManager.add_sensor()` passes the registered Robots/Articulations and
-  expected environment count to `sensors.attachment.resolve_parent_nodes()` before
-  allocating camera views. The manager only coordinates creation and attachment.
-- The resolver owns `extrinsics.parent` parsing, link-name disambiguation, and
-  instance-count validation. It uses public asset queries, not a manager singleton
-  or native handles. A plain canonical link name remains valid; use
-  `"<asset_uid>/<link_name>"` to disambiguate shared names.
-- `Articulation.get_link_render_nodes()` encapsulates per-arena topology checks and
-  `get_render_body(link_name).render_node()`; Robot inherits this query. Do not
-  access `asset._entities` from the resolver, use global `Env.find_node()`, or
-  infer backend clone suffixes such as `.0` and `.1`.
-- `Camera.attach_to_parent_nodes()` attaches one resolved node per camera instance,
-  reapplies parent-relative extrinsics, and then sets `is_attached` to `True`.
-  Stereo cameras use the same method, forwarding attachment to both views.
-- Directly constructed cameras require an explicit `attach_to_parent_nodes()`
-  call. With `parent=None`, cameras added through the manager remain in arena space.
-- Focused validation: `tests/sim/sensors/test_attachment.py` for resolution,
-  `tests/sim/objects/test_articulation.py` for native queries,
-  `tests/sim/sensors/test_camera.py` for attachment, and
-  `tests/sim/test_sim_manager.py` for coordination. Pure logic tests do not
-  initialize a renderer.
-
-### StereoCameraCfg
-
-Extends `CameraCfg` with stereo-specific fields:
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `intrinsics_right` | `Tuple[float,float,float,float]` | `(600, 600, 320, 240)` | Right camera intrinsics |
-| `left_to_right_pos` | `Tuple[float,float,float]` | `(0.05, 0, 0)` | Baseline translation (5cm default) |
-| `left_to_right_rot` | `Tuple[float,float,float]` | `(0, 0, 0)` | Rotation in degrees |
-| `enable_disparity` | `bool` | `False` | Enable disparity map output |
-
-Properties `left_to_right` and `right_to_left` return `4×4` transform tensors. All enabled data types are duplicated for left and right (e.g. `color`, `color_right`).
-
-### ContactSensorCfg
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `rigid_uid_list` | `List[str]` | `[]` | UIDs of rigid bodies to monitor |
-| `articulation_cfg_list` | `List[ArticulationContactFilterCfg]` | `[]` | Articulation link filters |
-| `filter_need_both_actor` | `bool` | `True` | Require both actors in filter list |
-| `max_contacts_per_env` | `int` | `64` | Max contacts per environment |
-
-`ArticulationContactFilterCfg` specifies `articulation_uid` and `link_name_list` to filter which links report contacts.
-
-### Contact query lifecycle
-
-Create contact sensors through `SimulationManager.add_sensor()`. The manager
-crosses `prepare()` first and passes itself as the explicit owner. The sensor
-resolves every configured UID to per-Arena Spawn handles and creates one
-`spawn_result.create_contact_query(...)`:
-
-- `filter_need_both_actor=True` maps to `match="all"`; `False` maps to
-  `match="any"`.
-- `max_contacts_per_env` is passed as the query's per-Arena quota, while the
-  total query capacity remains `num_envs * max_contacts_per_env`. This keeps a
-  busy Arena from consuming every row before other Arenas are represented.
-- The query returns positions in each Arena frame and supplies an explicit
-  `env_ids` row for every contact. Environment assignment therefore works
-  when the selected actor is either actor 0 or actor 1 and when the other
-  actor is global.
-- Query targets and actor IDs survive Newton topology rebuilds by semantic
-  Spawn path/link identity.
-- `contact_capabilities` reports whether the backend supplies geometry,
-  normal impulse, and friction impulse. Newton MuJoCo-Warp provides all three;
-  other supported Newton rigid solvers may provide geometry only. DexUni does
-  not currently publish rigid contacts through `ContactQuery`.
-
-The existing TensorDict shape and field names remain stable. `user_ids` now
-contains backend-neutral contact actor IDs rather than PhysX render user IDs;
-resolve one with `ContactSensor.get_actor_info()`. `item_user_ids` contains the
-IDs selected by the sensor, and `filter_by_user_ids()` accepts those same IDs.
-Normals consistently point from `user_ids[..., 0]` toward
-`user_ids[..., 1]`. Force-capable backends preserve every backend-emitted row
-that passes the positive-impulse filter: Default CPU uses total impulse norm
-greater than `1e-7`, while Direct GPU and force-reporting Newton solvers use
-normal impulse greater than `1e-7`. Geometry-only Newton solvers retain all
-candidate rows with zero impulse. The sensor does not synthesize a common
-contact manifold; solver options such as MuJoCo-Warp's `enable_multiccd`
-control how many points the backend emits for a geometry pair. Several contact
-points and shape pairs may therefore map to the same actor pair. Only
-`is_valid` and the per-environment counts are reset on each update, so values
-in invalid fixed-buffer slots are unspecified.
-PhysX Direct GPU does not identify static counterparts in its raw contact
-buffer; those rows use actor ID `-1`. Monitor the dynamic/link side with
-`filter_need_both_actor=False` when contacts against arbitrary static geometry
-are required. Default CPU and Newton identify registered static shapes.
-
-## Common Failure Modes
-
-- **`sensor_type` string mismatch** — `SensorCfg.from_dict()` looks up `sensor_type + "Cfg"` in the sensors module. A typo (e.g. `"camera"` instead of `"Camera"`) causes `AttributeError`.
-- **Depth not enabled** — `enable_depth` defaults to `False`. Accessing depth data without enabling it returns empty tensors.
-- **Invalid camera parent** — `OffsetCfg.parent` must match a link in a Spawn-bound robot or articulation. Missing or ambiguous registered links raise `ValueError`; missing per-arena links or render nodes raise `RuntimeError` during attachment or `SimulationManager.prepare()`.
-- **Stereo baseline sign** — `left_to_right_pos` defines translation from left to right camera. Flipping the sign inverts the disparity.
-- **Contact sensor buffer overflow** — `max_contacts_per_env` caps the contact count. Exceeding it silently drops contacts; increase if the scene has dense collisions.
-- **Using native object user IDs with contact data** — `user_ids` is now a
-  query-local, backend-neutral actor identity. Use `get_actor_info()` or
-  `item_user_ids`, not `RigidObject.get_user_ids()`.
-- **View attribute flags** — `Camera.get_view_attrib()` computes `dr.ViewFlags` from enabled booleans. Adding a new data type requires both the `enable_*` flag and the corresponding `ViewFlags` bit.
-
-## Contact computation ownership
-
-`lab/sim/sensors/_warp/contact.py` owns `scatter_contact_data`, whose fixed
-contact columns, environment IDs, and per-environment capacity belong to
-the sensor integration. The generic tiled-image kernel lives separately in
-`compute/image/_warp/tiling.py`. The old `utils.warp.kernels` image export is
-an alias; its contact export resolves the sensor implementation on demand.
+For missing camera output, inspect enabled fields and `ViewFlags` together.
+For missing contacts, inspect backend capabilities, the query filter and quota
+before changing buffer allocation. Pure resolver tests do not require a renderer.

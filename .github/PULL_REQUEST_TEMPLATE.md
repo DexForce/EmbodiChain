@@ -42,7 +42,7 @@ To upload images to a PR -- simply drag and drop an image while in edit mode and
 ## Checklist
 
 - [ ] I have run the `black .` command to format the code base.
-- [ ] I have made corresponding changes to the documentation
+- [ ] I reviewed affected documentation and agent context, updated it where needed, or explained why no update was needed.
 - [ ] Public API changes are reflected in the API docs (`python docs/scripts/check_api_docs.py`), if applicable
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] Dependencies have been updated, if applicable.

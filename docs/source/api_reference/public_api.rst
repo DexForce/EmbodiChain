@@ -681,6 +681,9 @@ embodichain.lab.sim.atomic_actions
 
    ActionPlanningServices
    Affordance
+   AffordancePoseCandidates
+   AffordanceSample
+   AffordanceSamplingContext
    AntipodalAffordance
    AssembleAffordance
    BUILTIN_ACTION_TYPES
@@ -727,6 +730,21 @@ embodichain.lab.sim.atomic_actions.affordance
    AssembleAffordance
 
 .. automodule:: embodichain.lab.sim.atomic_actions.affordance
+   :members:
+   :no-index:
+
+embodichain.lab.sim.atomic_actions.affordance_sampling
+-------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.affordance_sampling
+
+.. autosummary::
+
+   AffordancePoseCandidates
+   AffordanceSample
+   AffordanceSamplingContext
+
+.. automodule:: embodichain.lab.sim.atomic_actions.affordance_sampling
    :members:
    :no-index:
 
