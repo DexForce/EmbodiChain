@@ -83,10 +83,7 @@ _RIGID_POLICY = {
     "min_position_iters": 32,
     "min_velocity_iters": 8,
     "max_convex_hull_num": 16,
-    # VHACD was accepted by the legacy importer but is not implemented by the
-    # current Spawn compiler.  CoACD preserves the requested decomposition
-    # semantics on both Default and Newton runtimes.
-    "acd_method": "coacd",
+    "acd_method": "visacd",
 }
 _BACKGROUND_ATTRS = {
     key: value

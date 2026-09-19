@@ -3058,6 +3058,13 @@ def test_slide_joint_target_uses_fresh_row_local_motion(
         atol=1e-6,
     )
     reached = ~active
+    assert plan.diagnostics.metadata["joint_target"] == {
+        "articulation_id": "drawer",
+        "joint_name": "drawer_joint",
+        "position": target_position,
+        "already_satisfied": reached.tolist(),
+    }
+    assert "grasp" in plan.diagnostics.metadata["affordance_sample"]
     assert torch.equal(
         plan.joint_trajectory.positions[reached],
         torch.zeros_like(plan.joint_trajectory.positions[reached]),
@@ -3075,6 +3082,11 @@ def test_slide_joint_target_uses_fresh_row_local_motion(
     held = _plan_action(action, invocation, _context(scene=advanced))
     assert held.plan_success.all()
     assert [s.name for s in held.segments] == ["already_satisfied"]
+    assert held.diagnostics.metadata["joint_target"]["already_satisfied"] == [
+        True,
+        True,
+    ]
+    assert "affordance_sample" not in held.diagnostics.metadata
 
 
 @pytest.mark.parametrize(
@@ -3134,12 +3146,8 @@ def test_slide_joint_target_preserves_reached_rows_when_other_rows_fail(
     )
     generator = _motion_generator()
     action = _bind_action(generator, Slide())
-    _GRASP_GENERATORS[id(action)].get_best_grasp_poses = Mock(
-        return_value=(
-            torch.zeros(NUM_ENVS, dtype=torch.bool),
-            torch.eye(4).repeat(NUM_ENVS, 1, 1),
-            torch.zeros(NUM_ENVS),
-        )
+    _GRASP_GENERATORS[id(action)].get_valid_grasp_poses = Mock(
+        return_value=[(torch.empty(0, 4, 4), torch.empty(0)) for _ in range(NUM_ENVS)]
     )
     scene = replace(
         SceneSnapshot.empty(),
@@ -3161,6 +3169,10 @@ def test_slide_joint_target_preserves_reached_rows_when_other_rows_fail(
     )
     plan = _plan_action(action, invocation, _context(scene=scene))
     assert plan.plan_success.tolist() == [True, False]
+    assert plan.diagnostics.metadata["joint_target"]["already_satisfied"] == [
+        True,
+        False,
+    ]
     assert torch.equal(
         plan.joint_trajectory.positions,
         torch.zeros_like(plan.joint_trajectory.positions),

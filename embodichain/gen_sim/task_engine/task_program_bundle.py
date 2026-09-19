@@ -1482,7 +1482,7 @@ def _scene_payload(scene: Any, *, program_id: str) -> dict[str, Any]:
     def runtime_rigid(config: Any) -> dict[str, Any]:
         result = deepcopy(config)
         max_hulls = int(result.pop("max_convex_hull_num", 1))
-        acd_method = str(result.pop("acd_method", "coacd"))
+        acd_method = str(result.pop("acd_method", "visacd"))
         shape = result.get("shape")
         if isinstance(shape, dict) and shape.get("shape_type") == "Mesh":
             shape.pop("max_convex_hull_num", None)
