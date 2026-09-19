@@ -14,6 +14,7 @@
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
 | Standalone physical playback | `embodichain/lab/sim/motion/execution.py` |
 | Candidate generation and coverage bookkeeping | `embodichain/lab/sim/motion/expansion/` |
+| Distinct trajectory variants for fixed waypoints | `embodichain/lab/sim/motion/expansion/variants.py` |
 
 ## Choose the layer
 
@@ -85,10 +86,25 @@ dataset: host integrations own restoration, rollout, validation and persistence.
 Keep algorithm modules free of direct Gym imports.
 
 Motion-limit checks are not collision/task-success certification.
-`rotate_grasp_about_object_axis` changes a reference TCP candidate around a
-fixed object's local axis; callers choose geometry-valid angles and replan.
-Grasp generation itself belongs to `embodichain.toolkits.graspkit`, composed
-by Atomic Skills/Task Program rather than embedded in `MotionGenerator`.
+`rotate_grasp_about_object_axis` and `perturb_approach_direction` change TCP
+candidates around a fixed object axis or approach cone; both emit Cartesian
+poses that callers must replan, and neither certifies the contact. Grasp
+generation itself belongs to `embodichain.toolkits.graspkit`, composed by
+Atomic Skills/Task Program rather than embedded in `MotionGenerator`.
+
+`variants.py` varies execution when waypoints are already fixed. Its qpos
+operators (`via_points`, `nullspace_residual`, `retime` profiles) vanish with
+zero derivative at every phase endpoint and never touch `contact`/`hold`
+phases, so annotated waypoints stay exact. `nullspace_residual` holds the
+caller's declared task rows to first order only; the caller owns the Jacobian
+frame and column order, and a fully constrained task raises. At most one
+joint-path operator runs per variant. `expand_trajectory_variants` deduplicates
+one fixed scene on measured geometry/timing; `expand_row_variants` assigns one
+variant per independent row, deduplicates nothing across rows, and falls back to a
+row's own reference. `StackBlocksTwo-v1` is the opt-in host integration: it
+reads phase boundaries from atomic-action `TrajectorySegment` ranges and
+retimes only at or after the lift, keeping the shared `clear_dynamics()` step
+index aligned.
 
 ## Focused validation
 
@@ -99,6 +115,7 @@ by Atomic Skills/Task Program rather than embedded in `MotionGenerator`.
 | Pure path/timing functions | `tests/compute/test_trajectory.py`, `test_trajectory_timing.py` in that directory |
 | Fixed-cadence playback | `tests/sim/motion/test_execution.py` |
 | Augmentation contracts, operators and session accounting | `tests/sim/motion/expansion/` |
+| Packaged trajectory-variant host integration | `tests/gym/envs/test_stack_blocks_two_trajectory_variants.py` |
 
 For stale obstacles, inspect collision capability/identity before planner tuning.
 For altered trajectory duration or acceleration, inspect normalization and the

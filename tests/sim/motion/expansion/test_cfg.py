@@ -115,7 +115,8 @@ def test_decoder_rejects_unknown_fields_types_and_invalid_budgets(
         {"persistence": {"async_write": True}},
         {"validation": {"require_path_collision": False}},
         {"validation": {"require_task_success": False}},
-        {"augmentation": {"factors": {"ik": {"enabled": True}}}},
+        {"augmentation": {"factors": {"contact": {"enabled": True}}}},
+        {"augmentation": {"factors": {"contact_timing": {"enabled": True}}}},
         {"augmentation": {"factors": {"recovery": {"enabled": True}}}},
     ],
 )
@@ -173,3 +174,101 @@ def test_semantic_revalidation_rejects_mutated_configuration() -> None:
         cfg.validate_semantics()
     with pytest.raises(ValueError, match="typed configuration"):
         TrajectoryAugmentationCfg(factors={})
+
+
+def test_variant_factors_decode_and_declare_their_operator_capabilities() -> None:
+    cfg = TrajectoryGenerationJobCfg.from_mapping(
+        {
+            "augmentation": {
+                "factors": {
+                    "spatial": {
+                        "enabled": True,
+                        "method": "via_points",
+                        "via_count": 3,
+                    },
+                    "ik": {"enabled": True, "task_rows": [0, 1, 2, 3, 4]},
+                    "approach": {
+                        "enabled": True,
+                        "cone_half_angle_rad": 0.3,
+                        "directions": 4,
+                    },
+                    "timing": {
+                        "enabled": True,
+                        "duration_scales": [0.8, 1.0],
+                        "profiles": ["uniform", "ease_in"],
+                    },
+                }
+            }
+        }
+    )
+    factors = cfg.augmentation.factors
+    assert factors.spatial.via_count == 3
+    assert factors.ik.task_rows == (0, 1, 2, 3, 4)
+    assert factors.approach.directions == 4
+    assert factors.timing.profiles == ("uniform", "ease_in")
+
+    registries = {
+        "source_ids": ("handwritten_qpos",),
+        "validator_ids": ("task_success",),
+        "profile_ids": (
+            "fixed_scene_initial_state",
+            "fixed_scene_tolerances",
+            "verified_motion",
+            "robot_execution_limits",
+        ),
+        "sink_ids": ("lerobot",),
+    }
+    cfg.validate_capabilities(
+        operators=(
+            "via_points",
+            "nullspace_residual",
+            "perturb_approach_direction",
+            "retime",
+        ),
+        **registries,
+    )
+    for missing in ("nullspace_residual", "perturb_approach_direction"):
+        available = tuple(
+            name
+            for name in (
+                "via_points",
+                "nullspace_residual",
+                "perturb_approach_direction",
+                "retime",
+            )
+            if name != missing
+        )
+        with pytest.raises(ValueError, match="capability unavailable"):
+            cfg.validate_capabilities(operators=available, **registries)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"augmentation": {"factors": {"spatial": {"via_count": 0}}}},
+        {"augmentation": {"factors": {"spatial": {"via_count": 9}}}},
+        {"augmentation": {"factors": {"ik": {"method": "damped_least_squares"}}}},
+        {"augmentation": {"factors": {"ik": {"task_rows": []}}}},
+        {"augmentation": {"factors": {"ik": {"task_rows": [0, 6]}}}},
+        {"augmentation": {"factors": {"ik": {"normalized_scale": 1.5}}}},
+        {"augmentation": {"factors": {"approach": {"enabled": True}}}},
+        {"augmentation": {"factors": {"approach": {"cone_half_angle_rad": 2.0}}}},
+        {"augmentation": {"factors": {"approach": {"directions": 0}}}},
+        {
+            "augmentation": {
+                "factors": {"timing": {"enabled": True, "profiles": ["bounce"]}}
+            }
+        },
+        {
+            "augmentation": {
+                "factors": {
+                    "timing": {"enabled": True, "profiles": ["uniform", "uniform"]}
+                }
+            }
+        },
+        {"augmentation": {"factors": {"timing": {"profiles": ["ease_in"]}}}},
+    ],
+)
+def test_variant_factor_settings_are_validated(payload: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        TrajectoryGenerationJobCfg.from_mapping(payload)
