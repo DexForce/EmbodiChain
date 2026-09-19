@@ -16,6 +16,11 @@ config device. Omission preserves the backend default. Environment tensors
 use `sim.device`; `gpu_id` selects the render GPU and fills an unindexed CUDA
 device, not a separate environment tensor device.
 
+`DefaultPhysicsCfg.cache_material` controls native material reuse.
+`SimulationManagerCfg.scene_node_capacity` sets World capacity before creation;
+`None` retains the native default. Gym accepts the former in `physics_config`
+and the latter at the top level through `config_to_cfg()`.
+
 Newton `solver_cfg=None` preserves DexSim's scene-aware `AutoSolverCfg`.
 The concrete solver is resolved from the complete Spawn scene, then exposed
 through `NewtonPhysicsBackend.solver_type`. Do not guess a solver-specific robot

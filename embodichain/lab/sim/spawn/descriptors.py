@@ -62,6 +62,7 @@ from dexsim.spawn import (
 from dexsim.spawn.descs import NEWTON_CONTACT_SOLVER_FIELDS
 from dexsim.types import ActorType, DriveType, LoadOption as DexsimLoadOption
 
+from embodichain.lab.sim._inertia import _principal_inertia_matrix
 from embodichain.lab.sim.cfg import (
     _normalize_joint_target_mode,
     ArticulationCfg,
@@ -79,7 +80,6 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg, SphereCfg
 from embodichain.utils import logger
-from embodichain.utils.math import quat_xyzw_to_wxyz
 from embodichain.utils.string import (
     resolve_matching_names,
     resolve_matching_names_values,
@@ -962,7 +962,6 @@ def _has_articulation_link_physics_overlay(
             "density",
             "inertia",
             "com_position",
-            "com_quaternion",
             "collision_filter_data",
             "dexsim",
         )
@@ -992,7 +991,6 @@ def _has_default_articulation_link_physics_overlay(
             "density",
             "inertia",
             "com_position",
-            "com_quaternion",
             "collision_filter_data",
             "dexsim",
         )
@@ -1386,8 +1384,6 @@ def _compile_rigid_physics(
         if quaternion_norm <= 1.0e-8:
             raise ValueError("Rigid-body com_quaternion cannot be zero.")
         com_quaternion = com_quaternion / quaternion_norm
-        # DexSim descriptors use wxyz; EmbodiChain configuration uses xyzw.
-        com_quaternion = quat_xyzw_to_wxyz(com_quaternion)
 
     if body_type != "static":
         mass = (
@@ -1409,6 +1405,29 @@ def _compile_rigid_physics(
         com_position = None
         com_quaternion = None
 
+    if inertia is not None:
+        if inertia.size == 3:
+            inertia = _principal_inertia_matrix(
+                inertia,
+                (
+                    com_quaternion
+                    if com_quaternion is not None
+                    else np.array([0, 0, 0, 1])
+                ),
+            )
+        else:
+            inertia = inertia.reshape(3, 3)
+            if com_quaternion is not None:
+                warnings.warn(
+                    "com_quaternion is ignored for a body-frame inertia matrix.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+    elif com_quaternion is not None:
+        raise ValueError(
+            "Rigid-body com_quaternion requires explicit principal inertia."
+        )
+
     if physics.default_rigid_props:
         default_values = {item.name: None for item in fields(DexsimPhysicsDesc)}
         default_values.update(physics.default_rigid_props)
@@ -1421,7 +1440,6 @@ def _compile_rigid_physics(
         density=density,
         inertia=inertia,
         com_position=com_position,
-        com_quaternion=com_quaternion,
         dexsim=default_desc,
         newton=None,
     )
