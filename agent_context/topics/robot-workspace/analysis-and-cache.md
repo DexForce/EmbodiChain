@@ -109,6 +109,20 @@
 - `scripts/tutorials/sim/workspace_manipulability_visualization.py` runs the
   whole path headlessly on a solver-backed robot adapter and writes the
   `docs/source/_static/tutorials/workspace_manipulability_*.png` figures.
+- `scripts/tutorials/sim/visualize_robot_workspace.py` creates a real UR5 with
+  `sim.add_robot()` and calls `sim.prepare()` before analysis. Its default
+  `--backend dexsim` draws the robot and colored workspace together; `--backend
+  viser` publishes the same cloud with the simulated robot in the browser.
+  `--headless` saves one native offscreen image. `--mode cartesian_space` adds
+  rejected IK samples; the default joint-space mode uses FK samples.
+- This scene example uses fresh arena-frame Robot FK/IK results, which already
+  contain the chain-root pose, and adds only `sim.arena_offsets[0]` for the
+  world-frame point-cloud APIs. It does not transform points by the robot base
+  a second time. The cloud is static; moving the robot base requires reanalysis.
+  Native point size is in screen pixels, while Viser uses scene units. These
+  backends receive RGB only; per-point alpha/marker size, the color bar and
+  velocity-ellipsoid detail plots remain Matplotlib features. The native/Viser
+  example reports the raw/clipped color ranges in the console.
 
 ### Seed selection for Cartesian/plane IK
 
