@@ -298,8 +298,8 @@ def test_prepare_scene_normalizes_prompt2scene_export(gym_export: Path) -> None:
     assert scene.z_rotation_degrees == -90.0
     assert scene.rigid_objects[0]["init_pos"] == [2.0, -1.0, 0.7]
     assert scene.rigid_objects[0]["max_convex_hull_num"] == 16
-    assert scene.rigid_objects[0]["acd_method"] == "coacd"
-    assert scene.rigid_objects[0]["shape"]["acd_method"] == "coacd"
+    assert scene.rigid_objects[0]["acd_method"] == "visacd"
+    assert scene.rigid_objects[0]["shape"]["acd_method"] == "visacd"
     assert scene.rigid_objects[0]["shape"]["max_convex_hull_num"] == 16
     assert Path(scene.rigid_objects[0]["shape"]["fpath"]).is_file()
     assert scene.planner_objects[1]["source_uid"] == "interact_can_0"

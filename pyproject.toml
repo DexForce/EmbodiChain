@@ -25,7 +25,7 @@ dynamic = ["version"]
 
 # Core install dependencies (kept from requirements.txt).
 dependencies = [
-  "dexsim_engine==0.4.3",
+  "dexsim_engine==0.5.0",
   "setuptools>=78.1.1",
   "gymnasium>=0.29.1",
   "langchain",

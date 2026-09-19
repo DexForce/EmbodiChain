@@ -234,13 +234,13 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             context.batch_size, dtype=torch.bool, device=self.device
         )
         reached = torch.zeros_like(joint_valid)
-        diagnostics = {}
+        diagnostics: PlannerDiagnostics | None = None
         if target.joint_target is not None:
             displacement, joint_valid, reached = self._joint_displacement(
                 target.joint_target, affordance, context
             )
             active = joint_valid & ~reached
-            diagnostics["diagnostics"] = PlannerDiagnostics(
+            diagnostics = PlannerDiagnostics(
                 backend=self.planning_services.planner_name,
                 metadata={
                     "joint_target": {
@@ -262,7 +262,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
                         step_dt=interpolation_dt,
                     ),
                     segment_lengths={"already_satisfied": 1},
-                    **diagnostics,
+                    diagnostics=diagnostics,
                 )
             positive = displacement[active] > 0
             if positive.any() and not positive.all():
@@ -338,7 +338,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
                         step_dt=interpolation_dt,
                     ),
                     segment_lengths={"already_satisfied": 1},
-                    **diagnostics,
+                    diagnostics=diagnostics,
                 )
             return self.failed_plan(
                 request,
@@ -545,7 +545,10 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             expected_effects=StateDelta(),
             diagnostics=PlannerDiagnostics(
                 backend=self.planning_services.planner_name,
-                metadata={"affordance_sample": {"grasp": grasp_sample.metadata}},
+                metadata={
+                    **(diagnostics.metadata if diagnostics is not None else {}),
+                    "affordance_sample": {"grasp": grasp_sample.metadata},
+                },
             ),
             segment_lengths=segment_lengths,
             # Once reach completes, contact or the commanded slide may move the
@@ -553,7 +556,6 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             scene_dependency_end_segment=(
                 "reach" if self._scene_dependencies(request) else None
             ),
-            **diagnostics,
         )
 
     @staticmethod

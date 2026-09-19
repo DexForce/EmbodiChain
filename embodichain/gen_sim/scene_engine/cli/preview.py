@@ -223,7 +223,7 @@ def _add_objects(
             mesh_collision = MeshCollisionCfg(
                 approximation="convex_decomposition",
                 max_hulls=max_convex_hull_num,
-                acd_method="coacd",
+                acd_method="visacd",
             )
 
         sim.add_rigid_object(

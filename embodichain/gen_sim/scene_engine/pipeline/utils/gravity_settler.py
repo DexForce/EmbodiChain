@@ -307,7 +307,7 @@ class GravitySettler:
         return MeshCollisionCfg(
             approximation="convex_decomposition",
             max_hulls=physics.max_convex_hull_num,
-            acd_method="coacd",
+            acd_method="visacd",
         )
 
     @staticmethod
