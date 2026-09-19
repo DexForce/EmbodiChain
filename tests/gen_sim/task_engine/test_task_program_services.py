@@ -186,6 +186,51 @@ def test_motion_wrapper_masks_unsafe_rows_without_clipping_commands(
     torch.testing.assert_close(result.positions, positions)
 
 
+def test_single_pose_transport_samples_cartesian_path(monkeypatch) -> None:
+    from embodichain.gen_sim.task_engine._task_program import motion
+
+    start = torch.eye(4).unsqueeze(0)
+    start[:, 2, 3] = 1.1
+    target = start.clone()
+    target[:, :3, 3] = torch.tensor([0.2, 0.1, 1.3])
+    target[:, :3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    generator = object.__new__(motion.ApproachMotionGenerator)
+    generator.robot = SimpleNamespace(compute_fk=lambda **kw: start.clone())
+    monkeypatch.setattr(motion, "_joint_velocity_limits", lambda *a: torch.ones(1, 1))
+    result = motion.PlanResult(
+        success=torch.tensor([True]),
+        positions=torch.zeros(1, 5, 1),
+        dt=torch.full((1, 5), 0.04),
+    )
+    backend = Mock(return_value=result)
+    monkeypatch.setattr(motion.MotionGenerator, "generate", backend)
+    options = motion.MotionGenOptions(
+        strategy="ik_interp",
+        control_part="arm",
+        start_qpos=torch.zeros(1, 1),
+        sample_count=5,
+    )
+
+    generator.generate(
+        [motion.PlanState(move_type=motion.MoveType.EEF_MOVE, xpos=target)], options
+    )
+
+    samples = backend.call_args.args[0]
+    forwarded = backend.call_args.kwargs["options"]
+    assert len(samples) == 4
+    assert forwarded.preserve_cartesian_samples is True
+    assert forwarded.is_linear is True
+    assert forwarded.sample_count == 5
+    for index, sample in enumerate(samples, start=1):
+        expected = start[:, :3, 3].lerp(target[:, :3, 3], index / 4)
+        torch.testing.assert_close(sample.xpos[:, :3, 3], expected)
+        assert float(sample.xpos[0, 2, 3]) >= 1.1
+    torch.testing.assert_close(samples[-1].xpos, target)
+    assert options.preserve_cartesian_samples is False
+
+
 def test_stack_place_allows_equivalent_tcp_roll_without_moving_release(
     monkeypatch,
 ) -> None:
@@ -466,6 +511,69 @@ def test_current_pose_upright_binding_preserves_each_environments_position() -> 
     )
     torch.testing.assert_close(poses, before)
     assert robot.mock_calls == []
+
+
+def test_upright_alignment_lifts_before_rotating() -> None:
+    pose = torch.eye(4).unsqueeze(0)
+    pose[:, :3, :3] = torch.tensor([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]])
+    pose[:, :3, 3] = torch.tensor([0.1, 0.2, 1.0])
+    original = pose.clone()
+    robot = SimpleNamespace(
+        cfg=SimpleNamespace(solver_cfg={"arm": SimpleNamespace(root_link_name="base")}),
+        get_link_pose=lambda **kw: torch.eye(4).unsqueeze(0),
+    )
+    lowerer = _AlignHeldLowerer(
+        (("can", "staging", False, (0.0, 0.0, 1.0), (0.1, 0.2, 1.3)),), robot
+    )
+    held = SimpleNamespace(
+        semantics=SimpleNamespace(entity_id="can"),
+        object_to_eef=torch.eye(4).unsqueeze(0),
+    )
+    context = SimpleNamespace(
+        batch_size=1,
+        env_ids=torch.tensor([0]),
+        task=SimpleNamespace(get_held_object=lambda key: held),
+        scene=SimpleNamespace(
+            entities={"can": SimpleNamespace(pose=pose, confidence=1.0)}
+        ),
+    )
+    bound = SimpleNamespace(
+        binding=SimpleNamespace(
+            resources={
+                "primary": SimpleNamespace(
+                    endpoints={
+                        "motion": SimpleNamespace(
+                            task_state_key="arm",
+                            runtime_target=SimpleNamespace(control_part="arm"),
+                        )
+                    }
+                )
+            }
+        )
+    )
+    result = lowerer.lower(
+        RegisteredSemanticCall(
+            call_id="gen_sim.align_held",
+            arguments={
+                "object": "can",
+                "target": "staging",
+                "preserve_yaw": False,
+            },
+        ),
+        context=context,
+        bound=bound,
+        option_template=MoveHeldObjectOptions(),
+    )
+    waypoints = result.goal.object_target_pose
+    assert waypoints.shape == (1, 2, 4, 4)
+    torch.testing.assert_close(waypoints[:, 0, :3, :3], original[:, :3, :3])
+    torch.testing.assert_close(
+        waypoints[:, :, :3, 3], torch.tensor([[[0.1, 0.2, 1.3]]]).expand(-1, 2, -1)
+    )
+    torch.testing.assert_close(
+        waypoints[:, 1, :3, 2], torch.tensor([[0.0, 0.0, 1.0]]), atol=1e-6, rtol=0
+    )
+    torch.testing.assert_close(pose, original)
 
 
 def test_coordinated_hold_lowerer_retains_both_verified_attachments() -> None:

@@ -62,6 +62,21 @@ environment files.
 
 ## Task Engine semantics and execution scope
 
+Prepared scenes use intrinsic `XYZ` degree rotations. Bundle scene payloads
+serialize explicit `init_local_pose` matrices so generic configuration decoders
+cannot reinterpret those angles as extrinsic `xyz`; keep this boundary distinct
+from the Task Program's `quaternion_xyzw` serialization.
+Task motion policy samples even single-EEF-target transports in Cartesian space;
+joint targets retain their joint-space behavior. E2 alignment preserves the
+acquired orientation during the staging lift, then turns the object aloft.
+Only yaw-free alignment calls enable alternative final headings; exact-pose
+transport retains its orientation contract. All candidates use the same motion
+and velocity checks.
+Opt-in grasp fitting reserves the declared/default robot and object contact
+envelopes before selecting a uniform scale. The adaptation report records the
+effective per-jaw clearance; the 0.25 minimum scale and source-preservation
+boundary remain unchanged.
+
 `task_engine/ontology.py` owns scene-independent task meaning and capability
 requirements; `task_engine/interpretation.py` owns strict intent validation and
 model guidance. E6 is a prismatic part opened or closed (`target_state=open` or

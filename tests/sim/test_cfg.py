@@ -79,6 +79,26 @@ def test_articulation_cfg_defaults_to_preserving_asset_physics() -> None:
     assert articulation_cfg.resolve_asset_physics_mode() == "preserve"
 
 
+@pytest.mark.parametrize("as_list", [False, True])
+def test_articulation_cfg_decodes_serialized_local_pose(as_list: bool) -> None:
+    import numpy as np
+    from scipy.spatial.transform import Rotation
+
+    pose = np.eye(4)
+    pose[:3, :3] = Rotation.from_euler("XYZ", [20, 30, 40], degrees=True).as_matrix()
+    pose[:3, 3] = [0.1, -0.2, 0.3]
+    cfg = ArticulationCfg.from_dict(
+        {"init_local_pose": pose.tolist() if as_list else pose}
+    )
+
+    assert np.allclose(cfg.init_local_pose, pose)
+    assert cfg.init_pos == pytest.approx(pose[:3, 3])
+    assert np.allclose(
+        Rotation.from_euler("xyz", cfg.init_rot, degrees=True).as_matrix(),
+        pose[:3, :3],
+    )
+
+
 def test_articulation_cfg_uses_grouped_physics_fields_only() -> None:
     field_names = {item.name for item in fields(ArticulationCfg)}
     root_props = ArticulationCfg().root_props
