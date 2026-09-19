@@ -333,6 +333,12 @@ class PhysicsBackendCfg:
 class DefaultPhysicsCfg(PhysicsBackendCfg):
     """Configuration selector for the Default physics backend."""
 
+    cache_material: bool = False
+    """Reuse identical physics materials across objects and environment clones.
+
+    Enable this for large batches to avoid exhausting the native material table.
+    """
+
     bounce_threshold: float = 2.0
     """Relative normal-speed threshold below which contacts do not bounce [m/s]."""
 
@@ -374,6 +380,7 @@ class DefaultPhysicsCfg(PhysicsBackendCfg):
         :class:`DefaultPhysicsCfg` retain their established defaults here.
         """
         args = {
+            "cache_material": self.cache_material,
             "gravity": _gravity_vector(self.gravity),
             "bounce_threshold": self.bounce_threshold,
             "enable_ccd": self.enable_ccd,
@@ -428,7 +435,7 @@ class NewtonCollisionPipelineCfg:
     """
 
     soft_contact_margin: float = 0.01
-    """Distance margin used to generate particle/soft contacts [m]."""
+    """Particle/soft contact detection distance [m]."""
 
     broad_phase: Literal["nxn", "sap", "explicit"] | Any | None = None
     """Built-in broad-phase mode or a prebuilt Newton broad-phase object.
@@ -612,6 +619,14 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
                 for item in fields(self.collision_cfg)
             }
             collision_values["requires_grad"] = self.requires_grad
+            # Newton 1.6 renamed this field; published DexSim builds also use
+            # Newton 1.4, whose descriptor retains soft_contact_margin.
+            if "soft_contact_gap" in {
+                item.name for item in fields(DexsimNewtonCollisionPipelineCfg)
+            }:
+                collision_values["soft_contact_gap"] = collision_values.pop(
+                    "soft_contact_margin"
+                )
             collision_pipeline_cfg = DexsimNewtonCollisionPipelineCfg(
                 **collision_values
             )

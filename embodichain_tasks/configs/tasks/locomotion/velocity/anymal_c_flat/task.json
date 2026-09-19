@@ -1,0 +1,126 @@
+{
+  "schema": "isaaclab-anymal-c-velocity-flat-direct",
+  "official_task": "Isaac-Velocity-Flat-Anymal-C-Direct-v0",
+  "physics": {
+    "physics_dt": 0.005,
+    "control_dt": 0.02,
+    "decimation": 4,
+    "episode_length_s": 20.0,
+    "default_backend_mapping": {
+      "solver_position_iterations": 4,
+      "solver_velocity_iterations": 0
+    }
+  },
+  "robot": {
+    "root_body": "base",
+    "root_height": 0.6,
+    "joint_names": [
+      "LF_HAA",
+      "LF_HFE",
+      "LF_KFE",
+      "LH_HAA",
+      "LH_HFE",
+      "LH_KFE",
+      "RF_HAA",
+      "RF_HFE",
+      "RF_KFE",
+      "RH_HAA",
+      "RH_HFE",
+      "RH_KFE"
+    ],
+    "default_joint_position": [
+      0.0,
+      0.4,
+      -0.8,
+      0.0,
+      -0.4,
+      0.8,
+      0.0,
+      0.4,
+      -0.8,
+      0.0,
+      -0.4,
+      0.8
+    ],
+    "action_scale": 0.5,
+    "stiffness": 40.0,
+    "damping": 5.0,
+    "effort_limit": 80.0,
+    "velocity_limit": 7.5,
+    "actuator_model": "ANYDRIVE_3_SIMPLE_ACTUATOR_CFG"
+  },
+  "contact": {
+    "foot_body_names": ["LF_FOOT", "LH_FOOT", "RF_FOOT", "RH_FOOT"],
+    "base_body_name": "base",
+    "thigh_body_names": ["LF_THIGH", "LH_THIGH", "RF_THIGH", "RH_THIGH"],
+    "force_threshold": 1.0,
+    "history_substeps": 4
+  },
+  "observations": {
+    "actor_dimension": 48,
+    "critic_dimension": 48,
+    "order": [
+      "base_lin_vel",
+      "base_ang_vel",
+      "projected_gravity",
+      "velocity_commands",
+      "joint_pos_rel",
+      "joint_vel",
+      "actions"
+    ]
+  },
+  "actions": {
+    "joint_pos": {
+      "use_default_offset": true
+    }
+  },
+  "commands": {
+    "twist": {
+      "resampling_time_range": [20.0, 20.0],
+      "rel_standing_envs": 0.0,
+      "rel_heading_envs": 0.0,
+      "heading_command": false,
+      "heading_control_stiffness": 0.0,
+      "ranges": {
+        "lin_vel_x": [-1.0, 1.0],
+        "lin_vel_y": [-1.0, 1.0],
+        "ang_vel_z": [-1.0, 1.0]
+      }
+    }
+  },
+  "events": {
+    "reset_base": {
+      "params": {
+        "pose_range": {
+          "x": [0.0, 0.0],
+          "y": [0.0, 0.0],
+          "z": [0.0, 0.0],
+          "yaw": [0.0, 0.0]
+        }
+      }
+    },
+    "reset_robot_joints": {
+      "params": {
+        "position_range": [1.0, 1.0],
+        "velocity_range": [0.0, 0.0],
+        "operation": "scale"
+      }
+    }
+  },
+  "rewards": {
+    "track_lin_vel_xy_exp": {"weight": 1.0, "std_squared": 0.25},
+    "track_ang_vel_z_exp": {"weight": 0.5, "std_squared": 0.25},
+    "lin_vel_z_l2": {"weight": -2.0},
+    "ang_vel_xy_l2": {"weight": -0.05},
+    "dof_torques_l2": {"weight": -0.000025},
+    "dof_acc_l2": {"weight": -0.00000025},
+    "action_rate_l2": {"weight": -0.01},
+    "feet_air_time": {"weight": 0.5, "threshold": 0.5},
+    "undesired_contacts": {"weight": -1.0, "threshold": 1.0},
+    "flat_orientation_l2": {"weight": -5.0}
+  },
+  "terminations": {
+    "base_contact": {"threshold": 1.0},
+    "time_out": {"time_out": true}
+  }
+}

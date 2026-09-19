@@ -19,8 +19,18 @@
 Private Warp kernels implement OPW, SRS, UR, and trapezoidal/Double-S profiles.
 Stateful solver interfaces and robot configuration remain in
 ``embodichain.lab.sim.motion.solvers``.
-"""
+Pure batched manipulability helpers live in :mod:`.manipulability`."""
 
 from __future__ import annotations
 
-__all__ = []
+from embodichain.compute.kinematics.manipulability import (
+    condition_number,
+    select_jacobian_rows,
+    yoshikawa_manipulability,
+)
+
+__all__ = [
+    "condition_number",
+    "select_jacobian_rows",
+    "yoshikawa_manipulability",
+]

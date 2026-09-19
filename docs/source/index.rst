@@ -34,6 +34,7 @@ Table of Contents
    :caption: Overview
    :glob:
 
+   overview/architecture/index
    overview/sim/index
    overview/task_program/index
    overview/gym/index

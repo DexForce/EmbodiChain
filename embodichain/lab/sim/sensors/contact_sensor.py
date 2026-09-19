@@ -26,11 +26,17 @@ import warp as wp
 from tensordict import TensorDict
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
-from embodichain.lab.sim.sensors._warp.contact import scatter_contact_data
+from embodichain.lab.sim.sensors._warp.contact import scatter_contact_rows
+from embodichain.lab.sim.sensors.contact_history import ContactHistory
 from embodichain.utils import configclass, logger
 
 if TYPE_CHECKING:
-    from dexsim.scene import ContactActorInfo, ContactQuery, ContactQueryCapabilities
+    from dexsim.scene import (
+        ContactActorInfo,
+        ContactBuffer,
+        ContactQuery,
+        ContactQueryCapabilities,
+    )
 
     from embodichain.lab.sim.sim_manager import SimulationManager
 
@@ -144,7 +150,17 @@ class ContactSensor(BaseSensor):
         self.device = device
         self.cfg = config
         self._query: ContactQuery | None = None
+        self._metadata_actor_table: tuple[ContactActorInfo, ...] | None = None
+        self._metadata_selected_ids: tuple[int, ...] | None = None
 
+        self._query_dropped_count = torch.zeros(1, dtype=torch.int32, device=device)
+        self._scatter_dropped_count = torch.zeros(
+            owner.num_envs, dtype=torch.int32, device=device
+        )
+        self._sample_scatter_dropped_count = torch.zeros_like(
+            self._scatter_dropped_count
+        )
+        self._histories: dict[str, ContactHistory] = {}
         self._num_contacts_per_env: torch.Tensor | None = None
         """Number of contacts per environment."""
 
@@ -273,7 +289,15 @@ class ContactSensor(BaseSensor):
 
     def _sync_filter_actor_metadata(self) -> None:
         assert self._query is not None
+        # ContactQuery replaces these immutable tables when topology refreshes.
+        # Avoid visiting every actor and copying metadata on every physics step.
+        actors = self._query.actors
         actor_ids = self._query.selected_actor_ids
+        if (
+            actors is self._metadata_actor_table
+            and actor_ids is self._metadata_selected_ids
+        ):
+            return
         self.item_user_ids = torch.as_tensor(
             actor_ids, dtype=torch.int32, device=self.device
         )
@@ -292,6 +316,8 @@ class ContactSensor(BaseSensor):
             self.item_user_env_ids_map[self.item_user_ids.to(torch.long)] = (
                 self.item_env_ids
             )
+        self._metadata_actor_table = actors
+        self._metadata_selected_ids = actor_ids
 
     def update(self, **kwargs) -> None:
         """Update the sensor state based on the current simulation state.
@@ -302,42 +328,65 @@ class ContactSensor(BaseSensor):
             **kwargs: Additional keyword arguments for sensor update.
         """
 
+        buffer = self._fetch_contacts()
+        if not self._histories:
+            self._query_dropped_count.copy_(buffer.dropped_count_device)
+            self._scatter_dropped_count.copy_(self._sample_scatter_dropped_count)
+
+    def _fetch_contacts(self) -> ContactBuffer:
         assert self._query is not None and self._num_contacts_per_env is not None
         self._num_contacts_per_env.zero_()
         self._data_buffer["is_valid"].zero_()
-
-        contact_buffer = self._query.fetch()
+        self._sample_scatter_dropped_count.zero_()
+        if self.device.type == "cuda":
+            buffer = self._query.fetch_async()
+        else:
+            buffer = self._query.fetch()
+            buffer.device_counts[0] = buffer.count
+            buffer.device_counts[1] = buffer.dropped_count
         self._sync_filter_actor_metadata()
-        if contact_buffer.count == 0:
-            return
-        env_ids = contact_buffer.env_ids[: contact_buffer.count]
-        valid = (env_ids >= 0) & (env_ids < self.num_instances)
-        if not bool(valid.any()):
-            return
-        contact_data = contact_buffer.data[: contact_buffer.count][valid].contiguous()
-        actor_ids = contact_buffer.actor_ids[: contact_buffer.count][valid].contiguous()
-        env_ids = env_ids[valid].contiguous()
-
         wp.launch(
-            kernel=scatter_contact_data,
-            dim=contact_data.shape[0],
+            kernel=scatter_contact_rows,
+            dim=buffer.capacity,
             inputs=[
-                wp.from_torch(contact_data),
-                wp.from_torch(actor_ids),
-                wp.from_torch(env_ids),
+                wp.from_torch(buffer.data),
+                wp.from_torch(buffer.actor_ids),
+                wp.from_torch(buffer.env_ids),
                 wp.from_torch(self._num_contacts_per_env),
                 self.cfg.max_contacts_per_env,
-            ],
-            outputs=[
-                wp.from_torch(self._data_buffer["position"]),
-                wp.from_torch(self._data_buffer["normal"]),
-                wp.from_torch(self._data_buffer["friction"]),
-                wp.from_torch(self._data_buffer["impulse"]),
-                wp.from_torch(self._data_buffer["distance"]),
-                wp.from_torch(self._data_buffer["user_ids"]),
-                wp.from_torch(self._data_buffer["is_valid"]),
+                *[
+                    wp.from_torch(self._data_buffer[name])
+                    for name in (
+                        "position",
+                        "normal",
+                        "friction",
+                        "impulse",
+                        "distance",
+                        "user_ids",
+                        "is_valid",
+                    )
+                ],
+                wp.from_torch(buffer.count_device),
+                wp.from_torch(self._sample_scatter_dropped_count),
             ],
             device=str(self.device),
+            stream=(
+                wp.stream_from_torch(self.device)
+                if self.device.type == "cuda"
+                else None
+            ),
+        )
+        return buffer
+
+    @property
+    def dropped_contacts(self) -> int:
+        """Rows lost across the current control interval, or latest standalone update.
+
+        This diagnostic reads device counters only when requested. Query overflow
+        and per-environment scatter overflow are counted separately and summed.
+        """
+        return int(
+            (self._query_dropped_count.sum() + self._scatter_dropped_count.sum()).item()
         )
 
     def get_arena_pose(self, to_matrix: bool = False) -> torch.Tensor | None:
@@ -393,6 +442,114 @@ class ContactSensor(BaseSensor):
         """Resolve an ID from the ``user_ids`` field to its Spawn identity."""
         assert self._query is not None
         return self._query.actor_info(actor_id)
+
+    def get_actor_ids(
+        self, uid: str, link_names: Sequence[str] | None = None
+    ) -> torch.Tensor:
+        """Resolve a scene entity's ordered contact IDs for every environment.
+
+        Args:
+            uid: Robot, articulation or rigid-object UID in the Spawn scene.
+            link_names: Ordered articulation links; None selects the rigid actor.
+
+        Returns:
+            IDs shaped (environments, selected bodies). Global actors are broadcast.
+        """
+        assert self._query is not None
+        handles = self._sim._spawn_scene.handles(uid)
+        paths = {handle.path for handle in handles}
+        names = (None,) if link_names is None else tuple(link_names)
+        actors = {
+            (actor.env_id, actor.link_name): actor.actor_id
+            for actor in self._query.actors
+            if actor.path in paths
+        }
+        rows = []
+        for env_id in range(self.num_instances):
+            row = []
+            for name in names:
+                key = (env_id, name) if (env_id, name) in actors else (-1, name)
+                if key not in actors:
+                    raise ValueError(
+                        f"No contact actor for {uid}/{name} in row {env_id}."
+                    )
+                row.append(actors[key])
+            rows.append(row)
+        return torch.tensor(rows, device=self.device, dtype=torch.int32).reshape(
+            self.num_instances, len(names)
+        )
+
+    def create_history(
+        self,
+        name: str,
+        actor_ids: torch.Tensor,
+        *,
+        counterpart_ids: torch.Tensor | None = None,
+        include_unknown_counterpart: bool = False,
+        force_threshold: float = 0.0,
+    ) -> ContactHistory:
+        """Register a sensor-owned reduction with explicit counterpart filtering.
+
+        Args:
+            name: Unique history name within the sensor.
+            actor_ids: Body IDs to monitor, in per-environment order.
+            counterpart_ids: Allowed counterparts; None accepts all contacts.
+            include_unknown_counterpart: Also accept unidentified query counterparts.
+            force_threshold: Minimum contact force in newtons for timing events.
+
+        Returns:
+            History that automatically enables substep sampling and selected-row reset.
+        """
+        if name in self._histories:
+            raise ValueError(f"Contact history {name!r} already exists.")
+        history = ContactHistory(
+            actor_ids,
+            counterpart_ids=counterpart_ids,
+            include_unknown_counterpart=include_unknown_counterpart,
+            force_threshold=force_threshold,
+        )
+        self._histories[name] = history
+        return history
+
+    @property
+    def requires_substep_update(self) -> bool:
+        """Whether this sensor participates in the physics-substep lifecycle."""
+        return bool(self._histories)
+
+    def begin_control_step(self) -> None:
+        """Start a new interval without discarding persistent contact timing."""
+        self._query_dropped_count.zero_()
+        self._scatter_dropped_count.zero_()
+        for history in self._histories.values():
+            history.begin_control_step()
+
+    def update_physics_step(self, dt: float) -> None:
+        """Sample contacts and advance registered histories after physics.
+
+        Args:
+            dt: Elapsed physics time in seconds.
+        """
+        buffer = self._fetch_contacts()
+        self._query_dropped_count.add_(buffer.dropped_count_device)
+        self._scatter_dropped_count.add_(self._sample_scatter_dropped_count)
+        for history in self._histories.values():
+            history._update_from_query(buffer, dt)
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        """Clear contact samples and histories only for the selected rows.
+
+        Args:
+            env_ids: Rows to reset. None selects every row.
+        """
+        ids = slice(None) if env_ids is None else env_ids
+        self._data_buffer["is_valid"][ids] = False
+        self._num_contacts_per_env[ids] = 0
+        self._scatter_dropped_count[ids] = 0
+        self._sample_scatter_dropped_count[ids] = 0
+        if env_ids is None:
+            self._query_dropped_count.zero_()
+        for history in self._histories.values():
+            history.reset(env_ids)
 
     def filter_by_user_ids(
         self, item_user_ids: torch.Tensor, env_ids: Sequence[int] | None = None

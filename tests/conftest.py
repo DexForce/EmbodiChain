@@ -164,6 +164,10 @@ def _initialize_sim_engine(renderer):
         "fast-rt": dexsim.types.Renderer.FASTRT,
     }
     sim_config = dexsim.WorldConfig()
+    # Keep the process-wide engine initialization aligned with the manager's
+    # default. DexSim's native auto worker setting changes contact ordering
+    # and adds substantial scheduling overhead to these small test scenes.
+    sim_config.cpu_num = 1
     sim_config.renderer = renderer_map[renderer]
     sim_config.backend = dexsim.types.Backend.VULKAN
     sim_config.open_windows = False

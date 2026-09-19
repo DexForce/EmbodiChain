@@ -44,6 +44,7 @@ from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
     clone_local_pose_from_first_env,
+    create_affordance_sampling_context,
     create_antipodal_semantics,
     create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
@@ -53,7 +54,9 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     draw_axis_marker,
     get_hand_open_close_qpos,
     initialize_pre_pick_robot_pose,
+    log_affordance_branch_diagnostics,
     make_clear_dynamics_callback,
+    parse_affordance_sampling_arguments,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
@@ -83,7 +86,7 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the AxisAlign tutorial."""
     parser = create_tutorial_argument_parser(
         "Demonstrate upright or horizontal AxisAlign on a cube.",
-        features=("grasp_sampling", "visualize_axes"),
+        features=("affordance_sampling", "grasp_sampling", "visualize_axes"),
     )
     parser.add_argument(
         "--alignment",
@@ -91,7 +94,7 @@ def parse_arguments() -> argparse.Namespace:
         default="upright",
         help="Choose the object-axis alignment example.",
     )
-    return parser.parse_args()
+    return parse_affordance_sampling_arguments(parser)
 
 
 def create_align_object(
@@ -218,8 +221,12 @@ def main() -> None:
                 ),
             ),
         ),
-        engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        engine.initial_context(
+            control_dt=sim.sim_config.physics_dt,
+            affordance_sampling=create_affordance_sampling_context(args),
+        ),
     )
+    log_affordance_branch_diagnostics(compiled.action_plans[0])
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan AxisAlign demo trajectory.")
         return

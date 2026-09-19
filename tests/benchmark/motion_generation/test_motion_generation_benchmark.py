@@ -484,6 +484,242 @@ def test_nmg_model_revision_is_derived_from_runtime_model_path():
     assert adapter.metadata.model_revision == "unified-k3"
 
 
+def test_nmg_over_capacity_case_is_explicitly_unsupported_without_truncation():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+
+    adapter = NmgOnnxAdapter(
+        PlannerSpecCfg(
+            id="nmg",
+            adapter="nmg_onnx",
+            role="candidate",
+            config={"num_waypoints": 5},
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+    over_capacity = replace(
+        _case(),
+        num_waypoints=6,
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).repeat(1, 6, 1, 1),
+        reference_qpos=torch.zeros(1, 6, 7),
+    )
+
+    supported, reason = adapter.supports_case(over_capacity)
+
+    assert supported is False
+    assert reason is not None
+    assert "at most 5" in reason
+    assert "not truncated or split" in reason
+
+
+def test_nmg_case_budget_is_thirty_steps_per_waypoint():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+
+    adapter = NmgOnnxAdapter(
+        PlannerSpecCfg(
+            id="nmg",
+            adapter="nmg_onnx",
+            role="candidate",
+            config={"num_waypoints": 5, "steps_per_waypoint": 30, "max_steps": 150},
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+
+    assert adapter._case_max_steps(replace(_case(), num_waypoints=1)) == 30
+    assert adapter._case_max_steps(replace(_case(), num_waypoints=3)) == 90
+    assert adapter._case_max_steps(replace(_case(), num_waypoints=5)) == 150
+
+
+def test_nmg_joint_case_uses_joint_constraint_waypoints():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+
+    adapter = NmgOnnxAdapter(
+        PlannerSpecCfg(
+            id="nmg",
+            adapter="nmg_onnx",
+            role="candidate",
+            config={"num_waypoints": 5},
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+    expected = Mock()
+    adapter.motion_generator = Mock()
+    adapter.motion_generator.generate.return_value = expected
+    joint_targets = torch.tensor(
+        [[[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], [0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]]]
+    )
+    joint_case = replace(
+        _case(),
+        num_waypoints=2,
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).repeat(1, 2, 1, 1),
+        reference_qpos=joint_targets,
+        case_parameters={"motion_validity": "ordered_joint_waypoints"},
+    )
+
+    supported, reason = adapter.supports_case(joint_case)
+    result = adapter.plan(joint_case)
+
+    assert supported is True
+    assert reason is None
+    assert result is expected
+    targets = adapter.motion_generator.generate.call_args.args[0]
+    assert [target.move_type for target in targets] == [
+        MoveType.JOINT_MOVE,
+        MoveType.JOINT_MOVE,
+    ]
+    assert targets[0].xpos is None
+    assert targets[1].xpos is None
+    assert torch.equal(targets[0].qpos, joint_targets[:, 0])
+    assert torch.equal(targets[1].qpos, joint_targets[:, 1])
+
+
+def _curobo_adapter():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.curobo import CuroboAdapter
+
+    adapter = CuroboAdapter(
+        PlannerSpecCfg(
+            id="curobo",
+            adapter="curobo",
+            role="primary_baseline",
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+    adapter.motion_generator = Mock()
+    return adapter
+
+
+def _joint_waypoint_case() -> tuple[BenchmarkCase, torch.Tensor]:
+    joint_targets = torch.tensor(
+        [[[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], [0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]]]
+    )
+    case = replace(
+        _case(),
+        num_waypoints=2,
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).repeat(1, 2, 1, 1),
+        reference_qpos=joint_targets,
+        case_parameters={"motion_validity": "ordered_joint_waypoints"},
+    )
+    return case, joint_targets
+
+
+def test_curobo_prepares_joint_backend_for_joint_waypoint_case():
+    adapter = _curobo_adapter()
+    case, _ = _joint_waypoint_case()
+
+    adapter.prepare(case)
+
+    adapter.motion_generator.planner.prepare_backend.assert_called_once_with(
+        control_part="arm",
+        batch_size=case.batch_size,
+        move_type=MoveType.JOINT_MOVE,
+    )
+
+
+def test_curobo_prepares_every_required_planning_mode_once():
+    adapter = _curobo_adapter()
+    joint_case, _ = _joint_waypoint_case()
+    cartesian_case = replace(
+        _case(),
+        case_parameters={"motion_validity": "ordered_cartesian_waypoints"},
+    )
+    duplicate_cartesian_case = replace(cartesian_case, case_id="cartesian-duplicate")
+
+    metadata = adapter.prepare_cases(
+        [cartesian_case, duplicate_cartesian_case, joint_case]
+    )
+
+    calls = adapter.motion_generator.planner.prepare_backend.call_args_list
+    assert [call.kwargs["move_type"] for call in calls] == [
+        MoveType.EEF_MOVE,
+        MoveType.JOINT_MOVE,
+    ]
+    assert [call.kwargs["batch_size"] for call in calls] == [
+        cartesian_case.batch_size,
+        joint_case.batch_size,
+    ]
+    assert len(metadata["backends"]) == 2
+
+
+def test_curobo_joint_case_uses_reference_joint_waypoints():
+    adapter = _curobo_adapter()
+    case, joint_targets = _joint_waypoint_case()
+    expected = Mock()
+    adapter.motion_generator.generate.return_value = expected
+
+    result = adapter.plan(case)
+
+    assert result is expected
+    targets = adapter.motion_generator.generate.call_args.args[0]
+    assert [target.move_type for target in targets] == [
+        MoveType.JOINT_MOVE,
+        MoveType.JOINT_MOVE,
+    ]
+    assert targets[0].xpos is None
+    assert targets[1].xpos is None
+    assert torch.equal(targets[0].qpos, joint_targets[:, 0])
+    assert torch.equal(targets[1].qpos, joint_targets[:, 1])
+
+
+def test_nmg_rejects_unknown_motion_validity():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+
+    adapter = NmgOnnxAdapter(
+        PlannerSpecCfg(
+            id="nmg",
+            adapter="nmg_onnx",
+            role="candidate",
+            config={"num_waypoints": 5},
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=1,
+        ),
+    )
+    unknown_case = replace(
+        _case(),
+        case_parameters={"motion_validity": "unknown_waypoint_space"},
+    )
+
+    supported, reason = adapter.supports_case(unknown_case)
+
+    assert supported is False
+    assert reason == "unsupported motion_validity mode 'unknown_waypoint_space'"
+    adapter.motion_generator = Mock()
+    with pytest.raises(ValueError, match="Unsupported motion_validity mode"):
+        adapter.plan(unknown_case)
+
+
 def test_seed_override_applies_to_atomic_tracks():
     suite = load_suite("atomic_franka_pgi_curobo_randomized")
 
@@ -1051,6 +1287,26 @@ def test_nmg_precision_rejects_non_positive_values(override):
 
     with pytest.raises(ValueError, match="NMG"):
         _apply_overrides(suite, **override)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("num_waypoints", 0),
+        ("steps_per_waypoint", -1),
+        ("max_steps", 0),
+        ("max_steps", 1.5),
+        ("steps_per_waypoint", True),
+    ],
+)
+def test_nmg_rollout_budgets_must_be_positive_integers(field, value):
+    suite = load_suite("smoke")
+    nmg = next(spec for spec in suite.planners if spec.adapter == "nmg_onnx")
+    nmg.id = "renamed_nmg_candidate"
+    nmg.config[field] = value
+
+    with pytest.raises((TypeError, ValueError), match=rf"NMG {field}"):
+        suite.validate_benchmark()
 
 
 class _FrankaLimitRobot(_MetricRobot):
@@ -1835,10 +2091,17 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
     )
     from scripts.benchmark.motion_generation.runner import BenchmarkRunner
 
+    prepared_case_sets: list[tuple[str, ...]] = []
+
     class _CapableFake(PlannerAdapter):
         capabilities = frozenset({"eef_waypoint", "batched", "empty_world"})
+        separate_prepare = True
 
         def build(self) -> None:
+            return None
+
+        def prepare_cases(self, cases: list[BenchmarkCase]) -> dict[str, object] | None:
+            prepared_case_sets.append(tuple(case.case_id for case in cases))
             return None
 
         def plan(self, case: BenchmarkCase) -> PlanResult:
@@ -1948,6 +2211,8 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
         for spec in specs:
             runner._run_adapter(writer, sim, robot, spec, [case], required)
 
+        assert prepared_case_sets == [(case.case_id,)]
+
         phases = {
             (r.algorithm_id, r.phase, r.status, r.failure_code) for r in runner.records
         }
@@ -1992,6 +2257,27 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
         assert capable["overall_success_rate"] == pytest.approx(1.0)
         assert incapable["eligible"] is False
         assert any("missing required capabilities" in note for note in runner.notes)
+
+        joint_case = replace(
+            case,
+            case_id="joint-case",
+            case_parameters={"motion_validity": "ordered_joint_waypoints"},
+        )
+        runner._run_adapter(
+            writer,
+            sim,
+            robot,
+            specs[1],
+            [joint_case],
+            frozenset(),
+        )
+        joint_records = [
+            record for record in runner.records if record.case_id == joint_case.case_id
+        ]
+        assert any(
+            record.failure_code == "unsupported_capability" for record in joint_records
+        )
+        assert not any(record.phase is TrialPhase.CONSTRUCT for record in joint_records)
     finally:
         for name in names:
             unregister_planner_adapter(name)

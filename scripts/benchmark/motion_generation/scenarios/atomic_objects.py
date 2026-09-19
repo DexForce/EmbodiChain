@@ -38,7 +38,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
     RigidObjectCfg,
 )
-from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
 from embodichain.utils.math import matrix_from_euler
 
 if TYPE_CHECKING:
@@ -183,8 +183,18 @@ def _mesh_shape(config: Mapping[str, object]) -> MeshCfg:
     if not isinstance(asset_path, str) or not asset_path:
         raise ValueError("mesh.asset_path must be a non-empty string.")
     resolved = Path(asset_path)
+    max_hulls = int(config.get("max_convex_hull_num", 16))
+    collision = (
+        MeshCollisionCfg(approximation="convex_hull")
+        if max_hulls == 1
+        else MeshCollisionCfg(
+            approximation="convex_decomposition",
+            max_hulls=max_hulls,
+        )
+    )
     return MeshCfg(
-        fpath=str(resolved if resolved.is_absolute() else get_data_path(asset_path))
+        fpath=str(resolved if resolved.is_absolute() else get_data_path(asset_path)),
+        collision=collision,
     )
 
 
@@ -271,11 +281,14 @@ def create_atomic_object(
                     restitution=float(config.get("restitution", 0.0)),
                 ),
             ),
-            max_convex_hull_num=int(config.get("max_convex_hull_num", 16)),
             init_pos=position,
             init_rot=rotation,
             body_scale=scale,
-            use_usd_properties=bool(config.get("use_usd_properties", False)),
+            asset_physics_mode=(
+                "preserve"
+                if bool(config.get("use_usd_properties", False))
+                else "overlay"
+            ),
         )
     )
     configured_pose = _configured_pose(simulation, position, rotation)

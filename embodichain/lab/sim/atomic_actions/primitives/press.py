@@ -46,7 +46,11 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
 )
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    PlannerDiagnostics,
+    TimedTrajectory,
+)
 from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
@@ -193,10 +197,14 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             num_envs=self.num_envs,
             device=self.device,
         )
-        contact_xpos = affordance.get_press_pose(
+        contact_sample = affordance.sample_press_pose(
             target_pose,
             press_position=options.press_position,
-        ).to(device=self.device, dtype=torch.float32)
+            sampling=context.affordance_sampling,
+            env_ids=context.env_ids,
+            key=(request.invocation_id or self.skill_id) + ":contact",
+        )
+        contact_xpos = contact_sample.poses.to(device=self.device, dtype=torch.float32)
         contact_xpos = self._find_symmetric_nearest_xpos(
             contact_xpos,
             reference_xpos=self.robot.compute_fk(
@@ -273,7 +281,13 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             interpolation_dt=interpolation_dt,
             cartesian_linear=True,
         )
-        success = approach_success & contact_success & press_success & retract_success
+        success = (
+            contact_sample.success
+            & approach_success
+            & contact_success
+            & press_success
+            & retract_success
+        )
 
         parts = (hand_close, approach_arm, contact_arm, press_arm, retract_arm)
         lengths = tuple(part.shape[1] for part in parts)
@@ -306,6 +320,10 @@ class Press(AtomicAction[PressGoal, PressOptions]):
                 step_dt=interpolation_dt,
             ),
             expected_effects=StateDelta(),
+            diagnostics=PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                metadata={"affordance_sample": contact_sample.metadata},
+            ),
             segment_lengths={
                 "close": lengths[0],
                 "approach": lengths[1],

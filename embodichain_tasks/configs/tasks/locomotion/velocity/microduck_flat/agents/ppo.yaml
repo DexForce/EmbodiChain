@@ -1,0 +1,60 @@
+trainer:
+  exp_name: microduck_flat_ppo
+  gym_config: embodichain_tasks/configs/tasks/locomotion/velocity/microduck_flat/env.yaml
+  seed: 42
+  device: cuda:0
+  headless: true
+  renderer: hybrid
+  num_envs: 4096
+  iterations: 10001
+  buffer_size: 24
+  enable_eval: false
+  save_frequency_updates: 100
+  use_wandb: false
+  wandb_project_name: embodichain-locomotion
+policy:
+  name: actor_critic
+  actor_obs_normalization: true
+  critic_obs_normalization: true
+  obs_groups:
+    actor:
+    - policy
+    critic:
+    - critic
+  actor:
+    type: mlp
+    network_cfg:
+      hidden_sizes:
+      - 512
+      - 256
+      - 128
+      activation: elu
+  critic:
+    type: mlp
+    network_cfg:
+      hidden_sizes:
+      - 512
+      - 256
+      - 128
+      activation: elu
+  initial_action_std: 1.0
+algorithm:
+  name: ppo
+  cfg:
+    optimizer:
+      name: adam
+      learning_rate: 0.001
+    schedule: adaptive
+    desired_kl: 0.01
+    minimum_learning_rate: 1.0e-05
+    maximum_learning_rate: 0.01
+    n_epochs: 5
+    num_mini_batches: 4
+    batch_size: 24576
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_coef: 0.2
+    ent_coef: 0.01
+    vf_coef: 1.0
+    use_clipped_value_loss: true
+    max_grad_norm: 1.0

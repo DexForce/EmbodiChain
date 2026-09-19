@@ -117,3 +117,35 @@ def test_reset_publishes_episode_state_before_visual_observation() -> None:
         "capture",
         "get_obs",
     ]
+
+
+def test_named_component_stream_rewinds_on_explicit_seed_and_is_independent():
+    env = _ResetEnv()
+    command = env.get_generator("commands")
+    noise = env.get_generator("noise")
+    env.reset(seed=42)
+    first = torch.rand(6, generator=command)
+    torch.rand(17, generator=noise)
+    env.reset(seed=42)
+    assert env.get_generator("commands") is command
+    assert torch.equal(first, torch.rand(6, generator=command))
+    env.reset()
+    continued = torch.rand(6, generator=command)
+    env.reset(seed=42)
+    torch.rand(6, generator=command)
+    assert torch.equal(continued, torch.rand(6, generator=command))
+
+
+def test_unseeded_component_streams_do_not_share_a_fixed_seed():
+    first, second = _ResetEnv(), _ResetEnv()
+    a, b = first.get_generator("commands"), second.get_generator("commands")
+    assert a.initial_seed() != b.initial_seed()
+    assert not torch.equal(torch.rand(8, generator=a), torch.rand(8, generator=b))
+    assert first.get_generator("commands") is a
+
+
+def test_explicit_zero_seed_is_reproducible():
+    first, second = _ResetEnv(), _ResetEnv()
+    first.cfg.seed = second.cfg.seed = 0
+    a, b = first.get_generator("commands"), second.get_generator("commands")
+    assert torch.equal(torch.rand(8, generator=a), torch.rand(8, generator=b))

@@ -300,6 +300,22 @@ class ActionManager(ManagerBase):
                 action[term.input_key] = term.process_action(action[term.input_key])
             return action
 
+    def reset(
+        self, env_ids: list[int] | torch.Tensor | None = None
+    ) -> dict[str, float]:
+        """Reset state owned by action terms for selected environments.
+
+        Args:
+            env_ids: Selected rows. None resets every row.
+
+        Returns:
+            Empty manager diagnostic mapping.
+        """
+        for mode in ("pre", "post"):
+            for _, term in self.get_terms_by_mode(mode):
+                term.reset(env_ids=env_ids)
+        return {}
+
     def get_term(self, name: str) -> ActionTerm:
         """Get action term by name."""
         return self._terms[name]

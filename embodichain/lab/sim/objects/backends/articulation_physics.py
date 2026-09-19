@@ -21,6 +21,9 @@ from typing import Any
 
 import numpy as np
 
+from embodichain.lab.sim._inertia import _principal_inertia_matrix
+from embodichain.utils.math import quat_wxyz_to_xyzw
+
 __all__ = [
     "apply_link_com_pose",
     "apply_link_inertia",
@@ -72,12 +75,18 @@ def apply_link_inertia(
     link_name: str,
     value: np.ndarray,
     *,
+    quaternion_xyzw: np.ndarray | None = None,
     is_spawn_bound: bool,
     is_newton: bool,
 ) -> int | None:
     """Apply one link inertia and return a Spawn status when available."""
     if is_spawn_bound:
-        return int(entity.set_link_inertia(link_name, value))
+        if quaternion_xyzw is None:
+            raise ValueError(
+                "Spawn inertia writes require the current principal frame."
+            )
+        matrix = _principal_inertia_matrix(value, quaternion_xyzw)
+        return int(entity.set_link_inertia(link_name, matrix))
     if not is_newton:
         entity.get_physical_body(link_name).set_mass_space_inertia_tensor(value)
         return None
@@ -93,12 +102,19 @@ def apply_link_com_pose(
     position: np.ndarray,
     quaternion: np.ndarray,
     *,
+    inertia: np.ndarray | None = None,
     is_spawn_bound: bool,
     is_newton: bool,
 ) -> int | None:
     """Apply one link local COM pose and return a Spawn status when available."""
     if is_spawn_bound:
-        return int(entity.set_link_com_pose(link_name, position, quaternion))
+        if inertia is None:
+            raise ValueError("Spawn COM writes require the current principal moments.")
+        matrix = _principal_inertia_matrix(inertia, quat_wxyz_to_xyzw(quaternion))
+        status = int(entity.set_link_inertia(link_name, matrix))
+        if status < 0:
+            return status
+        return int(entity.set_link_com_position(link_name, position))
     if not is_newton:
         entity.get_physical_body(link_name).set_cmass_local_pose(position, quaternion)
         return None

@@ -97,7 +97,7 @@ def test_default_source_capture_keeps_valid_inertia_and_discards_invalid_com(
     valid = desc.get_link_desc("valid")
     assert valid.rigid_body is not None
     assert valid.rigid_body.mass == pytest.approx(2.0)
-    np.testing.assert_array_equal(valid.rigid_body.inertia, (1.0, 2.0, 3.0))
+    np.testing.assert_array_equal(valid.rigid_body.inertia, np.diag([1.0, 2.0, 3.0]))
     np.testing.assert_allclose(valid.rigid_body.com_position, (0.1, 0.2, 0.3))
     assert valid._inertia_from_source
 
@@ -106,7 +106,7 @@ def test_default_source_capture_keeps_valid_inertia_and_discards_invalid_com(
     assert invalid.rigid_body.mass == pytest.approx(0.5)
     assert invalid.rigid_body.inertia is None
     assert invalid.rigid_body.com_position is None
-    assert invalid.rigid_body.com_quaternion is None
+    assert not hasattr(invalid.rigid_body, "com_quaternion")
     assert not invalid._inertia_from_source
 
     unowned = desc.get_link_desc("unowned")
@@ -124,7 +124,7 @@ def test_invalid_source_com_normalization_does_not_touch_authored_inertia() -> N
     )
     authored = _link("authored")
     authored.rigid_body = authored_body = _physical_body(
-        inertia=np.asarray((1.0, 2.0, 3.0), dtype=np.float32),
+        inertia=np.diag(np.asarray((1.0, 2.0, 3.0), dtype=np.float32)),
         com_position=np.asarray((4.0, 5.0, 6.0), dtype=np.float32),
     )
     authored._inertia_from_source = True
@@ -143,7 +143,7 @@ def test_default_overlay_writes_only_explicitly_marked_link_physics() -> None:
     applied = _link("applied")
     for link in (skipped, applied):
         link.rigid_body = _physical_body(
-            inertia=np.asarray((1.0, 2.0, 3.0), dtype=np.float32),
+            inertia=np.diag(np.asarray((1.0, 2.0, 3.0), dtype=np.float32)),
             com_position=np.asarray((0.1, 0.2, 0.3), dtype=np.float32),
         )
     skipped._embodichain_apply_physics = False

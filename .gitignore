@@ -214,3 +214,7 @@ scripts/benchmark/rl/reports/*
 /embodichain/gen_sim/gradio_ui/.articraft/
 /embodichain/gen_sim/gradio_ui/.gen_sim/
 /embodichain/gen_sim/gradio_ui/__pycache__/
+
+# Rebuilt by the architecture Sphinx extension
+/docs/source/_static/architecture/
+/docs/source/_static/.architecture-build-*/

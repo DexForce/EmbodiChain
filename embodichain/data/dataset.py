@@ -212,8 +212,8 @@ def get_data_path(data_path_in_config: str) -> str:
         3. Otherwise, resolve via the registered data-class download mechanism.
 
     Args:
-        data_path_in_config (str): The dataset path in the format
-            ``"dataset_name/subpath"``.
+        data_path_in_config (str): The dataset name, optionally followed by a
+            subpath in the format ``"dataset_name/subpath"``.
 
     Returns:
         str: The absolute path of the data file.
@@ -229,12 +229,9 @@ def get_data_path(data_path_in_config: str) -> str:
         return local_path
 
     # Fall back to the data-class download mechanism
-    split_str = data_path_in_config.split("/")
-    dataset_name = split_str[0]
-    sub_path = os.path.join(*split_str[1:])
+    dataset_name, *sub_path_parts = data_path_in_config.split("/")
 
     data_class = get_data_class(dataset_name)
     data_obj = data_class()
     data_dir = data_obj.extract_dir
-    data_path = os.path.join(data_dir, sub_path)
-    return data_path
+    return os.path.join(data_dir, *sub_path_parts)

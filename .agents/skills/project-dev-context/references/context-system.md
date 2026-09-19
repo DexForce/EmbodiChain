@@ -27,12 +27,29 @@ The checker validates schema, relations, paths, local Markdown links and orphan
 topic pages. It does not prove source facts, frames, tensor dimensions, examples
 or freshness. Review those against the owning implementation and focused tests.
 
-`affected --base REF` compares the merge base with the checkout, including
-staged, unstaged and untracked files. Deleted/renamed source paths can identify
-their former topics. Run this before changing metadata to avoid losing old
-watch coverage. Impact uses the union of `source_of_truth` and optional `watch_paths`;
-context edits identify their owning topic as well. MAP, conventions or routing
-skill/adapter changes conservatively select all active topics for review.
+`affected --base REF --explain` compares the merge base with the checkout,
+including staged, unstaged and untracked files. Impact uses both baseline and
+current `source_of_truth`/`watch_paths`, so deleted or renamed paths still identify
+their former owners after metadata is updated. Context edits identify their
+owning topic. Reasons distinguish source, watch, context and registry changes;
+they identify review candidates, not required prose edits. Omit `--explain` to
+retain the topic-ID-only output.
+
+MAP changes compare parsed entries by stable id: additions, removals and updates
+select those entries; comments, formatting and topic-list order do not. Global
+MAP settings, conventions and routing skill/adapter changes select all active
+topics. Removed entries remain in the report so incoming links can be repaired.
+Without `--base` (or when the baseline has no MAP), a MAP path match conservatively
+selects all active topics; `--explain` reports the missing baseline. An unreadable
+or malformed baseline is an error, not an empty impact report.
+
+`stats [--base REF]` reports total context Markdown files/lines/whitespace words
+and per-overview word counts, including checkout additions/deletions. With a
+base, deltas compare against the merge base. These are not model token counts.
+Overviews above 1,200 words, or growing by more than 25% and at least 100 words,
+are flagged for review without failing the command. Use the flags to inspect
+reading cost and duplication, not to remove necessary invariants or enforce
+fixed prose lengths. Check total content as well as overview size after splits.
 
 Add/delete/move topics atomically with their MAP entries and incoming links.
 Deprecation keeps a redirect until callers migrate. No timestamp field is used

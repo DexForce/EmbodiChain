@@ -51,6 +51,7 @@ from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
     configure_newton_link_contacts,
+    create_affordance_sampling_context,
     create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
@@ -58,6 +59,8 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
+    log_affordance_branch_diagnostics,
+    parse_affordance_sampling_arguments,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
@@ -77,11 +80,11 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the drawer pull/push tutorial."""
     parser = create_tutorial_argument_parser(
         "Pull a drawer open, then push it closed with Slide.",
-        features=("grasp_sampling", "visualize_axes"),
+        features=("affordance_sampling", "grasp_sampling", "visualize_axes"),
     )
     parser.add_argument("--translation_distance", type=float, default=0.18)
     parser.add_argument("--approach_distance", type=float, default=0.10)
-    return parser.parse_args()
+    return parse_affordance_sampling_arguments(parser)
 
 
 def create_drawer(
@@ -169,7 +172,8 @@ def create_invocation(
         ),
         control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
         motion_policy=MotionPolicy(
-            strategy="motion_gen",
+            # Contact/path segments require exact Cartesian samples.
+            strategy="ik_interp",
             sample_count=TRAJECTORY_SAMPLE_COUNT,
         ),
         skill_options=SlideOptions(
@@ -252,8 +256,12 @@ def main() -> None:
                     translation_distance=args.translation_distance,
                 ),
             ),
-            context=engine.initial_context(control_dt=sim.sim_config.physics_dt),
+            context=engine.initial_context(
+                control_dt=sim.sim_config.physics_dt,
+                affordance_sampling=create_affordance_sampling_context(args),
+            ),
         )
+        log_affordance_branch_diagnostics(compiled.action_plans[0])
         if not compiled.plan_success.all():
             logger.log_warning(f"Failed to plan the Slide {direction} trajectory.")
             return

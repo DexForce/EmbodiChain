@@ -63,22 +63,29 @@ topic ids and overview paths; linked detail pages carry optional depth.
 Find topics potentially affected by a code change:
 
 ```bash
-python .agents/skills/project-dev-context/scripts/context.py affected --base origin/main
+python .agents/skills/project-dev-context/scripts/context.py affected --base origin/main --explain
 python .agents/skills/project-dev-context/scripts/context.py affected embodichain/lab/gym/envs/base_env.py
 ```
 
 Review affected topics in the same change; this is an impact hint, not proof
-that prose is stale or that unchanged paths are fresh. Update relevant prose,
-source pointers, watch scopes and routing terms. Add a topic for a requested or
-recurring missing domain, not automatically for every unmatched lookup.
+that prose is stale or that unchanged paths are fresh. Choose **no update**,
+**revise**, or **add** using `conventions/topic-lifecycle.md`, and briefly state
+the outcome in the PR or task result. Edit only guidance or metadata made
+inaccurate or materially incomplete. Replace/consolidate the owning passage;
+do not append a PR summary. Add a topic for a requested or recurring missing
+domain, not automatically for every unmatched lookup.
 
 After editing:
 
 ```bash
 python .agents/skills/project-dev-context/scripts/context.py check
+python .agents/skills/project-dev-context/scripts/context.py stats --base origin/main
 python -m pytest -q -c /dev/null --noconftest tests/test_agent_context_map.py tests/test_agent_context_tools.py
 ```
 
 Validate representative natural-language routes before and after routing changes,
-including ambiguous and unmatched requests. Thin adapters only point here;
+including ambiguous and unmatched requests. For content restructuring, follow
+representative questions from overview to owner and check how much unrelated
+content must be read. Size/growth statistics are advisory, not a length gate.
+Thin adapters only point here;
 they need changes only when their local entry hints change.

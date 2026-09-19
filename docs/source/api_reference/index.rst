@@ -85,3 +85,4 @@ documentation. CI runs this same checker after style checks and before tests.
 
    embodichain/embodichain.gen_sim.task_engine
    public_api
+   locomotion_tasks
