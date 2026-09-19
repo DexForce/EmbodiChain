@@ -36,6 +36,15 @@ The `scene_export/` directory contains `scene.json`, `scene_config.json`,
 - Scene object IDs and graph node IDs must be equal sets on import and export.
 - Editable scene state is Y-up; portable runtime output is Z-up. Convert world
   pose at this boundary, and preserve `body_scale` separately from mesh geometry.
+- Task Engine imports preserve modern `scene-export/v1` world poses by default,
+  including scenes with authored robots. World rotation requires explicit
+  `z_rotation_degrees`; an explicit XY translation is still supported. Legacy
+  robot configs retain their table-centering compatibility behavior, but no
+  source format receives an implicit -90-degree yaw. `ResolvedSceneSource.mesh_up_axis`
+  independently records Y-up export meshes for geometry inspection; the legacy
+  `is_prompt2scene_export` API no longer classifies modern exports or controls
+  transforms. Regenerate old bundles to use this import policy; existing bundles
+  retain their serialized poses.
 - Articulation export measures collision meshes relative to the native root
   rigid body, respecting USD up-axis, scale and deployment rotation, and sets
   root Z to leave 1 mm above the support. `proxy_init_pos` retains the independent

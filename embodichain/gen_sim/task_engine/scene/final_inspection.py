@@ -95,7 +95,7 @@ def inspect_final_scene(
         role = str(raw.get("role", ""))
         geometry = _measure_geometry(
             runtime.get(uid, raw),
-            convert_y_up=resolved.is_prompt2scene,
+            convert_y_up=resolved.mesh_up_axis == "Y",
         )
         measured[uid] = {
             "uid": uid,

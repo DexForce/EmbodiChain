@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Read and normalize an exported Prompt2Scene source scene.
+"""Read and normalize an exported source scene.
 
 The source scene remains the authority for object geometry and initial poses.
 Generation only makes asset paths absolute, gives runtime objects stable UIDs,
@@ -32,7 +32,7 @@ import json
 import math
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Literal
 import warnings
 
 from embodichain.data import get_data_path
@@ -57,7 +57,6 @@ _UID_SUFFIX_RE = re.compile(r"_0$")
 _UID_INVALID_RE = re.compile(r"[^0-9A-Za-z_.-]+")
 
 _SCENE_DEFAULTS = {
-    "prompt2scene_z_rotation_degrees": -90.0,
     "body_scale_policy": "preserve",
     "body_scale": (1.0, 1.0, 1.0),
 }
@@ -142,12 +141,15 @@ class ResolvedSceneSource:
     Attributes:
         path: Absolute path to the selected source configuration.
         source_format: Stable identifier for the detected source schema.
-        is_prompt2scene: Whether Prompt2Scene world alignment should be applied.
+        is_prompt2scene: Legacy export-layout compatibility flag, not a transform policy.
+        mesh_up_axis: Source mesh axis convention, independent of world poses.
+            Scene-export/v1 meshes are Y-up while its world poses are Z-up.
     """
 
     path: Path
     source_format: str
     is_prompt2scene: bool
+    mesh_up_axis: Literal["Y", "Z"] = "Z"
 
 
 def resolve_source_scene(gym_project: str | Path) -> ResolvedSceneSource:
@@ -217,14 +219,15 @@ def resolve_gym_config_path(gym_project: str | Path) -> Path:
 
 
 def is_prompt2scene_export(gym_project: str | Path) -> bool:
-    """Return whether the input has Prompt2Scene export provenance.
+    """Recognize legacy export layouts through the compatibility API.
 
     Args:
         gym_project: Task root, export directory, or explicit configuration path.
 
     Returns:
-        ``True`` when a supported source carries Prompt2Scene provenance;
-        otherwise ``False``, including invalid or missing paths.
+        ``True`` for legacy layouts with historical export markers. Modern
+        scene-export/v1 inputs, invalid paths, and missing paths return ``False``.
+        This result does not control world rotation or mesh conversion.
     """
     try:
         return resolve_source_scene(gym_project).is_prompt2scene
@@ -244,10 +247,11 @@ def prepare_scene(
 
     Args:
         gym_project: Task root, export directory, or explicit configuration path.
-        z_rotation_degrees: Optional world-frame rotation override. Prompt2Scene
-            inputs use the canonical rotation when this value is omitted.
-        source_scene_xy_translation: Optional two-value world translation. An
-            explicit robot scene otherwise centers itself on its table anchor.
+        z_rotation_degrees: Explicit world-frame rotation. Omission preserves
+            authored world orientation and does not rotate positions.
+        source_scene_xy_translation: Optional two-value world translation.
+            Modern exports preserve authored positions by default. Legacy robot
+            configs retain automatic centering on their table anchor.
         body_scale_policy: One of ``preserve``, ``multiply``, or ``absolute``.
         body_scale: Positive three-value scale consumed by the selected policy.
 
@@ -297,16 +301,16 @@ def prepare_scene(
         resolved_xy_translation = tuple(
             float(value) for value in source_scene_xy_translation
         )
-    elif source_has_robot and source_table is not None:
+    elif (
+        resolved_source.source_format == _LEGACY_GYM_FORMAT
+        and source_has_robot
+        and source_table is not None
+    ):
         table_anchor = _vector3(source_table.get("init_pos", (0.0, 0.0, 0.0)))
         resolved_xy_translation = (-table_anchor[0], -table_anchor[1])
     else:
         resolved_xy_translation = (0.0, 0.0)
-    rotation = (
-        float(_SCENE_DEFAULTS["prompt2scene_z_rotation_degrees"])
-        if z_rotation_degrees is None and resolved_source.is_prompt2scene
-        else float(z_rotation_degrees or 0.0)
-    )
+    rotation = 0.0 if z_rotation_degrees is None else float(z_rotation_degrees)
 
     planner_objects: list[dict[str, Any]] = []
     runtime_sections: dict[str, list[dict[str, Any]]] = {
@@ -445,14 +449,17 @@ def _classify_source_config(path: Path) -> ResolvedSceneSource:
         return ResolvedSceneSource(
             path=path,
             source_format=_SCENE_EXPORT_FORMAT,
-            is_prompt2scene=True,
+            is_prompt2scene=False,
+            mesh_up_axis="Y",
         )
+    legacy_mesh_export = _has_legacy_prompt2scene_marker(
+        path
+    ) or _has_scene_export_companion(path)
     return ResolvedSceneSource(
         path=path,
         source_format=_LEGACY_GYM_FORMAT,
-        is_prompt2scene=(
-            _has_legacy_prompt2scene_marker(path) or _has_scene_export_companion(path)
-        ),
+        is_prompt2scene=legacy_mesh_export,
+        mesh_up_axis="Y" if legacy_mesh_export else "Z",
     )
 
 

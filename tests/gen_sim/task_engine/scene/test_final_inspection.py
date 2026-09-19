@@ -100,6 +100,14 @@ def test_final_inspection_recomputes_support_and_orientation(tmp_path: Path) -> 
 
     inspection = inspect_final_scene(source, revision_id=scene_revision_id(source))
 
+    from embodichain.gen_sim.task_engine.orchestration.source_scene import (
+        resolve_source_scene,
+    )
+
+    resolved = resolve_source_scene(source)
+    assert resolved.is_prompt2scene is False
+    assert resolved.mesh_up_axis == "Y"
+
     can = next(item for item in inspection["objects"] if item["uid"] == "can")
     assert can["orientation"] == "standing"
     assert can["support"]["parent_uid"] == "table"

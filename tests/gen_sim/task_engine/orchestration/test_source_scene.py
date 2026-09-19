@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 
 from embodichain.gen_sim.task_engine.orchestration.source_scene import (
+    is_prompt2scene_export,
     prepare_scene,
     resolve_gym_config_path,
     resolve_source_scene,
@@ -294,8 +295,8 @@ def test_prepare_scene_normalizes_prompt2scene_export(gym_export: Path) -> None:
     scene = prepare_scene(gym_export)
 
     assert scene.uid_map == {"table_0": "table", "interact_can_0": "interact_can"}
-    assert scene.z_rotation_degrees == -90.0
-    assert scene.rigid_objects[0]["init_pos"] == [2.0, -1.0, 0.7]
+    assert scene.z_rotation_degrees == 0.0
+    assert scene.rigid_objects[0]["init_pos"] == [1.0, 2.0, 0.7]
     assert scene.rigid_objects[0]["max_convex_hull_num"] == 16
     assert scene.rigid_objects[0]["acd_method"] == "vhacd"
     assert scene.rigid_objects[0]["shape"]["acd_method"] == "vhacd"
@@ -315,8 +316,56 @@ def test_prepare_scene_supports_scene_export_v1(scene_export: Path) -> None:
         "bottle_002": "bottle_002",
     }
     assert scene.planner_objects[1]["name"] == "Bottle 1"
+    assert scene.z_rotation_degrees == 0.0
+    assert scene.rigid_objects[0]["init_pos"] == [1.0, 2.0, 0.7]
+    resolved = resolve_source_scene(scene_export)
+    assert resolved.mesh_up_axis == "Y"
+    assert resolved.is_prompt2scene is False
+    assert is_prompt2scene_export(scene_export) is False
+
+
+@pytest.mark.parametrize("rotation", [None, 0.0])
+def test_modern_export_preserves_authored_pose_even_with_robot(
+    scene_export: Path,
+    rotation: float | None,
+) -> None:
+    path = scene_export / "scene_config.json"
+    source = json.loads(path.read_text())
+    source["robot"] = {"uid": "source_robot"}
+    source["background"][0]["init_pos"] = [0.4, 0.6, 0.0]
+    source["rigid_object"][0]["init_rot"] = [0.0, 0.0, 90.0]
+    path.write_text(json.dumps(source))
+    scene = prepare_scene(scene_export, z_rotation_degrees=rotation)
+    assert scene.source_scene_xy_translation == (0.0, 0.0)
+    assert scene.background[0]["init_pos"] == [0.4, 0.6, 0.0]
+    assert scene.rigid_objects[0]["init_pos"] == [1.0, 2.0, 0.7]
+    assert scene.rigid_objects[0]["init_rot"] == [0.0, 0.0, 90.0]
+
+
+def test_modern_export_applies_explicit_translation(scene_export: Path) -> None:
+    scene = prepare_scene(scene_export, source_scene_xy_translation=(-1.0, -2.0))
+    assert scene.source_scene_xy_translation == (-1.0, -2.0)
+    assert scene.z_rotation_degrees == 0.0
+    assert scene.rigid_objects[0]["init_pos"] == [0.0, 0.0, 0.7]
+
+
+def test_modern_export_rotates_only_when_explicit(scene_export: Path) -> None:
+    from scipy.spatial.transform import Rotation
+
+    path = scene_export / "scene_config.json"
+    source = json.loads(path.read_text())
+    source["rigid_object"][0]["init_rot"] = [10.0, 20.0, 30.0]
+    path.write_text(json.dumps(source))
+    scene = prepare_scene(scene_export, z_rotation_degrees=-90.0)
     assert scene.z_rotation_degrees == -90.0
-    assert scene.rigid_objects[0]["init_pos"] == [2.0, -1.0, 0.7]
+    assert scene.rigid_objects[0]["init_pos"] == pytest.approx([2.0, -1.0, 0.7])
+    expected = Rotation.from_euler("Z", -90, degrees=True) * Rotation.from_euler(
+        "XYZ", [10, 20, 30], degrees=True
+    )
+    actual = Rotation.from_euler(
+        "XYZ", scene.rigid_objects[0]["init_rot"], degrees=True
+    )
+    assert (actual.inv() * expected).magnitude() < 1e-8
 
 
 def test_prepare_scene_requires_exactly_one_background(gym_export: Path) -> None:
@@ -380,7 +429,8 @@ def test_explicit_scene_export_overrides_mixed_layout(
 
     assert resolved.path == scene_export / "scene_config.json"
     assert resolved.source_format == "embodichain.scene-export/v1"
-    assert resolved.is_prompt2scene is True
+    assert resolved.is_prompt2scene is False
+    assert resolved.mesh_up_axis == "Y"
 
 
 def test_explicit_named_legacy_config_is_supported(gym_export: Path) -> None:
