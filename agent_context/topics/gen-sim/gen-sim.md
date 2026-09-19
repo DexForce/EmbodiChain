@@ -99,6 +99,11 @@ yaw; normal loading never silently applies that repair.
 Publish repaired exports separately with asset provenance. GenSim assembly and
 E6 binding check fresh native joint limits and reapply the same values only when the
 public pre-scale cache is stale; it does not enlarge the physical travel range.
+Generated E6 bundles apply the calibrated 1 kg mass only to discovered
+prismatic moving links. Fixed cabinet/root links retain source-authored mass,
+while contact offsets and materials remain asset-owned; this preserves the
+Slide grasp response across the legacy loader and Spawn without restoring the
+old global articulation-physics override.
 
 ## Focused validation
 

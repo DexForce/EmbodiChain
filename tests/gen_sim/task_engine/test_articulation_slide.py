@@ -484,6 +484,12 @@ def test_e6_bundle_uses_standard_registration_and_complete_recipe(
     }
     assert articulation["root_props"] == {"fixed_base": True}
     assert articulation["asset_physics_mode"] == "overlay"
+    assert articulation["link_attrs"] == {
+        "gen_sim_prismatic_link_mass": {
+            "link_names_expr": ["drawer"],
+            "attrs": {"mass_props": {"mass": 1.0}},
+        }
+    }
     assert "fix_base" not in articulation
     assert "proxy_init_pos" not in articulation
     assert "joint_drive_props" not in scene.articulations[0]
