@@ -89,6 +89,7 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
         pose = observed.pose.clone()
         if pose.shape == (4, 4):
             pose = pose.unsqueeze(0).expand(context.batch_size, -1, -1).clone()
+        staging_pose = pose.clone()
         source = torch.nn.functional.normalize(
             pose[:, :3, :3] @ pose.new_tensor(axis), dim=-1
         )
@@ -114,6 +115,7 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
         pose[:, :3, :3] = correction @ pose[:, :3, :3]
         if position is not None:
             pose[:, :3, 3] = pose.new_tensor(position)
+            staging_pose[:, :3, 3] = pose[:, :3, 3]
         if args["preserve_yaw"]:
             return SemanticLowering(goal=HeldObjectPoseGoal(pose))
         # Upright leaves yaw free. Prefer a TCP approaching from its arm root
@@ -138,13 +140,20 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
             half_turn @ pose[:, :3, :3],
             pose[:, :3, :3],
         )
-        return SemanticLowering(goal=HeldObjectPoseGoal(pose))
+        # Lift with the acquired orientation before turning the object. A
+        # coupled rotation/translation can hit joint limits or sweep the table.
+        target_poses = (
+            torch.stack((staging_pose, pose), dim=1) if position is not None else pose
+        )
+        return SemanticLowering(
+            goal=HeldObjectPoseGoal(target_poses, world_yaw_free=True)
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class _AlignHeldFactory:
     call_id: ClassVar[str] = ALIGN_HELD_CALL
-    revision: ClassVar[str] = "3"
+    revision: ClassVar[str] = "5"
     target_descriptor = MoveHeldObject.descriptor()
     routes: tuple[
         tuple[str, str, bool, tuple[float, ...], tuple[float, ...] | None], ...

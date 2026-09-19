@@ -1186,6 +1186,45 @@ def test_scene_payload_defaults_to_visacd_and_preserves_explicit_algorithm(
     assert "collision" not in source["shape"]
 
 
+def test_grasp_contact_clearances_follow_physics_overrides() -> None:
+    from copy import deepcopy
+    from dexsim.spawn import DexsimCollisionDesc
+
+    embodiment = {
+        "simulation": {
+            "attrs": {"collision_props": {"contact_offset": 0.004}},
+            "link_attrs": {
+                "pads": {"attrs": {"collision_props": {"contact_offset": 0.006}}},
+                "mass_only": {"attrs": {"mass_props": {"mass": 1.0}}},
+            },
+        }
+    }
+    before = deepcopy(embodiment)
+    scene = SimpleNamespace(
+        rigid_objects=(
+            {"uid": "cup", "attrs": {"collision_props": {"contact_offset": 0.003}}},
+            {"uid": "default"},
+            {"uid": "zero", "attrs": {"collision_props": {"contact_offset": 0.0}}},
+        )
+    )
+    values = task_program_bundle._grasp_contact_clearances(scene, embodiment)
+    assert values["cup"] == pytest.approx(0.009)
+    assert values["default"] == pytest.approx(
+        0.006 + DexsimCollisionDesc().contact_offset
+    )
+    assert values["zero"] == pytest.approx(0.006)
+    assert embodiment == before
+
+
+@pytest.mark.parametrize("offset", [-0.001, float("nan"), True])
+def test_grasp_contact_clearances_reject_invalid_physics(offset) -> None:
+    with pytest.raises(ValueError, match="contact_offset"):
+        task_program_bundle._grasp_contact_clearances(
+            SimpleNamespace(rigid_objects=()),
+            {"simulation": {"attrs": {"collision_props": {"contact_offset": offset}}}},
+        )
+
+
 def test_generated_usd_articulation_disables_urdf_only_pk_chain() -> None:
     scene = SimpleNamespace(
         table_top_z=0.72,
@@ -1209,6 +1248,54 @@ def test_generated_usd_articulation_disables_urdf_only_pk_chain() -> None:
     assert "category" not in articulation
     assert "name" not in articulation
     assert "proxy_glb_fpath" not in articulation
+
+
+@pytest.mark.parametrize("section", ["background", "rigid_object", "articulation"])
+def test_scene_payload_preserves_intrinsic_xyz_through_config_decode(
+    section: str,
+) -> None:
+    from scipy.spatial.transform import Rotation
+    from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg
+    from embodichain.lab.sim.spawn.descriptors import _pose_from_cfg
+
+    position = [0.1, -0.2, 0.8]
+    rotation = [70.0, -25.0, 15.0]
+    config = {"uid": "target", "init_pos": position, "init_rot": rotation}
+    scene = SimpleNamespace(
+        table_top_z=0.72,
+        background=(config,) if section == "background" else (),
+        rigid_objects=(config,) if section == "rigid_object" else (),
+        articulations=(config,) if section == "articulation" else (),
+    )
+    payload = _scene_payload(scene, program_id="pose_decode")
+    item = payload["simulation"][section][0]
+    cfg_type = ArticulationCfg if section == "articulation" else RigidObjectCfg
+    decoded = cfg_type.from_dict(item)
+    pose = _pose_from_cfg(decoded)
+    expected_rotation = Rotation.from_euler("XYZ", rotation, degrees=True).as_matrix()
+
+    assert np.allclose(pose[:3, :3], expected_rotation, atol=1e-6)
+    assert np.allclose(pose[:3, 3], position)
+    assert "init_local_pose" in item
+    assert "init_local_pose" not in config
+
+
+def test_scene_payload_preserves_explicit_pose_without_mutating_source() -> None:
+    from scipy.spatial.transform import Rotation
+
+    pose = np.eye(4)
+    pose[:3, :3] = Rotation.from_euler("XYZ", [20, 30, 40], degrees=True).as_matrix()
+    pose[:3, 3] = [0.1, 0.2, 0.3]
+    config = {"uid": "object", "init_local_pose": pose.tolist()}
+    scene = SimpleNamespace(
+        table_top_z=0.72, background=(), rigid_objects=(config,), articulations=()
+    )
+    result = _scene_payload(scene, program_id="explicit_pose")["simulation"][
+        "rigid_object"
+    ][0]
+    assert np.allclose(result["init_local_pose"], pose)
+    result["init_local_pose"][0][3] = 9.0
+    assert config["init_local_pose"][0][3] == pytest.approx(0.1)
 
 
 def _prepared_axis_scene(
@@ -1485,7 +1572,7 @@ def test_coordinated_bundle_composes_against_unmodified_public_options(
         deployment["env"]["events"]["settle_objects_on_reset"]["params"][
             "restore_initial_xy"
         ]
-        is True
+        is False
     )
     _verify_program_projection(paths.program, generated)
     integration = load_config(paths.integration)

@@ -1313,6 +1313,161 @@ def test_move_held_object_uses_exact_projected_attachment_target() -> None:
     assert torch.allclose(target_states[0].xpos, held.object_to_eef)
 
 
+def test_move_held_object_preserves_ordered_object_waypoints() -> None:
+    generator = _motion_generator()
+    dt = torch.full((NUM_ENVS, 4), CONTROL_DT)
+    dt[:, 0] = 0.0
+    generator.generate = Mock(
+        return_value=PlanResult(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            positions=torch.zeros(NUM_ENVS, 4, ARM_DOF),
+            dt=dt,
+        )
+    )
+    action = _bind_action(generator, MoveHeldObject())
+    held = _held()
+    held.object_to_eef[:, 0, 3] = torch.tensor([0.03, 0.06])
+    grasp_before = held.object_to_eef.clone()
+    task = TaskState(batch_size=NUM_ENVS, device="cpu", held_objects={"arm": held})
+    targets = torch.eye(4).repeat(NUM_ENVS, 2, 1, 1)
+    targets[:, 0, 2, 3] = 1.3
+    targets[:, 1, 2, 3] = 1.3
+    targets[:, 1, :3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    before = targets.clone()
+
+    plan = _plan_action(
+        action, _invocation(action, HeldObjectPoseGoal(targets)), _context(task)
+    )
+
+    states = generator.generate.call_args.args[0]
+    assert len(states) == 2
+    for index, state in enumerate(states):
+        torch.testing.assert_close(state.xpos, targets[:, index] @ grasp_before)
+    assert plan.expected_effects.is_empty
+    torch.testing.assert_close(held.object_to_eef, grasp_before)
+    torch.testing.assert_close(targets, before)
+    assert (_joint_trajectory(plan).positions[..., ARM_DOF:] == 1).all()
+
+
+@pytest.mark.parametrize("shape", [(NUM_ENVS, 0, 4, 4), (NUM_ENVS + 1, 2, 4, 4)])
+def test_move_held_object_rejects_invalid_waypoint_batch(shape) -> None:
+    generator = _motion_generator()
+    generator.generate = Mock()
+    action = _bind_action(generator, MoveHeldObject())
+    task = TaskState(batch_size=NUM_ENVS, device="cpu", held_objects={"arm": _held()})
+
+    with pytest.raises(ValueError, match="waypoint"):
+        _plan_action(
+            action,
+            _invocation(action, HeldObjectPoseGoal(torch.zeros(shape))),
+            _context(task),
+        )
+    generator.generate.assert_not_called()
+
+
+def test_move_held_object_yaw_freedom_retains_successful_rows() -> None:
+    generator = _motion_generator()
+    first = PlanResult(
+        success=torch.tensor([True, False]),
+        positions=torch.full((NUM_ENVS, 3, ARM_DOF), 0.1),
+        dt=torch.tensor([[0.0, CONTROL_DT, CONTROL_DT]]).repeat(NUM_ENVS, 1),
+    )
+    second = PlanResult(
+        success=torch.tensor([False, True]),
+        positions=torch.full((NUM_ENVS, 5, ARM_DOF), 0.2),
+        dt=torch.tensor([[0.0, CONTROL_DT, CONTROL_DT, CONTROL_DT, CONTROL_DT]]).repeat(
+            NUM_ENVS, 1
+        ),
+    )
+    generator.generate = Mock(side_effect=[first, second])
+    action = _bind_action(generator, MoveHeldObject())
+    held = _held()
+    held.object_to_eef[:, 0, 3] = 0.03
+    held.object_to_eef[:, :3, :3] = torch.tensor(
+        [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]
+    )
+    grasp_before = held.object_to_eef.clone()
+    task = TaskState(batch_size=NUM_ENVS, device="cpu", held_objects={"arm": held})
+    target = torch.eye(4).repeat(NUM_ENVS, 2, 1, 1)
+    target[:, :, :3, 3] = torch.tensor([0.1, 0.2, 1.3])
+    before = target.clone()
+
+    plan = _plan_action(
+        action,
+        _invocation(action, HeldObjectPoseGoal(target, world_yaw_free=True)),
+        _context(task),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    assert generator.generate.call_count == 2
+    candidates = generator.generate.call_args.args[0]
+    torch.testing.assert_close(candidates[0].xpos, before[:, 0] @ grasp_before)
+    selected_object_pose = candidates[-1].xpos @ torch.linalg.inv(grasp_before)
+    torch.testing.assert_close(selected_object_pose[:, :3, 3], before[:, -1, :3, 3])
+    torch.testing.assert_close(selected_object_pose[:, :3, 2], before[:, -1, :3, 2])
+    assert not torch.allclose(selected_object_pose[:, :3, :3], before[:, -1, :3, :3])
+    trajectory = _joint_trajectory(plan)
+    torch.testing.assert_close(
+        trajectory.positions[0, :, :ARM_DOF],
+        torch.full_like(trajectory.positions[0, :, :ARM_DOF], 0.1),
+    )
+    torch.testing.assert_close(
+        trajectory.positions[1, :, :ARM_DOF],
+        torch.full_like(trajectory.positions[1, :, :ARM_DOF], 0.2),
+    )
+    assert plan.expected_effects.is_empty
+    torch.testing.assert_close(target, before)
+    torch.testing.assert_close(held.object_to_eef, grasp_before)
+
+
+@pytest.mark.parametrize("free_yaw, attempts", [(False, 1), (True, 8)])
+def test_move_held_object_yaw_search_fails_closed(
+    free_yaw: bool, attempts: int
+) -> None:
+    generator = _motion_generator()
+    generator.generate = Mock(
+        return_value=PlanResult(
+            success=torch.zeros(NUM_ENVS, dtype=torch.bool),
+            positions=torch.zeros(NUM_ENVS, 3, ARM_DOF),
+            dt=torch.tensor([[0.0, CONTROL_DT, CONTROL_DT]]).repeat(NUM_ENVS, 1),
+        )
+    )
+    action = _bind_action(generator, MoveHeldObject())
+    task = TaskState(batch_size=NUM_ENVS, device="cpu", held_objects={"arm": _held()})
+    plan = _plan_action(
+        action,
+        _invocation(action, HeldObjectPoseGoal(torch.eye(4), world_yaw_free=free_yaw)),
+        _context(task),
+    )
+    assert not plan.plan_success.any()
+    assert generator.generate.call_count == attempts
+    assert plan.expected_effects.is_empty
+
+
+def test_move_held_object_yaw_search_accepts_failed_plans_without_positions() -> None:
+    generator = _motion_generator()
+    generator.generate = Mock(
+        return_value=PlanResult(success=torch.zeros(NUM_ENVS, dtype=torch.bool))
+    )
+    action = _bind_action(generator, MoveHeldObject())
+    task = TaskState(batch_size=NUM_ENVS, device="cpu", held_objects={"arm": _held()})
+    plan = _plan_action(
+        action,
+        _invocation(action, HeldObjectPoseGoal(torch.eye(4), world_yaw_free=True)),
+        _context(task),
+    )
+    assert not plan.plan_success.any()
+    assert generator.generate.call_count == 8
+
+
+@pytest.mark.parametrize("value", [1, "true", None])
+def test_move_held_object_yaw_freedom_requires_boolean(value) -> None:
+    with pytest.raises(TypeError, match="boolean"):
+        HeldObjectPoseGoal(torch.eye(4), world_yaw_free=value)
+
+
 def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
     generator = _motion_generator()
     solved_poses: list[torch.Tensor] = []
@@ -3048,6 +3203,10 @@ def test_slide_joint_target_uses_fresh_row_local_motion(
     plan = _plan_action(action, invocation, _context(scene=scene))
     assert plan.plan_success.tolist() == [True, True]
     assert direction in [s.name for s in plan.segments]
+    assert plan.diagnostics.metadata["joint_target"]["position"] == target_position
+    assert (
+        plan.diagnostics.metadata["affordance_sample"]["grasp"]["key"] == "slide:grasp"
+    )
     lengths = Slide._motion_segment_lengths(24, 3, direction=direction)
     poses = [c.kwargs["pose"] for c in generator.robot.compute_ik.call_args_list]
     endpoint = poses[lengths[1] + lengths[2] - 2]
@@ -4497,9 +4656,10 @@ def test_handover_can_end_with_receiving_resource_holding_object(
     object_pose[:, :3, 3] = torch.tensor([-0.8, 0.1, 0.5])
 
     action._resolve_grasp = Mock(
-        side_effect=lambda _affordance, sampled_pose, *_args, **_kwargs: (
-            sampled_pose.clone(),
-            torch.ones(NUM_ENVS, dtype=torch.bool),
+        side_effect=lambda _affordance, sampled_pose, *_args, **kwargs: AffordanceSample(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            poses=sampled_pose.clone(),
+            metadata={"key": kwargs["sample_key"]},
         )
     )
 
@@ -4588,9 +4748,10 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
         held_objects={"left_arm": held},
     )
     action._resolve_grasp = Mock(
-        side_effect=lambda _affordance, sampled_pose, *_args, **_kwargs: (
-            sampled_pose.clone(),
-            torch.ones(NUM_ENVS, dtype=torch.bool),
+        side_effect=lambda _affordance, sampled_pose, *_args, **kwargs: AffordanceSample(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            poses=sampled_pose.clone(),
+            metadata={"key": kwargs["sample_key"]},
         )
     )
     planned_targets: list[torch.Tensor] = []
@@ -4665,7 +4826,10 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
     ]
 
 
-def test_handover_center_grasp_rejects_lower_cost_outer_candidates() -> None:
+@pytest.mark.parametrize("sampling_enabled", [False, True])
+def test_handover_center_grasp_rejects_lower_cost_outer_candidates(
+    sampling_enabled: bool,
+) -> None:
     """Center mode selects the object's middle third, not either end."""
     action = _bind_action(_dual_motion_generator(), HandOver())
     vertices = torch.tensor(
@@ -4688,7 +4852,13 @@ def test_handover_center_grasp_rejects_lower_cost_outer_candidates() -> None:
         return_value=[(candidates, costs) for _ in range(NUM_ENVS)]
     )
 
-    poses, success = action._resolve_grasp(
+    context = _handover_context(torch.eye(4).repeat(NUM_ENVS, 1, 1))
+    if sampling_enabled:
+        context = replace(
+            context,
+            affordance_sampling=AffordanceSamplingContext(count=NUM_ENVS, seed=7),
+        )
+    sample = action._resolve_grasp(
         affordance,
         torch.eye(4).repeat(NUM_ENVS, 1, 1),
         torch.tensor([[1.0, 0.0, -1.0]]).expand(NUM_ENVS, -1),
@@ -4696,10 +4866,14 @@ def test_handover_center_grasp_rejects_lower_cost_outer_candidates() -> None:
         obj_longest_axis=None,
         is_positive_part=torch.ones(NUM_ENVS, dtype=torch.bool),
         center_axis=torch.tensor([[0.0, 0.0, 1.0]]).expand(NUM_ENVS, -1),
+        context=context,
+        sample_key="handover:center_grasp",
     )
 
-    assert success.tolist() == [True, True]
-    torch.testing.assert_close(poses[:, 2, 3], torch.zeros(NUM_ENVS))
+    assert sample.success.tolist() == [True, True]
+    torch.testing.assert_close(sample.poses[:, 2, 3], torch.zeros(NUM_ENVS))
+    assert sample.metadata["candidate_ids"] == [1, 1]
+    assert sample.metadata["valid_candidate_counts"] == [1, 1]
 
 
 def test_handover_horizontal_mode_uses_downward_opposite_end_grasps() -> None:
