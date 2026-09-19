@@ -1,148 +1,81 @@
-# Solver tuning, seeds and null-space tasks
+# Solver state and adaptation contracts
 
-Read this when the request needs these details. [Topic overview](ik-solvers.md).
+Read when changing solver state across calls, frame adaptation or candidate
+selection. Entry points and validation are in the [IK overview](ik-solvers.md).
+Parameter defaults and numerical algorithms remain in concrete solver modules
+and their tests, not in this page.
 
-### Iterative solver common params
+## Analytical buffers and selection
 
-`PytorchSolverCfg`, `PinocchioSolverCfg`, `PinkSolverCfg`, and
-`DifferentialSolverCfg` share these fields:
+UR all-solutions and OPW use `solvers/_buffers.py`. `prepare_buffers(max_batch)`
+reserves high-water capacity; allocation is lazy and grows for larger requests.
+Public outputs remain independent of later calls, including all-solutions
+outputs. A lock and CUDA events serialize reuse, Warp runs on the current Torch
+stream, and storage dies with the solver. OPW packs current joint limits on each
+call, so limit updates must not require buffer invalidation.
 
-| Field | Default | Purpose |
-|---|---|---|
-| `pos_eps` | `5e-4` | Position convergence tolerance |
-| `rot_eps` | `5e-4` | Rotation convergence tolerance |
-| `max_iterations` | 500–1000 | Iteration cap |
-| `dt` | `0.1` | Numerical integration step |
-| `damp` | `1e-6` | Damping for numerical stability |
-| `is_only_position_constraint` | `False` | Ignore orientation in IK |
-| `num_samples` | 5–30 | Random seeds per solve |
+UR nearest-solution dispatch uses `ur_ik_nearest_kernel` without a full-batch
+candidate tensor. Numerically ambiguous distances fall back to bounded chunks
+using legacy Torch ranking, preserving candidate order and rounding at branch
+bisectors. The ambiguity threshold selects the fallback; it must not decide a
+tie. The all-solutions path preserves the full ordered periodic candidates,
+including repeated representatives when no shifted value fits the limits.
+Kernel formulas/counts and fallback chunk limits are source-owned in
+`ur_solver.py` and `compute/kinematics/_warp/ur.py`.
 
-### DifferentialSolver-specific
+SRS CPU and Warp paths must agree on reference frames, periodic representatives
+and seed-dependent singularity handling. Runtime TCP and nearest-weight updates
+synchronize both caches. Shape-reused scratch and all-solution deduplication
+must preserve ordering without introducing quadratic GPU storage. Inspect
+`srs_solver.py` and `compute/kinematics/_warp/srs.py` together for changes; use
+`tests/sim/motion/solvers/test_srs_solver.py` for parity and singularity cases.
+OPW continuous-path selection is the typed capability described in the overview,
+not an untyped special case in Robot.
 
-- `ik_method`: `"pinv"`, `"svd"`, `"trans"`, `"dls"` — Jacobian inversion strategy.
-- `ik_params`: auto-populated defaults per method (e.g., `k_val`, `lambda_val`).
-- `command_type`: `"position"` or `"pose"`.
-- `use_relative_mode`: delta commands relative to current pose.
+## Pink frame and limit adaptation
 
-### PinkSolver-specific
+`pink_solver.py` accepts exactly one targeted variable `FrameTask` for its
+single-pose IK API; additional fixed frame constraints belong in
+`fixed_input_tasks`. Targets are TCP poses relative to `root_link_name`, even
+when that root is offset from the URDF root. Remove TCP before setting the Pink
+frame target and preserve the root transform in reduced-model adaptation.
 
-- `variable_input_tasks` contains exactly one `pink.tasks.FrameTask` targeted
-  by the single-pose IK API and may include other task types. Additional fixed
-  frame constraints belong in `fixed_input_tasks`.
-- `mesh_path`: path for Pinocchio URDF mesh loading.
-- `show_ik_warnings` / `fail_on_joint_limit_violation`: error-handling behaviour.
-- Supports single-pose and sequential batch IK while preserving one seed per
-  target and returning a consistent `(N,)`, `(N, 1, dof)` result contract.
-- End-effector targets are interpreted as TCP poses; the configured TCP is
-  removed before setting the controlled Pink frame target. Targets remain
-  relative to `root_link_name` even when that link is offset from the URDF root.
-- Convergence is checked against the single targeted variable FrameTask. Maximum-iteration,
-  stagnation, and solver-exception exits report failure and preserve the
-  corresponding input seed.
-- Adaptive controls (`stagnation_tolerance`, `stagnation_iterations`,
-  `max_backtracks`, `damping_growth`, `damping_decay`, and `max_damping`)
-  use a lexicographic merit that prioritizes FrameTask progress and considers
-  only controllable projected null-space posture error as a secondary term.
-  They increase regularization and terminate stalled solves early.
-- Effective limits intersect URDF, user-configured, and runtime robot limits,
-  then synchronize the result into the reduced Pinocchio model in Pink order.
+Convergence is measured against that targeted frame. Stagnation, iteration-limit
+and solver-exception exits report failure while preserving the input seed for
+the corresponding target. Multi-target calls preserve per-target seeds and the
+`(N,)`, `(N, 1, dof)` result contract.
 
-### SRSSolver-specific
+Effective limits intersect URDF, user and runtime robot limits before mapping
+into reduced Pinocchio joint order. Backtracking prioritizes FrameTask progress;
+only controllable projected posture error is a secondary merit. Keep this
+ordering when changing convergence or regularization controls.
 
-- `dh_params`, `link_lengths`, `rotation_directions`, `T_b_ob`, `T_e_oe`: kinematic model params.
-- `sort_ik`: whether to rank solutions by distance to seed.
-- `search_mode`: `"seeded"` computes the seed's geometric shoulder-elbow-wrist
-  arm angle and searches redundancy angles radially around it; if the configured
-  radial step cannot produce `num_samples` distinct angles in one revolution,
-  the incomplete radial prefix is replaced by a complete seed-centered uniform
-  full-circle grid. `"full"` samples the complete `[-pi, pi)` interval directly.
-- `redundancy_step`: angular increment used by seed-centered search.
-- Requesting all solutions always uses full-space redundancy sampling.
-- CPU and CUDA derive the reference plane in the base frame and use the same
-  signed arm-angle, shoulder-azimuth degeneracy rule, and periodic
-  nearest-solution formulas. Shoulder azimuth is set to zero only when the
-  shoulder-to-wrist projection onto the XY plane is near zero.
-- At shoulder or wrist Euler singularities, both analytical backends preserve
-  the seed's free coupled joint and solve the remaining coupled angle, avoiding
-  arbitrary equivalent-angle jumps near singular configurations.
-- Candidate revolute angles are shifted by integer multiples of `2*pi` into
-  the configured joint limits, choosing the representation nearest the seed.
-- Runtime `set_tcp()` and `set_ik_nearest_weight()` calls synchronize the CPU
-  and Warp analytical-backend caches immediately.
-- CPU target/reference-plane geometry is precomputed per target and elbow
-  branch. CUDA derives target/config/angle indices directly from the Warp
-  thread id, and all-solution sorting uses device-side tensor sorting rather
-  than a serial quadratic Warp sort.
-- Warp arm-angle and IK scratch arrays are reused by shape within a solver
-  instance to avoid repeated device allocations during steady-state calls.
-- Periodic-equivalent all-solutions candidates are greedily deduplicated
-  against retained representatives on CPU before indexing the original device
-  tensor, preserving order without allocating quadratic GPU scratch space.
-- Requires `num_envs` in `init_solver()`.
+`NullSpacePostureTask` computes manifold error in tangent space (`nv`), excludes
+floating-base coordinates, and treats an empty joint selection as all actuated
+joints. Pink initializes the task from either task list and updates its target
+through `update_null_space_joint_targets()` in simulator joint order. Do not
+substitute configuration-space subtraction or let posture improvement override
+failure to progress on the controlled frame.
 
-Focused performance and accuracy validation is available at
-`scripts/benchmark/robotics/kinematic_solver/srs_solver.py`; it compares CPU
-and available CUDA backends in seeded and full redundancy-search modes.
+## Seeds and cached retrieval
 
-### OPWSolver-specific
+`BaseSolver.get_default_qpos_seed()` returns the joint-range midpoint. Seedless
+Pinocchio calls reset to that default instead of retaining the preceding call's
+seed; Pink uses its own limit-projected neutral configuration. Inspect the
+concrete seedless path rather than assuming zero is legal for every robot.
 
-- `a1, a2, b, c1–c4, offsets, flip_axes, has_parallelogram`: OPW kinematic parameters.
-- `safe_margin`: joint-limit safety margin in radians.
+`QposSeedSampler` preserves the caller seed as the first multi-start sample;
+remaining slots sample within limits. Target repetition must use the same
+expanded batch ordering.
 
----
+`QposSeedSelSampler` is an opt-in Pytorch multi-start extension. Its lazy Sobol FK
+database stores flange poses, so retrieval receives the TCP-stripped target and
+`set_tcp()` does not invalidate the database. Joint-limit changes do trigger a
+rebuild. Without a target it falls back to ordinary random sampling. Optional
+Jacobian ranking consumes the same pose/joint ordering. Analytical solvers do
+not use this database; they still use seeds for their own branch selection.
 
-## Seed Sampling and Null-Space Tasks
-
-### Default seed (`BaseSolver.get_default_qpos_seed`)
-
-When `get_ik` receives no seed, every solver falls back to the joint-range
-midpoint from `BaseSolver.get_default_qpos_seed()` — never a zero
-configuration, which violates the limits of some robots (Franka FR3 joints 4
-and 6) and biases nearest-solution selection toward the bounds. Pinocchio
-resets its internal `init_qpos` to this default on seedless calls instead of
-reusing the previous call's seed; UR accepts a missing seed instead of
-crashing. Pink keeps its own limit-projected neutral configuration.
-
-### `QposSeedSampler` (`qpos_seed_sampler.py`)
-
-Used by iterative solvers (e.g., `PytorchSolver`) to generate joint-seed
-batches for IK multi-start:
-
-- `__init__(num_samples, dof, device)`
-- `sample(qpos_seed, lower_limits, upper_limits, batch_size) → Tensor[batch*num_samples, dof]`
-  - First sample = provided seed; remaining are uniform-random within limits.
-- `repeat_target_xpos(target_xpos, num_samples)` — repeats target poses to match expanded seed batch.
-
-### `QposSeedSelSampler` (`qpos_seed_sel_sampler.py`)
-
-Database-driven drop-in extension of `QposSeedSampler` (SELIK-style retrieval).
-Slots after the caller seed come from a lazily built Sobol FK database: pose-space
-kNN (position + Frobenius rotation, `rot_scale` metres/radian) re-ranked by the
-predicted joint step `||J⁺·Δpose||` when a Jacobian provider is configured.
-
-- Opt-in through `PytorchSolverCfg.enable_seed_selection` with `seed_db_size`
-  and `seed_rot_scale`; default off preserves shipped behaviour exactly.
-- The database stores flange poses (no TCP), so runtime `set_tcp()` never
-  invalidates it; `get_ik` queries with its TCP-stripped target.
-- Joint-limit changes trigger an automatic rebuild; `sample()` without a
-  `target_xpos` falls back to the parent's uniform-random behaviour.
-- Cost: build ~11 ms / 6 MB at 20k entries on GPU (one-time, lazy); query
-  adds <1 ms per `get_ik` call (~0.2% of a solve).
-- Analytic solvers (SRS/OPW/UR) do not consume seeds and are unaffected.
-
-### `NullSpacePostureTask` (`null_space_posture_task.py`)
-
-A `pink.tasks.Task` subclass for posture control in the null space of
-higher-priority tasks.
-
-- Error: a Pinocchio manifold difference masked in tangent space (`nv`), with
-  an empty joint selection meaning all actuated joints while floating-base
-  coordinates are always excluded.
-- Jacobian: null-space projector `N(q) = I − J_primary⁺ · J_primary`.
-- Add it to either `variable_input_tasks` or `fixed_input_tasks`; PinkSolver
-  initializes it, includes it in QP solving, and uses its controllable projected
-  error only as a secondary backtracking merit behind FrameTask progress. It
-  updates its simulator-ordered target through
-  `update_null_space_joint_targets()`.
-
----
+Validate retrieval with `test_qpos_seed_sel_sampler.py`, seedless behavior with
+`test_default_qpos_seed.py`, and Pink adaptation with `test_pink_solver.py`, all
+under `tests/sim/motion/solvers/`. Keep measured performance figures in benchmark
+results rather than treating one machine's timing as a solver contract.

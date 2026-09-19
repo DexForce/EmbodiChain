@@ -39,7 +39,7 @@ functors), :class:`ActionManager` (``process_actions(actions)``), and
       DatasetFunctorCfg
       Functor
       ManagerBase
-      EventManager
+      ~event_manager.EventManager
       ObservationManager
       RewardManager
       ActionManager

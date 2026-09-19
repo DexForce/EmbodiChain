@@ -64,9 +64,9 @@ class MassPropertiesCfg:
     Supply either three positive principal moments or a symmetric,
     positive-definite 3-by-3 tensor in the body frame.  Explicit inertia is
     accepted only together with a positive :attr:`mass`.  For one definition
-    shared by both backends, prefer principal moments plus
-    :attr:`com_quaternion`; the current Default adapter consumes the principal-
-    moment representation, while Newton can retain a full tensor.
+    shared by both backends, either representation is supported. Principal
+    moments plus :attr:`com_quaternion` are converted to a body-frame matrix
+    before entering DexSim.
     """
 
     recompute_inertia: bool | None = None
@@ -87,8 +87,10 @@ class MassPropertiesCfg:
     com_quaternion: Sequence[float] | np.ndarray | None = None
     """Orientation of the center-of-mass/inertia frame in ``xyzw`` order.
 
-    Spawn normalizes the quaternion and converts it to the backend descriptor's
-    ``wxyz`` convention.  A zero quaternion is invalid.
+    With three explicit principal moments, Spawn compiles ``R diag(I) R.T``
+    in body axes. With a full body-frame inertia matrix, the quaternion is
+    ignored with a warning. Without explicit inertia it is rejected. A zero
+    quaternion is invalid.
     """
 
 

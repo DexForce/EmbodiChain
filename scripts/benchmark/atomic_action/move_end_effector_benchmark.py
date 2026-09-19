@@ -60,6 +60,7 @@ POSE_CASES = {
 }
 DEFAULT_POSE_CASES = tuple(POSE_CASES.keys())
 MOVE_SAMPLE_INTERVAL = 80
+# Endpoint accuracy of the planned trajectory against the commanded pose.
 SUCCESS_TOLERANCE_M = 0.01
 
 
@@ -142,7 +143,8 @@ def _run_case(
                     binding=binding,
                     motion_policy=MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
                 ),
-            )
+            ),
+            atomic_engine.initial_context(control_dt=sim.sim_config.physics_dt),
         )
     )
     is_success = bool(result.plan_success.all().item())
@@ -321,7 +323,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    from scripts.tutorials.atomic_action.tutorial_utils import run_tutorial
+
+    run_tutorial(main)
 
 
 __all__ = ["add_benchmark_args", "run_all_benchmarks"]

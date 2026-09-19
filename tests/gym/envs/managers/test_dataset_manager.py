@@ -188,15 +188,24 @@ def test_finalize_aggregates_errors_and_attempts_every_functor() -> None:
     third.finalize.assert_called_once_with()
 
 
-def test_initialize_episode_limits_successes_to_reset_envs() -> None:
+@pytest.mark.parametrize("action_manager_state", ["missing", "disabled", "configured"])
+def test_initialize_episode_limits_successes_to_reset_envs(
+    action_manager_state: str,
+) -> None:
     env, manager = make_env_for_episode_selection(
         save_failed_episodes=False,
         successful_env_ids=[0, 1],
     )
+    if action_manager_state == "disabled":
+        env.action_manager = None
+    elif action_manager_state == "configured":
+        env.action_manager = SimpleNamespace(reset=MagicMock())
 
     EmbodiedEnv._initialize_episode(env, env_ids=[1, 2])
 
     assert torch.equal(manager.saved_env_ids, torch.tensor([1]))
+    if action_manager_state == "configured":
+        env.action_manager.reset.assert_called_once_with(env_ids=[1, 2])
 
 
 def test_initialize_episode_saves_failed_reset_envs_when_enabled() -> None:
@@ -248,6 +257,7 @@ def test_initialize_episode_commits_only_explicit_vector_rows() -> None:
     env.cfg.events = object()
     env.event_manager = SimpleNamespace(
         _mode_functor_cfgs={"interval": [SimpleNamespace(func=recorder)]},
+        reset=MagicMock(),
         available_modes=[],
     )
     env._traj_buffer = object()
@@ -315,6 +325,7 @@ def test_discard_reset_clears_camera_frames_without_saving() -> None:
     env.cfg.events = object()
     env.event_manager = SimpleNamespace(
         _mode_functor_cfgs={"interval": [SimpleNamespace(func=recorder)]},
+        reset=MagicMock(),
         available_modes=[],
     )
 

@@ -23,7 +23,8 @@ differentiable dynamics are outside the current public contract.
 Usage:
 
     class MyTask(DifferentiableEnv):
-        def _apply_action_kernel(self, action_wp, tape): ...
+        def _functional_state_tensors(self): ...
+        def _apply_action_kernel(self, action_wp, *state_wps, tape): ...
         def _make_kinematic_step_fn(self): ...
         def _read_outputs(self, final_state) -> dict: ...
 """
@@ -79,15 +80,37 @@ class DifferentiableEnv(EmbodiedEnv):
 
     # -- subclass contract ------------------------------------------------ #
 
-    def _apply_action_kernel(self, action_wp: Any, tape: Any) -> None:
+    def _functional_state_tensors(self) -> tuple[torch.Tensor, ...]:
+        """Return recurrent state tensors forwarded through autograd.
+
+        The default environment has no functional state. Subclasses that keep
+        differentiable state between steps return it here in the same order as
+        the Warp arrays accepted by :meth:`_apply_action_kernel`. Their output
+        hook must expose each next-state tensor through ``_order`` and
+        ``_grad_track`` before retaining that same tensor for the next step.
+
+        Returns:
+            Functional state tensors for the current control step.
+        """
+        return ()
+
+    def _apply_action_kernel(
+        self,
+        action_wp: Any,
+        *state_wps: Any,
+        tape: Any,
+    ) -> None:
         """Write an action for the task-defined kinematics callback.
 
-        The hook receives no solver control because :class:`DifferentiableEnv`
-        never advances Newton dynamics.
+        Functional state arrays follow ``action_wp`` and ``tape`` is always
+        keyword-only, so state cannot collide with the tape argument. The hook
+        receives no solver control because :class:`DifferentiableEnv` never
+        advances Newton dynamics.
         """
+        del state_wps
         raise NotImplementedError(
             "DifferentiableEnv subclasses must implement "
-            "_apply_action_kernel(action_wp, tape)."
+            "_apply_action_kernel(action_wp, *state_wps, tape=tape)."
         )
 
     def _read_outputs(self, final_state: Any) -> dict:
@@ -125,11 +148,19 @@ class DifferentiableEnv(EmbodiedEnv):
         """
         if not isinstance(action, torch.Tensor):
             action = torch.as_tensor(action, dtype=torch.float32)
+        functional_state = tuple(self._functional_state_tensors())
         retains_tape_for_backward = bool(
-            torch.is_grad_enabled() and action.requires_grad
+            torch.is_grad_enabled()
+            and (
+                action.requires_grad
+                or any(
+                    bool(getattr(state, "requires_grad", False))
+                    for state in functional_state
+                )
+            )
         )
         sim_state = self._build_sim_state_dict(action)
-        outputs = NewtonStepFunc.apply(action, sim_state)
+        outputs = NewtonStepFunc.apply(action, sim_state, *functional_state)
         obs, reward, terminated, truncated = outputs[:4]
         info = sim_state["last_info"]
 
@@ -163,7 +194,7 @@ class DifferentiableEnv(EmbodiedEnv):
         """Adapt the task action hook to :class:`NewtonStepFunc`."""
         env = self
 
-        def _inner(action_wp: Any, tape: Any, *_: Any) -> None:
-            env._apply_action_kernel(action_wp, tape=tape)
+        def _inner(action_wp: Any, tape: Any, *state_wps: Any) -> None:
+            env._apply_action_kernel(action_wp, *state_wps, tape=tape)
 
         return _inner

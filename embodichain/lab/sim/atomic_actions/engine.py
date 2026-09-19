@@ -23,6 +23,7 @@ from typing import Iterable, Mapping, TYPE_CHECKING
 
 import torch
 
+from .affordance_sampling import AffordanceSamplingContext
 from .bindings import ActionBinding
 from .core import AtomicAction, SkillDescriptor
 from .control import ActionControlOverrides, ControlPartCommandProfile
@@ -404,6 +405,7 @@ class AtomicActionEngine:
         scene: SceneSnapshot | None = None,
         timestamp: float = 0.0,
         control_dt: float | None = None,
+        affordance_sampling: AffordanceSamplingContext | None = None,
     ) -> PlanningContext:
         """Capture the robot state needed to start offline compilation.
 
@@ -414,6 +416,7 @@ class AtomicActionEngine:
                 are absent.
             timestamp: Timestamp assigned to the captured robot observation.
             control_dt: Explicit command period for action-owned interpolation.
+            affordance_sampling: Optional reproducible Affordance sampling stream.
 
         Returns:
             Planning context containing owned robot tensors.
@@ -446,6 +449,7 @@ class AtomicActionEngine:
             scene=scene,
             env_ids=env_ids,
             control_dt=control_dt,
+            affordance_sampling=affordance_sampling,
         )
 
     def compile(

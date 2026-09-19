@@ -13,17 +13,6 @@ The analytic formulation follows the
 and the DH parameters for each robot variant are taken from
 [`dh_parameters.hh`](https://github.com/Victorlouisdg/ur-analytic-ik/blob/main/src/ur_analytic_ik/dh_parameters.hh).
 
-## Key Features
-
-* Analytical, closed-form IK for the full UR series (UR3/UR3e/UR5/UR5e/UR10/UR10e)
-* DH parameters auto-populated from the selected `ur_type`, sourced from `ur-analytic-ik`
-* Batched GPU computation via a Warp kernel for many target poses at once
-* Up to 8 base analytical solutions, expanded to 512 FK-equivalent candidates per pose through per-joint `±2π` shifts
-* Strict enforcement of joint limits; invalid candidates are flagged and filtered out
-* Forward-kinematics (FK) error check that validates each candidate against the target pose
-* Tool Center Point (TCP) support via `set_tcp`
-* Flexible configuration via `URSolverCfg`
-
 ## DH Parameters
 
 The UR kinematic chain is described with the standard DH convention:
@@ -68,114 +57,34 @@ cfg = URSolverCfg(
 solver = cfg.init_solver(device="cuda")
 ```
 
-.. tip::
-    ``ur_type`` is the only parameter that usually needs to be set. The
-    ``__post_init__`` hook raises ``ValueError`` for any unrecognized value, so
-    an invalid robot variant fails fast at configuration time.
+`ur_type` selects the robot variant; an unrecognized value raises `ValueError`
+at configuration time.
 
-## Main Methods
+## Solution selection
 
-* `get_fk(self, qpos: torch.Tensor) -> torch.Tensor`
-  Computes the end-effector pose (homogeneous transformation matrix) for the
-  given joint positions. Inherited from `BaseSolver` and computed from the URDF
-  kinematic chain, with the TCP applied.
+See {ref}`shared FK/IK conventions <motion-solver-conventions>` for the
+common call pattern. UR IK produces eight analytical branches and expands
+joint-period shifts into 512 candidates per pose. Each candidate must satisfy
+joint limits and an FK check against the target.
 
-  **Parameters:**
-  + `qpos` (`torch.Tensor` or `list[float]`): Joint positions, shape `(num_envs, num_joints)` or `(num_joints,)`.
-
-  **Returns:**
-  + `torch.Tensor`: End-effector pose(s), shape `(num_envs, 4, 4)`.
-
-  **Example:**
+| Mode | Validity shape | Joint solution shape |
+|---|---|---|
+| `return_all_solutions=False` | `(B,)` | `(B, 6)`; valid candidate closest to `qpos_seed`. |
+| `return_all_solutions=True` | `(B, 512)` | `(B, 512, 6)`; inspect validity before selecting. |
 
 ```python
-  fk = solver.get_fk(qpos=[0.0, -1.5708, 0.0, -1.5708, 0.0, 0.0])
-  print(fk)
-  # Output:
-  # tensor([[[ -1.0000,  -0.0000,   0.0000,   0.0000],
-  #          [ -0.0000,  -0.0000,  -1.0000,  -0.2561],
-  #          [  0.0000,  -1.0000,   0.0000,   1.4273],
-  #          [  0.0000,   0.0000,   0.0000,   1.0000]]], device='cuda:0')
+qpos_seed = torch.tensor(
+    [[0.0, -1.5708, 0.0, -1.5708, 0.0, 0.0]], device=solver.device
+)
+target_pose = solver.get_fk(qpos_seed)
+valid, ik_qpos = solver.get_ik(target_pose, qpos_seed=qpos_seed)
+valid_all, candidates = solver.get_ik(
+    target_pose, qpos_seed=qpos_seed, return_all_solutions=True
+)
 ```
 
-* `get_ik(self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor, return_all_solutions: bool = False, **kwargs) -> Tuple[torch.Tensor, torch.Tensor]`
-  Computes joint positions (inverse kinematics) for the given target
-  end-effector pose(s) using the closed-form UR solution evaluated in a Warp
-  kernel.
-
-  For each target pose the kernel first derives the 8 base analytical solutions
-  (combinations of the two `theta1` branches, the two `theta5` sign branches,
-  and the elbow-up/down `theta3` branch). Because UR joints are `2π`-periodic,
-  each base solution is then expanded into `2**6 = 64` per-joint `±2π` shift
-  variants that are FK-equivalent, yielding `8 * 64 = 512` candidate solutions.
-  A candidate is flagged valid only if its forward kinematics matches the target
-  pose *and* every joint lies within the configured joint limits.
-
-  When `return_all_solutions=False`, the valid candidate closest to `qpos_seed`
-  (by Euclidean distance in joint space) is returned for each target.
-
-  **Parameters:**
-  + `target_xpos` (`torch.Tensor`): Target end-effector pose(s), shape `(4, 4)` or `(num_envs, 4, 4)`.
-  + `qpos_seed` (`torch.Tensor`): Reference joint positions used to pick the closest solution, shape `(num_envs, num_joints)` or `(num_joints,)`.
-  + `return_all_solutions` (`bool`, optional): If `True`, returns all 512 candidates and their validity flags instead of the single closest solution. Default is `False`.
-  + `**kwargs`: Additional arguments for future extensions.
-
-  **Returns:**
-  + `Tuple[torch.Tensor, torch.Tensor]`:
-    - If `return_all_solutions=False`:
-      - First element: validity flag per environment, shape `(num_envs,)`.
-      - Second element: closest joint positions, shape `(num_envs, num_joints)`.
-    - If `return_all_solutions=True`:
-      - First element: validity flag per candidate, shape `(num_envs, 512)`.
-      - Second element: all candidate joint positions, shape `(num_envs, 512, num_joints)`.
-
-  **Example:**
-
-```python
-  import torch
-  # Reuse the FK pose above as the IK target.
-  xpos = torch.tensor([[[ -1.0000,  -0.0000,   0.0000,   0.0000],
-                        [ -0.0000,  -0.0000,  -1.0000,  -0.2561],
-                        [  0.0000,  -1.0000,   0.0000,   1.4273],
-                        [  0.0000,   0.0000,   0.0000,   1.0000]]],
-                      device=solver.device)
-  qpos_seed = torch.zeros((1, 6), device=solver.device)
-  valid, ik_qpos = solver.get_ik(target_xpos=xpos, qpos_seed=qpos_seed)
-  print("IK valid:", valid)
-  print("IK solution:", ik_qpos)
-  # IK valid: tensor([True], device='cuda:0')
-  # IK solution: tensor([[ 0.0004, -1.5704, -0.0007, -1.5705, -0.0004, -0.0000]],
-  #                     device='cuda:0')
-
-  # Return every candidate instead of just the closest one:
-  valid_all, all_solutions = solver.get_ik(
-      target_xpos=xpos, qpos_seed=qpos_seed, return_all_solutions=True
-  )
-  print(all_solutions.shape)   # torch.Size([1, 512, 6])
-```
-
-* `set_tcp(self, tcp: np.ndarray)`
-  Sets the Tool Center Point transform and precomputes its inverse so that IK
-  targets are mapped into the flange frame before solving.
-
-* `dh_matrix(theta_i, d_i, a_i, alpha_i) -> torch.Tensor` *(staticmethod)*
-  Computes a single 4×4 Denavit–Hartenberg transformation matrix from the
-  standard DH parameters `(theta, d, a, alpha)`. Useful for building custom FK
-  chains or debugging the kinematic model.
-
-## How It Works
-
-1. **DH model**: The robot is parameterized by `(d1, a2, a3, d4, d5, d6)` and
-   the fixed twists `alpha ∈ {+π/2, 0, -π/2}` (see the table above).
-2. **Analytic solve**: For a target pose, `theta1` has two branches; for each,
-   `theta5` (sign) and `theta6` are recovered, then `theta2/3/4` are solved in
-   closed form with an elbow-up/down split — yielding 8 base solutions.
-3. **Shift expansion**: Each base solution is expanded into 64 per-joint `±2π`
-   shift variants that preserve the end-effector pose, producing 512 candidates.
-4. **Validation**: A candidate is valid only if its forward kinematics matches
-   the target (translation ≤ 1e-2, rotation ≤ 1e-1) *and* all joints lie within
-   the joint limits. The Warp kernel runs one thread per target pose, so the
-   whole batch is evaluated in parallel on the GPU.
+`set_tcp()` updates the tool transform used by FK and IK. Use `dh_matrix()`
+when inspecting the model's individual DH transforms.
 
 ## References
 

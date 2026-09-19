@@ -191,7 +191,7 @@ def _prepare_held_state(
         make_pre_pick_eef_pose,
     )
 
-    hand_open, hand_close = get_hand_open_close_qpos(robot, sim.device)
+    hand_open, hand_close = get_hand_open_close_qpos(robot)
     pickup_args = _make_pickup_args(args, object_preset, profile)
     atomic_engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -790,7 +790,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    from scripts.tutorials.atomic_action.tutorial_utils import run_tutorial
+
+    run_tutorial(main)
 
 
 __all__ = ["add_benchmark_args", "run_all_benchmarks"]

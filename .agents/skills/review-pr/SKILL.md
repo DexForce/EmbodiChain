@@ -183,10 +183,12 @@ is insufficient. Keep these responsibilities distinct:
 - Use the matching `add-*` or `update-*` skill only after the user asks to fix
   a finding.
 
-Require public docs or agent-context updates only when the change makes those
-artifacts materially incomplete or incorrect. A behavior change covered by an
-`agent_context/MAP.yaml` topic must update its mapped context according to the
-project context update contract.
+Review affected public docs and mapped agent context; require edits only where
+guidance becomes inaccurate or materially incomplete. A matching path or a
+behavior change alone does not establish a documentation defect. Apply the
+context lifecycle's no-update/revise/add decision; accept a brief no-update
+reason when the existing guidance still suffices. When an update is needed,
+revise its owner and check for stale or duplicated consumer summaries.
 
 ## 4. Prove each candidate finding
 

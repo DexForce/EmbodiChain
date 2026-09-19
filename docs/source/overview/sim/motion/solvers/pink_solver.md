@@ -1,18 +1,8 @@
 # PinkSolver
 
-`PinkSolver` is an advanced inverse kinematics (IK) solver for robot manipulators, built on [Pinocchio](https://github.com/stack-of-tasks/pinocchio) and [Pink](https://github.com/stephane-caron/pink). It supports flexible task definitions, robust optimization, and null space posture control.
-
-## Key Features
-
-- Supports both position-only and full pose (position + orientation) constraints
-- Configurable convergence tolerance (`pos_eps`, `rot_eps`), damping, and iteration limits
-- Handles joint limits and safety checks during optimization
-- Allows variable and fixed task definitions for flexible control (see `FrameTask`, `NullSpacePostureTask`)
-- Integrates with Pinocchio robot models and Pink task framework
-- Supports multiple solver backends: `osqp`, `clarabel`, `ecos`, `proxqp`, `scs`, `daqp`
-- Provides joint mapping between simulation and solver for flexible robot integration
-- Null space posture task for redundancy resolution and secondary objectives
-- Torch and numpy compatible for seamless integration in simulation pipelines
+`PinkSolver` uses [Pink](https://github.com/stephane-caron/pink) and
+[Pinocchio](https://github.com/stack-of-tasks/pinocchio) for task-based IK,
+including frame targets and null-space posture objectives.
 
 ## Configuration Example
 
@@ -28,7 +18,6 @@ posture_task = NullSpacePostureTask(
 
 cfg = PinkSolverCfg(
     urdf_path=get_data_path("UniversalRobots/UR5/UR5.urdf"),
-    joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
     end_link_name="ee_link",
     root_link_name="base_link",
     max_iterations=500,
@@ -48,57 +37,18 @@ solver.update_null_space_joint_targets([0.0] * 6)
 ```
 
 
-## Main Methods
+## Solver-specific behavior
 
-* `get_fk(self, qpos: torch.Tensor) -> torch.Tensor`  
-  Computes the end-effector pose (homogeneous transformation matrix) for the given joint positions.
+See {ref}`shared FK/IK conventions <motion-solver-conventions>` for the
+common call pattern and return order.
 
-  **Parameters:**
-  + `qpos` (`torch.Tensor` or `list[float]`): Joint positions, shape `(num_envs, num_joints)` or `(num_joints,)`.
+`get_ik()` returns success flags `(B,)` and joint solutions `(B, 1, DOF)`.
+Failed targets retain their seeds. `return_all_solutions=True` still returns
+one locally optimal solution per target. Seeds may be unbatched, broadcast
+from `(1, DOF)`, or supplied per target.
 
-  **Returns:**
-  + `torch.Tensor`: End-effector pose(s), shape `(num_envs, 4, 4)`.
-
-  **Example:**
-
-```python
-  fk = solver.get_fk(qpos=[0.0, 0.0, 0.0, 1.5708, 0.0, 0.0])
-  print(fk)
-  # Output:
-  # tensor([[[ 0.0,     -1.0,      0.0,     -0.722600],
-  #          [ 0.0,      0.0,     -1.0,     -0.191450],
-  #          [ 1.0,      0.0,      0.0,      0.079159],
-  #          [ 0.0,      0.0,      0.0,      1.0     ]]])
-```
-
-* `get_ik(self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor = None, return_all_solutions: bool = False) -> Tuple[torch.Tensor, torch.Tensor]`
-  Computes joint positions (inverse kinematics) for the given target end-effector pose.
-
-  **Parameters:**
-  + `target_xpos` (`torch.Tensor`): Target TCP pose(s), shape `(4, 4)` or `(num_envs, 4, 4)`.
-  + `qpos_seed` (`torch.Tensor`, optional): Initial guess(es) for joint positions, shape `(num_joints,)`, `(1, num_joints)` (broadcast), `(num_envs, num_joints)`, or `(num_envs, 1, num_joints)`. If `None`, a default is used.
-  + `return_all_solutions` (`bool`, optional): Accepted for solver-interface compatibility. Pink returns one locally optimal solution per target even when this is `True`. Default is `False`.
-
-  **Returns:**
-  + `Tuple[torch.Tensor, torch.Tensor]`:
-    - First element: Success flags, shape `(num_envs,)`.
-    - Second element: Joint solutions, shape `(num_envs, 1, num_joints)`.
-      Failed targets preserve their corresponding seeds.
-
-  **Example:**
-
-```python
-  import torch
-  xpos = torch.tensor([[[ 0.0,     -1.0,      0.0,     -0.722600],
-                        [ 0.0,      0.0,     -1.0,     -0.191450],
-                        [ 1.0,      0.0,      0.0,      0.079159],
-                        [ 0.0,      0.0,      0.0,      1.0     ]]])
-  qpos_seed = torch.zeros((1, 6))
-  success, qpos_sol = solver.get_ik(target_xpos=xpos)
-  print("Success:", success)
-  print("IK solution:", qpos_sol[:, 0])
-```
-
+Use `fixed_input_tasks` for posture objectives and
+`update_null_space_joint_targets()` to change their target posture.
 
 ## References
 

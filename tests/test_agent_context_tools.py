@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import importlib.util
 import subprocess
+from copy import deepcopy
 from pathlib import Path
 from types import ModuleType
 
 import yaml
+import pytest
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _HELPER_PATH = (
@@ -506,3 +508,202 @@ def test_affected_base_diffs_from_merge_base(tmp_path: Path, capsys) -> None:
 
     assert exit_code == 0
     assert capsys.readouterr().out.splitlines() == ["branch-change"]
+
+
+def _commit_context_fixture(root: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "tests@example.com"], cwd=root, check=True
+    )
+    subprocess.run(["git", "config", "user.name", "Tests"], cwd=root, check=True)
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "context fixture"], cwd=root, check=True)
+
+
+def test_affected_map_change_selects_only_changed_entries() -> None:
+    helper = _load_helper()
+    previous = {"topics": [_topic("changed"), _topic("unchanged")]}
+    current = deepcopy(previous)
+    current["topics"][0]["aliases"] = ["new alias"]
+
+    assert helper.affected_topics(
+        current, ["agent_context/MAP.yaml"], previous_data=previous
+    ) == ["changed"]
+
+
+def test_affected_map_additions_removals_and_old_source_scopes() -> None:
+    helper = _load_helper()
+    previous = {
+        "topics": [
+            _topic("moved", source_of_truth=["src/old.py"]),
+            _topic("removed"),
+            _topic("unchanged"),
+        ]
+    }
+    current = {
+        "topics": [
+            _topic("moved", source_of_truth=["src/new.py"]),
+            _topic("added"),
+            _topic("unchanged"),
+        ]
+    }
+
+    assert helper.affected_topics(
+        current, ["agent_context/MAP.yaml"], previous_data=previous
+    ) == ["moved", "added", "removed"]
+    assert helper.affected_topics(current, ["src/old.py"], previous_data=previous) == [
+        "moved"
+    ]
+
+
+def test_affected_ignores_map_formatting_and_topic_order() -> None:
+    helper = _load_helper()
+    previous = {"topics": [_topic("first"), _topic("second")]}
+    current = {"topics": list(reversed(previous["topics"]))}
+
+    assert (
+        helper.affected_topics(
+            current, ["agent_context/MAP.yaml"], previous_data=previous
+        )
+        == []
+    )
+
+
+def test_affected_global_defaults_still_select_all_active_topics() -> None:
+    helper = _load_helper()
+    previous = {
+        "version": 1,
+        "defaults": {"write_contexts": []},
+        "topics": [
+            _topic("first"),
+            _topic("second"),
+            _topic("old", status="deprecated"),
+        ],
+    }
+    current = deepcopy(previous)
+    current["defaults"]["write_contexts"] = ["conventions/new.md"]
+
+    assert helper.affected_topics(
+        current, ["agent_context/MAP.yaml"], previous_data=previous
+    ) == ["first", "second"]
+
+
+def test_affected_cli_explains_map_and_previous_source_matches(
+    tmp_path: Path, capsys
+) -> None:
+    helper = _load_helper()
+    root, data = _make_repository(
+        tmp_path, [_topic("moved", source_of_truth=["src/old.py"]), _topic("unchanged")]
+    )
+    _commit_context_fixture(root)
+    (root / "src/old.py").unlink()
+    data["topics"][0]["source_of_truth"] = ["src/new.py"]
+    (root / "src/new.py").write_text("# moved\n", encoding="utf-8")
+    (root / "agent_context/MAP.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    assert helper.main(["affected", "--base", "HEAD", "--explain"], root=root) == 0
+    output = capsys.readouterr().out
+    assert "moved" in output and "unchanged" not in output
+    assert "MAP entry" in output
+    assert "src/old.py" in output and "previous source_of_truth" in output
+    assert "src/new.py" in output and "source_of_truth" in output
+
+
+def test_affected_cli_explains_path_only_map_fallback(tmp_path: Path, capsys) -> None:
+    helper = _load_helper()
+    root, _ = _make_repository(tmp_path, [_topic("first"), _topic("second")])
+
+    assert (
+        helper.main(["affected", "agent_context/MAP.yaml", "--explain"], root=root) == 0
+    )
+    output = capsys.readouterr().out
+    assert "first" in output and "second" in output
+    assert "no baseline" in output and "--base" in output
+    assert output.count("no baseline") == 1
+
+
+def test_affected_base_ignores_comment_only_map_change(tmp_path: Path, capsys) -> None:
+    helper = _load_helper()
+    root, _ = _make_repository(tmp_path, [_topic("unchanged")])
+    _commit_context_fixture(root)
+    path = root / "agent_context/MAP.yaml"
+    path.write_text("# comment only\n" + path.read_text(), encoding="utf-8")
+
+    assert helper.main(["affected", "--base", "HEAD"], root=root) == 0
+    assert capsys.readouterr().out.strip() == "no affected topics"
+
+
+def test_affected_base_without_historical_map_is_conservative(
+    tmp_path: Path, capsys
+) -> None:
+    helper = _load_helper()
+    (tmp_path / "README.md").write_text("# Initial\n", encoding="utf-8")
+    _commit_context_fixture(tmp_path)
+    root, _ = _make_repository(tmp_path, [_topic("new")])
+
+    assert helper.main(["affected", "--base", "HEAD", "--explain"], root=root) == 0
+    output = capsys.readouterr().out
+    assert "new" in output and "no baseline" in output
+
+
+def test_stats_reports_overview_growth_and_total_detail_reduction(
+    tmp_path: Path, capsys
+) -> None:
+    helper = _load_helper()
+    root, _ = _make_repository(tmp_path, [_topic("sample")])
+    overview = root / "agent_context/topics/sample/overview.md"
+    overview.write_text("one two\n", encoding="utf-8")
+    detail = overview.with_name("details.md")
+    detail.write_text("three four five six\n", encoding="utf-8")
+    _commit_context_fixture(root)
+    overview.write_text("one two three\n", encoding="utf-8")
+    detail.unlink()
+
+    assert helper.main(["stats", "--base", "HEAD"], root=root) == 0
+    output = capsys.readouterr().out
+    assert "Whitespace words (not tokens)" in output
+    assert "3 (+1)" in output and "topics/sample/overview.md" in output
+    assert "Total Markdown words: 5 (-3)" in output
+
+
+def test_stats_warns_about_large_overview_without_failing(
+    tmp_path: Path, capsys
+) -> None:
+    helper = _load_helper()
+    root, _ = _make_repository(tmp_path, [_topic("sample")])
+    overview = root / "agent_context/topics/sample/overview.md"
+    overview.write_text("word " * 1300, encoding="utf-8")
+
+    assert helper.main(["stats"], root=root) == 0
+    output = capsys.readouterr().out
+    assert "REVIEW" in output and "topics/sample/overview.md" in output
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "needs_review"),
+    [(400, 500, False), (300, 399, False), (300, 400, True), (400, 501, True)],
+)
+def test_stats_growth_notice_requires_both_absolute_and_relative_growth(
+    tmp_path: Path, capsys, before: int, after: int, needs_review: bool
+) -> None:
+    helper = _load_helper()
+    root, _ = _make_repository(tmp_path, [_topic("sample")])
+    overview = root / "agent_context/topics/sample/overview.md"
+    overview.write_text("word " * before, encoding="utf-8")
+    _commit_context_fixture(root)
+    overview.write_text("word " * after, encoding="utf-8")
+
+    assert helper.main(["stats", "--base", "HEAD"], root=root) == 0
+    assert ("REVIEW" in capsys.readouterr().out) is needs_review
+
+
+@pytest.mark.parametrize("command", ["affected", "stats"])
+def test_baseline_commands_report_invalid_revision(
+    tmp_path: Path, capsys, command: str
+) -> None:
+    helper = _load_helper()
+    root, _ = _make_repository(tmp_path, [_topic("sample")])
+    _commit_context_fixture(root)
+
+    assert helper.main([command, "--base", "does-not-exist"], root=root) == 2
+    assert "failed to inspect Git" in capsys.readouterr().err

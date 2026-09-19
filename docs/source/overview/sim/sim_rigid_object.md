@@ -31,7 +31,13 @@ means that a source asset or the active backend keeps ownership of that value.
 | `collision_props` | `collision_enabled`, `contact_offset`, `rest_offset` |
 | `material_props` | `dynamic_friction`, `static_friction`, `restitution` |
 
-COM quaternions are always authored in `xyzw` order. Native engine attributes
+COM quaternions are authored in `xyzw` order. With three principal moments,
+EmbodiChain converts them to `R diag(I) R.T` before creating a DexSim descriptor.
+A full 3-by-3 inertia is already in body axes; supplying a quaternion with it
+emits a warning and leaves the matrix unchanged. A quaternion without explicit
+inertia is rejected. Both backends receive the same mat33 contract.
+
+Native engine attributes
 are an internal adapter detail. Backend-specific values use the concrete type in
 the corresponding property slot rather than a second backend block.
 

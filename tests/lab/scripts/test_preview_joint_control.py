@@ -27,20 +27,6 @@ from embodichain.lab.scripts.preview_joint_control import (
 from embodichain.lab.visualization import JointControlCommand
 
 
-class _Entity:
-    def __init__(self) -> None:
-        self.requested_joint_names: list[str] = []
-        self._joint_types = {
-            "hinge": SimpleNamespace(name="REVOLUTE"),
-            "mimic": SimpleNamespace(name="REVOLUTE"),
-            "slide": SimpleNamespace(name="PRISMATIC"),
-        }
-
-    def get_joint_info(self, joint_name: str) -> SimpleNamespace:
-        self.requested_joint_names.append(joint_name)
-        return SimpleNamespace(joint_type=self._joint_types[joint_name])
-
-
 class _Articulation:
     dof = 3
     joint_names = ["hinge", "mimic", "slide"]
@@ -49,7 +35,12 @@ class _Articulation:
 
     def __init__(self) -> None:
         self.cfg = SimpleNamespace(uid="door")
-        self._entities = [_Entity()]
+        self.requested_joint_names: list[str] = []
+        self._joint_types = {
+            "hinge": "revolute",
+            "mimic": "revolute",
+            "slide": "prismatic",
+        }
         self.qpos = torch.tensor([[0.1, 0.2, 0.3]], dtype=torch.float32)
         self.limits = torch.tensor(
             [[[-1.0, 1.0], [-0.5, 0.5], [0.0, float("inf")]]],
@@ -61,6 +52,10 @@ class _Articulation:
 
     def get_qpos(self) -> torch.Tensor:
         return self.qpos
+
+    def get_joint_type(self, joint_name: str) -> str:
+        self.requested_joint_names.append(joint_name)
+        return self._joint_types[joint_name]
 
     def get_qpos_limits(self, env_ids: list[int]) -> torch.Tensor:
         assert env_ids == [0]
@@ -135,7 +130,7 @@ def test_preview_controller_exposes_only_independent_scalar_joints() -> None:
 
     assert controller.has_controls
     assert [spec.joint_name for spec in specs] == ["hinge", "slide"]
-    assert articulation._entities[0].requested_joint_names == ["hinge", "slide"]
+    assert articulation.requested_joint_names == ["hinge", "slide"]
     assert specs[0].lower == -1.0
     assert specs[0].upper == 1.0
     assert specs[1].lower == 0.0

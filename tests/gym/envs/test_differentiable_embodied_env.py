@@ -52,6 +52,16 @@ def _square_reward_kernel(
     reward[0] = state[0] * state[0]
 
 
+@wp.kernel
+def _recurrent_state_kernel(
+    action: wp.array(dtype=wp.float32),
+    state: wp.array(dtype=wp.float32),
+    next_state: wp.array(dtype=wp.float32),
+) -> None:
+    """Advance one scalar functional state."""
+    next_state[0] = state[0] + 2.0 * action[0]
+
+
 def _bridge_state(*, is_newton_backend: bool = True) -> dict[str, Any]:
     """Build a one-dimensional kinematics bridge input on CPU."""
     state_wp = wp.zeros(1, dtype=wp.float32, device="cpu", requires_grad=True)
@@ -161,14 +171,14 @@ def test_environment_builds_only_a_kinematic_bridge_state() -> None:
     assert "differentiable_step_mode" not in DifferentiableEnv.__dict__
 
 
-def test_environment_action_hook_receives_only_action_and_tape() -> None:
-    """The bridge adapter never supplies a Newton control buffer."""
+def test_environment_action_hook_receives_no_state_by_default() -> None:
+    """The default bridge adapter supplies only action and keyword tape."""
     env = _bare_env()
     action_wp = object()
     tape = object()
     calls: list[tuple[object, object]] = []
 
-    def _apply_action(action: object, tape: object) -> None:
+    def _apply_action(action: object, *, tape: object) -> None:
         calls.append((action, tape))
 
     env._apply_action_kernel = _apply_action
@@ -188,6 +198,125 @@ def test_kinematic_bridge_propagates_reward_gradient_to_action() -> None:
 
     assert action.grad is not None
     assert torch.allclose(action.grad, torch.tensor([4.0]))
+
+
+def test_kinematic_bridge_propagates_functional_state_gradient() -> None:
+    """Recurrent state inputs retain a complete gradient across bridge calls."""
+    next_state_wp = wp.zeros(1, dtype=wp.float32, device="cpu", requires_grad=True)
+    reward_wp = wp.zeros(1, dtype=wp.float32, device="cpu", requires_grad=True)
+
+    def _apply_action(action_wp: Any, tape: Any, state_wp: Any) -> None:
+        del tape
+        wp.launch(
+            _recurrent_state_kernel,
+            dim=1,
+            inputs=[action_wp, state_wp, next_state_wp],
+            device="cpu",
+        )
+
+    def _read_outputs(final_state: Any) -> dict[str, Any]:
+        wp.launch(
+            _square_reward_kernel,
+            dim=1,
+            inputs=[final_state, reward_wp],
+            device="cpu",
+        )
+        return {
+            "next_state": wp.to_torch(final_state),
+            "reward": wp.to_torch(reward_wp),
+            "_order": ("next_state", "reward"),
+            "_grad_track": {
+                "next_state": next_state_wp,
+                "reward": reward_wp,
+            },
+        }
+
+    sim_state = {
+        "manager": SimpleNamespace(is_newton_backend=True),
+        "action_kernel": _apply_action,
+        "kernel_args": (),
+        "step_fn": lambda: next_state_wp,
+        "obs_reward_fn": _read_outputs,
+    }
+    action = torch.tensor([0.5], requires_grad=True)
+    state = torch.tensor([1.0], requires_grad=True)
+
+    _, reward = NewtonStepFunc.apply(action, sim_state, state)
+    reward.sum().backward()
+
+    assert torch.allclose(action.grad, torch.tensor([8.0]))
+    assert torch.allclose(state.grad, torch.tensor([4.0]))
+
+
+def test_environment_step_propagates_functional_state_gradient() -> None:
+    """The public environment step preserves a two-step recurrent graph."""
+    wp.init()
+    env = _bare_env()
+    state = torch.tensor([1.0], requires_grad=True)
+    env.functional_state = state
+    env._next_state_wp = None
+
+    env._functional_state_tensors = lambda: (env.functional_state,)
+
+    def _apply_action(action_wp: Any, state_wp: Any, *, tape: Any) -> None:
+        del tape
+        env._next_state_wp = wp.zeros(
+            1,
+            dtype=wp.float32,
+            device="cpu",
+            requires_grad=True,
+        )
+        wp.launch(
+            _recurrent_state_kernel,
+            dim=1,
+            inputs=[action_wp, state_wp, env._next_state_wp],
+            device="cpu",
+        )
+
+    def _read_outputs(final_state: Any) -> dict[str, Any]:
+        reward_wp = wp.zeros(
+            1,
+            dtype=wp.float32,
+            device="cpu",
+            requires_grad=True,
+        )
+        wp.launch(
+            _square_reward_kernel,
+            dim=1,
+            inputs=[final_state, reward_wp],
+            device="cpu",
+        )
+        next_state = wp.to_torch(final_state)
+        env.functional_state = next_state
+        return {
+            "obs": next_state,
+            "reward": wp.to_torch(reward_wp),
+            "terminated": torch.zeros(1, dtype=torch.bool),
+            "truncated": torch.zeros(1, dtype=torch.bool),
+            "_order": ("obs", "reward", "terminated", "truncated"),
+            "_grad_track": {
+                "obs": final_state,
+                "reward": reward_wp,
+                "terminated": None,
+                "truncated": None,
+            },
+        }
+
+    env._apply_action_kernel = _apply_action
+    env._make_kinematic_step_fn = lambda: (lambda: env._next_state_wp)
+    env._read_outputs = _read_outputs
+    first_action = torch.tensor([0.5], requires_grad=True)
+    second_action = torch.tensor([0.5], requires_grad=True)
+
+    env.step(first_action)
+    _, reward, terminated, truncated, _ = env.step(second_action)
+    reward.sum().backward()
+
+    assert not terminated.any()
+    assert not truncated.any()
+    assert torch.allclose(first_action.grad, torch.tensor([12.0]))
+    assert torch.allclose(second_action.grad, torch.tensor([12.0]))
+    assert torch.allclose(state.grad, torch.tensor([6.0]))
 
 
 def test_kinematic_bridge_no_grad_call_releases_tape_synchronously() -> None:
@@ -218,6 +347,15 @@ def test_kinematic_bridge_requires_a_named_step_callback() -> None:
 
     with pytest.raises(TypeError, match="callable step_fn"):
         NewtonStepFunc.apply(torch.zeros(1), sim_state)
+
+
+def test_kinematic_bridge_rejects_non_tensor_functional_state() -> None:
+    """Functional-state validation fails before tensor metadata is accessed."""
+    with pytest.raises(
+        TypeError,
+        match="functional state inputs must be torch.Tensor, got str at index 0",
+    ):
+        NewtonStepFunc.apply(torch.zeros(1), _bridge_state(), "not-a-tensor")
 
 
 def test_tape_context_rejects_default_backend() -> None:

@@ -1,6 +1,6 @@
 # Installation
 
-EmbodiChain is a Python framework built on the [DexSim](https://github.com/DexForce) simulation engine (`dexsim_engine` on PyPI). This guide covers system requirements, package indexes, Docker and local install paths, optional generative-simulation dependencies, and verification.
+EmbodiChain is a Python framework built on the [DexSim](https://github.com/DexForce) simulation engine (`dexsim_engine` on PyPI). This guide covers system requirements, package indexes, Docker and local install paths, optional policy deployment and generative-simulation dependencies, and verification.
 
 After installation, continue with the [Quick Start Tutorial](../tutorial/index.rst).
 
@@ -188,6 +188,42 @@ Commands can continue to use repository-style paths such as
 `embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml`.
 EmbodiChain resolves these paths from the checkout when present and otherwise
 from the installed wheel.
+
+## Optional: policy deployment (`policy-deploy`)
+
+Install the `policy-deploy` extra to run ONNX policies with NeuralPlanner/NMG
+or DexSim Motion Policy Kit. It installs `onnxruntime-gpu>=1.20,<1.27` for the
+CUDA 12.x stack; ORT 1.27 and later default to CUDA 13. The base EmbodiChain
+installation does not request ONNX Runtime.
+
+Use the index variables from [Package indexes](#package-indexes):
+
+| Source | Tool | Command |
+|--------|------|---------|
+| PyPI | uv | `uv pip install "embodichain[policy-deploy]" ${PIP_EXTRA_ARGS}` |
+| PyPI | pip | `pip install "embodichain[policy-deploy]" ${PIP_EXTRA_ARGS}` |
+| Git clone | uv | `uv pip install -e ".[policy-deploy]" ${PIP_EXTRA_ARGS}` |
+| Git clone | pip | `pip install -e ".[policy-deploy]" ${PIP_EXTRA_ARGS}` |
+
+The GPU package also provides CPU execution. Install only one of
+`onnxruntime` and `onnxruntime-gpu` in an environment; see the
+[ONNX Runtime installation guide](https://onnxruntime.ai/docs/get-started/with-python.html#install-onnx-runtime).
+For GPU execution, match the installed ORT version to the environment's CUDA
+and cuDNN libraries using the
+[CUDA provider requirements](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html#requirements).
+Installing the extra does not override a policy's execution-provider selection.
+
+The former `nmg` extra has been replaced by `policy-deploy`. Update existing
+install commands accordingly. If the old extra installed the CPU package,
+remove it before installing the shared GPU runtime. If both ORT packages are
+already installed, remove both first to avoid overlapping package files:
+
+```bash
+python -m pip uninstall -y onnxruntime onnxruntime-gpu
+python -m pip install "embodichain[policy-deploy]" ${PIP_EXTRA_ARGS}
+```
+
+For an editable checkout, use `-e ".[policy-deploy]"` in the second command.
 
 ## Optional: cuRobo V2 motion planning
 

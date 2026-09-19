@@ -1,0 +1,222 @@
+{
+  "family": "humanoid_run",
+  "action_dim": 17,
+  "observation_dim": 63,
+  "root_body": "torso",
+  "episode_seconds": 15.0,
+  "spawn_height": 1.34,
+  "action": {
+    "type": "joint_effort",
+    "scale": 1.0,
+    "clip": 0.4,
+    "joint_gears": {
+      "abdomen_z": 100.0,
+      "abdomen_y": 100.0,
+      "abdomen_x": 100.0,
+      "right_hip_x": 100.0,
+      "right_hip_z": 100.0,
+      "right_hip_y": 300.0,
+      "right_knee": 200.0,
+      "left_hip_x": 100.0,
+      "left_hip_z": 100.0,
+      "left_hip_y": 300.0,
+      "left_knee": 200.0,
+      "right_shoulder1": 25.0,
+      "right_shoulder2": 25.0,
+      "right_elbow": 25.0,
+      "left_shoulder1": 25.0,
+      "left_shoulder2": 25.0,
+      "left_elbow": 25.0
+    }
+  },
+  "passive_joint": {
+    "abdomen_z": [
+      20.0,
+      5.0,
+      0.02
+    ],
+    "abdomen_y": [
+      10.0,
+      5.0,
+      0.02
+    ],
+    "abdomen_x": [
+      10.0,
+      5.0,
+      0.02
+    ],
+    "right_hip_x": [
+      10.0,
+      5.0,
+      0.01
+    ],
+    "right_hip_z": [
+      10.0,
+      5.0,
+      0.01
+    ],
+    "right_hip_y": [
+      20.0,
+      5.0,
+      0.008
+    ],
+    "right_knee": [
+      0.0,
+      1.0,
+      0.006
+    ],
+    "left_hip_x": [
+      10.0,
+      5.0,
+      0.01
+    ],
+    "left_hip_z": [
+      10.0,
+      5.0,
+      0.01
+    ],
+    "left_hip_y": [
+      20.0,
+      5.0,
+      0.01
+    ],
+    "left_knee": [
+      1.0,
+      1.0,
+      0.006
+    ],
+    "right_shoulder1": [
+      1.0,
+      1.0,
+      0.0068
+    ],
+    "right_shoulder2": [
+      1.0,
+      1.0,
+      0.0051
+    ],
+    "right_elbow": [
+      0.0,
+      1.0,
+      0.0028
+    ],
+    "left_shoulder1": [
+      1.0,
+      1.0,
+      0.0068
+    ],
+    "left_shoulder2": [
+      1.0,
+      1.0,
+      0.0051
+    ],
+    "left_elbow": [
+      0.0,
+      1.0,
+      0.0028
+    ]
+  },
+  "reset": {
+    "xy": [
+      0.0,
+      0.0
+    ],
+    "yaw": [
+      0.0,
+      0.0
+    ],
+    "joint_position": 0.0,
+    "joint_velocity": 0.0
+  },
+  "termination": {
+    "minimum_torso_height": 0.8
+  },
+  "reward": {
+    "heading": 0.5,
+    "up": 0.1,
+    "energy_cost": 0.05,
+    "actions_cost": 0.01,
+    "alive": 2.0,
+    "death": -1.0,
+    "dof_velocity_scale": 0.1,
+    "angular_velocity_scale": 0.25
+  },
+  "joint_names": [
+    "abdomen_z",
+    "abdomen_y",
+    "abdomen_x",
+    "right_hip_x",
+    "right_hip_z",
+    "right_hip_y",
+    "right_knee",
+    "left_hip_x",
+    "left_hip_z",
+    "left_hip_y",
+    "left_knee",
+    "right_shoulder1",
+    "right_shoulder2",
+    "right_elbow",
+    "left_shoulder1",
+    "left_shoulder2",
+    "left_elbow"
+  ],
+  "joint_lower": [
+    -0.7853981633974483,
+    -1.3089969389957472,
+    -0.6108652381980153,
+    -0.4363323129985824,
+    -1.0471975511965976,
+    -1.9198621771937625,
+    -2.792526803190927,
+    -0.4363323129985824,
+    -1.0471975511965976,
+    -1.9198621771937625,
+    -2.792526803190927,
+    -1.4835298641951802,
+    -1.4835298641951802,
+    -1.5707963267948966,
+    -1.0471975511965976,
+    -1.0471975511965976,
+    -1.5707963267948966
+  ],
+  "joint_upper": [
+    0.7853981633974483,
+    0.5235987755982988,
+    0.6108652381980153,
+    0.08726646259971647,
+    0.6108652381980153,
+    0.3490658503988659,
+    -0.03490658503988659,
+    0.08726646259971647,
+    0.6108652381980153,
+    0.3490658503988659,
+    -0.03490658503988659,
+    1.0471975511965976,
+    1.0471975511965976,
+    0.8726646259971648,
+    1.4835298641951802,
+    1.4835298641951802,
+    0.8726646259971648
+  ],
+  "joint_effort": [
+    40.0,
+    40.0,
+    40.0,
+    40.0,
+    40.0,
+    120.0,
+    80.0,
+    40.0,
+    40.0,
+    120.0,
+    80.0,
+    10.0,
+    10.0,
+    10.0,
+    10.0,
+    10.0,
+    10.0
+  ],
+  "physics_dt": 0.008333333333333333,
+  "decimation": 2
+}
