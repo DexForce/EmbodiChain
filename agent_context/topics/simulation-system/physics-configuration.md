@@ -65,6 +65,18 @@ COM adapters follow the [quaternion boundary](simulation-system.md#quaternion-an
 
 ## Geometry and contact policy
 
+Explicit `MeshCfg.collision.acd_method="visacd"` on non-USD rigid meshes is
+materialized by `spawn/_visacd.py` before Spawn: the original render geometry
+is retained and each part becomes an independent convex collision on the same
+body. File meshes use the native loader's coordinate convention. Body scale
+is applied by Spawn, not baked twice. Convex parts over the vertex budget use
+Open3D quadric decimation followed by a convex hull. Native part-count overruns
+trigger at most three complete decompositions with decreasing requested budgets;
+no output parts are discarded. Invalid output, remaining excess part counts
+and vertex-budget violations fail without an algorithm
+fallback. This path requires native VisACD support, does not use a persistent
+cache, and does not alter USD articulation collision cooking or global defaults.
+
 `MeshCfg.collision` owns collision approximation and cooking, including Newton
 SDF/hydroelastic settings. The strategy is explicit, not inferred from numeric
 parameters. Rigid physics and articulation link overlays do not own cooking;

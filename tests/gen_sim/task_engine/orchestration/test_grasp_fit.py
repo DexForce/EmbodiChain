@@ -105,9 +105,37 @@ def test_grasp_fit_scales_only_target_and_preserves_support(tmp_path: Path) -> N
     assert normalized.rigid_objects[0]["body_scale"] == [1.0, 1.0, 1.0]
     assert normalized.asset_provenance[0]["source_sha256"] == record["source_sha256"]
     assert source.read_bytes() == original_bytes
-    assert report["schema_version"] == "gen_sim.asset-adaptation/v2"
+    assert report["schema_version"] == "gen_sim.asset-adaptation/v3"
     assert record["task_types"] == ["E2"]
     assert record["fit_mode"] == "single_arm_transverse"
+
+
+def test_grasp_fit_reserves_contact_envelopes(tmp_path: Path) -> None:
+    scene = _scene(tmp_path, (0.133, 0.19, 0.132))
+    original = deepcopy(scene.rigid_objects)
+    fitted, report = fit_grasp_assets(
+        scene, _graph(), openings={"left": 0.128}, contact_clearances={"cup": 0.009}
+    )
+    record = report["records"][0]
+    assert record["scale_factor"] == pytest.approx(0.109 / 0.133)
+    assert record["pad_margin_m"] == pytest.approx(0.009)
+    assert record["contact_clearance_m"] == pytest.approx(0.009)
+    assert record["usable_span_m"] == pytest.approx(0.110)
+    assert fitted.rigid_objects[0]["body_scale"][0] >= 0.25
+    assert scene.rigid_objects == original
+
+
+@pytest.mark.parametrize(
+    "clearances", [{}, {"cup": -0.01}, {"cup": float("nan")}, {"cup": True}]
+)
+def test_grasp_fit_rejects_invalid_contact_clearances(
+    tmp_path: Path, clearances
+) -> None:
+    scene = _scene(tmp_path, (0.133, 0.19, 0.132))
+    with pytest.raises(ValueError, match="contact"):
+        fit_grasp_assets(
+            scene, _graph(), openings={"left": 0.128}, contact_clearances=clearances
+        )
 
 
 def test_grasp_fit_skips_compatible_asset_and_rejects_excess_shrink(

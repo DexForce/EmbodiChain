@@ -323,6 +323,16 @@ def rigid_desc_from_cfg(
     )
     collision.render_source_index = 0
 
+    collisions = [collision]
+    if (
+        isinstance(cfg.shape, MeshCfg)
+        and approximation == CollisionApproximation.CONVEX_DECOMPOSITION
+        and cfg.shape.collision.acd_method == "visacd"
+    ):
+        from ._visacd import explicit_visacd_collisions
+
+        collisions = explicit_visacd_collisions(collision)
+
     descriptor = ObjectDesc(
         name=uid,
         pose=_pose_from_cfg(cfg),
@@ -333,7 +343,7 @@ def rigid_desc_from_cfg(
                 material_ref=material_ref,
             )
         ],
-        collisions=[collision],
+        collisions=collisions,
         physics=_compile_rigid_physics(physics, cfg.body_type),
         per_env=per_env,
         body_scale=_vector3(cfg.body_scale, field_name="body_scale"),

@@ -212,7 +212,12 @@ def generate_task_program_bundle(
             for resource in ("left", "right")
         }
         prepared_scene, adaptation = fit_assets(
-            prepared_scene, selected_graph, openings=openings
+            prepared_scene,
+            selected_graph,
+            openings=openings,
+            contact_clearances=_grasp_contact_clearances(
+                prepared_scene, embodiment_payload
+            ),
         )
     scene = normalize_scene_assets(prepared_scene, root)
     if adaptation is not None:
@@ -369,7 +374,9 @@ def generate_task_program_bundle(
                             "check_interval_steps": 2,
                             "required_stable_checks": 3,
                             "timeout_behavior": "raise",
-                            "restore_initial_xy": True,
+                            # Plan from the measured settled pose. Teleporting
+                            # afterward invalidates the settled contact state.
+                            "restore_initial_xy": False,
                         },
                     }
                 },
@@ -1479,8 +1486,23 @@ def _integration_payload(
 
 
 def _scene_payload(scene: Any, *, program_id: str) -> dict[str, Any]:
-    def runtime_rigid(config: Any) -> dict[str, Any]:
+    def runtime_pose(config: Any) -> dict[str, Any]:
+        from scipy.spatial.transform import Rotation
+
         result = deepcopy(config)
+        if result.get("init_local_pose") is None:
+            # PreparedScene uses intrinsic XYZ; dictionary decoders infer
+            # extrinsic xyz. Serialize the matrix to preserve the planner pose.
+            pose = np.eye(4)
+            pose[:3, :3] = Rotation.from_euler(
+                "XYZ", result.get("init_rot", [0.0, 0.0, 0.0]), degrees=True
+            ).as_matrix()
+            pose[:3, 3] = result.get("init_pos", [0.0, 0.0, 0.0])
+            result["init_local_pose"] = pose.tolist()
+        return result
+
+    def runtime_rigid(config: Any) -> dict[str, Any]:
+        result = runtime_pose(config)
         max_hulls = int(result.pop("max_convex_hull_num", 1))
         acd_method = str(result.pop("acd_method", "coacd"))
         shape = result.get("shape")
@@ -1502,7 +1524,7 @@ def _scene_payload(scene: Any, *, program_id: str) -> dict[str, Any]:
             )
         return result
 
-    articulations = [deepcopy(value) for value in scene.articulations]
+    articulations = [runtime_pose(value) for value in scene.articulations]
     for articulation in articulations:
         for semantic_only_key in (
             "affordances",
@@ -1672,6 +1694,43 @@ def _add_handover_staging(graph: SemanticTaskGraph, scene: Any) -> SemanticTaskG
         )
         group["node_ids"].insert(group["node_ids"].index(node["id"]), staging_id)
     return validate_semantic_task_graph(result)
+
+
+def _grasp_contact_clearances(
+    scene: Any, embodiment: dict[str, Any]
+) -> dict[str, float]:
+    """Reserve both contact envelopes for the Default-backed GenSim deployment."""
+    from dexsim.spawn import DexsimCollisionDesc
+
+    default_offset = DexsimCollisionDesc().contact_offset
+
+    def contact_offset(attrs: Any, fallback: float | None) -> float:
+        configured = ((attrs or {}).get("collision_props") or {}).get("contact_offset")
+        value = fallback if configured is None else configured
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise ValueError("Grasp-fit requires a finite non-negative contact_offset.")
+        return float(value)
+
+    simulation = embodiment["simulation"]
+    robot_offset = contact_offset(simulation.get("attrs"), default_offset)
+    # Conservatively include explicit link overrides without importing a robot
+    # or starting a simulator during provider-free bundle generation.
+    robot_offset = max(
+        [robot_offset]
+        + [
+            contact_offset(group.get("attrs"), robot_offset)
+            for group in (simulation.get("link_attrs") or {}).values()
+        ]
+    )
+    return {
+        str(obj["uid"]): robot_offset + contact_offset(obj.get("attrs"), default_offset)
+        for obj in scene.rigid_objects
+    }
 
 
 def _calibrate_task_gripper_opening(embodiment: dict[str, Any]) -> None:
