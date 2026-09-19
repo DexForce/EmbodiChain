@@ -242,8 +242,17 @@ class SuiteCfg:
         for track in self.tracks:
             if track.scenario == "atomic_task":
                 _validate_atomic_task_track(track)
-        nmg = next((spec for spec in self.planners if spec.id == "nmg"), None)
-        if nmg is not None:
+        for nmg in (spec for spec in self.planners if spec.adapter == "nmg_onnx"):
+            for field, default in (
+                ("num_waypoints", 5),
+                ("steps_per_waypoint", 30),
+                ("max_steps", 150),
+            ):
+                _positive_int(
+                    nmg.config.get(field),
+                    name=f"NMG {field}",
+                    default=default,
+                )
             if float(nmg.config.get("pos_eps", 0.01)) <= 0.0:
                 raise ValueError("NMG pos_eps must be > 0.")
             if float(nmg.config.get("rot_eps", 0.1)) <= 0.0:

@@ -52,8 +52,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-nmg = [
-  "onnxruntime>=1.20",
+policy-deploy = [
+  # ORT 1.27+ defaults to CUDA 13; EmbodiChain's supported stack uses CUDA 12.
+  "onnxruntime-gpu>=1.20,<1.27",
 ]
 gensim = [
   "bpy",

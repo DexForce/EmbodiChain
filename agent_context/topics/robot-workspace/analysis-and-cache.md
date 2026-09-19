@@ -73,6 +73,30 @@
 | `workspace-cache list/clean` cannot see ResultsCache entries | It targets legacy session caches; use analyzer preview/cache directory semantics for result entries. |
 | Concurrent analyzers expose corrupt/incomplete cache | `ResultsCache.save()` writes result then metadata directly with no observed lock or temp-file replacement. Add atomic write/lock coverage before relying on shared concurrent writers. |
 
+### Manipulability scores
+
+- When the metric config enables manipulability (default `ALL`), the analyzer
+  computes per-configuration Yoshikawa scores `w = sqrt(det(J J^T))` from the
+  active solver's Jacobian after analysis. `manipulability_scores` is
+  row-aligned with `joint_configurations` (and therefore with reachable points
+  in Cartesian/plane modes), stored in `results.npz`, and restored on cache
+  hits; aggregates land in `metrics["manipulability"]`.
+- `ManipulabilityMetric` produces statistics only from Jacobians or
+  precomputed scores. The former centroid-distance placeholder was measured
+  to be negatively correlated with true manipulability (corr ≈ −0.37 on
+  Franka) and now yields a warning plus empty results instead.
+- Cost is negligible: batched Jacobian + determinant is ~10 ms per 470
+  configurations on GPU.
+
+### Seed selection for Cartesian/plane IK
+
+Cartesian and plane analysis verify reachability through the solver's
+multi-start `get_ik`, so `PytorchSolverCfg.enable_seed_selection` applies
+without analyzer changes. Measured on Franka (4000 identical points, warm):
+enabling it at unchanged `num_samples=30` detected slightly more reachable
+points at 3.3× lower wall time; `num_samples=8` reached 4.1× with <1%
+detection loss. Analytic solvers (OPW/SRS/UR) are unaffected.
+
 ### Sampling and allocation controls
 
 - `SamplingConfig` and `analyze-workspace --sampler` default to scrambled Sobol.

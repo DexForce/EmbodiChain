@@ -30,6 +30,7 @@ from embodichain.lab.sim.atomic_actions import (
     ActionOptions,
     ActionPlan,
     Affordance,
+    AffordanceSamplingContext,
     AtomicAction,
     AtomicActionEngine,
     DynamicCollisionMode,
@@ -118,6 +119,18 @@ def _context(
         env_ids=torch.tensor([4, 7], dtype=torch.long),
         control_dt=control_dt,
     )
+
+
+def test_planning_context_validates_and_preserves_affordance_sampling() -> None:
+    sampling = AffordanceSamplingContext(count=2, seed=7, attempt_id=3)
+    context = replace(_context(control_dt=0.02), affordance_sampling=sampling)
+
+    projected = context.project(qpos=context.robot.qpos + 1.0, task=context.task)
+
+    assert context.affordance_sampling is sampling
+    assert projected.affordance_sampling is sampling
+    with pytest.raises(TypeError, match="affordance_sampling"):
+        replace(context, affordance_sampling=object())
 
 
 def _command_sequence(
@@ -526,7 +539,7 @@ def test_motion_policy_maps_to_motion_generator_strategy() -> None:
         constraints={"velocity": 0.2, "acceleration": 0.5}
     )
     policy = MotionPolicy(
-        strategy="ik_interp",
+        strategy="motion_gen",
         sample_count=24,
         plan_opts=planner_options,
     )
@@ -540,7 +553,7 @@ def test_motion_policy_maps_to_motion_generator_strategy() -> None:
         interpolation_dt=0.02,
     )
 
-    assert options.strategy == "ik_interp"
+    assert options.strategy == "motion_gen"
     assert options.sample_count == 12
     assert options.start_qpos is not start_qpos
     assert torch.equal(options.start_qpos, start_qpos)
@@ -1574,3 +1587,18 @@ def test_timed_trajectory_concatenates_metadata() -> None:
 
     assert result.positions.shape == (2, 5, 4)
     assert result.duration.tolist() == pytest.approx([0.5, 0.5])
+
+
+def test_interpolation_policy_rejects_backend_options_at_construction() -> None:
+    with pytest.raises(ValueError, match="plan_opts"):
+        MotionPolicy(strategy="ik_interp", plan_opts=ToppraPlanOptions())
+
+
+def test_fixed_cartesian_policy_requires_explicit_interpolation_strategy() -> None:
+    with pytest.raises(ValueError, match="cartesian_linear|preserve_cartesian_samples"):
+        MotionPolicy(strategy="motion_gen").to_motion_gen_options(
+            start_qpos=torch.zeros(1, 6),
+            control_part="arm",
+            interpolation_dt=0.02,
+            cartesian_linear=True,
+        )

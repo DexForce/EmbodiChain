@@ -74,6 +74,8 @@ def test_get_ik_uses_true_inverse_for_rotated_tcp() -> None:
     solver.device = torch.device("cpu")
     solver.dof = 2
     solver._num_samples = 1
+    solver._seed_sampler = None
+    solver._solution_selection = "nearest"
     solver.lower_qpos_limits = torch.full((2,), -1.0)
     solver.upper_qpos_limits = torch.full((2,), 1.0)
     solver.ik_nearest_weight = torch.ones(2)

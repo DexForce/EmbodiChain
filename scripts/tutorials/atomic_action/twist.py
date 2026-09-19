@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from pathlib import Path
 
@@ -50,11 +51,14 @@ from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
     configure_newton_link_contacts,
+    create_affordance_sampling_context,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     get_hand_open_close_qpos,
+    log_affordance_branch_diagnostics,
+    parse_affordance_sampling_arguments,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
@@ -76,7 +80,7 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the Twist tutorial."""
     parser = create_tutorial_argument_parser(
         "Demonstrate Twist on an articulation-link or rigid knob.",
-        features=("visualize_axes",),
+        features=("affordance_sampling", "visualize_axes"),
     )
     parser.add_argument("--twist_angle", type=float, default=-0.7853981634)
     parser.add_argument(
@@ -84,7 +88,7 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Use a standalone rigid knob instead of the microwave link.",
     )
-    return parser.parse_args()
+    return parse_affordance_sampling_arguments(parser)
 
 
 def create_microwave(sim) -> Articulation:
@@ -132,8 +136,19 @@ def create_rigid_knob(sim) -> RigidObject:
 
 def create_knob_semantics(
     target: Articulation | RigidObject,
+    *,
+    grasp_roll_range: tuple[float, float] | None = None,
 ) -> tuple[ObjectSemantics, torch.Tensor]:
-    """Create twist semantics for an articulation-link or rigid knob."""
+    """Create twist semantics for an articulation-link or rigid knob.
+
+    Args:
+        target: Knob entity whose geometry defines the grasp and rotation axis.
+        grasp_roll_range: Allowed local-z grasp rolls in radians, or ``None``
+            to retain the nominal grasp.
+
+    Returns:
+        Knob semantics and its current batched target pose.
+    """
     if isinstance(target, Articulation):
         vertices, _ = target.get_link_vert_face(KNOB_LINK_NAME)
         target_pose = target.get_link_pose(KNOB_LINK_NAME, to_matrix=True)
@@ -145,6 +160,7 @@ def create_knob_semantics(
             body_scale=target.cfg.body_scale,
         ).to_object_geometry()
         affordance = TwistAffordance(
+            grasp_roll_range=grasp_roll_range,
             grasp_position=_mesh_center(vertices),
         )
         label = "microwave_power_knob"
@@ -154,6 +170,7 @@ def create_knob_semantics(
         geometry = {}
         mesh_center = _mesh_center(vertices)
         affordance = TwistAffordance(
+            grasp_roll_range=grasp_roll_range,
             grasp_position=mesh_center,
             axis_origin=mesh_center,
             twist_axis=torch.tensor([-1.0, 0.0, 0.0], device=target.device),
@@ -190,7 +207,10 @@ def main() -> None:
         robot,
         planner=getattr(args, "planner", "trapezoidal"),
     )
-    semantics, target_pose = create_knob_semantics(target)
+    semantics, target_pose = create_knob_semantics(
+        target,
+        grasp_roll_range=(-math.pi, math.pi) if args.affordance_branches > 1 else None,
+    )
 
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -227,8 +247,12 @@ def main() -> None:
                 ),
             ),
         ),
-        context=engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        context=engine.initial_context(
+            control_dt=sim.sim_config.physics_dt,
+            affordance_sampling=create_affordance_sampling_context(args),
+        ),
     )
+    log_affordance_branch_diagnostics(compiled.action_plans[0])
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan the Twist demo trajectory.")
         return

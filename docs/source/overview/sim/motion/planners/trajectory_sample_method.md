@@ -1,17 +1,16 @@
 # TrajectorySampleMethod
 
-`TrajectorySampleMethod` is an enumeration that defines different strategies for sampling points along a trajectory. It provides meaningful names for various sampling methods, making trajectory planning code more readable and maintainable.
+`TrajectorySampleMethod` names sampling modes. A backend supports only the
+modes documented on its own page.
 
-## Enum Members
+| Member | Meaning of `sample_interval` | Example |
+|---|---|---|
+| `TIME` | Requested time spacing in seconds; endpoint handling is backend-specific. | `0.01` seconds. |
+| `QUANTITY` | Requested number of samples. | `100` points. |
+| `DISTANCE` | Path-distance spacing, where supported. | A distance step in the path's units. |
 
-- **TIME**:  
-  Sample trajectory points based on fixed time intervals.  
-  Example: Generate a point every 0.01 seconds.
-
-- **QUANTITY**:  
-  Sample a specified number of points along the trajectory, regardless of the time interval.  
-  Example: Generate exactly 100 points between start and end.
-
-- **DISTANCE**:  
-  Sample points based on fixed distance intervals along the path.  
-  Example: Generate a point every 1 cm along the trajectory.
+[TOPPRA](toppra_planner.md) and [TrapezoidalPlanner](trapezoidal_planner.md)
+support `TIME` and `QUANTITY`. The presence of `DISTANCE` in the enum does not
+imply support in those planners. Sampling controls the output grid; physical
+execution uses the simulator or environment's control clock, as described in
+[playback](../motion_generator.md#execute-in-simulation).

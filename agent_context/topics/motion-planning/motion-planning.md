@@ -1,253 +1,106 @@
 # Motion Planning
 
-## Entry Points
+## Find the owner
 
-| What | Path |
+| Change or question | Start here |
 |---|---|
-| Planner registry | `embodichain/lab/sim/motion/planners/__init__.py` |
-| Base planner class & config | `embodichain/lab/sim/motion/planners/base_planner.py` → `BasePlanner`, `BasePlannerCfg`, `CollisionWorldInfo`, `PlanOptions`, `validate_plan_options` |
-| TOPPRA planner | `embodichain/lab/sim/motion/planners/toppra_planner.py` → `ToppraPlanner`, `ToppraPlannerCfg`, `ToppraPlanOptions` |
-| Trapezoidal planner | `embodichain/lab/sim/motion/planners/trapezoidal_planner.py` → `TrapezoidalPlanner`, `TrapezoidalPlannerCfg`, `TrapezoidalPlanOptions` |
-| Bézier path geometry | `embodichain/lab/sim/motion/planners/bezier.py` → `BezierPath` and internal quintic waypoint blending helpers |
-| Cartesian SE(3) line | `embodichain/lab/sim/motion/planners/se3.py` → `plan_se3_line`, `SE3LineResult` |
-| Shared scalar timing | `embodichain/lab/sim/motion/planners/_scalar_time_law.py` → `ScalarTimeLaw`, `ScalarState` |
-| Continuous blend constraints | `embodichain/lab/sim/motion/planners/_blend_constraints.py` → Bernstein derivative bounds and phase interval bounds |
-| Trapezoidal Warp kernels | `embodichain/compute/kinematics/_warp/trapezoidal.py` → batched profile construction and sampling kernels |
-| Neural planner | `embodichain/lab/sim/motion/planners/neural_planner.py` → `NeuralPlanner`, `NeuralPlannerCfg`, `NeuralPlanOptions` |
-| cuRobo planner | `embodichain/lab/sim/motion/planners/curobo/curobo_planner.py` → `CuroboPlanner`, `CuroboPlannerCfg`, `CuroboWorldCfg`, `CuroboPlanOptions` |
-| Motion generator | `embodichain/lab/sim/motion/motion_generator.py` → `MotionGenerator`, `MotionGenCfg`, `MotionGenOptions` |
-| Standalone timed playback | `embodichain/lab/sim/motion/execution.py` → `JointTrajectoryPlaybackCfg`, `play_joint_trajectory` |
-| Planner utilities & data types | `embodichain/lab/sim/motion/planners/utils.py` → `PlanState`, `PlanResult`, `MoveType`, `MovePart`, `TrajectorySampleMethod`, `interpolate_xpos_batched` |
-| Trajectory augmentation | `embodichain/lab/sim/motion/expansion/` → contracts, configs, operators, coverage, `GenerationSession` |
+| Planning interface, options and batch validation | `embodichain/lab/sim/motion/planners/base_planner.py` |
+| Timed inputs/results | `embodichain/lab/sim/motion/planners/utils.py` → `PlanState`, `PlanResult` |
+| Strategy, IK preparation, result normalization | `embodichain/lab/sim/motion/motion_generator.py` → `MotionGenerator` |
+| Joint-path timing | `embodichain/lab/sim/motion/planners/toppra_planner.py`, `trapezoidal_planner.py` in that directory |
+| Cartesian geometry and scalar timing | `embodichain/lab/sim/motion/planners/se3.py`, `bezier.py`, `_scalar_time_law.py`, `_blend_constraints.py` in that directory |
+| Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
+| NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
+| Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
+| Standalone physical playback | `embodichain/lab/sim/motion/execution.py` |
+| Candidate generation and coverage bookkeeping | `embodichain/lab/sim/motion/expansion/` |
 
-## Overview
+## Choose the layer
 
-Planners, solvers, workspace analysis, and trajectory augmentation are sibling
-packages under `embodichain.lab.sim.motion`. Import planner APIs from
-`embodichain.lab.sim.motion.planners`; the parent namespace resolves subpackages
-lazily and must not eagerly load planners during Robot initialization. Import the coordinating `MotionGenerator`, `MotionGenCfg` and `MotionGenOptions`
-from `embodichain.lab.sim.motion.motion_generator`. Planners do not re-export
-this facade; solver and planner imports must not load it eagerly. Atomic
-Actions consume these motion capabilities from `sim/atomic_actions/`.
-Focused tests and examples live under `tests/sim/motion/` and
-`examples/sim/motion/`.
+`BasePlanner` consumes waypoints and returns timed trajectories.
+`MotionGenerator` is the stateful facade for strategy selection, sequential IK,
+backend composition, normalization and multi-part coordination. Import it from
+`motion.motion_generator`, not `motion.planners`. Motion siblings and the parent
+namespace remain lazy to protect Robot initialization.
 
-The cuRobo adapter imports its optional backend through `_require_curobo()`.
-That boundary preserves the caller's Torch matmul precision and CUDA/cuDNN
-TF32 flags on success or failure; cuRobo import side effects must not change
-the numerical policy of other planners or FK/IK solvers.
+Planners resolve the robot through the manager identified by
+`BasePlannerCfg.sim_instance_id`; there is no fallback to another manager with
+the same robot UID. Environment factories copy configs before supplying their
+own manager ID. Keep manager selection at this construction boundary.
 
-The planning stack has two layers:
-1. **BasePlanner** — low-level trajectory planner that takes a list of `PlanState` waypoints and produces a `PlanResult` with joint trajectories.
-2. **MotionGenerator** — the single stateful planning facade that composes a
-   planner with strategy selection, interpolation, IK resolution, result
-   normalization, and multi-part coordination.
+Read [planner details](planner-details.md) when changing normalization, backend
+capabilities or planner registration. Read [collision worlds](collision-worlds.md)
+when changing obstacle identity, cache generation or dynamic scene binding.
+[IK solvers](../ik-solvers/ik-solvers.md) own candidate/frame contracts;
+[Atomic Skills](../atomic-actions/atomic-actions.md) own motion execution policy.
 
-All planners resolve their robot at init via `SimulationManager.get_instance(cfg.sim_instance_id).get_robot(cfg.robot_uid)`.
-`BasePlannerCfg.sim_instance_id` defaults to `0`. Environment-owned planner
-factories supply their manager's ID, copying supplied configurations before
-overriding it. A missing manager or robot is an error; lookup does not fall
-back to another manager with the same robot UID.
+## Timing and batch boundary
 
-The entire stack is **env-batched** (`B = num_envs`). `PlanState` / `PlanResult` tensors carry a leading `B` dimension; `BasePlanner.plan()` and `MotionGenerator.generate()` operate on `B` environments in one call.
+Planning is environment-batched: waypoint qpos is `(B, dof)`, TCP transforms
+are `(B, 4, 4)`, and output positions are `(B, N, dof)`. Use `PlanState.single()`
+for single-environment inputs instead of losing the batch axis. Concrete enum
+values, fields and option defaults remain in their source definitions.
 
-## Trajectory Augmentation Boundary
+`PlanResult` is the canonical timed trajectory across planning and execution.
+Whenever positions exist, `dt` contains per-sample arrival intervals `(B, N)`;
+`duration` is derived from their sum. A failed result may omit positions.
+Timing does not alter simulator `physics_dt`.
 
-`motion/expansion/` owns immutable trajectory/candidate contracts,
-strict configuration decoding, phase-authorized joint residuals and retiming,
-sampled motion-limit checks, geometric/timing coverage, and bounded generation
-session bookkeeping. Candidates are logical rows; their identities and local
-random seeds do not derive from physical environment slots.
+`MotionGenOptions.strategy` selects the timing owner. `motion_gen` invokes the
+backend; `ik_interp` requires explicit start/count/dt, rejects backend options
+and derivative limits, and supports joint/EEF moves. Required Cartesian IK
+failures fail the row; waypoints are never discarded to salvage success.
+Unsupported routes raise instead of silently selecting another strategy.
 
-`GenerationSession` accounts for ready candidates, rollout and pending-write
-budgets, accepted-episode coverage reservations, and idempotent commit receipts.
-It never steps or resets an environment or writes a dataset. Execution,
-initial-state restoration, physical/task validation, and durable sinks belong
-to host integrations. Keep algorithm modules free of direct Gym imports while
-recognizing that the public package follows normal `lab/sim` initialization.
-Motion-limit validation alone does not establish collision freedom or task
-success.
+Normalization must preserve the meaning of timing, derivatives, failure rows
+and backend diagnostics together. Read the
+[result contract](planner-details.md#normalization-and-capabilities) before
+changing interpolation or output sample counts. Final sampled collision checks
+do not establish continuous collision freedom or derivative compliance.
 
-`rotate_grasp_about_object_axis` rotates a reference TCP pose about a fixed
-object-local axis through the object origin. The caller chooses geometry-valid
-angles and replans the resulting pose candidates; the operator neither moves
-the object nor certifies the grasp.
+## Compute and execution ownership
 
-Focused augmentation tests live under `tests/sim/motion/expansion/`.
+`compute.trajectory` owns pure interpolation, differentiation, resampling and
+warping. New consumers import it directly; `lab.sim.utility.action_utils` keeps
+solver-dependent pose/IK adaptation and compatibility re-exports. Trapezoidal/
+Double-S Warp profiles live in `compute/kinematics/_warp/trapezoidal.py`; compute
+must not import simulation objects.
 
-## Choose the owning layer
+`retime_to_control_grid()` maps source trajectories onto a fixed command clock
+without shortening their durations and recomputes velocity references.
+[Planner details](planner-details.md#retiming-and-playback) describe the execution
+boundary. Standalone `play_joint_trajectory()` advances unchanged physics
+substeps; Gym experts use the environment-owned command period and
+[expert execution contract](../env-framework/env-framework.md). Dataset writers
+encode prepared actions rather than retiming a second time.
 
-- `BasePlanner` and `PlanState` / `PlanResult` define planning interfaces.
-- `ToppraPlanner` and `TrapezoidalPlanner` own joint-path time parameterization;
-  `CuroboPlanner` owns collision-aware planning.
-- `MotionGenerator` composes motion commands and trajectory helpers; `NeuralPlanner` is experimental.
-- [Planner details](planner-details.md) cover process/memory behavior, registration and validation.
-- [Collision worlds](collision-worlds.md) cover snapshots, pose updates, provenance and cache boundaries.
+## Trajectory augmentation boundary
 
-### NeuralPlanner / NMG
+`motion/expansion/` owns immutable candidate contracts, strict config decoding,
+phase-authorized residuals/retiming, sampled motion-limit checks and coverage.
+Candidate identity and local random seeds are independent of physical env slots.
+`GenerationSession` owns budgets, pending writes, coverage reservations and
+idempotent commit receipts. It never steps/resets an environment or writes a
+dataset: host integrations own restoration, rollout, validation and persistence.
+Keep algorithm modules free of direct Gym imports.
 
-`NeuralPlanner` rolls out a standalone NMG ONNX policy whose graph includes
-raw-observation normalization. Install the `nmg` optional dependency, set
-`NeuralPlannerCfg.onnx_model_path`, and invoke it through `MotionGenerator`
-with `NeuralPlanOptions`. `EEF_MOVE` inputs use batched `(B, 4, 4)` poses;
-dynamic-batch exports roll out all environments together. When the runtime
-robot base or TCP differs from training, configure
-`policy_frame_from_world` and `runtime_tcp_from_policy_tcp` explicitly.
-NeuralPlanner target and FK quaternions remain EmbodiChain `xyzw` throughout
-the observation and convergence paths; `quat_from_matrix()` must not be
-re-converted. External `wxyz` conversion is limited to the adapter that owns
-that external contract.
+Motion-limit checks are not collision/task-success certification.
+`rotate_grasp_about_object_axis` changes a reference TCP candidate around a
+fixed object's local axis; callers choose geometry-valid angles and replan.
+Grasp generation itself belongs to `embodichain.toolkits.graspkit`, composed
+by Atomic Skills/Task Program rather than embedded in `MotionGenerator`.
 
-## Planner Interface
+## Focused validation
 
-### PlanState (input)
-
-Describes one waypoint or action. Tensor fields carry a leading batch dim `B`; enum/scalar fields are shared across `B`.
-
-| Field | Type | Notes |
-|---|---|---|
-| `move_type` | `MoveType` | `TOOL`, `EEF_MOVE`, `JOINT_MOVE`, `SYNC`, `PAUSE` |
-| `move_part` | `MovePart` | `LEFT`, `RIGHT`, `BOTH`, `TORSO`, `ALL` |
-| `xpos` | `torch.Tensor \| None` | Target TCP pose `(B, 4, 4)` for `EEF_MOVE` |
-| `qpos` | `torch.Tensor \| None` | Target joint angles `(B, DOF)` for `JOINT_MOVE` |
-| `qvel` / `qacc` | `torch.Tensor \| None` | Target joint velocities / accelerations `(B, DOF)` |
-| `is_open` | `bool` | Tool open/close (for `TOOL`) |
-| `is_world_coordinate` | `bool` | `True` = world frame; `False` = relative |
-| `pause_seconds` | `float` | Duration for `PAUSE` move type |
-
-Convenience constructors:
-- `PlanState.from_qpos(qpos:(B,DOF), move_type=JOINT_MOVE, ...) -> PlanState`
-- `PlanState.from_xpos(xpos:(B,4,4), move_type=EEF_MOVE, ...) -> PlanState`
-- `PlanState.single(qpos=(DOF,)\|None, xpos=(4,4)\|None, ...) -> PlanState` — unsqueezes single-env tensors to `B=1` (idempotent on already-batched tensors).
-
-### PlanResult (output)
-
-| Field | Type | Notes |
-|---|---|---|
-| `success` | `bool \| torch.Tensor` | Per-env success `(B,)` bool tensor (or scalar bool) |
-| `xpos_list` | `torch.Tensor \| None` | EEF poses `(B, N, 4, 4)` |
-| `positions` | `torch.Tensor \| None` | Joint positions `(B, N, DOF)` |
-| `velocities` | `torch.Tensor \| None` | Joint velocities `(B, N, DOF)` |
-| `accelerations` | `torch.Tensor \| None` | Joint accelerations `(B, N, DOF)` |
-| `dt` | `torch.Tensor \| None` | Per-step arrival intervals `(B, N)`; required whenever `positions` is present |
-| `constraint_report` | `dict[str, torch.Tensor] \| None` | Optional derivative peaks, utilization, and limit status |
-| `duration` | `torch.Tensor \| None` | Read-only total trajectory time `(B,)`, derived as `dt.sum(dim=1)` |
-
-Helper: `PlanResult.is_all_success() -> bool` returns `True` only when every env succeeded.
-`PlanResult` rejects positions with missing, malformed, or inconsistent timing.
-A failed result may omit the trajectory entirely by leaving `positions=None`.
-`MotionGenerator` materializes missing velocities from the final positions and
-arrival intervals. When it resamples a timed result, it samples by time,
-preserves each row's duration, and recomputes velocities; acceleration samples
-are invalidated. Unchanged planner samples retain native derivatives. cuRobo
-maps native velocities/accelerations into simulator joint order and zero-pads
-short/failed rows, deriving only missing velocity segments.
-Planners that own sparse joint-waypoint timing declare
-`uses_sparse_joint_waypoints=True`; `MotionGenerator` then prepends
-`start_qpos` without generic pre-interpolation. Backends that also declare
-`preserve_plan_samples=True` retain their native sample grid, velocity, and
-acceleration outputs through normalization. `TrapezoidalPlanner` declares both
-capabilities so direct calls and Atomic Skills share its native time profile.
-`MotionGenerator.generate()` preserves the backend `constraint_report` for
-unchanged trajectories, including backends that preserve samples. Resampling
-or replacing failed rows with a start-pose hold invalidates the entire report
-to `None`; planner-specific diagnostics cannot be generically recomputed.
-Backends such as NeuralPlanner may opt into `preserve_failed_plan_positions`;
-failed rows and their reports remain intact unless resampling changes them.
-
-### MoveType enum
-
-| Value | Meaning |
+| Changed boundary | Existing coverage |
 |---|---|
-| `TOOL` | Tool open or close command |
-| `EEF_MOVE` | End-effector Cartesian move (IK + trajectory) |
-| `JOINT_MOVE` | Joint-space move (trajectory planning only) |
-| `SYNC` | Synchronized dual-arm movement |
-| `PAUSE` | Pause for `pause_seconds` |
+| Imports and generator normalization | `tests/sim/motion/test_motion_imports.py`, `test_motion_generator.py`, `test_motion_generator_batched.py` in that directory |
+| Planner options, timing and backend behavior | Matching files under `tests/sim/motion/planners/` |
+| Pure path/timing functions | `tests/compute/test_trajectory.py`, `test_trajectory_timing.py` in that directory |
+| Fixed-cadence playback | `tests/sim/motion/test_execution.py` |
+| Augmentation contracts, operators and session accounting | `tests/sim/motion/expansion/` |
 
-### MovePart enum
-
-| Value | Meaning |
-|---|---|
-| `LEFT` | Left arm/EEF |
-| `RIGHT` | Right arm/EEF |
-| `BOTH` | Both arms/EEFs |
-| `TORSO` | Torso (humanoid) |
-| `ALL` | All joints |
-
-## Common Failure Modes
-
-- **`robot_uid` is MISSING** — `BasePlannerCfg.robot_uid` defaults to `MISSING`. Forgetting to set it raises `ValueError` at planner init.
-- **Robot not found** — planner init calls `SimulationManager.get_instance(cfg.sim_instance_id).get_robot(uid)`. If the robot hasn't been added to the sim yet, this returns `None` and raises `ValueError`.
-- **toppra not installed** — `ToppraPlanner` import fails with `ImportError` at module load time if `toppra==0.6.3` is not installed.
-- **Batch dim mismatch** — `@validate_plan_options` raises `ValueError` if `PlanState` entries have inconsistent `B` or if `B` does not equal `robot.num_instances`.
-- **Single-env caller shape mismatch** — legacy callers passing `(DOF,)` qpos or `(4,4)` xpos must wrap with `PlanState.single(...)` or call `from_qpos`/`from_xpos` with a leading `B=1` dim.
-- **MotionGenerator planner_type not registered** — if `planner_cfg.planner_type` is not in `_support_planner_dict`, `MotionGenerator.__init__` fails. Register new planners there first.
-- **IK interpolation with unsupported MoveType** — `strategy="ik_interp"`
-  accepts only `EEF_MOVE` and `JOINT_MOVE` and raises for other target types.
-- **Missing interpolation inputs** — `strategy="ik_interp"` requires explicit
-  `start_qpos`, `sample_count`, and `interpolation_dt`; it never reads live robot
-  state or guesses a command period implicitly.
-- **Missing planner timing** — constructing a `PlanResult` with positions but
-  without `dt` raises immediately; `duration` is derived from `dt`.
-- **CUDA requested on a CPU-only runtime** — planner success-mask normalization
-  raises a direct `ValueError` before querying the active CUDA device. It never
-  silently falls back to CPU.
-- **Constraint tolerance** — `is_satisfied_constraint` allows 10% velocity / 25% acceleration overshoot. Dense waypoint trajectories may appear to violate constraints but pass validation.
-- **Fork safety with GPU sim** — `ToppraPlannerCfg.mp_context=None` defaults to `spawn` on GPU to avoid fork-after-CUDA-init hazards. Force `fork` only when the sim device is CPU or you have verified it is safe.
-- **cuRobo shared-world mismatch** — World-frame poses may differ solely because replicated arenas are offset. Compare poses after robot-base rebasing: keep `multi_env=False` if they match, and enable it only when robot-relative layouts differ.
-- **Dynamic obstacles silently stale** — A planner participates in atomic-action collision revision recovery only when `collision_world_info.supports_updates=True`; its hook must bind every `collision_entity_id` pose into the current planning attempt.
-- **Registry/planner identity drift** — Registry-backed cuRobo worlds must use a
-  canonical-ID mapping, not a list whose names are inferred from UIDs. Validate
-  exact full registry/planner collision-world agreement, dynamic
-  registry/provider/planner agreement, and batch-mode agreement through
-  `SceneRegistry` before starting execution.
-
-## Shared trajectory computations
-
-Trapezoidal and Double-S Warp profile construction and sampling live in
-`compute/kinematics/_warp/trapezoidal.py`. The scalar timing layer imports this
-compute implementation directly. `utils/warp/kinematics/trapezoidal_warp.py`
-retains compatibility aliases; compute does not import simulation modules.
-
-`embodichain.compute.trajectory` owns pure interpolation, path resampling,
-time-domain differentiation/resampling, and keyframe-based warping. `interpolate_with_distance` retains keyframes;
-`resample_with_distance` treats interior points as optional path samples and
-falls back to pure Torch when the Warp runtime cannot launch.
-MotionGenerator and atomic trajectory helpers import the compute API directly.
-`lab.sim.utility.action_utils` retains solver-dependent pose/IK adaptation and
-re-exports pure functions for compatibility. Warp implementations live in
-`compute/trajectory/_warp/`; tests belong to `tests/compute/test_trajectory.py`.
-
-`differentiate_positions(positions, dt)` uses nonuniform central differences
-and one-sided endpoints. Zero-time position changes are rejected; unchanged
-samples at repeated times are valid padding or junctions. `resample_in_time`
-preserves first-arrival offset and total duration. Neither helper guarantees
-motion limits or smooth rest-to-rest motion. Execution-specific stationary and
-terminal targets belong to [Atomic Skills](../atomic-actions/execution.md).
-
-`retime_to_control_grid(positions, dt, control_dt)` maps each row to a fixed
-destination command clock without shortening it: the executed interval count is
-`ceil(duration / control_dt)`, samples follow uniform source-path phase, and
-qvel is recomputed on the executed grid. The first, last valid, and padded hold
-velocities are zero. Planner `PlanResult.dt` remains source timing and never
-changes simulator `physics_dt`.
-
-For standalone simulation, `play_joint_trajectory()` additionally requires
-`control_dt` to be an integer multiple of `physics_dt`, then advances unchanged
-physics substeps. Its default is position-only at one physics step; qpos+qvel is
-explicitly opt-in. Environment experts instead use the environment-owned
-`step_dt` and `ExpertTrajectoryCfg` contract in
-[Environment framework](../env-framework/env-framework.md).
-
-`PlanResult` is the canonical timed trajectory contract for both simulation
-and Gym execution. Expert dataset code encodes the already prepared qpos/qvel
-action and does not perform a second trajectory retiming pass. The legacy
-`ExpertJointTrajectory` wrapper is accepted only for compatibility.
-
-`scripts/tutorials/sim/motion_generator.py` and the neural planner example
-replay timed trajectories on an explicit physics/control grid and recompute
-velocity references if playback retimes them. The cuRobo example teleports
-through path samples for visualization. The physical tracking comparison is
-`examples/sim/motion/trajectory_velocity_tracking.py`; its CSV/plot compares
-identical position references with zero versus derived target velocities.
+For stale obstacles, inspect collision capability/identity before planner tuning.
+For altered trajectory duration or acceleration, inspect normalization and the
+destination clock before changing backend limits. Tutorials remain examples;
+validate these production boundaries directly.
