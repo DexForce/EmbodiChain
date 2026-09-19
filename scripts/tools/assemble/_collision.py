@@ -180,6 +180,29 @@ class ExactCollision:
         self.assemble = _triangle_object(assemble)
         self.base_solid = _solid(base)
         self.assemble_solid = _solid(assemble)
+        self._base_bounds = np.asarray(base.bounds).copy()
+        assemble_bounds = np.asarray(assemble.bounds)
+        self._assemble_center = assemble_bounds.mean(axis=0)
+        self._assemble_half_extents = np.diff(assemble_bounds, axis=0)[0] / 2
+
+    def _bounds_overlap(self, pose: np.ndarray) -> bool:
+        """Conservatively transform the cached local bounding box in constant time."""
+        rotation, translation = pose[:3, :3], pose[:3, 3]
+        center = rotation @ self._assemble_center + translation
+        half_extents = np.abs(rotation) @ self._assemble_half_extents
+        lower, upper = center - half_extents, center + half_extents
+        # Enlarge both comparisons so roundoff and exact boundary contact cannot
+        # cause an early rejection. Validated meshes use meters.
+        scale = max(
+            1.0,
+            float(np.max(np.abs(self._base_bounds))),
+            float(np.max(np.abs(center) + half_extents)),
+        )
+        margin = 1e-9 + 64 * np.finfo(np.float64).eps * scale
+        return bool(
+            np.all(upper >= self._base_bounds[0] - margin)
+            and np.all(lower <= self._base_bounds[1] + margin)
+        )
 
     def surface_collision(self, pose: np.ndarray) -> bool:
         """Check original triangle boundaries for intersection.
@@ -190,6 +213,8 @@ class ExactCollision:
         Returns:
             Whether the surfaces touch or intersect; containment is separate.
         """
+        if not self._bounds_overlap(pose):
+            return False
         self.assemble.setTransform(fcl.Transform(pose[:3, :3], pose[:3, 3]))
         return bool(
             fcl.collide(
@@ -218,6 +243,8 @@ class ExactCollision:
         Returns:
             Intersection volume in cubic meters.
         """
+        if not self._bounds_overlap(pose):
+            return 0.0
         overlap = self.base_solid ^ self.assemble_solid.transform(pose[:3, :4])
         if overlap.status() != manifold3d.Error.NoError:
             raise RuntimeError(f"Solid intersection failed: {overlap.status()}")

@@ -563,3 +563,21 @@ python -m pytest -q -c /dev/null --noconftest -p no:cacheprovider \
   tests/toolkits/test_assemble_harness.py \
   tests/toolkits/test_assemble_helpers.py
 ```
+
+## Pick and assemble with a robot
+
+For an existing successful assembly result, see the [Codex grasp-to-assembly
+harness](../grasp_assemble/README.md). Its minimal configuration needs only
+`assembly_result`; it inherits this harness's short descriptions, detailed design,
+mesh frames, and verified `T_base_assemble`. Codex proposes an object-local TCP
+grasp, initial object orientation and robot-relative layout, clearance, and
+insertion/retraction directions and distances. Explicit advanced overrides remain
+available. Examples cover a mug on a tree-shaped rack and a phone on its stand.
+
+The host plans grasp → lift → rotate → transit → pre-insert → place with a
+continuous IK branch search. The full carry path uses one TOPPRA solve and one
+playback call; finger closure/opening separate the arm timing blocks. Native
+simulation supports contact-only grasping or an explicitly enabled temporary
+grasp constraint. Geometry/planning acceptance and measured physical replay
+success are reported separately. The current robot is UR5 + DH PGI 140/80, and
+the supported tasks remain single-grasp rigid, gravity-supported placements.

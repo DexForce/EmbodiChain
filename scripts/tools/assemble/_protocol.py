@@ -200,7 +200,14 @@ def run_process(
         )
 
 
-def codex_action(prompt: str, run_dir: Path, turn: int, config: dict) -> dict:
+def codex_action(
+    prompt: str,
+    run_dir: Path,
+    turn: int,
+    config: dict,
+    *,
+    response_schema: dict | None = None,
+) -> dict:
     """Request one GPT action through Codex CLI using its existing login.
 
     Args:
@@ -208,6 +215,7 @@ def codex_action(prompt: str, run_dir: Path, turn: int, config: dict) -> dict:
         run_dir: Isolated audit directory.
         turn: Sequential decision number.
         config: Model and timeout settings.
+        response_schema: Optional structured-output contract for another harness.
 
     Returns:
         The structured final response, not the JSONL event stream.
@@ -216,7 +224,7 @@ def codex_action(prompt: str, run_dir: Path, turn: int, config: dict) -> dict:
     if executable is None:
         raise RuntimeError("Codex CLI is not on PATH; install it and run codex login")
     schema = run_dir / "action.schema.json"
-    write_json(schema, action_schema())
+    write_json(schema, action_schema() if response_schema is None else response_schema)
     prefix = run_dir / f"turn_{turn:02d}"
     response = prefix.with_suffix(".json")
     prefix.with_suffix(".prompt.txt").write_text(prompt, encoding="utf-8")
