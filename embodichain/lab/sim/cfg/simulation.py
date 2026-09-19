@@ -333,6 +333,12 @@ class PhysicsBackendCfg:
 class DefaultPhysicsCfg(PhysicsBackendCfg):
     """Configuration selector for the Default physics backend."""
 
+    cache_material: bool = False
+    """Reuse identical physics materials across objects and environment clones.
+
+    Enable this for large batches to avoid exhausting the native material table.
+    """
+
     bounce_threshold: float = 2.0
     """Relative normal-speed threshold below which contacts do not bounce [m/s]."""
 
@@ -374,6 +380,7 @@ class DefaultPhysicsCfg(PhysicsBackendCfg):
         :class:`DefaultPhysicsCfg` retain their established defaults here.
         """
         args = {
+            "cache_material": self.cache_material,
             "gravity": _gravity_vector(self.gravity),
             "bounce_threshold": self.bounce_threshold,
             "enable_ccd": self.enable_ccd,

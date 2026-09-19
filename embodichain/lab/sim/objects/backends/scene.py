@@ -440,6 +440,7 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
         )
         self._joint_apply_scratch: dict[str, torch.Tensor] = {}
         self._link_com_scratch: torch.Tensor | None = None
+        self._root_velocity_snapshot: torch.Tensor | None = None
 
     def _validate_homogeneous_layout(self) -> None:
         """Require the uniform topology promised by one EC Articulation."""
@@ -636,6 +637,62 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
             rows,
             (7,),
         )
+
+    def apply_root_velocity(
+        self, velocity: torch.Tensor, env_ids: Sequence[int] | torch.Tensor
+    ) -> None:
+        """Write selected root velocities through the existing Scene batch.
+
+        Args:
+            velocity: World-frame linear and angular velocities, shape ``(N, 6)``.
+            env_ids: Environment rows in the same order as ``velocity``.
+
+        Raises:
+            RuntimeError: A batch write fails. Both velocity components are
+                restored first; a failed rollback is reported with the original
+                write error as its cause.
+        """
+        rows = self._select_rows(env_ids)
+        expected_shape = (len(rows), 6)
+        if tuple(velocity.shape) != expected_shape:
+            raise ValueError(
+                f"Expected selected data shape {expected_shape}, got "
+                f"{tuple(velocity.shape)}."
+            )
+        if len(rows):
+            batch = self.batch.select(rows)
+            if (
+                self._root_velocity_snapshot is None
+                or self._root_velocity_snapshot.shape[1] < len(rows)
+            ):
+                self._root_velocity_snapshot = torch.empty(
+                    (2, len(rows), 3), dtype=torch.float32, device=self.device
+                )
+            previous = self._root_velocity_snapshot[:, : len(rows)]
+            # Snapshot both components before either independent native write.
+            _checked_batch_call(batch, "fetch_root_linear_velocity", previous[0])
+            _checked_batch_call(batch, "fetch_root_angular_velocity", previous[1])
+            try:
+                _checked_batch_call(
+                    batch, "apply_root_linear_velocity", velocity[:, :3]
+                )
+                _checked_batch_call(
+                    batch, "apply_root_angular_velocity", velocity[:, 3:]
+                )
+            except Exception as write_error:
+                rollback_errors = []
+                for component, saved in zip(("linear", "angular"), previous):
+                    method = f"apply_root_{component}_velocity"
+                    try:
+                        _checked_batch_call(batch, method, saved)
+                    except Exception as rollback_error:
+                        rollback_errors.append(f"{method}: {rollback_error}")
+                if rollback_errors:
+                    raise RuntimeError(
+                        "Root velocity write failed and rollback could not restore "
+                        "all selected velocities: " + "; ".join(rollback_errors)
+                    ) from write_error
+                raise
 
     def _joint_columns(
         self, joint_ids: Sequence[int] | torch.Tensor | None

@@ -93,6 +93,8 @@ def test_scene_views_match_installed_dexsim_batch_surface() -> None:
     articulation_methods = {
         "select",
         "apply_root_pose",
+        "apply_root_linear_velocity",
+        "apply_root_angular_velocity",
         "fetch_root_pose",
         "fetch_root_linear_velocity",
         "fetch_root_angular_velocity",
@@ -270,6 +272,14 @@ class _SelectedArticulationBatch:
 
     def apply_root_angular_velocity(self, values: torch.Tensor) -> int:
         self.owner.root_angular_velocity[self.rows] = values
+        return len(self.rows)
+
+    def fetch_root_linear_velocity(self, out: torch.Tensor) -> int:
+        out.copy_(self.owner.root_linear_velocity[self.rows])
+        return len(self.rows)
+
+    def fetch_root_angular_velocity(self, out: torch.Tensor) -> int:
+        out.copy_(self.owner.root_angular_velocity[self.rows])
         return len(self.rows)
 
     def fetch_root_pose(self, out: torch.Tensor) -> int:
@@ -864,3 +874,162 @@ def test_scene_rigid_collision_filter_delegates_to_batch() -> None:
     view.fetch_collision_filter(actual)
 
     assert torch.equal(actual, expected)
+
+
+@pytest.mark.parametrize("env_ids", [[1], torch.tensor([1])], ids=["list", "tensor"])
+def test_root_velocity_writes_preserve_unselected_rows(
+    env_ids: list[int] | torch.Tensor,
+) -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(SimpleNamespace(), batch, torch.device("cpu"))
+    velocity = torch.tensor([[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]])
+    view.apply_root_velocity(velocity, env_ids=env_ids)
+    assert batch.selections == [(1,)]
+    torch.testing.assert_close(batch.root_linear_velocity[1:2], velocity[:, :3])
+    torch.testing.assert_close(batch.root_angular_velocity[1:2], velocity[:, 3:])
+    torch.testing.assert_close(
+        batch.root_linear_velocity[0], torch.tensor([1.0, 2.0, 3.0])
+    )
+    torch.testing.assert_close(
+        batch.root_angular_velocity[0], torch.tensor([7.0, 8.0, 9.0])
+    )
+
+
+def test_root_velocity_writes_follow_reordered_selection() -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(SimpleNamespace(), batch, torch.device("cpu"))
+    velocity = torch.arange(12, dtype=torch.float32).reshape(2, 6)
+    view.apply_root_velocity(velocity, env_ids=[1, 0])
+    assert batch.selections == [(1, 0)]
+    torch.testing.assert_close(batch.root_linear_velocity[[1, 0]], velocity[:, :3])
+    torch.testing.assert_close(batch.root_angular_velocity[[1, 0]], velocity[:, 3:])
+
+
+def test_empty_root_velocity_selection_leaves_velocities_unchanged() -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(SimpleNamespace(), batch, torch.device("cpu"))
+    linear_before = batch.root_linear_velocity.clone()
+    angular_before = batch.root_angular_velocity.clone()
+    view.apply_root_velocity(torch.empty((0, 6)), env_ids=[])
+    assert batch.selections == []
+    torch.testing.assert_close(batch.root_linear_velocity, linear_before)
+    torch.testing.assert_close(batch.root_angular_velocity, angular_before)
+
+
+@pytest.mark.parametrize(
+    "component, failure",
+    [("linear", "status"), ("angular", "status"), ("angular", "exception")],
+)
+def test_failed_root_velocity_write_restores_previous_values(
+    monkeypatch: pytest.MonkeyPatch,
+    component: str,
+    failure: str,
+) -> None:
+    env_ids = [1]
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(SimpleNamespace(), batch, torch.device("cpu"))
+    # A previous successful write must not leave a stale rollback snapshot.
+    view.apply_root_velocity(torch.full((2, 6), 2.0), env_ids=[0, 1])
+    linear_before = batch.root_linear_velocity.clone()
+    angular_before = batch.root_angular_velocity.clone()
+    method = f"apply_root_{component}_velocity"
+    original = getattr(_SelectedArticulationBatch, method)
+    error = RuntimeError("injected root velocity write failure")
+    calls = 0
+
+    def fail_once(selected: _SelectedArticulationBatch, values: torch.Tensor) -> int:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            target = getattr(selected.owner, f"root_{component}_velocity")
+            target[selected.rows[0]] = values[0]
+            if failure == "status":
+                return -7
+            raise error
+        return original(selected, values)
+
+    monkeypatch.setattr(_SelectedArticulationBatch, method, fail_once)
+    requested = torch.arange(len(env_ids) * 6, dtype=torch.float32).reshape(-1, 6)
+    with pytest.raises(RuntimeError) as caught:
+        view.apply_root_velocity(requested, env_ids=env_ids)
+    if failure == "exception":
+        assert caught.value is error
+    else:
+        assert method in str(caught.value) and "status -7" in str(caught.value)
+    torch.testing.assert_close(batch.root_linear_velocity, linear_before)
+    torch.testing.assert_close(batch.root_angular_velocity, angular_before)
+
+    view.apply_root_velocity(requested, env_ids=env_ids)
+    torch.testing.assert_close(batch.root_linear_velocity[env_ids], requested[:, :3])
+    torch.testing.assert_close(batch.root_angular_velocity[env_ids], requested[:, 3:])
+
+
+def test_root_velocity_snapshot_failure_does_not_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(SimpleNamespace(), batch, torch.device("cpu"))
+    linear_before = batch.root_linear_velocity.clone()
+    angular_before = batch.root_angular_velocity.clone()
+    monkeypatch.setattr(
+        _SelectedArticulationBatch,
+        "fetch_root_angular_velocity",
+        lambda self, out: -8,
+    )
+    with pytest.raises(RuntimeError, match="status -8"):
+        view.apply_root_velocity(torch.zeros(1, 6), env_ids=[1])
+    torch.testing.assert_close(batch.root_linear_velocity, linear_before)
+    torch.testing.assert_close(batch.root_angular_velocity, angular_before)
+
+
+def test_root_velocity_rollback_failure_attempts_both_components(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(SimpleNamespace(), batch, torch.device("cpu"))
+    original_error = RuntimeError("injected angular write failure")
+    calls = {"linear": 0, "angular": 0}
+
+    def writer(component: str):
+        original = getattr(
+            _SelectedArticulationBatch, f"apply_root_{component}_velocity"
+        )
+
+        def apply(selected: _SelectedArticulationBatch, values: torch.Tensor) -> int:
+            calls[component] += 1
+            if calls[component] == 2 and component == "linear":
+                return -9
+            result = original(selected, values)
+            if calls[component] == 1 and component == "angular":
+                raise original_error
+            return result
+
+        return apply
+
+    for component in calls:
+        monkeypatch.setattr(
+            _SelectedArticulationBatch,
+            f"apply_root_{component}_velocity",
+            writer(component),
+        )
+    with pytest.raises(RuntimeError, match="rollback") as caught:
+        view.apply_root_velocity(torch.zeros(1, 6), env_ids=[1])
+    assert caught.value.__cause__ is original_error
+    assert "apply_root_linear_velocity" in str(caught.value)
+    assert "status -9" in str(caught.value)
+    assert calls == {"linear": 2, "angular": 2}
+
+
+@pytest.mark.parametrize("shape", [(2, 6), (1, 5), (1, 7)])
+def test_root_velocity_view_rejects_shape_before_writing(
+    shape: tuple[int, int],
+) -> None:
+    batch = _ArticulationBatch()
+    view = SceneArticulationView(SimpleNamespace(), batch, torch.device("cpu"))
+    linear_before = batch.root_linear_velocity.clone()
+    angular_before = batch.root_angular_velocity.clone()
+    with pytest.raises(ValueError, match="Expected selected data shape"):
+        view.apply_root_velocity(torch.zeros(shape), env_ids=[1])
+    assert batch.selections == []
+    torch.testing.assert_close(batch.root_linear_velocity, linear_before)
+    torch.testing.assert_close(batch.root_angular_velocity, angular_before)

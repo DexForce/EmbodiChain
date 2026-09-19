@@ -43,6 +43,14 @@ full-batch tensors when partial writes must preserve other rows/DOFs. Avoid
 DexSim's host-materialized selected-DOF path. Pose conversions follow the
 [public quaternion contract](simulation-system.md#quaternion-and-pose-convention).
 
+`Articulation.set_root_velocity()` writes selected world-frame linear and
+angular velocities as `(N, 6)` rows. The Scene adapter validates the complete
+input before writing one selected batch; other environment rows are preserved.
+The adapter snapshots both velocity components into reusable device buffers
+before the independent native writes. On a write failure it attempts both
+restores, then propagates the original error; rollback failures are reported
+with the write error preserved as their cause.
+
 Newton root-pose writes filter unchanged rows before forwarding genuine
 changes, preserving CUDA graphs on ordinary fixed-root reset. Intentional
 initial anchor changes should occur after `prepare()` and before the first

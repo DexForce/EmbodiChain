@@ -36,6 +36,7 @@ sim_config = SimulationManagerCfg(
 | `width` | `int` | `1920` | The width of the simulation window. |
 | `height` | `int` | `1080` | The height of the simulation window. |
 | `headless` | `bool` | `False` | Whether to run the simulation in headless mode (no Window). |
+| `scene_node_capacity` | `int` \| `None` | `None` | Optional DexSim scene-node allocation capacity; `None` keeps the native default. |
 | `render_cfg` | `RenderCfg` | `RenderCfg()` | The rendering configuration parameters. |
 | `gpu_id` | `int` | `0` | Rendering GPU index; also resolves an unindexed CUDA compute device. |
 | `thread_mode` | `ThreadMode` | `RENDER_SHARE_ENGINE` | The threading mode for the simulation engine. |
@@ -46,6 +47,18 @@ sim_config = SimulationManagerCfg(
 | `physics_cfg` | `DefaultPhysicsCfg` \| `NewtonPhysicsCfg` | `DefaultPhysicsCfg()` | Physics backend configuration (class selects default vs Newton). |
 | `profiler` | `ProfilerCfg` \| `None` | `None` | Optional hierarchical wall-time profiler for simulation updates. |
 | `visualization` | `VisualizationCfg` | `VisualizationCfg()` | Browser visualization, opt-in Gizmo commands, and Viser server settings. |
+
+Large articulated batches can set `scene_node_capacity: 262144` in the training
+configuration, or pass `scene_node_capacity=262144` to `SimulationManagerCfg`.
+The value reaches `WorldConfig.scene_node_capacity` and leaves physics parameters
+unchanged.
+
+### Material reuse
+
+Set `DefaultPhysicsCfg(cache_material=True)` to reuse identical physics materials
+across objects and environment clones. Training configuration uses
+`physics: default` and `physics_config: {cache_material: true}`. The default is
+`False`, preserving the existing allocation behavior.
 
 ### Physics
 

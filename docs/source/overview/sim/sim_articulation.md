@@ -26,6 +26,14 @@ Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
 At runtime, call `articulation.set_gravity(...)` to change gravity for every
 environment or for a selected set of environment indices.
 
+### Root velocity writes
+
+`Articulation.set_root_velocity(velocity, env_ids=None)` writes root-link velocities
+in world coordinates. The tensor has shape `(N, 6)`: linear velocity in m/s,
+followed by angular velocity in rad/s. Omitting `env_ids` selects all environments;
+selected writes use the requested environment order and preserve other rows.
+`Robot` inherits this method. Writes use the existing Scene batch APIs.
+
 ### Per-link physics (`link_attrs`)
 
 By default, `attrs` applies the same rigid-body physics to every link. Use `link_attrs` to
