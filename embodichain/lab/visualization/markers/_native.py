@@ -17,7 +17,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import import_module
 from typing import Any
+from uuid import uuid4
 
 import numpy as np
 
@@ -46,16 +48,29 @@ class NativeMarkerRenderer:
     """Own native render-only mesh handles on the simulation thread.
 
     Args:
-        arena: Global DexSim arena exposing ``create_debug_mesh``. Older
-            engines raise an actionable error instead of drawing into sensors.
+        arena: Global DexSim arena owning generic render-only mesh actors.
+            Unsupported Spawn/native capabilities raise an actionable error.
     """
 
     def __init__(self, arena: Any) -> None:
-        if not callable(getattr(arena, "create_debug_mesh", None)):
+        try:
+            spawn = import_module("dexsim.spawn")
+            for symbol in (
+                "create_render_actor",
+                "ObjectDesc",
+                "RenderDesc",
+                "GeometryDesc",
+                "MaterialDesc",
+            ):
+                if not callable(getattr(spawn, symbol, None)):
+                    raise ImportError(f"Missing dexsim.spawn.{symbol}")
+        except ImportError as exc:
             raise RuntimeError(
-                "Native marker groups require DexSim Arena.create_debug_mesh. "
-                "Install a DexSim build with debug-mesh overlay support or use Viser."
-            )
+                "Native marker groups require dexsim.spawn.create_render_actor "
+                "and generic render descriptors. Install a DexSim build with "
+                "render-only overlay support or use Viser."
+            ) from exc
+        self._spawn = spawn
         self._arena = arena
         self._groups: dict[str, dict[str, _Entry]] = {}
 
@@ -88,11 +103,39 @@ class NativeMarkerRenderer:
                     handle = entry.handle
                     touched.append(entry)
                 else:
-                    handle = self._arena.create_debug_mesh(
-                        marker.vertices, marker.faces, marker.color
+                    actor_name = f"__embodichain_marker_{uuid4().hex}"
+                    spawn = self._spawn
+                    handle = spawn.create_render_actor(
+                        self._arena,
+                        spawn.ObjectDesc(
+                            name=actor_name,
+                            renders=[
+                                spawn.RenderDesc.from_geometry(
+                                    spawn.GeometryDesc.mesh(
+                                        vertices=marker.vertices,
+                                        triangles=marker.faces,
+                                    ),
+                                    render_mode="overlay",
+                                    cast_shadow=False,
+                                    pickable=False,
+                                    material=spawn.MaterialDesc(
+                                        name=f"{actor_name}_material",
+                                        base_color=marker.color,
+                                        unlit=True,
+                                        alpha_mode="blend",
+                                        depth_write=False,
+                                        double_sided=True,
+                                    ),
+                                )
+                            ],
+                            physics=None,
+                            per_env=False,
+                        ),
                     )
                     if handle is None:
-                        raise RuntimeError("DexSim failed to create a debug mesh.")
+                        raise RuntimeError(
+                            "DexSim failed to create a render-only mesh."
+                        )
                     created.append(handle)
                 self._apply(handle, marker)
                 pending[marker.overlay_id] = _Entry(handle, marker)

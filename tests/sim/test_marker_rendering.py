@@ -26,7 +26,24 @@ from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototyp
 pytestmark = [pytest.mark.gpu, pytest.mark.requires_sim]
 
 
+def _require_render_actor_capability():
+    from dexsim import engine, spawn
+
+    required = (
+        (spawn, "create_render_actor"),
+        (getattr(engine, "RenderBody", None), "set_raytrace_visible"),
+        (getattr(engine, "RenderBody", None), "set_pickable"),
+        (getattr(engine, "RenderBody", None), "build"),
+        (getattr(engine, "MaterialInst", None), "set_unlit"),
+        (getattr(engine, "MaterialInst", None), "set_alpha_mode"),
+        (getattr(engine, "AlphaMode", None), "BLEND"),
+    )
+    if any(not hasattr(owner, name) for owner, name in required):
+        pytest.skip("Requires DexSim generic render actor and material capabilities")
+
+
 def test_marker_group_native_rendering_and_sensor_isolation():
+    _require_render_actor_capability()
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
@@ -48,8 +65,6 @@ def _exercise_marker_rendering(sim):
     import dexsim
 
     arena = sim.get_env()
-    if not hasattr(arena, "create_debug_mesh"):
-        pytest.skip("Requires DexSim create_debug_mesh overlay capability")
     world = sim.get_world()
     camera_group = world.create_camera_group([96, 96], 1, True)
     camera = arena.create_camera(
@@ -122,6 +137,7 @@ def test_environment_batched_native_attachment_follows_bound_articulation(tmp_pa
             "Registered-asset smoke requires compatible DexSim COM descriptors; installed schema lacks com_quaternion"
         )
 
+    _require_render_actor_capability()
     source = tmp_path / "marker_parent.urdf"
     source.write_text("""<robot name="marker_parent">
       <link name="base"><inertial><mass value="1"/><inertia ixx="0.1" iyy="0.1" izz="0.1" ixy="0" ixz="0" iyz="0"/></inertial><visual><geometry><box size="0.1 0.1 0.1"/></geometry></visual></link>
@@ -139,8 +155,6 @@ def test_environment_batched_native_attachment_follows_bound_articulation(tmp_pa
         )
     )
     try:
-        if not hasattr(sim.get_env(), "create_debug_mesh"):
-            pytest.skip("Requires DexSim create_debug_mesh overlay capability")
         target = sim.add_articulation(
             ArticulationCfg(uid="parent", fpath=str(source), init_pos=(0.0, 0.0, 2.0))
         )
@@ -191,6 +205,7 @@ def test_environment_batched_native_attachment_follows_bound_articulation(tmp_pa
 
 
 def test_native_environment_batches_selected_mutations_without_preparation():
+    _require_render_actor_capability()
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
@@ -203,8 +218,6 @@ def test_native_environment_batches_selected_mutations_without_preparation():
     )
     try:
         arena = sim.get_env()
-        if not hasattr(arena, "create_debug_mesh"):
-            pytest.skip("Requires DexSim create_debug_mesh overlay capability")
         count = arena.get_actor_num()
         revision = sim._prepared_spawn_topology_revision
         group = sim.add_marker_group(

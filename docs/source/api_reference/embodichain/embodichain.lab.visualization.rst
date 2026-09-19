@@ -82,8 +82,21 @@ marker operations stepping physics. Attachment currently requires env scope.
 
 Prototype colors and per-instance overrides are RGBA in [0, 1]. Frame markers
 keep their RGB axis colors while following alpha. Native rendering requires
-DexSim's debug-mesh capability; Hybrid NRD offscreen with DLSS disabled inherits
-the engine's overlay-composition limitation. This batched state API currently
+DexSim's generic ``dexsim.spawn.create_render_actor`` factory and render-property
+bindings. The adapter composes ``ObjectDesc(physics=None, per_env=False)``,
+array-backed ``GeometryDesc.mesh``, and ``RenderDesc`` with
+``render_mode="overlay"``, ``cast_shadow=False`` and ``pickable=False``.
+``MaterialDesc`` supplies unlit RGBA blending, disabled depth writes and two-sided
+surfaces. The new unlit and alpha-mode controls require DexSim's shared native
+RT material type; Filament materials reject them. File-backed overlays are
+unsupported. Existing Arena-owned
+``MeshObject`` / ``RenderBody`` APIs provide updates and cleanup without preparing
+physics or introducing a dedicated debug object.
+
+Hybrid, FastRT and OfflineRT support these overlays. Offscreen output excludes
+them by default; explicit camera-group opt-in enables supported targets. Hybrid
+NRD offscreen with DLSS disabled inherits the engine's overlay-composition
+limitation even with opt-in. This batched state API currently
 uses per-object native handles; native batch submission and GPU instancing are
 tracked separately in DexSim issue 227.
 
