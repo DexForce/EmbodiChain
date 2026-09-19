@@ -770,6 +770,21 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
         preview(env)
         return
 
+    from embodichain.lab.gym.envs.augmentation import AffordanceAugmentationCfg
+
+    expert_cfg = getattr(
+        getattr(_env_target(env), "cfg", None), "expert_trajectory", None
+    )
+    if isinstance(
+        getattr(expert_cfg, "affordance_augmentation", None), AffordanceAugmentationCfg
+    ):
+        from embodichain.lab.scripts._affordance_collection import (
+            _collect_affordance_episodes,
+        )
+
+        _collect_affordance_episodes(args, env, gym_config)
+        return
+
     # Prepare one clean scene. max_episodes counts persisted per-environment
     # episodes, not vector batches. Every successful generate_function call
     # commits exactly the selected rows and leaves the next batch ready to plan.

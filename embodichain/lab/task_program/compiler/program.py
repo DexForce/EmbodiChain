@@ -262,6 +262,8 @@ class CompiledObjectNearTargetValidator:
                 object=self.cfg.object,
                 target=self.cfg.target,
                 position_tolerance=self.cfg.position_tolerance,
+                release_resource=self.cfg.release_resource,
+                release_tolerance=self.cfg.release_tolerance,
                 kind=self.cfg.kind,
             ),
         )
@@ -1522,6 +1524,8 @@ class TaskProgramCompiler:
                                 object=cfg.object,
                                 target=cfg.target,
                                 position_tolerance=cfg.position_tolerance,
+                                release_resource=cfg.release_resource,
+                                release_tolerance=cfg.release_tolerance,
                                 kind=cfg.kind,
                             ),
                             object=object_ref,

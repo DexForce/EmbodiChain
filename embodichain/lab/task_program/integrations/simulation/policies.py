@@ -47,8 +47,15 @@ from embodichain.lab.task_program.compiler import (
     CompiledArticulationJointPositionValidator,
     CompiledObjectNearTargetValidator,
     CompiledPostPolicy,
+    CompiledTaskProgram,
     CompiledTaskProgramSegment,
     CompiledTaskProgramValidator,
+)
+from embodichain.lab.sim.atomic_actions.control import JointPositionCommand
+from embodichain.lab.task_program.semantics.calls import Pick, Place
+from embodichain.lab.task_program.semantics.profiles import (
+    ControlPartEndpoint,
+    RobotSkillProfile,
 )
 from .bindings import SimulationSceneBinding
 
@@ -107,6 +114,7 @@ class SimulationSegmentPolicyPort:
         robot: Live robot used to produce full target-qpos holds while the
             post-policy observes settling.
         scene_binding: Exact canonical-to-native scene declaration.
+        robot_profile: Optional bound profile used to resolve measured grasp release.
         settle_presets: Named settling policies. ``None`` installs the shared
             ``rigid_object`` and ``articulation`` presets.
         env_ids: Optional stable logical row IDs. They describe correlation,
@@ -124,6 +132,7 @@ class SimulationSegmentPolicyPort:
         robot: Robot,
         scene_binding: SimulationSceneBinding,
         *,
+        robot_profile: RobotSkillProfile | None = None,
         settle_presets: Mapping[str, DynamicSettleMonitorCfg] | None = None,
         env_ids: torch.Tensor | None = None,
     ) -> None:
@@ -171,6 +180,10 @@ class SimulationSegmentPolicyPort:
                 )
             normalized_presets[preset_id] = cfg.snapshot()
 
+        if robot_profile is not None and type(robot_profile) is not RobotSkillProfile:
+            raise TypeError("robot_profile must be exactly RobotSkillProfile or None.")
+        self._robot_profile = robot_profile
+        self._measured_program: CompiledTaskProgram | None = None
         self._simulation = simulation
         self._robot = robot
         self._scene_binding = scene_binding
@@ -189,6 +202,130 @@ class SimulationSegmentPolicyPort:
         self._post_policy_results: dict[int, dict[str, object]] = {}
         self._post_policy_success: dict[int, torch.Tensor] = {}
         self._validator_results: dict[int, dict[str, object]] = {}
+
+    def _release_command(self, resource_id: str) -> tuple[str, torch.Tensor]:
+        """Resolve only an explicitly declared joint-backed grasp open command."""
+        if self._robot_profile is None:
+            raise ValueError("Measured release requires the bound robot profile.")
+        resource = self._robot_profile.resources.get(resource_id)
+        endpoint = None if resource is None else resource.endpoints.get("grasp")
+        if type(endpoint) is not ControlPartEndpoint:
+            raise ValueError(
+                f"Release resource {resource_id!r} needs a joint-backed grasp endpoint."
+            )
+        profile_id = endpoint.command_profile or endpoint.control_part
+        profile = self._robot_profile.command_profiles.get(profile_id)
+        command = None if profile is None else profile.commands.get("open")
+        if type(command) is not JointPositionCommand or command.positions.ndim != 1:
+            raise ValueError(
+                f"Release resource {resource_id!r} needs an unbatched open joint command."
+            )
+        return endpoint.control_part, command.positions
+
+    def validate_measured_acceptance(self, program: CompiledTaskProgram) -> None:
+        """Qualify supported Pick/Place outcomes and begin a fresh evidence attempt.
+
+        Call before every episode, including retries of the same compiled object.
+        Each segment must end every touched object with an absolute Place and
+        measure that position, the placing gripper's release, and object settling.
+        This bounded qualification does not certify arbitrary projected programs.
+
+        Args:
+            program: Exact compiled program for the upcoming episode attempt.
+
+        Raises:
+            ValueError: If any segment lacks a supported complete measured outcome.
+        """
+        self._measured_program = None
+        self._post_policy_results.clear()
+        self._post_policy_success.clear()
+        self._validator_results.clear()
+        if type(program) is not CompiledTaskProgram:
+            raise TypeError("program must be exactly CompiledTaskProgram.")
+        for segment in program.iter_segments():
+            if segment.parallel_block is not None:
+                raise ValueError(
+                    "Measured acceptance does not support parallel segments."
+                )
+            terminal: dict[str, Pick | Place] = {}
+            for item in segment.calls:
+                if type(item.call) not in (Pick, Place):
+                    raise ValueError(
+                        "Measured acceptance supports only Pick/Place programs."
+                    )
+                terminal[item.call.object.entity_id] = item.call
+            for object_id, call in terminal.items():
+                if type(call) is not Place or call.at is None:
+                    raise ValueError(
+                        "Measured acceptance requires terminal absolute Place outcomes."
+                    )
+                if self._robot_profile is None:
+                    raise ValueError(
+                        "Measured acceptance requires a bound release profile."
+                    )
+                default = self._robot_profile.defaults.get("place")
+                resource = call.resources.get("primary") or (
+                    None if default is None else default.resources.get("primary")
+                )
+                validators = [
+                    v
+                    for v in segment.validators
+                    if type(v) is CompiledObjectNearTargetValidator
+                    and v.object.entity_id == object_id
+                    and v.cfg.release_resource is not None
+                    and v.cfg.release_resource == resource
+                    and torch.equal(v.target_pose.position, call.at.position)
+                ]
+                if not validators:
+                    raise ValueError(
+                        f"Measured acceptance requires target and release validation for {object_id!r}."
+                    )
+                policies = [
+                    p
+                    for p in segment.post_policies
+                    if p.entity.entity_id == object_id and p.cfg.kind == "wait_stable"
+                ]
+                if not policies:
+                    raise ValueError(
+                        f"Measured acceptance requires wait_stable for {object_id!r}."
+                    )
+                for validator in validators:
+                    self.validate_validator(validator, segment=segment)
+                for policy in policies:
+                    self.validate_policy(policy, segment=segment)
+        self._measured_program = program
+
+    def measured_success_mask(self, program: CompiledTaskProgram) -> torch.Tensor:
+        """Return completed current-attempt evidence, failing closed when missing.
+
+        Args:
+            program: Same compiled instance qualified before this attempt.
+
+        Returns:
+            Owned boolean mask with one measured success flag per simulator row.
+        """
+        if program is not self._measured_program:
+            raise ValueError("Program has no current measured acceptance attempt.")
+        accepted = torch.ones_like(self._env_ids, dtype=torch.bool)
+        for segment in program.iter_segments():
+            for policy in segment.post_policies:
+                metadata = self._post_policy_results.get(id(policy))
+                result = self._post_policy_success.get(id(policy))
+                if (
+                    metadata is None
+                    or result is None
+                    or metadata["status"] not in ("settled", "timed_out")
+                ):
+                    return torch.zeros_like(accepted)
+                accepted &= result
+            for validator in segment.validators:
+                metadata = self._validator_results.get(id(validator))
+                if metadata is None:
+                    return torch.zeros_like(accepted)
+                accepted &= torch.tensor(
+                    metadata["accepted_mask"], dtype=torch.bool, device=accepted.device
+                )
+        return accepted
 
     @property
     def settle_preset_ids(self) -> tuple[str, ...]:
@@ -378,6 +515,8 @@ class SimulationSegmentPolicyPort:
                     f"Canonical validator object {entity_id!r} has no explicit "
                     "rigid-object binding."
                 )
+            if validator.cfg.release_resource is not None:
+                self._release_command(validator.cfg.release_resource)
             return
 
         if validator.cfg.kind != "articulation_joint_position":
@@ -430,7 +569,36 @@ class SimulationSegmentPolicyPort:
         accepted = torch.isfinite(error) & (
             error <= float(validator.cfg.position_tolerance)
         )
+        release_metadata: dict[str, object] = {}
+        if validator.cfg.release_resource is not None:
+            control_part, open_positions = self._release_command(
+                validator.cfg.release_resource
+            )
+            measured = self._robot.get_qpos(name=control_part, target=False)
+            if not isinstance(measured, torch.Tensor) or measured.shape != (
+                self._env_ids.numel(),
+                open_positions.numel(),
+            ):
+                raise ValueError(
+                    "Measured release qpos must match the selected grasp endpoint."
+                )
+            if measured.device != self._env_ids.device:
+                raise ValueError(
+                    "Measured release qpos must share the simulation device."
+                )
+            release_error = (measured - open_positions.to(measured)).abs().amax(dim=1)
+            released = torch.isfinite(release_error) & (
+                release_error <= validator.cfg.release_tolerance
+            )
+            accepted &= released
+            release_metadata = {
+                "release_resource": validator.cfg.release_resource,
+                "release_tolerance": validator.cfg.release_tolerance,
+                "release_error": _json_speed_values(release_error),
+                "release_mask": released.detach().cpu().tolist(),
+            }
         self._validator_results[id(validator)] = {
+            **release_metadata,
             "kind": validator.cfg.kind,
             "object_id": entity_id,
             "target_id": validator.target_selection.target_id,

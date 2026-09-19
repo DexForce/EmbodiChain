@@ -1863,3 +1863,36 @@ def test_factory_planner_config_uses_owner_without_mutating_input(
     assert captured[0].robot_uid == robot.uid
     assert captured[0] is not supplied
     assert supplied.sim_instance_id == 0
+
+
+def test_simulation_observation_reads_current_affordance_attempt() -> None:
+    from embodichain.lab.sim.atomic_actions import AffordanceSamplingContext
+
+    robot = _Robot()
+    current = [AffordanceSamplingContext(count=_BATCH_SIZE, seed=7, episode_id=2)]
+    environment = SimpleNamespace(
+        sim=_Simulation(robot),
+        robot=robot,
+        step_dt=_STEP_DT,
+        get_affordance_sampling_context=lambda: current[0],
+    )
+    factory = SimulationTaskProgramFactory.from_environment(
+        environment,
+        registration=SimulationTaskProgramRegistration(
+            SimulationSceneBinding(registry_id="scene"),
+            _profile_binding(),
+        ),
+        motion_generator_factory=lambda: _motion_generator(robot),
+    )
+    profile = factory.create_robot_skill_profile()
+    provider = factory.create_planning_observation_provider(
+        scene_registry=factory.create_scene_registry(),
+        engine=factory.create_atomic_action_engine(profile),
+        clock=EnvironmentStepClock(_STEP_DT),
+    )
+    task = TaskState.empty(_BATCH_SIZE, robot.device)
+    assert provider.observe(task).affordance_sampling is current[0]
+    current[0] = AffordanceSamplingContext(count=_BATCH_SIZE, seed=7, episode_id=3)
+    assert provider.observe(task).affordance_sampling is current[0]
+    current[0] = None
+    assert provider.observe(task).affordance_sampling is None

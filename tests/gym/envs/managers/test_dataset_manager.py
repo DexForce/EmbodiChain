@@ -472,3 +472,27 @@ def test_pending_discard_attempts_every_camera_and_clears_trajectory() -> None:
     second.discard_and_clear.assert_called_once_with()
     second.finalize.assert_called_once_with()
     assert env._traj_steps.tolist() == [0, 0]
+
+
+def test_explicit_augmented_commit_keeps_trajectory_subset():
+    from embodichain.lab.gym.envs.managers.episode_commit import DemoCommitReceipt
+
+    env, manager = make_env_for_episode_selection(
+        save_failed_episodes=False, successful_env_ids=[0, 1, 2]
+    )
+    receipt = DemoCommitReceipt(1, "ep", "commit", 4, ("dataset", "metadata"))
+    manager.commit_episode_rows = lambda rows: (receipt,)
+    env._affordance_commit_requested = True
+    env._traj_buffer = object()
+    env.cfg.trajectory_auto_save = True
+    saved = []
+    env._save_trajectory_for_env = lambda row: saved.append(row) or f"row-{row}.pt"
+    EmbodiedEnv._initialize_episode(
+        env, env_ids=[0, 1, 2], save_data=False, commit_env_ids=torch.tensor([1])
+    )
+    assert saved == [1]
+    assert env._affordance_last_commit_receipts[0].confirmed_modalities == (
+        "dataset",
+        "metadata",
+        "trajectory",
+    )

@@ -684,7 +684,16 @@ def _decode_validator(
 
     _validate_fields(
         mapping,
-        allowed=frozenset({"kind", "object", "target", "position_tolerance"}),
+        allowed=frozenset(
+            {
+                "kind",
+                "object",
+                "target",
+                "position_tolerance",
+                "release_resource",
+                "release_tolerance",
+            }
+        ),
         required=frozenset({"kind", "object", "target"}),
         path=path,
     )
@@ -709,6 +718,14 @@ def _decode_validator(
         object=_expect_identifier(mapping["object"], path=(*path, "object")),
         target=target,
         position_tolerance=tolerance,
+        release_resource=(
+            None
+            if mapping.get("release_resource") is None
+            else _expect_identifier(
+                mapping["release_resource"], path=(*path, "release_resource")
+            )
+        ),
+        release_tolerance=mapping.get("release_tolerance", 0.002),
     )  # type: ignore[return-value]
 
 

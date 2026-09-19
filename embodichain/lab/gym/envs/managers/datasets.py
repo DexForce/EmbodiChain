@@ -23,7 +23,7 @@ import json
 import math
 import threading
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
@@ -47,6 +47,7 @@ from embodichain.lab.gym.envs.demo import DEMO_ANNOTATION_KEYS, DEMO_SCHEMA_VERS
 from embodichain.lab.gym.envs.expert_trajectory import encode_expert_action
 from .manager_base import Functor
 from .cfg import DatasetFunctorCfg
+from .episode_commit import DemoCommitReceipt
 
 __all__ = ["LeRobotRecorder"]
 
@@ -180,6 +181,9 @@ class LeRobotRecorder(Functor):
         self._fragment_commit_lock = threading.RLock()
         self._committed_fragment_ids: dict[str, int] = {}
         self._partial_fragment_commits: dict[str, tuple[int, str]] = {}
+        self._episode_commit_receipts: dict[str, DemoCommitReceipt] = {}
+        self._episode_commit_error: str | None = None
+        self._partial_episode_commits: dict[str, tuple[int, str]] = {}
         self._finalize_lock = threading.Lock()
         self._finalized = False
         self._finalize_result: Optional[str] = None
@@ -258,6 +262,198 @@ class LeRobotRecorder(Functor):
             # Save episodes for specified environments
             if len(env_ids) > 0:
                 self._save_episodes(env_ids)
+
+    def validate_episode_commit_support(self) -> None:
+        """Require a synchronous sink whose videos finish within each commit."""
+        if type(self) is not LeRobotRecorder:
+            raise ValueError(
+                "Episode receipts require an exact synchronous LeRobotRecorder"
+            )
+        if self._finalized:
+            raise RuntimeError("LeRobotRecorder is already finalized")
+        if self.dataset is None:
+            raise RuntimeError(
+                "Episode receipts require an initialized synchronous dataset"
+            )
+        if getattr(self, "_episode_commit_error", None) is not None:
+            raise RuntimeError(self._episode_commit_error)
+        if getattr(self.dataset, "batch_encoding_size", 1) != 1:
+            raise ValueError("Episode receipts do not support deferred video encoding")
+
+    def _ensure_episode_commit_tracking(self) -> None:
+        if not hasattr(self, "_episode_commit_receipts"):
+            self._episode_commit_receipts = {}
+            self._partial_episode_commits = {}
+
+    @property
+    def episode_commit_receipts(self) -> tuple[DemoCommitReceipt, ...]:
+        """Successful receipts in commit order, including before a later failure."""
+        self._ensure_episode_commit_tracking()
+        return tuple(self._episode_commit_receipts.values())
+
+    @staticmethod
+    def _augmentation_identity(metadata: Mapping[str, Any] | None) -> tuple[str, str]:
+        augmentation = (metadata or {}).get("augmentation")
+        if not isinstance(augmentation, Mapping):
+            raise ValueError("Episode commit requires explicit augmentation metadata")
+        values = tuple(augmentation.get(key) for key in ("episode_id", "commit_id"))
+        if any(
+            not isinstance(value, str) or not value or value != value.strip()
+            for value in values
+        ):
+            raise ValueError(
+                "augmentation episode_id and commit_id must be nonempty strings without surrounding whitespace"
+            )
+        return values
+
+    def commit_episode_rows(
+        self, env_ids: Sequence[int] | torch.Tensor
+    ) -> tuple[DemoCommitReceipt, ...]:
+        """Persist exactly the selected full episodes and return durable receipts.
+
+        All rows require explicit ``augmentation.episode_id`` and ``commit_id``
+        metadata. Completed IDs are deduplicated within this recorder; a
+        failure after the primary save starts leaves the sink unusable for
+        further writes, because persistence may be partial. Earlier successful
+        receipts remain accessible if a later row fails.
+
+        Args:
+            env_ids: Unique physical rows containing nonempty augmented episodes.
+
+        Returns:
+            Receipts for independently readable episodes in requested row order.
+        """
+        self.validate_episode_commit_support()
+        ids = torch.as_tensor(env_ids)
+        if ids.ndim == 1 and ids.numel() == 0:
+            return ()
+        if ids.ndim != 1 or ids.dtype == torch.bool or ids.is_floating_point():
+            raise ValueError("env_ids must be a one-dimensional integer sequence")
+        rows = ids.cpu().tolist()
+        if len(set(rows)) != len(rows) or any(
+            row < 0 or row >= self._env.num_envs for row in rows
+        ):
+            raise ValueError("env_ids must contain unique valid environment rows")
+        with self._finalize_lock:
+            self.validate_episode_commit_support()
+            self._ensure_episode_commit_tracking()
+            payloads = []
+            commit_ids = set()
+            for row in rows:
+                step = self._episode_length(row)
+                if step <= 0:
+                    raise ValueError(f"Cannot commit empty episode for env {row}")
+                getter = getattr(self._env, "get_demo_episode_metadata", None)
+                metadata = copy.deepcopy(getter(row)) if getter is not None else None
+                episode_id, commit_id = self._augmentation_identity(metadata)
+                if (
+                    metadata.get("fragment")
+                    or metadata.get("output_mode") == "segment_fragments"
+                ):
+                    raise ValueError(
+                        "Episode receipts require full episodes, not fragments"
+                    )
+                if commit_id in commit_ids:
+                    raise ValueError(
+                        "Selected rows contain duplicate augmentation commit_id"
+                    )
+                commit_ids.add(commit_id)
+                receipt = self._episode_commit_receipts.get(commit_id)
+                if receipt is not None and (
+                    receipt.env_id != row or receipt.episode_id != episode_id
+                ):
+                    raise ValueError(
+                        f"Commit {commit_id!r} was already used for a different episode"
+                    )
+                annotations = {
+                    key: self._env.rollout_buffer[key][row, :step]
+                    for key in DEMO_ANNOTATION_KEYS
+                    if key in self._env.rollout_buffer.keys()
+                }
+                payloads.append(
+                    (
+                        row,
+                        self._env.rollout_buffer["obs"][row, :step],
+                        self._env.rollout_buffer["actions"][row, :step],
+                        annotations,
+                        metadata,
+                    )
+                )
+            return tuple(self._commit_episode_payload(*payload) for payload in payloads)
+
+    def _commit_episode_payload(
+        self,
+        env_id: int,
+        obs_list: Any,
+        action_list: Any,
+        annotations: Mapping[str, Any] | None,
+        episode_metadata: Mapping[str, Any],
+    ) -> DemoCommitReceipt:
+        self._ensure_episode_commit_tracking()
+        episode_id, commit_id = self._augmentation_identity(episode_metadata)
+        partial = self._partial_episode_commits.get(commit_id)
+        if partial is not None:
+            episode_index, error = partial
+            raise RuntimeError(
+                f"Commit {commit_id!r} already started LeRobot episode {episode_index}, "
+                f"but persistence is uncertain: {error}. Refusing to write a duplicate."
+            )
+        receipt = self._episode_commit_receipts.get(commit_id)
+        if receipt is not None:
+            if receipt.env_id != env_id or receipt.episode_id != episode_id:
+                raise ValueError(
+                    f"Commit {commit_id!r} was already used for a different episode"
+                )
+            return receipt
+        if not self._save_single_episode(
+            env_id, obs_list, action_list, annotations, episode_metadata
+        ):
+            raise RuntimeError(f"Episode {episode_id!r} was not persisted")
+        modalities = ("dataset", "metadata")
+        if self._depth_manager is not None:
+            modalities += ("depth",)
+        receipt = DemoCommitReceipt(
+            env_id,
+            episode_id,
+            commit_id,
+            self._last_committed_episode_index,
+            modalities,
+        )
+        self._episode_commit_receipts[commit_id] = receipt
+        return receipt
+
+    def _flush_episode_commit(self) -> None:
+        """Close parquet footers and resume using LeRobot's public append path.
+
+        ``save_episode`` leaves data and metadata writers open in LeRobot v3.
+        Reusing those writers after ``finalize`` can truncate their old files.
+        A fresh resumed dataset instead advances both file indices from persisted
+        metadata. This intentionally pays local reload costs per accepted episode
+        so receipts are independently readable before recorder shutdown.
+        """
+        dataset = self.dataset
+        if dataset.image_writer is not None:
+            dataset.stop_image_writer()
+        dataset.finalize()
+        # Validate local files directly before the constructor, whose missing
+        # file fallback would otherwise try to download a Hub dataset.
+        dataset.meta.load_metadata()
+        dataset.load_hf_dataset()
+        resumed = LeRobotDataset(
+            repo_id=dataset.repo_id,
+            root=dataset.root,
+            tolerance_s=dataset.tolerance_s,
+            video_backend=dataset.video_backend,
+            vcodec=dataset.vcodec,
+            batch_encoding_size=1,
+            download_videos=False,
+        )
+        resumed.episode_buffer = resumed.create_episode_buffer()
+        self.dataset = resumed
+        if self.image_writer_processes or self.image_writer_threads:
+            resumed.start_image_writer(
+                self.image_writer_processes, self.image_writer_threads
+            )
 
     def _save_episodes(
         self,
@@ -520,6 +716,12 @@ class LeRobotRecorder(Functor):
         episode already exists, so retrying raises instead of creating a
         duplicate with incomplete sidecar durability.
         """
+        if episode_metadata is not None and "augmentation" in episode_metadata:
+            self.validate_episode_commit_support()
+            self._commit_episode_payload(
+                env_id, obs_list, action_list, annotations, episode_metadata
+            )
+            return True
         fragment_id = self._fragment_id_from_metadata(episode_metadata)
         if fragment_id is None:
             return self._save_single_episode(
@@ -595,6 +797,8 @@ class LeRobotRecorder(Functor):
         Returns:
             True if the episode was saved successfully, False otherwise.
         """
+        if getattr(self, "_episode_commit_error", None) is not None:
+            raise RuntimeError(self._episode_commit_error)
         task = (
             self.instruction.get("lang", "unknown_task")
             if self.instruction
@@ -635,7 +839,18 @@ class LeRobotRecorder(Functor):
 
         depth_prefix = f"{LeRobotKey.OBS_PREFIX.value}depth."
         episode_index = self.curr_episode
+        augmentation_commit_id = None
+        if episode_metadata is not None and "augmentation" in episode_metadata:
+            _, augmentation_commit_id = self._augmentation_identity(episode_metadata)
+            self._ensure_episode_commit_tracking()
+            episode_index = self.dataset.episode_buffer["episode_index"]
+            if not isinstance(episode_index, (int, np.integer)) or episode_index < 0:
+                raise ValueError(
+                    "LeRobot episode buffer must expose its actual integer episode_index"
+                )
+            episode_index = int(episode_index)
         dataset_committed = False
+        dataset_save_started = False
         fragment_id = self._fragment_id_from_metadata(episode_metadata)
         episode_attempt_id = int((episode_metadata or {}).get("attempt_id", 0))
         episode_continuity_id = int((episode_metadata or {}).get("continuity_id", 0))
@@ -714,12 +929,14 @@ class LeRobotRecorder(Functor):
                 self.dataset.add_frame(frame)
 
             self._normalize_scalar_episode_buffer()
+            dataset_save_started = True
             self.dataset.save_episode()
-            # LeRobot has committed this index. Advance immediately so a later
+            # LeRobot has accepted this index. Advance immediately so a later
             # depth/metadata failure cannot make the next queued episode reuse
             # and overwrite the same sidecar filename.
             dataset_committed = True
-            self.curr_episode += 1
+            self.curr_episode = episode_index + 1
+            self._last_committed_episode_index = episode_index
             if self._depth_manager is not None:
                 self._depth_manager.end_episode(episode_index)
 
@@ -749,6 +966,8 @@ class LeRobotRecorder(Functor):
                 }
             )
             self._write_episode_metadata(sidecar_metadata)
+            if augmentation_commit_id is not None:
+                self._flush_episode_commit()
 
             logger.log_info(
                 f"[LeRobotRecorder] Saved dataset to: {self.dataset_path}\n"
@@ -757,6 +976,31 @@ class LeRobotRecorder(Functor):
 
             return True
         except Exception as error:
+            if dataset_save_started and augmentation_commit_id is not None:
+                self._partial_episode_commits[augmentation_commit_id] = (
+                    episode_index,
+                    f"{type(error).__name__}: {error}",
+                )
+                self._episode_commit_error = (
+                    f"Commit {augmentation_commit_id!r} started LeRobot episode {episode_index}, "
+                    f"but persistence is uncertain: {type(error).__name__}: {error}. "
+                    "Refusing to write a duplicate or append later episodes to this sink."
+                )
+                error.add_note(self._episode_commit_error)
+            if not dataset_save_started and augmentation_commit_id is not None:
+                try:
+                    self.dataset.clear_episode_buffer()
+                except Exception as cleanup_error:
+                    self._partial_episode_commits[augmentation_commit_id] = (
+                        episode_index,
+                        f"Pending frame cleanup failed: {cleanup_error}",
+                    )
+                    self._episode_commit_error = (
+                        f"Commit {augmentation_commit_id!r} could not clear pending "
+                        f"LeRobot episode {episode_index} frames: {cleanup_error}. "
+                        "Refusing to append later episodes to this uncertain sink."
+                    )
+                    error.add_note(self._episode_commit_error)
             if dataset_committed and fragment_id is not None:
                 self._ensure_fragment_commit_tracking()
                 with self._fragment_commit_lock:
@@ -764,7 +1008,9 @@ class LeRobotRecorder(Functor):
                         episode_index,
                         f"{type(error).__name__}: {error}",
                     )
-            if not dataset_committed:
+            if not dataset_committed and (
+                augmentation_commit_id is None or not dataset_save_started
+            ):
                 self.total_time = previous_total_time
             if self._depth_manager is not None and not dataset_committed:
                 try:

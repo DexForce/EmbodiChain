@@ -80,6 +80,7 @@ snapshot to the exact integration registration.
 
 | Environment | Assurance | Source |
 |---|---|---|
+| `TaskProgramRepeatedPickPlace-UR5-Augmentation-v1` | projected calls; measured terminal collection acceptance | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.augmentation.yaml` |
 | `TaskProgramRepeatedPickPlace-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/` |
 | `TaskProgramRepeatedPickPlace-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.newton.yaml` |
 | `TaskProgramRepeatedPickPlace-Franka-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.newton.yaml` |

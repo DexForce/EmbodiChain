@@ -273,6 +273,17 @@ embodichain.gen_sim.simready_pipeline.cli.start
    cli_ingest_single
    main
 
+embodichain.lab.gym.envs.augmentation
+----------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.augmentation
+
+Opt-in host policy for bounded, measured offline Affordance collection.
+
+.. autosummary::
+
+   AffordanceAugmentationCfg
+
 embodichain.lab.gym.envs.base_env
 ---------------------------------
 
@@ -344,6 +355,18 @@ embodichain.lab.gym.envs.managers.actions
    EefPoseTerm
    QvelTerm
    QfTerm
+
+embodichain.lab.gym.envs.managers.episode_commit
+---------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.episode_commit
+
+Synchronous episode acknowledgement with explicit confirmed output modalities.
+Idempotency is limited to the recorder process.
+
+.. autosummary::
+
+   DemoCommitReceipt
 
 embodichain.lab.gym.envs.wrapper.replay
 ---------------------------------------

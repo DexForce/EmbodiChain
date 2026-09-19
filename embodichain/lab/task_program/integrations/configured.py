@@ -2018,7 +2018,9 @@ class _ConfiguredTaskProgramAdapterFactory:
         environment: object,
     ) -> TaskProgramEnvironmentAdapter:
         """Create a live adapter for an initialized environment."""
-        return self.delegate.create_adapter(environment)
+        adapter = self.delegate.create_adapter(environment)
+        adapter._configured_integration_fingerprint = self.integration_fingerprint
+        return adapter
 
 
 @dataclass(frozen=True, slots=True)
