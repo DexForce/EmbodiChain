@@ -44,6 +44,7 @@ from ._task_program.articulation_slide import preset_id
 from ._task_program.e6_clearance import (
     ARM_STIFFNESS,
     PASSIVE_FRICTION,
+    PRISMATIC_LINK_MASS,
     PRESHAPE_FRACTION,
     RELEASE_RETREAT_DISTANCE,
 )
@@ -317,14 +318,20 @@ def generate_task_program_bundle(
         if articulation["uid"] not in bound_uids:
             continue
         articulation.setdefault("asset_physics_mode", "overlay")
+        parts = discover_prismatic_parts(articulation)
+        link_attrs = articulation.setdefault("link_attrs", {})
+        mass_group = "gen_sim_prismatic_link_mass"
+        if mass_group in link_attrs:
+            raise ValueError(f"Generated E6 articulation reserves {mass_group!r}.")
+        link_attrs[mass_group] = {
+            "link_names_expr": sorted({part.link for part in parts}),
+            "attrs": {"mass_props": {"mass": PRISMATIC_LINK_MASS}},
+        }
         drive = articulation.setdefault("joint_drive_props", {})
         if drive.get("drive_type", "none") == "none":
             drive.setdefault("drive_type", "none")
             if "friction" not in drive:
-                drive["friction"] = {
-                    part.joint: PASSIVE_FRICTION
-                    for part in discover_prismatic_parts(articulation)
-                }
+                drive["friction"] = {part.joint: PASSIVE_FRICTION for part in parts}
     save_config(paths.scene, scene_payload)
     save_config(
         paths.deployment,
