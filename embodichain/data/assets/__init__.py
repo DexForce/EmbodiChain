@@ -16,6 +16,8 @@
 
 """Preset configuration objects for scene assets (robots, end-effectors, objects, materials, sensors, planners, solvers, demo scenes) ready to reference from task configs."""
 
+from __future__ import annotations
+
 from .materials import *
 from .demo_assets import *
 from .obj_assets import *
@@ -25,3 +27,5 @@ from .robot_assets import *
 from .scene_assets import *
 from .solver_assets import *
 from .planner_assets import *
+
+from .locomotion_assets import *

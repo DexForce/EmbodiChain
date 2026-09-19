@@ -74,8 +74,15 @@ not switch it. Use a separate environment config for each backend.
 ## Code and validation
 
 - Run **`black==26.3.1`**, using `black .`, before every commit.
-- Use `/pre-commit-check` for proportional checks. New fixes/features need
-  focused tests that prove their behavior; use `/add-test` for project patterns.
+- Use `/pre-commit-check` for proportional checks. New production fixes/features
+  need focused tests that prove their behavior; use `/add-test` for project patterns.
+- Treat `scripts/tutorials/**` as examples, not production API test targets. Do
+  not create or expand tests whose primary subject is a tutorial, and do not
+  import tutorial scripts into new tests, unless the user explicitly requests
+  tutorial test coverage.
+- When a change affects both a tutorial and production code, test the underlying
+  production contract instead. For tutorial-only changes, use existing
+  syntax/import/static checks and do not add a new test file unless requested.
 - New source files use the Apache 2.0 copyright header from
   [.agents/skills/pre-commit-check/SKILL.md](.agents/skills/pre-commit-check/SKILL.md),
   with DexForce's 2021–2026 copyright. Preserve existing third-party licenses.
@@ -91,8 +98,10 @@ not switch it. Use a separate environment config for each backend.
   build with `pip install -r docs/requirements.txt`, then `make -C docs html`.
   For locale errors use `LC_ALL=C.UTF-8` and `LANG=C.UTF-8`.
 - When routed behavior changes, review affected context in the same change:
-  `python .agents/skills/project-dev-context/scripts/context.py affected --base origin/main`.
-  Follow the context skill for updating and checking it.
+  `python .agents/skills/project-dev-context/scripts/context.py affected --base origin/main --explain`.
+  Follow the context skill's no-update/revise/add decision. Review does not
+  require an edit when guidance remains accurate and sufficient; state the
+  reason in the PR or task result.
 
 ## Contribution routes
 

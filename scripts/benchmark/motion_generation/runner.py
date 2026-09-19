@@ -46,7 +46,11 @@ from .models import (
     TrialPhase,
     TrialRecord,
 )
-from .planners.base import PlannerAdapter, PlannerContext
+from .planners.base import (
+    PlannerAdapter,
+    PlannerContext,
+    _case_motion_capability,
+)
 from .registry import (
     create_planner_adapter,
     create_robot_provider,
@@ -389,7 +393,36 @@ class BenchmarkRunner:
         adapter = create_planner_adapter(spec, context)
         metadata = adapter.metadata
         self.metadata.setdefault(metadata.algorithm_id, metadata)
-        first_case = cases[0]
+        supported_cases = []
+        for case in cases:
+            motion_capability, modality_reason = _case_motion_capability(case)
+            if (
+                motion_capability is None
+                or motion_capability not in adapter.capabilities
+            ):
+                self._record_unavailable(
+                    writer,
+                    metadata,
+                    case,
+                    modality_reason
+                    or f"case requires planner capability {motion_capability!r}",
+                    failure_code="unsupported_capability",
+                )
+                continue
+            supported, reason = adapter.supports_case(case)
+            if supported:
+                supported_cases.append(case)
+                continue
+            self._record_unavailable(
+                writer,
+                metadata,
+                case,
+                reason or "case is outside planner capacity",
+                failure_code="unsupported_capacity",
+            )
+        if not supported_cases:
+            return
+        first_case = supported_cases[0]
         missing = sorted(required_capabilities - adapter.capabilities)
         if missing:
             self._record_unavailable(
@@ -429,7 +462,7 @@ class BenchmarkRunner:
                     metadata,
                     first_case,
                     TrialPhase.PREPARE,
-                    lambda: adapter.prepare(first_case),
+                    lambda: adapter.prepare_cases(supported_cases),
                 )
                 if prepare_error is not None:
                     return
@@ -464,7 +497,7 @@ class BenchmarkRunner:
                 TrialPhase.COLD,
                 repeat=-1,
             )
-            for case in cases:
+            for case in supported_cases:
                 for warmup_index in range(self.suite.protocol.warmup_trials):
                     self._run_plan_call(
                         writer,

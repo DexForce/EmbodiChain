@@ -1,0 +1,352 @@
+{
+  "schema": "unitree-velocity-task",
+  "official_task": "Mjlab-Velocity-Flat-Unitree-Go1",
+  "physics": {
+    "physics_dt": 0.005,
+    "control_dt": 0.02,
+    "decimation": 4,
+    "episode_length_s": 20.0,
+    "default_backend_mapping": {
+      "solver_position_iterations": 4,
+      "solver_velocity_iterations": 0
+    },
+    "mujoco": {
+      "integrator": "implicitfast",
+      "solver": "newton",
+      "iterations": 10,
+      "line_search_iterations": 20,
+      "tolerance": 1e-8,
+      "ccd_iterations": 50
+    }
+  },
+  "robot": {
+    "root_body": "trunk",
+    "root_height": 0.278,
+    "joint_names": [
+      "FR_hip_joint",
+      "FR_thigh_joint",
+      "FR_calf_joint",
+      "FL_hip_joint",
+      "FL_thigh_joint",
+      "FL_calf_joint",
+      "RR_hip_joint",
+      "RR_thigh_joint",
+      "RR_calf_joint",
+      "RL_hip_joint",
+      "RL_thigh_joint",
+      "RL_calf_joint"
+    ],
+    "default_joint_position": [
+      0.1,
+      0.9,
+      -1.8,
+      -0.1,
+      0.9,
+      -1.8,
+      0.1,
+      0.9,
+      -1.8,
+      -0.1,
+      0.9,
+      -1.8
+    ],
+    "action_scale": [
+      0.3727530386870487,
+      0.3727530386870487,
+      0.24850202579136574,
+      0.3727530386870487,
+      0.3727530386870487,
+      0.24850202579136574,
+      0.3727530386870487,
+      0.3727530386870487,
+      0.24850202579136574,
+      0.3727530386870487,
+      0.3727530386870487,
+      0.24850202579136574
+    ],
+    "stiffness": [
+      15.895242654143557,
+      15.895242654143557,
+      35.76429597182301,
+      15.895242654143557,
+      15.895242654143557,
+      35.76429597182301,
+      15.895242654143557,
+      15.895242654143557,
+      35.76429597182301,
+      15.895242654143557,
+      15.895242654143557,
+      35.76429597182301
+    ],
+    "damping": [
+      1.0119225760208341,
+      1.0119225760208341,
+      2.276825796046877,
+      1.0119225760208341,
+      1.0119225760208341,
+      2.276825796046877,
+      1.0119225760208341,
+      1.0119225760208341,
+      2.276825796046877,
+      1.0119225760208341,
+      1.0119225760208341,
+      2.276825796046877
+    ],
+    "armature": [
+      0.004026312,
+      0.004026312,
+      0.009059202,
+      0.004026312,
+      0.004026312,
+      0.009059202,
+      0.004026312,
+      0.004026312,
+      0.009059202,
+      0.004026312,
+      0.004026312,
+      0.009059202
+    ],
+    "effort_limit": [
+      23.7,
+      23.7,
+      35.55,
+      23.7,
+      23.7,
+      35.55,
+      23.7,
+      23.7,
+      35.55,
+      23.7,
+      23.7,
+      35.55
+    ],
+    "enable_self_collisions": false
+  },
+  "contact_contract": {
+    "foot_site_names": ["FR", "FL", "RR", "RL"],
+    "foot_geom_names": [
+      "FR_foot_collision",
+      "FL_foot_collision",
+      "RR_foot_collision",
+      "RL_foot_collision"
+    ],
+    "collision_foot_body_names": ["FR_foot", "FL_foot", "RR_foot", "RL_foot"],
+    "collision_nonfoot_body_names": [
+      "trunk",
+      "FR_hip",
+      "FR_thigh",
+      "FR_calf",
+      "FL_hip",
+      "FL_thigh",
+      "FL_calf",
+      "RR_hip",
+      "RR_thigh",
+      "RR_calf",
+      "RL_hip",
+      "RL_thigh",
+      "RL_calf"
+    ],
+    "force_threshold": 10.0,
+    "history_substeps": 4
+  },
+  "observations": {
+    "actor_dimension": 48,
+    "critic_dimension": 72,
+    "actor": {
+      "terms": {
+        "base_lin_vel": {"noise": {"n_min": -0.5, "n_max": 0.5}},
+        "base_ang_vel": {"noise": {"n_min": -0.2, "n_max": 0.2}},
+        "projected_gravity": {"noise": {"n_min": -0.05, "n_max": 0.05}},
+        "joint_pos": {"noise": {"n_min": -0.01, "n_max": 0.01}},
+        "joint_vel": {"noise": {"n_min": -1.5, "n_max": 1.5}},
+        "actions": {"noise": null},
+        "command": {"noise": null}
+      }
+    }
+  },
+  "actions": {
+    "joint_pos": {
+      "use_default_offset": true
+    }
+  },
+  "commands": {
+    "twist": {
+      "resampling_time_range": [3.0, 8.0],
+      "rel_standing_envs": 0.1,
+      "rel_heading_envs": 0.3,
+      "rel_forward_envs": 0.2,
+      "heading_command": true,
+      "heading_control_stiffness": 0.5,
+      "ranges": {
+        "lin_vel_x": [-1.0, 1.0],
+        "lin_vel_y": [-1.0, 1.0],
+        "ang_vel_z": [-0.5, 0.5],
+        "heading": [-3.141592653589793, 3.141592653589793]
+      }
+    }
+  },
+  "events": {
+    "reset_base": {
+      "params": {
+        "pose_range": {
+          "x": [-0.5, 0.5],
+          "y": [-0.5, 0.5],
+          "z": [0.01, 0.05],
+          "yaw": [-3.14, 3.14]
+        },
+        "velocity_range": {}
+      }
+    },
+    "reset_robot_joints": {
+      "params": {
+        "position_range": [0.0, 0.0],
+        "velocity_range": [0.0, 0.0]
+      }
+    },
+    "push_robot": {
+      "interval_range_s": [1.0, 3.0],
+      "params": {
+        "velocity_range": {
+          "x": [-0.5, 0.5],
+          "y": [-0.5, 0.5],
+          "z": [-0.4, 0.4],
+          "roll": [-0.52, 0.52],
+          "pitch": [-0.52, 0.52],
+          "yaw": [-0.78, 0.78]
+        }
+      }
+    },
+    "foot_friction_slide": {
+      "params": {
+        "asset_cfg": {
+          "geom_names": [
+            "FR_foot_collision",
+            "FL_foot_collision",
+            "RR_foot_collision",
+            "RL_foot_collision"
+          ]
+        },
+        "ranges": [0.3, 1.5],
+        "shared_random": true
+      }
+    },
+    "foot_friction_spin": {
+      "params": {
+        "ranges": [0.0001, 0.02],
+        "distribution": "log_uniform",
+        "shared_random": true
+      }
+    },
+    "foot_friction_roll": {
+      "params": {
+        "ranges": [0.00001, 0.005],
+        "distribution": "log_uniform",
+        "shared_random": true
+      }
+    },
+    "encoder_bias": {
+      "params": {"bias_range": [-0.015, 0.015]}
+    },
+    "base_com": {
+      "params": {
+        "asset_cfg": {"body_names": ["trunk"]},
+        "ranges": {
+          "0": [-0.025, 0.025],
+          "1": [-0.025, 0.025],
+          "2": [-0.03, 0.03]
+        }
+      }
+    }
+  },
+  "rewards": {
+    "track_linear_velocity": {"weight": 2.0, "params": {"std": 0.5}},
+    "track_angular_velocity": {
+      "weight": 2.0,
+      "params": {"std": 0.7071067811865476}
+    },
+    "upright": {"weight": 1.0, "params": {"std": 0.4472135954999579}},
+    "pose": {
+      "weight": 1.0,
+      "params": {
+        "walking_threshold": 0.05,
+        "running_threshold": 1.5,
+        "std_standing": {
+          ".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.05,
+          ".*(FR|FL|RR|RL)_calf_joint.*": 0.1
+        },
+        "std_walking": {
+          ".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.3,
+          ".*(FR|FL|RR|RL)_calf_joint.*": 0.6
+        },
+        "std_running": {
+          ".*(FR|FL|RR|RL)_(hip|thigh)_joint.*": 0.3,
+          ".*(FR|FL|RR|RL)_calf_joint.*": 0.6
+        }
+      }
+    },
+    "dof_pos_limits": {"weight": -1.0},
+    "action_rate_l2": {"weight": -0.1},
+    "foot_clearance": {
+      "weight": -2.0,
+      "params": {"target_height": 0.1, "command_threshold": 0.05}
+    },
+    "foot_swing_height": {
+      "weight": -0.25,
+      "params": {"target_height": 0.1, "command_threshold": 0.05}
+    },
+    "foot_slip": {"weight": -0.1, "params": {"command_threshold": 0.05}},
+    "soft_landing": {"weight": -0.00001, "params": {"command_threshold": 0.05}}
+  },
+  "terminations": {
+    "fell_over": {"params": {"limit_angle": 1.2217304763960306}}
+  },
+  "curriculum": {
+    "command_vel": {
+      "params": {
+        "velocity_stages": [
+          {
+            "step": 0,
+            "lin_vel_x": [-1.0, 1.0],
+            "ang_vel_z": [-0.5, 0.5]
+          },
+          {
+            "step": 120000,
+            "lin_vel_x": [-1.5, 2.0],
+            "ang_vel_z": [-0.7, 0.7]
+          },
+          {"step": 240000, "lin_vel_x": [-2.0, 3.0]}
+        ]
+      }
+    }
+  },
+  "ppo": {
+    "seed": 42,
+    "num_steps_per_env": 24,
+    "max_iterations": 10000,
+    "save_interval": 50,
+    "policy": {
+      "init_noise_std": 1.0,
+      "actor_obs_normalization": true,
+      "critic_obs_normalization": true,
+      "actor_hidden_dims": [512, 256, 128],
+      "critic_hidden_dims": [512, 256, 128],
+      "activation": "elu"
+    },
+    "algorithm": {
+      "class_name": "PPO",
+      "num_learning_epochs": 5,
+      "num_mini_batches": 4,
+      "learning_rate": 0.001,
+      "schedule": "adaptive",
+      "gamma": 0.99,
+      "lam": 0.95,
+      "entropy_coef": 0.01,
+      "desired_kl": 0.01,
+      "max_grad_norm": 1.0,
+      "value_loss_coef": 1.0,
+      "use_clipped_value_loss": true,
+      "clip_param": 0.2,
+      "normalize_advantage_per_mini_batch": false
+    }
+  }
+}

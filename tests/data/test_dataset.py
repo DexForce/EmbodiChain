@@ -14,20 +14,44 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Regression tests for data-cache synchronization."""
+"""Regression tests for data-path resolution and cache synchronization."""
 
 from __future__ import annotations
 
 import multiprocessing as mp
 import time
+from pathlib import Path
 
 import pytest
 
+from embodichain.data import constants
+from embodichain.data import dataset as dataset_module
 from embodichain.data.dataset import _dataset_download_lock
 
 LOCK_HOLD_SECONDS = 0.2
 PROCESS_JOIN_TIMEOUT_SECONDS = 5.0
 PROCESS_START_TIMEOUT_SECONDS = 60.0
+
+
+@pytest.mark.no_sim
+def test_get_data_path_accepts_dataset_root_without_subpath(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bare dataset name resolves to the downloaded extraction root."""
+    extract_dir = tmp_path / "extract" / "SceneData"
+
+    class FakeDataset:
+        def __init__(self) -> None:
+            self.extract_dir = str(extract_dir)
+
+    def get_fake_data_class(dataset_name: str) -> type[FakeDataset]:
+        assert dataset_name == "SceneData"
+        return FakeDataset
+
+    monkeypatch.setattr(constants, "EMBODICHAIN_DEFAULT_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(dataset_module, "get_data_class", get_fake_data_class)
+
+    assert dataset_module.get_data_path("SceneData") == str(extract_dir)
 
 
 def _hold_dataset_download_lock(

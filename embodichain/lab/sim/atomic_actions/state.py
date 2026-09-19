@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from .affordance_sampling import AffordanceSamplingContext
+
 if TYPE_CHECKING:
     from .core import ObjectSemantics
 
@@ -948,7 +950,16 @@ class PlanningContext:
     control_dt: float | None = None
     """Explicit command period used by action-owned interpolation."""
 
+    affordance_sampling: AffordanceSamplingContext | None = None
+    """Optional immutable Affordance sampling stream supplied by the host."""
+
     def __post_init__(self) -> None:
+        if self.affordance_sampling is not None and not isinstance(
+            self.affordance_sampling, AffordanceSamplingContext
+        ):
+            raise TypeError(
+                "affordance_sampling must be AffordanceSamplingContext or None."
+            )
         if not isinstance(self.robot, RobotObservation):
             raise TypeError("robot must be a RobotObservation.")
         if not isinstance(self.task, TaskState):
@@ -1084,6 +1095,7 @@ class PlanningContext:
             scene=self.scene,
             env_ids=self.env_ids,
             control_dt=self.control_dt,
+            affordance_sampling=self.affordance_sampling,
         )
 
 

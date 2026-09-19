@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import torch
 
@@ -32,11 +34,98 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
     MassPropertiesCfg,
     DefaultRigidBodyPropertiesCfg,
+    physics_cfg_for_backend,
 )
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.data import get_data_path
 
 NUM_ARENAS = 2
+
+
+@pytest.mark.parametrize("physics", ["default", "newton"])
+def test_usdc_fk_matches_simulation_at_named_joint_states(
+    tmp_path: Path, physics: str
+) -> None:
+    """Resolved USD FK agrees with physics and does not change joint state."""
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+
+    path = tmp_path / "kinematic_tree.usdc"
+    stage = Usd.Stage.CreateNew(str(path))
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    assembly = UsdGeom.Xform.Define(stage, "/assembly")
+    stage.SetDefaultPrim(assembly.GetPrim())
+    UsdPhysics.ArticulationRootAPI.Apply(assembly.GetPrim())
+    for name in ("base", "drawer", "handle"):
+        body = UsdGeom.Xform.Define(stage, f"/assembly/{name}")
+        UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+        UsdPhysics.MassAPI.Apply(body.GetPrim()).CreateMassAttr(1.0)
+        cube = UsdGeom.Cube.Define(stage, f"/assembly/{name}/mesh")
+        cube.CreateSizeAttr(0.1)
+        UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
+    for name, schema, parent, child in (
+        ("slide", UsdPhysics.PrismaticJoint, "base", "drawer"),
+        ("hinge", UsdPhysics.RevoluteJoint, "drawer", "handle"),
+    ):
+        joint = schema.Define(stage, f"/assembly/{name}")
+        joint.CreateBody0Rel().SetTargets([f"/assembly/{parent}"])
+        joint.CreateBody1Rel().SetTargets([f"/assembly/{child}"])
+        joint.CreateAxisAttr("X")
+        joint.CreateLowerLimitAttr(-1.0 if name == "slide" else -90.0)
+        joint.CreateUpperLimitAttr(1.0 if name == "slide" else 90.0)
+        # Nonzero child-side frames exercise the USD-specific FK conversion.
+        for attr in (joint.CreateLocalPos0Attr(), joint.CreateLocalPos1Attr()):
+            attr.Set(Gf.Vec3f(0.0, 0.0, 0.2))
+        rotation = Gf.Quatf(0.70710678, Gf.Vec3f(0.0, 0.0, 0.70710678))
+        joint.CreateLocalRot0Attr(rotation)
+        joint.CreateLocalRot1Attr(rotation)
+    stage.GetRootLayer().Save()
+
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            num_envs=1,
+            physics_cfg=physics_cfg_for_backend(physics),
+        )
+    )
+    obj = None
+    try:
+        obj = sim.add_articulation(
+            ArticulationCfg(
+                uid="usd_fk",
+                fpath=str(path),
+                init_pos=(0.5, -0.3, 1.0),
+                init_rot=(10.0, 20.0, 30.0),
+            )
+        )
+        sim.prepare()
+        assert obj.pk_chain is not None
+        states = ((0.0, 0.0), (0.13, 0.4), (-0.07, -0.2))
+        if physics == "newton":
+            states = ((0.13, 0.4),)
+        for slide, hinge in states:
+            state = {"slide": slide, "hinge": hinge}
+            qpos = torch.tensor([[state[name] for name in obj.joint_names]])
+            obj.set_qpos(qpos, target=False)
+            # Default publishes physical link poses on the next update. Compare
+            # with the measured state after that update, not the command.
+            sim.update()
+            before = obj.get_qpos().clone()
+            fk = obj.compute_fk(
+                before, link_names=obj.link_names, qpos_joint_names=obj.joint_names
+            )
+            root = obj.get_link_pose("base", to_matrix=True)
+            for index, name in enumerate(obj.link_names):
+                observed = torch.linalg.inv(root) @ obj.get_link_pose(
+                    name, to_matrix=True
+                )
+                torch.testing.assert_close(fk[:, index], observed, atol=1e-5, rtol=1e-5)
+            torch.testing.assert_close(obj.get_qpos(), before)
+    finally:
+        sim.destroy(exit_process=False)
+        del obj
+        SimulationManager.flush_cleanup_queue()
 
 
 class BaseUsdTest:

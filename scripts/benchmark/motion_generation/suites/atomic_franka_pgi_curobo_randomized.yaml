@@ -15,14 +15,15 @@ planners:
     enabled: false
     config:
       onnx_model_path: null
-      num_waypoints: 3
-      max_steps: 240
+      num_waypoints: 5
+      steps_per_waypoint: 30
+      max_steps: 150
       action_scale: 0.2
       use_relative_obs: true
       intermediate_orientation: true
       pos_eps: 0.01
       rot_eps: 0.1
-      joint_eps: 0.02
+      joint_eps: 0.01
       policy_frame_from_world:
         - [-1.0, 0.0, 0.0, 0.0]
         - [0.0, -1.0, 0.0, 0.0]
@@ -79,6 +80,18 @@ tracks:
         control_part: hand
         open_qpos: [0.0]
         grasp_qpos: [0.024]
+      articulations:
+        - id: microwave
+          asset_path: MicrowaveOven/microwave_oven_with_inertials.urdf
+          position: [-1.0, -0.30, 0.4]
+          rotation_deg: [0.0, 0.0, 90.0]
+          init_qpos: [0.0, 0.0, 0.0, 0.0]
+          drive:
+            stiffness: 0.001
+            damping: 100.0
+            max_effort: 0.01
+          fix_base: true
+          settle_steps: 10
       objects:
         - id: cube_50mm
           kind: cube
@@ -177,12 +190,20 @@ tracks:
         - id: press
           sample_count: 80
           hand_interp_steps: 8
+          approach_distance_m: 0.12
+          press_distance_m: 0.03
+          articulation: microwave
+          target_link: button_cap
+          target_joint: start_button_press
+          articulation_position_jitter_m: [0.03, 0.03, 0.015]
+          effect_joint_sign: 1.0
+          minimum_joint_delta_m: 0.004
+          geometry_seed: 11
           start_qpos_jitter_rad: [0.15, 0.15, 0.15, 0.12, 0.15, 0.12, 0.15]
-          target_offset_jitter_m: [0.03, 0.03, 0.015]
           cases:
             - name: randomized_vertical_press
               task_difficulty: medium
               target_offset_m: [0.0, 0.0, -0.08]
               difficulty_factors:
                 randomized_start: true
-                randomized_target: true
+                randomized_articulation_pose: true

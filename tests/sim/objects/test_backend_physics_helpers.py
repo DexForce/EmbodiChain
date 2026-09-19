@@ -195,8 +195,8 @@ def test_articulation_link_writes_dispatch_to_backend_specific_entity_api() -> N
             calls.append(("spawn_inertia", (name, value)))
             return 0
 
-        def set_link_com_pose(self, name, position, quaternion):
-            calls.append(("spawn_com", (name, position, quaternion)))
+        def set_link_com_position(self, name, position):
+            calls.append(("spawn_com", (name, position)))
             return 0
 
     entity = Entity()
@@ -206,7 +206,14 @@ def test_articulation_link_writes_dispatch_to_backend_specific_entity_api() -> N
         is None
     )
     assert (
-        apply_link_inertia(entity, "link", value, is_spawn_bound=True, is_newton=True)
+        apply_link_inertia(
+            entity,
+            "link",
+            value,
+            quaternion_xyzw=np.array([0, 0, 0, 1]),
+            is_spawn_bound=True,
+            is_newton=True,
+        )
         == 0
     )
     assert (
@@ -214,7 +221,8 @@ def test_articulation_link_writes_dispatch_to_backend_specific_entity_api() -> N
             entity,
             "link",
             value,
-            np.array([0, 0, 0, 1], dtype=np.float32),
+            np.array([1, 0, 0, 0], dtype=np.float32),
+            inertia=value,
             is_spawn_bound=True,
             is_newton=True,
         )
@@ -222,6 +230,7 @@ def test_articulation_link_writes_dispatch_to_backend_specific_entity_api() -> N
     )
     assert [name for name, _ in calls] == [
         "spawn_mass",
+        "spawn_inertia",
         "spawn_inertia",
         "spawn_com",
     ]

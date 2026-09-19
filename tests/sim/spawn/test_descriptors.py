@@ -328,7 +328,7 @@ def test_cloth_descriptor_rejects_invalid_particle_flags(
 
 
 def _resolved_articulation_desc() -> ArticulationDesc:
-    source_inertia = np.ones(3, dtype=np.float32)
+    source_inertia = np.eye(3, dtype=np.float32)
     base = LinkDesc(
         "base",
         "",
@@ -480,15 +480,16 @@ def test_rigid_descriptor_forwards_explicit_mass_properties() -> None:
 
     descriptor, _ = rigid_desc_from_cfg(cfg)
 
-    np.testing.assert_array_equal(descriptor.physics.inertia, [1.0, 2.0, 3.0])
+    # q=(1,2,3,4)/sqrt(30) gives this non-diagonal body-frame tensor.
     np.testing.assert_allclose(
-        descriptor.physics.com_position,
-        [0.1, 0.2, 0.3],
+        descriptor.physics.inertia,
+        np.array(
+            [[2.52, -2 / 75, 8 / 15], [-2 / 75, 86 / 75, 0.4], [8 / 15, 0.4, 7 / 3]]
+        ),
+        atol=1e-6,
     )
-    np.testing.assert_allclose(
-        descriptor.physics.com_quaternion,
-        np.array([4.0, 1.0, 2.0, 3.0]) / np.sqrt(30.0),
-    )
+    np.testing.assert_allclose(descriptor.physics.com_position, [0.1, 0.2, 0.3])
+    assert not hasattr(descriptor.physics, "com_quaternion")
 
 
 @pytest.mark.parametrize(
@@ -752,7 +753,7 @@ def test_grouped_rigid_physics_overlays_usd_without_erasing_source(
         name="source",
         physics=RigidBodyPhysicsDesc.dynamic(
             mass=7.0,
-            inertia=np.array([1.0, 2.0, 3.0], dtype=np.float32),
+            inertia=np.diag(np.array([1.0, 2.0, 3.0], dtype=np.float32)),
             dexsim=DexsimPhysicsDesc(
                 linear_damping=0.6,
                 angular_damping=0.8,
@@ -792,7 +793,7 @@ def test_grouped_rigid_physics_overlays_usd_without_erasing_source(
     descriptor, _ = rigid_desc_from_usd(cfg)
 
     assert descriptor.physics.mass == 7.0
-    np.testing.assert_array_equal(descriptor.physics.inertia, [1.0, 2.0, 3.0])
+    np.testing.assert_array_equal(descriptor.physics.inertia, np.diag([1.0, 2.0, 3.0]))
     assert descriptor.physics.dexsim.linear_damping == 0.2
     assert descriptor.physics.dexsim.angular_damping == 0.8
     collision = descriptor.collisions[0]
@@ -810,7 +811,7 @@ def test_rigid_usd_can_recompute_source_inertia(
         name="source",
         physics=RigidBodyPhysicsDesc.dynamic(
             mass=7.0,
-            inertia=np.array([1.0, 2.0, 3.0], dtype=np.float32),
+            inertia=np.diag(np.array([1.0, 2.0, 3.0], dtype=np.float32)),
         ),
         collisions=[CollisionDesc()],
     )
@@ -1009,6 +1010,35 @@ def test_dynamic_triangle_mesh_collision_is_rejected_before_spawn() -> None:
         rigid_desc_from_cfg(cfg)
 
 
+@pytest.mark.parametrize(
+    ("method", "expected"),
+    [(None, "visacd"), ("visacd", "visacd"), ("coacd", "coacd"), ("vhacd", "vhacd")],
+)
+def test_spawn_forwards_convex_decomposition_algorithm(
+    method: str | None, expected: str
+) -> None:
+    cfg = RigidObjectCfg.from_dict(
+        {
+            "uid": "mesh",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "mesh.glb",
+                "collision": {
+                    "approximation": "convex_decomposition",
+                    "max_hulls": 8,
+                    "acd_method": method,
+                },
+            },
+        }
+    )
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+
+    collision = descriptor.collisions[0]
+    assert collision.approximation == CollisionApproximation.CONVEX_DECOMPOSITION
+    assert collision.decomp_max_hulls == 8
+    assert collision.decomp_algorithm == expected
+
+
 def test_spawn_rejects_unsupported_convex_decomposition_method() -> None:
     cfg = RigidObjectCfg(
         uid="mesh",
@@ -1017,12 +1047,13 @@ def test_spawn_rejects_unsupported_convex_decomposition_method() -> None:
             collision=MeshCollisionCfg(
                 approximation="convex_decomposition",
                 max_hulls=4,
-                acd_method="vhacd",
+                acd_method="coacd",
             ),
         ),
     )
 
-    with pytest.raises(ValueError, match="acd_method='visacd' or 'coacd'"):
+    cfg.shape.collision.acd_method = "invalid"
+    with pytest.raises(ValueError, match="acd_method"):
         rigid_desc_from_cfg(cfg)
 
 
@@ -1542,7 +1573,7 @@ def test_articulation_config_applies_to_exact_source_resolved_names() -> None:
     assert base.collisions[0].dexsim.dynamic_friction == 0.4
     np.testing.assert_array_equal(
         base.rigid_body.inertia,
-        np.ones(3, dtype=np.float32),
+        np.eye(3, dtype=np.float32),
     )
     assert finger.rigid_body.mass == 2.0
     assert finger.collisions[0].newton.mu == 0.8
@@ -1712,7 +1743,6 @@ def test_invalid_source_inertia_uses_geometry_fallback_without_an_overlay() -> N
         link._embodichain_has_collision_geometry = True
         link.rigid_body.inertia = None
         link.rigid_body.com_position = None
-        link.rigid_body.com_quaternion = None
     cfg = ArticulationCfg(
         uid="robot",
         fpath="robot.urdf",
@@ -1827,7 +1857,7 @@ def test_per_link_mass_properties_can_preserve_global_source_inertia() -> None:
     assert base.replace_inertial is True
     np.testing.assert_array_equal(
         finger.rigid_body.inertia,
-        np.ones(3, dtype=np.float32),
+        np.eye(3, dtype=np.float32),
     )
     assert finger.replace_inertial is False
 
@@ -2089,7 +2119,7 @@ def test_articulation_config_validation_failure_is_atomic(
     finger = descriptor.get_link_desc("finger_left")
     np.testing.assert_array_equal(
         finger.rigid_body.inertia,
-        np.ones(3, dtype=np.float32),
+        np.eye(3, dtype=np.float32),
     )
 
 
@@ -2275,3 +2305,38 @@ def test_newton_skips_default_only_articulation_root_properties() -> None:
 
     native_articulation.set_sleep_threshold.assert_not_called()
     native_articulation.set_solver_iteration_counts.assert_not_called()
+
+
+@pytest.mark.parametrize("flat", [False, True])
+def test_rigid_descriptor_keeps_body_frame_matrix_without_rotating_twice(
+    flat: bool,
+) -> None:
+    matrix = np.array(
+        [[2.0, 0.2, 0.3], [0.2, 3.0, 0.4], [0.3, 0.4, 4.0]], dtype=np.float32
+    )
+    cfg = RigidObjectCfg(
+        uid="tensor",
+        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(
+                mass=2.0,
+                inertia=matrix.flatten() if flat else matrix,
+                com_quaternion=[1.0, 2.0, 3.0, 4.0],
+            )
+        ),
+    )
+    with pytest.warns(UserWarning, match="ignored for a body-frame inertia matrix"):
+        descriptor, _ = rigid_desc_from_cfg(cfg)
+    np.testing.assert_array_equal(descriptor.physics.inertia, matrix)
+
+
+def test_rigid_descriptor_rejects_orientation_without_principal_moments() -> None:
+    cfg = RigidObjectCfg(
+        uid="tensor",
+        shape=CubeCfg(size=(0.1, 0.1, 0.1)),
+        attrs=RigidBodyPhysicsCfg(
+            mass_props=MassPropertiesCfg(mass=2.0, com_quaternion=[0.0, 0.0, 0.0, 1.0])
+        ),
+    )
+    with pytest.raises(ValueError, match="requires explicit principal inertia"):
+        rigid_desc_from_cfg(cfg)

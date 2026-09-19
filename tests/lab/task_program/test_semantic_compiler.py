@@ -28,6 +28,7 @@ import torch
 from embodichain.lab.sim.atomic_actions import (
     ActionOptions,
     Affordance,
+    AffordanceSample,
     AntipodalAffordance,
     AtomicActionEngine,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
@@ -1634,14 +1635,26 @@ def test_pick_replan_resolves_downstream_target_from_latest_snapshot() -> None:
         grasp_target_id: str,
         options: PickUpOptions,
         approach_direction: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        del self, semantics, start_qpos, manipulator, approach_direction
+        context: PlanningContext,
+        *,
+        sample_key: str,
+    ) -> AffordanceSample:
+        del (
+            self,
+            semantics,
+            start_qpos,
+            manipulator,
+            approach_direction,
+            context,
+            sample_key,
+        )
         target = options.downstream_object_target_poses[0]
         assert isinstance(target, torch.Tensor)
         captured.append(target.clone())
-        return (
-            torch.zeros(2, dtype=torch.bool),
-            object_pose.clone(),
+        return AffordanceSample(
+            success=torch.zeros(2, dtype=torch.bool),
+            poses=object_pose.clone(),
+            metadata={},
         )
 
     action._resolve_grasp_pose = MethodType(  # type: ignore[method-assign]

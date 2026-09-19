@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 os.environ.setdefault(
     "AZURE_OPENAI_ENDPOINT", "https://mock-endpoint.openai.azure.com/"
@@ -35,6 +36,7 @@ os.environ.setdefault(
 os.environ.setdefault("AZURE_OPENAI_API_KEY", "mock-api-key-for-docs-build")
 
 sys.path.insert(0, os.path.abspath("../.."))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 
 project = "EmbodiChain"
@@ -52,6 +54,7 @@ with open(os.path.join(os.path.dirname(__file__), "..", "..", "VERSION")) as f:
 
 
 extensions = [
+    "architecture_sphinx",
     "autodocsumm",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
