@@ -40,7 +40,7 @@ from embodichain.lab.sim.motion.planners.utils import (
 
 __all__: list[str] = []
 
-MOTION_VALIDATION_REVISION = 3
+MOTION_VALIDATION_REVISION = 4
 
 
 def _joint_velocity_limits(robot: Any, control_part: str | None) -> torch.Tensor:
@@ -192,7 +192,7 @@ def _cartesian_samples(
 
 
 class ApproachMotionGenerator(CheckedMotionGenerator):
-    """Keep multi-waypoint EEF approaches Cartesian; the core solves every sample."""
+    """Sample EEF paths in Cartesian space, including single-target transports."""
 
     def generate(
         self,
@@ -209,7 +209,7 @@ class ApproachMotionGenerator(CheckedMotionGenerator):
             options is not None
             and options.strategy == "ik_interp"
             and not options.preserve_cartesian_samples
-            and len(target_states) > 1
+            and len(target_states) >= 1
             and all(state.move_type is MoveType.EEF_MOVE for state in target_states)
         ):
             if (

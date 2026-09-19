@@ -588,8 +588,7 @@ def validate_placement(
     binding: PrismaticBinding, config: dict, table_top_z: float | None
 ) -> None:
     """Reject an unmeasured or table-embedded E6 before publishing executable assets."""
-    from ..scene.articulation_geometry import read_articulation_geometry
-    from scipy.spatial.transform import Rotation
+    from ..scene.articulation_geometry import _root_pose, read_articulation_geometry
 
     if table_top_z is None or not np.isfinite(table_top_z):
         raise ValueError("E6 placement requires a measured tabletop height.")
@@ -606,10 +605,8 @@ def validate_placement(
     handle, _ = handle_mesh(binding, config["fpath"])
     link_pose = geometry.link_poses[binding.link]
     handle = handle @ link_pose[:3, :3].T + link_pose[:3, 3] * binding.scale
-    rotation = Rotation.from_euler(
-        "XYZ", config.get("init_rot", [0, 0, 0]), degrees=True
-    )
-    slide_axis_world = rotation.apply(
+    pose = _root_pose(config)
+    slide_axis_world = pose[:3, :3] @ (
         link_pose[:3, :3] @ np.asarray(binding.axis, dtype=float)
     )
     slide_axis_world /= np.linalg.norm(slide_axis_world)
@@ -618,6 +615,6 @@ def validate_placement(
             "GenSim E6 requires a passive slide axis within one degree of "
             "horizontal; repair the source articulation layout before execution."
         )
-    handle = rotation.apply(handle) + np.asarray(config.get("init_pos", [0, 0, 0]))
+    handle = handle @ pose[:3, :3].T + pose[:3, 3]
     if handle[:, 2].min() <= table_top_z:
         raise ValueError("E6 handle is not clear of the tabletop.")
