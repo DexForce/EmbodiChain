@@ -70,7 +70,9 @@ for details.
 EmbodiChain environments can also be used with the optional
 [RLinf integration](https://dexforce.github.io/EmbodiChain/main/guides/rlinf.html);
 the integration guide documents the separate runtime, task registration, and
-current compatibility boundary.
+current compatibility boundary. The
+[official RLinf EmbodiChain recipe](https://rlinf.readthedocs.io/en/latest/rst_source/examples/embodied/embodichain.html)
+provides a concrete end-to-end reference.
 
 ## Contribution Guide
 

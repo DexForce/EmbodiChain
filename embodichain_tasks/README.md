@@ -188,16 +188,8 @@ The template uses explicit package imports; `embodichain_tasks` uses the
 
 ## Using registered tasks with RLinf
 
-RLinf discovers the same installed task packages through the
-`embodichain.tasks` entry-point group. Install the external task package in the
-Python environment used by RLinf workers, set `env_type: embodichain`, and set
-`gym_config_path` to a runnable Gym deployment. The RLinf adapter calls
-`discover_task_packages()` and `execute_init_hooks()` inside each worker before
-calling `config_to_cfg()` and `build_env()`.
-
-Use an absolute deployment path for external or componentized projects until
-the adapter provides package-resource resolution. The current adapter is best
-suited to inline deployments with low-dimensional `robot` observations and
-flat continuous actions. See the [RLinf integration guide](../docs/source/guides/rlinf.md)
-for the launch command, configuration example, compatibility matrix, and
-known limitations.
+RLinf workers use the same installed task packages as the EmbodiChain CLI
+through the `embodichain.tasks` entry-point group. Install the package in the
+worker environment and point the adapter at a runnable Gym deployment. See the
+[RLinf integration guide](../docs/source/guides/rlinf.md) for the integration
+boundary and current compatibility notes.
