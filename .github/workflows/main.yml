@@ -427,6 +427,14 @@ jobs:
       - name: Install architecture frontend dependencies
         if: hashFiles('docs/scripts/build_architecture_assets.py') != ''
         run: npm --prefix docs/architecture/web ci
+      - name: Fetch pinned architecture evidence
+        run: |
+          # Squash merges can leave this revision outside all fetched branch tips.
+          architecture_revision=$(python -c 'import json; print(json.load(open("docs/architecture/generated/architecture.json"))["revision"])')
+          if ! git cat-file -e "${architecture_revision}^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "${architecture_revision}"
+          fi
+          git cat-file -e "${architecture_revision}^{commit}"
       - name: Verify architecture frontend and Sphinx integration
         working-directory: docs/architecture/web
         run: |

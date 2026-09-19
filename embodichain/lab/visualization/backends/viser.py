@@ -37,6 +37,7 @@ from ..protocol import (
     JointControlSpec,
     JointControlState,
     MeshGeometry,
+    MeshMarkerOverlay,
     PickCommand,
     PointCloudOverlay,
     SceneFrame,
@@ -79,6 +80,15 @@ class _GizmoHandle:
 class _JointControlHandle:
     handle: object
     spec: JointControlSpec
+
+
+@dataclass
+class _MeshOverlayHandle:
+    handle: object
+    vertices: np.ndarray
+    faces: np.ndarray
+    scale: np.ndarray
+    env_id: int | None
 
 
 @dataclass(frozen=True)
@@ -172,6 +182,7 @@ class ViserBackend(VisualizationBackend):
         self._camera_preview_group_folders: dict[str, object] = {}
         self._camera_image_handles: dict[str, object] = {}
         self._overlay_handles: dict[tuple[str, str], object] = {}
+        self._mesh_overlay_handles: dict[tuple[str, str], _MeshOverlayHandle] = {}
         self._overlay_base_visibility: dict[tuple[str, str], bool] = {}
         self._env_visibility: dict[int, bool] = {}
         self._show_all_envs = True
@@ -181,6 +192,7 @@ class ViserBackend(VisualizationBackend):
             "trajectories": True,
             "targets": True,
             "point_clouds": True,
+            "markers": True,
         }
         self._gui_events: queue.SimpleQueue[_GuiEvent] = queue.SimpleQueue()
         self._gizmo_events: queue.SimpleQueue[_GizmoEvent] = queue.SimpleQueue()
@@ -356,6 +368,7 @@ class ViserBackend(VisualizationBackend):
                 ("trajectories", "Trajectories"),
                 ("targets", "Targets"),
                 ("point_clouds", "Point clouds"),
+                ("markers", "Markers"),
             ):
                 checkbox = self._server.gui.add_checkbox(
                     label, initial_value=self._overlay_visibility[category]
@@ -1130,6 +1143,7 @@ class ViserBackend(VisualizationBackend):
         for handle in self._overlay_handles.values():
             handle.remove()
         self._overlay_handles.clear()
+        self._mesh_overlay_handles.clear()
         self._overlay_base_visibility.clear()
         geometry_by_id = {
             geometry.geometry_id: geometry for geometry in manifest.geometries
@@ -1368,9 +1382,7 @@ class ViserBackend(VisualizationBackend):
         for dynamic_mesh in self._dynamic_meshes.values():
             self._apply_dynamic_mesh_visibility(dynamic_mesh)
         for key, handle in self._overlay_handles.items():
-            handle.visible = self._overlay_base_visibility.get(
-                key, True
-            ) and self._overlay_visibility.get(key[0], True)
+            self._apply_overlay_visibility(key, handle)
         self._apply_camera_visibility()
         self._apply_gizmo_visibility()
         if camera_previews_changed:
@@ -1511,6 +1523,69 @@ class ViserBackend(VisualizationBackend):
             handle.point_size = overlay.point_size
         handle.visible = overlay.visible and self._overlay_visibility[category]
 
+    def _apply_overlay_visibility(self, key: tuple[str, str], handle: object) -> None:
+        mesh = self._mesh_overlay_handles.get(key)
+        env_visible = (
+            True
+            if mesh is None or mesh.env_id is None
+            else self._env_visibility.get(mesh.env_id, True)
+        )
+        handle.visible = (
+            self._overlay_base_visibility.get(key, True)
+            and self._overlay_visibility.get(key[0], True)
+            and env_visible
+        )
+
+    @staticmethod
+    def _mesh_marker_color(
+        color: tuple[float, float, float, float],
+    ) -> tuple[int, int, int]:
+        return tuple(int(component * 255.0) for component in color[:3])
+
+    def _update_mesh_marker(
+        self, overlay: MeshMarkerOverlay, active: set[tuple[str, str]]
+    ) -> None:
+        category = "markers"
+        key = (category, overlay.overlay_id)
+        active.add(key)
+        self._overlay_base_visibility[key] = overlay.visible
+        mesh = self._mesh_overlay_handles.get(key)
+        geometry_changed = mesh is None or not (
+            np.array_equal(mesh.vertices, overlay.vertices)
+            and np.array_equal(mesh.faces, overlay.faces)
+            and np.array_equal(mesh.scale, overlay.scale)
+        )
+        if geometry_changed:
+            if mesh is not None:
+                mesh.handle.remove()
+            path_component = safe_path_component(overlay.overlay_id)
+            handle = self._server.scene.add_mesh_simple(
+                f"/overlays/{category}/{path_component}",
+                vertices=overlay.vertices * overlay.scale,
+                faces=overlay.faces,
+                color=self._mesh_marker_color(overlay.color),
+                opacity=overlay.color[3],
+                side="double",
+                cast_shadow=False,
+                receive_shadow=False,
+            )
+            mesh = _MeshOverlayHandle(
+                handle=handle,
+                vertices=overlay.vertices,
+                faces=overlay.faces,
+                scale=overlay.scale,
+                env_id=overlay.env_id,
+            )
+            self._mesh_overlay_handles[key] = mesh
+            self._overlay_handles[key] = handle
+        else:
+            mesh.env_id = overlay.env_id
+            mesh.handle.color = self._mesh_marker_color(overlay.color)
+            mesh.handle.opacity = overlay.color[3]
+        mesh.handle.position = overlay.position
+        mesh.handle.wxyz = overlay.wxyz
+        self._apply_overlay_visibility(key, mesh.handle)
+
     def publish_frame(self, frame: SceneFrame) -> bool:
         """Publish a dynamic scene frame.
 
@@ -1615,10 +1690,13 @@ class ViserBackend(VisualizationBackend):
             self._update_trajectory(overlay, active_overlays)
         for overlay in frame.overlays.point_clouds:
             self._update_point_cloud(overlay, active_overlays)
+        for overlay in frame.overlays.meshes:
+            self._update_mesh_marker(overlay, active_overlays)
 
         stale = set(self._overlay_handles) - active_overlays
         for key in stale:
             self._overlay_handles.pop(key).remove()
+            self._mesh_overlay_handles.pop(key, None)
             self._overlay_base_visibility.pop(key, None)
         return True
 
@@ -1729,6 +1807,7 @@ class ViserBackend(VisualizationBackend):
         self._camera_preview_group_folders.clear()
         self._camera_image_handles.clear()
         self._overlay_handles.clear()
+        self._mesh_overlay_handles.clear()
         self._overlay_base_visibility.clear()
         while True:
             try:

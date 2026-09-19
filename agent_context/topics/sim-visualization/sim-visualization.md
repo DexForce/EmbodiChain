@@ -2,7 +2,7 @@
 
 > Topic: Simulation visualization — `SimulationManager` lifecycle,
 > backend-neutral scene snapshots, the Viser backend, cameras, deformables,
-> interactive Gizmos, and launcher integration.
+> interactive Gizmos, render-only marker groups, and launcher integration.
 
 ---
 
@@ -18,6 +18,7 @@
 | `embodichain/lab/visualization/runtime.py` | Background worker, latest-frame queues, rate limiting, health, and telemetry |
 | `embodichain/lab/visualization/backends/base.py` | Visualization backend contract |
 | `embodichain/lab/visualization/backends/viser.py` | Viser server, scene handles, GUI controls, and browser publishing |
+| `embodichain/lab/visualization/markers/` | Marker prototype/group configuration, geometry generation, validation, and lifecycle |
 | `embodichain/lab/gym/utils/gym_utils.py` | Gym config parsing, common launcher arguments, and CLI overrides |
 | `embodichain/lab/gym/envs/base_env.py` | Environment scene setup, post-setup start, and forced reset capture |
 | `embodichain/lab/scripts/preview_asset.py` | Standalone rigid-object and articulation browser preview |
@@ -47,6 +48,28 @@ VisualizationBackend
 The simulation owns physics and assets. Scene export is read-only. When
 `allow_commands=True`, Viser Gizmo callbacks enqueue pose commands that
 `SimulationManager` later applies on the simulation thread.
+
+`SimulationManager.add_marker_group()` owns named render-only marker groups.
+`MarkerPrototypeCfg` supplies box, sphere, cylinder, capsule, cone, arrow,
+frame, or caller-provided mesh geometry; `MarkerGroup.update()` publishes
+batched pose, scale, prototype, color, and visibility arrays without stepping
+physics. Groups default to all sub-environments; `env_ids` selects mutations,
+while `scope="world"` creates one global batch. Attach/detach follows prepared
+registered roots or links through public pose reads on the simulation thread.
+Native rendering composes DexSim's `dexsim.spawn.create_render_actor` with
+`ObjectDesc(physics=None, per_env=False)` and array-backed `GeometryDesc.mesh`.
+`RenderDesc` selects overlay routing with shadows and picking disabled;
+`MaterialDesc` supplies unlit RGBA blending, disabled depth writes and two-sided
+surfaces. These unlit/alpha-mode controls require the shared native RT material
+type; Filament materials reject them. It uses existing Arena-owned `MeshObject`/`RenderBody` APIs, with no
+dedicated debug factory, object subtype, Scene registry or physics preparation.
+Removal invalidates the borrowed native handle; owned material retirement
+preserves explicitly shared or externally retained instances. File-backed
+overlay geometry is unsupported. Browser rendering carries meshes in
+`SceneOverlays`. Native submission remains per-object; true native batching and
+GPU instancing are tracked separately in DexSim issue 227. `draw_marker()` remains
+the compatibility API for legacy axis markers. Point clouds and polylines
+remain separate overlay APIs rather than marker prototypes.
 
 `SimulationManager` may start the Viser server during its own construction,
 before a standalone caller has declared any assets. That empty visualization
@@ -83,6 +106,9 @@ this invariant.
   and offsets face indices into the concatenated vertex array. Links without
   render meshes export empty geometry without querying mesh zero.
 - Sampling rates are wall-clock limits, not simulation-time guarantees.
+- Marker mutation never prepares or synchronizes an unprepared scene. When
+  topology is dirty, browser publication waits for the next explicit host
+  capture or `SimulationManager.update()`.
 - Bind to loopback by default. Viser has no EmbodiChain authentication layer;
   use SSH forwarding or an authenticated gateway for remote access.
 
@@ -93,6 +119,7 @@ this invariant.
 | `Visualization env_ids ... outside simulation range` | Selected IDs do not exist in the configured arenas. Validate them against `SimulationManager.num_envs`. |
 | Startup timeout or address-in-use error | The Viser worker did not become ready or the configured port is occupied. Select another port and inspect `visualization_health.worker_error`. |
 | Asset added after startup is missing | Step once, call `refresh_visualization()`, or mark topology dirty if the change bypassed manager APIs. |
+| Native marker creation reports missing render-actor support | Use a DexSim build exposing `dexsim.spawn.create_render_actor`, render-property descriptors and the matching native RenderBody bindings, or run with `--viser`. Overlay routing supports Hybrid, FastRT and OfflineRT. |
 | Newton Viser shows only the grid after declaring a robot | Check that Viser startup did not finalize an empty Spawn scene before asset declaration and that link poses remain finite after the first update. |
 | A Newton articulation link is missing geometry or emits `mesh_id 0 out of range` | Export all render-body mesh segments and treat a zero-mesh link as empty geometry. Do not use the single-mesh articulation helper for Newton render bodies. |
 | Browser stops updating after an exporter/backend exception | `capture_visualization_safely()` latches the first error to protect simulation. Inspect health/logs, then stop and restart after fixing the cause. |
@@ -113,6 +140,9 @@ Relevant tests:
 - `tests/visualization/test_scene_exporter.py`
 - `tests/visualization/test_runtime.py`
 - `tests/visualization/test_viser_backend.py`
+- `tests/visualization/test_markers.py`
+- `tests/visualization/test_native_markers.py`
 - `tests/sim/test_sim_manager.py`
+- `tests/sim/test_marker_rendering.py`
 - `tests/gym/utils/test_gym_utils.py`
 - `tests/lab/scripts/test_preview_asset.py`
