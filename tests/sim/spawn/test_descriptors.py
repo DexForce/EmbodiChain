@@ -1009,6 +1009,67 @@ def test_dynamic_triangle_mesh_collision_is_rejected_before_spawn() -> None:
         rigid_desc_from_cfg(cfg)
 
 
+@pytest.mark.parametrize("newton_solver_type", [None, "xpbd"])
+def test_explicit_visacd_preserves_render_and_physics(
+    monkeypatch: pytest.MonkeyPatch, newton_solver_type: str | None
+) -> None:
+    import open3d as o3d
+    from dexsim.kit.meshproc import convex_decomposition
+
+    vertices = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=np.float32)
+    triangles = np.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]], dtype=np.int32)
+    mesh = o3d.geometry.TriangleMesh(
+        o3d.utility.Vector3dVector(vertices), o3d.utility.Vector3iVector(triangles)
+    )
+    part = o3d.t.geometry.TriangleMesh.from_legacy(mesh)
+    decompose = Mock(return_value=(True, [part, part]))
+    monkeypatch.setattr(convex_decomposition, "convex_decomposition_visacd", decompose)
+    cfg = RigidObjectCfg(
+        uid="visacd_test",
+        body_scale=(2.0, 3.0, 4.0),
+        shape=MeshCfg(
+            vertices=vertices,
+            triangles=triangles,
+            collision=MeshCollisionCfg(
+                approximation="convex_decomposition", max_hulls=2, acd_method="visacd"
+            ),
+        ),
+        attrs=RigidBodyPhysicsCfg(mass_props=MassPropertiesCfg(mass=0.5)),
+    )
+    descriptor, _ = rigid_desc_from_cfg(cfg, newton_solver_type=newton_solver_type)
+    assert len(descriptor.renders) == 1
+    np.testing.assert_array_equal(descriptor.renders[0].vertices, vertices)
+    np.testing.assert_array_equal(descriptor.body_scale, [2, 3, 4])
+    assert descriptor.physics.mass == 0.5
+    assert len(descriptor.collisions) == 2
+    for collision in descriptor.collisions:
+        assert collision.approximation == CollisionApproximation.CONVEX_HULL
+        assert collision.render_source_index is None
+        assert collision.file_path is None
+        assert collision.vertices.shape == (4, 3)
+        np.testing.assert_array_equal(collision.local_transform, np.eye(4))
+    assert decompose.call_args.kwargs["max_convex_hull_num"] == 2
+
+
+@pytest.mark.parametrize("outcome", [(False, []), (True, []), (True, [None] * 3)])
+def test_visacd_fails_closed(monkeypatch: pytest.MonkeyPatch, outcome: tuple) -> None:
+    from dexsim.spawn import GeometryType
+    from dexsim.kit.meshproc import convex_decomposition
+    from embodichain.lab.sim.spawn._visacd import explicit_visacd_collisions
+
+    monkeypatch.setattr(
+        convex_decomposition, "convex_decomposition_visacd", Mock(return_value=outcome)
+    )
+    collision = CollisionDesc(
+        geometry_type=GeometryType.MESH,
+        vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]),
+        triangles=np.array([[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]),
+        decomp_max_hulls=2,
+    )
+    with pytest.raises(RuntimeError, match="VisACD"):
+        explicit_visacd_collisions(collision)
+
+
 def test_spawn_rejects_unsupported_convex_decomposition_method() -> None:
     cfg = RigidObjectCfg(
         uid="mesh",
@@ -1024,6 +1085,106 @@ def test_spawn_rejects_unsupported_convex_decomposition_method() -> None:
 
     with pytest.raises(ValueError, match="acd_method='visacd' or 'coacd'"):
         rigid_desc_from_cfg(cfg)
+
+
+def test_visacd_retries_whole_mesh_when_native_exceeds_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import open3d as o3d
+    from dexsim.spawn import GeometryType
+    from dexsim.kit.meshproc import convex_decomposition
+    from embodichain.lab.sim.spawn._visacd import explicit_visacd_collisions
+
+    mesh = o3d.geometry.TriangleMesh.create_box()
+    part = o3d.t.geometry.TriangleMesh.from_legacy(mesh)
+    decompose = Mock(side_effect=[(True, [part] * 3), (True, [part] * 2)])
+    monkeypatch.setattr(convex_decomposition, "convex_decomposition_visacd", decompose)
+    collision = CollisionDesc(
+        geometry_type=GeometryType.MESH,
+        vertices=np.asarray(mesh.vertices),
+        triangles=np.asarray(mesh.triangles),
+        decomp_max_hulls=2,
+    )
+    result = explicit_visacd_collisions(collision)
+    assert len(result) == 2
+    assert [c.kwargs["max_convex_hull_num"] for c in decompose.call_args_list] == [2, 1]
+    for call in decompose.call_args_list:
+        assert len(call.args[0].vertex.positions) == len(mesh.vertices)
+
+
+def test_visacd_reduces_convex_vertices_to_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import open3d as o3d
+    from dexsim.spawn import GeometryType
+    from dexsim.kit.meshproc import convex_decomposition
+    from embodichain.lab.sim.spawn._visacd import explicit_visacd_collisions
+
+    mesh = o3d.geometry.TriangleMesh.create_sphere(resolution=10)
+    monkeypatch.setattr(
+        convex_decomposition,
+        "convex_decomposition_visacd",
+        Mock(return_value=(True, [o3d.t.geometry.TriangleMesh.from_legacy(mesh)])),
+    )
+    collision = CollisionDesc(
+        geometry_type=GeometryType.MESH,
+        vertices=np.asarray(mesh.vertices),
+        triangles=np.asarray(mesh.triangles),
+        decomp_max_hulls=2,
+        decomp_vertex_limit=64,
+    )
+    result = explicit_visacd_collisions(collision)
+    assert 4 <= len(result[0].vertices) <= 64
+    assert result[0].approximation == CollisionApproximation.CONVEX_HULL
+
+
+@pytest.mark.gpu
+@pytest.mark.requires_sim
+@pytest.mark.parametrize("backend", ["default", "newton"])
+def test_visacd_explicit_shapes_load_in_native_backend(backend: str) -> None:
+    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.sim.cfg import DefaultPhysicsCfg, NewtonPhysicsCfg
+
+    vertices = np.array(
+        [[0, 0, 0], [0.1, 0, 0], [0, 0.1, 0], [0, 0, 0.1]],
+        dtype=np.float32,
+    )
+    triangles = np.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]], dtype=np.int32)
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            enable_entity_gizmo=False,
+            physics_cfg=(
+                NewtonPhysicsCfg() if backend == "newton" else DefaultPhysicsCfg()
+            ),
+        )
+    )
+    obj = None
+    try:
+        obj = sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="explicit_visacd",
+                init_pos=(0.0, 0.0, 1.0),
+                shape=MeshCfg(
+                    vertices=vertices,
+                    triangles=triangles,
+                    collision=MeshCollisionCfg(
+                        approximation="convex_decomposition",
+                        max_hulls=16,
+                        acd_method="visacd",
+                    ),
+                ),
+            )
+        )
+        sim.prepare()
+        sim.update(step=5)
+        pose = obj.get_local_pose().detach().cpu().numpy()
+        assert np.isfinite(pose).all()
+        assert 0.9 < pose[0, 2] < 1.0
+    finally:
+        obj = None
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
 
 
 def test_default_collision_solver_fields_compile_from_collision_slot() -> None:
