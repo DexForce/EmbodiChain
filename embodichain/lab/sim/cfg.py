@@ -1817,6 +1817,14 @@ class ArticulationCfg(ObjectBaseCfg):
     disable_self_collision: bool = True
     """Whether to enable or disable self-collisions."""
 
+    mimic_compliance: tuple[float, float] | None = None
+    """Optional native mimic natural frequency and damping ratio.
+
+    ``None`` preserves the imported mechanism. ``(-1.0, -1.0)`` requests
+    rigid mimic coupling; otherwise frequency must be positive and damping
+    non-negative. Existing mimic joints are updated, never rebuilt.
+    """
+
     enable_gravity: bool = True
     """Whether gravity is enabled for the articulation.
 

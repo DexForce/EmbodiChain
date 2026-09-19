@@ -71,6 +71,30 @@ from embodichain.lab.sim.utility.solver_utils import (
 from embodichain.utils import logger
 
 
+def _configure_mimic_compliance(
+    entities: list[_Articulation], parameters: tuple[float, float] | None
+) -> None:
+    """Apply an opt-in mechanism setting before the first physics update."""
+    if parameters is None:
+        return
+    if not isinstance(parameters, (tuple, list)) or len(parameters) != 2:
+        raise ValueError("mimic_compliance must contain frequency and damping.")
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not np.isfinite(value)
+        for value in parameters
+    ):
+        raise ValueError("mimic_compliance values must be finite real numbers.")
+    frequency, damping = map(float, parameters)
+    if (frequency, damping) != (-1.0, -1.0) and (frequency <= 0 or damping < 0):
+        raise ValueError(
+            "Use positive frequency and non-negative damping, or (-1, -1) for rigid mimic."
+        )
+    for entity in entities:
+        entity.set_mimic_compliance(frequency, damping)
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class ArticulationJointKinematics:
     """Backend-neutral kinematic description of one articulation joint.
@@ -650,6 +674,8 @@ class Articulation(BatchEntity):
         self.cfg = cfg
         self._entities = entities
         self.device = device
+
+        _configure_mimic_compliance(entities, cfg.mimic_compliance)
 
         # Store all indices for batch operations
         self._all_indices = torch.arange(len(entities), dtype=torch.int32)

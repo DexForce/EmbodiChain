@@ -30,7 +30,7 @@ from .source_scene import PreparedScene
 
 __all__: list[str] = []
 
-_POLICY = "semantic_grasp_fit/v2"
+_POLICY = "semantic_grasp_fit/v3"
 _MIN_SCALE = 0.25
 _PAD_MARGIN = 0.002
 _FIT_MARGIN = 0.001
@@ -196,7 +196,11 @@ def _fit_object(
         span = float(extents.min())
     if not math.isfinite(span) or span <= 0:
         raise ValueError(f"Grasp-fit target {object_id!r} has no measurable span.")
-    usable = opening - 2 * _PAD_MARGIN
+    contact_offset = float(obj.get("attrs", {}).get("contact_offset", 0.0))
+    if not math.isfinite(contact_offset) or contact_offset < 0:
+        raise ValueError(f"Grasp-fit target {object_id!r} has invalid contact_offset.")
+    # Both pad and object contact envelopes must clear when the hand opens.
+    usable = opening - 2 * (_PAD_MARGIN + contact_offset)
     factor = min(1.0, (usable - _FIT_MARGIN) / span)
     if factor < _MIN_SCALE:
         raise ValueError(
@@ -213,6 +217,7 @@ def _fit_object(
         "source_sha256": source_sha256,
         "calibrated_opening_m": opening,
         "pad_margin_m": _PAD_MARGIN,
+        "object_contact_offset_m": contact_offset,
         "fit_margin_m": _FIT_MARGIN,
         "usable_span_m": usable,
         "original_fit_span_m": span,

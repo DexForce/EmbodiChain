@@ -199,6 +199,8 @@ def generate_task_program_bundle(
     )
     embodiment_payload = load_config(embodiment_source)
     _calibrate_task_gripper_opening(embodiment_payload)
+    # The deployed Robotiq linkage is mechanically coupled, not independent fingers.
+    embodiment_payload["simulation"]["mimic_compliance"] = [-1.0, -1.0]
     adaptation = None
     if fit_grasp_assets:
         from .orchestration.grasp_fit import fit_grasp_assets as fit_assets
@@ -309,6 +311,7 @@ def generate_task_program_bundle(
             program_id=program_id,
             scene_contract=scene_contract,
             collision_world=policy_payload["motion"]["strategy"] == "motion_gen",
+            embodiment=embodiment_payload,
         ),
     )
     scene_payload = _scene_payload(scene, program_id=program_id)
@@ -829,8 +832,21 @@ def _integration_payload(
     program_id: str,
     scene_contract: str,
     collision_world: bool = False,
+    embodiment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
+    arm_roots = {}
+    if embodiment is not None:
+        from scipy.spatial.transform import Rotation
+
+        sim = embodiment["simulation"]
+        base_rotation = Rotation.from_euler("XYZ", sim["init_rot"], degrees=True)
+        for component in sim["urdf_cfg"]["components"]:
+            if component["component_type"] in {"left_arm", "right_arm"}:
+                translation = np.asarray(component["transform"])[:3, 3]
+                arm_roots[component["component_type"].removesuffix("_arm")] = (
+                    base_rotation.apply(translation) + np.asarray(sim["init_pos"])
+                )
     articulation_bindings = graph_bindings(graph, scene)
     referenced_objects: set[str] = set()
     inside_routes: list[tuple[str, str, str]] = []
@@ -962,6 +978,12 @@ def _integration_payload(
             approach = (
                 np.array([0.0, 0.0, -1.0]) if length <= 1e-6 else approach / length
             )
+            root = arm_roots.get(call.get("resources", {}).get("primary", "left"))
+            if root is not None:
+                toward_object = np.asarray(_position(scene_objects[object_id])) - root
+                if float(np.dot(approach[:2], toward_object[:2])) < 0.0:
+                    # Do not force an upper-region grasp from the far axial end.
+                    approach = np.array([0.0, 0.0, -1.0])
             options = {
                 "kind": "pick_up",
                 "hand_interp_steps": default_pick_options["hand_interp_steps"],
@@ -1673,7 +1695,7 @@ def _relative_place_route_payloads(
     axis_align_objects: set[str] = set()
     selectors: set[tuple[str, str, str]] = set()
     stack_selectors: set[tuple[str, str, str]] = set()
-    upright_targets: dict[tuple[str, str, str], tuple[str, str]] = {}
+    upright_targets: dict[tuple[str, str, str], str] = {}
     for node in graph["nodes"]:
         call = node["call"]
         if call["kind"] != "registered":
@@ -1700,10 +1722,7 @@ def _relative_place_route_payloads(
                         str(arguments["reference"]),
                         str(arguments["relation"]),
                     )
-                ] = (
-                    f"{node['task_instance_id']}_upright_target",
-                    str(call["resources"]["primary"]),
-                )
+                ] = f"{node['task_instance_id']}_upright_target"
             selectors.add(
                 (
                     str(arguments["object"]),
@@ -1721,7 +1740,7 @@ def _relative_place_route_payloads(
                 "Bind the named relation anchor, not the surrounding tabletop region."
             )
         if selector in upright_targets:
-            target_id, resource = upright_targets[selector]
+            target_id = upright_targets[selector]
             target = _single_target_pose(graph, target_id)
             reference_position = _position(scene_objects[reference_id])
             displacement = [
@@ -1748,18 +1767,6 @@ def _relative_place_route_payloads(
                 "reference_entity_id": reference_id,
                 "relation": relation,
                 "world_displacement": displacement,
-                **(
-                    {
-                        "world_yaw_offset": (
-                            math.pi / 3.0 if resource == "right" else -math.pi / 3.0
-                        )
-                    }
-                    if selector in upright_targets
-                    and not settled
-                    and abs(_longest_local_axis(scene_objects[object_id])[2])
-                    < 1.0 - 1.0e-6
-                    else {}
-                ),
             }
         )
     return routes

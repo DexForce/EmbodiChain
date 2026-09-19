@@ -75,6 +75,30 @@ def test_unconstrained_pick_still_checks_opening_envelope() -> None:
     assert torch.isinf(rows[0][1]).all()
 
 
+def test_centered_opening_proposals_preserve_valid_and_reject_oversize() -> None:
+    from embodichain.gen_sim.task_engine._task_program.grasp_filter import (
+        _center_opening_proposals,
+    )
+
+    vertices = torch.tensor([[-0.0615, 0.0, 0.0], [0.0615, 0.0, 0.1]])
+    poses = torch.eye(4).repeat(2, 1, 1)
+    poses[1, 0, 3] = 0.01
+    original = poses.clone()
+    centered = _center_opening_proposals(vertices, poses, torch.eye(4), 0.128)
+    torch.testing.assert_close(poses, original)
+    torch.testing.assert_close(centered[0], poses[0])
+    assert opening_envelope_mask(vertices, centered, torch.eye(4), 0.128).all()
+    wide = vertices.clone()
+    wide[:, 0] *= 2
+    oversized = _center_opening_proposals(wide, poses, torch.eye(4), 0.128)
+    assert not opening_envelope_mask(wide, oversized, torch.eye(4), 0.128).any()
+    world = torch.eye(4)
+    world[:3, :3] = torch.tensor([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+    world[:3, 3] = torch.tensor([2.0, -3.0, 0.5])
+    transformed = _center_opening_proposals(vertices, world @ poses, world, 0.128)
+    torch.testing.assert_close(transformed, world @ centered)
+
+
 def test_e6_clearance_shifts_only_within_pad_workspace() -> None:
     from embodichain.gen_sim.task_engine._task_program.e6_clearance import HandClearance
 

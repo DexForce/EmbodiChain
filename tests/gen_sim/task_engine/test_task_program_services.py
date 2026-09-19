@@ -28,7 +28,10 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.gen_sim.task_engine._task_program.align_held import _AlignHeldLowerer
+from embodichain.gen_sim.task_engine._task_program.align_held import (
+    _AlignHeldLowerer,
+    _select_upright_yaw,
+)
 
 from embodichain.gen_sim.task_engine._task_program.configured import (
     decode_task_lowerer,
@@ -466,6 +469,121 @@ def test_current_pose_upright_binding_preserves_each_environments_position() -> 
     )
     torch.testing.assert_close(poses, before)
     assert robot.mock_calls == []
+
+
+@pytest.mark.parametrize("ik_success", [True, False])
+def test_upright_yaw_prefers_joint_margin_and_preserves_failure_fallback(
+    ik_success: bool,
+) -> None:
+    pose = torch.eye(4).unsqueeze(0)
+    pose[:, :3, 3] = torch.tensor([0.1, 0.2, 0.9])
+    original = pose.clone()
+    robot = Mock()
+    robot.get_qpos_limits.return_value = torch.tensor([[[0.0, 1.0]]])
+
+    generator = Mock()
+
+    def generate(targets, *, options):
+        target = targets[0].xpos
+        angle = torch.atan2(target[:, 1, 0], target[:, 0, 0])
+        near_preferred = (angle - math.pi / 6).abs() < 1e-5
+        qpos = torch.where(near_preferred, 0.5, 0.95)[:, None]
+        assert options.preserve_cartesian_samples
+        assert len(targets) == 5
+        torch.testing.assert_close(
+            targets[-1].xpos[:, :3, 3], torch.tensor([[0.1, 0.2, 0.7]])
+        )
+        return SimpleNamespace(
+            success=torch.full((1,), ik_success, dtype=torch.bool),
+            positions=torch.cat(
+                [options.start_qpos[:, None], qpos[:, None].expand(-1, 5, -1)], dim=1
+            ),
+        )
+
+    generator.generate.side_effect = generate
+    selected = _select_upright_yaw(
+        robot,
+        generator,
+        pose,
+        torch.eye(4),
+        torch.tensor([[0.5]]),
+        "right_arm",
+        [0],
+        (0.1, 0.2, 0.7),
+    )
+    torch.testing.assert_close(pose, original)
+    torch.testing.assert_close(selected[:, :3, 3], pose[:, :3, 3])
+    torch.testing.assert_close(selected[:, :3, 2], pose[:, :3, 2])
+    assert generator.generate.call_count == 7
+    robot.compute_ik.assert_not_called()
+    if ik_success:
+        assert float(
+            torch.atan2(selected[0, 1, 0], selected[0, 0, 0])
+        ) == pytest.approx(math.pi / 6)
+    else:
+        torch.testing.assert_close(selected, pose)
+
+
+def test_staging_yaw_is_applied_before_descent_without_changing_position() -> None:
+    routes = (("can", "staging", False, (1.0, 0.0, 0.0), (0.1, 0.2, 1.0)),)
+    root = torch.eye(4).unsqueeze(0)
+    root[:, 0, 3] = -1.0
+    robot = SimpleNamespace(
+        cfg=SimpleNamespace(
+            solver_cfg={"left_arm": SimpleNamespace(root_link_name="root")}
+        ),
+        get_link_pose=lambda **kwargs: root,
+    )
+    context = SimpleNamespace(
+        batch_size=1,
+        env_ids=torch.tensor([0]),
+        task=SimpleNamespace(
+            get_held_object=lambda key: SimpleNamespace(
+                semantics=SimpleNamespace(entity_id="can"),
+                object_to_eef=torch.eye(4).unsqueeze(0),
+            )
+        ),
+        scene=SimpleNamespace(
+            entities={
+                "can": SimpleNamespace(pose=torch.eye(4).unsqueeze(0), confidence=1.0)
+            }
+        ),
+    )
+    bound = SimpleNamespace(
+        binding=SimpleNamespace(
+            resources={
+                "primary": SimpleNamespace(
+                    endpoints={
+                        "motion": SimpleNamespace(
+                            task_state_key="left",
+                            runtime_target=SimpleNamespace(control_part="left_arm"),
+                        )
+                    }
+                )
+            }
+        )
+    )
+    call = RegisteredSemanticCall(
+        call_id="gen_sim.align_held",
+        arguments={"object": "can", "target": "staging", "preserve_yaw": False},
+    )
+    kwargs = dict(context=context, bound=bound, option_template=MoveHeldObjectOptions())
+    baseline = (
+        _AlignHeldLowerer(routes, robot).lower(call, **kwargs).goal.object_target_pose
+    )
+    rotated = (
+        _AlignHeldLowerer(routes, robot, (("can", "staging", math.pi / 3),))
+        .lower(call, **kwargs)
+        .goal.object_target_pose
+    )
+    yaw = torch.tensor(
+        [[0.5, -math.sqrt(3) / 2, 0.0], [math.sqrt(3) / 2, 0.5, 0.0], [0.0, 0.0, 1.0]]
+    )
+    torch.testing.assert_close(rotated[:, :3, :3], yaw @ baseline[:, :3, :3])
+    torch.testing.assert_close(rotated[:, :3, 3], baseline[:, :3, 3])
+    torch.testing.assert_close(
+        rotated[:, :3, 0], torch.tensor([[0.0, 0.0, 1.0]]), atol=1e-6, rtol=0
+    )
 
 
 def test_coordinated_hold_lowerer_retains_both_verified_attachments() -> None:

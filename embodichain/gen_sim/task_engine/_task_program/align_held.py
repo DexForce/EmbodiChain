@@ -19,9 +19,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import math
+import json
 from typing import Any, ClassVar
 
 import torch
+from embodichain.utils import logger
+from embodichain.lab.sim.motion.motion_generator import MotionGenOptions
+from embodichain.lab.sim.motion.planners.utils import MoveType, PlanState
 
 from embodichain.lab.sim.atomic_actions.primitives.move_held_object import (
     HeldObjectPoseGoal,
@@ -50,12 +55,24 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
     target_descriptor = MoveHeldObject.descriptor()
     preserves_symbolic_state: ClassVar[bool] = True
 
-    def __init__(self, routes: tuple[tuple[Any, ...], ...], robot: Any) -> None:
+    def __init__(
+        self,
+        routes: tuple[tuple[Any, ...], ...],
+        robot: Any,
+        yaw_offsets: tuple[tuple[str, str, float], ...] = (),
+        descent_positions: tuple[tuple[str, str, tuple[float, ...]], ...] = (),
+        motion_generator: Any = None,
+    ) -> None:
         self._routes = {
             (obj, target, preserve): (axis, position)
             for obj, target, preserve, axis, position in routes
         }
         self._robot = robot
+        self._motion_generator = motion_generator
+        self._yaw_offsets = {(obj, target): yaw for obj, target, yaw in yaw_offsets}
+        self._descent_positions = {
+            (obj, target): position for obj, target, position in descent_positions
+        }
 
     def lower(
         self,
@@ -138,17 +155,118 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
             half_turn @ pose[:, :3, :3],
             pose[:, :3, :3],
         )
+        # Complete the placement yaw while the payload is at staging height.
+        yaw = self._yaw_offsets.get((args["object"], args["target"]), 0.0)
+        if yaw:
+            pose[:, :3, :3] = (
+                axis_angle_to_rotation_matrix(pose.new_tensor([0.0, 0.0, yaw]))
+                @ pose[:, :3, :3]
+            )
+        release = self._descent_positions.get((args["object"], args["target"]))
+        if release is not None:
+            pose = _select_upright_yaw(
+                self._robot,
+                self._motion_generator,
+                pose,
+                object_to_eef,
+                context.robot.qpos[:, list(motion.joint_ids)],
+                part,
+                context.env_ids.tolist(),
+                release,
+            )
         return SemanticLowering(goal=HeldObjectPoseGoal(pose))
+
+
+def _select_upright_yaw(
+    robot: Any,
+    motion_generator: Any,
+    pose: torch.Tensor,
+    object_to_eef: torch.Tensor,
+    seed: torch.Tensor,
+    part: str,
+    env_ids: list[int],
+    release: tuple[float, ...],
+) -> torch.Tensor:
+    """Rank free-yaw targets; full trajectory and execution gates remain mandatory."""
+    limits = robot.get_qpos_limits(name=part, env_ids=env_ids).to(pose)
+    low, high = limits[..., 0], limits[..., 1]
+    best_score = pose.new_full((len(pose),), -float("inf"))
+    best_pose = pose.clone()
+    evidence = []
+    for degrees in (0, -30, 30, -60, 60, -90, 90):
+        candidate = pose.clone()
+        candidate[:, :3, :3] = (
+            axis_angle_to_rotation_matrix(
+                pose.new_tensor([0.0, 0.0, math.radians(degrees)])
+            )
+            @ pose[:, :3, :3]
+        )
+        targets = []
+        for fraction in (0.0, 0.25, 0.5, 0.75, 1.0):
+            target = candidate.clone()
+            target[:, :3, 3] = torch.lerp(
+                candidate[:, :3, 3], pose.new_tensor(release), fraction
+            )
+            targets.append(
+                PlanState(move_type=MoveType.EEF_MOVE, xpos=target @ object_to_eef)
+            )
+        # Coarse ranking plans are never executed or substituted for the real plan.
+        planned = motion_generator.generate(
+            targets,
+            options=MotionGenOptions(
+                strategy="ik_interp",
+                start_qpos=seed,
+                control_part=part,
+                sample_count=6,
+                preserve_cartesian_samples=True,
+                is_linear=True,
+                interpolation_dt=2.0,
+            ),
+        )
+        qpos = planned.positions[:, 1:]
+        delta = planned.positions[:, 1:] - planned.positions[:, :-1]
+        feasible = planned.success & torch.isfinite(qpos).all(-1).all(-1)
+        feasible &= (delta[:, 1:].abs().amax(-1) < 0.5).all(-1)
+        travel = torch.linalg.vector_norm(delta, dim=-1).sum(-1)
+        margin = (
+            torch.minimum(
+                (qpos - low[:, None]) / (high - low)[:, None],
+                (high[:, None] - qpos) / (high - low)[:, None],
+            )
+            .amin(-1)
+            .amin(-1)
+        )
+        score = torch.where(feasible, margin - 0.01 * travel, -float("inf"))
+        best_pose = torch.where(
+            (score > best_score)[:, None, None], candidate, best_pose
+        )
+        best_score = torch.maximum(best_score, score)
+        evidence.append(
+            {
+                "yaw_delta_degrees": degrees,
+                "feasible": feasible.tolist(),
+                "minimum_joint_margin": [
+                    value if math.isfinite(value) else None for value in margin.tolist()
+                ],
+                "joint_travel": [
+                    value if math.isfinite(value) else None for value in travel.tolist()
+                ],
+            }
+        )
+    logger.log_info("GenSim upright yaw candidates: " + json.dumps(evidence))
+    return best_pose
 
 
 @dataclass(frozen=True, slots=True)
 class _AlignHeldFactory:
     call_id: ClassVar[str] = ALIGN_HELD_CALL
-    revision: ClassVar[str] = "3"
+    revision: ClassVar[str] = "5"
     target_descriptor = MoveHeldObject.descriptor()
     routes: tuple[
         tuple[str, str, bool, tuple[float, ...], tuple[float, ...] | None], ...
     ]
+    yaw_offsets: tuple[tuple[str, str, float], ...] = ()
+    descent_positions: tuple[tuple[str, str, tuple[float, ...]], ...] = ()
 
     def create(
         self, *, simulation: Any, robot: Any, scene_registry: Any, engine: Any
@@ -157,7 +275,13 @@ class _AlignHeldFactory:
             raise ValueError("Held alignment must bind the factory's robot.")
         for obj, _, _, _, _ in self.routes:
             scene_registry.resolve(obj, expected_type=SceneObjectRef)
-        return _AlignHeldLowerer(self.routes, robot)
+        return _AlignHeldLowerer(
+            self.routes,
+            robot,
+            self.yaw_offsets,
+            self.descent_positions,
+            engine.motion_generator,
+        )
 
 
 def with_held_alignment(
@@ -169,8 +293,13 @@ def with_held_alignment(
         if cfg.local_axis is not None
     }
     routes = {}
+    yaw_offsets = {}
+    pickup_targets = {}
+    descent_positions = {}
     for item in program["program"]["items"]:
         call = item["steps"]["call"]
+        if call.get("call_id", "").startswith("gen_sim.pick."):
+            pickup_targets[call["arguments"]["object"]] = call["arguments"]["target"]
         if call.get("call_id") != ALIGN_HELD_CALL:
             continue
         args = call["arguments"]
@@ -196,9 +325,24 @@ def with_held_alignment(
             axes[obj],
             None if values is None else tuple(values[0]["position"]),
         )
+        if values is not None and not preserve and abs(axes[obj][2]) < 1.0 - 1e-6:
+            arm = call.get("resources", {}).get("primary", "left")
+            yaw_offsets[(obj, target)] = (
+                math.pi / 3.0 if arm == "right" else -math.pi / 3.0
+            )
+            if obj in pickup_targets:
+                release_values = program["targets"][pickup_targets[obj]]["values"]
+                if len(release_values) == 1:
+                    descent_positions[(obj, target)] = tuple(
+                        release_values[0]["position"]
+                    )
     if not routes:
         return registration
-    factory = _AlignHeldFactory(tuple(routes.values()))
+    factory = _AlignHeldFactory(
+        tuple(routes.values()),
+        tuple((obj, target, yaw) for (obj, target), yaw in yaw_offsets.items()),
+        tuple((obj, target, pos) for (obj, target), pos in descent_positions.items()),
+    )
     catalog = registration.call_catalog.with_descriptor(
         SemanticCallDescriptor(
             call_id=ALIGN_HELD_CALL,

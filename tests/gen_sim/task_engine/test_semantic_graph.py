@@ -1126,6 +1126,27 @@ def test_task_pick_directions_are_declared_per_policy_not_injected_by_lowerers()
     assert options["gen_sim.pick.two"]["approach_direction"] == pytest.approx(
         [0.0, -(2**-0.5), -(2**-0.5)]
     )
+    mounted = _integration_payload(
+        graph,
+        scene,
+        program_id="directions",
+        scene_contract="directions_scene",
+        embodiment={
+            "simulation": {
+                "init_pos": [0.0, -1.0, 0.0],
+                "init_rot": [0.0, 0.0, 0.0],
+                "urdf_cfg": {
+                    "components": [
+                        {"component_type": "left_arm", "transform": np.eye(4).tolist()}
+                    ]
+                },
+            }
+        },
+    )["profile"]["action_options"]
+    assert mounted["gen_sim.pick.one"]["approach_direction"] == pytest.approx(
+        options["gen_sim.pick.one"]["approach_direction"]
+    )
+    assert mounted["gen_sim.pick.two"]["approach_direction"] == [0.0, 0.0, -1.0]
     factories = integration["runtime_services"]["registered_semantic_lowerers"]
     assert {f["call_id"] for f in factories if f["kind"] == "pick"} == {
         "gen_sim.pick.one",
@@ -1566,10 +1587,39 @@ def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
         for item in integration["runtime_services"]["registered_semantic_lowerers"]
         if item["kind"] == "place_relative"
     )["routes"][0]
+    assert "world_yaw_offset" not in route
+    from embodichain.gen_sim.task_engine._task_program.assembly import load_deployment
+    from embodichain.gen_sim.task_engine._task_program.align_held import (
+        _AlignHeldFactory,
+    )
+
+    composed = load_deployment(
+        task_program=load_config(paths.deployment)["task_program"],
+        skill_profile=load_config(paths.embodiment)["skill_profile"],
+        base_dir=paths.root,
+    )
+    align_factory = next(
+        factory
+        for factory in composed.integration.registration.registered_semantic_lowerer_factories
+        if isinstance(factory, _AlignHeldFactory)
+    )
     if expected_yaw is None:
-        assert "world_yaw_offset" not in route
+        assert align_factory.yaw_offsets == ()
     else:
-        assert route["world_yaw_offset"] == pytest.approx(expected_yaw)
+        assert align_factory.yaw_offsets == (
+            ("bottle", "upright_upright_staging_target", expected_yaw),
+        )
+        assert align_factory.descent_positions == (
+            (
+                "bottle",
+                "upright_upright_staging_target",
+                tuple(
+                    load_config(paths.program)["targets"]["upright_upright_target"][
+                        "values"
+                    ][0]["position"]
+                ),
+            ),
+        )
     assert "post" not in release and "validators" not in release
     assert terminal["validators"][0]["kind"] == "object_near_relative_target"
     # Planning includes 1 cm release clearance; acceptance uses the support surface.

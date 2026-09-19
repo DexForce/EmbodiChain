@@ -36,7 +36,7 @@ from .e6_clearance import HandClearance
 
 __all__: list[str] = []
 
-GRASP_FILTER_REVISION = 4
+GRASP_FILTER_REVISION = 5
 
 
 def opening_envelope_mask(
@@ -61,6 +61,34 @@ def opening_envelope_mask(
             projection.abs().amax(0) <= half_gap
         )
     return accepted
+
+
+def _center_opening_proposals(
+    vertices: torch.Tensor,
+    poses: torch.Tensor,
+    object_pose: torch.Tensor,
+    opening: float,
+) -> torch.Tensor:
+    """Recenter rejected jaw apertures without changing approach or relaxing clearance."""
+    accepted = opening_envelope_mask(vertices, poses, object_pose, opening)
+    if accepted.all():
+        return poses
+    candidates = poses.clone()
+    relative = pose_inv(object_pose) @ poses
+    for start in range(0, len(poses), 64):
+        chunk = relative[start : start + 64]
+        axes = chunk[:, :3, 0]
+        projection = (
+            vertices.to(poses) @ axes.T - (chunk[:, :3, 3] * axes).sum(-1)[None]
+        )
+        offset = (projection.amin(0) + projection.amax(0)) * 0.5
+        candidates[start : start + len(chunk), :3, 3] += (
+            offset[:, None] * poses[start : start + len(chunk), :3, 0]
+        )
+    usable = ~accepted & opening_envelope_mask(
+        vertices, candidates, object_pose, opening
+    )
+    return torch.where(usable[:, None, None], candidates, poses)
 
 
 def geometry_key(vertices: torch.Tensor, triangles: torch.Tensor) -> str:
@@ -194,6 +222,12 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                     "Grasp proposals must have matching pose and cost rows."
                 )
             costs = costs.to(poses.device)
+            poses = _center_opening_proposals(
+                mesh_vertices,
+                poses,
+                obj_poses[row].to(poses),
+                self.gripper_model.max_opening_width,
+            )
             accepted = torch.isfinite(costs)
             raw_count = int(accepted.sum())
             accepted &= opening_envelope_mask(

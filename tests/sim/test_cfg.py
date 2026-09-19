@@ -33,6 +33,27 @@ from embodichain.lab.sim.cfg import (
 )
 
 
+def test_mimic_compliance_is_opt_in_and_does_not_rebuild_joints() -> None:
+    from unittest.mock import Mock
+    from embodichain.lab.sim.objects.articulation import _configure_mimic_compliance
+
+    entity = Mock()
+    assert ArticulationCfg().mimic_compliance is None
+    _configure_mimic_compliance([entity], None)
+    entity.set_mimic_compliance.assert_not_called()
+    _configure_mimic_compliance([entity], [-1.0, -1.0])
+    entity.set_mimic_compliance.assert_called_once_with(-1.0, -1.0)
+    entity.build_mimic.assert_not_called()
+
+
+@pytest.mark.parametrize("value", [(-1, 0), (0, 1), (float("nan"), 1), (True, 1), (1,)])
+def test_mimic_compliance_rejects_invalid_parameters(value) -> None:
+    from embodichain.lab.sim.objects.articulation import _configure_mimic_compliance
+
+    with pytest.raises(ValueError, match="mimic"):
+        _configure_mimic_compliance([], value)
+
+
 def test_articulation_cfg_defaults_to_no_joint_drive() -> None:
     """Generic articulations are passive unless a drive is requested."""
     articulation_cfg = ArticulationCfg()

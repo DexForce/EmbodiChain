@@ -17,6 +17,11 @@ types, `BatchEntity`, and the simulation profiler. Import a specialized
 object, sensor, or atomic-action API from its own subpackage. Solver, planner,
 workspace, and trajectory-augmentation APIs live under `embodichain.lab.sim.motion`.
 
+`ArticulationCfg.mimic_compliance` is opt-in: `None` preserves imported mimic
+settings, `(-1, -1)` requests rigid coupling, and positive frequency with
+non-negative damping requests compliant coupling. Initialization updates the
+existing native mimic constraints before stepping; it never rebuilds them.
+
 ## Ownership
 
 `SimulationManager` owns one DexSim `World`, its global environment,

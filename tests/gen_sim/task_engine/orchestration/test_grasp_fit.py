@@ -125,6 +125,27 @@ def test_grasp_fit_skips_compatible_asset_and_rejects_excess_shrink(
         fit_grasp_assets(oversized, _graph("E3"), openings={"left": 0.128})
 
 
+def test_grasp_fit_reserves_object_contact_envelope(tmp_path: Path) -> None:
+    scene = _scene(tmp_path, (0.133, 0.19, 0.132))
+    scene.rigid_objects[0]["attrs"] = {"contact_offset": 0.003}
+    fitted, report = fit_grasp_assets(scene, _graph(), openings={"left": 0.128})
+    record = report["records"][0]
+    assert record["object_contact_offset_m"] == 0.003
+    assert record["usable_span_m"] == pytest.approx(0.118)
+    assert record["scale_factor"] == pytest.approx(0.117 / 0.133)
+    assert fitted.rigid_objects[0]["attrs"]["contact_offset"] == 0.003
+
+
+@pytest.mark.parametrize("offset", [-0.001, float("nan"), float("inf")])
+def test_grasp_fit_rejects_invalid_contact_offset(
+    tmp_path: Path, offset: float
+) -> None:
+    scene = _scene(tmp_path, (0.133, 0.19, 0.132))
+    scene.rigid_objects[0]["attrs"] = {"contact_offset": offset}
+    with pytest.raises(ValueError, match="invalid contact_offset"):
+        fit_grasp_assets(scene, _graph(), openings={"left": 0.128})
+
+
 @pytest.mark.parametrize("task_type", ["E1", "E3", "E4"])
 def test_grasp_fit_supports_single_arm_pick_task_families(
     tmp_path: Path, task_type: str

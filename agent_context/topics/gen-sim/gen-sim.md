@@ -71,6 +71,24 @@ environment files.
 
 ## Task Engine semantics and execution scope
 
+Single-arm grasp proposals that fail the full-mesh opening envelope may be
+recentered along the jaw-closing axis, then must pass the unchanged opening and
+task-region checks. Already-valid proposals remain unchanged; oversized meshes
+are not admitted by recentering.
+Grasp-fit scaling reserves the object's configured contact offset on both jaw
+sides in addition to the pad margin, and records that allowance in the asset
+adaptation report. Source meshes and contact parameters are not changed.
+
+Generated dual-Franka deployments explicitly request rigid gripper mimic
+coupling via `ArticulationCfg.mimic_compliance=(-1, -1)`; the shared default is
+`None` and leaves imported mechanisms unchanged. E2 pickup uses an overhead
+approach when its axial approach points away from the mounted arm. The
+arm-specific upright yaw is completed at staging height, not added again
+during final descent. When pickup declares the eventual release target, bounded
+yaw candidates are ranked by joint margin and travel along that descent. This is
+target selection, not trajectory acceptance: the full velocity and physical-effect
+gates remain in force, including when no screened alternative is available.
+
 `task_engine/ontology.py` owns scene-independent task meaning and capability
 requirements; `task_engine/interpretation.py` owns strict intent validation and
 model guidance. E6 is a prismatic part opened or closed (`target_state=open` or
