@@ -1155,6 +1155,37 @@ def test_upright_support_target_uses_the_mesh_top_not_half_extent(
     assert pose[11] == pytest.approx(0.18)
 
 
+@pytest.mark.parametrize("max_hulls", [1, 8])
+@pytest.mark.parametrize("method", [None, "coacd", "visacd"])
+def test_scene_payload_defaults_to_visacd_and_preserves_explicit_algorithm(
+    max_hulls: int, method: str | None
+) -> None:
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    source = {
+        "uid": "mesh",
+        "shape": {"shape_type": "Mesh", "fpath": "/tmp/mesh.glb"},
+        "max_convex_hull_num": max_hulls,
+    }
+    if method is not None:
+        source["acd_method"] = method
+    scene = SimpleNamespace(background=(), rigid_objects=(source,), articulations=())
+
+    payload = _scene_payload(scene, program_id="collision_policy")
+
+    runtime = payload["simulation"]["rigid_object"][0]
+    cfg = RigidObjectCfg.from_dict(runtime)
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+    if max_hulls > 1:
+        assert cfg.shape.collision.acd_method == (method or "visacd")
+        assert descriptor.collisions[0].decomp_algorithm == (method or "visacd")
+        assert descriptor.collisions[0].decomp_max_hulls == max_hulls
+    else:
+        assert runtime["shape"]["collision"] == {"approximation": "convex_hull"}
+    assert "collision" not in source["shape"]
+
+
 def test_generated_usd_articulation_disables_urdf_only_pk_chain() -> None:
     scene = SimpleNamespace(
         table_top_z=0.72,
