@@ -1672,7 +1672,13 @@ class SimulationManager:
         self._world.render_camera_group(group_ids)
         self._log_scene_summary()
 
-    def update(self, physics_dt: float | None = None, step: int = 10) -> None:
+    def update(
+        self,
+        physics_dt: float | None = None,
+        step: int = 10,
+        *,
+        after_substep: Callable[[float], None] | None = None,
+    ) -> None:
         """Advance physics explicitly and publish the resulting simulation state.
 
         Each substep applies pending Gizmo controls before advancing the world,
@@ -1682,6 +1688,9 @@ class SimulationManager:
         Args:
             physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
             step (int, optional): the number of :meth:`World.update` calls per invocation. Defaults to 10.
+            after_substep: Observer called with the elapsed physics time after
+                each world update, before recording and visualization. It runs
+                inside this update call and is not retained by the manager.
         """
         with self.profiler.section("sim_update", is_root=True):
             with self.profiler.section("gpu_physics_check"):
@@ -1701,6 +1710,9 @@ class SimulationManager:
                             self._world.update(physics_dt)
                     self._visualization_sim_step += 1
                     self._visualization_sim_time += physics_dt
+                    if after_substep is not None:
+                        with self.profiler.section("after_substep"):
+                            after_substep(physics_dt)
                     if (
                         self._window_record_state is not None
                         and self._window_record_state.capture_from_sim_update

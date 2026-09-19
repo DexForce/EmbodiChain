@@ -64,6 +64,9 @@ quota; native actor ordering does not determine environment assignment.
 render user IDs are not interchangeable. Consumers must honor `is_valid` and
 per-environment counts because unused fixed-buffer values are unspecified.
 
+For substep histories and control-interval accumulation, read
+[contact history](contact-history.md).
+
 Read [contact lifecycle and capabilities](lifecycle.md#contact-queries) before
 changing filtering, force assumptions, topology handling or actor metadata.
 Geometry-only contacts and multiple backend-emitted rows per actor pair are

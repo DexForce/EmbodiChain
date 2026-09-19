@@ -43,7 +43,13 @@ receive the project's locking/repair behavior.
 
 The CLI imports the fixed `CATEGORY_MODULES` and finds `DownloadDataset`
 subclasses defined in each module. Adding an asset module alone does not add a
-CLI category. `_ensure_extract()` copies non-ZIP downloads into the extract tree
+CLI category. `get_registry()` also appends public classes from
+`assets/locomotion_assets.py` to the robot category and excludes underscore-prefixed
+helper classes. These seven classes use `robot_assets/<ClassName>.zip` on the
+configured remote sources, with the model entry at the ZIP root.
+`download_asset()` returns success or failure; `cmd_download()` finishes the batch
+and exits nonzero if any requested asset failed.
+`_ensure_extract()` copies non-ZIP downloads into the extract tree
 when needed. Solver/planner checkpoint download helpers can have separate paths.
 
 ## Failure diagnosis and change sites
@@ -55,7 +61,7 @@ when needed. Solver/planner checkpoint download helpers can have separate paths.
 | Corrupt archive repeatedly retained | `check_zip()` MD5 checks and `is_safe_path()` cleanup guard, particularly with custom roots |
 | Returned path is absent | Caller-owned absolute path or unverified nested extracted path |
 | Bare class name fails | The remainder join in `get_data_path()`; do not assume a class-only reference returns the extraction root |
-| Automation sees success after download failure | `download_asset()` prints caught errors; inspect aggregate CLI exit handling |
+| Automation sees success after download failure | Verify the caller preserves `cmd_download()`'s nonzero exit status |
 
 Change path policy in `dataset.py`, root defaults in `constants.py`, registry
 visibility in package exports/`download.py`, and asset URLs/checksums in the

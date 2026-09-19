@@ -52,6 +52,7 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "DefaultJointPositionTerm",
     "DeltaQposTerm",
     "QposTerm",
     "QposDenormalizedTerm",
@@ -364,3 +365,92 @@ class QfTerm(ActionTerm):
 
     def process_action(self, action: torch.Tensor) -> torch.Tensor:
         return action * self._scale
+
+
+class DefaultJointPositionTerm(ActionTerm):
+    """Convert policy actions to joint positions around a configured default pose.
+
+    Parameters are explicit: ``joint_names`` defines policy order, ``offset``
+    supplies the default pose (otherwise robot init_qpos is used), ``scale``
+    accepts a scalar or per-joint values, and ``clip`` bounds policy actions.
+    Public ``action``, ``previous_action`` and ``position_bias`` buffers let
+    observations and randomization consume this term's state directly.
+    """
+
+    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv) -> None:
+        """Create the mapping and per-environment action state.
+
+        Args:
+            cfg: Term configuration with explicit mapping parameters.
+            env: Environment providing the robot and active joint order.
+        """
+        super().__init__(cfg, env)
+        names = tuple(cfg.params["joint_names"])
+        self._joint_ids = torch.tensor(
+            [env.robot.joint_names.index(name) for name in names],
+            dtype=torch.long,
+            device=env.device,
+        )
+        if not torch.equal(
+            self._joint_ids, torch.as_tensor(env.active_joint_ids, device=env.device)
+        ):
+            raise ValueError("joint_names must match the active-joint order.")
+        robot_default = torch.as_tensor(env.robot.cfg.init_qpos, device=env.device)[
+            self._joint_ids
+        ]
+        self._offset = torch.as_tensor(
+            cfg.params.get("offset", robot_default),
+            dtype=torch.float32,
+            device=env.device,
+        )
+        self._scale = torch.as_tensor(
+            cfg.params.get("scale", 1.0), dtype=torch.float32, device=env.device
+        )
+        for label, value in (("offset", self._offset), ("scale", self._scale)):
+            if value.ndim > 0 and value.shape != (self.action_dim,):
+                raise ValueError(
+                    f"{label} must be scalar or contain one value per joint."
+                )
+        self._clip = cfg.params.get("clip")
+        self.action = torch.zeros((env.num_envs, self.action_dim), device=env.device)
+        self.previous_action = torch.zeros_like(self.action)
+        self.position_bias = torch.zeros_like(self.action)
+
+    @property
+    def input_key(self) -> str:
+        """Robot command field produced by the term."""
+        return "qpos"
+
+    @property
+    def action_dim(self) -> int:
+        """Number of controlled joints."""
+        return self._joint_ids.numel()
+
+    def process_action(self, action: torch.Tensor) -> torch.Tensor:
+        """Store policy actions and return mapped joint targets.
+
+        Args:
+            action: Batched policy actions in the configured joint order.
+
+        Returns:
+            Default-offset, scaled and bias-corrected joint positions.
+        """
+        if action.shape != self.action.shape:
+            raise ValueError(
+                f"Expected action shape {self.action.shape}, got {action.shape}."
+            )
+        self.previous_action.copy_(self.action)
+        self.action.copy_(
+            action if self._clip is None else action.clamp(-self._clip, self._clip)
+        )
+        return self._offset + self._scale * self.action - self.position_bias
+
+    def reset(self, env_ids: list[int] | torch.Tensor | None = None) -> None:
+        """Clear action history for selected rows, preserving calibrated bias.
+
+        Args:
+            env_ids: Rows to reset. None selects all rows.
+        """
+        ids = slice(None) if env_ids is None else env_ids
+        self.action[ids] = 0
+        self.previous_action[ids] = 0

@@ -2318,3 +2318,31 @@ def test_replace_rigid_objects_prevalidates_and_prepares_once(monkeypatch, inval
         operations.clear()
         assert sim.replace_rigid_objects([]) == []
         assert operations == []
+
+
+@pytest.mark.parametrize("steps", [0, 1, 4])
+def test_after_substep_observer_preserves_manager_and_camera_boundaries(
+    steps: int,
+) -> None:
+    sim, runtime = _make_visualization_sim_manager()
+    observed = []
+    prepare = sim.prepare
+    prepare_calls = []
+
+    def prepare_once():
+        prepare_calls.append(True)
+        prepare()
+
+    sim.prepare = prepare_once
+    sim.update(
+        0.01,
+        steps,
+        after_substep=lambda dt: observed.append((dt, len(sim._world.physics_updates))),
+    )
+    assert len(prepare_calls) == 1
+    assert observed == [(0.01, i + 1) for i in range(steps)]
+    assert [item["capture_camera_images"] for item in runtime.capture_calls] == [
+        False
+    ] * max(0, steps - 1) + ([True] if steps else [])
+    sim.update(0.01, 1)
+    assert len(observed) == steps  # The observer is not retained for later calls.

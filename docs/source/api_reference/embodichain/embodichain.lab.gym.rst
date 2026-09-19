@@ -37,6 +37,7 @@ Base Environment Classes
 
 .. autoclass:: BaseEnv
     :members:
+    :exclude-members: get_generator
     :inherited-members:
     :show-inheritance:
 
@@ -54,6 +55,7 @@ Embodied Environment Classes
 
 .. autoclass:: EmbodiedEnv
     :members:
+    :exclude-members: get_generator
     :inherited-members:
     :show-inheritance:
 
