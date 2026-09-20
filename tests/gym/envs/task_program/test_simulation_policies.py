@@ -26,6 +26,10 @@ import torch
 
 from embodichain.lab.task_program import TaskProgramCompiler, decode_task_program
 from embodichain.lab.task_program.integrations import (
+    ControlPartCommandPreset,
+    ControlPartEndpointBinding,
+    ControlPartResourceBinding,
+    SimulationRobotSkillProfileBinding,
     SimulationArticulationBinding,
     SimulationRigidObjectBinding,
     SimulationSceneBinding,
@@ -96,9 +100,10 @@ class _Robot:
         )
         self.qpos_reads: list[bool] = []
 
-    def get_qpos(self, target: bool = False) -> torch.Tensor:
+    def get_qpos(self, name: str | None = None, target: bool = False) -> torch.Tensor:
         self.qpos_reads.append(target)
-        return (self.target_qpos if target else self.current_qpos).clone()
+        value = self.target_qpos if target else self.current_qpos
+        return (value[:, :1] if name == "hand" else value).clone()
 
 
 class _Articulation:
@@ -135,7 +140,13 @@ class _Simulation:
         return self.articulation if uid == "native_drawer" else None
 
 
-def _compiled_segment(*, settle_preset: str = "fast"):
+def _compiled_segment(
+    *,
+    settle_preset: str = "fast",
+    release_resource=None,
+    return_program=False,
+    mutate_payload=None,
+):
     """Compile one segment containing both supported policy types."""
     payload = {
         "program_id": "policy_test",
@@ -183,6 +194,10 @@ def _compiled_segment(*, settle_preset: str = "fast"):
             ],
         },
     }
+    if release_resource is not None:
+        payload["program"]["validators"][0]["release_resource"] = release_resource
+    if mutate_payload is not None:
+        mutate_payload(payload)
     registry = SceneRegistry(
         (
             SceneEntityRegistration(
@@ -194,7 +209,7 @@ def _compiled_segment(*, settle_preset: str = "fast"):
     compiled = TaskProgramCompiler.from_scene_registry(registry).compile(
         decode_task_program(payload)
     )
-    return next(compiled.iter_segments())
+    return compiled if return_program else next(compiled.iter_segments())
 
 
 def _compiled_articulation_segment():
@@ -247,6 +262,7 @@ def _port(
     *,
     preset: DynamicSettleMonitorCfg | None = None,
     target_qpos: torch.Tensor | None = None,
+    robot_profile=None,
 ) -> tuple[SimulationSegmentPolicyPort, _RigidObject, _Robot]:
     """Build one policy port and expose its mutable test doubles."""
     entity = _RigidObject(positions)
@@ -266,6 +282,7 @@ def _port(
                 ),
             ),
         ),
+        robot_profile=robot_profile,
         settle_presets={
             "fast": preset
             or DynamicSettleMonitorCfg(
@@ -656,3 +673,176 @@ def test_policy_port_rejects_unbound_native_entities_and_foreign_members() -> No
 
 
 __all__: list[str] = []
+
+
+def _release_profile():
+    """Declare the real open command independently of commanded drive targets."""
+    return SimulationRobotSkillProfileBinding(
+        profile_id="test_robot",
+        resources=(
+            ControlPartResourceBinding(
+                resource_id="primary_manipulator",
+                endpoints=(
+                    ControlPartEndpointBinding(
+                        endpoint_id="grasp",
+                        control_part="hand",
+                        capabilities=frozenset({"interaction.grasp"}),
+                        command_preset="jaw_commands",
+                    ),
+                ),
+            ),
+        ),
+        command_presets=(
+            ControlPartCommandPreset(
+                preset_id="jaw_commands",
+                control_part="hand",
+                commands={"open": (0.0,), "grasp": (0.024,)},
+            ),
+        ),
+        defaults={"place": {"primary": "primary_manipulator"}},
+    ).declare()
+
+
+def test_release_validator_reads_actual_gripper_not_open_target() -> None:
+    segment = _compiled_segment(release_resource="primary_manipulator")
+    port, _, robot = _port(torch.zeros(2, 3), robot_profile=_release_profile())
+    robot.current_qpos[:, 0] = torch.tensor([0.001, 0.024])
+    robot.target_qpos[:, 0] = 0.0
+    result = port.validate(segment.validators[0], segment=segment)
+    assert result.tolist() == [True, False]
+    assert port.validator_metadata(segment.validators[0], segment=segment)[
+        "release_mask"
+    ] == [True, False]
+
+
+def test_measured_acceptance_requires_current_completed_stability_and_release() -> None:
+    program = _compiled_segment(
+        release_resource="primary_manipulator", return_program=True
+    )
+    segment = next(program.iter_segments())
+    port, _, robot = _port(torch.zeros(2, 3), robot_profile=_release_profile())
+    robot.current_qpos[:, 0] = torch.tensor([0.0, 0.024])
+    port.validate_measured_acceptance(program)
+    assert port.measured_success_mask(program).tolist() == [False, False]
+    port.validate(segment.validators[0], segment=segment)
+    assert port.measured_success_mask(program).tolist() == [False, False]
+    list(
+        port.actions(
+            segment.post_policies[0],
+            segment=segment,
+            active_mask=torch.ones(2, dtype=torch.bool),
+        )
+    )
+    assert port.measured_success_mask(program).tolist() == [True, False]
+    port.validate_measured_acceptance(program)
+    assert port.measured_success_mask(program).tolist() == [False, False]
+
+
+def test_measured_acceptance_rejects_position_only_program() -> None:
+    program = _compiled_segment(return_program=True)
+    port, _, _ = _port(torch.zeros(2, 3), robot_profile=_release_profile())
+    with pytest.raises(ValueError, match="release"):
+        port.validate_measured_acceptance(program)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("release_resource", ""),
+        ("release_tolerance", 0),
+        ("release_tolerance", True),
+        ("release_tolerance", float("nan")),
+    ],
+)
+def test_release_validator_rejects_invalid_contract(field, value) -> None:
+    from embodichain.lab.task_program.language.schema import (
+        ObjectNearTargetValidatorCfg,
+    )
+
+    with pytest.raises((TypeError, ValueError)):
+        ObjectNearTargetValidatorCfg(object="cube", target="drop", **{field: value})
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "missing_settle",
+        "wrong_target",
+        "wrong_resource",
+        "terminal_pick",
+        "missing_second_segment",
+    ],
+)
+def test_measured_acceptance_rejects_unqualified_task_outcomes(failure: str) -> None:
+    def mutate(payload):
+        segment = payload["program"]
+        if failure == "missing_settle":
+            segment["post"] = []
+        elif failure == "wrong_target":
+            payload["targets"]["elsewhere"] = {
+                "kind": "cyclic_pose",
+                "values": [{"position": [1, 0, 0], "quaternion_xyzw": [0, 0, 0, 1]}],
+            }
+            segment["validators"][0]["target"] = "elsewhere"
+        elif failure == "wrong_resource":
+            segment["validators"][0]["release_resource"] = "unrelated_hand"
+        elif failure == "terminal_pick":
+            segment["steps"]["call"] = {"kind": "pick", "object": "cube"}
+        else:
+            from copy import deepcopy
+
+            second = deepcopy(segment)
+            second["validators"] = []
+            payload["program"] = {"kind": "sequence", "items": [segment, second]}
+
+    program = _compiled_segment(
+        release_resource="primary_manipulator",
+        return_program=True,
+        mutate_payload=mutate,
+    )
+    port, _, _ = _port(torch.zeros(2, 3), robot_profile=_release_profile())
+    with pytest.raises(ValueError, match="Measured acceptance"):
+        port.validate_measured_acceptance(program)
+    with pytest.raises(ValueError, match="no current"):
+        port.measured_success_mask(program)
+
+
+def test_measured_acceptance_rejects_nonfinite_release_and_unsettled_rows() -> None:
+    program = _compiled_segment(
+        release_resource="primary_manipulator", return_program=True
+    )
+    segment = next(program.iter_segments())
+    port, entity, robot = _port(torch.zeros(2, 3), robot_profile=_release_profile())
+    robot.current_qpos[:, 0] = torch.tensor([float("nan"), 0.0])
+    entity.body_data.lin_vel[1, 0] = 1.0
+    port.validate_measured_acceptance(program)
+    list(
+        port.actions(
+            segment.post_policies[0],
+            segment=segment,
+            active_mask=torch.ones(2, dtype=torch.bool),
+        )
+    )
+    port.validate(segment.validators[0], segment=segment)
+    assert port.measured_success_mask(program).tolist() == [False, False]
+    metadata = port.validator_metadata(segment.validators[0], segment=segment)
+    assert metadata["release_error"] == [None, 0.0]
+
+
+@pytest.mark.parametrize("empty_scope", ["program", "segment"])
+def test_empty_task_cannot_reach_measured_qualification(empty_scope: str) -> None:
+    """The strict compiler boundary rejects empty flows before qualification."""
+
+    def mutate(payload):
+        empty = {"kind": "sequence", "items": []}
+        if empty_scope == "program":
+            payload["program"] = empty
+        else:
+            payload["program"]["steps"] = empty
+
+    with pytest.raises(ValueError):
+        _compiled_segment(
+            release_resource="primary_manipulator",
+            return_program=True,
+            mutate_payload=mutate,
+        )

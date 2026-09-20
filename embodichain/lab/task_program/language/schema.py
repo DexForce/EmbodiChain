@@ -414,11 +414,18 @@ PostPolicyCfg: TypeAlias = WaitStablePostCfg
 
 @configclass
 class ObjectNearTargetValidatorCfg:
-    """Validate an object's position against one resolved target."""
+    """Validate position and optionally measured release at a resolved target.
+
+    ``release_resource`` selects a logical resource whose grasp endpoint must
+    measure the profile's ``open`` joint positions within ``release_tolerance``.
+    Orientation is intentionally unconstrained by this position validator.
+    """
 
     object: str = MISSING
     target: str = MISSING
     position_tolerance: float = 0.03
+    release_resource: str | None = None
+    release_tolerance: float = 0.002
     kind: str = "object_near_target"
 
     def __post_init__(self) -> None:
@@ -432,6 +439,14 @@ class ObjectNearTargetValidatorCfg:
         if tolerance <= 0.0:
             raise ValueError("position_tolerance must be positive.")
         self.position_tolerance = tolerance
+        if self.release_resource is not None:
+            _validate_identifier(self.release_resource, field_name="release_resource")
+        release_tolerance = _validate_number(
+            self.release_tolerance, field_name="release_tolerance"
+        )
+        if release_tolerance <= 0.0:
+            raise ValueError("release_tolerance must be positive.")
+        self.release_tolerance = release_tolerance
         _validate_kind(
             self.kind,
             expected="object_near_target",

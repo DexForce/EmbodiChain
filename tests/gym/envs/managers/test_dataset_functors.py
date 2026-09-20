@@ -1348,3 +1348,79 @@ class TestDatasetFunctorCfg:
         # Should be able to instantiate
         cfg = DatasetFunctorCfg()
         assert cfg is not None
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+@pytest.mark.parametrize("image_writer_threads", [0, 1])
+def test_augmented_receipts_match_reloaded_lerobot_episode_indices(
+    tmp_path, monkeypatch, image_writer_threads: int
+) -> None:
+    """Each receipt is readable before recorder shutdown; resume preserves history."""
+    from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
+
+    def reject_network(*args, **kwargs):
+        raise AssertionError("Episode commit must remain local")
+
+    monkeypatch.setattr(LeRobotDatasetMetadata, "pull_from_repo", reject_network)
+    monkeypatch.setattr(LeRobotDataset, "download", reject_network)
+    monkeypatch.setattr(
+        "lerobot.datasets.lerobot_dataset.get_safe_version", reject_network
+    )
+    env = MockEnvForDataset(num_envs=2, num_joints=2, has_sensors=False)
+    env.rollout_steps = torch.tensor([2, 2])
+    env.rollout_buffer = {
+        "obs": TensorDict(
+            {"robot": {name: torch.zeros(2, 2, 2) for name in ("qpos", "qvel", "qf")}},
+            batch_size=[2, 2],
+        ),
+        "actions": torch.zeros(2, 2, 2),
+    }
+    identities = ["episode-0", "episode-1"]
+    env.get_demo_episode_metadata = lambda row: {
+        "augmentation": {"episode_id": identities[row], "commit_id": identities[row]}
+    }
+    recorder = LeRobotRecorder(
+        MockFunctorCfg(
+            params={
+                "save_path": str(tmp_path),
+                "use_videos": False,
+                "image_writer_threads": image_writer_threads,
+            }
+        ),
+        env,
+    )
+    expected_actions = []
+    try:
+        recorder.curr_episode = 99
+        for episode_index, row in enumerate([1, 0, 1]):
+            identities[row] = f"episode-{episode_index}"
+            env.rollout_buffer["actions"][row] = float(episode_index + 1)
+            previous_writer = recorder.dataset.image_writer
+            receipts = recorder.commit_episode_rows([row])
+            if previous_writer is not None:
+                assert all(not thread.is_alive() for thread in previous_writer.threads)
+                assert recorder.dataset.image_writer is not previous_writer
+            assert receipts[0].dataset_episode_index == episode_index
+            assert recorder.commit_episode_rows([row]) == receipts
+            assert recorder._finalized is False
+            loaded = LeRobotDataset(
+                repo_id=recorder.dataset_full_path.name, root=recorder.dataset_full_path
+            )
+            expected_actions.extend([float(episode_index + 1)] * 2)
+            assert loaded.num_episodes == episode_index + 1
+            assert [
+                loaded[index]["episode_index"].item() for index in range(len(loaded))
+            ] == [index // 2 for index in range(len(expected_actions))]
+            assert [
+                loaded[index]["action"][0].item() for index in range(len(loaded))
+            ] == expected_actions
+            loaded.finalize()
+            metadata_path = (
+                recorder.dataset_full_path / "meta" / "embodichain_episodes.jsonl"
+            )
+            rows = [json.loads(line) for line in metadata_path.read_text().splitlines()]
+            assert [entry["augmentation"]["commit_id"] for entry in rows] == [
+                f"episode-{index}" for index in range(episode_index + 1)
+            ]
+    finally:
+        recorder.finalize()

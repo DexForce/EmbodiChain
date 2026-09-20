@@ -90,8 +90,9 @@ the full loop and reset ordering are owned by
 [environment execution](../env-framework/execution.md).
 
 `DatasetManager.apply("save", env_ids)` runs from episode initialization/reset,
-not as a `step(obs, action, done, info)` method. Recorder queues, explicit commit
-and abort, fragment idempotency and finalization are owned by
+not as a `step(obs, action, done, info)` method. Opt-in offline Affordance
+collection uses `commit_episode_rows()` for synchronous acknowledgements.
+Recorder queues, explicit commit and abort, fragment idempotency and finalization are owned by
 [data pipeline](../data-pipeline/data-pipeline.md).
 
 Event RNG scopes and interval-counter reset behavior are owned by

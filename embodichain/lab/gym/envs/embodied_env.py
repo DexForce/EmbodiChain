@@ -26,7 +26,8 @@ import torch
 import numpy as np
 import gymnasium as gym
 
-from dataclasses import MISSING
+from dataclasses import MISSING, replace
+from copy import deepcopy
 from typing import (
     TYPE_CHECKING,
     Dict,
@@ -90,6 +91,10 @@ from embodichain.data import get_data_path
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
 if TYPE_CHECKING:
+    from embodichain.lab.gym.envs.managers.episode_commit import DemoCommitReceipt
+    from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+        AffordanceSamplingContext,
+    )
     from embodichain.lab.task_program import CompiledTaskProgram, TaskProgramCfg
     from embodichain.lab.task_program.integrations import (
         TaskProgramAdapterFactory,
@@ -584,6 +589,122 @@ class EmbodiedEnv(BaseEnv):
             groups.append(("terms", remaining_names))
         return groups
 
+    def prepare_affordance_collection(self) -> CompiledTaskProgram:
+        """Preflight a measured, synchronous Task Program collection profile.
+
+        Returns:
+            The compiled program, reused by every collection attempt.
+
+        Raises:
+            ValueError: If the profile lacks supported sampling or persistence.
+        """
+        from .augmentation import AffordanceAugmentationCfg
+
+        policy = self.cfg.expert_trajectory.affordance_augmentation
+        if not isinstance(policy, AffordanceAugmentationCfg):
+            raise ValueError("An explicit Affordance augmentation policy is required.")
+        policy.validate_host(num_envs=self.num_envs, seed=self.cfg.seed)
+        if self.cfg.task_program is None:
+            raise ValueError(
+                "Affordance collection requires a configured Task Program expert."
+            )
+        if getattr(self, "_rollout_buffer_mode", "expert") == "rl":
+            raise ValueError("Affordance collection cannot use an RL rollout buffer.")
+        if self.dataset_manager is None:
+            raise ValueError(
+                "Affordance collection requires a synchronous dataset recorder."
+            )
+        if self.dataset_manager.save_failed_episodes:
+            raise ValueError("Affordance collection cannot save failed episodes.")
+        self.dataset_manager.validate_episode_commit_support()
+        program = self.compile_task_program(self.cfg.task_program)
+        self.task_program_adapter.validate_measured_acceptance(program)
+        return program
+
+    def select_affordance_episode_rows(
+        self, result: DemoEpisodeResult, program: CompiledTaskProgram, remaining: int
+    ) -> tuple[int, ...]:
+        """Annotate measured acceptance and select complete rows within quota.
+
+        Args:
+            result: Completed demo executor result for this attempt.
+            program: Qualified program used by the current measurement port.
+            remaining: Number of additional durable episodes requested.
+
+        Returns:
+            Ordered physical row IDs eligible for explicit commit.
+        """
+        from .augmentation import _select_accepted_rows
+
+        measured = self.task_program_adapter.measured_success_mask(program)
+        if measured.dtype != torch.bool or measured.shape != (self.num_envs,):
+            raise ValueError(
+                "Measured acceptance must have one boolean per environment."
+            )
+        measured_rows = tuple(measured.cpu().tolist())
+        selected = _select_accepted_rows(
+            completed=result.completed_by_env,
+            success=result.success,
+            measured=measured_rows,
+            lengths=result.lengths,
+            remaining=remaining,
+        )
+        for row, accepted in enumerate(measured_rows):
+            metadata = self._demo_episode_metadata[row]["augmentation"]
+            metadata["measured_success"] = accepted
+            metadata["selected_for_commit"] = row in selected
+        self._affordance_accepted_env_ids = selected
+        return selected
+
+    def commit_demo_rows(
+        self, env_ids: tuple[int, ...]
+    ) -> tuple[DemoCommitReceipt, ...]:
+        """Commit accepted augmented rows and reset the full physical batch.
+
+        Args:
+            env_ids: Nonempty unique row IDs selected by measured acceptance.
+
+        Returns:
+            Receipts for rows whose required outputs completed synchronously.
+
+        Raises:
+            ValueError: If rows were not accepted in the current attempt.
+        """
+        accepted = getattr(self, "_affordance_accepted_env_ids", ())
+        if (
+            not env_ids
+            or any(type(row) is not int for row in env_ids)
+            or len(set(env_ids)) != len(env_ids)
+            or not set(env_ids).issubset(accepted)
+        ):
+            raise ValueError("commit_demo_rows requires unique accepted episode rows.")
+        self._affordance_last_commit_receipts = ()
+        self._affordance_commit_requested = True
+        try:
+            self.reset(
+                options={
+                    "save_data": False,
+                    "commit_env_ids": torch.tensor(env_ids, device=self.device),
+                }
+            )
+            receipts = self._affordance_last_commit_receipts
+            if tuple(receipt.env_id for receipt in receipts) != env_ids:
+                raise RuntimeError(
+                    "Recorder did not confirm exactly the selected rows."
+                )
+            return receipts
+        finally:
+            self._affordance_commit_requested = False
+            self._affordance_accepted_env_ids = ()
+
+    def get_affordance_sampling_context(self) -> AffordanceSamplingContext | None:
+        """Return the current offline attempt identity without resampling.
+
+        Returns:
+            Caller-owned sampling context, or None outside an augmented attempt.
+        """
+        return getattr(self, "_affordance_sampling_context", None)
+
     def reset(
         self, seed: int | None = None, options: dict | None = None
     ) -> tuple[EnvObs, Dict]:
@@ -604,6 +725,9 @@ class EmbodiedEnv(BaseEnv):
         """
         obs, info = super().reset(seed=seed, options=options)
         self._active_task_program_bridge = None
+        self._affordance_sampling_context = None
+        self._affordance_collection_metadata = None
+        self._affordance_accepted_env_ids = ()
         if options is None or "reset_ids" not in options:
             reset_ids = torch.arange(self.num_envs, device=self.device)
         else:
@@ -952,6 +1076,7 @@ class EmbodiedEnv(BaseEnv):
                     "commit_env_ids must be a subset of the rows being reset."
                 )
 
+        commit_receipts = ()
         # Save dataset before clearing buffers for environments that are being reset
         if env_ids_to_commit.numel() > 0 and self.dataset_manager:
             if "save" in self.dataset_manager.available_modes:
@@ -977,10 +1102,15 @@ class EmbodiedEnv(BaseEnv):
 
                 if env_ids_to_save.numel() > 0:
                     with self._profiler.section("dataset_save"):
-                        self.dataset_manager.apply(
-                            mode="save",
-                            env_ids=env_ids_to_save,
-                        )
+                        if getattr(self, "_affordance_commit_requested", False):
+                            commit_receipts = self.dataset_manager.commit_episode_rows(
+                                env_ids_to_save
+                            )
+                        else:
+                            self.dataset_manager.apply(
+                                mode="save",
+                                env_ids=env_ids_to_save,
+                            )
 
         # Save recorded camera data before resetting
         if self.cfg.events and self.event_manager is not None:
@@ -1004,13 +1134,28 @@ class EmbodiedEnv(BaseEnv):
         # a _traj_buffer (e.g. unit-test stubs of _initialize_episode).
         _traj_buffer = getattr(self, "_traj_buffer", None)
         if (
-            save_data
+            (save_data or getattr(self, "_affordance_commit_requested", False))
+            and env_ids_to_commit.numel() > 0
             and _traj_buffer is not None
             and getattr(self.cfg, "trajectory_auto_save", False)
         ):
             with self._profiler.section("trajectory_save"):
-                for env_id in env_ids_to_process.tolist():
-                    self._save_trajectory_for_env(env_id)
+                for env_id in env_ids_to_commit.tolist():
+                    path = self._save_trajectory_for_env(env_id)
+                    if commit_receipts and path is None:
+                        raise RuntimeError(
+                            f"Trajectory for committed row {env_id} was not saved."
+                        )
+                commit_receipts = tuple(
+                    replace(
+                        receipt,
+                        confirmed_modalities=receipt.confirmed_modalities
+                        + ("trajectory",),
+                    )
+                    for receipt in commit_receipts
+                )
+        if getattr(self, "_affordance_commit_requested", False):
+            self._affordance_last_commit_receipts = commit_receipts
 
         _traj_steps = getattr(self, "_traj_steps", None)
         if _traj_steps is not None:
@@ -1149,6 +1294,21 @@ class EmbodiedEnv(BaseEnv):
         expert_action_spec = getattr(self, "expert_action_spec", None)
         if expert_action_spec is not None:
             metadata.update(expert_action_spec.metadata(step_dt=self.step_dt))
+        augmentation = getattr(self, "_affordance_collection_metadata", None)
+        if augmentation is not None:
+            augmentation = deepcopy(augmentation)
+            episode_id = f"{augmentation['run_id']}:{augmentation['collection_batch_id']}:{augmentation['sampling_attempt_id']}:{env_id}"
+            count = augmentation["sampling"]["count"]
+            augmentation.update(
+                {
+                    "physical_env_id": env_id,
+                    "group": env_id // count,
+                    "branch": env_id % count,
+                    "episode_id": episode_id,
+                    "commit_id": episode_id + ":commit",
+                }
+            )
+            metadata["augmentation"] = augmentation
         return metadata
 
     def _begin_demo_episode_recording(
@@ -1240,6 +1400,10 @@ class EmbodiedEnv(BaseEnv):
                 ] = accepted
 
             metadata = result.to_metadata(env_id if result.start_steps else None)
+            if "augmentation" in self._demo_episode_metadata[env_id]:
+                from .augmentation import _project_affordance_metadata
+
+                metadata = _project_affordance_metadata(metadata, env_id=env_id)
             metadata["start_step"] = start
             metadata["end_step"] = end
             self._demo_episode_metadata[env_id]["segments"].append(metadata)

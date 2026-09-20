@@ -1,0 +1,15 @@
+id: TaskProgramRepeatedPickPlace-UR5-Augmentation-v1
+seed: 42
+
+environment:
+  component: env.augmentation.yaml
+
+task_program:
+  program: task_program/program.augmentation.yaml
+  integration: task_program/integration.augmentation.yaml
+  execution_policy: ../../../components/execution_policies/trajectory_open_loop.yaml
+
+embodiment:
+  component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+  overrides:
+    init_qpos: [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0]
