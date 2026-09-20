@@ -125,6 +125,21 @@ while contact offsets and materials remain asset-owned; this preserves the
 Slide grasp response across the legacy loader and Spawn without restoring the
 old global articulation-physics override.
 
+E6-open / E1-inside / E6-close composition is owned by
+`_task_program/drawer_binding.py`, `drawer_geometry.py`, and `drawer_runtime.py`.
+Inside targets share E6's asset-qualified part/link identity, never a duplicate
+rigid root. Geometry supplies a floor/center hint, not an interior certificate.
+The GenSim adapter refreshes the placement target from actual link/object poses
+on every Place plan/replan while preserving the declared scene manifest.
+Oversized objects, incomplete walls and predicted contacts do not add task
+rejection gates. No drawer-specific containment or collision-screening policy
+is installed. Drawer payload pickup does not screen future placement reachability;
+Place is planned from the acquired grasp. Composite bundles use the extended
+motion sample budget rather than raising joint velocity limits. Ordinary command
+planning, effect verification and E6 joint-state acceptance remain.
+Execution completion does not prove an object is contained.
+Evaluate actual placement/closing from the recorded physical outcome.
+
 ## Focused validation
 
 | Change | Tests |
