@@ -2638,3 +2638,36 @@ def test_automatic_attachment_native_failure_preserves_step_accounting():
     assert sim._visualization_sim_time == pytest.approx(0.02)
     # Failed native publication keeps the previous detached transforms.
     np.testing.assert_allclose(groups[0].snapshot()[0].position, [13, 0, 0])
+
+
+@pytest.mark.parametrize("backend", ["default", "newton"])
+def test_native_markers_receive_prepared_scene_without_preparing_physics(
+    monkeypatch, backend
+):
+    from embodichain.lab.visualization.markers import MarkerGroupCfg, MarkerPrototypeCfg
+
+    sim, _ = _make_visualization_sim_manager()
+    sim.sim_config.num_envs = 1
+    sim.sim_config.visualization.backend = "native"
+    sim._marker_groups, sim._markers, sim._native_markers = {}, {}, None
+    sim.arena_offsets = torch.zeros((1, 3))
+    scene = object()
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(backend=backend, is_finalized=False, result=scene)
+    )
+    sim.get_env = MagicMock(side_effect=AssertionError("raw Arena is not the owner"))
+    renderer = SimpleNamespace(publish=MagicMock(), remove=MagicMock())
+    factory = MagicMock(return_value=renderer)
+    monkeypatch.setattr(sim_manager_module, "NativeMarkerRenderer", factory)
+
+    group = sim.add_marker_group(
+        MarkerGroupCfg(name="goal", prototypes={"box": MarkerPrototypeCfg()})
+    )
+    group.update(translations=[[0, 0, 0]])
+
+    factory.assert_called_once_with(scene)
+    renderer.publish.assert_called_once()
+    sim.get_env.assert_not_called()
+    sim.prepare.assert_not_called()
+    sim.sync_render_state.assert_not_called()
+    assert sim._world.physics_updates == []

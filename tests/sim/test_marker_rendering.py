@@ -28,8 +28,11 @@ pytestmark = [pytest.mark.gpu, pytest.mark.requires_sim]
 
 def _require_render_actor_capability():
     from dexsim import engine
+    from dexsim.scene import Scene
 
     required = (
+        (Scene, "add_mesh_object"),
+        (Scene, "remove_mesh_object"),
         (getattr(engine, "RenderBody", None), "set_raytrace_visible"),
         (getattr(engine, "RenderBody", None), "set_pickable"),
         (getattr(engine, "RenderBody", None), "build"),
@@ -38,7 +41,7 @@ def _require_render_actor_capability():
         (getattr(engine, "AlphaMode", None), "BLEND"),
     )
     if any(not hasattr(owner, name) for owner, name in required):
-        pytest.skip("Requires DexSim generic RenderBody and MaterialInst capabilities")
+        pytest.skip("Requires DexSim Scene mesh lifecycle and overlay capabilities")
 
 
 def test_marker_group_native_rendering_and_sensor_isolation():

@@ -56,17 +56,18 @@ batched pose, scale, prototype, color, and visibility arrays without stepping
 physics. Groups default to all sub-environments; `env_ids` selects mutations,
 while `scope="world"` creates one global batch. Attach/detach follows prepared
 registered roots or links through public pose reads on the simulation thread.
-Native rendering creates ordinary Arena-owned `MeshObject` instances through
-`Arena.create_actor(name, True, False)` without adding a rigid body or collision
-shapes. Before GPU build it configures `RenderBody` overlay routing, shadow and
-picking, adds the array-backed mesh with `auto_build=False`, and assigns the
-body-owned default material with unlit RGBA blending, disabled depth writes and
-two-sided surfaces. It then builds and attaches the node to the Arena root.
-Creation failures remove the incomplete object; marker group updates preserve
-existing handles and snapshots on failure. This path does not depend on Spawn
-factories/descriptors or prepare physics. Unlit/alpha-mode controls require the
-shared native RT material type; Filament materials reject them.
-Removal invalidates the borrowed native handle; owned material retirement
+Native rendering creates ordinary `MeshObject` instances through the builder's
+Scene with `Scene.add_mesh_object(MeshObjectDesc(..., physics=None))`.
+`RenderDesc` and `MaterialDesc` configure overlay routing, shadow/picking and
+unlit RGBA blending before GPU build. Scene owns the stable `SpawnedRigidBody`
+registration; Arena owns the native object. Marker updates reuse these handles,
+and removal uses `Scene.remove_mesh_object(path)`. Creation failures and failed
+group updates preserve existing handles and snapshots. The lightweight Scene
+is available after `prepare_arenas()` for either physics backend; creating or
+updating markers does not prepare physics. Handles survive Newton physics
+rebuild and become invalid on Scene close; renderer cleanup tolerates already
+invalidated handles. Unlit/alpha-mode controls require the shared native RT
+material type; Filament materials reject them. Owned material retirement
 preserves explicitly shared or externally retained instances. File-backed
 overlay geometry is unsupported. Browser rendering carries meshes in
 `SceneOverlays`. Native submission remains per-object; true native batching and
@@ -122,7 +123,7 @@ this invariant.
 | `Visualization env_ids ... outside simulation range` | Selected IDs do not exist in the configured arenas. Validate them against `SimulationManager.num_envs`. |
 | Startup timeout or address-in-use error | The Viser worker did not become ready or the configured port is occupied. Select another port and inspect `visualization_health.worker_error`. |
 | Asset added after startup is missing | Step once, call `refresh_visualization()`, or mark topology dirty if the change bypassed manager APIs. |
-| Native marker creation reports missing render-actor support | Use a DexSim build exposing the generic RenderBody and MaterialInst overlay properties, or run with `--viser`. Overlay routing supports Hybrid, FastRT and OfflineRT. |
+| Native marker creation reports missing render-actor support | Use a DexSim build exposing Scene render-only mesh lifecycle and generic RenderBody/MaterialInst overlay properties, or run with `--viser`. Overlay routing supports Hybrid, FastRT and OfflineRT. |
 | Newton Viser shows only the grid after declaring a robot | Check that Viser startup did not finalize an empty Spawn scene before asset declaration and that link poses remain finite after the first update. |
 | A Newton articulation link is missing geometry or emits `mesh_id 0 out of range` | Export all render-body mesh segments and treat a zero-mesh link as empty geometry. Do not use the single-mesh articulation helper for Newton render bodies. |
 | Browser stops updating after an exporter/backend exception | `capture_visualization_safely()` latches the first error to protect simulation. Inspect health/logs, then stop and restart after fixing the cause. |

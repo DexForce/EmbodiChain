@@ -18,17 +18,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import numpy as np
 
 from ..protocol import MeshMarkerOverlay
 
+if TYPE_CHECKING:
+    from dexsim.scene import Scene
+    from dexsim.scene.objects import SpawnedRigidBody
+
 
 @dataclass
 class _Entry:
-    handle: Any
+    handle: SpawnedRigidBody
     snapshot: MeshMarkerOverlay
 
 
@@ -45,77 +49,75 @@ def _pose(marker: MeshMarkerOverlay) -> np.ndarray:
 
 
 class NativeMarkerRenderer:
-    """Own native render-only mesh handles on the simulation thread.
+    """Own Scene render-only mesh handles on the simulation thread.
 
     Args:
-        arena: Global DexSim arena owning generic render-only mesh actors.
-            Unsupported native rendering capabilities raise an actionable error.
+        scene: Prepared DexSim Scene owning render-only mesh objects.
+            Creating markers does not prepare or rebuild physics.
     """
 
-    def __init__(self, arena: Any) -> None:
+    def __init__(self, scene: Scene) -> None:
         try:
-            engine = import_module("dexsim.engine")
+            spawn = import_module("dexsim.spawn")
             required = (
-                (getattr(engine, "RenderBody", None), "set_raytrace_visible"),
-                (getattr(engine, "RenderBody", None), "set_pickable"),
-                (getattr(engine, "RenderBody", None), "build"),
-                (getattr(engine, "MaterialInst", None), "set_unlit"),
-                (getattr(engine, "MaterialInst", None), "set_alpha_mode"),
-                (getattr(engine, "AlphaMode", None), "BLEND"),
+                (getattr(spawn, "RenderDesc", None), "render_mode"),
+                (getattr(spawn, "MaterialDesc", None), "unlit"),
+                (getattr(spawn, "MaterialDesc", None), "alpha_mode"),
+                (getattr(spawn, "MaterialDesc", None), "depth_write"),
             )
-            if any(not hasattr(owner, name) for owner, name in required):
-                raise ImportError("Missing native render-body or material properties")
+            if (
+                not hasattr(spawn, "MeshObjectDesc")
+                or any(not hasattr(owner, name) for owner, name in required)
+                or not callable(getattr(scene, "add_mesh_object", None))
+                or not callable(getattr(scene, "remove_mesh_object", None))
+            ):
+                raise ImportError("Missing Scene mesh-object or overlay properties")
         except ImportError as exc:
             raise RuntimeError(
-                "Native marker groups require generic RenderBody and MaterialInst "
-                "overlay properties. Install a DexSim build with render-only "
-                "overlay support or use Viser."
+                "Native marker groups require Scene mesh-object overlay support. "
+                "Install a DexSim build with render-only overlay support or use Viser."
             ) from exc
-        self._alpha_blend = engine.AlphaMode.BLEND
-        self._arena = arena
+        self._spawn = spawn
+        self._scene = scene
         self._groups: dict[str, dict[str, _Entry]] = {}
 
-    def _create(self, marker: MeshMarkerOverlay) -> Any:
-        """Configure one ordinary MeshObject before its first GPU build."""
+    def _create(self, marker: MeshMarkerOverlay) -> SpawnedRigidBody:
+        """Declare one render-only object through its lifetime-owning Scene."""
         name = f"__embodichain_marker_{uuid4().hex}"
-        actor = self._arena.create_actor(name, True, False)
-        if actor is None:
-            raise RuntimeError("DexSim failed to create a marker MeshObject.")
-        body = material = None
-        try:
-            body = actor.get_render_body()
-            body.set_raytrace_visible(False)
-            body.set_shadow(False)
-            body.set_pickable(False)
-            mesh_id = body.add_mesh(
-                np.ascontiguousarray(marker.vertices, dtype=np.float32),
-                np.ascontiguousarray(marker.faces, dtype=np.int32).reshape(-1),
-                auto_build=False,
-            )
-            if mesh_id < 0:
-                raise RuntimeError("DexSim failed to add marker mesh geometry.")
-            material = body.default_material()
-            if body.set_material(mesh_id, material, owned=True) <= 0:
-                raise RuntimeError("DexSim failed to assign marker material.")
-            material.set_base_color(marker.color)
-            material.set_unlit(True)
-            material.set_alpha_mode(self._alpha_blend)
-            material.set_depth_write(False)
-            material.set_double_sided(True)
-            if not body.build():
-                raise RuntimeError("DexSim failed to build marker mesh geometry.")
-            if self._arena.attach(actor.node) < 0:
-                raise RuntimeError("DexSim failed to attach marker MeshObject.")
-            return actor
-        except Exception:
-            # Release wrapper references before removal so owned resources can
-            # retire even while the exception traceback is retained.
-            body = material = None
-            self._arena.remove_actor(name)
-            raise
+        material = self._spawn.MaterialDesc(
+            name=f"{name}_material",
+            base_color=tuple(marker.color),
+            unlit=True,
+            alpha_mode="blend",
+            depth_write=False,
+            double_sided=True,
+        )
+        render = self._spawn.RenderDesc.from_geometry(
+            self._spawn.GeometryDesc.mesh(
+                vertices=np.ascontiguousarray(marker.vertices, dtype=np.float32),
+                triangles=np.ascontiguousarray(marker.faces, dtype=np.int32),
+            ),
+            render_mode="overlay",
+            cast_shadow=False,
+            pickable=False,
+            material=material,
+        )
+        desc = self._spawn.MeshObjectDesc(
+            name=name,
+            renders=[render],
+            physics=None,
+            per_env=False,
+        )
+        return self._scene.add_mesh_object(desc, arena_name="default")
+
+    def _discard(self, handle: SpawnedRigidBody) -> None:
+        # Scene.close() invalidates stable handles before native resources retire.
+        # Never inspect a borrowed native actor to decide how to remove it.
+        if handle.is_valid:
+            self._scene.remove_mesh_object(handle.path)
 
     @staticmethod
-    def _apply(handle: Any, marker: MeshMarkerOverlay) -> None:
+    def _apply(handle: SpawnedRigidBody, marker: MeshMarkerOverlay) -> None:
         handle.set_world_pose(_pose(marker))
         handle.set_scale(*(float(value) for value in marker.scale))
         handle.get_material().set_base_color(marker.color)
@@ -149,13 +151,13 @@ class NativeMarkerRenderer:
                 pending[marker.overlay_id] = _Entry(handle, marker)
         except Exception:
             for handle in created:
-                self._arena.remove_actor(handle.get_name())
+                self._discard(handle)
             for entry in touched:
                 self._apply(entry.handle, entry.snapshot)
             raise
         for key, entry in previous.items():
             if key not in pending or pending[key].handle is not entry.handle:
-                self._arena.remove_actor(entry.handle.get_name())
+                self._discard(entry.handle)
         self._groups[name] = pending
 
     def remove(self, name: str) -> None:
@@ -165,9 +167,9 @@ class NativeMarkerRenderer:
             name: Group to release; absent groups are ignored.
         """
         for entry in self._groups.pop(name, {}).values():
-            self._arena.remove_actor(entry.handle.get_name())
+            self._discard(entry.handle)
 
     def close(self) -> None:
-        """Release all native marker handles before arena destruction."""
+        """Release marker handles; also safe after their Scene has closed."""
         for name in tuple(self._groups):
             self.remove(name)

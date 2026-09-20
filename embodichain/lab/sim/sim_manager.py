@@ -3724,7 +3724,9 @@ class SimulationManager:
             self.sim_config.visualization.backend != "viser"
             and self._native_markers is None
         ):
-            self._native_markers = NativeMarkerRenderer(self.get_env())
+            self._native_markers = NativeMarkerRenderer(
+                self._spawn_scene.builder.result
+            )
         self._marker_groups[group.name] = group
         return group
 
