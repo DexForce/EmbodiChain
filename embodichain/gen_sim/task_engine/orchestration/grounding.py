@@ -159,13 +159,21 @@ def ground_articulation_parts(
     """
     requests = [
         {
-            "reference_id": f"{step['id']}.object",
-            "reference": step["object"].get("reference", ""),
+            "reference_id": f"{step['id']}.{role}",
+            "reference": step[role].get("reference", ""),
             "task_type": step["task_type"],
         }
         for step in intent.get("steps", [])
-        if step.get("task_type") == "E6"
-        and step.get("object", {}).get("kind") == "scene_ref"
+        for role in (
+            ("object",)
+            if step.get("task_type") == "E6"
+            else (
+                ("target",)
+                if step.get("task_type") == "E1" and step.get("relation") == "inside"
+                else ()
+            )
+        )
+        if step.get(role, {}).get("kind") == "scene_ref"
     ]
     pending: list[dict[str, Any]] = []
     resolved: dict[str, str] = dict(preselected or {})

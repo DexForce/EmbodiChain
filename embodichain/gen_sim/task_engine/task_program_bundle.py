@@ -172,6 +172,9 @@ def generate_task_program_bundle(
     )
     if unsupported:
         raise ValueError(f"Task Engine supports only E1-E6, not {unsupported}.")
+    from ._task_program.drawer_binding import prepare_drawer_graph, drawer_routes
+
+    selected_graph = prepare_drawer_graph(selected_graph, prepared_scene)
     articulation_bindings = graph_bindings(selected_graph, prepared_scene)
     normalized_profile = str(robot_profile).strip()
     try:
@@ -276,15 +279,16 @@ def generate_task_program_bundle(
                 if endpoint["endpoint_id"] == "motion":
                     stiffness[endpoint["control_part"]] = ARM_STIFFNESS
     save_config(paths.embodiment, embodiment_payload)
+    drawers = drawer_routes(selected_graph, scene)
     policy_payload = load_config(policy_source)
     policy_payload["tracking"]["consecutive_acceptances"] = 5
     policy_payload["tracking"]["terminal_settle_timeout"] = 3.0
-    if any(
+    if drawers or any(
         node["call"]["kind"] == "hand_over" or node["task_type"] == "E2"
         for node in selected_graph["nodes"]
     ):
-        # Leave motion time for handover and upright staging without shrinking
-        # a larger configured budget. The velocity validator remains mandatory.
+        # Leave motion time for drawer placement, handover and upright staging
+        # without shrinking a larger budget. Keep the velocity checks intact.
         policy_payload["motion"]["sample_count"] = max(
             260, policy_payload["motion"]["sample_count"]
         )
@@ -294,6 +298,8 @@ def generate_task_program_bundle(
     scene_contract = f"{program_id}_scene_v1"
     selected_graph = _refine_e3_return_targets(selected_graph, scene)
     stability = _task_stability_payload(selected_graph, scene, embodiment_payload)
+    if drawers:
+        stability["drawers"] = [route.payload() for route in drawers]
     save_config(
         paths.program,
         _program_payload(
@@ -758,9 +764,9 @@ def _program_node(
     if call["kind"] == "place":
         inside = call.get("inside")
         if inside is not None:
-            parts = str(inside).split("__")
-            if len(parts) != 3 or parts[0] != "inside":
-                raise ValueError(f"Unsupported generated inside affordance {inside!r}.")
+            from ._task_program.drawer_binding import inside_parts
+
+            inside_parts(str(inside))
             settle_preset = "contained_rigid_object"
         settle_entities.append(str(call["object"]))
     elif call["kind"] == "registered" and call["call_id"] in {
@@ -852,6 +858,35 @@ def _integration_payload(
 ) -> dict[str, Any]:
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
     articulation_bindings = graph_bindings(graph, scene)
+    from ._task_program.drawer_binding import drawer_routes, inside_parts
+
+    drawers = {route.affordance: route for route in drawer_routes(graph, scene)}
+    drawer_poses: dict[str, list[float]] = {}
+    if drawers:
+        from ._task_program.drawer_geometry import placement_pose
+        from .scene.articulation_geometry import _root_pose, read_articulation_geometry
+
+        configs = {str(cfg["uid"]): cfg for cfg in scene.articulations}
+        for route in drawers.values():
+            cfg = configs[route.binding.object_id]
+            local_link = (
+                read_articulation_geometry(cfg["fpath"])
+                .link_poses[route.binding.link]
+                .copy()
+            )
+            local_link[:3, 3] *= route.binding.scale
+            link = _root_pose(cfg) @ local_link
+            source = scene_objects[route.object_id]
+            target = placement_pose(
+                _mesh_vertices(source),
+                _root_pose(source)[:3, :3],
+                link,
+                np.asarray(route.lower),
+                np.asarray(route.upper),
+            )
+            drawer_poses[route.affordance] = (
+                (np.linalg.inv(link) @ target).reshape(-1).tolist()
+            )
     referenced_objects: set[str] = set()
     inside_routes: list[tuple[str, str, str]] = []
     on_routes: list[tuple[str, str, str]] = []
@@ -902,14 +937,10 @@ def _integration_payload(
             referenced_objects.add(str(call["object"]))
         if call["kind"] == "place" and "inside" in call:
             affordance = str(call["inside"])
-            parts = affordance.split("__")
-            if len(parts) != 3 or parts[0] != "inside":
-                raise ValueError(
-                    f"Unsupported generated inside affordance {affordance!r}."
-                )
-            container_id, object_id = parts[1], parts[2]
-            referenced_objects.add(container_id)
-            inside_routes.append((affordance, container_id, object_id))
+            container_id, object_id, _ = inside_parts(affordance)
+            if affordance not in drawers:
+                referenced_objects.add(container_id)
+                inside_routes.append((affordance, container_id, object_id))
         if call["kind"] == "place" and "on" in call:
             affordance = str(call["on"])
             parts = affordance.split("__")
@@ -1101,7 +1132,11 @@ def _integration_payload(
             )
 
     if collision_world:
-        referenced_objects.update(scene_objects)
+        referenced_objects.update(
+            uid
+            for uid, source in scene_objects.items()
+            if source["role"] != "articulation"
+        )
     rigid_bindings: list[dict[str, Any]] = []
     for entity_id in sorted(referenced_objects | {"table"}):
         source = scene_objects.get(entity_id)
@@ -1211,6 +1246,23 @@ def _integration_payload(
                     "entity_id": b.link_id,
                     "articulation_id": b.object_id,
                     "native_link_name": b.link,
+                    **(
+                        {
+                            "affordances": [
+                                {
+                                    "entity_id": r.affordance,
+                                    "kind": "container",
+                                    "native_name": r.affordance,
+                                    "object_target_pose": drawer_poses[r.affordance],
+                                    "release_clearance": 0.0,
+                                }
+                                for r in drawers.values()
+                                if r.binding == b
+                            ]
+                        }
+                        if any(r.binding == b for r in drawers.values())
+                        else {}
+                    ),
                 }
                 for b in articulation_bindings.values()
             ],

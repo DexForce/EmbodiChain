@@ -1023,3 +1023,304 @@ def test_articulation_declarations_reject_unknown_fields(scene: PreparedScene) -
             {"kind": "articulation_slide", "bindings": [value], "options": {}},
             path="test",
         )
+
+
+@pytest.fixture
+def drawer_container_scene(scene: PreparedScene, tmp_path: Path) -> PreparedScene:
+    stage = Usd.Stage.Open(scene.articulations[0]["fpath"])
+    stage.GetPrimAtPath("/fixture/slide").CreateAttribute(
+        "gen_sim:closedPosition", Sdf.ValueTypeNames.Double
+    ).Set(0.0)
+    for name, size, center in (
+        ("floor", (0.32, 0.42, 0.02), (0, 0.25, 0)),
+        ("left", (0.02, 0.42, 0.14), (-0.16, 0.25, 0.08)),
+        ("right", (0.02, 0.42, 0.14), (0.16, 0.25, 0.08)),
+        ("front", (0.30, 0.02, 0.14), (0, 0.04, 0.08)),
+        ("back", (0.30, 0.02, 0.14), (0, 0.46, 0.08)),
+    ):
+        shape = trimesh.creation.box(extents=size)
+        shape.apply_translation(center)
+        mesh = UsdGeom.Mesh.Define(stage, f"/fixture/drawer/{name}")
+        mesh.CreatePointsAttr(shape.vertices.tolist())
+        mesh.CreateFaceVertexCountsAttr([3] * len(shape.faces))
+        mesh.CreateFaceVertexIndicesAttr(shape.faces.flatten().tolist())
+        UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
+    stage.GetRootLayer().Save()
+    cube_path = tmp_path / "cube.glb"
+    trimesh.creation.box(extents=[0.03] * 3).export(cube_path)
+    cube = {
+        "uid": "cube",
+        "runtime_uid": "cube",
+        "role": "rigid_object",
+        "category": "cube",
+        "shape": {"shape_type": "Mesh", "fpath": str(cube_path)},
+        "init_pos": [0.1, 0.2, 0.75],
+        "init_rot": [0.0] * 3,
+        "body_scale": [1.0] * 3,
+    }
+    return replace(
+        scene,
+        planner_objects=(*scene.planner_objects, cube),
+        rigid_objects=(cube,),
+        uid_map={**scene.uid_map, "cube": "cube"},
+    )
+
+
+def _drawer_composite_graph(scene: PreparedScene) -> dict:
+    empty = {
+        "kind": "none",
+        "reference": "",
+        "step_id": "",
+        "quantifier": "one",
+        "count": 0,
+    }
+    opened = {
+        **deepcopy(_INTENT_FIELD_DEFAULTS),
+        "id": "open",
+        "task_type": "E6",
+        "object": {**empty, "kind": "scene_ref", "reference": "drawer"},
+        "target": empty,
+        "required_arm": "right_arm",
+        "target_state": "open",
+        "depends_on": [],
+    }
+    result = {**empty, "kind": "step_result", "step_id": "open"}
+    placed = {
+        **deepcopy(_INTENT_FIELD_DEFAULTS),
+        "id": "place",
+        "task_type": "E1",
+        "object": {**empty, "kind": "scene_ref", "reference": "cube"},
+        "target": result,
+        "relation": "inside",
+        "required_arm": "right_arm",
+        "depends_on": ["open"],
+    }
+    closed = {
+        **opened,
+        "id": "close",
+        "object": result,
+        "target_state": "closed",
+        "depends_on": ["place"],
+    }
+    candidate = TaskAgent(
+        caller=lambda **kw: {"steps": [opened, placed, closed]}
+    ).generate(
+        "drawer_composite",
+        "Open the drawer, put cube inside, close it",
+        candidate_count=1,
+    )[
+        "candidates"
+    ][
+        0
+    ]
+    bindings = {
+        "schema_version": ROLE_BINDINGS_SCHEMA,
+        "task_id": "drawer_composite",
+        "candidate_id": candidate["candidate_id"],
+        "reference_bindings": {
+            "step_01.object": ["drawer"],
+            "step_02.object": ["cube"],
+        },
+        "role_bindings": {},
+    }
+    return SemanticTaskPlanner().plan(candidate, bindings, scene.planner_objects)
+
+
+def test_drawer_open_place_close_builds_one_link_owned_container(
+    drawer_container_scene: PreparedScene, tmp_path: Path
+) -> None:
+    graph, paths = generate_task_program_bundle(
+        _drawer_composite_graph(drawer_container_scene),
+        drawer_container_scene,
+        tmp_path / "composite",
+        robot_profile="dual_franka",
+    )
+    _verify_program_projection(paths.program, graph)
+    deployment = load_deployment(
+        task_program=load_config(paths.deployment)["task_program"],
+        skill_profile=load_config(paths.embodiment)["skill_profile"],
+        base_dir=paths.root,
+    )
+    binding = deployment.integration.registration.scene_binding
+    assert "drawer" not in {b.entity_id for b in binding.rigid_objects}
+    assert len(binding.articulations) == len(binding.containers) == 1
+    route = deployment.integration.adapter_factory.drawer_routes[0]
+    assert load_config(paths.execution_policy)["motion"]["sample_count"] >= 260
+    assert binding.containers[0].parent_id == route.binding.link_id
+    assert route.binding.part_id
+    slides = [
+        n["call"]["arguments"]
+        for n in graph["nodes"]
+        if n["call"].get("call_id") == SLIDE_CALL
+    ]
+    assert [a["part"] for a in slides] == [route.binding.part_id] * 2
+    items = load_config(paths.program)["program"]["items"]
+    placement = next(i for i in items if i["steps"]["call"].get("kind") == "place")
+    assert not any(
+        p["preset"].startswith("gen_sim.drawer.")
+        for item in items
+        for p in item.get("post", [])
+    )
+    assert placement["post"][0]["preset"] == "contained_rigid_object"
+    assert items[-1]["validators"][0]["kind"] == "articulation_joint_position"
+
+
+def test_composite_unifies_implicit_and_explicit_same_part(
+    drawer_container_scene: PreparedScene,
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program.drawer_binding import (
+        prepare_drawer_graph,
+    )
+
+    graph = _drawer_composite_graph(drawer_container_scene)
+    part = discover_prismatic_parts(drawer_container_scene.articulations[0])[0].part_id
+    for node in graph["nodes"]:
+        args = node["call"].get("arguments", {})
+        if args.get("state") == "closed":
+            args["part"] = part
+    before = deepcopy(graph)
+    result = prepare_drawer_graph(graph, drawer_container_scene)
+    assert graph == before
+    assert next(
+        n["call"]["inside"] for n in result["nodes"] if "inside" in n["call"]
+    ).endswith(f"__{part}")
+
+
+def _live_drawer(scene: PreparedScene):
+    from embodichain.gen_sim.task_engine._task_program.drawer_binding import (
+        prepare_drawer_graph,
+        drawer_routes,
+    )
+    from embodichain.gen_sim.task_engine._task_program.drawer_runtime import (
+        DrawerObservation,
+    )
+
+    graph = prepare_drawer_graph(_drawer_composite_graph(scene), scene)
+    route = drawer_routes(graph, scene)[0]
+    link = torch.eye(4).unsqueeze(0)
+    obj_pose = link.clone()
+    obj_pose[0, :3, 3] = torch.tensor([0.0, 0.125, 0.025])
+    vertices = torch.tensor(
+        trimesh.creation.box(extents=[0.03] * 3).vertices, dtype=torch.float32
+    )
+    cfg = scene.articulations[0]
+    art = SimpleNamespace(
+        cfg=SimpleNamespace(
+            fpath=cfg["fpath"],
+            body_scale=cfg["body_scale"],
+            root_props=SimpleNamespace(fixed_base=True),
+        ),
+        joint_names=[route.binding.joint],
+        get_link_pose=lambda *a, **kw: link.clone(),
+        get_qpos=lambda: torch.tensor([[route.binding.target("open")]]),
+    )
+    obj = SimpleNamespace(
+        get_vertices=lambda **kw: vertices.unsqueeze(0),
+        get_local_pose=lambda **kw: obj_pose.clone(),
+    )
+    sim = SimpleNamespace(
+        get_articulation=lambda uid: art,
+        get_rigid_object=lambda uid: obj,
+        get_articulation_uid_list=lambda: [route.binding.object_id],
+        get_rigid_object_uid_list=lambda: [],
+    )
+    return DrawerObservation(route, sim), sim, link, obj_pose
+
+
+def test_handle_only_geometry_is_not_a_task_rejection(scene: PreparedScene) -> None:
+    from embodichain.gen_sim.task_engine._task_program.drawer_geometry import (
+        drawer_region,
+    )
+
+    low, high = drawer_region(
+        scene.articulations[0], inspect_prismatic(scene.articulations[0])
+    )
+    assert np.isfinite([low, high]).all()
+
+
+def test_drawer_runtime_target_follows_link(
+    drawer_container_scene: PreparedScene,
+) -> None:
+    obs, _, link, _ = _live_drawer(drawer_container_scene)
+    initial = obs.target_pose()
+    link[0, 0, 3] += 0.12
+    moved = obs.target_pose()
+    torch.testing.assert_close(
+        moved[0, :3, 3] - initial[0, :3, 3], torch.tensor([0.12, 0, 0])
+    )
+
+
+def test_oversize_drawer_payload_bundle_has_no_containment_gate(
+    drawer_container_scene: PreparedScene, tmp_path: Path
+) -> None:
+    cube = {**drawer_container_scene.rigid_objects[0], "body_scale": [10.0] * 3}
+    scene = replace(
+        drawer_container_scene,
+        rigid_objects=(cube,),
+        planner_objects=(*drawer_container_scene.planner_objects[:-1], cube),
+    )
+    _, paths = generate_task_program_bundle(
+        _drawer_composite_graph(scene),
+        scene,
+        tmp_path / "oversize",
+        robot_profile="dual_franka",
+    )
+    assert paths.deployment.is_file()
+    items = load_config(paths.program)["program"]["items"]
+    assert not any(
+        p["preset"].startswith("gen_sim.drawer.")
+        for item in items
+        for p in item.get("post", [])
+    )
+
+
+def test_drawer_place_preparation_uses_live_target_without_fit_gate(
+    drawer_container_scene: PreparedScene,
+) -> None:
+    from dataclasses import dataclass
+    from embodichain.gen_sim.task_engine._task_program.drawer_runtime import (
+        prepare_place,
+    )
+    from embodichain.lab.sim.atomic_actions import (
+        PlaceGoal,
+        PlaceOptions,
+        SceneEntityPose,
+    )
+
+    obs, _, link, _ = _live_drawer(drawer_container_scene)
+    obs.vertices *= 10
+    qpos = torch.zeros(1, 1)
+    motion = SimpleNamespace(
+        task_state_key="arm",
+    )
+    held = SimpleNamespace(
+        semantics=SimpleNamespace(entity_id=obs.route.object_id),
+        object_to_eef=torch.eye(4).unsqueeze(0),
+    )
+    context = SimpleNamespace(
+        task=SimpleNamespace(get_held_object=lambda key: held),
+        robot=SimpleNamespace(qpos=qpos),
+        env_ids=torch.tensor([0]),
+    )
+
+    @dataclass
+    class Request:
+        goal: object
+        skill_options: object
+        binding: object
+
+    request = Request(
+        PlaceGoal(SceneEntityPose(obs.route.affordance)),
+        PlaceOptions(),
+        SimpleNamespace(endpoint=lambda slot, name: motion),
+    )
+    prepared = prepare_place(request, context, (obs,))
+    assert prepared.goal.xpos.shape == (1, 4, 4)
+    torch.testing.assert_close(prepared.goal.xpos, obs.target_pose())
+    assert isinstance(request.goal.xpos, SceneEntityPose)
+    link[0, 0, 3] += 0.12
+    changed = prepare_place(request, context, (obs,))
+    torch.testing.assert_close(
+        changed.goal.xpos[0, :3, 3] - prepared.goal.xpos[0, :3, 3],
+        torch.tensor([0.12, 0, 0]),
+    )
