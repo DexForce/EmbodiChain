@@ -57,6 +57,7 @@ class MockRigidObject:
         self.cfg = Mock()
         self.cfg.shape = Mock()
         self.cfg.shape.fpath = "test.obj"
+        self.cfg.init_pos = [0.25, -0.5, 1.0]
         self.cfg.attrs = Mock()
         self.cfg.attrs.mass_props = Mock(mass=1.0)
 
@@ -83,6 +84,13 @@ class MockRigidObject:
             self._pose[env_ids] = pose[:, env_ids] if pose.dim() > 3 else pose
         else:
             self._pose = pose
+
+    def set_velocity(self, lin_vel=None, ang_vel=None, env_ids=None):
+        local_env_ids = list(range(self.num_envs)) if env_ids is None else env_ids
+        if lin_vel is not None:
+            self.body_data.lin_vel[local_env_ids] = lin_vel
+        if ang_vel is not None:
+            self.body_data.ang_vel[local_env_ids] = ang_vel
 
     def get_mass(self, env_ids=None):
         if env_ids is not None:
@@ -1287,6 +1295,32 @@ class TestWaitForDynamicObjectsToSettle:
 
         env.sim.update.assert_not_called()
 
+    def test_can_restore_configured_planar_layout_after_settling(self):
+        """Generated scenes retain semantic X/Y while keeping settled Z and rotation."""
+        env = MockEnv(num_envs=2)
+        cube = env.test_object
+        cube._pose[:, :3, 3] = torch.tensor([[0.8, 0.7, 1.1], [-0.9, 0.6, 1.2]])
+        cube.body_data.lin_vel.fill_(0.01)
+        cube.body_data.ang_vel.fill_(0.03)
+        env.sim.update = Mock()
+
+        wait_for_dynamic_objects_to_settle(
+            env,
+            None,
+            entity_cfgs=[SceneEntityCfg(uid="cube")],
+            min_steps=0,
+            max_steps=0,
+            required_stable_checks=1,
+            restore_initial_xy=True,
+        )
+
+        torch.testing.assert_close(
+            cube._pose[:, :2, 3], torch.tensor([[0.25, -0.5], [0.25, -0.5]])
+        )
+        torch.testing.assert_close(cube._pose[:, 2, 3], torch.tensor([1.1, 1.2]))
+        assert torch.count_nonzero(cube.body_data.lin_vel) == 0
+        assert torch.count_nonzero(cube.body_data.ang_vel) == 0
+
     def test_timeout_warns_with_diagnostics(self, caplog):
         """Warning timeouts report exact step usage and residual speed."""
         env = MockEnv(num_envs=4)
@@ -1370,6 +1404,7 @@ class TestWaitForDynamicObjectsToSettle:
             {"linear_velocity_threshold": float("nan")},
             {"timeout_behavior": "ignore"},
             {"allow_partial_envs": "yes"},
+            {"restore_initial_xy": "yes"},
         ],
     )
     def test_invalid_parameters_are_rejected(self, params):

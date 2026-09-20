@@ -51,6 +51,58 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils im
 
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 _CATEGORY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+# Segmentation models are less reliable for compound object names than their
+# visual nouns; aliases improve recall without changing semantic IDs.
+_SEGMENTATION_PROMPT_ALIASES: dict[str, tuple[str, ...]] = {
+    "bell": ("hotel bell",),
+    "service_bell": ("bell", "desk bell", "call bell", "hotel bell"),
+    "call_bell": ("bell", "desk bell", "service bell", "hotel bell"),
+    "desk_bell": ("bell", "service bell", "call bell", "hotel bell"),
+    "water_dispenser": ("dispenser",),
+    "placemat": ("blue placemat", "table mat"),
+    "folder": ("placemat", "blue placemat", "table mat"),
+    "mat": ("placemat", "blue placemat", "table mat"),
+    "button_device": ("button", "push button", "emergency stop button"),
+    "push_button": ("button", "push button", "emergency stop button"),
+    "hot_plate": (
+        "hot plate",
+        "electric hot plate",
+        "cooktop",
+        "stove",
+        "stainless steel stove",
+    ),
+    "electric_hot_plate": ("hot plate", "electric hot plate", "cooktop"),
+    "button_box": ("button", "push button", "button box"),
+    "sheet": ("sheet of paper", "paper sheet", "blue placemat"),
+    "paper_cup": ("cup", "paper cup", "disposable cup"),
+    "drawer": ("drawer", "cabinet drawer", "storage drawer"),
+    "laptop": ("square device", "gray tablet", "electronic panel"),
+}
+_FORCED_ARTICULATION_CATEGORIES = {
+    "bell",
+    "service_bell",
+    "desk_bell",
+    "call_bell",
+    "button",
+    "push_button",
+    "button_box",
+    "game_button",
+    "button_device",
+    "emergency_stop_button",
+    "switch",
+    "switch_box",
+    "knob",
+    "stove",
+    "electric_cooktop",
+    "coffee_machine",
+    "coffee_maker",
+    "water_dispenser",
+    "control_panel",
+    "knob_panel",
+    "hot_plate",
+    "electric_hot_plate",
+    "dimmer_switch",
+}
 _VISIBLE_RGBA_IMAGE_SIZE = (512, 512)
 _SYSTEM_PROMPT = """You inspect one tabletop-scene image.
 Identify the main table and every visible, physically distinct object that should
@@ -81,11 +133,15 @@ Rules:
    Structural direction words are allowed when they describe the object itself:
    "bottle with a black cap on top" is valid, while "bottle on the left of the
    table" is not.
-9. is_articulated is true only for articulated objects with functional movable
-   parts that matter in simulation. Typical true examples are a microwave with
-   a door, cabinet, button, or drawer. Treat every other object as false unless
-   its independently movable links or joints are clearly visible; in particular,
-   rigid objects such as bottles, mugs, bowls, books, utensils, and boxes are false.
+9. is_articulated is true for objects with functional independently movable
+   parts, even when they are small or not the target of a task. Include rocker
+   switches, push buttons, service-bell plungers, rotary knobs, cabinet doors,
+   drawers, sliding oven racks, and the turning layers of a Rubik's cube.
+   Keep a unified appliance as one asset, but describe ALL its movable parts
+   and their motion types, not just its most prominent door or knob.
+   Do not confuse a Rubik's cube with a rigid colored block. Plain open cups,
+   bowls, sealed cans and solid wooden blocks are rigid. Do not invent a hinge
+   for a loose removable lid or a joint for a featureless rigid object.
 
 Return JSON only: no Markdown, comments, or prose outside this exact schema:
 {
@@ -150,6 +206,10 @@ location.
 Extra candidate masks are normal and may be ignored. Never force a candidate
 onto an asset. If any listed asset has no correct candidate, return
 {"assignments": null}.
+Candidate number labels can cover the center of small objects. They are an
+annotation, not part of the object: use its visible contour and surrounding
+color to match it. Do not reject an otherwise matching object merely because
+its center is covered by its candidate number.
 
 Examples:
 - Two listed paper cups match candidate 1 and candidate 3:
@@ -415,6 +475,7 @@ def _analyze_image_objects(
         )
         try:
             analyzed_scene = _parse_image_object_analysis_response(response_text)
+            _force_known_movable_objects_articulated(analyzed_scene)
             validate_scene_understanding(analyzed_scene)
         except ValueError as exc:
             last_validation_error = exc
@@ -428,6 +489,17 @@ def _analyze_image_objects(
         "VLM returned invalid image-object analysis JSON after "
         f"{json_max_attempts} attempts: {last_validation_error}"
     ) from last_validation_error
+
+
+def _force_known_movable_objects_articulated(scene: Scene) -> None:
+    """Promote known interactive object categories before generation dispatch."""
+    for scene_object in scene.assets:
+        semantic_text = " ".join((scene_object.name, scene_object.description)).lower()
+        button_box = (
+            scene_object.category in {"box", "toy"} and "button" in semantic_text
+        )
+        if scene_object.category in _FORCED_ARTICULATION_CATEGORIES or button_box:
+            scene_object.is_articulated = True
 
 
 def _parse_image_object_analysis_response(response_text: str) -> Scene:
@@ -819,7 +891,11 @@ def _segment_assets(
         mask_rles: list[dict[str, Any]] = []
         # Use categories and names as segmentation prompt.
         # Use category to segment first, then use each assets' name to segment.
-        prompts = [category, *dict.fromkeys(asset.name for asset in assets)]
+        prompts = [
+            category,
+            *dict.fromkeys(asset.name for asset in assets),
+            *_SEGMENTATION_PROMPT_ALIASES.get(category, ()),
+        ]
         for prompt in prompts:
             mask_rles.extend(
                 image_segmentation_client.segment_single_object(

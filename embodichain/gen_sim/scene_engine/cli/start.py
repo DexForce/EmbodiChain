@@ -31,6 +31,7 @@ def cli_scene_engine(
     output_root: str | Path,
     *,
     edit_prompt: str | None = None,
+    scene_z_rotation_degrees: float = 180.0,
 ) -> None:
     """Generate a scene from an image, edit an export, or do both in sequence."""
     resolved_output_root = Path(output_root).expanduser().resolve()
@@ -60,6 +61,7 @@ def cli_scene_engine(
     generate_scene_from_image(
         image_path=resolved_image_path,
         output_root=resolved_output_root,
+        scene_z_rotation_degrees=scene_z_rotation_degrees,
     )
     if edit_prompt is not None:
         edit_scene(
@@ -95,7 +97,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    cli_scene_engine(args.image, args.output_root, edit_prompt=args.edit_prompt)
+    cli_scene_engine(
+        args.image,
+        args.output_root,
+        edit_prompt=args.edit_prompt,
+        scene_z_rotation_degrees=180.0,
+    )
 
 
 if __name__ == "__main__":

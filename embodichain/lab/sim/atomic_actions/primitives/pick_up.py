@@ -55,7 +55,6 @@ from embodichain.lab.sim.atomic_actions.goals import (
     PoseGoalValue,
     SceneEntityPose,
     _resolve_object_pose,
-    collect_scene_dependencies,
     resolve_pose_goal,
     validate_pose_goal,
 )
@@ -175,6 +174,9 @@ class PickUpOptions(ActionOptions):
     pre_grasp_distance: float = 0.15
     """Distance to offset back from the grasp pose along the approach direction."""
 
+    grasp_commit_fraction: float = 1.0
+    """Approach fraction after which contact motion no longer invalidates grasp."""
+
     approach_direction: torch.Tensor = torch.tensor([0, 0, -1], dtype=torch.float32)
     """World-frame direction from the pre-grasp pose to the grasp pose."""
 
@@ -211,6 +213,12 @@ class PickUpOptions(ActionOptions):
             raise ValueError("lift_height must be non-negative.")
         if self.pre_grasp_distance < 0.0:
             raise ValueError("pre_grasp_distance must be non-negative.")
+        if isinstance(self.grasp_commit_fraction, bool) or not isinstance(
+            self.grasp_commit_fraction, (int, float)
+        ):
+            raise TypeError("grasp_commit_fraction must be a real number.")
+        if not 0.0 < self.grasp_commit_fraction <= 1.0:
+            raise ValueError("grasp_commit_fraction must be in (0, 1].")
         if self.approach_direction.shape != (3,):
             raise ValueError("approach_direction must have shape (3,).")
         if not torch.isfinite(self.approach_direction).all():
@@ -291,7 +299,13 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         self,
         request: ResolvedActionRequest[GraspGoal, PickUpOptions],
     ) -> tuple[str, ...]:
-        """Include the semantic object when it has a stable scene identity."""
+        """Monitor only the object that the current invocation must acquire.
+
+        Downstream object targets guide grasp selection for static look-ahead,
+        but they are grounded again at the next Semantic Call boundary.  A
+        moving downstream destination must therefore not invalidate an active
+        pickup after a feasible grasp has already been selected.
+        """
         dependencies = set(super()._scene_dependencies(request))
         entity_id = request.goal.semantics.entity_id
         # An explicit object pose is a scene-independent planning input.  Do
@@ -304,11 +318,6 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         # live scene snapshot.
         if entity_id is not None and request.goal.object_pose is None:
             dependencies.add(entity_id)
-        dependencies.update(
-            collect_scene_dependencies(
-                request.skill_options.downstream_object_target_poses
-            )
-        )
         return tuple(sorted(dependencies))
 
     def _get_full_pickup_trajectory(
@@ -598,13 +607,24 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                 ),
             ),
             segment_lengths=segment_lengths,
-            # Once the approach is dispatched the object can move because of
-            # contact or grasping. That self-induced motion must not look like
-            # an external dynamic-goal update.
+            # Once the approach is dispatched, contact can move the object and
+            # the selected downstream suffix can be grounded again after this
+            # semantic boundary.  Neither expected pickup motion nor a later
+            # destination revision should invalidate an already acquired grasp
+            # during close/lift.  Only the object whose pose was used for this
+            # invocation is self-induced; downstream look-ahead entities remain
+            # ordinary dependencies for the next semantic boundary.
             scene_dependency_monitor_until=(
                 {}
                 if monitored_object_id is None
-                else {monitored_object_id: segment_lengths["approach"]}
+                else {
+                    monitored_object_id: max(
+                        1,
+                        math.ceil(
+                            segment_lengths["approach"] * options.grasp_commit_fraction
+                        ),
+                    )
+                }
             ),
         )
 

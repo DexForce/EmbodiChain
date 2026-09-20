@@ -28,13 +28,18 @@ def get_joint_descriptor(
 ) -> object:
     """Read one joint descriptor through the active backend contract.
 
-    Newton exposes backend-neutral joint descriptors directly. Default first
-    uses its legacy joint-info API and falls back to the descriptor API when
-    that legacy query is unavailable.
+    Newton and current Default backends expose backend-neutral descriptors.
+    Older Default builds fall back to the legacy joint-info API.
     """
     if is_newton:
         return _required_descriptor(entity, joint_name)
 
+    get_joint_desc = getattr(entity, "get_joint_desc", None)
+    if callable(get_joint_desc):
+        try:
+            return get_joint_desc(joint_name)
+        except (KeyError, StopIteration, NotImplementedError):
+            pass
     get_joint_info = getattr(entity, "get_joint_info", None)
     native = get_joint_info(joint_name) if callable(get_joint_info) else None
     if native is not None:

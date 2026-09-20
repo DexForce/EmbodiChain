@@ -417,8 +417,9 @@ def test_engine_skills_only_exposes_visible_explicit_installed_contracts() -> No
     }
 
     assert set(engine.skills) == expected
+    assert "park" not in engine.actions
     assert "move_joints" in engine.actions
-    assert "move_joints" not in engine.skills
+    assert "move_joints" in engine.skills
 
 
 def test_new_skill_subclass_must_redeclare_binding_contract() -> None:

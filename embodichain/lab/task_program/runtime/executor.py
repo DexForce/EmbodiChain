@@ -396,6 +396,21 @@ class SemanticCallExecutor:
         return self._status
 
     @property
+    def current_call_index(self) -> int | None:
+        """Return the active semantic-call index without copying audit history."""
+        return self._current_call_index
+
+    @property
+    def env_ids(self) -> torch.Tensor:
+        """Return an owned environment-ID view without copying audit history."""
+        return self._env_ids.clone()
+
+    @property
+    def wait_duration(self) -> float:
+        """Return the remaining runtime wait before another due cycle."""
+        return self._wait_duration
+
+    @property
     def result(self) -> SemanticExecutionResult:
         """Return an immutable snapshot of the current workflow."""
         return SemanticExecutionResult(
@@ -463,14 +478,42 @@ class SemanticCallExecutor:
 
     def step(self) -> SemanticExecutionResult:
         """Advance the current call by at most one due runner cycle."""
+        self._advance_once()
+        return self.result
+
+    def advance(self) -> SemanticExecutionStatus:
+        """Advance one due cycle without materializing the full audit snapshot.
+
+        Long-running physical calls can collect hundreds of in-flight effect
+        traces.  Consumers that only need lifecycle progress should use this
+        method and read :attr:`status`, :attr:`current_call_index`,
+        :attr:`env_ids`, and :attr:`wait_duration`; :attr:`result` remains the
+        explicit immutable audit boundary.
+
+        Returns:
+            The workflow status after the due cycle.
+        """
+        self._advance_once()
+        return self._status
+
+    def _advance_once(self) -> None:
+        """Advance the current call without constructing a result snapshot."""
         if self._status is not SemanticExecutionStatus.RUNNING:
-            return self.result
+            return
         runner = self._require_runner()
         grounded = self._require_grounded()
         monitor = grounded.effect_monitor
         if monitor is not None:
             verifier = self._effect_verifier
         elif grounded.analyzed.effect_assurance is EffectAssurance.PROJECTED:
+            verifier = self._project_unverified_effect
+        elif (
+            grounded.effect_spec is None
+            and runner.session.active_plan.expected_effects.is_empty
+        ):
+            # Verified assurance is vacuous for an explicitly effectless motion:
+            # tracking and transport acknowledgement still gate completion, and
+            # no symbolic or physical effect is projected into TaskState.
             verifier = self._project_unverified_effect
         else:  # pragma: no cover - compiler rejects this before execution
             raise RuntimeError(
@@ -499,9 +542,9 @@ class SemanticCallExecutor:
                 "The atomic invocation requested a phase-effect gate, but the "
                 "grounded semantic call did not install its monitor."
             )
-            return self.result
+            return
         if runner_step.status is RunnerStatus.RUNNING:
-            return self.result
+            return
         recovery_item = self._active_recovery_item
         trigger = (
             self._workflow_recovery_trigger()
@@ -514,7 +557,6 @@ class SemanticCallExecutor:
             self._handle_original_call_finished(finished, trigger=trigger)
         else:
             self._handle_recovery_call_finished(recovery_item, finished)
-        return self.result
 
     def run(
         self,

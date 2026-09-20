@@ -88,7 +88,7 @@ class RobotCfg(ArticulationCfg):
         - The joint names in the control parts support regular expressions, e.g., 'joint[1-6]'.
             After initialization of robot, the names will be expanded to a list of full joint names.
         - `Robot` is a derived class of `Articulation`, with control parts support. So the `joint_drive_props`
-            in `ArticulationCfg` can use control part as key to specify the corresponding joint drive properties, 
+            in `ArticulationCfg` can use control part as key to specify the corresponding joint drive properties,
             which will be overridden if these joint names are already specified.
     """
 

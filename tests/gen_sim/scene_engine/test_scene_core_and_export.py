@@ -34,6 +34,7 @@ from embodichain.gen_sim.scene_engine.core.scene_object import (
 )
 from embodichain.gen_sim.scene_engine.cli.preview import (
     _add_articulations,
+    _add_objects,
     _setup_viser_joint_control,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import SceneExporter
@@ -208,7 +209,18 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
 
 def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
+    from embodichain.gen_sim.scene_engine.pipeline.utils import scene_exporter
+
+    monkeypatch.setattr(
+        scene_exporter, "_articulation_root_bottom_z", lambda *args: -0.05
+    )
+    monkeypatch.setattr(
+        scene_exporter,
+        "measure_scene_object_z_up_world_aabb",
+        lambda **kwargs: [[0, 0, 0], [1, 1, 0.73]],
+    )
     table_glb = tmp_path / "table.glb"
     drawer_glb = tmp_path / "drawer.glb"
     drawer_usdc = tmp_path / "drawer.usdc"
@@ -245,6 +257,7 @@ def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
     assert articulation["proxy_glb_fpath"] == "mesh_assets/drawer/drawer.glb"
     assert articulation["body_scale"] == [1.25, 2.5, 3.75]
     assert articulation["proxy_body_scale"] == [1.0, 2.0, 3.0]
+    assert articulation["init_pos"][2] == pytest.approx(0.781)
     assert (export_path.parent / articulation["fpath"]).read_bytes() == b"USDC-drawer"
     assert (
         export_path.parent / articulation["proxy_glb_fpath"]
@@ -259,9 +272,58 @@ def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
         export_path.parent / "articulated_assets" / "drawer" / "drawer.usdc"
     )
     assert imported_drawer.articulated_usdc_scale == [1.25, 2.5, 3.75]
+    assert np.allclose(imported_drawer.pos, drawer.pos)
+    assert np.allclose(imported_drawer.rot, drawer.rot)
 
 
-def test_preview_loads_exported_usdc_as_an_articulation(tmp_path: Path) -> None:
+@pytest.mark.parametrize("max_hulls", [1, 8])
+def test_preview_forwards_visacd_collision_policy(
+    tmp_path: Path, max_hulls: int
+) -> None:
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+    from embodichain.lab.sim.spawn.descriptors import rigid_desc_from_cfg
+
+    class FakeSimulationManager:
+        def __init__(self) -> None:
+            self.configs: list[RigidObjectCfg] = []
+
+        def add_rigid_object(self, cfg: RigidObjectCfg) -> None:
+            self.configs.append(cfg)
+
+    (tmp_path / "mesh.glb").write_bytes(b"glTF")
+    sim = FakeSimulationManager()
+    _add_objects(
+        sim=sim,  # type: ignore[arg-type]
+        entries=[
+            {
+                "uid": "mesh",
+                "shape": {"shape_type": "Mesh", "fpath": "mesh.glb"},
+                "init_pos": [0.0, 0.0, 0.0],
+                "init_rot": [0.0, 0.0, 0.0],
+                "max_convex_hull_num": max_hulls,
+            }
+        ],
+        config_dir=tmp_path,
+        label="rigid_object",
+    )
+
+    cfg = sim.configs[0]
+    assert cfg.body_type == "static"
+    collision = cfg.shape.collision
+    assert collision.acd_method == ("visacd" if max_hulls > 1 else None)
+    descriptor, _ = rigid_desc_from_cfg(cfg)
+    if max_hulls > 1:
+        assert descriptor.collisions[0].decomp_algorithm == "visacd"
+        assert descriptor.collisions[0].decomp_max_hulls == max_hulls
+
+
+def test_preview_loads_exported_usdc_as_an_articulation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from embodichain.gen_sim.scene_engine.cli import preview
+
+    monkeypatch.setattr(preview, "_read_revolute_qpos_limits", lambda path: {})
+
     class FakeSimulationManager:
         def __init__(self) -> None:
             self.articulation_cfgs: list[object] = []

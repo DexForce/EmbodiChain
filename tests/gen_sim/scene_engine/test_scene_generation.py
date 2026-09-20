@@ -44,11 +44,63 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.visual_yaw_optimizer import
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.articulated_usdc_utils import (
     _canonicalize_articulated_usdc_bottom_center,
+    _articulation_root_bottom_z,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
     layout_object_to_transform_matrix,
     transform_matrix_to_layout_object,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
+    rotate_scene_z_up_world,
+    scene_object_y_up_layout,
+    y_up_to_z_up_matrix,
+)
+
+
+@pytest.mark.parametrize("up_axis, expected", [("Y", -0.2), ("Z", -0.1)])
+def test_root_height_uses_collision_geometry_not_usd_root_translation(
+    tmp_path: Path, up_axis: str, expected: float
+) -> None:
+    path = tmp_path / "height.usdc"
+    stage = Usd.Stage.CreateNew(str(path))
+    root = UsdGeom.Xform.Define(stage, "/Asset")
+    stage.SetDefaultPrim(root.GetPrim())
+    UsdGeom.SetStageUpAxis(stage, up_axis)
+    root.AddTranslateOp().Set(Gf.Vec3d(4, 5, 6))
+    body = UsdGeom.Xform.Define(stage, "/Asset/base")
+    body.AddTranslateOp().Set(Gf.Vec3d(0, 0, 2))
+    UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+    mesh = UsdGeom.Mesh.Define(stage, "/Asset/base/collision")
+    mesh.CreatePointsAttr([(-1, -0.1, -0.05), (1, 0.1, 0.05)])
+    UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
+    stage.GetRootLayer().Save()
+    assert _articulation_root_bottom_z(path, [2, 2, 2], [0, 0, 35]) == pytest.approx(
+        expected
+    )
+    root.GetOrderedXformOps()[0].Set(Gf.Vec3d(9, 10, 11))
+    stage.GetRootLayer().Save()
+    assert _articulation_root_bottom_z(path, [2, 2, 2], [0, 0, 35]) == pytest.approx(
+        expected
+    )
+
+
+def test_z_up_canonicalization_uses_z_bottom(tmp_path: Path) -> None:
+    path = tmp_path / "z_up.usdc"
+    stage = Usd.Stage.CreateNew(str(path))
+    root = UsdGeom.Xform.Define(stage, "/Asset")
+    stage.SetDefaultPrim(root.GetPrim())
+    UsdGeom.SetStageUpAxis(stage, "Z")
+    UsdPhysics.ArticulationRootAPI.Apply(root.GetPrim())
+    cube = UsdGeom.Cube.Define(stage, "/Asset/mesh")
+    cube.CreateSizeAttr(2)
+    cube.AddTranslateOp().Set(Gf.Vec3d(2, 3, 4))
+    stage.GetRootLayer().Save()
+    _canonicalize_articulated_usdc_bottom_center(path)
+    stage = Usd.Stage.Open(str(path))
+    translation = (
+        UsdGeom.Xformable(stage.GetDefaultPrim()).GetOrderedXformOps()[0].Get()
+    )
+    assert list(translation) == pytest.approx([-2, -3, -3])
 
 
 def _z_up_rotation_from_y_up_layout(layout: dict[str, object]) -> np.ndarray:
@@ -223,6 +275,99 @@ def test_visual_yaws_replace_coarse_rotations_but_preserve_positions() -> None:
     assert np.allclose(yawed_layout["pos"], [0.1, 0.2, 0.3])
 
 
+def test_rotate_scene_z_up_world_rotates_complete_scene_and_support_metadata() -> None:
+    scene = Scene(
+        objects=[
+            SceneObject(
+                id="table",
+                kind="table",
+                category="table",
+                name="table",
+                description="table",
+                rot=[0.0, 0.0, 0.0],
+                pos=[0.0, 0.0, 0.0],
+                scale=[1.0, 1.0, 1.0],
+                center_xy=[1.0, 2.0],
+                support_contour_xy=[[1.0, 2.0], [-1.0, 2.0]],
+                support_optimization_rect_xy=[[1.0, 1.0], [-1.0, 1.0]],
+            ),
+            SceneObject(
+                id="book_001",
+                kind="asset",
+                category="book",
+                name="book",
+                description="book",
+                rot=[10.0, 20.0, 30.0],
+                pos=[1.0, 2.0, 3.0],
+                scale=[1.0, 2.0, 3.0],
+                center_xy=[3.0, 4.0],
+            ),
+        ]
+    )
+    basis = y_up_to_z_up_matrix()
+    inverse_basis = np.linalg.inv(basis)
+    original_z_up_transforms = {
+        scene_object.id: (
+            basis
+            @ layout_object_to_transform_matrix(scene_object_y_up_layout(scene_object))
+            @ inverse_basis
+        )
+        for scene_object in scene.objects
+    }
+    expected_world_rotation = np.eye(4)
+    expected_world_rotation[:3, :3] = Rotation.from_euler(
+        "z", 180.0, degrees=True
+    ).as_matrix()
+
+    rotate_scene_z_up_world(scene=scene, rotation_degrees=180.0)
+
+    for scene_object in scene.objects:
+        actual_z_up_transform = (
+            basis
+            @ layout_object_to_transform_matrix(scene_object_y_up_layout(scene_object))
+            @ inverse_basis
+        )
+        assert np.allclose(
+            actual_z_up_transform,
+            expected_world_rotation @ original_z_up_transforms[scene_object.id],
+        )
+    assert np.allclose(scene.table.center_xy, [-1.0, -2.0])
+    assert np.allclose(scene.table.support_contour_xy, [[-1.0, -2.0], [1.0, -2.0]])
+    assert np.allclose(
+        scene.table.support_optimization_rect_xy,
+        [[-1.0, -1.0], [1.0, -1.0]],
+    )
+
+
+def test_rotate_scene_z_up_world_rejects_non_finite_angle() -> None:
+    with pytest.raises(ValueError, match="rotation_degrees must be finite"):
+        rotate_scene_z_up_world(scene=Scene(), rotation_degrees=float("nan"))
+
+
+def test_runtime_revolute_limits_convert_degrees_without_mutating_usd(
+    tmp_path: Path,
+) -> None:
+    from pxr import Usd, UsdPhysics
+    from embodichain.gen_sim.scene_engine.pipeline.utils.articulated_usdc_utils import (
+        _read_revolute_qpos_limits,
+    )
+
+    path = tmp_path / "limits.usdc"
+    stage = Usd.Stage.CreateNew(str(path))
+    joint = UsdPhysics.RevoluteJoint.Define(stage, "/rocker")
+    joint.CreateLowerLimitAttr(-8.0)
+    joint.CreateUpperLimitAttr(8.0)
+    slider = UsdPhysics.PrismaticJoint.Define(stage, "/slider")
+    slider.CreateLowerLimitAttr(0.0)
+    slider.CreateUpperLimitAttr(0.1)
+    stage.GetRootLayer().Save()
+    before = path.read_bytes()
+    limits = _read_revolute_qpos_limits(path)
+    assert limits["rocker"] == pytest.approx(np.deg2rad([-8.0, 8.0]))
+    assert "slider" not in limits
+    assert path.read_bytes() == before
+
+
 def test_articulated_usdcs_use_visible_rgba_in_scene_order(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -293,10 +438,10 @@ def test_articulated_usdcs_use_visible_rgba_in_scene_order(
         articulated_generation_client=client,  # type: ignore[arg-type]
     )
 
-    assert [call[0] for call in client.calls] == [
-        "white drawer with a pull handle",
-        "black microwave with a hinged door",
-    ]
+    assert "white drawer with a pull handle" in client.calls[0][0]
+    assert "black microwave with a hinged door" in client.calls[1][0]
+    assert all("self-contained USDC" in call[0] for call in client.calls)
+    assert all("gen_sim:closedPosition" in call[0] for call in client.calls)
     assert drawer.articulated_usdc_path == str(
         tmp_path / "articulated_geometry" / "drawer_001.usdc"
     )
@@ -307,6 +452,30 @@ def test_articulated_usdcs_use_visible_rgba_in_scene_order(
     assert drawer.articulated_usdc_scale == [1.0, 2.0, 3.0]
     assert microwave.articulated_usdc_scale == [4.0, 5.0, 6.0]
     assert static_mug.articulated_usdc_path is None
+
+
+def test_rubiks_cube_is_excluded_from_articulation_generation(tmp_path: Path) -> None:
+    class FakeClient:
+        def generate_articulated_usdc(self, **_: object) -> Path:
+            raise AssertionError("Rubik cube must not be submitted")
+
+    cube = SceneObject(
+        id="puzzle_cube_001",
+        kind="asset",
+        category="puzzle_cube",
+        name="colorful Rubik cube",
+        description="3x3 puzzle cube with colored facelets",
+        is_articulated=True,
+        visible_rgba_path=str(tmp_path / "cube.png"),
+    )
+    _generate_articulated_usdcs(
+        scene=Scene(objects=[cube]),
+        output_root=tmp_path / "articulated_geometry",
+        coarse_scales_y_up_by_id={},
+        articulated_generation_client=FakeClient(),  # type: ignore[arg-type]
+    )
+    assert cube.is_articulated is False
+    assert cube.articulated_usdc_path is None
 
 
 def test_articulated_usdc_canonicalization_moves_bottom_center_to_origin(

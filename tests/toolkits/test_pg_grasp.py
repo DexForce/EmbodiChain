@@ -60,13 +60,14 @@ def _box_geometry(*, subdivide_end: bool = False) -> tuple[torch.Tensor, torch.T
 
 
 def _prepared_backend(
-    vertices: torch.Tensor, pairs: torch.Tensor
+    vertices: torch.Tensor, pairs: torch.Tensor, *, center_mode: str = "bounds"
 ) -> _AntipodalMeshBackend:
     """Bypass sampling and collision construction to test prepared-pair logic."""
     backend = _AntipodalMeshBackend.__new__(_AntipodalMeshBackend)
     backend.device = vertices.device
     backend.vertices = vertices
     backend._hit_point_pairs = pairs
+    backend._center_mode = center_mode
     return backend
 
 
@@ -110,6 +111,33 @@ def test_default_grasp_mode_ranks_by_transformed_bounding_box_center() -> None:
     torch.testing.assert_close(poses[costs.argmin(), :3, 3], object_pose[:3, 3])
     torch.testing.assert_close(widths, torch.full((2,), 0.04))
     assert costs.min() == pytest.approx(0.0, abs=1.0e-6)
+
+
+def test_centroid_mode_preserves_vertex_weighted_ranking() -> None:
+    vertices, _ = _box_geometry(subdivide_end=True)
+    centers = torch.tensor([[0.0, 0.0, 0.0], [0.08, 0.0, 0.0]])
+    contact_offset = torch.tensor([0.0, 0.02, 0.0])
+    pairs = torch.stack([centers - contact_offset, centers + contact_offset], dim=1)
+    backend = _prepared_backend(vertices, pairs, center_mode="centroid")
+    backend._max_deviation_angle = 0.1
+    backend._approach_direction_samples = 1
+    backend._max_candidates = 10
+    backend._filter_ground_collision = False
+    backend._collision_checker = Mock()
+    backend._collision_checker.query.return_value = (
+        torch.zeros(len(pairs), dtype=torch.bool),
+        torch.zeros(len(pairs)),
+    )
+    object_pose = _object_pose()
+
+    success, poses, _, costs = backend.get_valid_grasp_poses(
+        object_pose=object_pose,
+        approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+    )
+
+    assert success
+    expected = centers[1] @ object_pose[:3, :3].T + object_pose[:3, 3]
+    torch.testing.assert_close(poses[costs.argmin(), :3, 3], expected)
 
 
 @pytest.mark.parametrize(

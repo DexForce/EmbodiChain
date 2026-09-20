@@ -354,9 +354,17 @@ def _generate_articulated_usdcs(
     articulated_generation_client: ArticulatedGenerationClient | None,
 ) -> None:
     """Generate and persist one articulation USDC for every articulated object."""
-    articulated_objects = [
-        scene_object for scene_object in scene.objects if scene_object.is_articulated
-    ]
+    articulated_objects = []
+    for scene_object in scene.objects:
+        if _is_rubiks_cube(scene_object):
+            # The current articulation service cannot represent a Rubik cube's
+            # coupled six-layer mechanism faithfully; keep it as a rigid asset.
+            scene_object.is_articulated = False
+            scene_object.articulated_usdc_path = None
+            scene_object.articulated_usdc_scale = None
+            continue
+        if scene_object.is_articulated:
+            articulated_objects.append(scene_object)
     if not articulated_objects:
         return
     if articulated_generation_client is None:
@@ -385,17 +393,42 @@ def _generate_articulated_usdcs(
             )
         # Run serially so the stage ends only after every required USDC is saved.
         generated_usdc_path = articulated_generation_client.generate_articulated_usdc(
-            prompt=scene_object.description,
+            prompt=(
+                f"Object: {scene_object.name} ({scene_object.category}). "
+                f"{scene_object.description}\n"
+                "Reconstruct every functional movable part visible in the reference, "
+                "including switches, buttons, knobs, doors, drawers, plungers, and "
+                "handles. Use real revolute or prismatic joints with physically "
+                "meaningful axes and motion limits, connected to valid rigid-body "
+                "links. Do not fuse a movable part into the base or add an unrelated "
+                "token joint. "
+                "For every prismatic joint, author a custom Double attribute "
+                "gen_sim:closedPosition equal to the joint-limit endpoint at which "
+                "the drawer or slider is physically closed; do not assume zero. "
+                "Deliver a self-contained USDC with an articulation root, meshes, "
+                "and enabled non-fixed joints; a rigid GLB proxy is not enough."
+            ),
             image_path=scene_object.visible_rgba_path,
             output_path=resolved_output_root / f"{scene_object.id}.usdc",
         )
-        # Canonicalize the runtime USDC so it shares the SimReady GLB origin.
+        # Normalize the authored hierarchy; export separately places the native root.
         scene_object.articulated_usdc_path = str(
             _canonicalize_articulated_usdc_bottom_center(generated_usdc_path)
         )
-        # USDC is y-up like GLB; SimulationManager performs the shared z-up conversion.
+        # Retain deployment scale; USD's declared up-axis is handled at export.
         scene_object.articulated_usdc_scale = list(coarse_scale_y_up)
         log_info(f"Created articulated USDC: {scene_object.id!r}.")
+
+
+def _is_rubiks_cube(scene_object: SceneObject) -> bool:
+    """Return whether an object is a Rubik-style cube excluded from generation."""
+    text = " ".join(
+        (scene_object.category, scene_object.name, scene_object.description)
+    ).lower()
+    return any(
+        token in text
+        for token in ("rubik", "rubik's", "rubiks", "puzzle_cube", "puzzle cube")
+    )
 
 
 def _update_scene_final_y_up_layout_and_z_up_centers(
