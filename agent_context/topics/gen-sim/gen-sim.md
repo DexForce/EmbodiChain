@@ -77,6 +77,22 @@ acquired orientation during the staging lift, then turns the object aloft.
 Only yaw-free alignment calls enable alternative final headings; exact-pose
 transport retains its orientation contract. All candidates use the same motion
 and velocity checks.
+E2 release preserves the observed aligned heading instead of adding another
+fixed yaw during descent; an upright instruction does not require that rotation.
+Generated E1/E2-only deployments cap the used Robotiq gripper `max_effort` at 0.5
+when every picked rigid body has an explicitly declared mass of at most 10 g.
+The full closing range is retained; smaller existing effort limits are not
+increased. Unknown/heavier loads and other recipe families retain their declared
+controls. Imported mimic behavior and shared robot defaults are unchanged.
+E1 placement on another object retains its original position tolerance and adds
+the existing stack stability checks for vertical orientation, support gap and
+reference stability. Source pose matrices take precedence over Euler fields.
+For level containers with a dominant planar floor, inside placement selects an
+arm-side point from the actual floor triangles, eroded by the projected child
+footprint and a margin. Holes are retained. Unsupported floor geometry retains
+the existing target policy; an oversized footprint on a measured floor fails
+explicitly. This geometric preference still requires downstream IK and physical
+release/containment qualification.
 Opt-in grasp fitting reserves the declared/default robot and object contact
 envelopes before selecting a uniform scale. The adaptation report records the
 effective per-jaw clearance; the 0.25 minimum scale and source-preservation

@@ -211,6 +211,47 @@ def test_stack_requires_both_objects_stable_in_each_environment(motion: str) -> 
     assert port.post_policy_result(policy, segment=segment).tolist() == [True, False]
 
 
+@pytest.mark.parametrize(
+    "kind, expected",
+    [("placement", [True, True, True]), ("stack", [True, False, False])],
+)
+def test_support_checks_reject_hovering_or_tipped_objects_near_target(
+    kind: str, expected: list[bool]
+) -> None:
+    upper = torch.eye(4).repeat(3, 1, 1)
+    upper[:, 2, 3] = torch.tensor([0.1, 0.125, 0.1])
+    upper[2, :3, :3] = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+    )
+    support = torch.eye(4).repeat(3, 1, 1)
+    cfg = StabilityConstraint(
+        entity="upper",
+        reference="support",
+        kind=kind,
+        displacement=(0.0, 0.0, 0.11),
+        position_tolerance=0.05,
+        duration=0.08,
+        timeout=0.12,
+        **(
+            {
+                "local_axis": (0.0, 0.0, 1.0),
+                "reference_axis": (0.0, 0.0, 1.0),
+                "reference_top": 0.1,
+                "reference_half_extents": (0.05, 0.05),
+            }
+            if kind == "stack"
+            else {}
+        ),
+    )
+    port, policy, segment = _local_port(cfg, upper, reference_pose=support)
+    list(
+        port.actions(
+            policy, segment=segment, active_mask=torch.ones(3, dtype=torch.bool)
+        )
+    )
+    assert port.post_policy_result(policy, segment=segment).tolist() == expected
+
+
 def test_stack_restarts_its_complete_window_after_support_motion() -> None:
     upper = torch.eye(4).unsqueeze(0)
     upper[:, 2, 3] = 0.1

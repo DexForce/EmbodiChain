@@ -1587,20 +1587,24 @@ def test_coordinated_bundle_composes_against_unmodified_public_options(
 
 
 @pytest.mark.parametrize(
-    ("source_extents", "expected_axis", "expected_yaw"),
+    ("source_extents", "expected_axis"),
     [
-        ((0.06, 0.24, 0.06), [0.0, -0.0, 1.0], None),
-        ((0.06, 0.06, 0.24), [0.0, -1.0, 0.0], -math.pi / 3.0),
+        ((0.06, 0.24, 0.06), [0.0, -0.0, 1.0]),
+        ((0.06, 0.06, 0.24), [0.0, -1.0, 0.0]),
     ],
 )
+@pytest.mark.parametrize("resource", ["left", "right"])
 def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
     tmp_path: Path,
     source_extents: tuple[float, float, float],
     expected_axis: list[float],
-    expected_yaw: float | None,
+    resource: str,
 ) -> None:
     """The merged E2 route passes real configured composition and preflight."""
+    from embodichain.lab.sim.cfg import RobotCfg
+
     scene = _prepared_axis_scene(tmp_path, source_extents=source_extents)
+    scene.rigid_objects[0]["attrs"] = {"mass_props": {"mass": 0.01}}
     graph = _graph()
     graph["task_id"] = "upright"
     graph["targets"] = {
@@ -1657,7 +1661,7 @@ def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
                 "kind": "registered",
                 "call_id": call_id,
                 "arguments": arguments,
-                "resources": {"primary": "left"},
+                "resources": {"primary": resource},
             },
         }
         for index, (call_id, arguments) in enumerate(calls)
@@ -1682,6 +1686,9 @@ def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
     _verify_program_projection(paths.program, generated)
     integration = load_config(paths.integration)
     segments = load_config(paths.program)["program"]["items"]
+    robot_cfg = RobotCfg.from_dict(load_config(paths.embodiment)["simulation"])
+    assert "mimic_compliance" not in load_config(paths.embodiment)["simulation"]
+    assert robot_cfg.joint_drive_props.max_effort[f"{resource}_eef"] == 0.5
     assert generated["nodes"][0]["call"]["call_id"] == "gen_sim.pick.upright"
     assert "gen_sim.pick.upright" in integration["profile"]["action_options"]
     release = segments[-3]
@@ -1691,10 +1698,8 @@ def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
         for item in integration["runtime_services"]["registered_semantic_lowerers"]
         if item["kind"] == "place_relative"
     )["routes"][0]
-    if expected_yaw is None:
-        assert "world_yaw_offset" not in route
-    else:
-        assert route["world_yaw_offset"] == pytest.approx(expected_yaw)
+    # Upright yaw is selected during alignment, not changed again on descent.
+    assert "world_yaw_offset" not in route
     assert "post" not in release and "validators" not in release
     assert terminal["validators"][0]["kind"] == "object_near_relative_target"
     # Planning includes 1 cm release clearance; acceptance uses the support surface.

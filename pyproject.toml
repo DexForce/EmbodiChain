@@ -63,6 +63,7 @@ gensim = [
   "requests",
   "Pillow",
   "scipy",
+  "shapely",
   "matplotlib",
 ]
 
