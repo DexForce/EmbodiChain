@@ -28,11 +28,56 @@ from embodichain.lab.visualization.markers._native import NativeMarkerRenderer
 
 
 class Handle:
-    def __init__(self, name, color):
-        self.name, self.color, self.visible = name, color, True
+    def __init__(self, name):
+        self.name, self.color, self.visible = name, (1, 1, 1, 1), True
+        self.node = self
+        self.events = []
 
     def get_name(self):
         return self.name
+
+    def get_render_body(self):
+        return self
+
+    def set_raytrace_visible(self, enabled):
+        self.raytrace = enabled
+        self.events.append("routing")
+
+    def set_shadow(self, enabled):
+        self.shadow = enabled
+
+    def set_pickable(self, enabled):
+        self.pickable = enabled
+
+    def add_mesh(self, vertices, indices, *, auto_build):
+        assert not auto_build
+        self.vertices, self.indices = vertices.copy(), indices.copy()
+        self.events.append("mesh")
+        return 0
+
+    def default_material(self):
+        return self
+
+    def set_material(self, mesh_id, material, *, owned):
+        assert mesh_id == 0 and material is self and owned
+        self.events.append("owned_material")
+        return 1
+
+    def set_unlit(self, enabled):
+        self.unlit = enabled
+
+    def set_alpha_mode(self, mode):
+        self.alpha_mode = mode
+
+    def set_depth_write(self, enabled):
+        self.depth_write = enabled
+
+    def set_double_sided(self, enabled):
+        self.double_sided = enabled
+
+    def build(self):
+        self.events.append("build")
+        return True
 
     def set_world_pose(self, pose):
         self.pose = pose.copy()
@@ -55,44 +100,33 @@ class Arena:
         self.handles = {}
         self.created = 0
         self.fail = False
-        self.descriptions = []
 
-    def create_render_actor(self, desc):
+    def create_actor(self, name, create_render_body, attach_scene):
+        assert create_render_body and not attach_scene
         if self.fail:
             raise RuntimeError("upload failed")
         self.created += 1
-        assert desc.name not in self.handles
-        self.descriptions.append(desc)
-        handle = Handle(desc.name, desc.renders[0].material.base_color)
-        self.handles[handle.name] = handle
+        assert name not in self.handles
+        handle = Handle(name)
+        self.handles[name] = handle
         return handle
+
+    def attach(self, node):
+        node.events.append("attach")
+        return 0
 
     def remove_actor(self, name):
         self.handles.pop(name)
 
 
 @pytest.fixture(autouse=True)
-def spawn_api(monkeypatch):
-    # Recording the public Spawn boundary keeps this consumer suite CPU-only,
-    # including when the installed wheel predates generic render descriptors.
-    class GeometryDesc:
-        @staticmethod
-        def mesh(*, vertices, triangles):
-            return SimpleNamespace(vertices=vertices, triangles=triangles)
-
-    class RenderDesc:
-        @staticmethod
-        def from_geometry(geometry, **kwargs):
-            return SimpleNamespace(**vars(geometry), **kwargs)
-
+def native_api(monkeypatch):
     api = SimpleNamespace(
-        GeometryDesc=GeometryDesc,
-        RenderDesc=RenderDesc,
-        MaterialDesc=SimpleNamespace,
-        ObjectDesc=SimpleNamespace,
-        create_render_actor=lambda arena, desc: arena.create_render_actor(desc),
+        RenderBody=Handle, MaterialInst=Handle, AlphaMode=SimpleNamespace(BLEND="blend")
     )
-    monkeypatch.setitem(sys.modules, "dexsim.spawn", api)
+    monkeypatch.setitem(sys.modules, "dexsim.engine", api)
+    # A marker must not depend on any Spawn factory or descriptor.
+    monkeypatch.setitem(sys.modules, "dexsim.spawn", None)
     return api
 
 
@@ -142,25 +176,21 @@ def test_failed_geometry_replacement_retains_previous_native_handles():
     assert arena.handles == {}
 
 
-def test_generic_render_descriptor_keeps_markers_out_of_physics_and_sensors():
+def test_plain_mesh_object_configures_overlay_before_build_without_physics():
     arena = Arena()
     renderer = NativeMarkerRenderer(arena)
     snapshot = replace(marker(), color=(0.2, 0.4, 0.6, 0.3))
     renderer.publish("g", (snapshot,))
-    desc = arena.descriptions[0]
-    assert desc.physics is None
-    assert desc.per_env is False
-    assert len(desc.renders) == 1
-    render = desc.renders[0]
-    np.testing.assert_array_equal(render.vertices, snapshot.vertices)
-    np.testing.assert_array_equal(render.triangles, snapshot.faces)
-    assert render.render_mode == "overlay"
-    assert render.cast_shadow is False and render.pickable is False
-    assert render.material.base_color == snapshot.color
-    assert render.material.unlit is True
-    assert render.material.alpha_mode == "blend"
-    assert render.material.depth_write is False
-    assert render.material.double_sided is True
+    handle = next(iter(arena.handles.values()))
+    np.testing.assert_array_equal(handle.vertices, snapshot.vertices)
+    np.testing.assert_array_equal(handle.indices, snapshot.faces.flatten())
+    assert (
+        handle.raytrace is False and handle.shadow is False and handle.pickable is False
+    )
+    assert handle.color == snapshot.color
+    assert handle.unlit and handle.alpha_mode == "blend"
+    assert not handle.depth_write and handle.double_sided
+    assert handle.events == ["routing", "mesh", "owned_material", "build", "attach"]
 
 
 def test_native_names_are_unique_across_groups_environments_and_renderers():
@@ -191,21 +221,21 @@ def test_geometry_replacement_releases_old_actor_after_success():
     assert arena.handles == {}
 
 
-def test_later_creation_failure_rolls_back_updates_and_new_actors(
-    monkeypatch, spawn_api
-):
+def test_later_creation_failure_rolls_back_updates_and_new_actors(monkeypatch):
     arena = Arena()
     renderer = NativeMarkerRenderer(arena)
     renderer.publish("g", (marker(),))
     original = next(iter(arena.handles.values()))
     before = dict(arena.handles)
 
-    def create(arena, desc):
+    original_create = arena.create_actor
+
+    def create(*args):
         if arena.created == 2:
             raise RuntimeError("upload failed")
-        return arena.create_render_actor(desc)
+        return original_create(*args)
 
-    monkeypatch.setattr(spawn_api, "create_render_actor", create)
+    monkeypatch.setattr(arena, "create_actor", create)
     with pytest.raises(RuntimeError, match="upload failed"):
         renderer.publish(
             "g",
@@ -220,24 +250,34 @@ def test_later_creation_failure_rolls_back_updates_and_new_actors(
     assert original.color == marker().color
 
 
-def test_missing_spawn_factory_fails_explicitly(monkeypatch, spawn_api):
-    monkeypatch.delattr(spawn_api, "create_render_actor")
-    with pytest.raises(RuntimeError, match="create_render_actor"):
-        NativeMarkerRenderer(Arena())
-
-
-def test_missing_native_binding_error_is_preserved_without_leaks(
-    monkeypatch, spawn_api
-):
-    def unsupported(arena, desc):
-        raise RuntimeError("Install a DexSim build with MaterialInst.set_unlit")
-
-    monkeypatch.setattr(spawn_api, "create_render_actor", unsupported)
+@pytest.mark.parametrize("stage", ["add_mesh", "set_unlit", "build", "attach"])
+def test_creation_failure_removes_incomplete_actor(monkeypatch, stage):
     arena = Arena()
     renderer = NativeMarkerRenderer(arena)
-    with pytest.raises(RuntimeError, match="MaterialInst.set_unlit"):
+    owner = arena if stage == "attach" else Handle
+    if stage == "set_unlit":
+
+        def fail(*args, **kwargs):
+            raise RuntimeError("material failed")
+
+    else:
+
+        def fail(*args, **kwargs):
+            return False if stage == "build" else -1
+
+    monkeypatch.setattr(owner, stage, fail)
+    with pytest.raises(RuntimeError):
         renderer.publish("g", (marker(),))
     assert arena.handles == {}
+    assert renderer._groups == {}
+
+
+def test_missing_native_binding_fails_before_allocation(monkeypatch, native_api):
+    monkeypatch.delattr(native_api, "AlphaMode")
+    arena = Arena()
+    with pytest.raises(RuntimeError, match="Install a DexSim build"):
+        NativeMarkerRenderer(arena)
+    assert not arena.handles
 
 
 def test_apply_failure_removes_staged_actor_and_restores_previous_state(monkeypatch):
@@ -267,7 +307,7 @@ def test_apply_failure_removes_staged_actor_and_restores_previous_state(monkeypa
     assert original.scale == (1, 1, 1)
 
 
-def test_missing_spawn_module_fails_with_installation_guidance(monkeypatch):
-    monkeypatch.setitem(sys.modules, "dexsim.spawn", None)
+def test_missing_native_module_fails_with_installation_guidance(monkeypatch):
+    monkeypatch.setitem(sys.modules, "dexsim.engine", None)
     with pytest.raises(RuntimeError, match="Install a DexSim build"):
         NativeMarkerRenderer(Arena())

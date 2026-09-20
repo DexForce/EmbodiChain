@@ -3700,7 +3700,7 @@ class SimulationManager:
                 groups use all ``num_envs`` environments by default. Use
                 ``group.update(...)`` to populate instances. Viser groups do
                 not allocate native geometry. Native groups require DexSim's
-                ``spawn.create_render_actor`` overlay API.
+                ``RenderBody`` and ``MaterialInst`` overlay properties.
 
         Returns:
             Mutable marker group owned by this simulation manager.

@@ -49,30 +49,70 @@ class NativeMarkerRenderer:
 
     Args:
         arena: Global DexSim arena owning generic render-only mesh actors.
-            Unsupported Spawn/native capabilities raise an actionable error.
+            Unsupported native rendering capabilities raise an actionable error.
     """
 
     def __init__(self, arena: Any) -> None:
         try:
-            spawn = import_module("dexsim.spawn")
-            for symbol in (
-                "create_render_actor",
-                "ObjectDesc",
-                "RenderDesc",
-                "GeometryDesc",
-                "MaterialDesc",
-            ):
-                if not callable(getattr(spawn, symbol, None)):
-                    raise ImportError(f"Missing dexsim.spawn.{symbol}")
+            engine = import_module("dexsim.engine")
+            required = (
+                (getattr(engine, "RenderBody", None), "set_raytrace_visible"),
+                (getattr(engine, "RenderBody", None), "set_pickable"),
+                (getattr(engine, "RenderBody", None), "build"),
+                (getattr(engine, "MaterialInst", None), "set_unlit"),
+                (getattr(engine, "MaterialInst", None), "set_alpha_mode"),
+                (getattr(engine, "AlphaMode", None), "BLEND"),
+            )
+            if any(not hasattr(owner, name) for owner, name in required):
+                raise ImportError("Missing native render-body or material properties")
         except ImportError as exc:
             raise RuntimeError(
-                "Native marker groups require dexsim.spawn.create_render_actor "
-                "and generic render descriptors. Install a DexSim build with "
-                "render-only overlay support or use Viser."
+                "Native marker groups require generic RenderBody and MaterialInst "
+                "overlay properties. Install a DexSim build with render-only "
+                "overlay support or use Viser."
             ) from exc
-        self._spawn = spawn
+        self._alpha_blend = engine.AlphaMode.BLEND
         self._arena = arena
         self._groups: dict[str, dict[str, _Entry]] = {}
+
+    def _create(self, marker: MeshMarkerOverlay) -> Any:
+        """Configure one ordinary MeshObject before its first GPU build."""
+        name = f"__embodichain_marker_{uuid4().hex}"
+        actor = self._arena.create_actor(name, True, False)
+        if actor is None:
+            raise RuntimeError("DexSim failed to create a marker MeshObject.")
+        body = material = None
+        try:
+            body = actor.get_render_body()
+            body.set_raytrace_visible(False)
+            body.set_shadow(False)
+            body.set_pickable(False)
+            mesh_id = body.add_mesh(
+                np.ascontiguousarray(marker.vertices, dtype=np.float32),
+                np.ascontiguousarray(marker.faces, dtype=np.int32).reshape(-1),
+                auto_build=False,
+            )
+            if mesh_id < 0:
+                raise RuntimeError("DexSim failed to add marker mesh geometry.")
+            material = body.default_material()
+            if body.set_material(mesh_id, material, owned=True) <= 0:
+                raise RuntimeError("DexSim failed to assign marker material.")
+            material.set_base_color(marker.color)
+            material.set_unlit(True)
+            material.set_alpha_mode(self._alpha_blend)
+            material.set_depth_write(False)
+            material.set_double_sided(True)
+            if not body.build():
+                raise RuntimeError("DexSim failed to build marker mesh geometry.")
+            if self._arena.attach(actor.node) < 0:
+                raise RuntimeError("DexSim failed to attach marker MeshObject.")
+            return actor
+        except Exception:
+            # Release wrapper references before removal so owned resources can
+            # retire even while the exception traceback is retained.
+            body = material = None
+            self._arena.remove_actor(name)
+            raise
 
     @staticmethod
     def _apply(handle: Any, marker: MeshMarkerOverlay) -> None:
@@ -103,39 +143,7 @@ class NativeMarkerRenderer:
                     handle = entry.handle
                     touched.append(entry)
                 else:
-                    actor_name = f"__embodichain_marker_{uuid4().hex}"
-                    spawn = self._spawn
-                    handle = spawn.create_render_actor(
-                        self._arena,
-                        spawn.ObjectDesc(
-                            name=actor_name,
-                            renders=[
-                                spawn.RenderDesc.from_geometry(
-                                    spawn.GeometryDesc.mesh(
-                                        vertices=marker.vertices,
-                                        triangles=marker.faces,
-                                    ),
-                                    render_mode="overlay",
-                                    cast_shadow=False,
-                                    pickable=False,
-                                    material=spawn.MaterialDesc(
-                                        name=f"{actor_name}_material",
-                                        base_color=marker.color,
-                                        unlit=True,
-                                        alpha_mode="blend",
-                                        depth_write=False,
-                                        double_sided=True,
-                                    ),
-                                )
-                            ],
-                            physics=None,
-                            per_env=False,
-                        ),
-                    )
-                    if handle is None:
-                        raise RuntimeError(
-                            "DexSim failed to create a render-only mesh."
-                        )
+                    handle = self._create(marker)
                     created.append(handle)
                 self._apply(handle, marker)
                 pending[marker.overlay_id] = _Entry(handle, marker)

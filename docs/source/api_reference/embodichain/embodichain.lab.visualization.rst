@@ -82,16 +82,17 @@ marker operations stepping physics. Attachment currently requires env scope.
 
 Prototype colors and per-instance overrides are RGBA in [0, 1]. Frame markers
 keep their RGB axis colors while following alpha. Native rendering requires
-DexSim's generic ``dexsim.spawn.create_render_actor`` factory and render-property
-bindings. The adapter composes ``ObjectDesc(physics=None, per_env=False)``,
-array-backed ``GeometryDesc.mesh``, and ``RenderDesc`` with
-``render_mode="overlay"``, ``cast_shadow=False`` and ``pickable=False``.
-``MaterialDesc`` supplies unlit RGBA blending, disabled depth writes and two-sided
-surfaces. The new unlit and alpha-mode controls require DexSim's shared native
-RT material type; Filament materials reject them. File-backed overlays are
-unsupported. Existing Arena-owned
-``MeshObject`` / ``RenderBody`` APIs provide updates and cleanup without preparing
-physics or introducing a dedicated debug object.
+DexSim's generic ``RenderBody`` and ``MaterialInst`` overlay properties.
+The adapter creates an ordinary Arena-owned ``MeshObject`` without adding
+physics components. It configures overlay routing, disables shadow and picking,
+adds the mesh without automatic building, assigns an owned unlit RGBA material,
+and then builds and attaches the object. Creation failures remove the incomplete
+object. No Spawn factory or descriptor is required.
+
+Unlit and alpha-mode controls require DexSim's shared native RT material type;
+Filament materials reject them. Mesh geometry is supplied as arrays. Existing
+``MeshObject`` APIs provide pose, scale, color, visibility and removal without
+preparing physics.
 
 Hybrid, FastRT and OfflineRT support these overlays. Offscreen output excludes
 them by default; explicit camera-group opt-in enables supported targets. Hybrid
