@@ -137,6 +137,29 @@ def test_franka_distant_seed_roundtrip(solver: FEPSolver, with_tcp: bool) -> Non
     assert bool((distances.min(dim=-1).values < 5e-3).all())
 
 
+def test_fixed_q7_all_solutions_preserves_branches_when_seed_is_duplicate(
+    solver: FEPSolver,
+) -> None:
+    # Widen the limits for this algorithm fixture so all eight geometric
+    # branches are admissible, including both elbow configurations.
+    limits = torch.full((7,), torch.pi, device=solver.device)
+    solver.set_qpos_limits(-limits, limits)
+    seed = limits.new_tensor([[0.2, -0.4, 0.3, -1.5, 0.2, 1.2, 0.5]])
+    target = solver.get_fk(seed)
+    valid, joints = solver.get_ik(target, seed, return_all_solutions=True)
+
+    assert valid.shape == (1, 8) and bool(valid.all())
+    torch.testing.assert_close(joints[:, 0], seed, atol=0, rtol=0)
+    _assert_pose_accuracy(target.expand(8, -1, -1), solver.get_fk(joints[0]))
+    _assert_limits(solver, joints)
+    torch.testing.assert_close(joints[..., 6], seed[:, 6:7].expand(-1, 8))
+    distances = (joints[0, :, None] - joints[0, None, :]).abs().amax(-1)
+    distances.fill_diagonal_(torch.inf)
+    assert float(distances.min()) > 1e-6
+    costs = (joints - seed[:, None]).square().sum(-1)
+    assert bool((costs[:, 1:] >= costs[:, :-1]).all())
+
+
 def test_franka_previous_solution_tracks_motion(solver: FEPSolver) -> None:
     midpoint = solver.get_default_qpos_seed()
     midpoint[1] = 0.5  # A continuous branch away from the shoulder singularity.

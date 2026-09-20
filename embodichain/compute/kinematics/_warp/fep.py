@@ -698,20 +698,21 @@ def select(
         success = wp.isfinite(costs[best])
         costs[best] = wp.float64(wp.inf)
         if count > 1 and success:
-            # Only the all-solutions path needs sorting and deduplication.
-            for previous in range(slot):
-                if valid[row, previous]:
+            # Remove duplicates before selecting the next slot, so a feasible
+            # seed cannot displace a distinct branch from the eight outputs.
+            for branch in range(flags.shape[1]):
+                if wp.isfinite(costs[branch]):
                     maximum = wp.float64(0.0)
                     for i in range(7):
                         maximum = wp.max(
                             maximum,
                             wp.abs(
-                                wp.float64(joints[row, previous, i])
+                                wp.float64(candidates[row, branch, i])
                                 - wp.float64(candidates[row, best, i])
                             ),
                         )
                     if maximum < wp.float64(1e-6):
-                        success = False
+                        costs[branch] = wp.float64(wp.inf)
         valid[row, slot] = success
         for i in range(7):
             value = wp.clamp(seeds[row, i], lower[i], upper[i])
