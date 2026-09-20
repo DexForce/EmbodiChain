@@ -16,17 +16,94 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-import sys
+from dataclasses import dataclass, field, replace
+from types import SimpleNamespace
 import weakref
 
 import numpy as np
 import pytest
 
-from dexsim import spawn
 from dexsim.scene.objects import SpawnedRigidBody
 from embodichain.lab.visualization.protocol import MeshMarkerOverlay
+from embodichain.lab.visualization.markers import _native
 from embodichain.lab.visualization.markers._native import NativeMarkerRenderer
+
+
+# These explicit SDK stand-ins keep consumer transactions testable with the
+# released DexSim wheel. Actual descriptor/native compatibility is covered by
+# the GPU integration tests and DexSim's own contract tests, not this fake.
+@dataclass
+class _SdkGeometryDesc:
+    vertices: np.ndarray
+    triangles: np.ndarray
+
+    @classmethod
+    def mesh(cls, *, vertices: np.ndarray, triangles: np.ndarray):
+        return cls(vertices, triangles)
+
+
+@dataclass
+class _SdkMaterialDesc:
+    name: str
+    base_color: tuple[float, float, float, float] | None = None
+    double_sided: bool | None = None
+    unlit: bool | None = field(default=None, kw_only=True)
+    alpha_mode: str | None = field(default=None, kw_only=True)
+    depth_write: bool | None = field(default=None, kw_only=True)
+
+
+@dataclass
+class _SdkRenderDesc(_SdkGeometryDesc):
+    render_mode: str = field(default="scene", kw_only=True)
+    cast_shadow: bool = field(default=True, kw_only=True)
+    pickable: bool = field(default=True, kw_only=True)
+    material: _SdkMaterialDesc | None = None
+
+    @classmethod
+    def from_geometry(
+        cls,
+        geometry: _SdkGeometryDesc,
+        *,
+        render_mode: str = "scene",
+        cast_shadow: bool = True,
+        pickable: bool = True,
+        material: _SdkMaterialDesc | None = None,
+    ):
+        return cls(
+            geometry.vertices,
+            geometry.triangles,
+            render_mode=render_mode,
+            cast_shadow=cast_shadow,
+            pickable=pickable,
+            material=material,
+        )
+
+
+@dataclass
+class _SdkMeshObjectDesc:
+    name: str
+    renders: list[_SdkRenderDesc] = field(default_factory=list)
+    physics: object | None = None
+    per_env: bool = True
+    collisions: list[object] = field(default_factory=list)
+    scale: np.ndarray = field(default_factory=lambda: np.ones(3, dtype=np.float32))
+
+
+@pytest.fixture(autouse=True)
+def sdk_descriptors(monkeypatch):
+    sdk = SimpleNamespace(
+        GeometryDesc=_SdkGeometryDesc,
+        RenderDesc=_SdkRenderDesc,
+        MaterialDesc=_SdkMaterialDesc,
+        MeshObjectDesc=_SdkMeshObjectDesc,
+    )
+
+    def import_sdk(name):
+        assert name == "dexsim.spawn"
+        return sdk
+
+    monkeypatch.setattr(_native, "import_module", import_sdk)
+    return sdk
 
 
 class NativeActor:
@@ -55,7 +132,7 @@ class NativeActor:
 
 
 class Scene:
-    """Fake the Scene resource boundary, retaining real descriptors/handles."""
+    """Fake Scene allocation/removal while retaining real stable handles."""
 
     def __init__(self):
         self.handles = {}
@@ -66,7 +143,7 @@ class Scene:
 
     def add_mesh_object(self, desc, *, arena_name="default"):
         assert arena_name == "default"
-        assert isinstance(desc, spawn.MeshObjectDesc)
+        assert isinstance(desc, _SdkMeshObjectDesc)
         if self.fail:
             raise RuntimeError("upload failed")
         self.created += 1
@@ -140,13 +217,13 @@ def test_mesh_descriptor_requests_overlay_without_physics():
     desc = handle.desc
     assert desc.physics is None and desc.collisions == [] and not desc.per_env
     (render,) = desc.renders
-    assert isinstance(render, spawn.RenderDesc)
+    assert isinstance(render, _SdkRenderDesc)
     np.testing.assert_array_equal(render.vertices, snapshot.vertices)
     np.testing.assert_array_equal(render.triangles, snapshot.faces)
     assert render.render_mode == "overlay"
     assert render.cast_shadow is False and render.pickable is False
     material = render.material
-    assert isinstance(material, spawn.MaterialDesc)
+    assert isinstance(material, _SdkMaterialDesc)
     assert material.base_color == snapshot.color
     assert material.unlit and material.alpha_mode == "blend"
     assert material.depth_write is False and material.double_sided
@@ -272,7 +349,10 @@ def test_missing_scene_capability_fails_before_allocation(monkeypatch):
 
 
 def test_missing_spawn_module_fails_with_installation_guidance(monkeypatch):
-    monkeypatch.setitem(sys.modules, "dexsim.spawn", None)
+    def missing_sdk(name):
+        raise ModuleNotFoundError(name)
+
+    monkeypatch.setattr(_native, "import_module", missing_sdk)
     with pytest.raises(RuntimeError, match="Install a DexSim build"):
         NativeMarkerRenderer(Scene())
 
@@ -298,3 +378,24 @@ def test_updates_follow_stable_handle_after_native_rebind():
     np.testing.assert_array_equal(old_native.pose[:3, 3], [1, 2, 3])
     renderer.close()
     assert not handle.is_valid
+
+
+@pytest.mark.parametrize(
+    "owner, field_name",
+    [
+        ("RenderDesc", "render_mode"),
+        ("MaterialDesc", "unlit"),
+        ("MaterialDesc", "alpha_mode"),
+        ("MaterialDesc", "depth_write"),
+        (None, "MeshObjectDesc"),
+    ],
+)
+def test_missing_descriptor_capability_fails_before_allocation(
+    monkeypatch, sdk_descriptors, owner, field_name
+):
+    target = sdk_descriptors if owner is None else getattr(sdk_descriptors, owner)
+    monkeypatch.delattr(target, field_name)
+    scene = Scene()
+    with pytest.raises(RuntimeError, match="Install a DexSim build"):
+        NativeMarkerRenderer(scene)
+    assert not scene.handles
