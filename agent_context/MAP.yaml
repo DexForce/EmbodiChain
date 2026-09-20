@@ -360,3 +360,16 @@ topics:
     embodichain/cli/workspace_cache.py, tests/sim/motion/workspace/]
   related_topics: [robot-system, ik-solvers, randomization, motion-planning]
   status: active
+- id: mesh-affordance
+  title: Mesh Contact Affordance
+  aliases: [mesh affordance, mesh contact affordance, 抓取区域评分, 网格可供性, 杯子把手分割]
+  keywords: [MeshAffordanceCfg, analyze_mesh_affordance, prepare_mesh_affordance, score_mesh_affordance,
+    face_scores_to_vertices, partition_surface, vertex grasp score, Codex harness]
+  paths: [topics/mesh-affordance/mesh-affordance.md]
+  source_of_truth:
+  - embodichain/toolkits/mesh_affordance/
+  - embodichain/compute/geometry/surface.py
+  watch_paths: [embodichain/toolkits/mesh_affordance/, embodichain/compute/geometry/surface.py,
+    tests/toolkits/mesh_affordance/, tests/compute/geometry/test_surface.py]
+  related_topics: [data-assets, atomic-actions]
+  status: active
