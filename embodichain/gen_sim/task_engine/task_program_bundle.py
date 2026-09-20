@@ -268,6 +268,7 @@ def generate_task_program_bundle(
         / "dual_arm_trajectory_verified.yaml"
     )
     _bind_embodiment_to_scene(embodiment_payload, table_top_z=scene.table_top_z)
+    _calibrate_task_gripper_effort(embodiment_payload, scene, selected_graph)
     if articulation_bindings:
         # Calibrate this generated E6 deployment, not shared robot defaults.
         stiffness = embodiment_payload["simulation"]["joint_drive_props"]["stiffness"]
@@ -315,6 +316,7 @@ def generate_task_program_bundle(
             program_id=program_id,
             scene_contract=scene_contract,
             collision_world=policy_payload["motion"]["strategy"] == "motion_gen",
+            embodiment=embodiment_payload,
         ),
     )
     scene_payload = _scene_payload(scene, program_id=program_id)
@@ -575,6 +577,37 @@ def _task_stability_payload(
                     "displacement": route["world_displacement"],
                     "position_tolerance": _RELATIVE_POSITION_TOLERANCE,
                 }
+                if (
+                    node["task_type"] == "E1"
+                    and arguments["relation"] == "on"
+                    and reference_id != "table"
+                ):
+                    bottom, _ = _vertical_mesh_bounds(
+                        objects[object_id], axis_aligned=False
+                    )
+                    _, top = _vertical_mesh_bounds(
+                        objects[reference_id], axis_aligned=False
+                    )
+                    presets[f"gen_sim.{node['id']}.stable"].update(
+                        kind="stack",
+                        local_axis=_initial_local_up(objects[object_id]),
+                        reference_axis=_initial_local_up(objects[reference_id]),
+                        object_bottom=bottom,
+                        reference_top=top,
+                        reference_half_extents=[
+                            max(
+                                0.001,
+                                _horizontal_half_extent(
+                                    objects[reference_id],
+                                    world_axis=axis,
+                                    axis_aligned=False,
+                                )
+                                - 0.002,
+                            )
+                            for axis in (0, 1)
+                        ],
+                        minimum_alignment=math.cos(math.pi / 18.0),
+                    )
         elif (
             call["call_id"] == _ALIGN_HELD_CALL_ID
             and node["task_type"] == "E4"
@@ -849,11 +882,12 @@ def _integration_payload(
     program_id: str,
     scene_contract: str,
     collision_world: bool = False,
+    embodiment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
     articulation_bindings = graph_bindings(graph, scene)
     referenced_objects: set[str] = set()
-    inside_routes: list[tuple[str, str, str]] = []
+    inside_routes: list[tuple[str, str, str, str]] = []
     on_routes: list[tuple[str, str, str]] = []
     coordinated_routes: list[tuple[str, str, tuple[float, float, float]]] = []
     coordinated_hold_routes: list[tuple[str, str, tuple[float, float, float]]] = []
@@ -909,7 +943,14 @@ def _integration_payload(
                 )
             container_id, object_id = parts[1], parts[2]
             referenced_objects.add(container_id)
-            inside_routes.append((affordance, container_id, object_id))
+            inside_routes.append(
+                (
+                    affordance,
+                    container_id,
+                    object_id,
+                    str(call.get("resources", {}).get("primary", "left")),
+                )
+            )
         if call["kind"] == "place" and "on" in call:
             affordance = str(call["on"])
             parts = affordance.split("__")
@@ -1118,16 +1159,26 @@ def _integration_payload(
             if entity_id in axis_align_objects | pour_objects | upright_move_objects:
                 grasp_affordance["internal_axis"] = _longest_local_axis(source)
             affordances.append(grasp_affordance)
-        for affordance_id, container_id, object_id in inside_routes:
+        for affordance_id, container_id, object_id, resource in inside_routes:
             if container_id != entity_id:
                 continue
             lateral = 0.06 if "apple" in object_id else -0.06
+            target = _container_target_pose(
+                source,
+                scene_objects[object_id],
+                resource=resource,
+                embodiment=embodiment,
+            )
             affordances.append(
                 {
                     "entity_id": affordance_id,
                     "kind": "container",
                     "native_name": affordance_id,
-                    "object_target_pose": _translation_pose(lateral, 0.0, 0.008),
+                    "object_target_pose": (
+                        target
+                        if target is not None
+                        else _translation_pose(lateral, 0.0, 0.008)
+                    ),
                     "release_clearance": 0.12,
                 }
             )
@@ -1733,6 +1784,62 @@ def _grasp_contact_clearances(
     }
 
 
+def _calibrate_task_gripper_effort(
+    embodiment: dict[str, Any], scene: Any, graph: SemanticTaskGraph
+) -> None:
+    """Bound grip preload only for qualified <=10 g rigid E1/E2 recipes.
+
+    The canonical Robotiq keeps its complete closing range. Unknown/heavier
+    payloads and other recipe families retain their declared actuator limits.
+    This does not change the imported mechanism or any collision properties.
+    """
+    if any(node["task_type"] not in {"E1", "E2"} for node in graph["nodes"]):
+        return
+    picks = []
+    for node in graph["nodes"]:
+        call = node["call"]
+        if call["kind"] == "pick":
+            object_id = call["object"]
+        elif call["kind"] == "registered" and (
+            call["call_id"] == _PICK_CALL_ID
+            or call["call_id"].startswith("gen_sim.pick.")
+        ):
+            object_id = call["arguments"]["object"]
+        else:
+            continue
+        picks.append((object_id, call.get("resources", {}).get("primary", "left")))
+    if not picks:
+        return
+    objects = {item["uid"]: item for item in scene.rigid_objects}
+    for object_id, _ in picks:
+        mass = (
+            objects.get(object_id, {})
+            .get("attrs", {})
+            .get("mass_props", {})
+            .get("mass")
+        )
+        if (
+            isinstance(mass, bool)
+            or not isinstance(mass, (int, float))
+            or not math.isfinite(mass)
+            or not 0.0 < mass <= 0.01
+        ):
+            return
+    limits = embodiment["simulation"]["joint_drive_props"].get("max_effort")
+    if not isinstance(limits, dict):
+        return
+    grasp_parts = {
+        resource["resource_id"]: endpoint["control_part"]
+        for resource in embodiment["skill_profile"]["resources"]
+        for endpoint in resource["endpoints"]
+        if endpoint["endpoint_id"] == "grasp"
+    }
+    for resource in {resource for _, resource in picks}:
+        part = grasp_parts[resource]
+        if part in limits:
+            limits[part] = min(float(limits[part]), 0.5)
+
+
 def _calibrate_task_gripper_opening(embodiment: dict[str, Any]) -> None:
     """Bound this deployment's grasp proposals by the mounted pad clearance."""
     generators = embodiment["skill_profile"]["runtime_services"][
@@ -1778,7 +1885,7 @@ def _relative_place_route_payloads(
     axis_align_objects: set[str] = set()
     selectors: set[tuple[str, str, str]] = set()
     stack_selectors: set[tuple[str, str, str]] = set()
-    upright_targets: dict[tuple[str, str, str], tuple[str, str]] = {}
+    upright_targets: dict[tuple[str, str, str], str] = {}
     for node in graph["nodes"]:
         call = node["call"]
         if call["kind"] != "registered":
@@ -1805,10 +1912,7 @@ def _relative_place_route_payloads(
                         str(arguments["reference"]),
                         str(arguments["relation"]),
                     )
-                ] = (
-                    f"{node['task_instance_id']}_upright_target",
-                    str(call["resources"]["primary"]),
-                )
+                ] = f"{node['task_instance_id']}_upright_target"
             selectors.add(
                 (
                     str(arguments["object"]),
@@ -1826,7 +1930,7 @@ def _relative_place_route_payloads(
                 "Bind the named relation anchor, not the surrounding tabletop region."
             )
         if selector in upright_targets:
-            target_id, resource = upright_targets[selector]
+            target_id = upright_targets[selector]
             target = _single_target_pose(graph, target_id)
             reference_position = _position(scene_objects[reference_id])
             displacement = [
@@ -1853,18 +1957,6 @@ def _relative_place_route_payloads(
                 "reference_entity_id": reference_id,
                 "relation": relation,
                 "world_displacement": displacement,
-                **(
-                    {
-                        "world_yaw_offset": (
-                            math.pi / 3.0 if resource == "right" else -math.pi / 3.0
-                        )
-                    }
-                    if selector in upright_targets
-                    and not settled
-                    and abs(_longest_local_axis(scene_objects[object_id])[2])
-                    < 1.0 - 1.0e-6
-                    else {}
-                ),
             }
         )
     return routes
@@ -2033,13 +2125,7 @@ def _horizontal_half_extent(
         dominant_axis = int(np.argmax(np.ptp(vertices, axis=0)))
         horizontal_extents = np.delete(np.ptp(vertices, axis=0), dominant_axis)
         return 0.5 * float(horizontal_extents.max())
-    from scipy.spatial.transform import Rotation
-
-    world_vertices = Rotation.from_euler(
-        "XYZ",
-        source.get("init_rot", [0.0, 0.0, 0.0]),
-        degrees=True,
-    ).apply(vertices)
+    world_vertices = vertices @ _initial_rotation(source).T
     return 0.5 * float(np.ptp(world_vertices[:, world_axis]))
 
 
@@ -2074,6 +2160,24 @@ def _dominant_local_axis(source: dict[str, Any]) -> list[float]:
     return axis
 
 
+def _initial_rotation(source: dict[str, Any]) -> np.ndarray:
+    """Use the authoritative matrix, or the prepared scene's intrinsic angles."""
+    from scipy.spatial.transform import Rotation
+
+    if source.get("init_local_pose") is not None:
+        rotation = np.asarray(source["init_local_pose"], dtype=float)[:3, :3]
+    else:
+        rotation = Rotation.from_euler(
+            "XYZ", source.get("init_rot", [0.0, 0.0, 0.0]), degrees=True
+        ).as_matrix()
+    return rotation
+
+
+def _initial_local_up(source: dict[str, Any]) -> list[float]:
+    """Preserve the source's vertical orientation without fixing its heading."""
+    return _initial_rotation(source)[2].tolist()
+
+
 def _vertical_mesh_bounds(
     source: dict[str, Any],
     *,
@@ -2085,13 +2189,7 @@ def _vertical_mesh_bounds(
         axis = np.asarray(_dominant_local_axis(source), dtype=np.float64)
         heights = vertices @ axis
     else:
-        from scipy.spatial.transform import Rotation
-
-        heights = Rotation.from_euler(
-            "XYZ",
-            source.get("init_rot", [0.0, 0.0, 0.0]),
-            degrees=True,
-        ).apply(vertices)[:, 2]
+        heights = vertices @ np.asarray(_initial_local_up(source))
     return float(heights.min()), float(heights.max())
 
 
@@ -2414,6 +2512,62 @@ def _upright_target_quaternion(
         )
     target_quaternion = quat_from_matrix(target_rotation)
     return [float(value) for value in target_quaternion]
+
+
+def _container_target_pose(
+    container: dict[str, Any],
+    child: dict[str, Any],
+    *,
+    resource: str,
+    embodiment: dict[str, Any] | None,
+) -> list[float] | None:
+    """Ground an arm-side landing on a measured, nearly level container floor."""
+    if embodiment is None:
+        return None
+    import trimesh
+    from scipy.spatial.transform import Rotation
+
+    from ._task_program.container_targets import select_container_landing
+
+    simulation = embodiment["simulation"]
+    mount = next(
+        (
+            item
+            for item in simulation.get("urdf_cfg", {}).get("components", ())
+            if item["component_type"] == f"{resource}_arm"
+        ),
+        None,
+    )
+    if mount is None:
+        return None
+
+    def pose(source: dict[str, Any]) -> np.ndarray:
+        if source.get("init_local_pose") is not None:
+            return np.asarray(source["init_local_pose"], dtype=float)
+        result = np.eye(4)
+        result[:3, :3] = Rotation.from_euler(
+            "XYZ", source.get("init_rot", [0.0, 0.0, 0.0]), degrees=True
+        ).as_matrix()
+        result[:3, 3] = _position(source)
+        return result
+
+    container_pose = pose(container)
+    container_rotation = container_pose[:3, :3]
+    if container_rotation[2, 2] < math.cos(math.radians(5.0)):
+        return None
+    robot_pose = pose(simulation)
+    root_world = (
+        robot_pose[:3, :3] @ np.asarray(mount["transform"], dtype=float)[:3, 3]
+        + robot_pose[:3, 3]
+    )
+    root_local = container_rotation.T @ (root_world - container_pose[:3, 3])
+    mesh = trimesh.load(str(container["shape"]["fpath"]), force="scene").to_geometry()
+    mesh.vertices = _mesh_vertices(container)
+    child_vertices = (
+        _mesh_vertices(child) @ (container_rotation.T @ pose(child)[:3, :3]).T
+    )
+    translation = select_container_landing(mesh, child_vertices, root_local)
+    return None if translation is None else _translation_pose(*translation)
 
 
 def _support_target_pose(
