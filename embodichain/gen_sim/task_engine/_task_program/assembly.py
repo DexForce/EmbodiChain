@@ -135,6 +135,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         constraints: dict[str, StabilityConstraint],
         articulation_bindings: tuple = (),
         pour_receivers: dict[str, str] | None = None,
+        drawer_routes: tuple = (),
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -164,6 +165,34 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 articulation_bindings,
                 self.step_dt,
             )
+        self._drawers = ()
+        if drawer_routes:
+            from .drawer_runtime import DrawerObservation
+
+            self._drawers = tuple(
+                DrawerObservation(route, self._simulation) for route in drawer_routes
+            )
+
+    def create_atomic_action_engine(self, profile: Any) -> Any:
+        if self._drawers:
+            from .drawer_runtime import DrawerPlacementEngine
+
+            engine = DrawerPlacementEngine(
+                self._create_motion_generator(),
+                control_profiles=profile.action_control_profiles(),
+                grasp_pose_generators=self._grasp_pose_generators,
+                drawer_observations=self._drawers,
+            )
+            self.task_program_registration.validate_engine(engine)
+        else:
+            engine = super().create_atomic_action_engine(profile)
+        from .actions import GenSimMoveHeldObject, GenSimPour
+
+        engine.register(GenSimMoveHeldObject(), replace=True)
+        engine.register(GenSimPour(self._pour_receivers), replace=True)
+        self.task_program_registration.validate_engine(engine)
+        return engine
+        return engine
 
     def registration_owned_segment_policy_ports(self) -> tuple[Any, Any]:
         return self._task_post_port, self.segment_policy_port
@@ -189,6 +218,7 @@ class TaskAdapterFactory:
     cartesian_approaches: bool = False
     articulation_bindings: tuple = ()
     pour_receivers: tuple[tuple[str, str], ...] = ()
+    drawer_routes: tuple = ()
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Return the exact shared adapter; no Session or Bridge is overridden."""
@@ -250,6 +280,18 @@ class TaskAdapterFactory:
                     planner_cfg=ToppraPlannerCfg(robot_uid=environment.robot.uid)
                 )
             )
+            if self.drawer_routes:
+                from .drawer_curobo import DrawerMotionGenerator
+
+                motion_factory = lambda: DrawerMotionGenerator(
+                    MotionGenCfg(
+                        planner_cfg=ToppraPlannerCfg(
+                            robot_uid=environment.robot.uid,
+                            sim_instance_id=environment.sim.instance_id,
+                        )
+                    ),
+                    simulation=environment.sim,
+                )
         grasp_generators = {name: create() for name, create in self.grasp_factories}
         grasp_generators = install_grasp_filters(
             self.registration,
@@ -295,6 +337,7 @@ class TaskAdapterFactory:
             constraints=dict(self.constraints),
             articulation_bindings=self.articulation_bindings,
             pour_receivers=dict(self.pour_receivers),
+            drawer_routes=self.drawer_routes,
         )
         return factory.create_adapter()
 
@@ -316,7 +359,8 @@ def load_deployment(
     payload = load_config(path)
     if (
         type(payload) is not dict
-        or set(payload) != {"schema_version", "presets"}
+        or not {"schema_version", "presets"}.issubset(payload)
+        or set(payload) - {"schema_version", "presets", "drawers"}
         or payload["schema_version"] != "gen_sim_task_constraints/v1"
     ):
         raise ValueError(
@@ -331,6 +375,13 @@ def load_deployment(
     constraints = {
         name: StabilityConstraint.decode(cfg) for name, cfg in presets.items()
     }
+    from .drawer_binding import DrawerRoute
+
+    if type(payload.get("drawers", [])) is not list:
+        raise ValueError("Drawer routes must be a list.")
+    drawers = tuple(DrawerRoute.decode(value) for value in payload.get("drawers", []))
+    if len({route.affordance for route in drawers}) != len(drawers):
+        raise ValueError("Drawer routes must have unique affordance identities.")
     settle_presets = dict(base.integration.registration.settle_presets)
     if set(settle_presets) & set(constraints):
         raise ValueError("Task stability presets cannot replace core settling presets.")
@@ -371,6 +422,21 @@ def load_deployment(
                         "Articulation policies cannot replace existing presets."
                     )
                 settle_presets[name] = settle_presets["rigid_object"].snapshot()
+    for route in drawers:
+        if route.binding not in articulation_bindings:
+            raise ValueError(
+                "Drawer placement and E6 must share the exact part binding."
+            )
+        containers = base.integration.registration.scene_binding.containers
+        if not any(
+            c.entity_id == route.affordance
+            and c.parent_id == route.binding.link_id
+            and c.release_clearance == 0
+            for c in containers
+        ):
+            raise ValueError(
+                "Drawer container must belong to the declared live E6 link."
+            )
     # Registration materializes built-in grounders during construction; feeding
     # them back through replace would duplicate placement routes.
     registration = replace(
@@ -449,6 +515,18 @@ def load_deployment(
     )
     fingerprint = canonical_hash(
         {
+            **(
+                {"drawer_curobo_revision": 1}
+                if any(
+                    item.get("steps", {})
+                    .get("call", {})
+                    .get("arguments", {})
+                    .get("target")
+                    in {route.affordance for route in drawers}
+                    for item in program["program"]["items"]
+                )
+                else {}
+            ),
             "adapter_contract": ADAPTER_CONTRACT,
             "grasp_filter_revision": GRASP_FILTER_REVISION,
             "motion_validation_revision": MOTION_VALIDATION_REVISION,
@@ -471,6 +549,7 @@ def load_deployment(
         cartesian_approaches,
         articulation_bindings,
         pour_receivers,
+        drawers,
     )
     integration = replace(
         base.integration,

@@ -355,6 +355,7 @@ class SemanticTaskPlanner:
                     else _resource(requested, field="required_arm")
                 )
                 relation = str(step.get("relation", "none"))
+                target_part = _bound_part(step, "target", bindings, steps_by_id)
                 calls = []
                 if (
                     held_by.get(object_id) == resource
@@ -399,6 +400,8 @@ class SemanticTaskPlanner:
                     relation=relation,
                     resource=resource,
                 )
+                if relation == "inside" and target_part is not None:
+                    place_call["inside"] += f"__{target_part}"
                 if (
                     relation in {"on", "above"}
                     and object_id in upright_objects
@@ -477,16 +480,7 @@ class SemanticTaskPlanner:
                     if requested in {"auto", "none"}
                     else _resource(requested, field="required_arm")
                 )
-                part_id = bindings["role_bindings"].get(f"{step_id}.object")
-                if part_id is None:
-                    selector = step.get("object", {})
-                    source_step = (
-                        selector.get("step_id")
-                        if isinstance(selector, Mapping)
-                        else None
-                    )
-                    if source_step:
-                        part_id = bindings["role_bindings"].get(f"{source_step}.object")
+                part_id = _bound_part(step, "object", bindings, steps_by_id)
                 calls = recipe(
                     object_id,
                     str(step["target_state"]),
@@ -976,6 +970,27 @@ def _park_call(resource: str) -> dict[str, Any]:
 
 def _inside_affordance(container_id: str, object_id: str) -> str:
     return f"inside__{container_id}__{object_id}"
+
+
+def _bound_part(
+    step: Mapping[str, Any],
+    role: str,
+    bindings: RoleBindings,
+    steps_by_id: Mapping[str, Mapping[str, Any]],
+) -> str | None:
+    """Carry native part identity through result references, not just object IDs."""
+    seen: set[str] = set()
+    while True:
+        if step["id"] in seen:
+            raise ValueError("Cyclic articulation part reference.")
+        seen.add(step["id"])
+        part = bindings["role_bindings"].get(f"{step['id']}.{role}")
+        if part is not None:
+            return part
+        selector = step.get(role, {})
+        if selector.get("kind") != "step_result":
+            return None
+        step, role = steps_by_id[selector["step_id"]], "object"
 
 
 def _step_success(success_spec: Mapping[str, Any], step_id: str) -> dict[str, Any]:

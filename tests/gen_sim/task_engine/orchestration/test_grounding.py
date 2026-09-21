@@ -430,6 +430,33 @@ def test_part_grounding_selects_only_catalog_ids() -> None:
     assert result == {"slide.object": "part_right"}
 
 
+def test_inside_target_uses_the_same_part_catalog_as_slide() -> None:
+    intent = {
+        "steps": [
+            {
+                "id": "place",
+                "task_type": "E1",
+                "relation": "inside",
+                "target": _selector("top drawer"),
+            }
+        ]
+    }
+    result = ground_articulation_parts(
+        "put cube in top drawer",
+        intent,
+        {"place.target": ["cabinet"]},
+        {
+            "cabinet": [
+                {"part_id": "part_top", "vertical_rank": "top"},
+                {"part_id": "part_bottom", "vertical_rank": "bottom"},
+            ]
+        },
+        "test-model",
+        lambda **kw: pytest.fail("Explicit vertical selection must not call a model"),
+    )
+    assert result == {"place.target": "part_top"}
+
+
 def test_part_grounding_uses_vertical_geometry_over_preselection() -> None:
     intent = {
         "steps": [
