@@ -1,0 +1,14 @@
+{
+  "base_description": "树状支架",
+  "assemble_description": "马克杯",
+  "action_description": "倒扣",
+  "output_dir": "../../../../outputs/assemble/tree_mug",
+  "codex": {
+    "model": null,
+    "max_turns": 10,
+    "timeout_seconds": 300
+  },
+  "validation": {
+    "collision": "visacd"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "base_url": "https://api.deepseek.com",
+  "api_key": "REPLACE_WITH_YOUR_DEEPSEEK_API_KEY",
+  "model": "deepseek-flash"
+}
