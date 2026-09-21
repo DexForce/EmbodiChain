@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "status": "error",
+  "code": {
+    "revision": "c101a8051d5b6241a01c3bf5936c7fba9ed540ff",
+    "dirty": true
+  },
+  "deployment": "task.ur5.objective.yaml",
+  "seed": 0,
+  "environment": {
+    "python": "3.11",
+    "physics": "default",
+    "device": "cuda",
+    "num_envs": 1
+  },
+  "error": {
+    "type": "TypeError",
+    "message": "RigidBodyPhysicsDesc.dynamic() got an unexpected keyword argument 'com_quaternion'"
+  },
+  "results": [],
+  "qualification": "Startup failed before rollout; no physical success/failure was measured.",
+  "component_hashes": {
+    "task.ur5.objective.yaml": "d90446a7c2465d855e06cd5c855a88abaac9531e822cb5681a085cebade34a69",
+    "env.yaml": "035d3b862331b576a13368ac488d41aafdb2818ff07ce280e0e0eedfb886ccfe",
+    "../../../components/embodiments/ur5_dh_pgi_140_80.yaml": "4c0b0e7a9996c2be4f4edc0c70194b3d7be32146cd561be29820a50a5149af0c",
+    "objective.yaml": "2bed189685b1a59a172835eb78be868b4c4566bd7aab9d6d575d1db847d22282",
+    "task_program/program.yaml": "8651e7f0fe776f86450743f0e700f4e09d2444a6d2bd43d8710fc62b292e2891",
+    "task_program/integration.yaml": "403395ff1c873304afb83ad2f66cc605bd8b7dde3626de3677f6524190f15706",
+    "../../../components/execution_policies/trajectory_open_loop.yaml": "ff85fcd8e99b121e6d4fa907489623180054bccba4ffa24f2c5990e2ec65b64c"
+  },
+  "reproduce": "python -m embodichain.lab.scripts.evaluate_task_objective --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.objective.yaml --output-dir objective-run --seed 0 --num_envs 1 --headless --device cuda"
+}
