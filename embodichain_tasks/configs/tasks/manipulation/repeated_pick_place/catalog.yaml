@@ -12,6 +12,3 @@ deployments:
     config: task.franka.newton.yaml
   ur5_newton:
     config: task.ur5.newton.yaml
-  ur5_objective:
-    config: task.ur5.objective.yaml
-    validation: validation/default-startup.json

@@ -23,8 +23,7 @@ Environment catalog
 Use ``embodichain list-task --category manipulation`` to discover deployments
 and ``embodichain show-task embodichain_tasks:repeated_pick_place`` to inspect
 their configurations, supported uses and validation records. See
-:doc:`/guides/task_catalog` for static gallery export, task-local metadata and
-the optional independent physical-objective evaluation workflow.
+:doc:`/guides/task_catalog` for static gallery export and task-local metadata.
 
 .. list-table::
    :header-rows: 1
@@ -42,9 +41,6 @@ the optional independent physical-objective evaluation workflow.
    * - Manipulation
      - ``TaskProgramRepeatedPickPlace-v1``
      - ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml``
-   * - Manipulation
-     - ``TaskProgramRepeatedPickPlace-UR5-Objective-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.objective.yaml``
    * - Manipulation
      - ``TaskProgramRepeatedPickPlace-Newton-v1``
      - ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.newton.yaml``

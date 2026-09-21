@@ -50,10 +50,9 @@ Read this when the request needs these details. [Topic overview](env-framework.m
   holds, and abort-safe holds retain the normal Gym lifecycle.
 - A structured controller `TensorDict` may carry auxiliary fields such as
   `ik_success`, but it must contain at least one supported control key.
-- Explicit controller actions and position-velocity expert actions are encoded
-  only after validation and demo row masking, so recorded targets match the
-  commands actually sent to the controller. A missing qvel in position-velocity
-  mode is an error before physics advances.
+- Position-velocity expert actions are canonicalized only after validation and
+  demo row masking, so recorded targets match the commands actually sent to the
+  controller. A missing qvel is an error before physics advances.
 
 ### Task Program completion (`embodied_env.py`, `task_program/bridge.py`)
 
@@ -138,7 +137,6 @@ reset(options)
   │     ├── event_manager.apply("reset", env_ids)
   │     ├── observation_manager.reset(env_ids)
   │     └── reward_manager.reset(env_ids)
-  ├── _reset_physical_objective(env_ids) # after persistence and reset events
   ├── _elapsed_steps[env_ids] = 0
   └── return get_obs(), get_info()
 ```
@@ -154,7 +152,6 @@ step(action)
   ├── _step_action(action)           # subclass sends control to sim
   ├── sim.update(dt, sim_steps_per_control)
   ├── _update_sim_state()            # event_manager "interval" mode
-  ├── _update_physical_objective()    # optional, once per control step
   ├── get_obs()
   │     ├── robot.get_proprioception()[:, active_joint_ids]
   │     ├── _get_sensor_obs()
@@ -209,31 +206,12 @@ from the event config before the event manager is created.
 
 ## Recording & Replay
 
-### Independent measured objectives
-
-`EmbodiedEnv.physical_objective` is optional. Its per-row ordered milestone
-history advances once after interval events, while final-region truth can become
-false again. `get_info()["physical_objective"]` clones tensor snapshots;
-`get_demo_episode_metadata()` includes a JSON-compatible row snapshot. Querying
-either does not advance progress. Reset clears only selected rows after existing
-recording consumption and episode reset logic. These results never overwrite
-`compute_task_state()`, `is_task_success()`, segment validation or dataset decisions.
-Stable pose/velocity does not prove gripper detachment.
-
-`embodichain.lab.scripts.evaluate_task_objective` runs one explicit deployment
-through the expert bridge and dynamic replay, recording independent outcomes,
-resolved config/component snapshots and actual initial pose variation. It adds an
-explicitly reported settling tail and saves it in the diagnostic replay trajectory
-without extending accepted demonstration segments or rollout counters. This sample
-does not orchestrate multiple experiments or qualify kinematic playback.
-
 `EmbodiedEnv` can record per-object kinematic trajectories and replay them later.
 
 - **Recording**: set `cfg.record_trajectory = True`. A dedicated per-env
   `self._traj_buffer` (TensorDict: `states` = robot root_pose+qpos, articulations,
-  rigid objects; `actions` = the **pre-process** raw policy action in position
-  mode, encoded qpos for an explicit position `ControllerAction`, or effective
-  flat `[qpos, qvel]` targets in position-velocity expert mode) is written each step via
+  rigid objects; `actions` = the **pre-process** action in position mode, or
+  effective flat `[qpos, qvel]` targets in position-velocity expert mode) is written each step via
   `_write_trajectory_step` (called from `_hook_after_sim_step`). A per-env
   `self._traj_steps` counter means **async parallel envs** (different reset times)
   don't corrupt each other. `cfg.trajectory_uids` restricts which non-robot objects
@@ -245,14 +223,9 @@ does not orchestrate multiple experiments or qualify kinematic playback.
   `close()` (best-effort: IO errors warn + skip, never crash the episode).
 - **Replay**: `ReplayWrapper(env, trajectory, mode)` wraps any `EmbodiedEnv`.
   `kinematic` disables physics and writes recorded states (obs only, exact
-  reproduction); `dynamic` feeds raw-policy actions through `env.step` so the
-  `ActionManager` re-applies the transform. An explicit trajectory metadata
-  `action_kind: expert_controller` instead validates the expert schema, joint
-  layout and cadence and decodes `ControllerAction`, bypassing only pre terms.
-  Missing `action_kind` retains legacy raw-policy semantics; expert schema
-  metadata alone is insufficient to identify controller actions. Objective-enabled
-  dynamic replay currently requires one row, full resets and stopping at the
-  recorded horizon. `control` exposes `go_to_step(step)` for O(1) scrubbing. The replay
+  reproduction); `dynamic` feeds recorded actions through `env.step` so the
+  `ActionManager` re-applies the transform (faithful even with delta/eef_pose
+  actions); `control` exposes `go_to_step(step)` for O(1) scrubbing. The replay
   env must use the same robot/objects/`actions` config as the recording env.
 - **Decoupled from `rollout_buffer`**: the trajectory buffer is separate from the
   shared `rollout_buffer` (obs/actions/rewards) used by LeRobot/RL.
