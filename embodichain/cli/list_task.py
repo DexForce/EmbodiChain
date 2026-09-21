@@ -19,9 +19,14 @@
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
+import sys
 from collections.abc import Sequence
 from itertools import groupby
 from pathlib import Path
+
+from prettytable import PrettyTable, TableStyle
 
 from embodichain.cli._task_catalog import (
     _CAPABILITY_ORDER,
@@ -56,10 +61,16 @@ def _sort_entries(entries) -> list[_EnvironmentListEntry]:
     )
 
 
-def _print_environment_entries(entries: Sequence[_EnvironmentListEntry]) -> None:
-    """Print environment entries as a table with a task-directory tree."""
-    from prettytable import PrettyTable
-
+def _format_environment_entries(
+    entries: Sequence[_EnvironmentListEntry],
+    *,
+    color: bool | None = None,
+    width: int | None = None,
+) -> str:
+    """Format environment entries as a table with a task-directory tree."""
+    if color is None:
+        color = "NO_COLOR" not in os.environ and sys.stdout.isatty()
+    width = max(80, min(width or shutil.get_terminal_size((100, 24)).columns, 120))
     task_groups = [
         (task_path, list(task_entries))
         for task_path, task_entries in groupby(
@@ -68,7 +79,13 @@ def _print_environment_entries(entries: Sequence[_EnvironmentListEntry]) -> None
         )
     ]
     table = PrettyTable()
-    table.title = f"Tasks ({len(task_groups)}) / Environments ({len(entries)})"
+    table.set_style(TableStyle.SINGLE_BORDER)
+    task_label = "task" if len(task_groups) == 1 else "tasks"
+    environment_label = "environment" if len(entries) == 1 else "environments"
+    table.title = (
+        "EmbodiChain · Task Catalog · "
+        f"{len(task_groups)} {task_label} · {len(entries)} {environment_label}"
+    )
     table.field_names = [
         "Task",
         "Environment ID",
@@ -77,6 +94,22 @@ def _print_environment_entries(entries: Sequence[_EnvironmentListEntry]) -> None
         "Config",
     ]
     table.align = "l"
+    available_width = width - 16
+    task_width = max(10, int(available_width * 0.17))
+    environment_width = max(14, int(available_width * 0.23))
+    embodiment_width = max(10, int(available_width * 0.17))
+    capability_width = max(14, int(available_width * 0.23))
+    table.max_width = {
+        "Task": task_width,
+        "Environment ID": environment_width,
+        "Embodiment": embodiment_width,
+        "Capability": capability_width,
+        "Config": available_width
+        - task_width
+        - environment_width
+        - embodiment_width
+        - capability_width,
+    }
     active_categories: tuple[str, ...] = ()
     for group_index, (task_path, task_entries) in enumerate(task_groups):
         categories = task_path[:-1]
@@ -113,7 +146,26 @@ def _print_environment_entries(entries: Sequence[_EnvironmentListEntry]) -> None
         if group_index < len(task_groups) - 1:
             table.add_divider()
         active_categories = categories
-    print(table)
+    lines = table.get_string().splitlines()
+    if lines:
+        lines[0] = f"╭{lines[0][1:-1]}╮"
+        lines[-1] = f"╰{lines[-1][1:-1]}╯"
+    if color:
+        for index, line in enumerate(lines):
+            cells = line.split("│")
+            if len(cells) == 7:
+                for column, code in ((1, "1;36"), (2, "1;32"), (4, "1;33")):
+                    if cells[column].strip():
+                        cells[column] = f"\033[{code}m{cells[column]}\033[0m"
+                lines[index] = "│".join(cells)
+            elif "EmbodiChain ·" in line:
+                lines[index] = f"\033[1;36m{line}\033[0m"
+    return "\n".join(lines)
+
+
+def _print_environment_entries(entries: Sequence[_EnvironmentListEntry]) -> None:
+    """Print environment entries as a table with a task-directory tree."""
+    print(_format_environment_entries(entries))
 
 
 def main(argv: Sequence[str] | None = None) -> None:
