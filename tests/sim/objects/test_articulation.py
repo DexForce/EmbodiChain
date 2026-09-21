@@ -41,13 +41,127 @@ from embodichain.lab.sim.cfg import (
     RigidBodyPhysicsCfg,
 )
 from embodichain.data import get_data_path
+from embodichain.utils.math import matrix_from_quat
 from dexsim.types import ActorType, DriveType
 
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
+USD_DRAWER_PATH = "DrawerUSD/drawer_001.usdc"
 NUM_ARENAS = 10
 NEWTON_EFFORT_TARGET_MODE = 4
 DRIVE_TEST_STIFFNESS = 12.0
 DRIVE_TEST_DAMPING = 4.0
+
+
+def _inertia_tensor(inertia: torch.Tensor, com_pose: torch.Tensor) -> torch.Tensor:
+    """Compare physical inertia independently of the chosen principal axes."""
+    rotation = matrix_from_quat(com_pose[..., 3:])
+    return rotation @ torch.diag_embed(inertia) @ rotation.transpose(-1, -2)
+
+
+@pytest.mark.parametrize("physics", ["default", "newton"])
+def test_usdc_drawer_supports_named_kinematics_and_affordance_geometry(
+    physics: str,
+) -> None:
+    """The three-drawer asset supports geometry and a one-joint Jacobian."""
+    from embodichain.lab.sim.atomic_actions.articulation_geometry import (
+        sample_initial_articulation_geometry,
+    )
+
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            device="cpu",
+            num_envs=1,
+            physics_cfg=physics_cfg_for_backend(physics),
+        )
+    )
+    drawer = None
+    try:
+        drawer = sim.add_articulation(
+            ArticulationCfg(
+                uid="usd_drawer",
+                fpath=get_data_path(USD_DRAWER_PATH),
+                init_pos=(0.0, 0.0, 0.8),
+                asset_physics_mode="overlay",
+                joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
+            )
+        )
+        sim.prepare()
+        assert drawer.pk_chain is not None
+        assert drawer.dof == 3
+        top_joint = drawer.get_parent_joint_chain("top_drawer")[0]
+        assert top_joint.name == "top_slide"
+        assert top_joint.joint_type == "prismatic"
+        assert top_joint.joint_limits == pytest.approx((-0.26, 0.0))
+
+        geometry = sample_initial_articulation_geometry(
+            drawer,
+            "top_drawer",
+            initial_qpos=drawer.cfg.init_qpos,
+            initial_qpos_joint_names=drawer.joint_names,
+            body_scale=drawer.cfg.body_scale,
+            articulation_point_count=128,
+            target_point_count=32,
+        )
+        assert geometry.target_link_point_cloud.shape == (32, 3)
+        assert geometry.articulation_point_cloud.shape == (128, 3)
+        assert geometry.non_target_articulation_point_cloud.shape == (128, 3)
+        torch.testing.assert_close(
+            geometry.prismatic_joint_axis, torch.tensor([0.0, 1.0, 0.0])
+        )
+
+        # Move only the top joint halfway open. Physics publishes link poses
+        # after update; FK itself must evaluate a named state without mutation.
+        top_joint_id = drawer.joint_names.index("top_slide")
+        drawer.set_qpos(torch.tensor([[-0.13]]), joint_ids=[top_joint_id], target=False)
+        sim.update()
+        measured_qpos = drawer.get_qpos().clone()
+        assert measured_qpos[0, top_joint_id] < -0.1
+        fk = drawer.compute_fk(
+            measured_qpos,
+            link_names=drawer.link_names,
+            qpos_joint_names=drawer.joint_names,
+        )
+        root = drawer.get_link_pose("cabinet", to_matrix=True)
+        for index, link_name in enumerate(drawer.link_names):
+            observed = torch.linalg.inv(root) @ drawer.get_link_pose(
+                link_name, to_matrix=True
+            )
+            torch.testing.assert_close(fk[:, index], observed, atol=1e-5, rtol=1e-5)
+
+        # Public state has three sibling joints; top_drawer's serial chain has
+        # only top_slide. Passing the full state directly to PK used to fail.
+        jacobian = drawer.compute_jacobian(
+            drawer.get_qpos(), root_link_name="cabinet", end_link_name="top_drawer"
+        )
+        assert jacobian.shape == (1, 6, 1)
+        torch.testing.assert_close(
+            jacobian[0, :, 0], torch.tensor([0.0, 1.0, 0.0, 0.0, 0.0, 0.0])
+        )
+        epsilon = 0.001
+        delta = torch.zeros_like(measured_qpos)
+        delta[:, top_joint_id] = epsilon
+        plus = drawer.compute_fk(
+            measured_qpos + delta,
+            link_names=["top_drawer"],
+            qpos_joint_names=drawer.joint_names,
+        )
+        minus = drawer.compute_fk(
+            measured_qpos - delta,
+            link_names=["top_drawer"],
+            qpos_joint_names=drawer.joint_names,
+        )
+        torch.testing.assert_close(
+            jacobian[:, :3, 0],
+            (plus[:, 0, :3, 3] - minus[:, 0, :3, 3]) / (2 * epsilon),
+            atol=1e-4,
+            rtol=1e-4,
+        )
+        torch.testing.assert_close(drawer.get_qpos(), measured_qpos)
+    finally:
+        sim.destroy(exit_process=False)
+        del drawer
+        SimulationManager.flush_cleanup_queue()
 
 
 def _assert_newton_collision_groups(entity: Any, env_index: int) -> None:
@@ -88,6 +202,40 @@ def test_set_gravity_updates_only_selected_environments(enable: bool) -> None:
     assert articulation._entities[0].calls == [enable]
     assert articulation._entities[1].calls == []
     assert articulation._entities[2].calls == [enable]
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("is_newton_backend", [False, True])
+def test_get_joint_type_uses_backend_neutral_descriptor_adapter(
+    is_newton_backend: bool,
+) -> None:
+    """Joint type queries hide Default and Newton native descriptor APIs."""
+    joint = SimpleNamespace(
+        name="hinge",
+        joint_type=SimpleNamespace(name="REVOLUTE"),
+    )
+    entity = SimpleNamespace(
+        get_joint_names=lambda: [joint.name],
+        get_joint_info=(lambda _: joint) if not is_newton_backend else (lambda _: None),
+        get_joint_desc=(lambda _: joint),
+    )
+    articulation = object.__new__(Articulation)
+    articulation._entities = [entity]
+    articulation._data = SimpleNamespace(is_newton_backend=is_newton_backend)
+
+    assert articulation.get_joint_type("hinge") == "revolute"
+
+
+@pytest.mark.no_sim
+def test_get_joint_type_rejects_unknown_joint() -> None:
+    """Joint type queries fail before touching a native descriptor for bad names."""
+    entity = SimpleNamespace(get_joint_names=lambda: ["hinge"])
+    articulation = object.__new__(Articulation)
+    articulation._entities = [entity]
+    articulation._data = SimpleNamespace(is_newton_backend=False)
+
+    with pytest.raises(ValueError, match="Unknown articulation joint"):
+        articulation.get_joint_type("missing")
 
 
 @pytest.mark.no_sim
@@ -458,7 +606,14 @@ class BaseArticulationTest:
         assert data.default_com_pose.shape == data.com_pose.shape
         assert torch.allclose(self.art.default_link_masses, data.default_mass)
 
-    def test_reset_restores_default_link_mass_properties(self):
+    @pytest.mark.parametrize(
+        "principal_moments",
+        [(0.02, 0.02, 0.03), (0.02, 0.025, 0.03)],
+        ids=["repeated-moments", "distinct-moments"],
+    )
+    def test_reset_restores_default_link_mass_properties(
+        self, principal_moments: tuple[float, float, float]
+    ) -> None:
         """Partial reset restores mass, inertia, and COM only for selected rows."""
         data = self.art.body_data
         link_name = self.art.link_names[0]
@@ -468,7 +623,11 @@ class BaseArticulationTest:
         default_inertia = data.default_inertia[env_ids, link_id : link_id + 1].clone()
         default_com_pose = data.default_com_pose[env_ids, link_id : link_id + 1].clone()
         changed_mass = default_mass + 0.5
-        changed_inertia = default_inertia * 1.25
+        changed_inertia = (
+            torch.tensor(principal_moments, device=self.sim.device)
+            .expand_as(default_inertia)
+            .clone()
+        )
         changed_com_pose = default_com_pose.clone()
         changed_com_pose[..., 0] += 0.02
         changed_com_pose[..., 3:7] = torch.tensor(
@@ -481,12 +640,34 @@ class BaseArticulationTest:
             link_names=[link_name],
             env_ids=env_ids,
         )
+        # Matrix writes may reorder principal axes. The COM setter rotates the
+        # principal moments currently exposed by the backend.
+        moments_for_com = self.art.get_inertia(
+            link_names=[link_name], env_ids=env_ids
+        ).clone()
+        torch.testing.assert_close(
+            moments_for_com.sort(dim=-1).values,
+            changed_inertia.sort(dim=-1).values,
+            atol=1e-5,
+            rtol=0.0,
+        )
+        expected_tensor = _inertia_tensor(moments_for_com, changed_com_pose)
+        default_tensor = _inertia_tensor(default_inertia, default_com_pose)
         self.art.set_com_pose(
             changed_com_pose,
             link_names=[link_name],
             env_ids=env_ids,
         )
         self.sim.prepare()
+        torch.testing.assert_close(
+            _inertia_tensor(
+                self.art.get_inertia(link_names=[link_name], env_ids=env_ids),
+                self.art.get_com_pose(link_names=[link_name], env_ids=env_ids),
+            ),
+            expected_tensor,
+            atol=1e-5,
+            rtol=0.0,
+        )
 
         assert torch.allclose(
             data.default_mass[env_ids, link_id : link_id + 1], default_mass
@@ -510,10 +691,27 @@ class BaseArticulationTest:
 
         assert torch.allclose(mass_after_partial[0], default_mass[0], atol=1e-5)
         assert torch.allclose(mass_after_partial[1], changed_mass[1], atol=1e-5)
-        assert torch.allclose(inertia_after_partial[0], default_inertia[0], atol=1e-5)
-        assert torch.allclose(inertia_after_partial[1], changed_inertia[1], atol=1e-5)
-        assert torch.allclose(com_after_partial[0], default_com_pose[0], atol=1e-5)
-        assert torch.allclose(com_after_partial[1], changed_com_pose[1], atol=1e-5)
+        # Repeated eigenvalues permit different equivalent principal frames;
+        # the body-frame tensor and COM position must still round-trip.
+        tensor_after_partial = _inertia_tensor(inertia_after_partial, com_after_partial)
+        torch.testing.assert_close(
+            tensor_after_partial[0], default_tensor[0], atol=1e-5, rtol=0.0
+        )
+        torch.testing.assert_close(
+            tensor_after_partial[1], expected_tensor[1], atol=1e-5, rtol=0.0
+        )
+        torch.testing.assert_close(
+            com_after_partial[0, ..., :3],
+            default_com_pose[0, ..., :3],
+            atol=1e-5,
+            rtol=0.0,
+        )
+        torch.testing.assert_close(
+            com_after_partial[1, ..., :3],
+            changed_com_pose[1, ..., :3],
+            atol=1e-5,
+            rtol=0.0,
+        )
 
         self.art.reset(env_ids=[env_ids[1]])
         self.sim.prepare()
@@ -522,15 +720,23 @@ class BaseArticulationTest:
             default_mass,
             atol=1e-5,
         )
-        assert torch.allclose(
-            self.art.get_inertia(link_names=[link_name], env_ids=env_ids),
-            default_inertia,
-            atol=1e-5,
+        restored_com_pose = self.art.get_com_pose(
+            link_names=[link_name], env_ids=env_ids
         )
-        assert torch.allclose(
-            self.art.get_com_pose(link_names=[link_name], env_ids=env_ids),
-            default_com_pose,
+        torch.testing.assert_close(
+            _inertia_tensor(
+                self.art.get_inertia(link_names=[link_name], env_ids=env_ids),
+                restored_com_pose,
+            ),
+            default_tensor,
             atol=1e-5,
+            rtol=0.0,
+        )
+        torch.testing.assert_close(
+            restored_com_pose[..., :3],
+            default_com_pose[..., :3],
+            atol=1e-5,
+            rtol=0.0,
         )
 
     def test_control_api(self):

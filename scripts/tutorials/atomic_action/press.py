@@ -50,11 +50,14 @@ from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
     configure_newton_link_contacts,
+    create_affordance_sampling_context,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     get_hand_open_close_qpos,
+    log_affordance_branch_diagnostics,
+    parse_affordance_sampling_arguments,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
@@ -76,7 +79,7 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the Press tutorial."""
     parser = create_tutorial_argument_parser(
         "Demonstrate Press on an articulation-link or rigid button.",
-        features=("visualize_axes",),
+        features=("affordance_sampling", "visualize_axes"),
     )
     parser.add_argument("--press_distance", type=float, default=0.03)
     parser.add_argument(
@@ -92,7 +95,7 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Use a standalone rigid button instead of the microwave link.",
     )
-    return parser.parse_args()
+    return parse_affordance_sampling_arguments(parser)
 
 
 def create_microwave(sim) -> Articulation:
@@ -232,7 +235,8 @@ def main() -> None:
                 ),
                 control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
                 motion_policy=MotionPolicy(
-                    strategy="motion_gen",
+                    # Contact/path segments require exact Cartesian samples.
+                    strategy="ik_interp",
                     sample_count=PRESS_SAMPLE_INTERVAL,
                 ),
                 skill_options=PressOptions(
@@ -247,8 +251,12 @@ def main() -> None:
                 ),
             ),
         ),
-        context=engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        context=engine.initial_context(
+            control_dt=sim.sim_config.physics_dt,
+            affordance_sampling=create_affordance_sampling_context(args),
+        ),
     )
+    log_affordance_branch_diagnostics(compiled.action_plans[0])
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan the Press demo trajectory.")
         return

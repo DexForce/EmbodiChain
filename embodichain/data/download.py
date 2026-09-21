@@ -70,7 +70,8 @@ def _get_asset_classes(module_path: str) -> list[tuple[str, type]]:
     results: list[tuple[str, type]] = []
     for name, obj in inspect.getmembers(module, inspect.isclass):
         if (
-            issubclass(obj, open3d.data.DownloadDataset)
+            not name.startswith("_")
+            and issubclass(obj, open3d.data.DownloadDataset)
             and obj is not open3d.data.DownloadDataset
             and obj.__module__ == module.__name__
         ):
@@ -84,6 +85,10 @@ def get_registry() -> dict[str, list[tuple[str, type]]]:
     registry: dict[str, list[tuple[str, type]]] = {}
     for category, module_path in CATEGORY_MODULES.items():
         registry[category] = _get_asset_classes(module_path)
+    registry["robot"].extend(
+        _get_asset_classes("embodichain.data.assets.locomotion_assets")
+    )
+    registry["robot"].sort(key=lambda asset: asset[0])
     return registry
 
 
@@ -132,15 +137,17 @@ def _ensure_extract(data_obj: open3d.data.DownloadDataset, prefix: str) -> None:
     print(f"  Copied non-zip asset to extract dir: {extract_dir}")
 
 
-def download_asset(cls_name: str, cls: type) -> None:
+def download_asset(cls_name: str, cls: type) -> bool:
     """Instantiate an asset class to trigger download, then ensure extraction."""
     print(f"  Downloading {cls_name} ...")
     try:
         data_obj = cls()
         _ensure_extract(data_obj, cls_name)
         print(f"  ✓ {cls_name} ready")
+        return True
     except Exception as exc:
         print(f"  ✗ {cls_name} failed: {exc}", file=sys.stderr)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -209,10 +216,15 @@ def cmd_download(args: argparse.Namespace) -> None:
     print(f"Data root: {EMBODICHAIN_DEFAULT_DATA_ROOT}")
     print(f"Downloading {len(targets)} asset(s) ...\n")
 
+    failed = []
     for cls_name, cls in targets:
-        download_asset(cls_name, cls)
+        if not download_asset(cls_name, cls):
+            failed.append(cls_name)
 
     print(f"\nDone. {len(targets)} asset(s) processed.")
+    if failed:
+        print(f"Failed assets: {', '.join(failed)}", file=sys.stderr)
+        sys.exit(1)
 
 
 def main(argv: Sequence[str] | None = None) -> None:

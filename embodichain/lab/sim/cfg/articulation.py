@@ -472,7 +472,13 @@ class ArticulationCfg(ObjectBaseCfg):
     """
 
     build_pk_chain: bool = True
-    """Whether to build pytorch-kinematics chain for forward kinematics and jacobian computation."""
+    """Build a pytorch-kinematics chain for FK and Jacobian computation.
+
+    USD assets use resolved simulation joint descriptors after preparation;
+    URDF assets use their source kinematic tree. USD kinematics supports trees
+    of fixed, revolute, and prismatic joints, including child-side joint frames.
+    Set False to load other joint topologies for simulation without FK.
+    """
 
     def resolve_asset_physics_mode(self) -> AssetPhysicsMode:
         """Return the effective file-backed physics policy."""

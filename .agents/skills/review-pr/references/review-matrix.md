@@ -277,8 +277,9 @@ Check:
 - References are linked directly from `SKILL.md`, scripts are deterministic and
   tested, and no auxiliary README or process-history files are added.
 - `agent_context/MAP.yaml` resolves topics by ID, aliases, then keywords; paths
-  and `source_of_truth` remain current. Behavior changes update the mapped topic
-  and routing adapters when required by the context update contract.
+  and `source_of_truth` remain current. Affected topics are reviewed using the
+  context lifecycle's no-update/revise/add decision. Required edits update the
+  owning contract without copying full explanations into every consumer.
 - New canonical skills pass `quick_validate.py`; adapters and the project skill
   index expose them consistently.
 

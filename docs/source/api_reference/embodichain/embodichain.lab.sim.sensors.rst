@@ -18,8 +18,8 @@ bodies and articulation links via Warp kernels).
   .. rubric:: Classes
 
   .. autosummary::
-    SensorCfg
-    BaseSensor
+    ~base_sensor.SensorCfg
+    ~base_sensor.BaseSensor
     CameraCfg
     Camera
     StereoCameraCfg
@@ -102,3 +102,20 @@ Contact Sensor
 .. autoclass:: ArticulationContactFilterCfg
     :members:
     :show-inheritance:
+
+Contact history
+---------------
+
+Contact filtering and substep timing are owned by the sensor layer. Tasks
+select body and counterpart IDs, then consume interval events and completed
+flight durations without advancing the sensor state.
+
+.. automodule:: embodichain.lab.sim.sensors.contact_history
+   :members:
+   :undoc-members:
+
+Creating a contact history automatically enables physics-substep sampling.
+CUDA history reduction consumes compact contact rows and device counts through
+sparse Warp kernels. The ``dropped_contacts`` diagnostic sums query loss and
+scatter overflow across the current control interval; standalone updates
+without a history report the most recent sample.

@@ -32,6 +32,8 @@ from embodichain.cli.sim import add_sim_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.atomic_actions import (
+    ActionPlan,
+    AffordanceSamplingContext,
     AntipodalAffordance,
     ObjectSemantics,
     TimedTrajectory,
@@ -152,6 +154,7 @@ TOP_DOWN_EEF_ROTATION = (
 )
 
 TutorialCliFeature = Literal[
+    "affordance_sampling",
     "debug_state",
     "diagnose_plan",
     "grasp_sampling",
@@ -247,6 +250,25 @@ def create_tutorial_argument_parser(
     if "grasp_sampling" in features:
         parser.add_argument("--n_sample", type=int, default=10000)
         parser.add_argument("--force_reannotate", action="store_true")
+    if "affordance_sampling" in features:
+        parser.add_argument(
+            "--affordance_branches",
+            type=int,
+            default=None,
+            help="Number of Affordance branches and simulation rows; defaults to --num_envs.",
+        )
+        parser.add_argument(
+            "--sampling_seed",
+            type=int,
+            default=0,
+            help="Base seed for Affordance sampling streams.",
+        )
+        parser.add_argument(
+            "--sampling_attempt",
+            type=int,
+            default=0,
+            help="Explicit resampling-attempt identity (not a retry count).",
+        )
     if "headless_play" in features:
         parser.add_argument(
             "--headless_play",
@@ -260,6 +282,84 @@ def create_tutorial_argument_parser(
             help="Skip drawing target coordinate-frame markers.",
         )
     return parser
+
+
+def parse_affordance_sampling_arguments(
+    parser: argparse.ArgumentParser,
+) -> argparse.Namespace:
+    """Parse a sampling tutorial's arguments and map branches to environments.
+
+    Args:
+        parser: Tutorial parser with the ``affordance_sampling`` feature enabled.
+
+    Returns:
+        Parsed arguments with matching branch and environment counts.
+    """
+    args = parser.parse_args()
+    if args.affordance_branches is None:
+        args.affordance_branches = args.num_envs
+    if args.affordance_branches < 1:
+        parser.error("--affordance_branches must be positive.")
+    if args.sampling_seed < 0:
+        parser.error("--sampling_seed must be non-negative.")
+    if args.sampling_attempt < 0:
+        parser.error("--sampling_attempt must be non-negative.")
+    if args.num_envs not in (1, args.affordance_branches):
+        parser.error("--num_envs must be omitted or match --affordance_branches.")
+    args.num_envs = args.affordance_branches
+    return args
+
+
+def create_affordance_sampling_context(
+    args: argparse.Namespace,
+) -> AffordanceSamplingContext | None:
+    """Create caller-owned sampling identity for a parallel tutorial.
+
+    Args:
+        args: Validated arguments from :func:`parse_affordance_sampling_arguments`.
+
+    Returns:
+        Sampling context, or ``None`` for the nominal single branch.
+    """
+    if args.affordance_branches == 1:
+        return None
+    return AffordanceSamplingContext(
+        count=args.affordance_branches,
+        seed=args.sampling_seed,
+        attempt_id=args.sampling_attempt,
+    )
+
+
+def log_affordance_branch_diagnostics(plan: ActionPlan) -> None:
+    """Log each named candidate selection or contact roll before replay.
+
+    Args:
+        plan: Action plan containing Affordance sampling metadata.
+    """
+    metadata = plan.diagnostics.metadata.get("affordance_sample", {})
+    if not isinstance(metadata, dict) or not metadata:
+        return
+    samples = {"contact": metadata} if "roll" in metadata else metadata
+    for name, sample in samples.items():
+        if not isinstance(sample, dict):
+            continue
+        candidate_ids = sample.get("candidate_ids")
+        reused = sample.get("reused")
+        rolls = sample.get("roll")
+        for row, success in enumerate(plan.plan_success.tolist()):
+            if isinstance(candidate_ids, list) and isinstance(reused, list):
+                detail = f"candidate_id={candidate_ids[row]}, reused={reused[row]}"
+            elif isinstance(rolls, list):
+                detail = f"roll={rolls[row]:.6f} rad"
+            else:
+                continue
+            control_parts = sample.get("control_parts")
+            if isinstance(control_parts, list):
+                detail += f", control_part={control_parts[row]}"
+            logger.log_info(
+                f"Affordance branch {row} ({sample.get('key', name)}): "
+                f"success={success}, {detail}."
+            )
 
 
 def _tutorial_physics_cfg(
@@ -1572,6 +1672,7 @@ __all__ = [
     "configure_newton_gripper_contacts",
     "configure_newton_link_contacts",
     "create_antipodal_semantics",
+    "create_affordance_sampling_context",
     "create_parallel_jaw_grasp_pose_generator",
     "create_curobo_motion_generator",
     "create_franka_panda_robot_cfg",
@@ -1586,10 +1687,12 @@ __all__ = [
     "format_tensor",
     "get_hand_open_close_qpos",
     "initialize_pre_pick_robot_pose",
+    "log_affordance_branch_diagnostics",
     "make_eef_pose_at",
     "make_clear_dynamics_callback",
     "make_top_down_eef_pose",
     "prepare_tutorial_scene",
+    "parse_affordance_sampling_arguments",
     "publish_tutorial_scene",
     "replay_trajectory",
     "run_tutorial",
@@ -1600,3 +1703,43 @@ __all__ = [
     "stop_auto_play_recording",
     "draw_axis_marker",
 ]
+
+
+def initialize_benchmark_simulation(args) -> "SimulationManager":
+    """Create the tutorial simulation from a benchmark-style namespace.
+
+    Benchmark argument namespaces carry only ``device``/``renderer``; fill the
+    remaining launcher fields with tutorial defaults so
+    :func:`create_tutorial_simulation` accepts them unchanged.
+
+    Args:
+        args: Namespace with optional ``num_envs``/``device``/``renderer``.
+
+    Returns:
+        The shared tutorial simulation.
+    """
+    namespace = argparse.Namespace(
+        num_envs=getattr(args, "num_envs", 1),
+        device=getattr(args, "device", "cpu"),
+        renderer=getattr(args, "renderer", "auto"),
+        headless=True,
+    )
+    return create_tutorial_simulation(namespace)
+
+
+def compute_pick_close_end_step(compiled=None, invocation_index: int = 0) -> int:
+    """Trajectory step where PickUp's hand-close segment ends (lift start).
+
+    Args:
+        compiled: Optional compiled engine result; when given, the exact
+            ``lift`` segment start of the selected invocation is returned.
+        invocation_index: Invocation to inspect within ``compiled``.
+
+    Returns:
+        Step index separating the grasp phase from the lift phase. Without a
+        compiled result this uses the tutorial defaults
+        (``sample_count=120`` + ``hand_interp_steps=12`` + ``settle=0``).
+    """
+    if compiled is not None:
+        return int(compiled.segment(invocation_index, "lift").start)
+    return 120 + 12

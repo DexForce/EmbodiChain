@@ -1,47 +1,56 @@
 Planners
-=================================
+========
 
-This section documents the planners provided by the project with a focus on 
-planners for robotic motion: path planning, trajectory generation,
-collision avoidance, and practical considerations such as smoothness and
-dynamic feasibility.
+Planners produce timed trajectories from robot waypoints. Start with
+:doc:`MotionGenerator <../motion_generator>` for the shared planning workflow;
+use a backend directly when you already have its required waypoint inputs.
 
-The repository contains several planner implementations — each has a dedicated
-page with implementation details and examples. Use the links at the bottom of
-this page to jump to a specific planner.
+Choose a planner
+----------------
 
-.. contents:: Table of contents
-    :local:
-    :depth: 2
+.. list-table::
+   :header-rows: 1
+   :widths: 24 40 36
 
-Overview
---------
+   * - Planner
+     - Use it for
+     - Native targets and requirements
+   * - :doc:`toppra_planner`
+     - Time-parameterizing joint paths under velocity and acceleration limits.
+     - Joint waypoints; requires TOPPRA.
+   * - :doc:`trapezoidal_planner`
+     - Batched joint paths with trapezoidal or jerk-limited Double-S timing.
+     - Joint waypoints; Torch or Warp.
+   * - :doc:`curobo_planner`
+     - Collision-aware planning against an explicit world.
+     - Joint or Cartesian goals; requires CUDA and cuRobo V2.
+   * - :doc:`neural_planner`
+     - Experimental learned end-effector waypoint rollout.
+     - Cartesian goals; requires an NMG ONNX policy, validated on Franka Panda.
 
-The `embodichain` project provides a unified interface for robot trajectory planning, supporting both joint space and Cartesian space interpolation. The main planners include:
+For joint-only planners, ``MotionGenerator`` can convert Cartesian targets
+through IK when ``is_interpolate=True``. Only cuRobo provides collision-aware
+planning against the configured world; consult its page for supported geometry
+and collision-checking limits.
 
-- **ToppraPlanner**: A time-optimal trajectory planner based on the TOPPRA library, supporting joint trajectory generation under velocity and acceleration constraints.
-- **TrapezoidalPlanner**: A natively batched joint planner with trapezoidal or
-  jerk-limited Double-S timing and Torch/Warp backends.
-- **NeuralPlanner** (experimental): A learning-based EEF waypoint planner for Franka Panda.
-- **CuroboPlanner** (optional): A cuRobo V2 backend that plans on CUDA and supports either CPU or CUDA physics simulation for collision-aware single-arm Cartesian and joint-space planning.
-- **TrajectorySampleMethod**: An enumeration for trajectory sampling strategies, supporting sampling by time, quantity, or distance.
+Sampling is configured per backend. :doc:`trajectory_sample_method` explains
+the shared enum; each planner page documents the modes it accepts.
 
-These tools can be used to generate smooth and dynamically feasible robot trajectories. Install NVIDIA's CUDA-matched cuRobo source package separately when collision-aware planning against an explicit cuRobo world is required.
+Custom backends
+---------------
 
-Use NeuralPlanner (experimental) when you have a standalone NMG ONNX policy and
-need learned EEF waypoint rollout on Franka Panda.
-
-The parent-level :doc:`MotionGenerator <../motion_generator>` coordinates
-these backends and exposes the common interface used by Atomic Skills.
-
-See also
---------
+Subclass ``BasePlanner`` with a matching ``BasePlannerCfg``, declare
+``supported_move_types``, and return the timed ``PlanResult`` contract described
+in the MotionGenerator guide. Register the pair with
+``MotionGenerator.register_planner_type(name, planner_class, planner_cfg_class)``.
+Full signatures are in the
+:doc:`planner API </api_reference/embodichain/embodichain.lab.sim.motion.planners>`.
 
 .. toctree::
-    :maxdepth: 1
+   :maxdepth: 1
 
-    toppra_planner.md
-    trapezoidal_planner.md
-    neural_planner.md
-    curobo_planner.md
-    trajectory_sample_method.md
+   toppra_planner
+   trapezoidal_planner
+   curobo_planner
+   neural_planner
+   trajectory_sample_method
