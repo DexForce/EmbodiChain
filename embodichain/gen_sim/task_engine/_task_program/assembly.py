@@ -134,9 +134,11 @@ class _TaskFactory(SimulationTaskProgramFactory):
         *args: Any,
         constraints: dict[str, StabilityConstraint],
         articulation_bindings: tuple = (),
+        pour_receivers: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
+        self._pour_receivers = dict(pour_receivers or {})
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -166,6 +168,15 @@ class _TaskFactory(SimulationTaskProgramFactory):
     def registration_owned_segment_policy_ports(self) -> tuple[Any, Any]:
         return self._task_post_port, self.segment_policy_port
 
+    def create_atomic_action_engine(self, profile: Any) -> Any:
+        """Install task-owned wrappers after the shared engine contract is validated."""
+        engine = super().create_atomic_action_engine(profile)
+        from .actions import GenSimMoveHeldObject, GenSimPour
+
+        engine.register(GenSimMoveHeldObject(), replace=True)
+        engine.register(GenSimPour(self._pour_receivers), replace=True)
+        return engine
+
 
 @dataclass(frozen=True, slots=True)
 class TaskAdapterFactory:
@@ -177,6 +188,7 @@ class TaskAdapterFactory:
     grasp_factories: tuple[tuple[str, Any], ...]
     cartesian_approaches: bool = False
     articulation_bindings: tuple = ()
+    pour_receivers: tuple[tuple[str, str], ...] = ()
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Return the exact shared adapter; no Session or Bridge is overridden."""
@@ -282,6 +294,7 @@ class TaskAdapterFactory:
             grasp_pose_generators=grasp_generators,
             constraints=dict(self.constraints),
             articulation_bindings=self.articulation_bindings,
+            pour_receivers=dict(self.pour_receivers),
         )
         return factory.create_adapter()
 
@@ -424,6 +437,16 @@ def load_deployment(
         in {CLEAR_RELEASED_CALL, "gen_sim.articulation_withdraw"}
         for item in program["program"]["items"]
     )
+    pour_receivers = tuple(
+        (
+            str(item["steps"]["call"]["arguments"]["object"]),
+            str(item["steps"]["call"]["arguments"]["reference"]),
+        )
+        for item in program["program"]["items"]
+        if item.get("steps", {}).get("call", {}).get("call_id")
+        == "simulation.move_held_object"
+        and "reference" in item.get("steps", {}).get("call", {}).get("arguments", {})
+    )
     fingerprint = canonical_hash(
         {
             "adapter_contract": ADAPTER_CONTRACT,
@@ -434,6 +457,7 @@ def load_deployment(
             "task_constraints": payload,
             "program": program,
             "cartesian_approaches": cartesian_approaches,
+            "pour_receivers": pour_receivers,
             "grasp_pose_generators": {
                 name: asdict(factory) for name, factory in grasp_factories
             },
@@ -446,6 +470,7 @@ def load_deployment(
         grasp_factories,
         cartesian_approaches,
         articulation_bindings,
+        pour_receivers,
     )
     integration = replace(
         base.integration,

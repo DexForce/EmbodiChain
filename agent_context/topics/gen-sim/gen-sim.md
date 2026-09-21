@@ -87,6 +87,29 @@ controls. Imported mimic behavior and shared robot defaults are unchanged.
 E1 placement on another object retains its original position tolerance and adds
 the existing stack stability checks for vertical orientation, support gap and
 reference stability. Source pose matrices take precedence over Euler fields.
+Generated held-object transports declare a measured attachment postcondition.
+GenSim installs task-owned wrappers around the existing MoveHeldObject and Pour
+descriptors after shared engine validation; shared Lab action classes and
+options remain unchanged. The transport wrapper stages above the target and
+returns the input attachment as its expected effect, so the existing composite
+monitor verifies retention before observed-transform reconciliation. This is
+terminal verification, not in-flight slip prevention. Regenerate older bundles
+to include the wrapper registration and revised lowerer fingerprint.
+E3 now uses the vessel's geometric upright axis only as an upright reference,
+not as its rotation axis. The selected grasp is checked at runtime against the
+actual pad line before the tilt arc is generated;
+The GenSim Pour wrapper reads the two native finger-pad link poses (not TCP-X)
+and derives the projected pad-line as its rotation axis. Its visible object
+tilt is the cross product with upright, hence perpendicular to the actual jaw
+line. It samples the full tilt-and-return arc through the shared motion
+generator.
+No spout annotation is required for this tilt-and-restore contract. Receiving
+vessel position is late-bound while the source's upright heading is preserved
+independently of receiver yaw. Rim height, vessel radius and the declared finger
+envelope bound the clearance; E3 transports stage above the target before
+descending. E3 Place uses 0.12 m retreat/approach height without relaxing release
+acceptance. This is geometric/kinematic screening, not global collision planning
+or proof of fluid transfer; ambiguous upright geometry still needs qualification.
 For level containers with a dominant planar floor, inside placement selects an
 arm-side point from the actual floor triangles, eroded by the projected child
 footprint and a margin. Holes are retained. Unsupported floor geometry retains
