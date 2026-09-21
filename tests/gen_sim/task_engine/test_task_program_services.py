@@ -231,6 +231,40 @@ def test_single_pose_transport_samples_cartesian_path(monkeypatch) -> None:
     assert options.preserve_cartesian_samples is False
 
 
+def test_velocity_invalid_e6_retries_with_denser_samples(monkeypatch) -> None:
+    from embodichain.gen_sim.task_engine._task_program import motion
+
+    generator = object.__new__(motion.ApproachMotionGenerator)
+    start = torch.eye(4).unsqueeze(0)
+    start[:, 2, 3] = 1.0
+    generator.robot = SimpleNamespace(compute_fk=lambda **kw: start.clone())
+    monkeypatch.setattr(motion, "_joint_velocity_limits", lambda *a: torch.ones(1, 1))
+    calls = []
+
+    def backend(_self, targets, *, options):
+        calls.append((len(targets), options.sample_count))
+        success = torch.tensor([len(calls) > 1])
+        return motion.PlanResult(
+            success=success,
+            positions=torch.zeros(1, options.sample_count, 1),
+            dt=torch.full((1, options.sample_count), 0.04),
+        )
+
+    monkeypatch.setattr(motion.MotionGenerator, "generate", backend)
+    options = motion.MotionGenOptions(
+        strategy="ik_interp",
+        control_part="arm",
+        start_qpos=torch.zeros(1, 1),
+        sample_count=140,
+    )
+    result = generator.generate(
+        [motion.PlanState(move_type=motion.MoveType.EEF_MOVE, xpos=start)], options
+    )
+    assert result.success.tolist() == [True]
+    assert [sample_count for _, sample_count in calls] == [140, 260]
+    assert options.sample_count == 140
+
+
 def test_stack_place_allows_equivalent_tcp_roll_without_moving_release(
     monkeypatch,
 ) -> None:

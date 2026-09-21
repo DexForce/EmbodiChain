@@ -284,10 +284,10 @@ def generate_task_program_bundle(
     policy_payload["tracking"]["consecutive_acceptances"] = 5
     policy_payload["tracking"]["terminal_settle_timeout"] = 3.0
     if drawers or any(
-        node["call"]["kind"] == "hand_over" or node["task_type"] == "E2"
+        node["call"]["kind"] == "hand_over" or node["task_type"] in {"E2", "E6"}
         for node in selected_graph["nodes"]
     ):
-        # Leave motion time for drawer placement, handover and upright staging
+        # Leave motion time for drawer/E6 motion, handover and upright staging
         # without shrinking a larger budget. Keep the velocity checks intact.
         policy_payload["motion"]["sample_count"] = max(
             260, policy_payload["motion"]["sample_count"]
