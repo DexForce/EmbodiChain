@@ -227,7 +227,25 @@ class SimulationRigidObjectBinding:
 
 @dataclass(frozen=True, slots=True)
 class SimulationRigidizedArticulationObjectBinding:
-    """Bind one locked, floating articulation as a semantic object."""
+    """Bind one locked, floating articulation as a semantic object.
+
+    Args:
+        entity_id: Canonical scene object ID.
+        simulation_uid: Explicit native articulation UID.
+        locked_qpos: Exact locked position for every native joint.
+        aliases: Optional non-authoritative lookup aliases.
+        dynamics: Semantic dynamics classification.
+        collision_role: Collision-world participation role.
+        semantic_type: Optional semantic object classification.
+        default_grasp_affordance: Optional default grasp affordance ID.
+        geometry_provider: Optional planner-facing collision geometry provider.
+        joint_position_tolerance: Positive joint and limit comparison tolerance.
+        link_transform_tolerance: Positive cross-arena transform tolerance.
+
+    .. attention::
+       Live configured assembly accepts only floating roots whose native joint
+       limits are finite and coincident at every declared lock position.
+    """
 
     entity_id: str
     simulation_uid: str
@@ -378,7 +396,17 @@ class AntipodalGraspAffordanceBinding:
 
 @dataclass(frozen=True, slots=True)
 class RigidizedArticulationAntipodalGraspBinding:
-    """Build a root-frame grasp mesh from one rigidized articulation link."""
+    """Build a root-frame grasp mesh from one rigidized articulation link.
+
+    Args:
+        entity_id: Canonical affordance ID.
+        object_id: Parent rigidized-articulation object ID.
+        grasp_link: Native link supplying the grasp mesh.
+        native_name: Stable native name for the affordance.
+        revision: Affordance payload revision.
+        aliases: Optional non-authoritative lookup aliases.
+        relative_pose: Flattened affordance-to-object SE(3) transform.
+    """
 
     entity_id: str
     object_id: str

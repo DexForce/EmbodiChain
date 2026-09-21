@@ -256,7 +256,26 @@ def create_rigidized_articulation_antipodal_affordance(
     joint_position_tolerance: float = 1.0e-3,
     link_transform_tolerance: float = 1.0e-5,
 ) -> AntipodalAffordance:
-    """Build root-frame antipodal geometry for a rigidized articulation link."""
+    """Build root-frame antipodal geometry for a rigidized articulation link.
+
+    Args:
+        articulation: Native articulation providing named joint, link, pose,
+            drive, limit, FK, and link-mesh queries.
+        grasp_link: Native link whose mesh supplies the grasp geometry.
+        locked_qpos: Exact position required for every native joint.
+        joint_position_tolerance: Positive tolerance for measured positions,
+            targets, and coincident limits.
+        link_transform_tolerance: Positive tolerance for root-to-link transform
+            agreement across arenas.
+
+    Returns:
+        Owned antipodal mesh expressed in the articulation-root frame.
+
+    Raises:
+        TypeError: If a declared value or native reading has an invalid type.
+        ValueError: If the articulation is not consistently rigidized, the
+            selected link is absent, or its transformed mesh is invalid.
+    """
     joint_tolerance = _positive_finite_tolerance(
         joint_position_tolerance, field_name="joint_position_tolerance"
     )

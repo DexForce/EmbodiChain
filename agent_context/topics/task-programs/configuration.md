@@ -113,10 +113,15 @@ removed embodiment-level and scene-level `task_program` metadata keys are not
 accepted.
 
 Within `integration.yaml.scene_binding`, every affordance is nested in an
-`affordances` list under its owning `rigid_objects`, `articulations`, or `links`
-entry. The child keeps a globally unique `entity_id` and a closed `kind`
-discriminator (`antipodal_grasp`, `support_surface`, or `container`); the YAML
-does not repeat ownership with `object_id` or `parent_id`. The configured
-decoder derives that relation and normalizes the authoring hierarchy into the
-flat `SimulationSceneBinding` / `SceneRegistry` index. Scene-level affordance
-collections are not accepted.
+`affordances` list under its owning `rigid_objects`,
+`rigidized_articulations`, `articulations`, or `links` entry. The child keeps a
+globally unique `entity_id` and a closed `kind` discriminator
+(`antipodal_grasp`, `support_surface`, or `container`); the YAML does not repeat
+ownership with `object_id` or `parent_id`. `rigidized_articulations` owns a
+required `locked_qpos` mapping and binds a physical `simulation.articulation`
+UID as a `SceneObjectRef`. Its `antipodal_grasp` child owns a required
+`grasp_link`; ordinary rigid-object antipodal fields (`mesh_env_id` and
+`internal_axis`) remain unchanged and are not accepted on that link-backed
+child. The configured decoder derives those relations and normalizes the
+authoring hierarchy into the flat `SimulationSceneBinding` / `SceneRegistry`
+index. Scene-level affordance collections are not accepted.
