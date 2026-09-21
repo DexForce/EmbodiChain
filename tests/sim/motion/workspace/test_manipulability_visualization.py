@@ -18,10 +18,13 @@
 
 No simulation, renderer or robot asset is involved: every test exercises the
 score-to-color mapping, the robust/log normalization, the joint-space and
-Cartesian alignment contracts, and the selected-subset ellipsoid path.
+Cartesian alignment contracts, the selected-subset ellipsoid path, and the
+point-cloud forwarding contracts against a mocked simulation manager.
 """
 
 from __future__ import annotations
+
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -684,3 +687,105 @@ class TestVisualizerDataBackend:
         visualizer = ManipulabilityVisualizer(backend="data")
         with pytest.raises(ValueError, match="no inspections"):
             visualizer.visualize_inspection([])
+
+
+class TestVisualizerPointCloudBackends:
+    """Forwarding contracts for the ``sim_manager`` and ``viser`` backends.
+
+    Both backends receive plain RGB, so the reachability styling that the
+    Matplotlib figure expresses with per-point alpha and marker size has to
+    survive as color alone. These tests pin that, and pin that a compact
+    reachable-only score vector stays attached to the positions it belongs to
+    once the mapping is handed to a point-cloud renderer.
+    """
+
+    @staticmethod
+    def _aligned_point_set():
+        """Align a Cartesian result whose middle samples were rejected by IK."""
+        return align_manipulability_scores(TestAlignment._cartesian_result())
+
+    def test_sim_manager_backend_forwards_rgb_and_point_size(self):
+        sim = MagicMock()
+        point_set = self._aligned_point_set()
+        visualizer = ManipulabilityVisualizer(
+            backend="sim_manager",
+            sim_manager=sim,
+            control_part_name="arm",
+            color_cfg=ManipulabilityColorCfg(point_size=3.0),
+        )
+
+        visualizer.visualize(point_set.points, point_set=point_set)
+
+        sim.set_visualization_overlays.assert_not_called()
+        forwarded = sim.visualize_point_cloud.call_args.kwargs
+        assert forwarded["point_size"] == 3.0
+        assert forwarded["name"] == "workspace_pcd_arm"
+        # The native renderer ignores alpha, so the RGBA mapping must be cut
+        # down to three channels rather than passed through.
+        assert forwarded["colors"].shape == (len(point_set.points), 3)
+        np.testing.assert_allclose(forwarded["points"], point_set.points)
+
+    def test_viser_backend_publishes_one_uint8_overlay(self):
+        sim = MagicMock()
+        point_set = self._aligned_point_set()
+        visualizer = ManipulabilityVisualizer(
+            backend="viser",
+            sim_manager=sim,
+            control_part_name="arm",
+            color_cfg=ManipulabilityColorCfg(point_size=0.006),
+        )
+
+        visualizer.visualize(point_set.points, point_set=point_set)
+
+        sim.visualize_point_cloud.assert_not_called()
+        overlays = sim.set_visualization_overlays.call_args.args[0]
+        assert len(overlays.point_clouds) == 1
+        overlay = overlays.point_clouds[0]
+        assert overlay.overlay_id == "workspace_arm"
+        assert overlay.point_size == 0.006
+        assert overlay.colors.dtype == np.uint8
+        np.testing.assert_allclose(overlay.points, point_set.points, atol=1e-6)
+
+    def test_forwarding_backends_require_a_sim_manager(self):
+        visualizer = ManipulabilityVisualizer(backend="sim_manager")
+        with pytest.raises(ValueError, match="sim_manager is required"):
+            visualizer.visualize(np.zeros((2, 3)), scores=np.array([0.1, 0.9]))
+
+    @pytest.mark.parametrize("backend", ["sim_manager", "viser"])
+    def test_rejected_samples_do_not_shift_scores_onto_other_positions(
+        self, backend: str
+    ):
+        # ``_cartesian_result`` rejects samples 0, 2 and 5 and stores the
+        # remaining scores compactly as (0.7, 0.2, 0.5). Scattering them back
+        # must land the highest score on point 1 and the lowest on point 3.
+        sim = MagicMock()
+        point_set = self._aligned_point_set()
+        color_cfg = ManipulabilityColorCfg(percentile_clip=(0.0, 100.0))
+        visualizer = ManipulabilityVisualizer(
+            backend=backend,
+            sim_manager=sim,
+            control_part_name="arm",
+            color_cfg=color_cfg,
+        )
+
+        visualizer.visualize(point_set.points, point_set=point_set)
+
+        if backend == "sim_manager":
+            forwarded = sim.visualize_point_cloud.call_args.kwargs
+            points, rgb = forwarded["points"], np.asarray(forwarded["colors"])
+        else:
+            overlay = sim.set_visualization_overlays.call_args.args[0].point_clouds[0]
+            points, rgb = overlay.points, overlay.colors / 255.0
+
+        np.testing.assert_allclose(points, point_set.points, atol=1e-6)
+        gray = np.asarray(color_cfg.unreachable_color[:3])
+        for index, reachable in enumerate(point_set.reachable_mask):
+            if reachable:
+                assert not np.allclose(rgb[index], gray, atol=1 / 255)
+            else:
+                np.testing.assert_allclose(rgb[index], gray, atol=1 / 255)
+        # Low viridis is blue/purple and high viridis is yellow. Reading the
+        # channel order back proves the scores kept their own points instead of
+        # sliding across the two gray rows that separate them.
+        assert rgb[3, 2] > rgb[3, 1]
+        assert rgb[1, 1] > rgb[1, 2]

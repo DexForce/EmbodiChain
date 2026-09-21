@@ -109,20 +109,16 @@
 - `scripts/tutorials/sim/workspace_manipulability_visualization.py` runs the
   whole path headlessly on a solver-backed robot adapter and writes the
   `docs/source/_static/tutorials/workspace_manipulability_*.png` figures.
-- `scripts/tutorials/sim/visualize_robot_workspace.py` creates a real UR5 with
-  `sim.add_robot()` and calls `sim.prepare()` before analysis. Its default
-  `--backend dexsim` draws the robot and colored workspace together; `--backend
-  viser` publishes the same cloud with the simulated robot in the browser.
-  `--headless` saves one native offscreen image. `--mode cartesian_space` adds
-  rejected IK samples; the default joint-space mode uses FK samples.
-- This scene example uses fresh arena-frame Robot FK/IK results, which already
-  contain the chain-root pose, and adds only `sim.arena_offsets[0]` for the
-  world-frame point-cloud APIs. It does not transform points by the robot base
-  a second time. The cloud is static; moving the robot base requires reanalysis.
-  Native point size is in screen pixels, while Viser uses scene units. These
-  backends receive RGB only; per-point alpha/marker size, the color bar and
-  velocity-ellipsoid detail plots remain Matplotlib features. The native/Viser
-  example reports the raw/clipped color ranges in the console.
+  `scripts/tutorials/sim/visualize_robot_workspace.py` instead analyzes a
+  simulated robot and draws the cloud beside it in the native or Viser viewer;
+  a sim-backed `Robot` needs `sim.prepare()` before `WorkspaceAnalyzer` runs.
+- The `sim_manager` and `viser` point-cloud backends consume world coordinates,
+  while analyzer points are arena-frame and already carry the chain-root pose:
+  add `sim.arena_offsets[env]`, and never apply the robot base twice. They also
+  receive RGB only, so per-point alpha/marker size, the color bar and the
+  ellipsoid detail plots stay Matplotlib features; point size means screen
+  pixels natively but scene units in Viser. A published cloud is static, so
+  moving the robot base requires reanalysis.
 
 ### Seed selection for Cartesian/plane IK
 

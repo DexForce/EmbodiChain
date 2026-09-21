@@ -75,22 +75,61 @@ from embodichain.utils.math import look_at_to_pose
 
 def build_parser() -> argparse.ArgumentParser:
     """Return options for the single-robot workspace demonstration."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=("dexsim", "viser"), default="dexsim")
-    parser.add_argument(
-        "--mode", choices=("joint_space", "cartesian_space"), default="joint_space"
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--num-samples", type=int, default=6000)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", default="cpu")
-    parser.add_argument("--log-scale", action="store_true")
-    parser.add_argument("--base-position", type=float, nargs=3, default=(0, 0, 0))
+    parser.add_argument(
+        "--backend",
+        choices=("dexsim", "viser"),
+        default="dexsim",
+        help="Viewer that draws the robot and the colored cloud together.",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("joint_space", "cartesian_space"),
+        default="joint_space",
+        help="Sample joint configurations through FK, or Cartesian positions "
+        "verified with IK at the initial tool orientation.",
+    )
+    parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=6000,
+        help="Number of workspace samples to analyze.",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=0, help="Seed used by the workspace sampler."
+    )
+    parser.add_argument(
+        "--device",
+        default="cpu",
+        help="Torch device for sampling, kinematics and the simulation.",
+    )
+    parser.add_argument(
+        "--log-scale",
+        action="store_true",
+        help="Color on log10(w), which separates the interior of the workspace.",
+    )
+    parser.add_argument(
+        "--base-position",
+        type=float,
+        nargs=3,
+        default=(0, 0, 0),
+        help="Robot base position in the arena frame.",
+    )
     parser.add_argument("--port", type=int, default=8080, help="Viser server port.")
     parser.add_argument(
-        "--headless", action="store_true", help="Save one DexSim offscreen image."
+        "--headless",
+        action="store_true",
+        help="Render one native offscreen image to --output and exit, instead "
+        "of opening a viewer. Requires --backend dexsim.",
     )
     parser.add_argument(
-        "--output", type=Path, default=Path("outputs/robot_workspace.png")
+        "--output",
+        type=Path,
+        default=Path("outputs/robot_workspace.png"),
+        help="PNG destination used with --headless.",
     )
     parser.add_argument(
         "--max-steps", type=int, help="Stop the viewer after this many physics steps."
