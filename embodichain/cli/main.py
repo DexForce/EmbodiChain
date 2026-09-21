@@ -75,6 +75,11 @@ COMMANDS = (
         help="List tasks by category, deployment, and capability.",
     ),
     Command(
+        name="show-task",
+        target="embodichain.cli.show_task:main",
+        help="Inspect a logical task and its deployments.",
+    ),
+    Command(
         name="preview_lerobot_data",
         target="embodichain.lab.scripts.preview_lerobot_data:cli",
         help="Print and validate a recorded LeRobot dataset episode.",

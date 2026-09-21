@@ -44,11 +44,14 @@ topics:
   keywords: [BaseEnv, EmbodiedEnv, EnvCfg, register_env, list-task, run-env, target_control_frequency,
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
-    ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema]
+    ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema,
+    show-task, task catalog, task gallery, 任务画廊]
   paths: [topics/env-framework/env-framework.md]
   source_of_truth:
   - embodichain/cli/main.py
   - embodichain/cli/list_task.py
+  - embodichain/cli/_task_catalog.py
+  - embodichain/cli/show_task.py
   - embodichain/lab/scripts/run_env.py
   - embodichain/lab/gym/utils/gym_utils.py
   - embodichain/lab/gym/utils/_component_composition.py

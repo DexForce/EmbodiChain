@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "9ae02f0974b9dc62128ceeabbfe304dae39aee6d",
+  "revision": "abd754a3d86e82a6838e3062adda001f8b097007",
   "source_ref": "HEAD",
   "package_version": "0.2.4",
   "topic_index": "agent_context/MAP.yaml",
@@ -145,8 +145,8 @@
         {
           "path": "embodichain/lab/sim/objects/articulation.py",
           "symbol": "Articulation",
-          "start_line": 687,
-          "end_line": 687,
+          "start_line": 694,
+          "end_line": 694,
           "excerpt": "class Articulation(BatchEntity):"
         }
       ],
@@ -231,8 +231,8 @@
         {
           "path": "embodichain/lab/sim/atomic_actions/engine.py",
           "symbol": "AtomicActionEngine",
-          "start_line": 45,
-          "end_line": 45,
+          "start_line": 46,
+          "end_line": 46,
           "excerpt": "class AtomicActionEngine:"
         }
       ],
@@ -323,8 +323,8 @@
         {
           "path": "embodichain/lab/gym/envs/base_env.py",
           "symbol": "BaseEnv",
-          "start_line": 103,
-          "end_line": 103,
+          "start_line": 105,
+          "end_line": 105,
           "excerpt": "class BaseEnv(gym.Env):"
         }
       ],
@@ -679,8 +679,8 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "build_env_cfg_from_args",
-          "start_line": 1210,
-          "end_line": 1210,
+          "start_line": 1211,
+          "end_line": 1211,
           "excerpt": "def build_env_cfg_from_args("
         }
       ],
@@ -1230,8 +1230,8 @@
         {
           "path": "embodichain/lab/gym/envs/managers/event_manager.py",
           "symbol": "EventManager",
-          "start_line": 94,
-          "end_line": 94,
+          "start_line": 97,
+          "end_line": 97,
           "excerpt": "class EventManager(ManagerBase):"
         }
       ],
@@ -2794,8 +2794,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager",
-          "start_line": 481,
-          "end_line": 481,
+          "start_line": 490,
+          "end_line": 490,
           "excerpt": "class SimulationManager:"
         }
       ],
@@ -3520,8 +3520,8 @@
         {
           "path": "embodichain/lab/sim/objects/articulation.py",
           "symbol": "Articulation",
-          "start_line": 687,
-          "end_line": 687,
+          "start_line": 694,
+          "end_line": 694,
           "excerpt": "class Articulation(BatchEntity):"
         }
       ]
@@ -3556,8 +3556,8 @@
         {
           "path": "embodichain/lab/gym/envs/base_env.py",
           "symbol": "BaseEnv._setup_scene",
-          "start_line": 534,
-          "end_line": 534,
+          "start_line": 536,
+          "end_line": 536,
           "excerpt": "        self.sim = SimulationManager(self.sim_cfg, defer_startup_summary=True)"
         }
       ]
@@ -3678,8 +3678,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 99,
-          "end_line": 99,
+          "start_line": 104,
+          "end_line": 104,
           "excerpt": "        target=\"embodichain.toolkits.acd.cli:main\","
         }
       ]
@@ -3721,15 +3721,15 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "_load_handler",
-          "start_line": 155,
-          "end_line": 157,
+          "start_line": 160,
+          "end_line": 162,
           "excerpt": "    module_name, attribute = target.split(\":\", maxsplit=1)\n    module = importlib.import_module(module_name)\n    return getattr(module, attribute)"
         },
         {
           "path": "embodichain/cli/main.py",
           "symbol": "main",
-          "start_line": 194,
-          "end_line": 195,
+          "start_line": 199,
+          "end_line": 200,
           "excerpt": "    handler = _load_handler(command.target)\n    handler(arguments[1:])"
         }
       ]
@@ -3746,8 +3746,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 94,
-          "end_line": 94,
+          "start_line": 99,
+          "end_line": 99,
           "excerpt": "        target=\"embodichain.toolkits.graspkit.scripts.annotate_grasp:cli\","
         }
       ]
@@ -3764,8 +3764,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 89,
-          "end_line": 89,
+          "start_line": 94,
+          "end_line": 94,
           "excerpt": "        target=\"embodichain.learning.rl.policy_evaluation.cli:cli\","
         }
       ]
@@ -3818,22 +3818,22 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 84,
-          "end_line": 84,
+          "start_line": 89,
+          "end_line": 89,
           "excerpt": "        target=\"embodichain.learning.rl.train:cli\","
         },
         {
           "path": "embodichain/cli/main.py",
           "symbol": "_load_handler",
-          "start_line": 155,
-          "end_line": 157,
+          "start_line": 160,
+          "end_line": 162,
           "excerpt": "    module_name, attribute = target.split(\":\", maxsplit=1)\n    module = importlib.import_module(module_name)\n    return getattr(module, attribute)"
         },
         {
           "path": "embodichain/cli/main.py",
           "symbol": "main",
-          "start_line": 194,
-          "end_line": 195,
+          "start_line": 199,
+          "end_line": 200,
           "excerpt": "    handler = _load_handler(command.target)\n    handler(arguments[1:])"
         }
       ]
@@ -3850,8 +3850,8 @@
         {
           "path": "embodichain/cli/main.py",
           "symbol": "<module>",
-          "start_line": 114,
-          "end_line": 114,
+          "start_line": 119,
+          "end_line": 119,
           "excerpt": "        target=\"embodichain.lab.scripts.analyze_workspace:cli\","
         }
       ]
@@ -3954,8 +3954,8 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "build_env_cfg_from_args",
-          "start_line": 1244,
-          "end_line": 1249,
+          "start_line": 1245,
+          "end_line": 1250,
           "excerpt": "    cfg: EmbodiedEnvCfg = config_to_cfg(\n        gym_config,\n        manager_modules=get_manager_modules(),\n        source_path=gym_config_source_path,\n        task_program_path_override=getattr(args, \"task_program\", None),\n    )"
         },
         {
@@ -4234,8 +4234,8 @@
         {
           "path": "embodichain/lab/sim/atomic_actions/engine.py",
           "symbol": "AtomicActionEngine.motion_generator",
-          "start_line": 92,
-          "end_line": 92,
+          "start_line": 93,
+          "end_line": 93,
           "excerpt": "        return self._planning_services.motion_generator"
         }
       ]
@@ -4252,8 +4252,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv.create_task_program_bridge",
-          "start_line": 2242,
-          "end_line": 2242,
+          "start_line": 2247,
+          "end_line": 2247,
           "excerpt": "        return self._checked_task_program_adapter().create_bridge(program)"
         }
       ]
@@ -4270,8 +4270,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv.compile_task_program",
-          "start_line": 2227,
-          "end_line": 2227,
+          "start_line": 2232,
+          "end_line": 2232,
           "excerpt": "        return self._checked_task_program_adapter().compile(program)"
         }
       ]
@@ -4288,8 +4288,8 @@
         {
           "path": "embodichain/lab/gym/envs/embodied_env.py",
           "symbol": "EmbodiedEnv._declare_robot",
-          "start_line": 1987,
-          "end_line": 1987,
+          "start_line": 1991,
+          "end_line": 1991,
           "excerpt": "        return self.sim.add_robot(self.cfg.robot)"
         }
       ]
@@ -4324,8 +4324,8 @@
         {
           "path": "embodichain/lab/gym/envs/managers/event_manager.py",
           "symbol": "EventManager._call_event_functor",
-          "start_line": 483,
-          "end_line": 483,
+          "start_line": 489,
+          "end_line": 489,
           "excerpt": "            return super()._call_functor(functor_name, functor_cfg, *args)"
         },
         {
@@ -5137,15 +5137,15 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_robot",
-          "start_line": 3020,
-          "end_line": 3021,
+          "start_line": 3043,
+          "end_line": 3044,
           "excerpt": "        robot = self._declare_spawn_articulation(cfg, Robot)\n        self._robots[uid] = robot"
         },
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager._declare_spawn_articulation",
-          "start_line": 3054,
-          "end_line": 3057,
+          "start_line": 3077,
+          "end_line": 3080,
           "excerpt": "        facade = facade_type(\n            cfg=cfg,\n            device=self.device,\n        )"
         }
       ]
@@ -5162,8 +5162,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.start_visualization",
-          "start_line": 999,
-          "end_line": 1003,
+          "start_line": 1008,
+          "end_line": 1012,
           "excerpt": "        runtime = VisualizationRuntime(\n            SceneExporter(self, visualization_cfg),\n            visualization_cfg,\n        )\n        runtime.start()"
         }
       ]
@@ -5180,8 +5180,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_robot",
-          "start_line": 3021,
-          "end_line": 3024,
+          "start_line": 3044,
+          "end_line": 3047,
           "excerpt": "        self._robots[uid] = robot\n        if was_materialized:\n            self.prepare()\n        return robot"
         }
       ]
@@ -5198,8 +5198,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.enable_gizmo",
-          "start_line": 3207,
-          "end_line": 3207,
+          "start_line": 3230,
+          "end_line": 3230,
           "excerpt": "            gizmo = Gizmo(target, gizmo_cfg, control_part)"
         }
       ]
@@ -5216,8 +5216,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.create_rigid_constraint",
-          "start_line": 2723,
-          "end_line": 2723,
+          "start_line": 2746,
+          "end_line": 2746,
           "excerpt": "        constraint = RigidConstraint("
         }
       ]
@@ -5234,8 +5234,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_rigid_object_group",
-          "start_line": 2846,
-          "end_line": 2846,
+          "start_line": 2869,
+          "end_line": 2869,
           "excerpt": "        group = RigidObjectGroup("
         }
       ]
@@ -5252,8 +5252,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager._declare_rigid_objects",
-          "start_line": 2417,
-          "end_line": 2417,
+          "start_line": 2440,
+          "end_line": 2440,
           "excerpt": "            rigid_obj = RigidObject(cfg=cfg, device=self.device)"
         }
       ]
@@ -5270,8 +5270,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_articulation",
-          "start_line": 2945,
-          "end_line": 2945,
+          "start_line": 2968,
+          "end_line": 2968,
           "excerpt": "        self._articulations[uid] = articulation"
         }
       ]
@@ -5288,8 +5288,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_deformable_object",
-          "start_line": 2523,
-          "end_line": 2523,
+          "start_line": 2546,
+          "end_line": 2546,
           "excerpt": "        self._deformable_objects[uid] = deformable"
         }
       ]
@@ -5306,8 +5306,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_light",
-          "start_line": 2163,
-          "end_line": 2163,
+          "start_line": 2186,
+          "end_line": 2186,
           "excerpt": "        self._lights[uid] = batch_lights"
         }
       ]
@@ -5781,6 +5781,24 @@
       ]
     },
     {
+      "id": "static-imports-36d8a240dfd7",
+      "source": "atomic-engine",
+      "target": "motion-generator",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration under if TYPE_CHECKING. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/atomic_actions/engine.py",
+          "symbol": "<module>",
+          "start_line": 40,
+          "end_line": 40,
+          "excerpt": "    from embodichain.lab.sim.motion.motion_generator import MotionGenerator"
+        }
+      ]
+    },
+    {
       "id": "static-imports-374116b69d45",
       "source": "environment-adapter",
       "target": "skill-profile",
@@ -5831,6 +5849,24 @@
           "start_line": 45,
           "end_line": 45,
           "excerpt": "from embodichain.lab.sim.sensors import Camera, ContactSensor"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-3c75d4ca3aad",
+      "source": "base-env",
+      "target": "sensors",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/base_env.py",
+          "symbol": "<module>",
+          "start_line": 41,
+          "end_line": 41,
+          "excerpt": "from embodichain.lab.sim.sensors import BaseSensor, Camera"
         }
       ]
     },
@@ -6011,24 +6047,6 @@
           "start_line": 27,
           "end_line": 27,
           "excerpt": "    from embodichain.lab.sim.sim_manager import SimulationManager"
-        }
-      ]
-    },
-    {
-      "id": "static-imports-562205c26852",
-      "source": "base-env",
-      "target": "configuration",
-      "relation": "imports",
-      "description": "The selected source module declares an absolute import associated with this target.",
-      "provenance": "static-extracted",
-      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
-      "evidence": [
-        {
-          "path": "embodichain/lab/gym/envs/base_env.py",
-          "symbol": "<module>",
-          "start_line": 42,
-          "end_line": 42,
-          "excerpt": "from embodichain.utils import configclass"
         }
       ]
     },
@@ -6933,6 +6951,24 @@
       ]
     },
     {
+      "id": "static-imports-cc506a698f2f",
+      "source": "base-env",
+      "target": "config-loader",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/base_env.py",
+          "symbol": "<module>",
+          "start_line": 42,
+          "end_line": 42,
+          "excerpt": "from embodichain.lab.gym.utils import gym_utils"
+        }
+      ]
+    },
+    {
       "id": "static-imports-ccdd4adf0e59",
       "source": "online-dataset",
       "target": "chunk-samplers",
@@ -7005,42 +7041,6 @@
       ]
     },
     {
-      "id": "static-imports-d383e37d25c0",
-      "source": "base-env",
-      "target": "config-loader",
-      "relation": "imports",
-      "description": "The selected source module declares an absolute import associated with this target.",
-      "provenance": "static-extracted",
-      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
-      "evidence": [
-        {
-          "path": "embodichain/lab/gym/envs/base_env.py",
-          "symbol": "<module>",
-          "start_line": 40,
-          "end_line": 40,
-          "excerpt": "from embodichain.lab.gym.utils import gym_utils"
-        }
-      ]
-    },
-    {
-      "id": "static-imports-d3f76cbdac77",
-      "source": "atomic-engine",
-      "target": "motion-generator",
-      "relation": "imports",
-      "description": "The selected source module declares an absolute import associated with this target.",
-      "provenance": "static-extracted",
-      "scope": "Module-level declaration under if TYPE_CHECKING. Not a runtime call or proof that every class in the file uses the imported symbol.",
-      "evidence": [
-        {
-          "path": "embodichain/lab/sim/atomic_actions/engine.py",
-          "symbol": "<module>",
-          "start_line": 39,
-          "end_line": 39,
-          "excerpt": "    from embodichain.lab.sim.motion.motion_generator import MotionGenerator"
-        }
-      ]
-    },
-    {
       "id": "static-imports-d9c602221a0e",
       "source": "skill-profile",
       "target": "atomic-engine",
@@ -7091,6 +7091,24 @@
           "start_line": 98,
           "end_line": 98,
           "excerpt": "    from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-e1d222cb5a02",
+      "source": "base-env",
+      "target": "configuration",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/gym/envs/base_env.py",
+          "symbol": "<module>",
+          "start_line": 44,
+          "end_line": 44,
+          "excerpt": "from embodichain.utils import configclass"
         }
       ]
     },
@@ -7239,24 +7257,6 @@
       ]
     },
     {
-      "id": "static-imports-f047844198f1",
-      "source": "base-env",
-      "target": "sensors",
-      "relation": "imports",
-      "description": "The selected source module declares an absolute import associated with this target.",
-      "provenance": "static-extracted",
-      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
-      "evidence": [
-        {
-          "path": "embodichain/lab/gym/envs/base_env.py",
-          "symbol": "<module>",
-          "start_line": 39,
-          "end_line": 39,
-          "excerpt": "from embodichain.lab.sim.sensors import BaseSensor, Camera"
-        }
-      ]
-    },
-    {
       "id": "static-imports-f385bb6c0702",
       "source": "scene-editing",
       "target": "scene-layout",
@@ -7361,6 +7361,24 @@
           "start_line": 36,
           "end_line": 36,
           "excerpt": "from embodichain.lab.sim.objects.rigid_object import RigidObject"
+        }
+      ]
+    },
+    {
+      "id": "static-imports-ff6295f38963",
+      "source": "tasks",
+      "target": "config-loader",
+      "relation": "imports",
+      "description": "The selected source module declares an absolute import associated with this target.",
+      "provenance": "static-extracted",
+      "scope": "Module-level declaration. Not a runtime call or proof that every class in the file uses the imported symbol.",
+      "evidence": [
+        {
+          "path": "embodichain_tasks/embodichain_tasks/__init__.py",
+          "symbol": "<module>",
+          "start_line": 27,
+          "end_line": 27,
+          "excerpt": "from embodichain.lab.gym.utils.gym_utils import register_manager_modules"
         }
       ]
     },
@@ -7685,9 +7703,9 @@
         "static-imports-a2ed85aaf8e4",
         "static-imports-06051215554a",
         "static-imports-547bae782cdb",
-        "static-imports-f047844198f1",
-        "static-imports-d383e37d25c0",
-        "static-imports-562205c26852",
+        "static-imports-3c75d4ca3aad",
+        "static-imports-cc506a698f2f",
+        "static-imports-e1d222cb5a02",
         "static-imports-009eb229e628",
         "static-imports-6efc6c8fee5c",
         "static-imports-9930294a9a0a",
@@ -7698,7 +7716,7 @@
         "static-imports-3c5c9b9d4364",
         "static-imports-6b4f407022e8",
         "static-imports-eb84e6a51ed6",
-        "static-imports-d3f76cbdac77",
+        "static-imports-36d8a240dfd7",
         "static-imports-ab15f87df47f",
         "static-imports-bc79368679c6",
         "static-imports-f6f4ac515679",
@@ -7735,7 +7753,8 @@
         "static-imports-ae929a6258a7",
         "static-imports-8eec00e8d07c",
         "static-imports-4c07006a2a5a",
-        "static-imports-2b77ea1ae6d0"
+        "static-imports-2b77ea1ae6d0",
+        "static-imports-ff6295f38963"
       ],
       "groups": [
         {
@@ -7944,7 +7963,7 @@
         "static-imports-6887f760c2d8",
         "static-imports-5a790441a2e1",
         "static-imports-ddc442f99a40",
-        "static-imports-d3f76cbdac77",
+        "static-imports-36d8a240dfd7",
         "static-imports-a6906547dfc6",
         "static-imports-2b8a0b73365e",
         "static-imports-5d4a690b4f47",
@@ -8113,7 +8132,7 @@
         "deformables-inherits-batch-entity",
         "lights-inherits-batch-entity",
         "static-imports-547bae782cdb",
-        "static-imports-d3f76cbdac77",
+        "static-imports-36d8a240dfd7",
         "static-imports-5529b5ed4bec",
         "static-imports-ab15f87df47f",
         "static-imports-bc79368679c6",
