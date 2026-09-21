@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import trimesh
 import torch
 
@@ -68,6 +69,70 @@ def test_live_link_pose_and_object_rotation_define_target() -> None:
     next_target = placement_pose(vertices, np.eye(3), moved, low, high)
     np.testing.assert_allclose(next_target[:3, 3] - target[:3, 3], [0.12, 0, 0])
     np.testing.assert_allclose(target[:3, :3], np.eye(3))
+
+
+def test_transport_stages_outside_opening_along_calibrated_slide_axis() -> None:
+    from types import SimpleNamespace
+
+    from embodichain.gen_sim.task_engine._task_program.drawer_binding import (
+        DrawerRoute,
+    )
+    from embodichain.gen_sim.task_engine._task_program.drawer_runtime import (
+        DrawerObservation,
+    )
+    from embodichain.gen_sim.task_engine._task_program.articulation_binding import (
+        PrismaticBinding,
+    )
+
+    binding = PrismaticBinding(
+        object_id="cabinet",
+        joint="slide",
+        link="drawer",
+        parent="cabinet_root",
+        handle_path="/drawer/handle",
+        source_sha256="0" * 64,
+        scale=1.0,
+        axis=(0.0, 1.0, 0.0),
+        limits=(-0.1, 0.0),
+        part_id="part_test",
+    )
+    route = DrawerRoute(
+        "inside__cabinet__cube__part_test",
+        "cube",
+        binding,
+        (-0.1, -0.1, 0.0),
+        (0.1, 0.1, 0.1),
+    )
+    obj_pose = torch.eye(4).unsqueeze(0)
+    link_pose = torch.eye(4).unsqueeze(0)
+    obj = SimpleNamespace(
+        get_vertices=lambda scale=True: torch.tensor([[[0.0, 0.0, 0.0]]]),
+        get_local_pose=lambda to_matrix=True: obj_pose,
+    )
+    art = SimpleNamespace(
+        get_link_pose=lambda *args, **kwargs: link_pose,
+        joint_names=["slide"],
+        get_qpos=lambda: torch.tensor([[-0.1]]),
+    )
+    obs = object.__new__(DrawerObservation)
+    obs.route, obs.art, obs.obj = route, art, obj
+    obs.vertices = np.zeros((1, 3), dtype=np.float32)
+    staged, rim, release = obs.entry_poses()
+    assert staged[0, 0, 3] == pytest.approx(0.0)
+    assert staged[0, 1, 3] == pytest.approx(-0.14)
+    assert staged[0, 2, 3] == pytest.approx(0.245)
+    assert rim[0, 2, 3] == staged[0, 2, 3]
+    assert release[0, 1, 3] == pytest.approx(-0.05)
+    assert release[0, 2, 3] == pytest.approx(0.365)
+    transform = torch.eye(4)
+    transform[:3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    transform[:3, 3] = torch.tensor([0.6, -0.3, 0.8])
+    link_pose[:] = transform
+    obj_pose[:] = transform
+    for actual, original in zip(obs.entry_poses(), (staged, rim, release), strict=True):
+        torch.testing.assert_close(actual, transform @ original)
 
 
 def test_part_identity_survives_chained_step_results() -> None:
