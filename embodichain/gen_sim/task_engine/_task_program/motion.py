@@ -41,6 +41,14 @@ from embodichain.lab.sim.motion.planners.utils import (
 __all__: list[str] = []
 
 MOTION_VALIDATION_REVISION = 4
+VELOCITY_RETIME_SAMPLES = (260, 320)
+
+
+def _velocity_retry_samples(sample_count: int | None) -> tuple[int, ...]:
+    """Return denser fallback budgets without changing any joint limit."""
+    if sample_count is None:
+        return ()
+    return tuple(value for value in VELOCITY_RETIME_SAMPLES if value > sample_count)
 
 
 def _joint_velocity_limits(robot: Any, control_part: str | None) -> torch.Tensor:
@@ -200,11 +208,25 @@ class ApproachMotionGenerator(CheckedMotionGenerator):
         options: MotionGenOptions | None = None,
     ) -> PlanResult:
         input_target_count = len(target_states)
+        original_targets = target_states
+        original_options = options
         input_poses = [
             state.xpos.detach().cpu().tolist()
             for state in target_states
             if state.xpos is not None
         ]
+
+        def build_samples(
+            sample_count: int,
+        ) -> tuple[list[PlanState], MotionGenOptions]:
+            sampled = _cartesian_samples(start, original_targets, sample_count)
+            return sampled, replace(
+                original_options,
+                sample_count=sample_count,
+                preserve_cartesian_samples=True,
+                is_linear=True,
+            )
+
         if (
             options is not None
             and options.strategy == "ik_interp"
@@ -225,11 +247,35 @@ class ApproachMotionGenerator(CheckedMotionGenerator):
                 name=options.control_part,
                 to_matrix=True,
             )
-            target_states = _cartesian_samples(
-                start, target_states, options.sample_count
-            )
-            options = replace(options, preserve_cartesian_samples=True, is_linear=True)
+            target_states, options = build_samples(options.sample_count)
         result = super().generate(target_states, options=options)
+        if (
+            isinstance(result.success, torch.Tensor)
+            and not result.success.any()
+            and original_options is not None
+            and original_options.strategy == "ik_interp"
+            and original_options.sample_count is not None
+            and original_options.sample_count <= VELOCITY_RETIME_SAMPLES[0]
+            and original_options.control_part is not None
+            and not original_options.preserve_cartesian_samples
+            and all(state.move_type is MoveType.EEF_MOVE for state in original_targets)
+        ):
+            # A coarse IK interpolation can violate a real URDF/runtime limit
+            # even when the geometric path is valid. Retry with denser samples
+            # before reporting failure; limits remain unchanged.
+            for sample_count in _velocity_retry_samples(original_options.sample_count):
+                retry_targets, retry_options = build_samples(sample_count)
+                retry = super().generate(retry_targets, options=retry_options)
+                if isinstance(retry.success, torch.Tensor) and retry.success.any():
+                    target_states, options, result = (
+                        retry_targets,
+                        retry_options,
+                        retry,
+                    )
+                    logger.log_info(
+                        f"GenSim adaptive velocity retime accepted sample_count={sample_count}."
+                    )
+                    break
         logger.log_info(
             "GenSim motion plan: "
             + json.dumps(
