@@ -1041,8 +1041,12 @@ class EmbodiedEnv(BaseEnv):
 
         self.episode_success_status[env_ids_to_process] = False
 
-        # apply events such as randomization for environments that need a reset
+        # Stateful managers reset selected rows before reset-mode events run.
+        action_manager = getattr(self, "action_manager", None)
+        if action_manager is not None:
+            action_manager.reset(env_ids=env_ids)
         if self.cfg.events:
+            self.event_manager.reset(env_ids=env_ids)
             if "reset" in self.event_manager.available_modes:
                 with self._profiler.section("event_reset"):
                     self.event_manager.apply(mode="reset", env_ids=env_ids)
@@ -2014,10 +2018,11 @@ class EmbodiedEnv(BaseEnv):
                         f"Invalid control part: {part_name}. The supported control parts are: {robot.control_parts}"
                     )
 
-            for part_name in self.cfg.control_parts:
-                self.active_joint_ids.extend(
-                    robot.get_joint_ids(name=part_name, remove_mimic=True)
-                )
+            self.active_joint_ids = [
+                joint_id
+                for part_name in self.cfg.control_parts
+                for joint_id in robot.get_joint_ids(name=part_name, remove_mimic=True)
+            ]
         elif self.cfg.active_joint_ids:
             # Check env active joint ids are valid
             for joint_id in self.cfg.active_joint_ids:
@@ -2025,7 +2030,7 @@ class EmbodiedEnv(BaseEnv):
                     logger.log_error(
                         f"Invalid active joint id: {joint_id}. The supported active joint ids are: {robot.active_joint_ids}"
                     )
-            self.active_joint_ids = self.cfg.active_joint_ids
+            self.active_joint_ids = list(self.cfg.active_joint_ids)
         else:
             # Use all joints of the robot.
             self.active_joint_ids = list(range(robot.dof))

@@ -74,6 +74,7 @@ from embodichain.lab.sim.objects.backends.articulation_physics import (
 from embodichain.lab.sim.objects.backends.articulation_topology import (
     get_joint_descriptor,
 )
+from embodichain.lab.sim.objects.backends._kinematics import _build_pk_chain
 from embodichain.lab.sim.objects.backends.articulation_state import (
     get_state_joint_names,
     map_source_qpos_to_state_order,
@@ -438,9 +439,16 @@ class ArticulationData:
         """Refresh current mass, inertia diagonal, and local COM pose buffers.
 
         COM poses use the EmbodiChain convention ``xyz + xyzw`` and all
-        tensors use the public link ordering. DexSim physical-property
-        descriptors use ``wxyz`` and are converted at this boundary.
+        tensors use the public link ordering. Legacy DexSim physical attributes
+        use ``wxyz`` and are converted at this boundary. Newton
+        reads use the Scene batch to avoid per-link device-to-host transfers.
         """
+        if self.is_newton_backend:
+            self.articulation_view.fetch_link_physical_properties(
+                self._mass, self._inertia, self._com_pose
+            )
+            return self._mass, self._inertia, self._com_pose
+
         masses: list[list[float]] = []
         inertias: list[list[np.ndarray]] = []
         com_poses: list[list[np.ndarray]] = []
@@ -847,16 +855,13 @@ class Articulation(BatchEntity):
 
         is_usd_source = str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc"))
         self.pk_chain = None
-        if self.cfg.build_pk_chain and not is_usd_source:
-            self.pk_chain = create_pk_chain(
-                urdf_path=self.cfg.fpath, device=self.device
-            )
-        elif self.cfg.build_pk_chain:
-            logger.log_warning(
-                f"Articulation {self.uid!r} uses USD for simulation; skipping "
-                "the URDF-only pk_chain. Configure a solver with its matching "
-                "URDF when kinematics are required."
-            )
+        if self.cfg.build_pk_chain:
+            if is_usd_source:
+                self.pk_chain = _build_pk_chain(entities[0], device=self.device)
+            else:
+                self.pk_chain = create_pk_chain(
+                    urdf_path=self.cfg.fpath, device=self.device
+                )
 
         self._visual_material = [{} for _ in range(len(entities))]
         self.is_shared_visual_material = False
@@ -1333,17 +1338,19 @@ class Articulation(BatchEntity):
         inertia_changed = not torch.allclose(current_inertia, default_inertia)
         if mass_changed:
             self.set_mass(default_mass, link_names=self.link_names, env_ids=env_list)
-        if mass_changed or inertia_changed:
-            self.set_inertia(
-                default_inertia,
-                link_names=self.link_names,
-                env_ids=env_list,
-            )
-        if not torch.allclose(current_com_pose, default_com_pose):
-            self.set_com_pose(
-                default_com_pose,
-                link_names=self.link_names,
-                env_ids=env_list,
+        if (
+            mass_changed
+            or inertia_changed
+            or not torch.allclose(current_com_pose, default_com_pose)
+        ):
+            # Restore the saved pair together: a matrix write can reorder its
+            # principal axes, so an intervening read cannot supply the old frame.
+            if not self.is_spawn_bound:
+                self.set_inertia(
+                    default_inertia, link_names=self.link_names, env_ids=env_list
+                )
+            self._apply_com_pose(
+                default_com_pose, default_inertia, env_list, list(self.link_names)
             )
 
     @property
@@ -2055,7 +2062,7 @@ class Articulation(BatchEntity):
         """Set principal moments of inertia for selected links."""
         env_index = self._resolve_env_ids(env_ids)
         env_list = env_index.detach().cpu().tolist()
-        names, _ = self._resolve_link_names(link_names)
+        names, link_index = self._resolve_link_names(link_names)
         inertia = torch.as_tensor(inertia, dtype=torch.float32, device=self.device)
         expected_shape = (len(env_list), len(names), 3)
         if tuple(inertia.shape) != expected_shape:
@@ -2064,6 +2071,14 @@ class Articulation(BatchEntity):
                 f"got {tuple(inertia.shape)}."
             )
 
+        frames = (
+            self.body_data.com_pose[env_index[:, None], link_index[None, :], 3:7]
+            .detach()
+            .cpu()
+            .numpy()
+            if self.is_spawn_bound
+            else None
+        )
         values = inertia.detach().cpu().numpy()
         for i, env_idx in enumerate(env_list):
             entity = self._entities[env_idx]
@@ -2073,6 +2088,7 @@ class Articulation(BatchEntity):
                     entity,
                     name,
                     value,
+                    quaternion_xyzw=frames[i, j] if frames is not None else None,
                     is_spawn_bound=self.is_spawn_bound,
                     is_newton=self._data.is_newton_backend,
                 )
@@ -2104,7 +2120,7 @@ class Articulation(BatchEntity):
         """Set local COM poses in EmbodiChain ``xyz + xyzw`` convention."""
         env_index = self._resolve_env_ids(env_ids)
         env_list = env_index.detach().cpu().tolist()
-        names, _ = self._resolve_link_names(link_names)
+        names, link_index = self._resolve_link_names(link_names)
         com_pose = torch.as_tensor(com_pose, dtype=torch.float32, device=self.device)
         expected_shape = (len(env_list), len(names), 7)
         if tuple(com_pose.shape) != expected_shape:
@@ -2113,6 +2129,22 @@ class Articulation(BatchEntity):
                 f"got {tuple(com_pose.shape)}."
             )
 
+        inertia = (
+            self.body_data.inertia[env_index[:, None], link_index[None, :]]
+            if self.is_spawn_bound
+            else None
+        )
+        self._apply_com_pose(com_pose, inertia, env_list, names)
+
+    def _apply_com_pose(
+        self,
+        com_pose: torch.Tensor,
+        inertia: torch.Tensor | None,
+        env_list: list[int],
+        names: list[str],
+    ) -> None:
+        """Write a coherent pair of principal moments and local COM frames."""
+        moments = inertia.detach().cpu().numpy() if inertia is not None else None
         values = com_pose.detach().cpu().numpy()
         for i, env_idx in enumerate(env_list):
             entity = self._entities[env_idx]
@@ -2127,6 +2159,7 @@ class Articulation(BatchEntity):
                     name,
                     position,
                     quaternion,
+                    inertia=moments[i, j] if moments is not None else None,
                     is_spawn_bound=self.is_spawn_bound,
                     is_newton=self._data.is_newton_backend,
                 )
@@ -2211,8 +2244,8 @@ class Articulation(BatchEntity):
             environment-major order.
 
         .. attention::
-            The returned Spawn descriptor is a backend-native object;
-            ``com_quaternion`` is stored in ``wxyz`` order. Use
+            The returned Spawn descriptor stores a body-frame ``(3, 3)`` inertia
+            tensor and COM position, with no separate quaternion. Use
             :meth:`get_com_pose` for the EmbodiChain ``xyz + xyzw`` view.
         """
         if not (
@@ -2607,6 +2640,36 @@ class Articulation(BatchEntity):
             link_idx = self.link_names.index(link_name)
             return self.user_ids[local_env_ids, link_idx]
 
+    def set_root_velocity(
+        self,
+        velocity: torch.Tensor,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+    ) -> None:
+        """Set root-link linear and angular velocity in world coordinates.
+
+        If a native write fails, restore both velocity components for the
+        selected rows before propagating the error. A failed restoration raises
+        a rollback error chained from the original write error.
+
+        Args:
+            velocity: Selected root velocities with shape ``(N, 6)``; linear
+                velocity precedes angular velocity.
+            env_ids: Selected environment rows, or all rows when omitted.
+
+        Raises:
+            ValueError: The input shape does not match the selected rows.
+        """
+        ids = self._resolve_env_ids(env_ids)
+        velocity = torch.as_tensor(velocity, dtype=torch.float32, device=self.device)
+        if velocity.ndim == 1:
+            velocity = velocity.unsqueeze(0)
+        expected = (len(ids), 6)
+        if tuple(velocity.shape) != expected:
+            raise ValueError(
+                f"Root velocity must have shape {expected}, got {tuple(velocity.shape)}."
+            )
+        self._data.articulation_view.apply_root_velocity(velocity, ids)
+
     def clear_dynamics(self, env_ids: Sequence[int] | None = None) -> None:
         """Clear the dynamics of the articulation.
 
@@ -2975,8 +3038,12 @@ class Articulation(BatchEntity):
         """Compute the Jacobian matrix for the given joint positions using the pk_serial_chain.
 
         Args:
-            qpos (torch.Tensor): The joint positions. Shape can be (dof,) for a single configuration
-                                 or (batch_size, dof) for batched configurations.
+            qpos: Joint positions with shape ``(dof,)`` or ``(batch_size, dof)``
+                in public :attr:`joint_names` order. The selected chain's joint
+                values are extracted and reordered by name. A narrower vector
+                containing exactly the serial chain's joints is also accepted
+                in serial-chain parameter order. When both widths match, public
+                state order takes precedence. None evaluates the zero state.
             end_link_name (str, optional): The name of the end link for which the Jacobian is computed.
                                            Defaults to the last link in the chain.
             root_link_name (str, optional): The name of the root link for which the Jacobian is computed.
@@ -2985,33 +3052,37 @@ class Articulation(BatchEntity):
                                                                    frame for which the Jacobian is computed.
                                                                    Shape can be (batch_size, 3) or (3,) for a single offset.
                                                                    Defaults to None (origin of the end-effector frame).
-            jac_type (str, optional): Specifies the part of the Jacobian to return:
-                                      - 'full': Returns the full Jacobian (6, dof) or (batch_size, 6, dof).
-                                      - 'trans': Returns only the translational part (3, dof) or (batch_size, 3, dof).
-                                      - 'rot': Returns only the rotational part (3, dof) or (batch_size, 3, dof).
-                                      Defaults to 'full'.
+            jac_type: ``full`` returns all six rows; ``trans`` returns the
+                translational rows and ``rot`` the rotational rows. Defaults to
+                ``full``.
 
         Raises:
             RuntimeError: If the pk_chain is not initialized.
-            ValueError: If an invalid `jac_type` is provided.
+            ValueError: If ``jac_type`` is invalid, the joint-state shape does
+                not match the articulation or selected chain, or the chain
+                contains joint names absent from the public state.
 
         Returns:
-            torch.Tensor: The Jacobian matrix. Shape depends on the input:
-                          - For a single link: (6, dof) or (batch_size, 6, dof).
-                          - For multiple links: (num_links, 6, dof) or (num_links, batch_size, 6, dof).
-                          The shape also depends on the `jac_type` parameter.
+            Jacobian with shape ``(batch_size, 6, chain_dof)`` for ``full`` or
+            ``(batch_size, 3, chain_dof)`` for ``trans``/``rot``. A one-dimensional
+            input has batch size one. Columns follow the selected serial chain's
+            ``get_joint_parameter_names()`` order, not the public state order;
+            sibling joints outside the selected chain have no columns.
         """
         if self.pk_chain is None:
             logger.log_error("pk_chain is not initialized for this articulation.")
 
+        state_joint_names = tuple(self.joint_names)
         if qpos is None:
-            qpos = torch.zeros(self.dof, device=self.device)
+            qpos = torch.zeros(len(state_joint_names), device=self.device)
 
         # Ensure qpos is a tensor on the correct device
         qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
+        if qpos.ndim not in (1, 2):
+            raise ValueError("qpos must have shape (joints,) or (batch_size, joints).")
 
         # Default root and end link names if not provided
-        frame_names = self.pk_chain.get_frame_names()
+        frame_names = self.pk_chain.get_frame_names(exclude_fixed=False)
         if root_link_name is None:
             root_link_name = frame_names[0]  # Default to the first frame
         if end_link_name is None:
@@ -3019,11 +3090,33 @@ class Articulation(BatchEntity):
 
         # Create pk_serial_chain
         pk_serial_chain = create_pk_serial_chain(
-            urdf_path=self.cfg.fpath,
+            chain=self.pk_chain,
             root_link_name=root_link_name,
             end_link_name=end_link_name,
             device=self.device,
         )
+
+        serial_joint_names = tuple(pk_serial_chain.get_joint_parameter_names())
+        state_joint_ids = {name: index for index, name in enumerate(state_joint_names)}
+        missing_joint_names = set(serial_joint_names) - state_joint_ids.keys()
+        if missing_joint_names:
+            raise ValueError(
+                "Serial-chain joints are absent from public joint_names: "
+                f"{sorted(missing_joint_names)}."
+            )
+        if qpos.shape[-1] == len(state_joint_names):
+            joint_ids = torch.tensor(
+                [state_joint_ids[name] for name in serial_joint_names],
+                dtype=torch.long,
+                device=self.device,
+            )
+            qpos = qpos.index_select(-1, joint_ids)
+        elif qpos.shape[-1] != len(serial_joint_names):
+            raise ValueError(
+                f"qpos has {qpos.shape[-1]} joints; expected {len(state_joint_names)} "
+                "in public joint_names order or "
+                f"{len(serial_joint_names)} in serial-chain parameter order."
+            )
 
         # Compute the Jacobian using the kinematics chain
         J = pk_serial_chain.jacobian(th=qpos, locations=locations)

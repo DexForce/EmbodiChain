@@ -6,14 +6,13 @@ atomic-action interfaces while cuRobo performs collision-aware inverse
 kinematics and trajectory optimization. It supports Cartesian EEF_MOVE and
 joint-space JOINT_MOVE requests for one configured control part at a time.
 
-planner_type="curobo" selects this backend. cuRobo V2 is deliberately not an
+`planner_type="curobo"` selects this backend. cuRobo V2 is deliberately not an
 EmbodiChain core dependency: importing EmbodiChain planners does not import
 cuRobo, and constructing this planner requires a CUDA-capable NVIDIA GPU.
 
 ## Install cuRobo V2
 
-cuRobo V2 is installed separately from EmbodiChain because public package
-indexes do not accept Git dependencies in published package metadata. Select
+Install cuRobo V2 separately from EmbodiChain. Select
 exactly one source requirement that matches the CUDA runtime used by PyTorch:
 
 ~~~bash
@@ -48,15 +47,11 @@ environment that runs the simulator.
 
 ## Configure a control part
 
-The cuRobo robot model and the per-control-part profile are both auto-generated
-internally - no external cuRobo robot YAML (e.g. `franka.yml`) and no
-`robot_profiles` config are needed. On the first plan, the adapter fits collision
-spheres to each link of the robot's URDF and writes a cuRobo V2 robot YAML (see
-[Auto-generated robot YAML](#auto-generated-robot-yaml)). The tool frame, TCP
-offset, and base link are read from the control part's IK solver, and the
-simulator->cuRobo joint mapping is identity (the generated YAML reuses the
-URDF's own joint names). The control part is selected at plan time through
-`CuroboPlanOptions.control_part` and validated against `robot.control_parts`.
+Select a registered robot with an IK solver for the desired control part.
+The adapter generates the robot profile from its URDF, joint names, base link,
+and TCP; see [robot model generation](#auto-generated-robot-yaml) for caching
+and collision-sphere settings. `CuroboPlanOptions.control_part` selects the
+part at plan time.
 
 Lock non-controlled joints (for example gripper joints) in the cuRobo robot
 profile so they are not exposed as active planner joints. The simulator values of
@@ -100,6 +95,40 @@ cuRobo's Python logger defaults to error-only output. Set
 `CuroboPlannerCfg.log_level` to `"debug"`, `"info"`, `"warning"`, or `"error"`
 to change its verbosity. This setting does not affect EmbodiChain's own logs.
 
+## Generate a motion
+
+`MotionGenerator` forwards `start_qpos` and `control_part` to cuRobo. Native
+Cartesian goals bypass generic pre-interpolation. If `MotionGenOptions.sample_count`
+requests a different output count, the generator resamples in time while
+preserving duration. Set `CuroboPlannerCfg.preserve_plan_samples=True` to retain
+cuRobo's original collision-checked samples. When resampling changes the grid,
+the generator revalidates the final joint samples against the resolved collision
+scene and fails rows with invalid samples. This check does not certify the
+continuous path between samples.
+
+~~~python
+import torch
+
+from embodichain.lab.sim.motion.motion_generator import MotionGenOptions
+from embodichain.lab.sim.motion.planners import CuroboPlanOptions, PlanState
+
+goal_pose = torch.eye(4, device=robot.device).repeat(robot.num_instances, 1, 1)
+goal_pose[:, :3, 3] = torch.tensor(
+    [[0.55, 0.30, 0.45]], device=robot.device
+)
+result = motion_generator.generate(
+    [PlanState.from_xpos(goal_pose)],
+    MotionGenOptions(
+        start_qpos=robot.get_qpos(name="arm"),
+        control_part="arm",
+        plan_opts=CuroboPlanOptions(),
+    ),
+)
+assert result.success.all()
+~~~
+
+## Devices and CUDA graphs
+
 The physics and planner devices are independent.
 `SimulationManagerCfg(sim_device="cpu")` keeps robot state, targets, and
 returned trajectories on CPU,
@@ -108,29 +137,6 @@ default a CPU simulation uses PyTorch's current CUDA device; set
 `CuroboPlannerCfg.cuda_device="cuda:1"` (or an integer GPU index) to select a
 different planning GPU. A CPU value is rejected because cuRobo itself has no
 CPU backend.
-
-The robot configuration must be a cuRobo V2 robot profile with collision
-spheres; the adapter generates this from the robot's URDF automatically. A plain
-URDF alone is not sufficient for robot-to-world collision planning without that
-sphere-fitting step.
-
-:::{warning}
-cuRobo self-collision checking is temporarily disabled in this backend.
-Robot-to-world collision checking remains enabled, but planned trajectories
-are not currently rejected when two robot links collide with each other.
-:::
-
-The adapter automatically rebases simulator-world Cartesian goals and dynamic
-obstacle poses through the live simulator control-part base, so parallel arena
-offsets and a moved robot base are handled. If the simulator and cuRobo base
-frames use different fixed conventions, set
-`CuroboPlannerCfg.sim_base_to_curobo_base` to the transform from the simulator
-base to the cuRobo base. Collision-world poses are authored in the cuRobo
-base/world frame. `tool_frame_to_tcp` (read from `solver.tcp_xpos`) converts an
-EmbodiChain TCP goal into the chosen cuRobo tool frame when the solver's end link
-is not itself the TCP. By convention, the adapter uses
-`T_curobo,X = T_curobo,sim_base @ inv(T_world,sim_base) @ T_world,X`. It obtains
-the simulator base from the control part's IK solver root.
 
 `CuroboPlannerCfg.use_cuda_graph` defaults to `True`. The planner runs in the
 simulator process and reuses its CUDA context; it does not launch a persistent
@@ -160,6 +166,26 @@ caches those two goal types separately and initializes each lazily. Applications
 that use only one move type retain one planner backend; using both incurs a
 second one-time warmup and its graph-resident memory, but still no subprocess or
 second CUDA context.
+
+## Collision world
+
+:::{warning}
+cuRobo self-collision checking is temporarily disabled in this backend.
+Robot-to-world collision checking remains enabled, but planned trajectories
+are not currently rejected when two robot links collide with each other.
+:::
+
+The adapter automatically rebases simulator-world Cartesian goals and dynamic
+obstacle poses through the live simulator control-part base, so parallel arena
+offsets and a moved robot base are handled. If the simulator and cuRobo base
+frames use different fixed conventions, set
+`CuroboPlannerCfg.sim_base_to_curobo_base` to the transform from the simulator
+base to the cuRobo base. Collision-world poses are authored in the cuRobo
+base/world frame. `tool_frame_to_tcp` (read from `solver.tcp_xpos`) converts an
+EmbodiChain TCP goal into the chosen cuRobo tool frame when the solver's end link
+is not itself the TCP. By convention, the adapter uses
+`T_curobo,X = T_curobo,sim_base @ inv(T_world,sim_base) @ T_world,X`. It obtains
+the simulator base from the control part's IK solver root.
 
 The collision world is auto-generated from live `RigidObject` **physical
 collision shapes** via `RigidObject.get_collision_shapes()`. It does not use
@@ -235,18 +261,12 @@ even though they do not receive per-plan pose updates.
 
 `CuroboWorldCfg` validates this planner-local registration at construction:
 obstacle IDs must be unique, and every dynamic obstacle ID must match an entry
-in `rigid_objects`. A sequence of objects is retained only as an advanced
-direct-core path; it derives names from each `uid` or an `obstacle_<index>`
-fallback. Do not use that form for a registry-backed world.
+in `rigid_objects`. Use the mapping form for registry-backed worlds.
 
-The {doc}`../../../task_program/scene_registry` integration performs two
-higher-level checks before execution. First, all registry `STATIC ∪ DYNAMIC`
-IDs must exactly equal
-`MotionGenerator.collision_world_entity_ids`. Second, registry, derived scene
-provider, and planner dynamic-ID subsets must exactly agree. The planner must
-also support pose updates and its shared/per-environment batch mode must agree
-with the registry. Aliases are normalized at the registry boundary; cuRobo
-never translates a canonical ID back to a simulator UID.
+For registry-backed integration, derive geometry, dynamic IDs, and the scene
+provider from the same registry, as in the configuration example. The
+{doc}`../../../task_program/scene_registry` validates exact collision-ID,
+dynamic-ID, and batch-mode agreement before execution.
 
 ### Shared and per-environment collision worlds
 
@@ -344,38 +364,6 @@ representations read back from those caches, call
 transformed by the simulator's live link poses. The interactive cuRobo example
 calls this once after planner initialization; close the Open3D window to continue.
 
-## Generate a motion
-
-MotionGenerator passes start_qpos and control_part to the cuRobo backend. For
-Cartesian goals, leave EmbodiChain pre-interpolation disabled: cuRobo must
-receive the original pose. By default the returned collision-checked samples are
-arc-length resampled to the invocation's `MotionPolicy.sample_count` waypoint
-count (so the same runtime policy controls trajectory length across planners);
-set `CuroboPlannerCfg.preserve_plan_samples=True` to keep
-cuRobo's own samples (whose count is derived from `interpolation_dt` and the
-trajectory duration).
-
-~~~python
-import torch
-
-from embodichain.lab.sim.motion.motion_generator import MotionGenOptions
-from embodichain.lab.sim.motion.planners import CuroboPlanOptions, PlanState
-
-goal_pose = torch.eye(4, device=robot.device).unsqueeze(0)
-goal_pose[:, :3, 3] = torch.tensor(
-    [[0.55, 0.30, 0.45]], device=robot.device
-)
-result = motion_generator.generate(
-    [PlanState.from_xpos(goal_pose)],
-    MotionGenOptions(
-        start_qpos=robot.get_qpos(name="arm"),
-        control_part="arm",
-        plan_opts=CuroboPlanOptions(),
-    ),
-)
-assert result.success.all()
-~~~
-
 ## Atomic actions and supported scope
 
 Single-arm MoveEndEffector is supported through the normal
@@ -384,11 +372,11 @@ joint-space planning with `strategy="motion_gen"`; the action uses the planner
 already owned by its MotionGenerator. Movement phases of PickUp, Place,
 and MoveHeldObject can use the same single-arm static-world route.
 
-This first release intentionally has the following limits:
+Supported scope is limited as follows:
 
 - Only one configured control part is planned per request; coordinated dual-arm
   planning and CoordinatedPickment are unsupported.
-- Collision worlds are generated from `RigidObject` meshes (cuboid/mesh/sphere)
+- Collision worlds use the physical shapes described above
   plus named dynamic pose updates. Arbitrary geometry insertion and removal at
   runtime are unsupported.
 - The generated collision world assumes a fixed-base robot at the simulator

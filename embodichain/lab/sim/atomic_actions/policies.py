@@ -79,6 +79,10 @@ class MotionPolicy:
                 f"strategy must be one of {sorted(valid_strategies)}, "
                 f"got {self.strategy!r}."
             )
+        if self.strategy == "ik_interp" and self.plan_opts is not None:
+            raise ValueError(
+                "plan_opts requires strategy='motion_gen'; ik_interp bypasses the backend."
+            )
         if self.velocity_targets not in {"auto", "zero"}:
             raise ValueError("velocity_targets must be auto or zero.")
         if self.sample_count < 2:
@@ -121,18 +125,27 @@ class MotionPolicy:
 
         Returns:
             Independently owned options for :class:`MotionGenerator`.
+
+        Raises:
+            ValueError: If a fixed Cartesian path is requested with a planner
+                strategy that does not guarantee those exact samples.
         """
         from embodichain.lab.sim.motion.motion_generator import (
             MotionGenOptions,
         )
 
+        if cartesian_linear and self.strategy != "ik_interp":
+            raise ValueError(
+                "cartesian_linear skill segments require strategy='ik_interp'; "
+                "motion_gen backends do not guarantee exact Cartesian samples."
+            )
         return MotionGenOptions(
             strategy=self.strategy,
             sample_count=self.sample_count if sample_count is None else sample_count,
             start_qpos=start_qpos,
             control_part=control_part,
             plan_opts=self.plan_opts,
-            is_interpolate=True,
+            is_interpolate=self.strategy == "motion_gen",
             interpolation_dt=interpolation_dt,
             is_linear=cartesian_linear,
             preserve_cartesian_samples=cartesian_linear,

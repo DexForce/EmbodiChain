@@ -1,0 +1,1885 @@
+{
+  "schema": "unitree-velocity-task",
+  "official_task": "Unitree-G1-Flat",
+  "physics": {
+    "physics_dt": 0.005,
+    "control_dt": 0.02,
+    "decimation": 4,
+    "episode_length_s": 20.0,
+    "reference_task": "Isaac Lab G1 velocity: G1_MINIMAL_CFG -> G1_CFG",
+    "default_backend_mapping": {
+      "solver_position_iterations": 8,
+      "solver_velocity_iterations": 4
+    },
+    "mujoco": {
+      "timestep": 0.005,
+      "integrator": "implicitfast",
+      "impratio": 1.0,
+      "cone": "pyramidal",
+      "jacobian": "auto",
+      "solver": "newton",
+      "iterations": 10,
+      "tolerance": 1e-08,
+      "ls_iterations": 20,
+      "ls_tolerance": 0.01,
+      "ccd_iterations": 50,
+      "gravity": [
+        0.0,
+        0.0,
+        -9.81
+      ],
+      "multiccd": false
+    }
+  },
+  "robot": {
+    "joint_names": [
+      "left_hip_pitch_joint",
+      "left_hip_roll_joint",
+      "left_hip_yaw_joint",
+      "left_knee_joint",
+      "left_ankle_pitch_joint",
+      "left_ankle_roll_joint",
+      "right_hip_pitch_joint",
+      "right_hip_roll_joint",
+      "right_hip_yaw_joint",
+      "right_knee_joint",
+      "right_ankle_pitch_joint",
+      "right_ankle_roll_joint",
+      "waist_yaw_joint",
+      "waist_roll_joint",
+      "waist_pitch_joint",
+      "left_shoulder_pitch_joint",
+      "left_shoulder_roll_joint",
+      "left_shoulder_yaw_joint",
+      "left_elbow_joint",
+      "left_wrist_roll_joint",
+      "left_wrist_pitch_joint",
+      "left_wrist_yaw_joint",
+      "right_shoulder_pitch_joint",
+      "right_shoulder_roll_joint",
+      "right_shoulder_yaw_joint",
+      "right_elbow_joint",
+      "right_wrist_roll_joint",
+      "right_wrist_pitch_joint",
+      "right_wrist_yaw_joint"
+    ],
+    "body_names": [
+      "pelvis",
+      "left_hip_pitch_link",
+      "left_hip_roll_link",
+      "left_hip_yaw_link",
+      "left_knee_link",
+      "left_ankle_pitch_link",
+      "left_ankle_roll_link",
+      "right_hip_pitch_link",
+      "right_hip_roll_link",
+      "right_hip_yaw_link",
+      "right_knee_link",
+      "right_ankle_pitch_link",
+      "right_ankle_roll_link",
+      "waist_yaw_link",
+      "waist_roll_link",
+      "torso_link",
+      "left_shoulder_pitch_link",
+      "left_shoulder_roll_link",
+      "left_shoulder_yaw_link",
+      "left_elbow_link",
+      "left_wrist_roll_link",
+      "left_wrist_pitch_link",
+      "left_wrist_yaw_link",
+      "right_shoulder_pitch_link",
+      "right_shoulder_roll_link",
+      "right_shoulder_yaw_link",
+      "right_elbow_link",
+      "right_wrist_roll_link",
+      "right_wrist_pitch_link",
+      "right_wrist_yaw_link"
+    ],
+    "root_position": [
+      0.0,
+      0.0,
+      0.8
+    ],
+    "root_quaternion_wxyz": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "default_joint_position": [
+      -0.1,
+      0.0,
+      0.0,
+      0.3,
+      -0.2,
+      0.0,
+      -0.1,
+      0.0,
+      0.0,
+      0.3,
+      -0.2,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.35,
+      0.18,
+      0.0,
+      0.87,
+      0.0,
+      0.0,
+      0.0,
+      0.35,
+      -0.18,
+      0.0,
+      0.87,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "action_scale": [
+      0.5475464629911068,
+      0.35066146637882434,
+      0.5475464629911068,
+      0.35066146637882434,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.5475464629911068,
+      0.35066146637882434,
+      0.5475464629911068,
+      0.35066146637882434,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.5475464629911068,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.07450087032950714,
+      0.07450087032950714,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.43857731392336724,
+      0.07450087032950714,
+      0.07450087032950714
+    ],
+    "stiffness": [
+      40.17923863450712,
+      99.09842777666111,
+      40.17923863450712,
+      99.09842777666111,
+      28.50124619574858,
+      28.50124619574858,
+      40.17923863450712,
+      99.09842777666111,
+      40.17923863450712,
+      99.09842777666111,
+      28.50124619574858,
+      28.50124619574858,
+      40.17923863450712,
+      28.50124619574858,
+      28.50124619574858,
+      14.25062309787429,
+      14.25062309787429,
+      14.25062309787429,
+      14.25062309787429,
+      14.25062309787429,
+      16.77832748089279,
+      16.77832748089279,
+      14.25062309787429,
+      14.25062309787429,
+      14.25062309787429,
+      14.25062309787429,
+      14.25062309787429,
+      16.77832748089279,
+      16.77832748089279
+    ],
+    "damping": [
+      2.557889775413375,
+      6.308801853496639,
+      2.557889775413375,
+      6.308801853496639,
+      1.814445686584846,
+      1.814445686584846,
+      2.557889775413375,
+      6.308801853496639,
+      2.557889775413375,
+      6.308801853496639,
+      1.814445686584846,
+      1.814445686584846,
+      2.557889775413375,
+      1.814445686584846,
+      1.814445686584846,
+      0.907222843292423,
+      0.907222843292423,
+      0.907222843292423,
+      0.907222843292423,
+      0.907222843292423,
+      1.06814150219,
+      1.06814150219,
+      0.907222843292423,
+      0.907222843292423,
+      0.907222843292423,
+      0.907222843292423,
+      0.907222843292423,
+      1.06814150219,
+      1.06814150219
+    ],
+    "armature": [
+      0.01017752004132231,
+      0.025101924999999997,
+      0.01017752004132231,
+      0.025101924999999997,
+      0.00721945,
+      0.00721945,
+      0.01017752004132231,
+      0.025101924999999997,
+      0.01017752004132231,
+      0.025101924999999997,
+      0.00721945,
+      0.00721945,
+      0.01017752004132231,
+      0.00721945,
+      0.00721945,
+      0.003609725,
+      0.003609725,
+      0.003609725,
+      0.003609725,
+      0.003609725,
+      0.00425,
+      0.00425,
+      0.003609725,
+      0.003609725,
+      0.003609725,
+      0.003609725,
+      0.003609725,
+      0.00425,
+      0.00425
+    ],
+    "effort_limit": [
+      88.0,
+      139.0,
+      88.0,
+      139.0,
+      50.0,
+      50.0,
+      88.0,
+      139.0,
+      88.0,
+      139.0,
+      50.0,
+      50.0,
+      88.0,
+      50.0,
+      50.0,
+      25.0,
+      25.0,
+      25.0,
+      25.0,
+      25.0,
+      5.0,
+      5.0,
+      25.0,
+      25.0,
+      25.0,
+      25.0,
+      25.0,
+      5.0,
+      5.0
+    ],
+    "velocity_limit": [
+      32.0,
+      20.0,
+      32.0,
+      20.0,
+      37.0,
+      37.0,
+      32.0,
+      20.0,
+      32.0,
+      20.0,
+      37.0,
+      37.0,
+      32.0,
+      37.0,
+      37.0,
+      37.0,
+      37.0,
+      37.0,
+      37.0,
+      37.0,
+      22.0,
+      22.0,
+      37.0,
+      37.0,
+      37.0,
+      37.0,
+      37.0,
+      22.0,
+      22.0
+    ],
+    "soft_joint_position_limit_factor": 0.9,
+    "collision_configuration": [
+      {
+        "geom_names_expr": [
+          ".*_collision"
+        ],
+        "contype": 1,
+        "conaffinity": 1,
+        "condim": {
+          "^(left|right)_foot[1-7]_collision$": 3,
+          ".*_collision": 1
+        },
+        "priority": {
+          "^(left|right)_foot[1-7]_collision$": 1
+        },
+        "friction": {
+          "^(left|right)_foot[1-7]_collision$": [
+            0.6
+          ]
+        },
+        "solref": null,
+        "solimp": null,
+        "disable_other_geoms": true
+      }
+    ]
+  },
+  "observations": {
+    "actor_dimension": 98,
+    "actor": {
+      "terms": {
+        "base_ang_vel": {
+          "func": "mjlab.envs.mdp.observations.builtin_sensor",
+          "params": {
+            "sensor_name": "robot/imu_ang_vel"
+          },
+          "noise": {
+            "operation": "add",
+            "_tensor_cache": {},
+            "n_min": -0.2,
+            "n_max": 0.2
+          },
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "projected_gravity": {
+          "func": "mjlab.envs.mdp.observations.projected_gravity",
+          "params": {},
+          "noise": {
+            "operation": "add",
+            "_tensor_cache": {},
+            "n_min": -0.05,
+            "n_max": 0.05
+          },
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "command": {
+          "func": "mjlab.envs.mdp.observations.generated_commands",
+          "params": {
+            "command_name": "twist"
+          },
+          "noise": null,
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "phase": {
+          "func": "src.tasks.velocity.mdp.observations.phase",
+          "params": {
+            "period": 0.6,
+            "command_name": "twist"
+          },
+          "noise": null,
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "joint_pos": {
+          "func": "mjlab.envs.mdp.observations.joint_pos_rel",
+          "params": {},
+          "noise": {
+            "operation": "add",
+            "_tensor_cache": {},
+            "n_min": -0.01,
+            "n_max": 0.01
+          },
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "joint_vel": {
+          "func": "mjlab.envs.mdp.observations.joint_vel_rel",
+          "params": {},
+          "noise": {
+            "operation": "add",
+            "_tensor_cache": {},
+            "n_min": -1.5,
+            "n_max": 1.5
+          },
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "actions": {
+          "func": "mjlab.envs.mdp.observations.last_action",
+          "params": {},
+          "noise": null,
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        }
+      },
+      "concatenate_terms": true,
+      "concatenate_dim": -1,
+      "enable_corruption": true,
+      "history_length": 1,
+      "flatten_history_dim": true,
+      "nan_policy": "disabled",
+      "nan_check_per_term": true
+    },
+    "critic": {
+      "terms": {
+        "base_ang_vel": {
+          "func": "mjlab.envs.mdp.observations.builtin_sensor",
+          "params": {
+            "sensor_name": "robot/imu_ang_vel"
+          },
+          "noise": {
+            "operation": "add",
+            "_tensor_cache": {},
+            "n_min": -0.2,
+            "n_max": 0.2
+          },
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "projected_gravity": {
+          "func": "mjlab.envs.mdp.observations.projected_gravity",
+          "params": {},
+          "noise": {
+            "operation": "add",
+            "_tensor_cache": {},
+            "n_min": -0.05,
+            "n_max": 0.05
+          },
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "command": {
+          "func": "mjlab.envs.mdp.observations.generated_commands",
+          "params": {
+            "command_name": "twist"
+          },
+          "noise": null,
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "phase": {
+          "func": "src.tasks.velocity.mdp.observations.phase",
+          "params": {
+            "period": 0.6,
+            "command_name": "twist"
+          },
+          "noise": null,
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "joint_pos": {
+          "func": "mjlab.envs.mdp.observations.joint_pos_rel",
+          "params": {},
+          "noise": {
+            "operation": "add",
+            "_tensor_cache": {},
+            "n_min": -0.01,
+            "n_max": 0.01
+          },
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "joint_vel": {
+          "func": "mjlab.envs.mdp.observations.joint_vel_rel",
+          "params": {},
+          "noise": {
+            "operation": "add",
+            "_tensor_cache": {},
+            "n_min": -1.5,
+            "n_max": 1.5
+          },
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "actions": {
+          "func": "mjlab.envs.mdp.observations.last_action",
+          "params": {},
+          "noise": null,
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "base_lin_vel": {
+          "func": "mjlab.envs.mdp.observations.builtin_sensor",
+          "params": {
+            "sensor_name": "robot/imu_lin_vel"
+          },
+          "noise": {
+            "operation": "add",
+            "_tensor_cache": {},
+            "n_min": -0.5,
+            "n_max": 0.5
+          },
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "foot_height": {
+          "func": "src.tasks.velocity.mdp.observations.foot_height",
+          "params": {
+            "asset_cfg": {
+              "name": "robot",
+              "joint_names": null,
+              "joint_ids": {
+                "start": null,
+                "stop": null,
+                "step": null
+              },
+              "body_names": null,
+              "body_ids": {
+                "start": null,
+                "stop": null,
+                "step": null
+              },
+              "geom_names": null,
+              "geom_ids": {
+                "start": null,
+                "stop": null,
+                "step": null
+              },
+              "site_names": [
+                "left_foot",
+                "right_foot"
+              ],
+              "site_ids": {
+                "start": null,
+                "stop": null,
+                "step": null
+              },
+              "actuator_names": null,
+              "actuator_ids": {
+                "start": null,
+                "stop": null,
+                "step": null
+              },
+              "tendon_names": null,
+              "tendon_ids": {
+                "start": null,
+                "stop": null,
+                "step": null
+              },
+              "camera_names": null,
+              "camera_ids": {
+                "start": null,
+                "stop": null,
+                "step": null
+              },
+              "light_names": null,
+              "light_ids": {
+                "start": null,
+                "stop": null,
+                "step": null
+              },
+              "material_names": null,
+              "material_ids": {
+                "start": null,
+                "stop": null,
+                "step": null
+              },
+              "preserve_order": false
+            }
+          },
+          "noise": null,
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "foot_air_time": {
+          "func": "src.tasks.velocity.mdp.observations.foot_air_time",
+          "params": {
+            "sensor_name": "feet_ground_contact"
+          },
+          "noise": null,
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "foot_contact": {
+          "func": "src.tasks.velocity.mdp.observations.foot_contact",
+          "params": {
+            "sensor_name": "feet_ground_contact"
+          },
+          "noise": null,
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        },
+        "foot_contact_forces": {
+          "func": "src.tasks.velocity.mdp.observations.foot_contact_forces",
+          "params": {
+            "sensor_name": "feet_ground_contact"
+          },
+          "noise": null,
+          "clip": null,
+          "scale": null,
+          "delay_min_lag": 0,
+          "delay_max_lag": 0,
+          "delay_per_env": true,
+          "delay_hold_prob": 0.0,
+          "delay_update_period": 0,
+          "delay_per_env_phase": true,
+          "history_length": 0,
+          "flatten_history_dim": true
+        }
+      },
+      "concatenate_terms": true,
+      "concatenate_dim": -1,
+      "enable_corruption": false,
+      "history_length": 1,
+      "flatten_history_dim": true,
+      "nan_policy": "disabled",
+      "nan_check_per_term": true
+    }
+  },
+  "actions": {
+    "joint_pos": {
+      "entity_name": "robot",
+      "clip": null,
+      "transmission_type": "joint",
+      "actuator_names": [
+        ".*"
+      ],
+      "scale": {
+        ".*_elbow_joint": 0.43857731392336724,
+        ".*_shoulder_pitch_joint": 0.43857731392336724,
+        ".*_shoulder_roll_joint": 0.43857731392336724,
+        ".*_shoulder_yaw_joint": 0.43857731392336724,
+        ".*_wrist_roll_joint": 0.43857731392336724,
+        ".*_hip_pitch_joint": 0.5475464629911068,
+        ".*_hip_yaw_joint": 0.5475464629911068,
+        "waist_yaw_joint": 0.5475464629911068,
+        ".*_hip_roll_joint": 0.35066146637882434,
+        ".*_knee_joint": 0.35066146637882434,
+        ".*_wrist_pitch_joint": 0.07450087032950714,
+        ".*_wrist_yaw_joint": 0.07450087032950714,
+        "waist_pitch_joint": 0.43857731392336724,
+        "waist_roll_joint": 0.43857731392336724,
+        ".*_ankle_pitch_joint": 0.43857731392336724,
+        ".*_ankle_roll_joint": 0.43857731392336724
+      },
+      "offset": 0.0,
+      "preserve_order": false,
+      "use_default_offset": true
+    }
+  },
+  "commands": {
+    "twist": {
+      "resampling_time_range": [
+        3.0,
+        8.0
+      ],
+      "debug_vis": true,
+      "entity_name": "robot",
+      "heading_command": true,
+      "heading_control_stiffness": 0.5,
+      "rel_standing_envs": 0.05,
+      "rel_heading_envs": 1.0,
+      "init_velocity_prob": 0.0,
+      "ranges": {
+        "lin_vel_x": [
+          -1.0,
+          2.0
+        ],
+        "lin_vel_y": [
+          -1.0,
+          1.0
+        ],
+        "ang_vel_z": [
+          -1.0,
+          1.0
+        ],
+        "heading": [
+          -3.141592653589793,
+          3.141592653589793
+        ]
+      },
+      "viz": {
+        "z_offset": 1.15,
+        "scale": 0.5
+      }
+    }
+  },
+  "rewards": {
+    "track_linear_velocity": {
+      "func": "src.tasks.velocity.mdp.rewards.track_linear_velocity",
+      "params": {
+        "command_name": "twist",
+        "std": 0.5
+      },
+      "weight": 1.0
+    },
+    "track_angular_velocity": {
+      "func": "src.tasks.velocity.mdp.rewards.track_angular_velocity",
+      "params": {
+        "command_name": "twist",
+        "std": 0.7071067811865476
+      },
+      "weight": 1.0
+    },
+    "body_orientation_l2": {
+      "func": "src.tasks.velocity.mdp.rewards.body_orientation_l2",
+      "params": {
+        "asset_cfg": {
+          "name": "robot",
+          "joint_names": null,
+          "joint_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "body_names": [
+            "torso_link"
+          ],
+          "body_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "geom_names": null,
+          "geom_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "site_names": null,
+          "site_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "actuator_names": null,
+          "actuator_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "tendon_names": null,
+          "tendon_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "camera_names": null,
+          "camera_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "light_names": null,
+          "light_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "material_names": null,
+          "material_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "preserve_order": false
+        }
+      },
+      "weight": -1.0
+    },
+    "pose": {
+      "func": "src.tasks.velocity.mdp.rewards.variable_posture",
+      "params": {
+        "asset_cfg": {
+          "name": "robot",
+          "joint_names": ".*",
+          "joint_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "body_names": null,
+          "body_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "geom_names": null,
+          "geom_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "site_names": null,
+          "site_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "actuator_names": null,
+          "actuator_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "tendon_names": null,
+          "tendon_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "camera_names": null,
+          "camera_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "light_names": null,
+          "light_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "material_names": null,
+          "material_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "preserve_order": false
+        },
+        "command_name": "twist",
+        "std_standing": {
+          ".*": 0.05
+        },
+        "std_walking": {
+          ".*hip_pitch.*": 0.5,
+          ".*hip_roll.*": 0.15,
+          ".*hip_yaw.*": 0.15,
+          ".*knee.*": 0.5,
+          ".*ankle_pitch.*": 0.15,
+          ".*ankle_roll.*": 0.1,
+          ".*waist_yaw.*": 0.15,
+          ".*waist_roll.*": 0.1,
+          ".*waist_pitch.*": 0.1,
+          ".*shoulder_pitch.*": 0.15,
+          ".*shoulder_roll.*": 0.1,
+          ".*shoulder_yaw.*": 0.1,
+          ".*elbow.*": 0.1,
+          ".*wrist.*": 0.1
+        },
+        "std_running": {
+          ".*hip_pitch.*": 0.5,
+          ".*hip_roll.*": 0.25,
+          ".*hip_yaw.*": 0.25,
+          ".*knee.*": 0.5,
+          ".*ankle_pitch.*": 0.25,
+          ".*ankle_roll.*": 0.1,
+          ".*waist_yaw.*": 0.25,
+          ".*waist_roll.*": 0.1,
+          ".*waist_pitch.*": 0.1,
+          ".*shoulder_pitch.*": 0.25,
+          ".*shoulder_roll.*": 0.1,
+          ".*shoulder_yaw.*": 0.1,
+          ".*elbow.*": 0.1,
+          ".*wrist.*": 0.1
+        },
+        "walking_threshold": 0.1,
+        "running_threshold": 1.5
+      },
+      "weight": 1.0
+    },
+    "body_ang_vel": {
+      "func": "src.tasks.velocity.mdp.rewards.body_angular_velocity_penalty",
+      "params": {
+        "asset_cfg": {
+          "name": "robot",
+          "joint_names": null,
+          "joint_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "body_names": [
+            "torso_link"
+          ],
+          "body_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "geom_names": null,
+          "geom_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "site_names": null,
+          "site_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "actuator_names": null,
+          "actuator_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "tendon_names": null,
+          "tendon_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "camera_names": null,
+          "camera_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "light_names": null,
+          "light_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "material_names": null,
+          "material_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "preserve_order": false
+        }
+      },
+      "weight": -0.05
+    },
+    "angular_momentum": {
+      "func": "src.tasks.velocity.mdp.rewards.angular_momentum_penalty",
+      "params": {
+        "sensor_name": "robot/root_angmom"
+      },
+      "weight": -0.025
+    },
+    "is_terminated": {
+      "func": "mjlab.envs.mdp.rewards.is_terminated",
+      "params": {},
+      "weight": -200.0
+    },
+    "joint_acc_l2": {
+      "func": "mjlab.envs.mdp.rewards.joint_acc_l2",
+      "params": {},
+      "weight": -2.5e-07
+    },
+    "joint_pos_limits": {
+      "func": "mjlab.envs.mdp.rewards.joint_pos_limits",
+      "params": {},
+      "weight": -10.0
+    },
+    "action_rate_l2": {
+      "func": "mjlab.envs.mdp.rewards.action_rate_l2",
+      "params": {},
+      "weight": -0.05
+    },
+    "foot_gait": {
+      "func": "src.tasks.velocity.mdp.rewards.feet_gait",
+      "params": {
+        "period": 0.6,
+        "offset": [
+          0.0,
+          0.5
+        ],
+        "threshold": 0.56,
+        "command_threshold": 0.1,
+        "command_name": "twist",
+        "sensor_name": "feet_ground_contact"
+      },
+      "weight": 0.5
+    },
+    "foot_clearance": {
+      "func": "src.tasks.velocity.mdp.rewards.feet_clearance",
+      "params": {
+        "target_height": 0.1,
+        "command_name": "twist",
+        "command_threshold": 0.1,
+        "asset_cfg": {
+          "name": "robot",
+          "joint_names": null,
+          "joint_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "body_names": null,
+          "body_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "geom_names": null,
+          "geom_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "site_names": [
+            "left_foot",
+            "right_foot"
+          ],
+          "site_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "actuator_names": null,
+          "actuator_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "tendon_names": null,
+          "tendon_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "camera_names": null,
+          "camera_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "light_names": null,
+          "light_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "material_names": null,
+          "material_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "preserve_order": false
+        }
+      },
+      "weight": -1.0
+    },
+    "foot_slip": {
+      "func": "src.tasks.velocity.mdp.rewards.feet_slip",
+      "params": {
+        "sensor_name": "feet_ground_contact",
+        "command_name": "twist",
+        "command_threshold": 0.1,
+        "asset_cfg": {
+          "name": "robot",
+          "joint_names": null,
+          "joint_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "body_names": null,
+          "body_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "geom_names": null,
+          "geom_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "site_names": [
+            "left_foot",
+            "right_foot"
+          ],
+          "site_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "actuator_names": null,
+          "actuator_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "tendon_names": null,
+          "tendon_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "camera_names": null,
+          "camera_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "light_names": null,
+          "light_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "material_names": null,
+          "material_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "preserve_order": false
+        }
+      },
+      "weight": -0.25
+    },
+    "soft_landing": {
+      "func": "src.tasks.velocity.mdp.rewards.soft_landing",
+      "params": {
+        "sensor_name": "feet_ground_contact",
+        "command_name": "twist",
+        "command_threshold": 0.1
+      },
+      "weight": -0.001
+    },
+    "stand_still": {
+      "func": "src.tasks.velocity.mdp.rewards.stand_still",
+      "params": {
+        "command_name": "twist",
+        "command_threshold": 0.1,
+        "asset_cfg": {
+          "name": "robot",
+          "joint_names": ".*",
+          "joint_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "body_names": null,
+          "body_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "geom_names": null,
+          "geom_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "site_names": null,
+          "site_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "actuator_names": null,
+          "actuator_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "tendon_names": null,
+          "tendon_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "camera_names": null,
+          "camera_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "light_names": null,
+          "light_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "material_names": null,
+          "material_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "preserve_order": false
+        }
+      },
+      "weight": -1.0
+    },
+    "self_collisions": {
+      "func": "mjlab.tasks.velocity.mdp.rewards.self_collision_cost",
+      "params": {
+        "sensor_name": "self_collision",
+        "force_threshold": 10.0
+      },
+      "weight": -1.0
+    }
+  },
+  "terminations": {
+    "time_out": {
+      "func": "mjlab.envs.mdp.terminations.time_out",
+      "params": {},
+      "time_out": true
+    },
+    "fell_over": {
+      "func": "mjlab.envs.mdp.terminations.bad_orientation",
+      "params": {
+        "limit_angle": 1.2217304763960306
+      },
+      "time_out": false
+    }
+  },
+  "events": {
+    "reset_base": {
+      "func": "mjlab.envs.mdp.events.reset_root_state_uniform",
+      "params": {
+        "pose_range": {
+          "x": [
+            -0.5,
+            0.5
+          ],
+          "y": [
+            -0.5,
+            0.5
+          ],
+          "z": [
+            0.0,
+            0.0
+          ],
+          "yaw": [
+            -3.14,
+            3.14
+          ]
+        },
+        "velocity_range": {}
+      },
+      "mode": "reset",
+      "interval_range_s": null,
+      "is_global_time": false,
+      "min_step_count_between_reset": 0
+    },
+    "reset_robot_joints": {
+      "func": "mjlab.envs.mdp.events.reset_joints_by_offset",
+      "params": {
+        "position_range": [
+          -0.0,
+          0.0
+        ],
+        "velocity_range": [
+          -0.0,
+          0.0
+        ],
+        "asset_cfg": {
+          "name": "robot",
+          "joint_names": [
+            ".*"
+          ],
+          "joint_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "body_names": null,
+          "body_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "geom_names": null,
+          "geom_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "site_names": null,
+          "site_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "actuator_names": null,
+          "actuator_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "tendon_names": null,
+          "tendon_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "camera_names": null,
+          "camera_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "light_names": null,
+          "light_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "material_names": null,
+          "material_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "preserve_order": false
+        }
+      },
+      "mode": "reset",
+      "interval_range_s": null,
+      "is_global_time": false,
+      "min_step_count_between_reset": 0
+    },
+    "push_robot": {
+      "func": "mjlab.envs.mdp.events.push_by_setting_velocity",
+      "params": {
+        "velocity_range": {
+          "x": [
+            -0.5,
+            0.5
+          ],
+          "y": [
+            -0.5,
+            0.5
+          ],
+          "z": [
+            -0.4,
+            0.4
+          ],
+          "roll": [
+            -0.52,
+            0.52
+          ],
+          "pitch": [
+            -0.52,
+            0.52
+          ],
+          "yaw": [
+            -0.78,
+            0.78
+          ]
+        }
+      },
+      "mode": "interval",
+      "interval_range_s": [
+        5.0,
+        6.0
+      ],
+      "is_global_time": false,
+      "min_step_count_between_reset": 0
+    },
+    "foot_friction": {
+      "func": "mjlab.envs.mdp.dr.geom.geom_friction",
+      "params": {
+        "asset_cfg": {
+          "name": "robot",
+          "joint_names": null,
+          "joint_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "body_names": null,
+          "body_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "geom_names": [
+            "left_foot1_collision",
+            "left_foot2_collision",
+            "left_foot3_collision",
+            "left_foot4_collision",
+            "left_foot5_collision",
+            "left_foot6_collision",
+            "left_foot7_collision",
+            "right_foot1_collision",
+            "right_foot2_collision",
+            "right_foot3_collision",
+            "right_foot4_collision",
+            "right_foot5_collision",
+            "right_foot6_collision",
+            "right_foot7_collision"
+          ],
+          "geom_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "site_names": null,
+          "site_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "actuator_names": null,
+          "actuator_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "tendon_names": null,
+          "tendon_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "camera_names": null,
+          "camera_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "light_names": null,
+          "light_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "material_names": null,
+          "material_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "preserve_order": false
+        },
+        "operation": "abs",
+        "ranges": [
+          0.3,
+          1.6
+        ],
+        "shared_random": true
+      },
+      "mode": "startup",
+      "interval_range_s": null,
+      "is_global_time": false,
+      "min_step_count_between_reset": 0
+    },
+    "encoder_bias": {
+      "func": "mjlab.envs.mdp.dr.joint.encoder_bias",
+      "params": {
+        "asset_cfg": {
+          "name": "robot",
+          "joint_names": null,
+          "joint_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "body_names": null,
+          "body_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "geom_names": null,
+          "geom_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "site_names": null,
+          "site_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "actuator_names": null,
+          "actuator_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "tendon_names": null,
+          "tendon_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "camera_names": null,
+          "camera_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "light_names": null,
+          "light_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "material_names": null,
+          "material_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "preserve_order": false
+        },
+        "bias_range": [
+          -0.015,
+          0.015
+        ]
+      },
+      "mode": "startup",
+      "interval_range_s": null,
+      "is_global_time": false,
+      "min_step_count_between_reset": 0
+    },
+    "base_com": {
+      "func": "mjlab.envs.mdp.dr.body.body_com_offset",
+      "params": {
+        "asset_cfg": {
+          "name": "robot",
+          "joint_names": null,
+          "joint_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "body_names": [
+            "torso_link"
+          ],
+          "body_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "geom_names": null,
+          "geom_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "site_names": null,
+          "site_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "actuator_names": null,
+          "actuator_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "tendon_names": null,
+          "tendon_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "camera_names": null,
+          "camera_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "light_names": null,
+          "light_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "material_names": null,
+          "material_ids": {
+            "start": null,
+            "stop": null,
+            "step": null
+          },
+          "preserve_order": false
+        },
+        "operation": "add",
+        "ranges": {
+          "0": [
+            -0.05,
+            0.05
+          ],
+          "1": [
+            -0.05,
+            0.05
+          ],
+          "2": [
+            -0.05,
+            0.05
+          ]
+        }
+      },
+      "mode": "startup",
+      "interval_range_s": null,
+      "is_global_time": false,
+      "min_step_count_between_reset": 0
+    }
+  },
+  "curriculum": {
+    "command_vel": {
+      "func": "src.tasks.velocity.mdp.curriculums.commands_vel",
+      "params": {
+        "command_name": "twist",
+        "velocity_stages": [
+          {
+            "step": 0,
+            "lin_vel_x": [
+              -0.5,
+              1.0
+            ],
+            "lin_vel_y": [
+              -0.5,
+              0.5
+            ],
+            "ang_vel_z": [
+              -1.0,
+              1.0
+            ]
+          },
+          {
+            "step": 120000,
+            "lin_vel_x": [
+              -1.0,
+              2.0
+            ],
+            "lin_vel_y": [
+              -1.0,
+              1.0
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "ppo": {
+    "seed": 42,
+    "num_steps_per_env": 24,
+    "max_iterations": 10001,
+    "obs_groups": {
+      "actor": [
+        "actor"
+      ],
+      "critic": [
+        "critic"
+      ]
+    },
+    "save_interval": 100,
+    "experiment_name": "g1_velocity",
+    "run_name": "",
+    "logger": "wandb",
+    "wandb_project": "mjlab",
+    "wandb_tags": [],
+    "resume": false,
+    "load_run": ".*",
+    "load_checkpoint": "model_.*.pt",
+    "clip_actions": null,
+    "upload_model": true,
+    "class_name": "OnPolicyRunner",
+    "actor": {
+      "hidden_dims": [
+        512,
+        256,
+        128
+      ],
+      "activation": "elu",
+      "obs_normalization": true,
+      "cnn_cfg": null,
+      "distribution_cfg": {
+        "class_name": "GaussianDistribution",
+        "init_std": 1.0,
+        "std_type": "scalar"
+      },
+      "class_name": "MLPModel"
+    },
+    "critic": {
+      "hidden_dims": [
+        512,
+        256,
+        128
+      ],
+      "activation": "elu",
+      "obs_normalization": true,
+      "cnn_cfg": null,
+      "distribution_cfg": null,
+      "class_name": "MLPModel"
+    },
+    "algorithm": {
+      "num_learning_epochs": 5,
+      "num_mini_batches": 4,
+      "learning_rate": 0.001,
+      "schedule": "adaptive",
+      "gamma": 0.99,
+      "lam": 0.95,
+      "entropy_coef": 0.01,
+      "desired_kl": 0.01,
+      "max_grad_norm": 1.0,
+      "value_loss_coef": 1.0,
+      "use_clipped_value_loss": true,
+      "clip_param": 0.2,
+      "normalize_advantage_per_mini_batch": false,
+      "optimizer": "adam",
+      "share_cnn_encoders": false,
+      "class_name": "PPO"
+    }
+  }
+}

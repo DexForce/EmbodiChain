@@ -65,7 +65,11 @@ class MeshCollisionCfg:
     """Maximum hull count for ``convex_decomposition``; must be at least two."""
 
     acd_method: Literal["visacd", "coacd", "vhacd"] | None = None
-    """Approximate-convex-decomposition implementation."""
+    """Approximate-convex-decomposition implementation.
+
+    ``None`` selects ``visacd`` when compiling mesh collision geometry.
+    VisACD requires a DexSim build with CUDA/OptiX support.
+    """
 
     sdf_resolution: int | None = None
     """Maximum SDF grid resolution; valid only for the ``sdf`` strategy."""

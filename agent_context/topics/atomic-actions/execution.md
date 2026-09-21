@@ -109,6 +109,12 @@ the selected `RecoveryPolicy`.
 trajectory or endpoint command must align to it; integrations must not silently
 resample fractional durations.
 
+`MotionPolicy` forwards the explicit strategy unchanged. `ik_interp` rejects
+backend `plan_opts`; `motion_gen` always invokes the backend. Segments requesting
+`cartesian_linear=True` preserve caller-supplied Cartesian samples and currently
+require `ik_interp`, including Press, Slide, PushObject and OpenDoor. A planner
+policy for such a segment raises instead of silently bypassing backend timing.
+
 Primitive planner results are explicitly retimed before their controlled-joint
 paths are embedded into a full-robot `TimedTrajectory`. Off-grid duration rounds
 up to a whole control interval, qvel is recomputed from the executed samples,

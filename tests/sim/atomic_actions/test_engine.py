@@ -31,6 +31,7 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     ActionOptions,
     ActionPlan,
+    AffordanceSamplingContext,
     AtomicAction,
     AtomicActionEngine,
     BUILTIN_ACTION_TYPES,
@@ -251,6 +252,16 @@ def test_initial_context_explicit_scene_overrides_configured_provider() -> None:
 
     assert context.scene is explicit_scene
     assert provider.calls == []
+
+
+def test_initial_context_accepts_direct_affordance_sampling() -> None:
+    engine = _engine()
+    sampling = AffordanceSamplingContext(count=2, seed=11, attempt_id=4)
+
+    context = engine.initial_context(affordance_sampling=sampling)
+
+    assert context.affordance_sampling is sampling
+    assert torch.equal(context.env_ids, torch.tensor([0, 1]))
 
 
 def test_engine_rejects_invalid_scene_provider() -> None:
