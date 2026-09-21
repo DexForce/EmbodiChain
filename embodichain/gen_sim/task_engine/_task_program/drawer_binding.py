@@ -36,6 +36,13 @@ from .drawer_geometry import drawer_region
 
 __all__: list[str] = []
 
+DRAWER_TRANSPORT_CALL = "simulation.move_held_object"
+TRANSPORT_CLEARANCE = 0.12
+ENTRY_RIM_CLEARANCE = 0.12
+# The transport endpoint is deliberately outside the active drawer.  The
+# object enters the drawer on the subsequent Place approach waypoints.
+TRANSPORT_OUTWARD_DISTANCE = 0.18
+
 
 def inside_parts(affordance: str) -> tuple[str, str, str | None]:
     parts = affordance.split("__")
@@ -96,6 +103,69 @@ def prepare_drawer_graph(graph: dict[str, Any], scene: Any) -> dict[str, Any]:
                 )
             binding = matches[0]
             call["inside"] = f"inside__{container}__{obj}__{binding.part_id}"
+    by_id = {node["id"]: node for node in result["nodes"]}
+    expanded = []
+    for node in result["nodes"]:
+        call = node["call"]
+        if (
+            call.get("kind") == "place"
+            and "inside" in call
+            and inside_parts(call["inside"])[0] in configs
+        ):
+            transport_id = f"{node['id']}__transport"
+            transport_call = {
+                "kind": "registered",
+                "call_id": DRAWER_TRANSPORT_CALL,
+                "arguments": {"object": call["object"], "target": call["inside"]},
+                "resources": deepcopy(call["resources"]),
+            }
+            if transport_id in by_id:
+                if by_id[transport_id]["call"] != transport_call or node[
+                    "depends_on"
+                ] != [transport_id]:
+                    raise ValueError(
+                        "Drawer transport conflicts with the placement route."
+                    )
+            else:
+                expanded.append(
+                    {**deepcopy(node), "id": transport_id, "call": transport_call}
+                )
+                node["depends_on"] = [transport_id]
+                group = next(
+                    g for g in result["task_groups"] if node["id"] in g["node_ids"]
+                )
+                group["node_ids"].insert(
+                    group["node_ids"].index(node["id"]), transport_id
+                )
+        expanded.append(node)
+    result["nodes"] = expanded
+    return result
+
+
+def rewrite_drawer_close_resources(graph: dict[str, Any]) -> dict[str, Any]:
+    """Use the free arm for the closing E6 after a composite placement."""
+    result = deepcopy(graph)
+    nodes = {node["id"]: node for node in result["nodes"]}
+    has_place = any(node["call"].get("kind") == "place" for node in result["nodes"])
+    if not has_place:
+        return result
+    for group in result.get("task_groups", ()):
+        ids = group.get("node_ids", ())
+        if group.get("task_type") != "E6" or not ids:
+            continue
+        first = nodes[ids[0]]["call"]
+        if first.get("arguments", {}).get("state") != "closed":
+            continue
+        primary = first.get("resources", {}).get("primary")
+        # The right arm is the alternate in the supported dual-arm profile.
+        # Keep an already-right close route idempotent across bundle passes.
+        alternate = "right" if primary == "left" else primary
+        if alternate is None:
+            continue
+        for node_id in ids:
+            resources = nodes[node_id]["call"].get("resources")
+            if resources is not None:
+                resources["primary"] = alternate
     return result
 
 

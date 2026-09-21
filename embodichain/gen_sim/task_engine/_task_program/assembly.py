@@ -261,6 +261,18 @@ class TaskAdapterFactory:
                     planner_cfg=ToppraPlannerCfg(robot_uid=environment.robot.uid)
                 )
             )
+            if self.drawer_routes:
+                from .drawer_curobo import DrawerMotionGenerator
+
+                motion_factory = lambda: DrawerMotionGenerator(
+                    MotionGenCfg(
+                        planner_cfg=ToppraPlannerCfg(
+                            robot_uid=environment.robot.uid,
+                            sim_instance_id=environment.sim.instance_id,
+                        )
+                    ),
+                    simulation=environment.sim,
+                )
         grasp_generators = {name: create() for name, create in self.grasp_factories}
         grasp_generators = install_grasp_filters(
             self.registration,
@@ -473,6 +485,18 @@ def load_deployment(
     )
     fingerprint = canonical_hash(
         {
+            **(
+                {"drawer_curobo_revision": 1}
+                if any(
+                    item.get("steps", {})
+                    .get("call", {})
+                    .get("arguments", {})
+                    .get("target")
+                    in {route.affordance for route in drawers}
+                    for item in program["program"]["items"]
+                )
+                else {}
+            ),
             "adapter_contract": ADAPTER_CONTRACT,
             "grasp_filter_revision": GRASP_FILTER_REVISION,
             "motion_validation_revision": MOTION_VALIDATION_REVISION,
