@@ -276,6 +276,7 @@ The package import path above is convenient for callers combining them.
 .. autosummary::
    :nosignatures:
 
+   allowed_phases
    rotate_grasp_about_object_axis
    joint_residual
    retime

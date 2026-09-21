@@ -41,7 +41,7 @@ from embodichain.compute.kinematics import (
 )
 
 from .contracts import TrajectoryPhase, TrajectoryTemplate
-from .operators import _allowed_phases, joint_residual
+from .operators import allowed_phases, joint_residual
 
 __all__ = [
     "ManipulabilityProfile",
@@ -283,7 +283,7 @@ def manipulability_guided_residual(
     Raises:
         ValueError: If permissions, arguments, or every sampled residual fail.
     """
-    _allowed_phases(template, "joint_residual")
+    allowed_phases(template, "joint_residual")
     if not isinstance(bands, ManipulabilityBands):
         raise ValueError("bands must be a ManipulabilityBands instance.")
     if type(target_band) is not int or not 0 <= target_band < bands.count:
