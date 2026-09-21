@@ -1,0 +1,13 @@
+task_key: humanoid
+title: Humanoid Run
+summary: Run toward a distant target with the torque-controlled Humanoid benchmark.
+tags:
+- locomotion
+- reinforcement_learning
+- humanoid
+default_deployment: default
+deployments:
+  default:
+    config: env.yaml
+  newton:
+    config: env.newton.yaml
