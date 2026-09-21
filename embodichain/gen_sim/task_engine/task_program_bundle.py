@@ -892,6 +892,7 @@ def _integration_payload(
     coordinated_routes: list[tuple[str, str, tuple[float, float, float]]] = []
     coordinated_hold_routes: list[tuple[str, str, tuple[float, float, float]]] = []
     move_held_routes: list[dict[str, Any]] = []
+    pour_geometry: dict[str, dict[str, Any]] = {}
     upright_move_objects: set[str] = set()
     pick_routes: dict[str, list[dict[str, Any]]] = {}
     upright_released: set[str] = set()
@@ -1092,6 +1093,13 @@ def _integration_payload(
             else:
                 reference = str(arguments["reference"])
                 referenced_objects.add(reference)
+                pose, geometry = _pour_target_geometry(
+                    scene_objects[object_id],
+                    scene_objects[reference],
+                    embodiment,
+                    call.get("resources", {}).get("primary", "left"),
+                )
+                pour_geometry[object_id] = geometry
                 move_held_routes.append(
                     {
                         "object_id": object_id,
@@ -1099,10 +1107,7 @@ def _integration_payload(
                         "pose": {
                             "kind": "scene_entity",
                             "entity_id": reference,
-                            # Keep the pour target close to the receiving
-                            # vessel so grasp screening uses a reachable
-                            # above-rim pose.
-                            "relative_pose": _translation_pose(0.0, -0.05, 0.10),
+                            **pose,
                         },
                     }
                 )
@@ -1280,7 +1285,7 @@ def _integration_payload(
                     "kind": "place",
                     "hand_interp_steps": 12,
                     "release_settle_steps": 60,
-                    "lift_height": 0.05,
+                    "lift_height": 0.12 if pour_objects else 0.05,
                     "cartesian_waypoint_count": 2,
                     "preserve_current_object_orientation": True,
                 },
@@ -1312,12 +1317,21 @@ def _integration_payload(
                     else {}
                 ),
                 **(
-                    {_MOVE_HELD_OBJECT_CALL_ID: {"kind": "move_held_object"}}
+                    {
+                        _MOVE_HELD_OBJECT_CALL_ID: {
+                            "kind": "move_held_object",
+                        }
+                    }
                     if move_held_routes
                     else {}
                 ),
                 **(
-                    {_POUR_CALL_ID: {"kind": "pour", "rotate_angle": -1.0471975512}}
+                    {
+                        _POUR_CALL_ID: {
+                            "kind": "pour",
+                            "rotate_angle": -1.0471975512,
+                        }
+                    }
                     if pour_objects
                     else {}
                 ),
@@ -1432,6 +1446,7 @@ def _integration_payload(
                     "simulation.coordinated_transport",
                     _COORDINATED_HOLD_CALL_ID,
                     _AXIS_ALIGN_CALL_ID,
+                    _MOVE_HELD_OBJECT_CALL_ID,
                     *pick_routes,
                     _PLACE_RELATIVE_CALL_ID,
                 )
@@ -2158,6 +2173,61 @@ def _dominant_local_axis(source: dict[str, Any]) -> list[float]:
     axis = [0.0, 0.0, 0.0]
     axis[major] = 1.0
     return axis
+
+
+def _pour_target_geometry(
+    source: dict[str, Any],
+    reference: dict[str, Any],
+    embodiment: dict[str, Any] | None,
+    resource: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Keep the swept vessel and finger envelope above the receiving rim."""
+    from scipy.spatial.transform import Rotation
+
+    vertices = _mesh_vertices(source)
+    pivot = (vertices.min(0) + vertices.max(0)) * 0.5
+    radius = float(np.linalg.norm(vertices - pivot, axis=1).max())
+    upright = np.asarray(_longest_local_axis(source))
+    rotation = _initial_rotation(source)
+    world_up = rotation @ upright
+    vertical = np.array([0.0, 0.0, 1.0])
+    cross = np.cross(world_up, vertical)
+    sine = np.linalg.norm(cross)
+    cosine = np.clip(world_up @ vertical, -1.0, 1.0)
+    if sine > 1e-8:
+        rotation = (
+            Rotation.from_rotvec(cross / sine * math.atan2(sine, cosine)).as_matrix()
+            @ rotation
+        )
+    elif cosine < 0:
+        transverse = rotation[:, int(np.argmin(np.abs(upright)))]
+        rotation = Rotation.from_rotvec(transverse * math.pi).as_matrix() @ rotation
+    if embodiment is None:
+        raise ValueError("Pour clearance requires the selected gripper geometry.")
+    model = embodiment["skill_profile"]["runtime_services"]["grasp_pose_generators"][
+        f"{resource}_eef"
+    ]["model"]
+    finger_radius = float(
+        np.linalg.norm(
+            [
+                (float(model["max_opening_width"]) + float(model["finger_thickness"]))
+                * 0.5,
+                float(model["finger_width"]) * 0.5,
+                float(model["finger_length"]) * 0.5,
+            ]
+        )
+    )
+    _, top = _vertical_mesh_bounds(reference, axis_aligned=False)
+    offset = np.array([0.0, 0.0, top + radius + finger_radius + 0.015])
+    relative = np.eye(4)
+    relative[:3, 3] = rotation.T @ offset - pivot
+    return (
+        {
+            "relative_pose": relative.reshape(-1).tolist(),
+            "world_orientation": rotation.reshape(-1).tolist(),
+        },
+        {"upright_axis": upright.tolist(), "pivot_local": pivot.tolist()},
+    )
 
 
 def _initial_rotation(source: dict[str, Any]) -> np.ndarray:

@@ -75,7 +75,13 @@ def _decode_goal_pose(
         path=path,
         required=frozenset({"kind"}),
         optional=frozenset(
-            {"position", "quaternion_xyzw", "entity_id", "relative_pose"}
+            {
+                "position",
+                "quaternion_xyzw",
+                "entity_id",
+                "relative_pose",
+                "world_orientation",
+            }
         ),
     )
     kind = _identifier(common["kind"], path=f"{path}.kind")
@@ -100,10 +106,19 @@ def _decode_goal_pose(
             value,
             path=path,
             required=frozenset({"kind", "entity_id"}),
-            optional=frozenset({"relative_pose"}),
+            optional=frozenset({"relative_pose", "world_orientation"}),
         )
         return _SceneEntityTarget(
             _identifier(config["entity_id"], path=f"{path}.entity_id"),
+            world_orientation=(
+                None
+                if "world_orientation" not in config
+                else _finite_tuple(
+                    config["world_orientation"],
+                    path=f"{path}.world_orientation",
+                    expected_length=9,
+                )
+            ),
             relative_pose=(
                 None
                 if "relative_pose" not in config

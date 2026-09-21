@@ -136,11 +136,27 @@ class _SceneEntityTarget:
 
     entity_id: str
     relative_pose: tuple[float, ...] | None = None
+    world_orientation: tuple[float, ...] | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.entity_id, field_name="entity_id")
         if self.relative_pose is not None:
             object.__setattr__(self, "relative_pose", _pose(self.relative_pose))
+        if self.world_orientation is not None:
+            if len(self.world_orientation) != 9 or not all(
+                math.isfinite(x) for x in self.world_orientation
+            ):
+                raise ValueError("world_orientation requires nine finite values.")
+            matrix = torch.eye(4, dtype=torch.float64)
+            matrix[:3, :3] = torch.tensor(
+                self.world_orientation, dtype=torch.float64
+            ).reshape(3, 3)
+            _pose(tuple(matrix.reshape(-1).tolist()))
+            object.__setattr__(
+                self,
+                "world_orientation",
+                tuple(float(x) for x in self.world_orientation),
+            )
 
     def snapshot(self) -> _SceneEntityTarget:
         """Return the immutable declaration, which owns no runtime tensors."""
@@ -195,6 +211,13 @@ def _configured_goal_pose(
     if type(value) is _SceneEntityTarget:
         return SceneEntityPose(
             value.entity_id,
+            world_orientation=(
+                None
+                if value.world_orientation is None
+                else torch.tensor(value.world_orientation, dtype=torch.float32).reshape(
+                    3, 3
+                )
+            ),
             relative_pose=(
                 None
                 if value.relative_pose is None
@@ -452,7 +475,7 @@ class _MoveHeldObjectLowerer(RegisteredSemanticLowerer):
 
     call_id: ClassVar[str] = _MOVE_HELD_OBJECT_CALL_ID
     target_descriptor: ClassVar[SkillDescriptor] = MoveHeldObject.descriptor()
-    preserves_symbolic_state: ClassVar[bool] = True
+    effect_contract_kind: ClassVar[SemanticEffectKind] = SemanticEffectKind.ATTACH
 
     def __init__(self, routes: tuple[_MoveHeldObjectRoute, ...]) -> None:
         self._routes = {route.target_id: route for route in routes}
@@ -497,7 +520,18 @@ class _MoveHeldObjectLowerer(RegisteredSemanticLowerer):
             )
         route = self._route(call)
         return SemanticLowering(
-            goal=HeldObjectPoseGoal(_configured_goal_pose(route.pose))
+            goal=HeldObjectPoseGoal(_configured_goal_pose(route.pose)),
+            registered_effect=RegisteredSemanticEffect(
+                effect_kind=SemanticEffectKind.ATTACH,
+                held_objects=(
+                    RegisteredHeldObjectEffect(
+                        expectation_id="primary",
+                        relation=HeldObjectRelation.ATTACHED,
+                        object_id=route.object_id,
+                        slot_id="primary",
+                    ),
+                ),
+            ),
         )
 
     def pick_lookahead_targets(
@@ -529,7 +563,7 @@ class _MoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
     """Validate canonical references for configured transport goals."""
 
     call_id: ClassVar[str] = _MOVE_HELD_OBJECT_CALL_ID
-    revision: ClassVar[str] = "2"
+    revision: ClassVar[str] = "3"
     target_descriptor: ClassVar[SkillDescriptor] = MoveHeldObject.descriptor()
     routes: tuple[_MoveHeldObjectRoute, ...]
 

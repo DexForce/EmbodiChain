@@ -55,6 +55,51 @@ from embodichain.utils.utility import load_config, save_config
 from embodichain.gen_sim.task_engine.orchestration.source_scene import PreparedScene
 
 
+@pytest.mark.parametrize("height", [0.12, 0.25])
+def test_pour_target_uses_upright_geometry_not_receiver_yaw(
+    monkeypatch: pytest.MonkeyPatch,
+    height: float,
+) -> None:
+    source = {"runtime_uid": "vessel", "init_rot": [0.0, 0.0, 30.0]}
+    receiver = {"runtime_uid": "receiver", "init_rot": [0.0, 0.0, 0.0]}
+    vertices = {
+        "vessel": np.array([[-0.03, -0.03, 0.0], [0.03, 0.03, height]]),
+        "receiver": np.array([[-0.05, -0.05, 0.0], [0.05, 0.05, 0.15]]),
+    }
+    monkeypatch.setattr(
+        task_program_bundle, "_mesh_vertices", lambda obj: vertices[obj["runtime_uid"]]
+    )
+    model = {
+        "max_opening_width": 0.128,
+        "finger_thickness": 0.01,
+        "finger_width": 0.02,
+        "finger_length": 0.13,
+    }
+    embodiment = {
+        "skill_profile": {
+            "runtime_services": {
+                "grasp_pose_generators": {"left_eef": {"model": model}}
+            }
+        }
+    }
+    first, semantics = task_program_bundle._pour_target_geometry(
+        source, receiver, embodiment, "left"
+    )
+    receiver["init_rot"] = [0.0, 0.0, 125.0]
+    second, _ = task_program_bundle._pour_target_geometry(
+        source, receiver, embodiment, "left"
+    )
+    assert first["relative_pose"] == pytest.approx(second["relative_pose"])
+    assert first["world_orientation"] == pytest.approx(second["world_orientation"])
+    assert semantics["upright_axis"] == [0.0, 0.0, 1.0]
+    assert semantics["pivot_local"] == pytest.approx([0.0, 0.0, height / 2])
+    rotation = np.asarray(first["world_orientation"]).reshape(3, 3)
+    relative = np.asarray(first["relative_pose"]).reshape(4, 4)
+    pivot_height = (rotation @ (relative[:3, 3] + semantics["pivot_local"]))[2]
+    radius = np.linalg.norm(vertices["vessel"] - semantics["pivot_local"], axis=1).max()
+    assert pivot_height - radius > 0.15 + 0.015
+
+
 def _graph() -> dict:
     return {
         "schema_version": "semantic_task_graph/v1",
@@ -1439,6 +1484,15 @@ def test_explicit_orientation_bundle_uses_shared_preflight_and_terminal_post(
     if task_type == "E4":
         assert policy["motion"]["sample_count"] >= 260
     integration = load_config(paths.integration)
+    if any(
+        node["call"].get("call_id") == "simulation.move_held_object"
+        for node in generated["nodes"]
+    ):
+        transport_monitor = integration["profile"]["effect_monitors"][
+            "simulation.move_held_object"
+        ]
+        assert transport_monitor["monitor_id"] == "builtin.composite_effect"
+        assert transport_monitor["params"]["attached_translation_threshold"] == 0.06
     if task_type == "E4":
         source_call = generated["nodes"][0]["call"]
         assert source_call["call_id"] == "gen_sim.pick.handover_source"
