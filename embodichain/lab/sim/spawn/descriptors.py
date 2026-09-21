@@ -62,6 +62,7 @@ from dexsim.spawn import (
 from dexsim.spawn.descs import NEWTON_CONTACT_SOLVER_FIELDS
 from dexsim.types import ActorType, DriveType, LoadOption as DexsimLoadOption
 
+from embodichain.lab.sim._inertia import _principal_inertia_matrix
 from embodichain.lab.sim.cfg import (
     _normalize_joint_target_mode,
     ArticulationCfg,
@@ -79,7 +80,6 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg, SphereCfg
 from embodichain.utils import logger
-from embodichain.utils.math import quat_xyzw_to_wxyz
 from embodichain.utils.string import (
     resolve_matching_names,
     resolve_matching_names_values,
@@ -302,7 +302,7 @@ def rigid_desc_from_cfg(
             newton_solver_type=newton_solver_type,
         )
     )
-    geometry, approximation, max_hulls = _compile_geometry(cfg)
+    geometry, approximation, max_hulls, acd_method = _compile_geometry(cfg)
     material_ref, material_entry = _compile_visual_material(
         uid, cfg.shape.visual_material
     )
@@ -310,6 +310,10 @@ def rigid_desc_from_cfg(
         geometry,
         approximation=approximation,
     )
+    if approximation == CollisionApproximation.CONVEX_DECOMPOSITION:
+        # Construct the declared field rather than attaching a dynamic attribute
+        # that older DexSim versions would silently ignore during cooking.
+        collision = replace(collision, decomp_algorithm=acd_method)
     collision.enable_collision = physics.collision_enabled
     collision.decomp_max_hulls = max_hulls
     collision.dexsim = _compile_default_collision(physics)
@@ -958,7 +962,6 @@ def _has_articulation_link_physics_overlay(
             "density",
             "inertia",
             "com_position",
-            "com_quaternion",
             "collision_filter_data",
             "dexsim",
         )
@@ -988,7 +991,6 @@ def _has_default_articulation_link_physics_overlay(
             "density",
             "inertia",
             "com_position",
-            "com_quaternion",
             "collision_filter_data",
             "dexsim",
         )
@@ -1382,8 +1384,6 @@ def _compile_rigid_physics(
         if quaternion_norm <= 1.0e-8:
             raise ValueError("Rigid-body com_quaternion cannot be zero.")
         com_quaternion = com_quaternion / quaternion_norm
-        # DexSim descriptors use wxyz; EmbodiChain configuration uses xyzw.
-        com_quaternion = quat_xyzw_to_wxyz(com_quaternion)
 
     if body_type != "static":
         mass = (
@@ -1405,6 +1405,29 @@ def _compile_rigid_physics(
         com_position = None
         com_quaternion = None
 
+    if inertia is not None:
+        if inertia.size == 3:
+            inertia = _principal_inertia_matrix(
+                inertia,
+                (
+                    com_quaternion
+                    if com_quaternion is not None
+                    else np.array([0, 0, 0, 1])
+                ),
+            )
+        else:
+            inertia = inertia.reshape(3, 3)
+            if com_quaternion is not None:
+                warnings.warn(
+                    "com_quaternion is ignored for a body-frame inertia matrix.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+    elif com_quaternion is not None:
+        raise ValueError(
+            "Rigid-body com_quaternion requires explicit principal inertia."
+        )
+
     if physics.default_rigid_props:
         default_values = {item.name: None for item in fields(DexsimPhysicsDesc)}
         default_values.update(physics.default_rigid_props)
@@ -1417,7 +1440,6 @@ def _compile_rigid_physics(
         density=density,
         inertia=inertia,
         com_position=com_position,
-        com_quaternion=com_quaternion,
         dexsim=default_desc,
         newton=None,
     )
@@ -1563,7 +1585,7 @@ def _compile_newton_collision(
 
 def _compile_geometry(
     cfg: RigidObjectCfg,
-) -> tuple[GeometryDesc, CollisionApproximation, int]:
+) -> tuple[GeometryDesc, CollisionApproximation, int, str]:
     shape = cfg.shape
     if isinstance(shape, MeshCfg):
         geometry = _mesh_geometry_from_cfg(shape, segment_name=cfg.uid or "mesh")
@@ -1586,10 +1608,10 @@ def _compile_geometry(
         # RigidObject after Spawn has created the file-backed mesh.
         if (
             collision_cfg.approximation == "convex_decomposition"
-            and acd_method not in ("visacd", "coacd")
+            and acd_method not in ("visacd", "coacd", "vhacd")
         ):
             raise ValueError(
-                "Spawn supports only acd_method='visacd' or 'coacd' "
+                "Spawn supports only acd_method='visacd', 'coacd', or 'vhacd' "
                 "for convex_decomposition."
             )
         if collision_cfg.sdf_resolution is not None:
@@ -1602,13 +1624,14 @@ def _compile_geometry(
             geometry,
             approximation,
             max(1, max_hulls),
+            acd_method,
         )
 
     if isinstance(shape, CubeCfg):
         size = tuple(float(value) for value in shape.size)
         if len(size) != 3 or any(value <= 0 for value in size):
             raise ValueError("CubeCfg.size must contain three positive values.")
-        return GeometryDesc.cube(size), CollisionApproximation.NONE, 1
+        return GeometryDesc.cube(size), CollisionApproximation.NONE, 1, "coacd"
 
     if isinstance(shape, SphereCfg):
         if shape.radius <= 0:
@@ -1617,6 +1640,7 @@ def _compile_geometry(
             GeometryDesc.sphere(float(shape.radius)),
             CollisionApproximation.NONE,
             1,
+            "coacd",
         )
 
     raise NotImplementedError(

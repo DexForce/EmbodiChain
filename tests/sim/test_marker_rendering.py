@@ -236,14 +236,7 @@ def _exercise_marker_rendering(sim):
 
 
 def test_environment_batched_native_attachment_follows_bound_articulation(tmp_path):
-    from dataclasses import fields
-    from dexsim.spawn import RigidBodyPhysicsDesc
     from embodichain.lab.sim.cfg import ArticulationCfg
-
-    if "com_quaternion" not in {field.name for field in fields(RigidBodyPhysicsDesc)}:
-        pytest.skip(
-            "Registered-asset smoke requires compatible DexSim COM descriptors; installed schema lacks com_quaternion"
-        )
 
     _require_render_actor_capability()
     source = tmp_path / "marker_parent.urdf"

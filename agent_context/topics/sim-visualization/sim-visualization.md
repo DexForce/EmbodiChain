@@ -56,6 +56,9 @@ batched pose, scale, prototype, color, and visibility arrays without stepping
 physics. Groups default to all sub-environments; `env_ids` selects mutations,
 while `scope="world"` creates one global batch. Attach/detach follows prepared
 registered roots or links through public pose reads on the simulation thread.
+During `SimulationManager.update()`, attachment refresh follows the optional
+`after_substep` observer and precedes recording and visualization capture, so
+captures include pose changes made by that observer.
 Native rendering creates ordinary `MeshObject` instances through the builder's
 Scene with `Scene.add_mesh_object(MeshObjectDesc(..., physics=None))`.
 `RenderDesc` and `MaterialDesc` configure overlay routing, shadow/picking and

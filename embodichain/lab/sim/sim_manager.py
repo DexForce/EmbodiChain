@@ -240,9 +240,11 @@ class SimulationManagerCfg:
         window_camera_pose: WindowCameraPoseCfg | None = None,
         startup_summary: Literal["compact", "full", "off"] = "compact",
         dexsim_startup_info: bool = False,
+        scene_node_capacity: int | None = None,
     ) -> None:
         self.startup_summary = startup_summary
         self.dexsim_startup_info = dexsim_startup_info
+        self.scene_node_capacity = scene_node_capacity
         self.width = width
         self.height = height
         self.headless = headless
@@ -299,6 +301,13 @@ class SimulationManagerCfg:
 
     Warnings and errors remain visible regardless of this setting. Requires
     a DexSim build exposing ``WorldConfig.log_startup_info``.
+    """
+
+    scene_node_capacity: int | None = None
+    """Maximum scene nodes, or None to retain the DexSim World default.
+
+    Large batches of articulated robots may require more nodes than the
+    default 65,536. This changes allocation capacity, not physics settings.
     """
 
     height: int = 1080
@@ -1120,6 +1129,8 @@ class SimulationManager:
     ) -> dexsim.WorldConfig:
         world_config = dexsim.WorldConfig()
         world_config.log_startup_info = sim_config.dexsim_startup_info
+        if sim_config.scene_node_capacity is not None:
+            world_config.scene_node_capacity = sim_config.scene_node_capacity
         win_config = dexsim.WindowsConfig()
         win_config.width = sim_config.width
         win_config.height = sim_config.height
@@ -1668,7 +1679,13 @@ class SimulationManager:
         self._world.render_camera_group(group_ids)
         self._log_scene_summary()
 
-    def update(self, physics_dt: float | None = None, step: int = 10) -> None:
+    def update(
+        self,
+        physics_dt: float | None = None,
+        step: int = 10,
+        *,
+        after_substep: Callable[[float], None] | None = None,
+    ) -> None:
         """Advance physics explicitly and publish the resulting simulation state.
 
         Each substep applies pending Gizmo controls before advancing the world,
@@ -1678,6 +1695,9 @@ class SimulationManager:
         Args:
             physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
             step (int, optional): the number of :meth:`World.update` calls per invocation. Defaults to 10.
+            after_substep: Observer called with the elapsed physics time after
+                each world update, before recording and visualization. It runs
+                inside this update call and is not retained by the manager.
         """
         with self.profiler.section("sim_update", is_root=True):
             with self.profiler.section("gpu_physics_check"):
@@ -1697,6 +1717,9 @@ class SimulationManager:
                             self._world.update(physics_dt)
                     self._visualization_sim_step += 1
                     self._visualization_sim_time += physics_dt
+                    if after_substep is not None:
+                        with self.profiler.section("after_substep"):
+                            after_substep(physics_dt)
                     self._refresh_marker_attachments()
                     if (
                         self._window_record_state is not None

@@ -17,13 +17,17 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import warp as wp
 
 from embodichain.lab.sim.sensors._warp.contact import scatter_contact_data
 from embodichain.utils.warp.kernels import scatter_contact_data as legacy_scatter
 
 
-def test_contact_kernel_compatibility_and_per_environment_capacity() -> None:
+@pytest.mark.parametrize("launch_size", (3, 8))
+def test_contact_kernel_compatibility_and_per_environment_capacity(
+    launch_size: int,
+) -> None:
     assert legacy_scatter is scatter_contact_data
     wp.init()
     # Three contacts in two environments; the second row in env 0 overflows.
@@ -37,7 +41,7 @@ def test_contact_kernel_compatibility_and_per_environment_capacity() -> None:
     valid = wp.zeros((2, 1), dtype=wp.bool, device="cpu")
     wp.launch(
         scatter_contact_data,
-        dim=3,
+        dim=launch_size,
         inputs=[
             contacts,
             users,

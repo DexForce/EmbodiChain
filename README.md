@@ -31,6 +31,8 @@ The figure below illustrates the overall architecture of EmbodiChain:
   <img src="assets/imgs/frameworks.jpg" alt="architecture" width="90%"/>
 </p>
 
+Explore EmbodiChain's module relationships with the [interactive architecture visualization](https://dexforce.github.io/EmbodiChain/main/overview/architecture/index.html#).
+
 
 ## Getting Started
 
@@ -67,6 +69,12 @@ gym config with `id`, install with `pip install -e .`, and launch it with
 `embodichain run-env`. See the
 [embodichain_tasks README](https://github.com/DexForce/EmbodiChain/blob/main/embodichain_tasks/README.md)
 for details.
+EmbodiChain environments can also be used with the optional
+[RLinf integration](https://dexforce.github.io/EmbodiChain/main/guides/rlinf.html);
+the integration guide documents the separate runtime, task registration, and
+current compatibility boundary. The
+[official RLinf EmbodiChain recipe](https://rlinf.readthedocs.io/en/latest/rst_source/examples/embodied/embodichain.html)
+provides a concrete end-to-end reference.
 
 ## Contribution Guide
 

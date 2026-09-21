@@ -40,6 +40,8 @@ from embodichain.utils.math import matrix_from_quat
 from embodichain.lab.sim.utility import get_dexsim_arena_num
 from embodichain.utils import configclass, is_configclass, logger
 
+__all__ = ["BaseSensor", "SensorCfg"]
+
 
 @configclass
 class SensorCfg(ObjectBaseCfg):
@@ -245,3 +247,19 @@ class BaseSensor(BatchEntity):
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         return super().reset(env_ids)
+
+    @property
+    def requires_substep_update(self) -> bool:
+        """Whether the environment must sample this sensor each physics substep."""
+        return False
+
+    def begin_control_step(self) -> None:
+        """Begin interval accumulation for a sensor that samples physics substeps."""
+
+    def update_physics_step(self, dt: float) -> None:
+        """Sample a sensor that opts into physics substeps.
+
+        Args:
+            dt: Elapsed physics time in seconds.
+        """
+        self.update()

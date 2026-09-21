@@ -35,6 +35,9 @@ if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
 
+__all__ = ["EventManager"]
+
+
 _MAX_TORCH_SEED = 2**63 - 1
 
 
@@ -219,7 +222,10 @@ class EventManager(ManagerBase):
                     ):
                         functor_cfg.func.reset(env_ids=env_ids)
 
-        # May be add more useful reset logic later.
+        for index, cfg in enumerate(self._mode_functor_cfgs.get("interval", [])):
+            if not cfg.is_global:
+                ids = slice(None) if env_ids is None else env_ids
+                self._interval_functor_step_count[index][ids] = 0
 
         # nothing to log here
         return {}

@@ -24,6 +24,7 @@ import pytest
 import torch
 
 from embodichain.lab.sim.objects import Articulation
+from embodichain.utils.math import matrix_from_quat
 
 pytestmark = pytest.mark.no_sim
 
@@ -38,14 +39,19 @@ def test_spawn_mass_setters_preserve_selection_and_quaternion_order(
     articulation.device = torch.device("cpu")
     articulation._spawn_result = object()
     articulation._data = SimpleNamespace(
-        is_newton_backend=newton, link_names=["base", "tip"]
+        is_newton_backend=newton,
+        link_names=["base", "tip"],
+        inertia=torch.tensor([1.0, 2.0, 3.0]).expand(3, 2, 3).clone(),
+        com_pose=torch.tensor([0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0])
+        .expand(3, 2, 7)
+        .clone(),
     )
     articulation._entities = [
-        Mock(spec=["set_link_inertia", "set_link_com_pose"]) for _ in range(3)
+        Mock(spec=["set_link_inertia", "set_link_com_position"]) for _ in range(3)
     ]
     for entity in articulation._entities:
         entity.set_link_inertia.return_value = 0
-        entity.set_link_com_pose.return_value = 0
+        entity.set_link_com_position.return_value = 0
     articulation._declared_num_instances = 3
     env_ids = [2, 0] if selected else None
     link_names = ["tip", "base"] if selected else None
@@ -68,18 +74,32 @@ def test_spawn_mass_setters_preserve_selection_and_quaternion_order(
     )
 
     for i, env_id in enumerate(rows):
-        calls = getattr(
-            articulation._entities[env_id], "set_link_" + property_name
-        ).call_args_list
+        entity = articulation._entities[env_id]
+        calls = entity.set_link_inertia.call_args_list
         assert len(calls) == len(names)
         for j, name in enumerate(names):
             args = calls[j].args
             assert args[0] == name
-            np.testing.assert_array_equal(args[1], values[i, j, :3].numpy())
+            link_id = articulation.link_names.index(name)
+            moments = (
+                values[i, j]
+                if property_name == "inertia"
+                else articulation._data.inertia[env_id, link_id]
+            )
+            frame = (
+                values[i, j, 3:]
+                if property_name == "com_pose"
+                else articulation._data.com_pose[env_id, link_id, 3:]
+            )
+            rotation = matrix_from_quat(frame)
+            expected = rotation @ torch.diag(moments) @ rotation.T
+            np.testing.assert_allclose(args[1], expected.numpy(), atol=1e-5)
             if property_name == "com_pose":
-                np.testing.assert_array_equal(
-                    args[2], values[i, j, [6, 3, 4, 5]].numpy()
-                )
+                com_args = entity.set_link_com_position.call_args_list[j].args
+                assert com_args[0] == name
+                np.testing.assert_array_equal(com_args[1], values[i, j, :3].numpy())
+            else:
+                entity.set_link_com_position.assert_not_called()
     if selected:
         assert articulation._entities[1].mock_calls == []
     torch.testing.assert_close(values, original)
@@ -109,9 +129,21 @@ def test_spawn_mass_setters_raise_for_negative_native_status(
     articulation = object.__new__(Articulation)
     articulation.device = torch.device("cpu")
     articulation._spawn_result = object()
-    articulation._data = SimpleNamespace(is_newton_backend=newton, link_names=["base"])
-    entity = Mock(spec=["set_link_inertia", "set_link_com_pose"])
-    getattr(entity, "set_link_" + property_name).return_value = status
+    articulation._data = SimpleNamespace(
+        is_newton_backend=newton,
+        link_names=["base"],
+        inertia=torch.ones(2, 1, 3),
+        com_pose=torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])
+        .expand(2, 1, 7)
+        .clone(),
+    )
+    entity = Mock(spec=["set_link_inertia", "set_link_com_position"])
+    entity.set_link_inertia.return_value = 0
+    entity.set_link_com_position.return_value = 0
+    getattr(
+        entity,
+        "set_link_inertia" if property_name == "inertia" else "set_link_com_position",
+    ).return_value = status
     articulation._entities = [Mock(), entity]
 
     with pytest.raises(
@@ -121,3 +153,55 @@ def test_spawn_mass_setters_raise_for_negative_native_status(
             torch.ones(1, 1, width), link_names="base", env_ids=[1]
         )
     assert articulation._entities[0].mock_calls == []
+
+
+@pytest.mark.parametrize("newton", [False, True])
+def test_partial_reset_restores_saved_inertia_frame_as_one_pair(newton: bool) -> None:
+    articulation = object.__new__(Articulation)
+    articulation.device = torch.device("cpu")
+    articulation._spawn_result = object()
+    default_inertia = torch.tensor([3.0, 1.0, 2.0]).expand(3, 1, 3).clone()
+    default_pose = (
+        torch.tensor([0.1, 0.2, 0.3, 1.0, 2.0, 3.0, 4.0]).expand(3, 1, 7).clone()
+    )
+    default_pose[..., 3:] /= torch.linalg.vector_norm(
+        default_pose[..., 3:], dim=-1, keepdim=True
+    )
+    current_pose = (
+        torch.tensor([0.4, 0.5, 0.6, 0.0, 0.0, 0.0, 1.0]).expand(3, 1, 7).clone()
+    )
+    data = SimpleNamespace(
+        is_newton_backend=newton,
+        link_names=["base"],
+        default_physical_properties_initialized=True,
+        default_mass=torch.ones(3, 1),
+        default_inertia=default_inertia,
+        default_com_pose=default_pose,
+        read_physical_properties=Mock(
+            return_value=(
+                torch.ones(3, 1),
+                torch.tensor([1.0, 2.0, 3.0]).expand(3, 1, 3),
+                current_pose,
+            )
+        ),
+    )
+    articulation._data = data
+    articulation._entities = [
+        Mock(spec=["set_link_inertia", "set_link_com_position"]) for _ in range(3)
+    ]
+    for entity in articulation._entities:
+        entity.set_link_inertia.return_value = 0
+        entity.set_link_com_position.return_value = 0
+    articulation._restore_default_physical_properties([2, 0])
+    for index in [2, 0]:
+        rotation = matrix_from_quat(default_pose[index, 0, 3:])
+        expected = rotation @ torch.diag(default_inertia[index, 0]) @ rotation.T
+        calls = articulation._entities[index].set_link_inertia.call_args_list
+        assert len(calls) == 1
+        np.testing.assert_allclose(calls[0].args[1], expected.numpy(), atol=1e-6)
+        np.testing.assert_allclose(
+            articulation._entities[index].set_link_com_position.call_args.args[1],
+            default_pose[index, 0, :3].numpy(),
+        )
+    assert articulation._entities[1].mock_calls == []
+    data.read_physical_properties.assert_called_once()

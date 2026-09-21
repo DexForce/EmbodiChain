@@ -2671,3 +2671,77 @@ def test_native_markers_receive_prepared_scene_without_preparing_physics(
     sim.prepare.assert_not_called()
     sim.sync_render_state.assert_not_called()
     assert sim._world.physics_updates == []
+
+
+@pytest.mark.parametrize("steps", [0, 1, 4])
+def test_after_substep_observer_preserves_manager_and_camera_boundaries(
+    steps: int,
+) -> None:
+    sim, runtime = _make_visualization_sim_manager()
+    observed = []
+    prepare = sim.prepare
+    prepare_calls = []
+
+    def prepare_once():
+        prepare_calls.append(True)
+        prepare()
+
+    sim.prepare = prepare_once
+    sim.update(
+        0.01,
+        steps,
+        after_substep=lambda dt: observed.append((dt, len(sim._world.physics_updates))),
+    )
+    assert len(prepare_calls) == 1
+    assert observed == [(0.01, i + 1) for i in range(steps)]
+    assert [item["capture_camera_images"] for item in runtime.capture_calls] == [
+        False
+    ] * max(0, steps - 1) + ([True] if steps else [])
+    sim.update(0.01, 1)
+    assert len(observed) == steps  # The observer is not retained for later calls.
+
+
+def test_after_substep_marker_refresh_precedes_visualization_capture() -> None:
+    sim, groups, pose = _attach_groups_for_host_update(1)
+    runtime = sim._visualization_runtime
+    events: list[str] = []
+    captured_positions: list[np.ndarray] = []
+    published_positions: list[np.ndarray] = []
+    world_update = sim._world.update
+    capture = sim.capture_visualization_safely
+
+    def update_world(dt: float) -> None:
+        world_update(dt)
+        events.append("physics")
+
+    def after_substep(dt: float) -> None:
+        events.append("observer")
+        pose[:, 0] += 1
+
+    def publish(name: str, markers: object) -> None:
+        events.append("markers")
+        published_positions.append(np.array([marker.position for marker in markers]))
+
+    def capture_state(**kwargs: object) -> None:
+        events.append("capture")
+        captured_positions.append(
+            np.array([marker.position for marker in groups[0].snapshot()])
+        )
+        capture(**kwargs)
+
+    sim._world.update = update_world
+    sim._native_markers = SimpleNamespace(publish=publish)
+    sim.capture_visualization_safely = capture_state
+
+    sim.update(step=2, after_substep=after_substep)
+
+    assert events == ["physics", "observer", "markers", "capture"] * 2
+    # The fixture's parent poses, marker offsets, and Arena offsets produce
+    # these world positions after the observer moves each parent by one unit.
+    expected = [[[14, 0, 0], [6, 20, 0]], [[15, 0, 0], [7, 20, 0]]]
+    np.testing.assert_allclose(published_positions, expected)
+    np.testing.assert_allclose(captured_positions, expected)
+    assert [call["capture_camera_images"] for call in runtime.capture_calls] == [
+        False,
+        True,
+    ]
