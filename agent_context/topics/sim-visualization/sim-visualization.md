@@ -67,8 +67,13 @@ is available after `prepare_arenas()` for either physics backend; creating or
 updating markers does not prepare physics. Handles survive Newton physics
 rebuild and become invalid on Scene close; renderer cleanup tolerates already
 invalidated handles. Unlit/alpha-mode controls require the shared native RT
-material type; Filament materials reject them. Owned material retirement
-preserves explicitly shared or externally retained instances. File-backed
+material type; Filament materials reject them. Actor removal and handle
+invalidation are immediate; unreferenced materials are reclaimed by DexSim's
+reference-aware periodic manager collection, so resource release can span
+later render updates. Shared or externally retained materials remain valid.
+The consumer keeps no native material cache and does not force collection;
+the dependency must provide this manager lifecycle alongside the Scene and
+overlay descriptor APIs. File-backed
 overlay geometry is unsupported. Browser rendering carries meshes in
 `SceneOverlays`. Native submission remains per-object; true native batching and
 GPU instancing are tracked separately in DexSim issue 227. `draw_marker()` remains

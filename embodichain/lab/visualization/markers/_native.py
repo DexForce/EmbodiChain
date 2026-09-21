@@ -51,6 +51,10 @@ def _pose(marker: MeshMarkerOverlay) -> np.ndarray:
 class NativeMarkerRenderer:
     """Own Scene render-only mesh handles on the simulation thread.
 
+    Removal invalidates handles and removes actors immediately. DexSim's
+    periodic material collection reclaims unreferenced materials later;
+    this consumer retains no native material wrappers between updates.
+
     Args:
         scene: Prepared DexSim Scene owning render-only mesh objects.
             Creating markers does not prepare or rebuild physics.

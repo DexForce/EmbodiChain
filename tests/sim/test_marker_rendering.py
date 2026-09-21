@@ -27,12 +27,16 @@ pytestmark = [pytest.mark.gpu, pytest.mark.requires_sim]
 
 
 def _require_render_actor_capability():
-    from dexsim import engine
+    from dexsim import engine, spawn
     from dexsim.scene import Scene
 
     required = (
         (Scene, "add_mesh_object"),
         (Scene, "remove_mesh_object"),
+        (getattr(spawn, "RenderDesc", None), "render_mode"),
+        (getattr(spawn, "MaterialDesc", None), "unlit"),
+        (getattr(spawn, "MaterialDesc", None), "alpha_mode"),
+        (getattr(spawn, "MaterialDesc", None), "depth_write"),
         (getattr(engine, "RenderBody", None), "set_raytrace_visible"),
         (getattr(engine, "RenderBody", None), "set_pickable"),
         (getattr(engine, "RenderBody", None), "build"),
@@ -42,6 +46,108 @@ def _require_render_actor_capability():
     )
     if any(not hasattr(owner, name) for owner, name in required):
         pytest.skip("Requires DexSim Scene mesh lifecycle and overlay capabilities")
+
+
+def test_native_marker_handles_retire_before_material_collection():
+    _require_render_actor_capability()
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True,
+            sim_device="cpu",
+            enable_entity_gizmo=False,
+            render_cfg=RenderCfg(renderer="hybrid"),
+            startup_summary="off",
+        )
+    )
+    try:
+        # Keep borrowed native references inside the helper's lifetime, before
+        # the World is destroyed.
+        _exercise_repeated_marker_lifecycle(sim)
+    finally:
+        sim.destroy(exit_process=False)
+        del sim
+        SimulationManager.flush_cleanup_queue()
+
+
+def _exercise_repeated_marker_lifecycle(sim):
+    scene = sim._spawn_scene.builder.result
+    arena = sim.get_env()
+    retained_material = None
+    try:
+        baseline_paths = set(scene.handles)
+        baseline_count = arena.get_actor_num()
+        revision = sim._prepared_spawn_topology_revision
+        group = sim.add_marker_group(
+            MarkerGroupCfg(
+                name="material_collection",
+                prototypes={
+                    "box": MarkerPrototypeCfg(shape="box"),
+                    "sphere": MarkerPrototypeCfg(shape="sphere"),
+                },
+            )
+        )
+        for _ in range(3):
+            group.update(translations=[[0, 0, 1], [1, 0, 1]], prototype_indices=[0, 0])
+            handles = {
+                path: scene.handles[path]
+                for path in set(scene.handles) - baseline_paths
+            }
+            assert len(handles) == 2
+            assert arena.get_actor_num() == baseline_count + 2
+            retained_material = next(iter(handles.values())).get_material()
+            color = [0.25, 0.5, 0.75, 0.5]
+            group.update(
+                translations=[[0, 1, 1], [1, 1, 1]],
+                scales=[[2, 2, 2], [2, 2, 2]],
+                colors=[color, color],
+            )
+            group.set_visibility(False)
+            assert set(scene.handles) == baseline_paths | handles.keys()
+            for path, handle in handles.items():
+                assert scene.handles[path] is handle
+                assert handle.is_valid
+                assert not handle.is_visible()
+                np.testing.assert_allclose(handle.get_world_pose()[:3, 3][1:], [1, 1])
+                np.testing.assert_allclose(handle.get_scale(), [2, 2, 2])
+            np.testing.assert_allclose(retained_material.get_base_color(), color[:3])
+
+            group.update(prototype_indices=[1, 1])
+            replacements = [
+                scene.handles[path] for path in set(scene.handles) - baseline_paths
+            ]
+            assert len(replacements) == 2
+            assert arena.get_actor_num() == baseline_count + 2
+            assert all(
+                not handle.is_valid and handle.native() is None
+                for handle in handles.values()
+            )
+            assert all(handle.is_valid for handle in replacements)
+            assert set(scene.handles).isdisjoint(handles)
+
+            group.clear()
+            assert arena.get_actor_num() == baseline_count
+            assert set(scene.handles) == baseline_paths
+            assert all(
+                not handle.is_valid and handle.native() is None
+                for handle in replacements
+            )
+            # Actor removal must not require material destruction. The manager's
+            # periodic GC owns reclamation, and this external reference remains usable.
+            retained_material.set_base_color([1, 0, 0, 1])
+            np.testing.assert_allclose(retained_material.get_base_color(), [1, 0, 0])
+            del retained_material
+            group.clear()
+            assert arena.get_actor_num() == baseline_count
+        group.remove()
+        group.remove()
+        assert sim.get_marker_overlays() == ()
+        assert sim._prepared_spawn_topology_revision == revision
+        assert sim._visualization_sim_step == 0
+
+    finally:
+        # Pytest retains failed frames; drop native wrappers before World teardown.
+        retained_material = None
+        arena = None
 
 
 def test_marker_group_native_rendering_and_sensor_isolation():
