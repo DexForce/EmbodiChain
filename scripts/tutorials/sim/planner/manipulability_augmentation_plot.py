@@ -18,9 +18,13 @@
 
 Every variant is produced by
 :func:`~embodichain.lab.sim.motion.expansion.manipulability.manipulability_guided_residual`
-against the same annotated reference, so the figure shows what band targeting
-actually changes: the phase endpoints stay exact while the interior of each
-joint path moves, and paths steered toward different bands separate.
+against the same annotated reference. One run writes two views of that same
+set, so the two figures can never disagree:
+
+* the joint paths, showing that phase endpoints stay exact while the interior
+  of each joint moves;
+* the manipulability measured along those paths, showing where each variant's
+  bottleneck lands relative to the band edges that selected it.
 
 The robot is driven through its kinematic chain and solver only. No simulation
 manager, renderer, physics backend or display is started, so this runs on a
@@ -48,12 +52,12 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import warp as wp
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
-from embodichain.compute.kinematics import yoshikawa_manipulability
 from embodichain.lab.sim.motion.expansion.contracts import (
     TrajectoryPhase,
     TrajectoryTemplate,
@@ -61,6 +65,7 @@ from embodichain.lab.sim.motion.expansion.contracts import (
 from embodichain.lab.sim.motion.expansion.manipulability import (
     GuidedResidual,
     ManipulabilityBands,
+    ManipulabilityProfile,
     describe_manipulability,
     manipulability_guided_residual,
 )
@@ -69,6 +74,11 @@ from embodichain.utils import logger
 
 DEFAULT_OUTPUT = Path("docs/source/_static/tutorials/manipulability_augmentation.png")
 """Repository-relative destination tracked alongside the other tutorial figures."""
+
+DEFAULT_PROFILE_OUTPUT = Path(
+    "docs/source/_static/tutorials/manipulability_augmentation_profile.png"
+)
+"""Destination of the companion manipulability-versus-time figure."""
 
 START_QPOS = (0.0, -1.2, 1.6, -1.2, -1.57, 0.0)
 """Well-conditioned UR5 start posture; the zero posture is singular."""
@@ -216,6 +226,33 @@ def collect_variants(
     return results
 
 
+def legend_handles() -> list[Line2D]:
+    """Build the band legend shared by both figures.
+
+    Returns:
+        Proxy artists for the reference, each reached band, and the dashed
+        style used when a variant could not reach its requested band.
+    """
+    handles = [Line2D([], [], color="black", linewidth=2.2, label="reference")]
+    handles += [
+        Line2D([], [], color=color, linewidth=1.4, label=f"reached: {label}")
+        for color, label in zip(BAND_COLORS, BAND_LABELS)
+    ]
+    # Black keeps this entry reading as a line style: unmatched variants stay
+    # colored by the band they actually reached.
+    handles.append(
+        Line2D(
+            [],
+            [],
+            color="black",
+            linewidth=1.4,
+            linestyle="--",
+            label="target band not reached",
+        )
+    )
+    return handles
+
+
 def build_figure(
     reference: TrajectoryTemplate,
     variants: list[GuidedResidual],
@@ -263,25 +300,8 @@ def build_figure(
         if axis.get_visible():
             axis.set_xlabel("time [s]", fontsize=9)
 
-    handles = [Line2D([], [], color="black", linewidth=2.2, label="reference")]
-    handles += [
-        Line2D([], [], color=color, linewidth=1.4, label=f"reached: {label}")
-        for color, label in zip(BAND_COLORS, BAND_LABELS)
-    ]
-    # Black keeps this entry reading as a line style: unmatched variants stay
-    # colored by the band they actually reached.
-    handles.append(
-        Line2D(
-            [],
-            [],
-            color="black",
-            linewidth=1.4,
-            linestyle="--",
-            label="target band not reached",
-        )
-    )
     figure.legend(
-        handles=handles, loc="lower center", ncol=5, frameon=False, fontsize=9
+        handles=legend_handles(), loc="lower center", ncol=5, frameon=False, fontsize=9
     )
     matched = sum(1 for variant in variants if variant.matched)
     figure.suptitle(
@@ -294,6 +314,98 @@ def build_figure(
     return figure
 
 
+def build_profile_figure(
+    reference_profile: ManipulabilityProfile,
+    variants: list[GuidedResidual],
+    *,
+    time: "np.ndarray",
+    reference_bottleneck: float,
+) -> Figure:
+    """Draw measured manipulability along every variant and the reference.
+
+    Scores come from the profile each variant was selected with, not from a
+    fresh evaluation, so the curves are exactly the evidence the operator
+    ranked. The marker on each curve is that trajectory's bottleneck, which is
+    the single value its band membership is decided by.
+
+    Args:
+        reference_profile: Manipulability measured along the reference.
+        variants: Selected residuals to overlay.
+        time: Sample arrival times shared by every trajectory.
+        reference_bottleneck: Reference bottleneck normalizing the band edges.
+
+    Returns:
+        The assembled figure.
+    """
+    figure, axis = plt.subplots(figsize=(13.5, 5.4))
+    for variant in variants:
+        scores = variant.profile.scores.numpy()
+        color = BAND_COLORS[variant.band]
+        axis.plot(
+            time,
+            scores,
+            color=color,
+            linewidth=1.0,
+            linestyle="-" if variant.matched else "--",
+            alpha=0.75,
+        )
+        lowest = int(scores.argmin())
+        axis.plot(time[lowest], scores[lowest], marker="o", markersize=4.5, color=color)
+
+    reference_scores = reference_profile.scores.numpy()
+    axis.plot(time, reference_scores, color="black", linewidth=2.2, zorder=5)
+    lowest = int(reference_scores.argmin())
+    axis.plot(
+        time[lowest],
+        reference_scores[lowest],
+        marker="o",
+        markersize=6.5,
+        color="black",
+        zorder=6,
+    )
+
+    for edge in BAND_EDGES:
+        level = edge * reference_bottleneck
+        axis.axhline(level, color="0.55", linestyle=":", linewidth=1.0, zorder=1)
+        # Anchored left, where the curves run high and leave the band lines clear.
+        axis.annotate(
+            f"{edge:g}x reference bottleneck",
+            xy=(time[0], level),
+            xytext=(6, 4),
+            textcoords="offset points",
+            va="bottom",
+            ha="left",
+            fontsize=8,
+            color="0.35",
+        )
+
+    axis.set_xlabel("time [s]", fontsize=9)
+    axis.set_ylabel("Yoshikawa manipulability w", fontsize=9)
+    axis.grid(alpha=0.25)
+    axis.margins(x=0.02)
+    ratio = axis.secondary_yaxis(
+        "right",
+        functions=(
+            lambda value: value / reference_bottleneck,
+            lambda value: value * reference_bottleneck,
+        ),
+    )
+    ratio.set_ylabel("ratio to reference bottleneck", fontsize=9)
+
+    figure.legend(
+        handles=legend_handles(), loc="lower center", ncol=5, frameon=False, fontsize=9
+    )
+    matched = sum(1 for variant in variants if variant.matched)
+    figure.suptitle(
+        "Manipulability measured along the same variants\n"
+        f"{len(variants)} variants, {matched} reached their target band; "
+        f"markers are each trajectory's bottleneck, the value its band is read from",
+        fontsize=11,
+    )
+    figure.tight_layout(rect=(0, 0.08, 1, 0.92))
+    return figure
+
+
 def parse_arguments() -> argparse.Namespace:
     """Parse the figure's optional shape and destination arguments."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -302,6 +414,12 @@ def parse_arguments() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_OUTPUT,
         help=f"PNG destination (default: {DEFAULT_OUTPUT.as_posix()}).",
+    )
+    parser.add_argument(
+        "--output-profile",
+        type=Path,
+        default=DEFAULT_PROFILE_OUTPUT,
+        help=f"Manipulability PNG (default: {DEFAULT_PROFILE_OUTPUT.as_posix()}).",
     )
     parser.add_argument(
         "--samples", type=int, default=41, help="Samples in the reference path."
@@ -330,7 +448,7 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Build the reference, steer residuals toward each band and write one PNG."""
+    """Build the reference, steer residuals toward each band and write both PNGs."""
     args = parse_arguments()
     if args.samples < 3 or args.per_band < 1 or args.proposals < 1:
         raise SystemExit("samples must be >= 3; per-band and proposals must be >= 1")
@@ -359,24 +477,33 @@ def main() -> None:
         proposals=args.proposals,
         seed=args.seed,
     )
-    figure = build_figure(
-        reference, variants, bands=bands, reference_bottleneck=bottleneck
-    )
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(args.output, dpi=150, bbox_inches="tight")
-    plt.close(figure)
+    time = torch.cumsum(reference.dt, dim=0).cpu().numpy()
+    figures = {
+        args.output: build_figure(
+            reference, variants, bands=bands, reference_bottleneck=bottleneck
+        ),
+        args.output_profile: build_profile_figure(
+            profile,
+            variants,
+            time=time,
+            reference_bottleneck=bottleneck,
+        ),
+    }
+    for destination, figure in figures.items():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        figure.savefig(destination, dpi=150, bbox_inches="tight")
+        plt.close(figure)
 
     reached = sum(1 for variant in variants if variant.matched)
-    spread = [
-        float(yoshikawa_manipulability(solver.get_jacobian(v.template.positions)).min())
-        for v in variants
-    ]
+    # Each variant's own selection profile, never a fresh evaluation.
+    spread = [variant.profile.bottleneck for variant in variants]
     logger.log_info(
         f"Reference bottleneck w={bottleneck:.5f}; "
         f"{reached}/{len(variants)} variants reached their target band; "
         f"variant bottlenecks span [{min(spread):.5f}, {max(spread):.5f}]."
     )
-    logger.log_info(f"Wrote {args.output.resolve()}")
+    for destination in figures:
+        logger.log_info(f"Wrote {destination.resolve()}")
 
 
 if __name__ == "__main__":
