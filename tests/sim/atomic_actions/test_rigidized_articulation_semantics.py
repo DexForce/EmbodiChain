@@ -25,6 +25,7 @@ import torch
 
 from embodichain.lab.sim.atomic_actions import (
     SceneEntity,
+    create_rigidized_articulation_antipodal_affordance,
     create_rigidized_articulation_antipodal_semantics,
 )
 
@@ -152,6 +153,25 @@ class _StubArticulation:
         return limits
 
 
+class _PkArticulation(_StubArticulation):
+    """Articulation double whose FK accepts only the supported named-tree API."""
+
+    pk_chain = object()
+
+    def compute_fk(
+        self,
+        qpos: torch.Tensor,
+        *,
+        link_names: tuple[str, ...] | list[str],
+        qpos_joint_names: tuple[str, ...] | list[str],
+    ) -> torch.Tensor:
+        """Record named FK inputs and return the configured root-frame pose."""
+        self.requested_link_names = tuple(link_names)
+        self.requested_qpos_joint_names = tuple(qpos_joint_names)
+        assert qpos.shape == (1, 1)
+        return torch.stack(self._root_to_link).unsqueeze(1)
+
+
 class TestRootFrameTransform:
     """The mesh must be expressed in the articulation-root frame."""
 
@@ -188,6 +208,40 @@ class TestRootFrameTransform:
         assert not torch.allclose(
             semantics.affordance.mesh_vertices.to(torch.float64),
             LINK_VERTICES.to(torch.float64),
+        )
+
+    def test_non_null_pk_chain_uses_full_tree_named_fk(self) -> None:
+        root_to_link = _transform(
+            torch.eye(3),
+            torch.tensor([0.1, -0.2, 0.3]),
+        )
+        cube = _PkArticulation(
+            root_to_link=root_to_link,
+            qpos={"top_turn": 0.0},
+        )
+
+        semantics = create_rigidized_articulation_antipodal_semantics(
+            cube,
+            grasp_link="top_layer",
+            locked_qpos={"top_turn": 0.0},
+            label="rubiks_cube",
+        )
+
+        assert cube.requested_link_names == ("top_layer",)
+        assert cube.requested_qpos_joint_names == ("top_turn",)
+        homogeneous = torch.cat(
+            (
+                LINK_VERTICES.to(torch.float64),
+                torch.ones(len(LINK_VERTICES), 1, dtype=torch.float64),
+            ),
+            dim=1,
+        )
+        expected = (homogeneous @ root_to_link.transpose(0, 1))[:, :3]
+        torch.testing.assert_close(
+            semantics.affordance.mesh_vertices.to(torch.float64),
+            expected,
+            atol=1.0e-7,
+            rtol=0.0,
         )
 
     def test_identity_transform_leaves_the_vertices_unchanged(self) -> None:
@@ -334,6 +388,110 @@ class TestRejectedConfigurations:
                 grasp_link="top_layer",
                 locked_qpos={"top_turn": 0.0},
                 label="cube",
+            )
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    @pytest.mark.parametrize(
+        "field_name",
+        ["joint_position_tolerance", "link_transform_tolerance"],
+    )
+    def test_non_finite_tolerance_is_rejected(
+        self,
+        field_name: str,
+        value: float,
+    ) -> None:
+        cube = _StubArticulation(
+            root_to_link=torch.eye(4, dtype=torch.float64),
+            qpos={"top_turn": 0.0},
+        )
+
+        with pytest.raises(ValueError, match=field_name):
+            create_rigidized_articulation_antipodal_affordance(
+                cube,
+                grasp_link="top_layer",
+                locked_qpos={"top_turn": 0.0},
+                **{field_name: value},
+            )
+
+    def test_non_finite_measured_qpos_is_rejected(self) -> None:
+        cube = _StubArticulation(
+            root_to_link=torch.eye(4, dtype=torch.float64),
+            qpos={"top_turn": float("nan")},
+            target_qpos={"top_turn": 0.0},
+        )
+
+        with pytest.raises(ValueError, match="qpos.*finite"):
+            create_rigidized_articulation_antipodal_affordance(
+                cube,
+                grasp_link="top_layer",
+                locked_qpos={"top_turn": 0.0},
+            )
+
+    def test_non_finite_joint_limits_are_rejected(self) -> None:
+        cube = _StubArticulation(
+            root_to_link=torch.eye(4, dtype=torch.float64),
+            qpos={"top_turn": 0.0},
+            qpos_limits=(float("nan"), 0.0),
+        )
+
+        with pytest.raises(ValueError, match="qpos limits.*finite"):
+            create_rigidized_articulation_antipodal_affordance(
+                cube,
+                grasp_link="top_layer",
+                locked_qpos={"top_turn": 0.0},
+            )
+
+    def test_non_finite_root_pose_is_rejected(self) -> None:
+        root_pose = torch.eye(4, dtype=torch.float64)
+        root_pose[0, 3] = float("nan")
+        cube = _StubArticulation(
+            root_to_link=torch.eye(4, dtype=torch.float64),
+            qpos={"top_turn": 0.0},
+            root_pose=root_pose,
+        )
+
+        with pytest.raises(ValueError, match="root-to-link transforms.*finite"):
+            create_rigidized_articulation_antipodal_affordance(
+                cube,
+                grasp_link="top_layer",
+                locked_qpos={"top_turn": 0.0},
+            )
+
+    def test_non_finite_vertices_are_rejected(self) -> None:
+        vertices = LINK_VERTICES.clone()
+        vertices[0, 0] = float("inf")
+        cube = _StubArticulation(
+            root_to_link=torch.eye(4, dtype=torch.float64),
+            qpos={"top_turn": 0.0},
+            vertices=vertices,
+        )
+
+        with pytest.raises(ValueError, match="finite floating mesh vertices"):
+            create_rigidized_articulation_antipodal_affordance(
+                cube,
+                grasp_link="top_layer",
+                locked_qpos={"top_turn": 0.0},
+            )
+
+    @pytest.mark.parametrize(
+        "triangles",
+        [
+            LINK_TRIANGLES.to(torch.float32),
+            torch.tensor([[0, 1, len(LINK_VERTICES)]], dtype=torch.int64),
+        ],
+    )
+    def test_invalid_triangles_are_rejected(self, triangles: torch.Tensor) -> None:
+        cube = _StubArticulation(
+            root_to_link=torch.eye(4, dtype=torch.float64),
+            qpos={"top_turn": 0.0},
+            triangles=triangles,
+        )
+
+        with pytest.raises(ValueError, match="mesh_triangles"):
+            create_rigidized_articulation_antipodal_affordance(
+                cube,
+                grasp_link="top_layer",
+                locked_qpos={"top_turn": 0.0},
             )
 
 

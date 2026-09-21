@@ -32,6 +32,7 @@ from .articulation_geometry import (
     ArticulationAffordanceGeometry,
     ArticulationGeometryProvider,
     ArticulationJointGeometry,
+    create_rigidized_articulation_antipodal_affordance,
     sample_initial_articulation_geometry,
 )
 from .affordance import (
@@ -272,6 +273,7 @@ __all__ = [
     "ArticulationAffordanceGeometry",
     "ArticulationGeometryProvider",
     "ArticulationJointGeometry",
+    "create_rigidized_articulation_antipodal_affordance",
     "ArticulationJointState",
     "AssembleAffordance",
     "AssembleGoal",
