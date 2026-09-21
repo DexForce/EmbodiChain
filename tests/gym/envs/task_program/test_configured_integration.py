@@ -692,6 +692,136 @@ def test_scene_shorthand_derives_native_ids_and_affordance_metadata() -> None:
     assert binding.antipodal_grasps[0].object_id == "cube"
 
 
+def _rigidized_articulation_payload() -> dict[str, object]:
+    """Return an integration whose object is a locked native articulation."""
+    payload = deepcopy(_integration_payload("repeated_pick_place"))
+    scene = payload["scene"]
+    assert type(scene) is dict
+    scene["rigidized_articulations"] = [
+        {
+            "entity_id": "rubiks_cube",
+            "simulation_uid": "cube_articulation",
+            "locked_qpos": {"top_turn": 0.0},
+            "dynamics": "dynamic",
+            "semantic_type": "rubiks_cube",
+            "affordances": [
+                {
+                    "kind": "antipodal_grasp",
+                    "entity_id": "rubiks_cube_grasp",
+                    "grasp_link": "lower_two_layers",
+                }
+            ],
+        }
+    ]
+    return payload
+
+
+def test_rigidized_articulation_scene_decodes_link_backed_grasp() -> None:
+    binding = _decode_configured_task_program_integration(
+        _rigidized_articulation_payload()
+    ).registration.scene_binding
+
+    assert dict(binding.rigidized_articulations[0].locked_qpos) == {"top_turn": 0.0}
+    assert binding.rigidized_articulation_grasps[0].grasp_link == "lower_two_layers"
+
+
+def test_rigidized_articulation_requires_locked_qpos() -> None:
+    payload = _rigidized_articulation_payload()
+    root = payload["scene"]["rigidized_articulations"][0]
+    root.pop("locked_qpos")
+
+    with pytest.raises(ValueError, match="missing required fields.*locked_qpos"):
+        _decode_configured_task_program_integration(payload)
+
+
+@pytest.mark.parametrize(
+    ("locked_qpos", "exception", "message"),
+    [
+        ({}, ValueError, "must not be empty"),
+        ([], TypeError, "must be a mapping"),
+        ({"top_turn": True}, TypeError, "finite number"),
+        ({"top_turn": float("inf")}, ValueError, "must be finite"),
+    ],
+)
+def test_rigidized_articulation_rejects_invalid_locked_qpos(
+    locked_qpos: object,
+    exception: type[Exception],
+    message: str,
+) -> None:
+    payload = _rigidized_articulation_payload()
+    payload["scene"]["rigidized_articulations"][0]["locked_qpos"] = locked_qpos
+
+    with pytest.raises(exception, match=message):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_rigidized_articulation_grasp_requires_grasp_link() -> None:
+    payload = _rigidized_articulation_payload()
+    grasp = payload["scene"]["rigidized_articulations"][0]["affordances"][0]
+    grasp.pop("grasp_link")
+
+    with pytest.raises(ValueError, match="missing required fields.*grasp_link"):
+        _decode_configured_task_program_integration(payload)
+
+
+@pytest.mark.parametrize("field_name", ("mesh_env_id", "internal_axis"))
+def test_rigidized_articulation_grasp_rejects_rigid_object_fields(
+    field_name: str,
+) -> None:
+    payload = _rigidized_articulation_payload()
+    grasp = payload["scene"]["rigidized_articulations"][0]["affordances"][0]
+    grasp[field_name] = 0 if field_name == "mesh_env_id" else [1.0, 0.0, 0.0]
+
+    with pytest.raises(ValueError, match=f"unsupported fields.*{field_name}"):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_rigid_object_grasp_rejects_grasp_link() -> None:
+    payload = deepcopy(_integration_payload("repeated_pick_place"))
+    grasp = payload["scene"]["rigid_objects"][0]["affordances"][0]
+    grasp["grasp_link"] = "lower_two_layers"
+
+    with pytest.raises(ValueError, match="unsupported fields.*grasp_link"):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_rigidized_articulation_accepts_nested_placement_affordance() -> None:
+    payload = _rigidized_articulation_payload()
+    root = payload["scene"]["rigidized_articulations"][0]
+    root["affordances"].append(
+        {
+            "kind": "support_surface",
+            "entity_id": "rubiks_cube_top",
+            "native_name": "top",
+        }
+    )
+
+    binding = _decode_configured_task_program_integration(
+        payload
+    ).registration.scene_binding
+
+    assert binding.support_surfaces[0].parent_id == "rubiks_cube"
+
+
+def test_scene_rejects_flat_rigidized_articulation_grasps() -> None:
+    payload = _rigidized_articulation_payload()
+    payload["scene"]["rigidized_articulation_grasps"] = []
+
+    with pytest.raises(
+        ValueError,
+        match="unsupported fields.*rigidized_articulation_grasps",
+    ):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_rigidized_articulation_rejects_unknown_root_field() -> None:
+    payload = _rigidized_articulation_payload()
+    payload["scene"]["rigidized_articulations"][0]["unexpected"] = True
+
+    with pytest.raises(ValueError, match="unsupported fields.*unexpected"):
+        _decode_configured_task_program_integration(payload)
+
+
 def test_scene_entity_nesting_derives_all_affordance_parents() -> None:
     """Affordance ownership comes only from the containing scene entity."""
     payload = deepcopy(_integration_payload("repeated_pick_place"))
