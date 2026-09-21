@@ -71,6 +71,11 @@ _REPOSITORY_ROOT = Path(__file__).parents[4]
 _CONFIG_DIRECTORY = _REPOSITORY_ROOT / "embodichain_tasks/configs/tasks/manipulation"
 _TABLEWARE_CONFIG_DIRECTORY = _CONFIG_DIRECTORY / "tableware"
 _TASKS = {
+    "rubiks_cube_pick_place": (
+        "task_program_rubiks_cube_pick_place",
+        "ur5_dh_pgi_140_80",
+        frozenset({"pick", "place", "hand_over"}),
+    ),
     "repeated_pick_place": (
         "task_program_repeated_pick_place",
         "ur5_dh_pgi_140_80",
@@ -557,12 +562,15 @@ def test_pick_option_rejects_malformed_fixed_object_to_eef() -> None:
 def test_all_examples_register_plain_embodied_env_under_config_selected_ids(
     task_name: str,
     registered_test_ids: list[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Config loading creates a runnable ID without a task environment class."""
     env_id = f"Configured-{task_name.replace('_', '-')}-v1"
     registered_test_ids.append(env_id)
     config = _gym_config(task_name)
     config["id"] = env_id
+    if task_name == "rubiks_cube_pick_place":
+        monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
 
     cfg = config_to_cfg(config, source_path=_config_path(task_name))
     spec = REGISTERED_ENVS[env_id]
@@ -582,6 +590,33 @@ def test_all_examples_register_plain_embodied_env_under_config_selected_ids(
         spec.task_program_registration.robot_profile_binding.profile_id
     )
     assert env_id in gym_registry
+
+
+def test_rubiks_cube_example_registers_rigidized_articulation_scene(
+    registered_test_ids: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _config_path("rubiks_cube_pick_place")
+    config = _gym_config("rubiks_cube_pick_place")
+    env_id = config["id"]
+    assert type(env_id) is str
+    registered_test_ids.append(env_id)
+    monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
+
+    config_to_cfg(config, source_path=path)
+    spec = REGISTERED_ENVS[env_id]
+    registration = spec.task_program_registration
+
+    assert gym_registry[env_id].id == "TaskProgramRubiksCubePickPlace-v1"
+    assert registration is not None
+    assert (
+        registration.scene_binding.rigidized_articulations[0].simulation_uid
+        == "rubiks_cube"
+    )
+    assert (
+        registration.scene_binding.rigidized_articulation_grasps[0].grasp_link
+        == "lower_two_layers"
+    )
 
 
 def test_grasp_generator_resolves_named_model_and_library_defaults() -> None:
