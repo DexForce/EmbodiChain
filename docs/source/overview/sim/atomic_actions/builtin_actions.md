@@ -502,10 +502,15 @@ semantics = create_rigidized_articulation_antipodal_semantics(
 ```
 
 `locked_qpos` declares the configuration the geometry is valid at and is
-verified against the articulation: every joint must be declared and actually
-held there, because a joint still free to move would leave the transformed mesh
-describing a pose the object no longer has. Joint locking itself, initial
-positions, `fixed_base` and drive parameters stay with
+verified against the articulation: every joint must be declared, must read that
+value, and must actually be *held* there — either by a position drive with
+non-zero stiffness commanded to the declared value, or by coincident position
+limits. Resting at the value is not enough, because a passive joint can sit
+there and swing away under load, leaving the transformed mesh describing a pose
+the object no longer has. One mesh is published for the whole batch, so the
+check covers every arena and refuses a batch whose arenas disagree on the
+root-to-link transform. Joint locking itself, initial positions, `fixed_base`
+and drive parameters stay with
 {class}`~embodichain.lab.sim.cfg.ArticulationCfg` or the physical environment.
 `slide.py` sources its handle affordance per link as well, but it manipulates
 the articulation rather than carrying it, so it does not rigidize the body.

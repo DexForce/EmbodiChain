@@ -59,11 +59,17 @@ def _rotation_z(angle: float) -> torch.Tensor:
     )
 
 
+LOCK_STIFFNESS = 1.0e4
+TURN_LIMITS = (-math.pi / 2.0, math.pi / 2.0)
+
+
 class _StubArticulation:
     """Articulation double exposing only what the adapter is allowed to use.
 
     ``pk_chain`` is ``None`` because USD-backed articulations never build one;
-    the adapter must then read the link pose the simulator reports.
+    the adapter must then read the link pose the simulator reports. Every
+    reading is batched by arena, because the adapter publishes one mesh for the
+    whole batch and has to inspect all of it.
     """
 
     pk_chain = None
@@ -71,36 +77,79 @@ class _StubArticulation:
     def __init__(
         self,
         *,
-        root_to_link: torch.Tensor,
-        qpos: dict[str, float],
+        root_to_link: torch.Tensor | list[torch.Tensor],
+        qpos: dict[str, float] | list[dict[str, float]],
         root_pose: torch.Tensor | None = None,
+        target_qpos: dict[str, float] | list[dict[str, float]] | None = None,
+        stiffness: float = LOCK_STIFFNESS,
+        qpos_limits: tuple[float, float] | dict[str, tuple[float, float]] = TURN_LIMITS,
         vertices: torch.Tensor = LINK_VERTICES,
         triangles: torch.Tensor = LINK_TRIANGLES,
     ) -> None:
         self.uid = "rubiks_cube"
         self.link_names = ["lower_two_layers", "top_layer"]
-        self.joint_names = list(qpos)
-        self._qpos = qpos
+        self._qpos = [qpos] if isinstance(qpos, dict) else list(qpos)
+        self.joint_names = list(self._qpos[0])
+        if target_qpos is None:
+            self._target_qpos = list(self._qpos)
+        else:
+            self._target_qpos = (
+                [target_qpos] if isinstance(target_qpos, dict) else list(target_qpos)
+            )
         self._root_pose = (
             torch.eye(4, dtype=torch.float64) if root_pose is None else root_pose
         )
-        self._root_to_link = root_to_link
+        self._root_to_link = (
+            [root_to_link] * len(self._qpos)
+            if isinstance(root_to_link, torch.Tensor)
+            else list(root_to_link)
+        )
+        self._stiffness = float(stiffness)
+        self._qpos_limits = qpos_limits
         self._vertices = vertices
         self._triangles = triangles
 
+    @property
+    def _arenas(self) -> int:
+        return len(self._qpos)
+
     def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
-        return self._root_pose.reshape(1, 4, 4)
+        return self._root_pose.reshape(1, 4, 4).expand(self._arenas, 4, 4)
 
     def get_link_pose(self, link_name: str, to_matrix: bool = False) -> torch.Tensor:
         if link_name == "lower_two_layers":
-            return self._root_pose.reshape(1, 4, 4)
-        return (self._root_pose @ self._root_to_link).reshape(1, 4, 4)
+            return self._root_pose.reshape(1, 4, 4).expand(self._arenas, 4, 4)
+        return torch.stack(
+            [self._root_pose @ transform for transform in self._root_to_link]
+        )
 
     def get_link_vert_face(self, link_name: str) -> tuple[torch.Tensor, torch.Tensor]:
         return self._vertices, self._triangles
 
     def get_qpos(self, target: bool = False) -> torch.Tensor:
-        return torch.tensor([[self._qpos[name] for name in self.joint_names]])
+        rows = self._target_qpos if target else self._qpos
+        return torch.tensor([[row[name] for name in self.joint_names] for row in rows])
+
+    def get_joint_drive(self) -> tuple[torch.Tensor, ...]:
+        stiffness = torch.full(
+            (self._arenas, len(self.joint_names)), self._stiffness, dtype=torch.float32
+        )
+        zeros = torch.zeros_like(stiffness)
+        return (stiffness, zeros, zeros, zeros, zeros, zeros)
+
+    def get_qpos_limits(self) -> torch.Tensor:
+        limits = torch.empty(
+            (self._arenas, len(self.joint_names), 2), dtype=torch.float32
+        )
+        for index, name in enumerate(self.joint_names):
+            lower, upper = (
+                self._qpos_limits[name]
+                if isinstance(self._qpos_limits, dict)
+                else self._qpos_limits
+            )
+            limits[:, index, 0] = lower
+            limits[:, index, 1] = upper
+        return limits
 
 
 class TestRootFrameTransform:
@@ -286,3 +335,119 @@ class TestRejectedConfigurations:
                 locked_qpos={"top_turn": 0.0},
                 label="cube",
             )
+
+
+class TestBatchedLockVerification:
+    """One published mesh serves every arena, so every arena is verified."""
+
+    def test_joint_displaced_in_a_later_arena_is_rejected(self) -> None:
+        # Arena 0 is locked, so a row-0 check would pass this batch while
+        # arena 1 silently receives geometry for a pose it does not hold.
+        cube = _StubArticulation(
+            root_to_link=torch.eye(4, dtype=torch.float64),
+            qpos=[{"top_turn": 0.0}, {"top_turn": 0.4}],
+        )
+
+        with pytest.raises(ValueError, match="in arena 1"):
+            create_rigidized_articulation_antipodal_semantics(
+                cube,
+                grasp_link="top_layer",
+                locked_qpos={"top_turn": 0.0},
+                label="cube",
+            )
+
+    def test_matching_arenas_are_accepted(self) -> None:
+        cube = _StubArticulation(
+            root_to_link=torch.eye(4, dtype=torch.float64),
+            qpos=[{"top_turn": 0.0}, {"top_turn": 0.0}],
+        )
+
+        semantics = create_rigidized_articulation_antipodal_semantics(
+            cube,
+            grasp_link="top_layer",
+            locked_qpos={"top_turn": 0.0},
+            label="cube",
+        )
+
+        torch.testing.assert_close(
+            semantics.affordance.mesh_vertices.to(torch.float64),
+            LINK_VERTICES.to(torch.float64),
+            atol=1e-9,
+            rtol=0,
+        )
+
+    def test_arenas_disagreeing_on_the_link_transform_are_rejected(self) -> None:
+        # Both arenas report the declared joint position, yet their link poses
+        # differ: no single mesh can describe both.
+        cube = _StubArticulation(
+            root_to_link=[
+                torch.eye(4, dtype=torch.float64),
+                _transform(_rotation_z(0.3), torch.tensor([0.01, 0.0, 0.0])),
+            ],
+            qpos=[{"top_turn": 0.0}, {"top_turn": 0.0}],
+        )
+
+        with pytest.raises(ValueError, match="one grasp mesh cannot describe"):
+            create_rigidized_articulation_antipodal_semantics(
+                cube,
+                grasp_link="top_layer",
+                locked_qpos={"top_turn": 0.0},
+                label="cube",
+            )
+
+
+class TestJointIsActuallyHeld:
+    """Sitting at the declared position is not evidence of a lock."""
+
+    def test_passive_joint_at_the_declared_position_is_rejected(self) -> None:
+        # The asset ships top_turn with zero stiffness: it rests at zero and
+        # swings away later, while the immutable mesh keeps the old frame.
+        cube = _StubArticulation(
+            root_to_link=torch.eye(4, dtype=torch.float64),
+            qpos={"top_turn": 0.0},
+            stiffness=0.0,
+        )
+
+        with pytest.raises(ValueError, match="nothing holds it there"):
+            create_rigidized_articulation_antipodal_semantics(
+                cube,
+                grasp_link="top_layer",
+                locked_qpos={"top_turn": 0.0},
+                label="cube",
+            )
+
+    def test_drive_commanded_away_from_the_declared_lock_is_rejected(self) -> None:
+        # A stiff drive pointing elsewhere will pull the joint off the declared
+        # configuration as soon as the simulation advances.
+        cube = _StubArticulation(
+            root_to_link=torch.eye(4, dtype=torch.float64),
+            qpos={"top_turn": 0.0},
+            target_qpos={"top_turn": 0.5},
+        )
+
+        with pytest.raises(ValueError, match="nothing holds it there"):
+            create_rigidized_articulation_antipodal_semantics(
+                cube,
+                grasp_link="top_layer",
+                locked_qpos={"top_turn": 0.0},
+                label="cube",
+            )
+
+    def test_joint_pinned_by_its_position_limits_is_accepted(self) -> None:
+        # Coincident limits remove the degree of freedom outright, so no drive
+        # is needed to hold the compound body together.
+        cube = _StubArticulation(
+            root_to_link=torch.eye(4, dtype=torch.float64),
+            qpos={"top_turn": 0.0},
+            stiffness=0.0,
+            qpos_limits=(0.0, 0.0),
+        )
+
+        semantics = create_rigidized_articulation_antipodal_semantics(
+            cube,
+            grasp_link="top_layer",
+            locked_qpos={"top_turn": 0.0},
+            label="cube",
+        )
+
+        assert semantics.entity_id == cube.uid
