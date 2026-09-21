@@ -254,12 +254,7 @@ def build_gym_policy_runtime(
             if uses_separate_critic_obs
             else actor_observation_dim
         )
-        action_manager = env.get_wrapper_attr("action_manager")
-        environment_action_dim = (
-            action_manager.total_action_dim
-            if action_manager is not None
-            else len(env.get_wrapper_attr("active_joint_ids"))
-        )
+        environment_action_dim = int(env.action_space.shape[-1])
         policy = _build_gym_policy(
             config["policy"],
             env=env,

@@ -119,3 +119,12 @@ focused environment integration case when invocation order changes.
 - Incorrect interval rows: distinguish global and per-row interval counters.
 - Corrupted asynchronous recordings: snapshot owned CPU payloads before rollout
   buffers are cleared; follow the recorder's persistence contract.
+
+### Default joint-position actions
+
+The standard `DefaultJointPositionTerm` in `managers/actions.py` accepts explicit
+`joint_names`, `offset`, `scale` and optional `clip`. It exposes current/previous
+action and position-bias buffers without reading task-specific attributes.
+ActionManager dispatches `reset(env_ids)` to its terms; EmbodiedEnv calls it on
+episode reset so untouched rows retain their action history. Locomotion supplies
+its robot-specific mapping and reads these public buffers for observations/rewards.

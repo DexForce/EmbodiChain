@@ -151,7 +151,10 @@ def _run_case(
     reset_robot(robot, initial_qpos)
     steps = _targets_for_sequence(atomic_engine, case, sim.device)
     elapsed, mem_delta, peak_gpu, result = timed_call(
-        lambda: atomic_engine.compile(steps)
+        lambda: atomic_engine.compile(
+            steps,
+            atomic_engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        )
     )
     is_success = bool(result.plan_success.all().item())
     traj = result.trajectory.positions
@@ -333,7 +336,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    from scripts.tutorials.atomic_action.tutorial_utils import run_tutorial
+
+    run_tutorial(main)
 
 
 __all__ = ["add_benchmark_args", "run_all_benchmarks"]
