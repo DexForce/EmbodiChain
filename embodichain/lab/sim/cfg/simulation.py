@@ -28,7 +28,7 @@ from typing import Any, Literal, Sequence, TYPE_CHECKING
 import dexsim
 import numpy as np
 import torch
-from dexsim.types import DenoiserType, Renderer, ToneMappingType
+from dexsim.types import RTRenderMode, Renderer, ToneMappingType
 
 from embodichain.utils import configclass, logger
 
@@ -37,13 +37,189 @@ if TYPE_CHECKING:
     from dexsim.engine.newton_physics.solvers_cfg import NewtonSolverCfg
 
 
+DenoisingMode = Literal["off", "optix", "dlss-rr", "nrd-sr"]
+"""Public ray-tracing denoising and reconstruction mode."""
+
+_DENOISING_MODES: dict[DenoisingMode, RTRenderMode] = {
+    "off": RTRenderMode.RAW,
+    "optix": RTRenderMode.OPTIX_DENOISE,
+    "dlss-rr": RTRenderMode.DLSS_RR,
+    "nrd-sr": RTRenderMode.NRD_SR,
+}
+
+
+@configclass
+class DenoisingCfg:
+    """Select denoising/reconstruction independently by rendering scope.
+
+    The public values describe complete image-processing paths. Native NRD
+    method variants remain an implementation detail instead of becoming
+    additional user-facing modes.
+    """
+
+    window: DenoisingMode = "dlss-rr"
+    """Pipeline used by the interactive window."""
+
+    offscreen: DenoisingMode = "dlss-rr"
+    """Pipeline used by offscreen camera targets."""
+
+    def __post_init__(self) -> None:
+        """Reject values outside the stable public mode contract."""
+        for name in ("window", "offscreen"):
+            value = getattr(self, name)
+            if type(value) is not str or value not in _DENOISING_MODES:
+                choices = ", ".join(repr(item) for item in _DENOISING_MODES)
+                raise ValueError(
+                    f"DenoisingCfg.{name} must be one of {choices}; got {value!r}."
+                )
+
+    def to_dexsim_modes(self) -> tuple[RTRenderMode, RTRenderMode]:
+        """Convert window and offscreen selections to DexSim modes.
+
+        Returns:
+            Window and offscreen modes, in that order.
+
+        Raises:
+            ValueError: If mutable settings no longer contain valid modes.
+        """
+        self.__post_init__()
+        return _DENOISING_MODES[self.window], _DENOISING_MODES[self.offscreen]
+
+
+@configclass
+class NRDCfg:
+    """Algorithm settings shared by targets that use the NRD+SR path.
+
+    Pipeline selection belongs to :class:`DenoisingCfg`. This class only owns
+    NRD tuning values and intentionally does not expose RELAX/REBLUR selection.
+    """
+
+    max_indirect_bounces: int = 1
+    denoising_range: float = 500000.0
+    disocclusion_threshold: float = 0.01
+    disocclusion_threshold_alternate: float = 0.05
+    disocclusion_threshold_mix_enabled: bool = True
+    history_confidence_enabled: bool = True
+    history_confidence_probe_stride: int = 5
+    history_confidence_sigma_scale: float = 2.0
+    history_confidence_sensitivity: float = 1.0
+    max_accumulated_frame_num: int = 30
+    max_fast_accumulated_frame_num: int = 6
+    history_fix_frame_num: int = 3
+    diffuse_prepass_blur_radius: float = 30.0
+    specular_prepass_blur_radius: float = 50.0
+    anti_firefly_enabled: bool = False
+    sh_mode_enabled: bool = False
+    validation_enabled: bool = False
+    max_stabilized_frame_num: int = 63
+    min_blur_radius: float = 1.0
+    max_blur_radius: float = 30.0
+    antilag_luminance_sigma_scale: float = 2.0
+    antilag_luminance_sensitivity: float = 3.0
+    taa_min_current_weight: float = 1.0 / 16.0
+    taa_sigma_scale: float = 2.0
+    taa_depth_rejection_enabled: bool = True
+    taa_tone_mapping_enabled: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate scalar types, numeric ranges, and radius ordering."""
+        boolean_fields = (
+            "disocclusion_threshold_mix_enabled",
+            "history_confidence_enabled",
+            "anti_firefly_enabled",
+            "sh_mode_enabled",
+            "validation_enabled",
+            "taa_depth_rejection_enabled",
+            "taa_tone_mapping_enabled",
+        )
+        for name in boolean_fields:
+            if type(getattr(self, name)) is not bool:
+                raise ValueError(f"NRDCfg.{name} must be a boolean.")
+
+        non_negative_integer_fields = (
+            "max_indirect_bounces",
+            "max_accumulated_frame_num",
+            "max_fast_accumulated_frame_num",
+            "history_fix_frame_num",
+            "max_stabilized_frame_num",
+        )
+        for name in non_negative_integer_fields:
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"NRDCfg.{name} must be a non-negative integer.")
+        if (
+            type(self.history_confidence_probe_stride) is not int
+            or self.history_confidence_probe_stride < 1
+        ):
+            raise ValueError(
+                "NRDCfg.history_confidence_probe_stride must be a positive integer."
+            )
+
+        positive_fields = (
+            "denoising_range",
+            "history_confidence_sigma_scale",
+            "taa_sigma_scale",
+        )
+        non_negative_fields = (
+            "disocclusion_threshold",
+            "disocclusion_threshold_alternate",
+            "history_confidence_sensitivity",
+            "diffuse_prepass_blur_radius",
+            "specular_prepass_blur_radius",
+            "min_blur_radius",
+            "max_blur_radius",
+            "antilag_luminance_sigma_scale",
+            "antilag_luminance_sensitivity",
+        )
+        for name in positive_fields + non_negative_fields:
+            value = getattr(self, name)
+            minimum = 0.0
+            invalid = (
+                isinstance(value, bool)
+                or not isinstance(value, Real)
+                or not math.isfinite(value)
+                or value < minimum
+                or (name in positive_fields and value == minimum)
+            )
+            if invalid:
+                qualifier = "positive" if name in positive_fields else "non-negative"
+                raise ValueError(f"NRDCfg.{name} must be a {qualifier}, finite number.")
+        if (
+            isinstance(self.taa_min_current_weight, bool)
+            or not isinstance(self.taa_min_current_weight, Real)
+            or not math.isfinite(self.taa_min_current_weight)
+            or not 0.0 <= self.taa_min_current_weight <= 1.0
+        ):
+            raise ValueError(
+                "NRDCfg.taa_min_current_weight must be a finite number from 0.0 to 1.0."
+            )
+        if self.min_blur_radius > self.max_blur_radius:
+            raise ValueError(
+                "NRDCfg.min_blur_radius must not exceed NRDCfg.max_blur_radius."
+            )
+
+    def to_dexsim_cfg(self) -> dexsim.NRDConfig:
+        """Convert the settings to DexSim's native NRD configuration.
+
+        Returns:
+            Populated :class:`dexsim.NRDConfig`.
+
+        Raises:
+            ValueError: If mutable settings no longer contain valid values.
+        """
+        self.__post_init__()
+        nrd = dexsim.NRDConfig()
+        for item in fields(self):
+            setattr(nrd, item.name, getattr(self, item.name))
+        return nrd
+
+
 @configclass
 class DLSSCfg:
-    """DexSim DLSS configuration for window and offscreen rendering.
+    """DLSS settings shared by RR and NRD+SR rendering paths.
 
-    DLSS controls apply to the ``"hybrid"``, ``"fast-rt"``, and ``"rt"``
-    renderers. Offscreen rendering and Ray Reconstruction (RR) retain
-    DexSim's native defaults.
+    Pipeline selection belongs to :class:`DenoisingCfg`. These controls apply
+    when either target selects ``"dlss-rr"`` or ``"nrd-sr"``.
 
     .. attention::
         DLSS requires a Vulkan render device, a compatible NVIDIA GPU/driver,
@@ -52,12 +228,6 @@ class DLSSCfg:
         Each enabled offscreen camera needs its own temporal history and
         Vulkan exchange images, increasing GPU memory use.
     """
-
-    dlss_enabled: bool = True
-    """Master switch for DLSS. False retains the standard rendering path."""
-
-    upscale_enabled: bool = True
-    """Enable standalone Super Resolution (SR) when RR is disabled."""
 
     dlss_quality: int = 2
     """Quality mode and derived internal scale: ``-1`` auto (58%), ``0`` Ultra
@@ -83,6 +253,15 @@ class DLSSCfg:
     target_height: int = 0
     """DexSim compatibility field. Set the actual window or camera height instead."""
 
+    tiled_enabled: bool = True
+    """Evaluate compatible multi-camera targets through one tiled DLSS atlas."""
+
+    tiled_gutter_pixels: int = 16
+    """Target-resolution guard band around each tile in pixels."""
+
+    tiled_max_dimension: int = 0
+    """Maximum atlas dimension; zero uses the Vulkan device limit."""
+
     exposure_compensation: float = 1.0
     """Positive, finite exposure multiplier used by the RR bridge."""
 
@@ -97,15 +276,18 @@ class DLSSCfg:
 
     def __post_init__(self) -> None:
         """Validate scalar types and the ranges of numeric settings."""
-        for name in (
-            "dlss_enabled",
-            "upscale_enabled",
-        ):
-            if not isinstance(getattr(self, name), bool):
-                raise ValueError(f"DLSSCfg.{name} must be a boolean.")
+        if type(self.tiled_enabled) is not bool:
+            raise ValueError("DLSSCfg.tiled_enabled must be a boolean.")
         if type(self.dlss_quality) is not int or not -1 <= self.dlss_quality <= 5:
             raise ValueError("DLSSCfg.dlss_quality must be an integer from -1 to 5.")
-        for name in ("render_width", "render_height", "target_width", "target_height"):
+        for name in (
+            "render_width",
+            "render_height",
+            "target_width",
+            "target_height",
+            "tiled_gutter_pixels",
+            "tiled_max_dimension",
+        ):
             value = getattr(self, name)
             if type(value) is not int or value < 0:
                 raise ValueError(f"DLSSCfg.{name} must be a non-negative integer.")
@@ -127,6 +309,15 @@ class DLSSCfg:
             raise ValueError(
                 "DLSSCfg.exposure_compensation must be a positive, finite number."
             )
+        if (
+            isinstance(self.frame_time_delta_ms, bool)
+            or not isinstance(self.frame_time_delta_ms, Real)
+            or not math.isfinite(self.frame_time_delta_ms)
+            or self.frame_time_delta_ms < 0.0
+        ):
+            raise ValueError(
+                "DLSSCfg.frame_time_delta_ms must be a non-negative, finite number."
+            )
 
     def to_dexsim_cfg(self, window_width: int, window_height: int) -> dexsim.DLSSConfig:
         """Convert settings without changing the window or camera output size.
@@ -144,8 +335,6 @@ class DLSSCfg:
         """
         self.__post_init__()
         dlss = dexsim.DLSSConfig()
-        dlss.dlss_enabled = self.dlss_enabled
-        dlss.upscale_enabled = self.upscale_enabled
         dlss.dlss_quality = self.dlss_quality
         dlss.render_width = self.render_width
         dlss.render_height = self.render_height
@@ -156,6 +345,9 @@ class DLSSCfg:
                 dlss.render_height = max(1, int(window_height / self.upsample_ratio))
         dlss.target_width = self.target_width
         dlss.target_height = self.target_height
+        dlss.tiled_enabled = self.tiled_enabled
+        dlss.tiled_gutter_pixels = self.tiled_gutter_pixels
+        dlss.tiled_max_dimension = self.tiled_max_dimension
         dlss.exposure_compensation = self.exposure_compensation
         dlss.frame_time_delta_ms = self.frame_time_delta_ms
         return dlss
@@ -179,8 +371,14 @@ class RenderCfg:
     spp: int = 1
     """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid', 'fast-rt' or 'rt'."""
 
+    denoising: DenoisingCfg = field(default_factory=DenoisingCfg)
+    """Window and offscreen denoising/reconstruction pipeline selection."""
+
     dlss: DLSSCfg = field(default_factory=DLSSCfg)
-    """DLSS settings for hybrid, fast-rt, and rt windows and offscreen cameras."""
+    """DLSS settings shared by targets using RR or NRD+SR."""
+
+    nrd: NRDCfg = field(default_factory=NRDCfg)
+    """NRD settings shared by targets using NRD+SR."""
 
     tone_mapping_enabled: bool = False
     """Whether to map HDR RGB output with the modified Reinhard curve."""
@@ -225,13 +423,17 @@ class RenderCfg:
             world_config: DexSim world configuration to update in place.
         """
         world_config.renderer = self.to_dexsim_flags()
+        window_mode, offscreen_mode = self.denoising.to_dexsim_modes()
+        world_config.set_rt_render_modes(
+            window=window_mode,
+            offscreen=offscreen_mode,
+        )
         world_config.dlss_config = self.dlss.to_dexsim_cfg(
             window_width=world_config.win_config.width,
             window_height=world_config.win_config.height,
         )
+        world_config.nrd_config = self.nrd.to_dexsim_cfg()
         world_config.raytrace_config.render_iterations_per_frame = self.spp
-        world_config.raytrace_config.open_denoise = True
-        world_config.raytrace_config.denoiser_type = DenoiserType.OPTIX
         world_config.postprocess_config.tone_mapping_enabled = self.tone_mapping_enabled
         world_config.postprocess_config.tone_mapping_type = (
             ToneMappingType.MODIFIED_REINHARD

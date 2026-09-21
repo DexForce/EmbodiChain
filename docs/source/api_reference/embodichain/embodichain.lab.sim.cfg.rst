@@ -32,6 +32,7 @@ UV seams and render detail.
 .. autosummary::
 
    AssetPhysicsMode
+   DenoisingMode
    MeshCollisionApproximation
 
 .. rubric:: Classes
@@ -39,6 +40,9 @@ UV seams and render detail.
 .. autosummary::
 
    RenderCfg
+   DenoisingCfg
+   DLSSCfg
+   NRDCfg
    PhysicsBackendCfg
    DefaultPhysicsCfg
    NewtonPhysicsCfg
