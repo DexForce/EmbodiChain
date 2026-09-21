@@ -271,6 +271,7 @@ class _LifecycleEnv(EmbodiedEnv):
             available_modes=["interval", "reset"],
             _mode_functor_cfgs={},
             apply=self._apply_event,
+            reset=lambda **kwargs: {},
         )
         self.interval_x = 0.0
         self.reset_snapshot = None

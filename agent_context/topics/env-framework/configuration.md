@@ -45,6 +45,7 @@ RL tasks sometimes drop the `-v<N>` suffix (`CartPoleRL`, `PushCubeRL`).
 | `configs/components/execution_policies/*.yaml` | Reusable execution policy | Physical environment/embodiment ownership |
 | `<task>/agents/<algorithm>.{json,yaml}` | Optional RL training configuration | Task identity or Python registration ownership |
 | `<task>/catalog.yaml` | Logical task key, presentation metadata and named deployment references | Gym registration or duplicated runtime settings |
+| Optional `objective.component` | Independent physical evaluation declaration | Program completion, segment acceptance or persistence authority |
 
 Component files do not use compatibility `version` fields. Inline runnable
 Gym configs remain supported when no conflicting component selector is used.
@@ -170,6 +171,12 @@ infer Python-only handwritten capabilities. Uncataloged tasks retain inferred
 records. Metadata must point to existing runnable configs and a valid default;
 capabilities remain deployment-specific. A catalog's optional validation report
 is provenance, not a replacement for measured runtime results.
+
+`objective: {component: objective.yaml}` is a deployment-owned, optional selector
+resolved relative to its declaring Gym config. The strict decoder and tensor
+evaluator live under `gym/envs/objectives/`. It observes ordered stable regions
+for a declared physical rigid object; it does not depend on Task Program bindings.
+See [execution](execution.md) for the separate result authority and reset contract.
 
 ---
 

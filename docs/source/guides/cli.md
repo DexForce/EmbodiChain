@@ -90,7 +90,8 @@ embodichain show-task embodichain_tasks:repeated_pick_place
 available validation records. `list-task --export-html task-gallery.html`
 exports the same catalog as a static gallery. For simulator-free discovery,
 pass `--config-root PACKAGE=PATH` with a `configs/tasks` directory.
-See {doc}`task_catalog` for catalog authoring and gallery export.
+See {doc}`task_catalog` for catalog authoring, gallery export and independent
+physical-objective evaluation.
 
 ---
 
