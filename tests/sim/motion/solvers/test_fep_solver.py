@@ -179,6 +179,134 @@ def test_franka_previous_solution_tracks_motion(solver: FEPSolver) -> None:
         previous = joints
 
 
+@pytest.mark.parametrize("search", [False, True])
+def test_manipulability_ranks_valid_retained_candidates(
+    solver: FEPSolver, search: bool
+) -> None:
+    from embodichain.compute.kinematics import yoshikawa_manipulability
+
+    solver.cfg.redundancy_search = search
+    solver.cfg.batch_size = 2
+    solver.cfg.max_joint_step = 0.1 if search else None
+    # Admit both elbow configurations and start on a less manipulable branch.
+    limits = torch.full((7,), torch.pi, device=solver.device)
+    solver.set_qpos_limits(-limits, limits)
+    seed = limits.new_tensor([[0.9, 0.75, 0.25, 0.6, -0.5, 0.3, 0.5]]).repeat(3, 1)
+    target = solver.get_fk(seed)
+    target[-1, 0, 3] += 10
+    # A live nonuniform weight remains relevant to search-pool construction.
+    solver.set_ik_nearest_weight(np.array([2.0, 0.2, 1.0, 0.5, 3.0, 0.7, 1.0]))
+    valid, candidates = solver.get_ik(target, seed, return_all_solutions=True)
+    scores = candidates.new_full(valid.shape, -torch.inf)
+    scores[valid] = yoshikawa_manipulability(solver.get_jacobian(candidates[valid]))
+    assert bool((scores[:2].amax(1) > scores[:2, 0] + 1e-6).all())
+    expected = candidates[
+        torch.arange(len(seed), device=solver.device), scores.argmax(1)
+    ]
+
+    solver.cfg.ik_solution_selection = "manipulability"
+    success, result = solver.get_ik(target, seed)
+    assert success.tolist() == [True, True, False]
+    assert result.shape == (3, 7)
+    torch.testing.assert_close(result, expected)
+    _assert_pose_accuracy(target[success], solver.get_fk(result[success]))
+    _assert_limits(solver, result)
+    if search:
+        assert float((result[success] - seed[success]).abs().max()) <= 0.1
+    torch.testing.assert_close(result[-1], seed[-1], atol=0, rtol=0)
+    all_valid, all_joints = solver.get_ik(target, seed, return_all_solutions=True)
+    torch.testing.assert_close(all_valid, valid)
+    torch.testing.assert_close(all_joints, candidates)
+    empty_valid, empty_joints = solver.get_ik(target[:0], seed[:0])
+    assert empty_valid.shape == (0,) and empty_joints.shape == (0, 7)
+
+
+def test_fep_rejects_numerical_sampling_and_unknown_selection(
+    solver: FEPSolver,
+) -> None:
+    from embodichain.lab.sim.motion.solvers import SolverCfg
+
+    for fields, match in (
+        ({"num_samples": 30}, "num_samples.*redundancy_search"),
+        ({"ik_solution_selection": "unknown"}, "ik_solution_selection"),
+    ):
+        with pytest.raises(ValueError, match=match):
+            FEPSolverCfg(**fields)
+        with pytest.raises(ValueError, match=match):
+            SolverCfg.from_dict({"class_type": "FEPSolver", **fields})
+    seed = solver.get_default_qpos_seed()[None]
+    with pytest.raises(ValueError, match="num_samples.*redundancy_search"):
+        solver.get_ik(solver.get_fk(seed), seed, num_samples=30)
+
+
+@pytest.mark.parametrize("selection", ["nearest", "manipulability"])
+def test_franka_robot_ik_shapes_frames_and_limit_sync(
+    solver: FEPSolver, selection: str
+) -> None:
+    from types import SimpleNamespace
+
+    from embodichain.lab.sim.objects.robot import Robot
+    from embodichain.lab.sim.robots import FrankaPandaCfg
+
+    cfg = FrankaPandaCfg.from_dict({})
+    assert cfg.solver_cfg["arm"].class_type == "PytorchSolver"
+    assert cfg.solver_cfg["arm"].num_samples == 30
+    cfg.solver_cfg["arm"] = FEPSolverCfg(
+        urdf_path=solver.urdf_path,
+        root_link_name="base",
+        end_link_name="fr3_hand_tcp",
+        redundancy_search=True,
+        ik_solution_selection=selection,
+    )
+    # Exercise Robot's real binding, frame conversion and limit synchronization;
+    # only the physics-owned poses/limits are supplied without a live simulator.
+    robot = object.__new__(Robot)
+    robot.cfg, robot.device = cfg, solver.device
+    robot._all_indices = list(range(8))
+    robot._joint_ids = {"arm": list(range(7))}
+    robot._solvers = {}
+    limits = torch.stack((solver.lower_qpos_limits, solver.upper_qpos_limits), -1)
+    robot._data = SimpleNamespace(qpos_limits=limits[None].clone())
+    robot.init_solver(cfg.solver_cfg)
+    solver = robot.get_solver("arm")
+    generator = torch.Generator().manual_seed(23)
+    source = solver.lower_qpos_limits + (
+        solver.upper_qpos_limits - solver.lower_qpos_limits
+    ) * (0.3 + 0.4 * torch.rand(8, 7, generator=generator).to(solver.device))
+    source[-3:-1] = solver.get_default_qpos_seed()
+    source[-3, 1] = 0  # Shoulder singularity.
+    seed = source.clone()
+    seed[-2, 6] = 2  # Target has no solution at this seed q7.
+    target = solver.get_fk(source)
+    target[-1, 0, 3] += 10
+    seed[-1, 0] = solver.upper_qpos_limits[0] + 1
+    base = torch.eye(4, device=solver.device).repeat(8, 1, 1)
+    base[:, :3, :3] = base.new_tensor([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
+    base[:, :3, 3] = base.new_tensor([0.3, -0.2, 0.1])
+    robot.get_link_pose = lambda **kwargs: base[kwargs["env_ids"]]
+    success, joints = robot.compute_ik(base @ target, seed, name="arm")
+    assert success.tolist() == [True] * 7 + [False]
+    assert joints.shape == (8, 7)
+    _assert_pose_accuracy(target[success], solver.get_fk(joints[success]))
+    _assert_limits(solver, joints)
+    torch.testing.assert_close(joints[-1], seed[-1].clamp(limits[:, 0], limits[:, 1]))
+    batch_valid, batch_joints = robot.compute_batch_ik(
+        (base @ target)[:, None], seed[:, None], name="arm"
+    )
+    assert batch_valid.shape == (8, 1) and batch_joints.shape == (8, 1, 7)
+    torch.testing.assert_close(batch_valid[:, 0], success)
+    torch.testing.assert_close(batch_joints[:, 0], joints)
+    robot._data.qpos_limits[0] = source[0, :, None].expand(-1, 2)
+    robot._sync_solver_limits("arm")
+    torch.testing.assert_close(solver.lower_qpos_limits, source[0])
+    torch.testing.assert_close(solver.upper_qpos_limits, source[0])
+    success, joints = robot.compute_ik(
+        (base @ target)[:1], seed[:1], name="arm", env_ids=[0]
+    )
+    assert success.shape == (1,) and joints.shape == (1, 7) and bool(success.all())
+    torch.testing.assert_close(joints, source[:1], atol=0, rtol=0)
+
+
 def test_franka_seedless_solve_starts_at_feasible_midpoint(solver: FEPSolver) -> None:
     midpoint = solver.get_default_qpos_seed()[None]
     valid, result = solver.get_ik(solver.get_fk(midpoint), return_all_solutions=True)

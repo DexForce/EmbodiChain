@@ -29,6 +29,7 @@ from typing import Any, TYPE_CHECKING
 import numpy as np
 import torch
 
+from embodichain.compute.kinematics import yoshikawa_manipulability
 from embodichain.utils import configclass
 from embodichain.lab.sim.utility.solver_utils import create_pk_serial_chain
 from .base_solver import BaseSolver, SolverCfg
@@ -47,9 +48,18 @@ class FEPSolverCfg(SolverCfg):
     position_tolerance: float = 1e-5
     rotation_tolerance: float = 1e-5
     batch_size: int | None = None
-    """Targets per chunk; None selects 16384. Search caps chunks at 4096."""
+    """Targets per chunk; default 16384, capped at 4096 for search or 1024 for Jacobians."""
+    ik_solution_selection: str = "nearest"
+    """Select by weighted seed distance or ``"manipulability"``.
+
+    Manipulability uses the shared Yoshikawa metric on the valid fixed-q7
+    branches. With redundancy search, it ranks only the eight candidates
+    retained by the continuity, arm-angle and limit-margin scores.
+    """
+    num_samples: int | None = None
+    """Unsupported numerical multi-start option; use ``redundancy_search`` instead."""
     redundancy_search: bool = False
-    """Search q7 near the seed, expanding when needed; no DLS fallback."""
+    """Search q7 near the seed, expanding and refining when needed."""
     arm_angle: float | None = None
     """Preferred GeoFIK swivel angle in radians; None prefers the seed angle."""
     arm_angle_weight: float = 0.1
@@ -60,6 +70,12 @@ class FEPSolverCfg(SolverCfg):
     """Hard per-joint displacement bound from the seed, in radians, during search."""
 
     def __post_init__(self) -> None:
+        if self.ik_solution_selection not in ("nearest", "manipulability"):
+            raise ValueError(
+                "ik_solution_selection must be 'nearest' or 'manipulability'"
+            )
+        if self.num_samples is not None:
+            raise ValueError("FEP does not support num_samples; use redundancy_search")
         if self.batch_size is not None and (
             type(self.batch_size) is not int or self.batch_size <= 0
         ):
@@ -508,6 +524,7 @@ class FEPSolver(BaseSolver):
         qpos_seed: torch.Tensor | None = None,
         return_all_solutions: bool = False,
         arm_angle: float | torch.Tensor | None = None,
+        num_samples: int | None = None,
         **kwargs: Any,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Solve geometric branches, optionally optimizing the redundant q7.
@@ -524,6 +541,8 @@ class FEPSolver(BaseSolver):
                 redundancy search. If both are None, use the seed's arm angle;
                 disable that score where the seed angle is undefined. Undefined
                 candidate angles are rejected when an angle preference is active.
+            num_samples: Must be None. Numerical multi-start sampling is not
+                equivalent to FEP's adaptive q7 search; use ``redundancy_search``.
             **kwargs: Reserved common solver arguments.
 
         Returns:
@@ -531,13 +550,19 @@ class FEPSolver(BaseSolver):
             are ``(N, 8)`` and ``(N, 8, 7)``. Invalid slots contain the clamped
             seed. Failure at one q7 does not prove the target unreachable at
             other q7 values. Singular continuous families use seed representatives.
+            ``ik_solution_selection="manipulability"`` selects the highest
+            Yoshikawa score from the valid branches, or the eight retained
+            search candidates. All-solutions ordering remains by seed distance
+            or the search score, regardless of the selection mode.
 
         Raises:
-            ValueError: Malformed targets, seeds or limits.
+            ValueError: Malformed inputs/configuration or unsupported ``num_samples``.
         """
         import warp as wp
 
         self.cfg.__post_init__()
+        if num_samples is not None:
+            raise ValueError("FEP does not support num_samples; use redundancy_search")
         if arm_angle is not None and not self.cfg.redundancy_search:
             raise ValueError("arm_angle requires redundancy_search")
         target = torch.as_tensor(target_xpos, device=self.device, dtype=torch.float32)
@@ -632,13 +657,20 @@ class FEPSolver(BaseSolver):
                 reference = reference.contiguous()
                 if self.device.type == "cuda":
                     reference.record_stream(torch.cuda.current_stream(self.device))
-        count = 8 if return_all_solutions else 1
+        select_manipulability = (
+            self.cfg.ik_solution_selection == "manipulability"
+            and not return_all_solutions
+        )
+        count = 8 if return_all_solutions or select_manipulability else 1
         valid = torch.empty((n, count), device=self.device, dtype=torch.bool)
         joints = seed.new_empty((n, count, 7))
         batch_size = self.cfg.batch_size or 16384
         if self.cfg.redundancy_search:
             # Bound candidate memory even when q7 expands to 33 probes.
             batch_size = min(batch_size, 4096)
+        if select_manipulability:
+            # Bound the batched Jacobian workspace for the eight-candidate pool.
+            batch_size = min(batch_size, 1024)
         for start in range(0, n, batch_size):
             end = start + batch_size
             if self.cfg.redundancy_search:
@@ -652,17 +684,28 @@ class FEPSolver(BaseSolver):
                     count,
                     stream,
                 )
-                continue
-            self._solve_branches(
-                target[start:end],
-                seed[start:end],
-                lower,
-                upper,
-                weights,
-                valid[start:end],
-                joints[start:end],
-                stream,
-            )
+            else:
+                self._solve_branches(
+                    target[start:end],
+                    seed[start:end],
+                    lower,
+                    upper,
+                    weights,
+                    valid[start:end],
+                    joints[start:end],
+                    stream,
+                )
+            if select_manipulability:
+                mask, candidates = valid[start:end], joints[start:end]
+                scores = candidates.new_full(mask.shape, -torch.inf)
+                feasible = candidates[mask]
+                if len(feasible):
+                    scores[mask] = yoshikawa_manipulability(self.get_jacobian(feasible))
+                best = scores.argmax(dim=1)
+                # All-invalid rows retain slot zero's clamped seed fallback.
+                selected = candidates[torch.arange(len(mask), device=self.device), best]
+                valid[start:end, 0] = mask.any(dim=1)
+                joints[start:end, 0] = selected
         if return_all_solutions:
             return valid, joints
         return valid[:, 0], joints[:, 0]

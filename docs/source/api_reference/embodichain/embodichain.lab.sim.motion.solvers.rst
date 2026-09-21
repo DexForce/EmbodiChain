@@ -85,18 +85,29 @@ Geometric IK for Franka-compatible screw-axis layouts, following the fixed-q7
 construction in HolisticMotion/`GeoFIK <https://arxiv.org/abs/2503.03992>`_.
 Dimensions, axis signs and fixed transforms are extracted from the URDF;
 incompatible seven-axis chains raise an error. CPU and CUDA share one Warp
-kernel. There is no DLS iteration or numerical fallback.
+kernel.
 
 The seed fixes q7 by default and selects the nearest valid branch. Without a
 seed, the joint-limit midpoint is used. ``return_all_solutions=True`` returns
 up to eight branches with validity masks; invalid slots contain the clamped
 seed. Every accepted solution satisfies the actual URDF FK, TCP and joint limits.
 
+``ik_solution_selection="nearest"`` is the default. Set it to
+``"manipulability"`` to select the valid candidate with the highest shared
+Yoshikawa score. At fixed q7 this ranks the geometric branches. During search
+it ranks only the eight candidates retained by the continuity, arm-angle and
+limit-margin scores, not every sampled candidate. All-solutions ordering is
+unchanged. Nearest-result shapes are ``(N,)`` and ``(N, 7)``; Robot's IK
+interface and the batch adapter also return joints without a candidate axis.
+
 Enable ``redundancy_search`` to sample and refine q7 using seed distance,
 arm-angle preference and joint-limit margin. ``max_joint_step`` remains a hard
 per-joint displacement bound in radians. Pass the previous solution as the next
 seed for sequential motion. Search returns the best sampled solutions, not an
 exhaustive continuous family; failure does not prove global unreachability.
+``num_samples`` is rejected in both configuration and IK calls: numerical
+multi-start sampling is not equivalent to q7 search. Franka retains its
+existing Pytorch default; FEP is selected explicitly through ``solver_cfg``.
 
 ``get_arm_angle(qpos)`` measures the TCP-independent GeoFIK swivel angle in
 radians, returning NaN at undefined planes. It differs from q7. During search,
@@ -104,7 +115,7 @@ radians, returning NaN at undefined planes. It differs from q7. During search,
 the seed's angle is preferred when defined. This is a soft posture preference, not a
 complete humanlike or collision model. See the API below for shapes and options.
 
-Run ``python -m scripts.tutorials.sim.fep_solver --device cuda --radius 0.15``
+Run ``python -m examples.sim.motion.solvers.fep_solver --device cuda --radius 0.15``
 from the repository root (or use ``--device cpu``). Add ``--redundancy-search``
 and optionally ``--arm-angle 0.3`` for posture optimization, or
 ``--headless --max-steps 301`` for a finite run. The circle example draws target

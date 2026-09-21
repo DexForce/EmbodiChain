@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 """Move the Franka TCP around a horizontal circle using sequential FEP IK.
 
-Run: python -m scripts.tutorials.sim.fep_solver --device cuda
+Run: python -m examples.sim.motion.solvers.fep_solver --device cuda
 Use --headless --max-steps 301 for a finite smoke run, or --headless --viser
 for browser visualization. The default radius is 15 cm; set --radius in metres.
 The seed keeps q7 fixed by default. Add --redundancy-search to optimize q7;
