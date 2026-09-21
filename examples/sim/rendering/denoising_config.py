@@ -24,7 +24,7 @@ import dexsim
 
 from embodichain.lab.sim.cfg import DenoisingCfg, DLSSCfg, NRDCfg, RenderCfg
 
-DENOISING_MODES = ("off", "optix", "dlss-rr", "nrd-sr")
+DENOISING_MODES = ("off", "optix", "dlss", "nrd")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,13 +33,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--window",
         choices=DENOISING_MODES,
-        default="dlss-rr",
+        default="dlss",
         help="Denoising/reconstruction path used by the native window.",
     )
     parser.add_argument(
         "--offscreen",
         choices=DENOISING_MODES,
-        default="dlss-rr",
+        default="dlss",
         help="Denoising/reconstruction path used by offscreen cameras.",
     )
     parser.add_argument(
@@ -53,13 +53,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         choices=range(-1, 6),
         default=2,
-        help="DLSS quality preset used by dlss-rr and nrd-sr.",
+        help="DLSS quality preset used by the dlss and nrd paths.",
     )
     parser.add_argument(
         "--nrd-history-frames",
         type=int,
         default=30,
-        help="Maximum NRD history length used by nrd-sr.",
+        help="Maximum NRD history length used by the nrd path.",
     )
     return parser
 

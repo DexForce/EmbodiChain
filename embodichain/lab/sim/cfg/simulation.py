@@ -37,14 +37,14 @@ if TYPE_CHECKING:
     from dexsim.engine.newton_physics.solvers_cfg import NewtonSolverCfg
 
 
-DenoisingMode = Literal["off", "optix", "dlss-rr", "nrd-sr"]
+DenoisingMode = Literal["off", "optix", "dlss", "nrd"]
 """Public ray-tracing denoising and reconstruction mode."""
 
 _DENOISING_MODES: dict[DenoisingMode, RTRenderMode] = {
     "off": RTRenderMode.RAW,
     "optix": RTRenderMode.OPTIX_DENOISE,
-    "dlss-rr": RTRenderMode.DLSS_RR,
-    "nrd-sr": RTRenderMode.NRD_SR,
+    "dlss": RTRenderMode.DLSS_RR,
+    "nrd": RTRenderMode.NRD_SR,
 }
 
 
@@ -57,10 +57,10 @@ class DenoisingCfg:
     additional user-facing modes.
     """
 
-    window: DenoisingMode = "dlss-rr"
+    window: DenoisingMode = "dlss"
     """Pipeline used by the interactive window."""
 
-    offscreen: DenoisingMode = "dlss-rr"
+    offscreen: DenoisingMode = "dlss"
     """Pipeline used by offscreen camera targets."""
 
     def __post_init__(self) -> None:
@@ -219,7 +219,7 @@ class DLSSCfg:
     """DLSS settings shared by RR and NRD+SR rendering paths.
 
     Pipeline selection belongs to :class:`DenoisingCfg`. These controls apply
-    when either target selects ``"dlss-rr"`` or ``"nrd-sr"``.
+    when either target selects ``"dlss"`` or ``"nrd"``.
 
     .. attention::
         DLSS requires a Vulkan render device, a compatible NVIDIA GPU/driver,

@@ -922,8 +922,8 @@ def test_render_cfg_defaults_both_targets_to_dlss_rr() -> None:
     [
         ("off", RTRenderMode.RAW),
         ("optix", RTRenderMode.OPTIX_DENOISE),
-        ("dlss-rr", RTRenderMode.DLSS_RR),
-        ("nrd-sr", RTRenderMode.NRD_SR),
+        ("dlss", RTRenderMode.DLSS_RR),
+        ("nrd", RTRenderMode.NRD_SR),
     ],
 )
 def test_render_cfg_maps_public_denoising_modes(
@@ -939,7 +939,9 @@ def test_render_cfg_maps_public_denoising_modes(
     assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.RAW
 
 
-@pytest.mark.parametrize("mode", ["nrd", "nrd-relax", "nrd-reblur", "raw"])
+@pytest.mark.parametrize(
+    "mode", ["dlss-rr", "nrd-sr", "nrd-relax", "nrd-reblur", "raw"]
+)
 def test_denoising_cfg_rejects_modes_outside_the_public_contract(mode: str) -> None:
     """Native implementation details cannot leak into public mode values."""
     with pytest.raises(ValueError, match="DenoisingCfg.window"):
@@ -950,7 +952,7 @@ def test_render_cfg_keeps_window_and_offscreen_modes_independent() -> None:
     """Window and offscreen cameras can choose different reconstruction paths."""
     world_config = dexsim.WorldConfig()
     render_cfg = RenderCfg(
-        denoising=sim_cfg.DenoisingCfg(window="optix", offscreen="nrd-sr")
+        denoising=sim_cfg.DenoisingCfg(window="optix", offscreen="nrd")
     )
 
     render_cfg.apply_to_dexsim_config(world_config)
@@ -1076,7 +1078,7 @@ def test_render_cfg_instances_do_not_share_image_processing_settings() -> None:
     first.dlss.tiled_enabled = False
     first.nrd.max_accumulated_frame_num = 12
 
-    assert second.denoising.window == "dlss-rr"
+    assert second.denoising.window == "dlss"
     assert second.dlss.tiled_enabled is True
     assert second.nrd.max_accumulated_frame_num == 30
 

@@ -1743,7 +1743,7 @@ class TestConfigToCfgFromFile:
                 "tone_mapping_exposure": 1.25,
                 "denoising": {
                     "window": "optix",
-                    "offscreen": "nrd-sr",
+                    "offscreen": "nrd",
                 },
                 "dlss": {
                     "dlss_quality": 1,

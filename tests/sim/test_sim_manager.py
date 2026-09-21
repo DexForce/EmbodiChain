@@ -69,7 +69,7 @@ pytestmark = pytest.mark.no_sim
 
 @pytest.mark.parametrize("renderer", ["hybrid", "fast-rt", "rt", "auto"])
 @pytest.mark.parametrize("headless", [False, True])
-@pytest.mark.parametrize("denoising_mode", ["optix", "dlss-rr"])
+@pytest.mark.parametrize("denoising_mode", ["optix", "dlss"])
 def test_convert_sim_config_applies_render_pipeline_for_all_startup_modes(
     renderer: str,
     headless: bool,
@@ -91,7 +91,7 @@ def test_convert_sim_config_applies_render_pipeline_for_all_startup_modes(
             renderer=renderer,
             denoising=DenoisingCfg(
                 window=denoising_mode,
-                offscreen="nrd-sr",
+                offscreen="nrd",
             ),
             dlss=DLSSCfg(
                 dlss_quality=3,
@@ -109,7 +109,7 @@ def test_convert_sim_config_applies_render_pipeline_for_all_startup_modes(
 
     expected_window_mode = {
         "optix": dexsim.types.RTRenderMode.OPTIX_DENOISE,
-        "dlss-rr": dexsim.types.RTRenderMode.DLSS_RR,
+        "dlss": dexsim.types.RTRenderMode.DLSS_RR,
     }[denoising_mode]
     assert world.rt_pipeline_config.window.mode == expected_window_mode
     assert world.rt_pipeline_config.offscreen.mode == dexsim.types.RTRenderMode.NRD_SR
