@@ -126,14 +126,24 @@ Slide grasp response across the legacy loader and Spawn without restoring the
 old global articulation-physics override.
 
 E6-open / E1-inside / E6-close composition is owned by
-`_task_program/drawer_binding.py`, `drawer_geometry.py`, and `drawer_runtime.py`.
+`_task_program/drawer_binding.py`, `drawer_geometry.py`, `drawer_runtime.py`,
+and `drawer_curobo.py`.
 Inside targets share E6's asset-qualified part/link identity, never a duplicate
 rigid root. Geometry supplies a floor/center hint, not an interior certificate.
 The GenSim adapter refreshes the placement target from actual link/object poses
 on every Place plan/replan while preserving the declared scene manifest.
-Oversized objects, incomplete walls and predicted contacts do not add task
-rejection gates. No drawer-specific containment or collision-screening policy
-is installed. Drawer payload pickup does not screen future placement reachability;
+No cavity-fit or separate FCL rejection gate is installed. Drawer payload pickup
+does not screen future placement reachability. Generated bundles insert an
+explicit `simulation.move_held_object` before Place: cuRobo plans that free-space
+transport, while E6, pickup and final lowering/release retain their existing
+planner. The task-owned transport service snapshots live rigid objects and all
+articulation links for each plan/replan. Articulated collision components become
+separate link-local boxes, preserving openings; the held object is removed only
+from the planner world and represented by a conservative sphere cover on a
+separate tool-attached collision link. This never attaches objects in physics.
+The planner and its payload attachment are released after each planning scope.
+This scoped snapshot does not implement concurrent moving-obstacle prediction
+or add self-collision checking to the shared cuRobo backend.
 Place is planned from the acquired grasp. Composite bundles use the extended
 motion sample budget rather than raising joint velocity limits. Ordinary command
 planning, effect verification and E6 joint-state acceptance remain.

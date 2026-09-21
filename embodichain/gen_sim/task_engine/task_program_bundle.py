@@ -297,6 +297,9 @@ def generate_task_program_bundle(
     program_id = _program_identifier(selected_graph["task_id"])
     scene_contract = f"{program_id}_scene_v1"
     selected_graph = _refine_e3_return_targets(selected_graph, scene)
+    from ._task_program.drawer_binding import rewrite_drawer_close_resources
+
+    selected_graph = rewrite_drawer_close_resources(selected_graph)
     stability = _task_stability_payload(selected_graph, scene, embodiment_payload)
     if drawers:
         stability["drawers"] = [route.payload() for route in drawers]
@@ -1060,7 +1063,23 @@ def _integration_payload(
             object_id = str(arguments["object"])
             target_id = str(arguments["target"])
             referenced_objects.add(object_id)
-            if node["task_type"] == "E2":
+            if target_id in drawers:
+                from ._task_program.drawer_binding import TRANSPORT_CLEARANCE
+
+                move_held_routes.append(
+                    {
+                        "object_id": object_id,
+                        "target_id": target_id,
+                        "pose": {
+                            "kind": "scene_entity",
+                            "entity_id": target_id,
+                            "relative_pose": _translation_pose(
+                                0.0, 0.0, TRANSPORT_CLEARANCE
+                            ),
+                        },
+                    }
+                )
+            elif node["task_type"] == "E2":
                 upright_move_objects.add(object_id)
                 pose = _single_target_pose(graph, target_id)
                 move_held_routes.append(

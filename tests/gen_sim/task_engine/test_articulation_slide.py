@@ -1148,6 +1148,15 @@ def test_drawer_open_place_close_builds_one_link_owned_container(
     assert load_config(paths.execution_policy)["motion"]["sample_count"] >= 260
     assert binding.containers[0].parent_id == route.binding.link_id
     assert route.binding.part_id
+    transport = [
+        n
+        for n in graph["nodes"]
+        if n["call"].get("call_id") == "simulation.move_held_object"
+        and n["call"]["arguments"]["target"] == route.affordance
+    ]
+    assert len(transport) == 1
+    place_node = next(n for n in graph["nodes"] if n["call"].get("kind") == "place")
+    assert place_node["depends_on"] == [transport[0]["id"]]
     slides = [
         n["call"]["arguments"]
         for n in graph["nodes"]
@@ -1315,12 +1324,15 @@ def test_drawer_place_preparation_uses_live_target_without_fit_gate(
         SimpleNamespace(endpoint=lambda slot, name: motion),
     )
     prepared = prepare_place(request, context, (obs,))
-    assert prepared.goal.xpos.shape == (1, 4, 4)
-    torch.testing.assert_close(prepared.goal.xpos, obs.target_pose())
+    assert prepared.goal.xpos.shape == (1, 3, 4, 4)
+    torch.testing.assert_close(
+        prepared.goal.xpos[:, 2], obs.entry_poses()[2] @ held.object_to_eef
+    )
+    assert prepared.goal.xpos[0, 0, 1, 3] < prepared.goal.xpos[0, 1, 1, 3]
     assert isinstance(request.goal.xpos, SceneEntityPose)
     link[0, 0, 3] += 0.12
     changed = prepare_place(request, context, (obs,))
     torch.testing.assert_close(
-        changed.goal.xpos[0, :3, 3] - prepared.goal.xpos[0, :3, 3],
+        changed.goal.xpos[0, 0, :3, 3] - prepared.goal.xpos[0, 0, :3, 3],
         torch.tensor([0.12, 0, 0]),
     )
