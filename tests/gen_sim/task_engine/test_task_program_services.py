@@ -687,7 +687,7 @@ def test_configured_transport_binds_one_baseline_pose_without_planning() -> None
         (_MoveHeldObjectRoute("part", "inspection", pose),)
     )
     forbidden_robot = Mock()
-    goal = lowerer.lower(
+    lowering = lowerer.lower(
         RegisteredSemanticCall(
             call_id="simulation.move_held_object",
             arguments={"object": "part", "target": "inspection"},
@@ -695,7 +695,15 @@ def test_configured_transport_binds_one_baseline_pose_without_planning() -> None
         context=forbidden_robot,
         bound=forbidden_robot,
         option_template=MoveHeldObjectOptions(),
-    ).goal
+    )
+    goal = lowering.goal
+    assert lowerer.effect_contract_kind is SemanticEffectKind.ATTACH
+    effect = lowering.registered_effect
+    assert effect is not None
+    assert effect.effect_kind is SemanticEffectKind.ATTACH
+    assert effect.held_objects[0].object_id == "part"
+    assert effect.held_objects[0].relation is HeldObjectRelation.ATTACHED
+    assert effect.held_objects[0].slot_id == "primary"
     forbidden_robot.assert_not_called()
     assert forbidden_robot.mock_calls == []
     assert type(goal) is HeldObjectPoseGoal
