@@ -1859,8 +1859,31 @@ class WorkspaceAnalyzer:
             # The manipulability visualizer colors by score, not reachability,
             # so it needs the scores (and the mask that lines the compact
             # reachable-only score vector up with the drawn points).
+            from embodichain.lab.sim.motion.workspace.visualizers.manipulability_visualizer import (
+                ManipulabilityColorCfg,
+            )
+
             common_kwargs["scores"] = self.manipulability_scores
             common_kwargs["reachable_mask"] = getattr(self, "reachability_mask", None)
+            # Native point size is in screen pixels; Viser uses scene units.
+            point_size = getattr(
+                self.config.visualization,
+                "viser_point_size" if backend == "viser" else "point_size",
+                0.01 if backend == "viser" else 4.0,
+            )
+            common_kwargs["color_cfg"] = ManipulabilityColorCfg(
+                log_scale=getattr(
+                    self.config.visualization, "manipulability_log_scale", False
+                ),
+                percentile_clip=tuple(
+                    getattr(
+                        self.config.visualization,
+                        "manipulability_percentile_clip",
+                        (2.0, 98.0),
+                    )
+                ),
+                point_size=float(point_size),
+            )
         # For other visualization types (MESH, HEATMAP), use only common arguments
 
         return factory.create_visualizer(viz_type=vis_type, **common_kwargs)
@@ -2229,7 +2252,13 @@ class WorkspaceAnalyzer:
             else:
                 backend = "open3d"
 
-        if backend == "viser" and vis_type != VisualizationType.POINT_CLOUD:
+        # MANIPULABILITY forwards its own colors to the same point-cloud
+        # overlay, so Viser renders it directly; only the geometry-building
+        # types still have no browser equivalent.
+        if backend == "viser" and vis_type not in (
+            VisualizationType.POINT_CLOUD,
+            VisualizationType.MANIPULABILITY,
+        ):
             logger.log_warning(
                 f"Viser workspace visualization currently uses point clouds; "
                 f"falling back from '{vis_type.value}' to 'point_cloud'."

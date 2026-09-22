@@ -16,7 +16,7 @@
 
 from enum import Enum
 from dataclasses import dataclass
-from typing import Union
+from typing import Tuple, Union
 
 
 class VisualizationType(Enum):
@@ -88,6 +88,22 @@ class VisualizationConfig:
 
     axis_size: float = 0.003
     """Thickness/size of coordinate axes for axis visualization."""
+
+    manipulability_log_scale: bool = False
+    """Normalize manipulability colors on ``log10(w)`` for MANIPULABILITY.
+
+    Manipulability spans orders of magnitude across a workspace, so a linear
+    ramp collapses the near-singular shell into one dark color. Only the color
+    mapping changes; the reported ranges stay in raw units.
+    """
+
+    manipulability_percentile_clip: Tuple[float, float] = (2.0, 98.0)
+    """Lower/upper percentile bounding the MANIPULABILITY color scale.
+
+    Clipping keeps a few extreme samples from flattening the whole ramp. Use
+    ``(0.0, 100.0)`` for a plain min/max scale. The untouched raw range is
+    reported alongside the clipped one, so clipping never hides magnitudes.
+    """
 
     show_unreachable_points: bool = True
     """Whether to show unreachable points in Cartesian space and Plane sampling modes.

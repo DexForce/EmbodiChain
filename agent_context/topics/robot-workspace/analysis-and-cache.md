@@ -109,15 +109,16 @@
 - `scripts/tutorials/sim/workspace_manipulability_visualization.py` runs the
   whole path headlessly on a solver-backed robot adapter and writes the
   `docs/source/_static/tutorials/workspace_manipulability_*.png` figures.
-  `scripts/tutorials/sim/visualize_robot_workspace.py` instead analyzes a
-  simulated robot and draws the cloud beside it in the native or Viser viewer;
-  a sim-backed `Robot` needs `sim.prepare()` before `WorkspaceAnalyzer` runs.
-- The `sim_manager` and `viser` point-cloud backends consume world coordinates,
-  while analyzer points are arena-frame and already carry the chain-root pose:
-  add `sim.arena_offsets[env]`, and never apply the robot base twice. They also
-  receive RGB only, so per-point alpha/marker size, the color bar and the
-  ellipsoid detail plots stay Matplotlib features; point size means screen
-  pixels natively but scene units in Viser. A published cloud is static, so
+  `analyze-workspace --vis-type manipulability` instead colors a simulated
+  robot's own workspace in the native viewer or Viser, with
+  `--manipulability-log-scale` and `--manipulability-percentile` selecting the
+  normalization. Scene-level manipulability has no separate runner.
+- `MANIPULABILITY` is the only non-point-cloud type Viser renders directly;
+  every other type still falls back to `point_cloud` there. Both forwarding
+  backends receive RGB only, so per-point alpha/marker size, the color bar and
+  the ellipsoid detail plots stay Matplotlib features; point size means screen
+  pixels natively but scene units in Viser, and the analyzer picks the matching
+  `VisualizationConfig` field per backend. A published cloud is static, so
   moving the robot base requires reanalysis.
 
 ### Seed selection for Cartesian/plane IK

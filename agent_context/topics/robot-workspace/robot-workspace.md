@@ -16,7 +16,7 @@ Paths below are relative to `embodichain/lab/sim/` unless qualified.
 | Runtime binding config | `workspace/cfg.py`: `RobotWorkspaceCfg`; `cfg.py`: `RobotCfg.workspace_cfg` |
 | Robot-facing sampling and FK | `objects/robot.py`: `sample_reachable_pose()` |
 | Manipulability visualization and score/point alignment | `workspace/visualizers/manipulability_visualizer.py`: `ManipulabilityVisualizer`, `align_manipulability_scores` |
-| Robot plus colored workspace in native DexSim or Viser | `scripts/tutorials/sim/visualize_robot_workspace.py` (repository-relative) |
+| Robot plus colored workspace in native DexSim or Viser | `analyze-workspace --vis-type manipulability` |
 | Analyze CLI | `embodichain/lab/scripts/analyze_workspace.py` |
 | Legacy session-cache CLI | `embodichain/cli/workspace_cache.py` → `workspace/caches/cache_utils.py` |
 
