@@ -34,6 +34,11 @@ and persistence confirmations; this package does not instantiate them.
    TrajectoryDescriptor
    describe_trajectory
    CoverageIndex
+   ManipulabilityProfile
+   ManipulabilityBands
+   GuidedResidual
+   describe_manipulability
+   manipulability_guided_residual
    rotate_grasp_about_object_axis
    joint_residual
    retime
@@ -109,7 +114,7 @@ Configuration and Preflight
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``TrajectoryAugmentationCfg`` owns the local seed, provided-start declaration,
-spatial and timing factors, and joint-geometry coverage limits.
+spatial, timing and manipulability factors, and joint-geometry coverage limits.
 ``TrajectoryGenerationJobCfg`` adds the nested ``source``, ``planning``,
 ``execution``, ``reset``, ``validation``, ``collection``, and ``persistence``
 sections used by a standalone generation job. Both ``from_mapping`` methods
@@ -161,6 +166,22 @@ capacity before persistence and counts geometry only after confirmation.
 Timing variants share geometry-family membership. This first descriptor uses
 joint geometry; it does not provide EEF workspace coverage.
 
+``describe_manipulability`` scores caller-supplied Jacobians with
+:func:`~embodichain.compute.kinematics.yoshikawa_manipulability` and aligns the
+result with trajectory phases. ``ManipulabilityBands`` partitions those scores
+into ordered bands normalized by a reference registered for one initial state,
+usually that state's reference trajectory bottleneck. ``manipulability_guided_residual`` draws several
+residual proposals from one local generator and keeps the proposal nearest a
+requested band, returning a ``GuidedResidual`` with the measured profile.
+
+When ``augmentation.factors.manipulability`` is enabled, ``CoverageIndex``
+additionally enforces a per-band quota, so a well-conditioned posture cannot
+absorb the whole collection budget and tighter but still task-valid postures
+retain capacity. Bands classify measured evidence: the session reads the
+``manipulability`` observation recorded during the rollout, never a planned
+score. Manipulability describes posture conditioning only; every banded
+candidate still requires the same independent path, dynamic, and task checks.
+
 ``GenerationSession`` owns scene-case registration, stable candidate identity,
 local random streams, bounded candidate and pending-episode payloads, collection
 budgets, coverage reservations, and commit accounting. Its lifecycle accepts
@@ -183,6 +204,19 @@ release collection and coverage reservations before an explicit write retry.
 
 .. autoclass:: CoverageIndex
    :members:
+
+.. autoclass:: ManipulabilityProfile
+   :members:
+
+.. autofunction:: describe_manipulability
+
+.. autoclass:: ManipulabilityBands
+   :members:
+
+.. autoclass:: GuidedResidual
+   :members:
+
+.. autofunction:: manipulability_guided_residual
 
 .. autoclass:: GenerationSession
    :members:
@@ -226,11 +260,23 @@ The package import path above is convenient for callers combining them.
    describe_trajectory
    CoverageIndex
 
+.. currentmodule:: embodichain.lab.sim.motion.expansion.manipulability
+
+.. autosummary::
+   :nosignatures:
+
+   ManipulabilityProfile
+   ManipulabilityBands
+   GuidedResidual
+   describe_manipulability
+   manipulability_guided_residual
+
 .. currentmodule:: embodichain.lab.sim.motion.expansion.operators
 
 .. autosummary::
    :nosignatures:
 
+   allowed_phases
    rotate_grasp_about_object_axis
    joint_residual
    retime

@@ -294,8 +294,8 @@ planner:
      - Fixed-cadence playback that retimes planner output to an integer number
        of unchanged physics steps.
    * - ``motion.expansion``
-     - Host-independent trajectory candidates, allowed operators, coverage, and
-       bounded generation bookkeeping.
+     - Host-independent trajectory candidates, allowed operators, coverage,
+       manipulability bands, and bounded generation bookkeeping.
 
 Use ``embodichain.lab.sim.motion.*`` for these capabilities. The former
 ``embodichain.lab.sim.solvers``, ``embodichain.lab.sim.planners``, and

@@ -38,6 +38,13 @@ from .contracts import (
     ValidationResult,
 )
 from .coverage import CoverageIndex, TrajectoryDescriptor, describe_trajectory
+from .manipulability import (
+    GuidedResidual,
+    ManipulabilityBands,
+    ManipulabilityProfile,
+    describe_manipulability,
+    manipulability_guided_residual,
+)
 from .operators import (
     joint_residual,
     retime,
@@ -62,6 +69,11 @@ __all__ = [
     "CoverageIndex",
     "TrajectoryDescriptor",
     "describe_trajectory",
+    "GuidedResidual",
+    "ManipulabilityBands",
+    "ManipulabilityProfile",
+    "describe_manipulability",
+    "manipulability_guided_residual",
     "joint_residual",
     "retime",
     "rotate_grasp_about_object_axis",

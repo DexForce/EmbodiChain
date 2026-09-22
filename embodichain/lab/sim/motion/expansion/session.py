@@ -22,6 +22,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, replace
 import hashlib
 import json
+import math
 import time
 from types import MappingProxyType
 
@@ -38,6 +39,7 @@ from .contracts import (
     ValidationResult,
 )
 from .coverage import CoverageIndex, describe_trajectory
+from .manipulability import ManipulabilityBands
 
 __all__ = ["GenerationSession"]
 
@@ -132,9 +134,11 @@ class GenerationSession:
         self._cfg = TrajectoryGenerationJobCfg.from_mapping(cfg.to_dict())
         self._clock, self._started_at = clock, clock()
         self._cases: dict[
-            tuple[str, str], tuple[SceneCase, torch.Tensor, tuple[str, ...]]
+            tuple[str, str],
+            tuple[SceneCase, torch.Tensor, tuple[str, ...], float | None],
         ] = {}
         self._coverage: dict[str, CoverageIndex] = {}
+        self._bands: dict[tuple[str, str], ManipulabilityBands] = {}
         self._ordinals: dict[tuple[str, ...], int] = {}
         self._attempts: dict[str, _Attempt] = {}
         self._commits: dict[str, str] = {}
@@ -156,14 +160,39 @@ class GenerationSession:
         joint_limits: torch.Tensor,
         *,
         joint_names: tuple[str, ...],
+        manipulability_reference: float | None = None,
     ) -> None:
         """Register immutable case conditions and complete joint normalization limits.
+
+        ``manipulability_reference`` normalizes measured manipulability into the
+        configured bands and is usually the reference trajectory's bottleneck
+        score. It is required exactly when the manipulability factor is enabled.
+        Because it describes one reference trajectory rather than the scene, it
+        belongs to a single initial state and may differ between the initial
+        states of one case; band quotas stay shared by scene case.
 
         Args:
             case: Scene and initial-state identity with fixed robot conditions.
             joint_limits: Finite increasing joint intervals, shape ``(D_full, 2)``.
             joint_names: Complete unique joint order matching the limit rows.
+            manipulability_reference: Positive reference manipulability for band
+                classification, or ``None`` when banded coverage is disabled.
         """
+        factor = self._cfg.augmentation.factors.manipulability
+        if factor.enabled:
+            if (
+                type(manipulability_reference) not in (float, int)
+                or not math.isfinite(manipulability_reference)
+                or manipulability_reference <= 0
+            ):
+                raise ValueError(
+                    "Banded coverage requires a positive manipulability_reference."
+                )
+            manipulability_reference = float(manipulability_reference)
+        elif manipulability_reference is not None:
+            raise ValueError(
+                "manipulability_reference requires factors.manipulability.enabled."
+            )
         names = tuple(joint_names)
         if (
             isinstance(joint_names, str)
@@ -181,18 +210,24 @@ class GenerationSession:
             )
         key = (case.scene_case_id, case.initial_state_id)
         if key in self._cases:
-            previous, previous_limits, previous_names = self._cases[key]
+            previous, previous_limits, previous_names, previous_reference = self._cases[
+                key
+            ]
             if (
                 previous != case
                 or not torch.equal(previous_limits, limits)
                 or previous_names != names
+                or previous_reference != manipulability_reference
             ):
                 raise ValueError("A registered case's fixed conditions cannot change.")
             return
+        # The reference manipulability describes one reference trajectory, not
+        # the scene, so it is deliberately excluded from the shared conditions.
         for (case_id, _), (
             previous,
             previous_limits,
             previous_names,
+            _,
         ) in self._cases.items():
             if case_id == case.scene_case_id and (
                 replace(previous, initial_state_id=case.initial_state_id) != case
@@ -202,12 +237,17 @@ class GenerationSession:
                 raise ValueError(
                     "Initial states in one case must share scene and robot conditions."
                 )
-        self._cases[key] = case, limits, names
+        self._cases[key] = case, limits, names, manipulability_reference
         if case.scene_case_id not in self._coverage:
             coverage = self._cfg.augmentation.coverage
             self._coverage[case.scene_case_id] = CoverageIndex(
                 geometry_tolerance=coverage.joint_dedup_normalized_tol,
                 target_per_geometry=coverage.target_per_cell,
+                target_per_band=factor.target_per_band if factor.enabled else None,
+            )
+        if factor.enabled:
+            self._bands[key] = ManipulabilityBands(
+                factor.band_edges, reference=manipulability_reference
             )
 
     def propose(
@@ -485,6 +525,30 @@ class GenerationSession:
                 size += attempt.episode_byte_budget
         return count, size
 
+    def _measured_band(self, episode: ExpertEpisode) -> int | None:
+        """Classify measured manipulability; planned scores are never accepted.
+
+        The normalizer belongs to the episode's own initial state, so rollouts
+        started from different reference trajectories are ranked against the
+        reference each one was registered with.
+        """
+        identity = episode.identity
+        bands = self._bands.get((identity.scene_case_id, identity.initial_state_id))
+        if bands is None:
+            return None
+        scores = episode.observations.get("manipulability")
+        if (
+            scores is None
+            or scores.ndim != 1
+            or scores.shape != episode.timestamps.shape
+            or bool((scores < 0).any())
+        ):
+            raise ValueError(
+                "Banded coverage requires one non-negative measured manipulability "
+                "value per observation."
+            )
+        return bands.band_of(float(scores.min()))
+
     def _reserve_coverage(self, episode: ExpertEpisode) -> bool:
         identity = episode.identity
         limits = self._cases[(identity.scene_case_id, identity.initial_state_id)][1]
@@ -496,7 +560,10 @@ class GenerationSession:
             samples_per_phase=self._cfg.augmentation.coverage.geometry_samples_per_phase,
         )
         return self._coverage[identity.scene_case_id].reserve(
-            episode.commit_id, identity.geometry_family_id, descriptor
+            episode.commit_id,
+            identity.geometry_family_id,
+            descriptor,
+            band=self._measured_band(episode),
         )
 
     def accept_episode(self, episode: ExpertEpisode) -> bool:
@@ -672,6 +739,7 @@ class GenerationSession:
 
         Diagnostics retain each check's status, first 256 detail characters,
         and first 16 numeric metrics. Results support at most 64 checks.
+        Manipulability band counts stay empty while banded coverage is disabled.
         Pending reservations cover assigned/running upper bounds and retained
         payload bytes, including failed writes that remain available for retry.
 
@@ -692,6 +760,12 @@ class GenerationSession:
                 "pending_reserved_bytes": pending_bytes,
                 "coverage": MappingProxyType(
                     {key: value.geometry_count for key, value in self._coverage.items()}
+                ),
+                "manipulability_bands": MappingProxyType(
+                    {
+                        key: MappingProxyType(value.band_counts)
+                        for key, value in self._coverage.items()
+                    }
                 ),
                 "audit": tuple(
                     (attempt.identity, attempt.state, attempt.submission_id)

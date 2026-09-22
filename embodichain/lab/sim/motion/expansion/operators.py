@@ -26,6 +26,7 @@ import torch
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
 from .contracts import (
+    TrajectoryPhase,
     TrajectoryTemplate,
     ValidationCheck,
     ValidationResult,
@@ -34,6 +35,7 @@ from .contracts import (
 )
 
 __all__ = [
+    "allowed_phases",
     "rotate_grasp_about_object_axis",
     "joint_residual",
     "retime",
@@ -93,7 +95,27 @@ def rotate_grasp_about_object_axis(
     return (anchor @ transforms @ pose_inv(anchor) @ reference).to(source_object)
 
 
-def _allowed_phases(template: TrajectoryTemplate, operator: str) -> list:
+def allowed_phases(
+    template: TrajectoryTemplate, operator: str
+) -> list[TrajectoryPhase]:
+    """Return the free phases a template authorizes one operator to reshape.
+
+    Operators that live outside this module call it to fail fast on a template
+    that does not authorize them, so a permission error is never mistaken for a
+    rejected sample.
+
+    Args:
+        template: Annotated reference whose phase permissions are checked.
+        operator: Operator identifier that must appear in the template's and
+            the phase's ``allowed_operators``.
+
+    Returns:
+        The authorized free phases, in template order.
+
+    Raises:
+        ValueError: If the template or every phase withholds the operator, or
+            if the template declares no controlled joints.
+    """
     if operator not in template.allowed_operators:
         raise ValueError(f"Template does not allow {operator}.")
     phases = [
@@ -133,7 +155,7 @@ def joint_residual(
     Raises:
         ValueError: If permissions, limits or resulting positions are invalid.
     """
-    phases = _allowed_phases(template, "joint_residual")
+    phases = allowed_phases(template, "joint_residual")
     if not math.isfinite(normalized_scale) or not 0 <= normalized_scale <= 1:
         raise ValueError("normalized_scale must be finite and within [0, 1].")
     q = template.positions.clone()
@@ -194,7 +216,7 @@ def retime(
     Raises:
         ValueError: If permissions, timing or allocation constraints fail.
     """
-    phases = _allowed_phases(template, "retime")
+    phases = allowed_phases(template, "retime")
     if not all(math.isfinite(x) and x > 0 for x in (duration_scale, control_dt)):
         raise ValueError(
             "Duration scale and control period must be positive and finite."

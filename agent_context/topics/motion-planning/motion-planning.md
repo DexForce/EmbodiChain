@@ -90,6 +90,20 @@ fixed object's local axis; callers choose geometry-valid angles and replan.
 Grasp generation itself belongs to `embodichain.toolkits.graspkit`, composed
 by Atomic Skills/Task Program rather than embedded in `MotionGenerator`.
 
+`expansion/manipulability.py` profiles posture conditioning through
+`embodichain.compute.kinematics.yoshikawa_manipulability`. Callers supply the
+Jacobians, so the module stays host-independent. `ManipulabilityBands`
+normalizes scores against a reference bottleneck held per initial state, and
+`manipulability_guided_residual` keeps whichever of several `joint_residual`
+draws from one local generator lands nearest a requested band. The factor is
+opt-in through `augmentation.factors.manipulability` and disabled by default.
+Once enabled, `register_case` requires a positive `manipulability_reference`
+for each initial state, which may differ within one case; `CoverageIndex`
+enforces a per-band quota so one well-conditioned posture cannot absorb the
+collection budget; and `GenerationSession` classifies bands from the measured
+`manipulability` observation rather than any planned score. Band guidance ranks
+postures only: path, dynamic and task validation stay separate.
+
 ## Focused validation
 
 | Changed boundary | Existing coverage |
