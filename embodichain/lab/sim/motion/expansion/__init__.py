@@ -61,6 +61,7 @@ from .variants import (
 )
 from .operators import (
     TIMING_PROFILES,
+    ProposalRejected,
     joint_residual,
     nullspace_residual,
     perturb_approach_direction,
@@ -102,6 +103,7 @@ __all__ = [
     "plan_trajectory_variants",
     "sample_approach_cone",
     "TIMING_PROFILES",
+    "ProposalRejected",
     "joint_residual",
     "nullspace_residual",
     "perturb_approach_direction",

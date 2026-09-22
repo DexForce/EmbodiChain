@@ -48,6 +48,8 @@ import math
 
 import torch
 
+from embodichain.compute.kinematics import select_jacobian_rows
+
 from .cfg import SPATIAL_METHODS, TrajectoryAugmentationCfg
 from .contracts import (
     CandidateIdentity,
@@ -58,6 +60,7 @@ from .contracts import (
 )
 from .coverage import CoverageIndex, describe_trajectory
 from .operators import (
+    ProposalRejected,
     joint_residual,
     nullspace_residual,
     retime,
@@ -367,8 +370,10 @@ def apply_trajectory_variant(
             Defaults to :func:`default_variant_factors`.
         joint_limits: Finite lower/upper limits with shape ``(D, 2)``.
         control_dt: Authoritative host control period used by retiming.
-        task_jacobians: Reference task Jacobians ``(N, R, C)``, required only by
-            the redundancy operator.
+        task_jacobians: Reference spatial Jacobians ``(N, R, C)`` for the
+            declared controlled joints, required only by the redundancy
+            operator. ``cfg.factors.ik.task_rows`` selects the constrained rows
+            from them, so supply every row the task could constrain.
         generator: Optional explicit local generator replacing the derived one.
 
     Returns:
@@ -405,7 +410,9 @@ def apply_trajectory_variant(
             )
         result = nullspace_residual(
             result,
-            task_jacobians=task_jacobians,
+            task_jacobians=select_jacobian_rows(
+                task_jacobians, list(cfg.factors.ik.task_rows)
+            ),
             joint_limits=joint_limits,
             normalized_scale=cfg.factors.ik.normalized_scale,
             generator=generator,
@@ -425,7 +432,7 @@ def apply_trajectory_variant(
 _MAX_REJECTION_REASON = 80
 
 
-def _rejection_reason(error: ValueError) -> str:
+def _rejection_reason(error: ProposalRejected) -> str:
     """Summarize an operator rejection into a stable, bounded counter key."""
     message = " ".join(str(error).split())
     if len(message) > _MAX_REJECTION_REASON:
@@ -507,8 +514,10 @@ def expand_trajectory_variants(
         control_dt: Authoritative host control period used by retiming.
         velocity_limits: Optional positive per-joint speed bounds, shape ``(D,)``.
         acceleration_limits: Optional positive per-joint acceleration bounds.
-        task_jacobians: Reference task Jacobians ``(N, R, C)`` required only when
-            the ik factor is enabled.
+        task_jacobians: Reference spatial Jacobians ``(N, R, C)`` required only
+            when the ik factor is enabled. ``cfg.factors.ik.task_rows`` selects
+            the constrained rows, so supply every row the task could constrain
+            rather than pre-reducing them.
         max_attempts: Optional proposal budget; defaults to four per requested variant.
 
     Returns:
@@ -564,10 +573,10 @@ def expand_trajectory_variants(
                 task_jacobians=task_jacobians,
                 generator=generator,
             )
-        except ValueError as error:
-            # Operators reject their own proposals, for example when a sampled
-            # residual leaves the joint limits. That is an ordinary outcome, but
-            # the reason has to survive so a caller can retune rather than guess.
+        except ProposalRejected as error:
+            # Only a rejected draw is bookkeeping. A malformed argument or an
+            # impossible configuration keeps propagating, so it cannot hide in
+            # a rejection count behind an already successful nominal variant.
             reason = _rejection_reason(error)
             rejected[reason] = rejected.get(reason, 0) + 1
             continue

@@ -270,6 +270,12 @@ generically leaves no redundancy, and the operator raises rather than silently
 returning the reference. Dropping the rows the task does not actually constrain
 is what creates alternative postures.
 
+`ik.task_rows` selects which rows of the supplied Jacobian stay constrained,
+so pass every spatial row rather than reducing them first. Redundancy is then
+decided on the numerical rank of the selected rows: six independent rows on a
+six-joint arm raise, because the projector of a generic full-rank Jacobian is
+floating-point residue rather than a usable direction.
+
 The frame convention is the caller's responsibility. `BaseSolver.get_jacobian`
 returns a Jacobian in the arm's base frame, so dropping its angular-z row
 removes rotation about base z, not about the tool axis. For a top-down grasp

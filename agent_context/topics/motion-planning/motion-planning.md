@@ -105,7 +105,9 @@ task raises. At most one joint-path operator runs per variant, though `spatial.m
 may name several so each becomes its own variant; a single name is still
 accepted.
 `expand_trajectory_variants` deduplicates one fixed scene on measured
-geometry/timing and counts every rejection under a key naming its reason.
+geometry/timing and counts every rejection under a key naming its reason. Only
+`ProposalRejected` is a rejection; malformed arguments stay plain `ValueError`
+and propagate rather than hiding in a rejection count.
 Configuration is optional: omitting it resolves `default_variant_factors`,
 which enables every implemented factor the inputs support and drops the ik
 factor when no Jacobians are supplied. An explicit config is never overridden, and an

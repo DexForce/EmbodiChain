@@ -542,7 +542,6 @@ def expand_tutorial_trajectory_variants(
     phase_kinds: Sequence[Mapping[str, str]],
     retimable: Sequence[Collection[str]] = (),
     control_part: str = "arm",
-    task_rows: Sequence[int] = (0, 1, 2, 3, 4),
 ):
     """Expand one compiled action into a distinct variant per simulation row.
 
@@ -559,13 +558,13 @@ def expand_tutorial_trajectory_variants(
         retimable: Free segment names per compiled action that may also change
             duration. Restrict this when the tutorial triggers an event at a
             fixed step index.
-        control_part: Control part whose joints the operators may move.
-        task_rows: Jacobian rows the posture factor must hold.
+        control_part: Control part whose joints the operators may move. The
+            configuration's ``ik.task_rows`` selects which Jacobian rows the
+            posture factor holds.
 
     Returns:
         The accepted variants, their factors and the rejection accounting.
     """
-    from embodichain.compute.kinematics import select_jacobian_rows
     from embodichain.lab.sim.motion.expansion import (
         SceneCase,
         TrajectoryPhase,
@@ -612,11 +611,10 @@ def expand_tutorial_trajectory_variants(
     cfg = create_trajectory_variant_cfg(args)
     jacobians = None
     if cfg is None or cfg.factors.ik.enabled:
-        jacobians = select_jacobian_rows(
-            robot.get_solver(control_part).get_jacobian(
-                positions[:, list(arm_columns)]
-            ),
-            tuple(task_rows),
+        # Supply every spatial row; the configuration selects the constrained
+        # ones, so the tutorial does not duplicate that decision.
+        jacobians = robot.get_solver(control_part).get_jacobian(
+            positions[:, list(arm_columns)]
         )
     return expand_trajectory_variants(
         template,

@@ -35,6 +35,7 @@ from .contracts import (
 )
 
 __all__ = [
+    "ProposalRejected",
     "allowed_phases",
     "rotate_grasp_about_object_axis",
     "perturb_approach_direction",
@@ -47,6 +48,16 @@ __all__ = [
 
 TIMING_PROFILES = ("uniform", "ease_in", "ease_out")
 """Monotone within-phase time warps selectable by :func:`retime`."""
+
+
+class ProposalRejected(ValueError):
+    """One sampled proposal is unusable; another draw may well succeed.
+
+    Operators raise this only for outcomes that depend on the draw. Malformed
+    arguments, unsatisfiable permissions and impossible configurations remain
+    plain :class:`ValueError`, so a generation loop that retries on rejection
+    does not also swallow a programming error.
+    """
 
 
 def rotate_grasp_about_object_axis(
@@ -122,6 +133,18 @@ def allowed_phases(
         ValueError: If the template or every phase withholds the operator, or
             if the template declares no controlled joints.
     """
+    if operator not in template.allowed_operators:
+        raise ValueError(f"Template does not allow {operator}.")
+    phases = [
+        phase
+        for phase in template.phases
+        if phase.kind == "free" and operator in phase.allowed_operators
+    ]
+    if not phases:
+        raise ValueError(f"No explicitly annotated free phase allows {operator}.")
+    if not template.controlled_joint_indices:
+        raise ValueError("Augmentation requires explicit controlled_joint_indices.")
+    return phases
 
 
 def perturb_approach_direction(
@@ -231,7 +254,7 @@ def _reject_limit_violations(
     """
     window, bounds = positions[:, indices], limits[indices]
     if ((window < bounds[:, 0]) | (window > bounds[:, 1])).any():
-        raise ValueError(
+        raise ProposalRejected(
             "Sampled residual violates joint limits; reject this proposal."
         )
 
@@ -428,7 +451,8 @@ def nullspace_residual(
         normalized_scale: Maximum offset as a fraction of each joint range,
             measured before null-space projection shrinks it.
         generator: Explicit local generator; global RNG is never consumed.
-        rank_tolerance: Relative singular-value cutoff for the pseudoinverse.
+        rank_tolerance: Relative singular-value cutoff shared by the rank test
+            and the pseudoinverse.
 
     Returns:
         A new template requiring pose, path and physical validation.
@@ -456,12 +480,21 @@ def nullspace_residual(
         raise ValueError("task_jacobians must constrain at least one task row.")
     # Project in float64: the projector is a difference of nearly equal terms
     # and loses the small redundant directions in lower precision.
+    # A generic full-rank Jacobian still leaves floating-point residue in
+    # ``I - pinv(J) @ J``, so redundancy has to be decided on the rank rather
+    # than on the size of that residue.
+    if bool(
+        (torch.linalg.matrix_rank(jacobians, rtol=rank_tolerance) >= len(indices)).all()
+    ):
+        raise ValueError(
+            "The declared task rows leave no joint redundancy; drop the rows the "
+            "task does not constrain or use a redundant control part."
+        )
     identity = torch.eye(len(indices), device=q.device, dtype=torch.float64)
     projector = identity - torch.linalg.pinv(jacobians, rtol=rank_tolerance).matmul(
         jacobians
     )
     spans = (limits[indices, 1] - limits[indices, 0]).to(torch.float64)
-    largest = 0.0
     for phase in phases:
         length = phase.stop_index - phase.start_index
         if length < 3:
@@ -474,16 +507,10 @@ def nullspace_residual(
         ).to(q.device)
         offsets = (2 * values - 1) * scale * spans
         window = projector[phase.start_index : phase.stop_index].matmul(offsets)
-        largest = max(largest, float(window.abs().max()))
         envelope = _endpoint_envelope(length, window)
         q[phase.start_index : phase.stop_index, indices] += (
             envelope[:, None] * window
         ).to(q.dtype)
-    if largest <= 0:
-        raise ValueError(
-            "The declared task rows leave no joint redundancy; drop the rows the "
-            "task does not constrain or use a redundant control part."
-        )
     _reject_limit_violations(q, limits, indices)
     return replace(template, positions=q)
 

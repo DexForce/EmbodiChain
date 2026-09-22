@@ -27,6 +27,7 @@ from embodichain.lab.sim.motion.expansion.contracts import (
     TrajectoryTemplate,
 )
 from embodichain.lab.sim.motion.expansion.operators import (
+    ProposalRejected,
     joint_residual,
     nullspace_residual,
     perturb_approach_direction,
@@ -400,10 +401,20 @@ def test_nullspace_residual_holds_the_declared_task_rows() -> None:
     )
 
 
-def test_nullspace_residual_refuses_a_fully_constrained_task() -> None:
+@pytest.mark.parametrize("kind", ["identity", "random", "ill_conditioned"])
+def test_nullspace_residual_refuses_any_fully_constrained_task(kind: str) -> None:
+    # A generic full-rank Jacobian leaves floating-point residue in
+    # ``I - pinv(J) @ J``, so a magnitude probe would pass it through and emit a
+    # near-unchanged variant. Only a rank test rejects all three.
     source = path_template()
     samples, joints = source.positions.shape
-    jacobians = torch.eye(joints).expand(samples, joints, joints).contiguous()
+    generator = torch.Generator(device="cpu").manual_seed(0)
+    if kind == "identity":
+        jacobians = torch.eye(joints).expand(samples, joints, joints).contiguous()
+    else:
+        square = torch.randn(samples, joints, joints, generator=generator)
+        jacobians = square + (3.0 if kind == "ill_conditioned" else 0.0)
+    assert int(torch.linalg.matrix_rank(jacobians.double())[0]) == joints
     with pytest.raises(ValueError, match="redundancy"):
         nullspace_residual(
             source,
@@ -412,6 +423,48 @@ def test_nullspace_residual_refuses_a_fully_constrained_task() -> None:
             normalized_scale=0.05,
             generator=torch.Generator(device="cpu").manual_seed(1),
         )
+
+
+def test_nullspace_residual_accepts_a_rank_deficient_task() -> None:
+    source = path_template()
+    samples, joints = source.positions.shape
+    # Five constrained rows on four joints still leave one redundant direction
+    # once the rows are linearly dependent.
+    rows = torch.randn(
+        samples, joints - 1, joints, generator=torch.Generator().manual_seed(2)
+    )
+    result = nullspace_residual(
+        source,
+        task_jacobians=rows,
+        joint_limits=wide_limits(),
+        normalized_scale=0.05,
+        generator=torch.Generator(device="cpu").manual_seed(1),
+    )
+    assert not torch.allclose(result.positions, source.positions)
+
+
+def test_a_limit_violation_is_a_rejection_not_a_malformed_input() -> None:
+    # A generation loop retries on a rejected draw; it must not retry past a
+    # caller error, so the two carry different exception types.
+    source = path_template()
+    tight = torch.stack((torch.zeros(4), torch.full((4,), 1e-3)), dim=1)
+    with pytest.raises(ProposalRejected):
+        via_points(
+            source,
+            joint_limits=tight,
+            via_count=2,
+            normalized_scale=1.0,
+            generator=torch.Generator(device="cpu").manual_seed(0),
+        )
+    with pytest.raises(ValueError) as malformed:
+        via_points(
+            source,
+            joint_limits=wide_limits(),
+            via_count=40,
+            normalized_scale=0.05,
+            generator=torch.Generator(device="cpu").manual_seed(0),
+        )
+    assert not isinstance(malformed.value, ProposalRejected)
 
 
 def test_nullspace_residual_requires_aligned_jacobians() -> None:

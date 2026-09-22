@@ -47,6 +47,7 @@ and persistence confirmations; this package does not instantiate them.
    nullspace_residual
    retime
    TIMING_PROFILES
+   ProposalRejected
    validate_motion_limits
    NOMINAL_OPERATOR
    TrajectoryVariant
@@ -183,7 +184,10 @@ routes a phase through several sampled interior knots instead, using clamped
 cubic Hermite segments, so two or more knots produce paths that differ in
 shape rather than only in amplitude. ``nullspace_residual`` projects a residual
 onto the null space of caller-supplied task Jacobians, changing arm posture
-while holding the declared task rows to **first order**; its phase endpoints
+while holding the declared task rows to **first order**. Redundancy is decided
+on the numerical rank of those Jacobians: a generic full-rank one still leaves
+floating-point residue in the projector, so a magnitude test would pass it
+through and emit a near-unchanged variant. The operator its phase endpoints
 remain exact because the envelope vanishes there, and interior samples require
 forward-kinematics verification by the host.
 
@@ -238,6 +242,9 @@ release collection and coverage reservations before an explicit write retry.
 .. autofunction:: retime
 
 .. autodata:: TIMING_PROFILES
+
+.. autoclass:: ProposalRejected
+   :members:
 
 .. autofunction:: validate_motion_limits
 
@@ -296,6 +303,17 @@ rejects proposals that an operator refuses, that fail sampled motion limits, or
 whose measured geometry and timing duplicate an accepted row. Each rejection is
 counted under a key naming its reason, so a caller can retune the offending
 setting instead of guessing why a proposal disappeared.
+
+Only :class:`ProposalRejected` counts as a rejection. Operators raise it for
+outcomes that depend on the draw, such as a residual leaving the joint limits;
+malformed arguments and impossible configurations stay plain ``ValueError`` and
+propagate, so a caller error cannot hide in a rejection count behind an
+already successful nominal variant.
+
+``spatial.method`` and ``ik.task_rows`` are both applied in the variant path:
+the configured rows are selected from the supplied spatial Jacobians before the
+null-space projection, so callers pass every row their task could constrain
+rather than pre-reducing them.
 
 Joint-limit rejection covers only the joints an operator actually moved. An
 observed reference can hold an untouched joint a few microradians outside its
@@ -390,6 +408,7 @@ The package import path above is convenient for callers combining them.
    nullspace_residual
    retime
    TIMING_PROFILES
+   ProposalRejected
    validate_motion_limits
 
 .. currentmodule:: embodichain.lab.sim.motion.expansion.variants

@@ -505,3 +505,49 @@ def test_the_approach_factor_cannot_be_dropped_silently() -> None:
     # can declare the factor in a shared job configuration.
     assert cfg.factors.approach.enabled
     assert not default_variant_factors().factors.approach.enabled
+
+
+def test_configured_task_rows_select_from_a_full_spatial_jacobian() -> None:
+    # Six rows on six joints leave no redundancy, so a configuration that keeps
+    # every row must fail while one that drops a row must succeed. That is only
+    # true if the variant path actually reads ik.task_rows.
+    source = template()
+    full = torch.zeros(SAMPLES, 6, JOINTS)
+    for row in range(6):
+        full[:, row, row] = 1.0
+
+    def expand(rows: list[int]):
+        return expand_trajectory_variants(
+            source,
+            cfg=augmentation(ik={"enabled": True, "task_rows": rows}),
+            case=case(),
+            count=2,
+            joint_limits=joint_limits(),
+            control_dt=0.1,
+            task_jacobians=full,
+            max_attempts=2,
+        )
+
+    with pytest.raises(ValueError, match="redundancy"):
+        expand([0, 1, 2, 3, 4, 5])
+    result = expand([0, 1, 2, 3, 4])
+    assert result.variants[1].spatial_operator == "nullspace_residual"
+    moved = result.candidates.positions[1] - source.positions
+    # Only the sixth joint is unconstrained, so the residual lives there.
+    assert float(moved[:, 5].abs().max()) > 0
+    assert float(moved[:, :5].abs().max()) == 0.0
+
+
+def test_a_malformed_jacobian_is_not_counted_as_a_rejected_proposal() -> None:
+    # Swallowing this as bookkeeping would return a partial result built from
+    # the nominal variant alone, hiding the caller's mistake.
+    with pytest.raises(ValueError, match="matching the template samples"):
+        expand_trajectory_variants(
+            template(),
+            cfg=augmentation(ik={"enabled": True}),
+            case=case(),
+            count=3,
+            joint_limits=joint_limits(),
+            control_dt=0.1,
+            task_jacobians=torch.zeros(3, 5, JOINTS),
+        )
