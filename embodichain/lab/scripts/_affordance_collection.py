@@ -99,7 +99,8 @@ def _collect_affordance_episodes(
         receipt.commit_id for receipt in manager.episode_commit_receipts
     }
     manifest: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "compatibility": {"accepted": "selected"},
         "run_id": run_id,
         "status": "running",
         "task_id": gym_config.get("id"),
@@ -114,6 +115,12 @@ def _collect_affordance_episodes(
         "max_batches": cfg.max_batches,
         "demo_max_attempts": max_attempts,
         "attempts": 0,
+        "measured_accepted": 0,
+        "selected": 0,
+        "quota_discarded": 0,
+        "dataset_written": 0,
+        # Kept for readers of schema version 1. It has the old, selected-row
+        # meaning and is intentionally not used as the collection quota.
         "accepted": 0,
         "committed": 0,
         "history": [],
@@ -169,6 +176,7 @@ def _collect_affordance_episodes(
             if receipt.commit_id not in previous_receipts
         ]
         manifest["dataset_receipts"] = [asdict(receipt) for receipt in receipts]
+        manifest["dataset_written"] = len(receipts)
 
     try:
         _write_manifest(manifest_path, manifest)
@@ -184,6 +192,9 @@ def _collect_affordance_episodes(
                     "batch_id": batch_id,
                     "attempt_id": attempt_id,
                     "accepted_env_ids": [],
+                    "measured_accepted": 0,
+                    "selected": 0,
+                    "quota_discarded": 0,
                     "receipt_ids": [],
                     "dataset_receipt_ids": [],
                 }
@@ -219,8 +230,41 @@ def _collect_affordance_episodes(
                         rows = target.select_affordance_episode_rows(
                             result, program, quota - manifest["committed"]
                         )
+                        selection = getattr(
+                            target, "_affordance_selection_counts", None
+                        )
+                        if not isinstance(selection, Mapping):
+                            # Preserve compatibility with lightweight host
+                            # doubles and older environments that only return
+                            # the selected row tuple.
+                            selection = {
+                                "measured_accepted": len(rows),
+                                "selected": len(rows),
+                                "quota_discarded": 0,
+                            }
+                        measured_accepted = int(
+                            selection.get("measured_accepted", len(rows))
+                        )
+                        selected_count = int(selection.get("selected", len(rows)))
+                        quota_discarded = int(selection.get("quota_discarded", 0))
+                        if (
+                            measured_accepted < 0
+                            or selected_count != len(rows)
+                            or quota_discarded < 0
+                            or measured_accepted != selected_count + quota_discarded
+                        ):
+                            raise ValueError(
+                                "Affordance selection counts are inconsistent with "
+                                "the selected rows."
+                            )
+                        record["measured_accepted"] = measured_accepted
+                        record["selected"] = selected_count
+                        record["quota_discarded"] = quota_discarded
+                        manifest["measured_accepted"] += measured_accepted
+                        manifest["selected"] += selected_count
+                        manifest["quota_discarded"] += quota_discarded
                         record["accepted_env_ids"] = list(rows)
-                        manifest["accepted"] += len(rows)
+                        manifest["accepted"] += selected_count
                         if rows:
                             before = {
                                 receipt.commit_id

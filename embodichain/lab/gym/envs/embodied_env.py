@@ -634,21 +634,28 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             Ordered physical row IDs eligible for explicit commit.
         """
-        from .augmentation import _select_accepted_rows
+        from .augmentation import _eligible_accepted_rows
 
         measured = self.task_program_adapter.measured_success_mask(program)
         if measured.dtype != torch.bool or measured.shape != (self.num_envs,):
             raise ValueError(
                 "Measured acceptance must have one boolean per environment."
             )
+        if type(remaining) is not int or remaining < 0:
+            raise ValueError("remaining must be a non-negative integer.")
         measured_rows = tuple(measured.cpu().tolist())
-        selected = _select_accepted_rows(
+        eligible = _eligible_accepted_rows(
             completed=result.completed_by_env,
             success=result.success,
             measured=measured_rows,
             lengths=result.lengths,
-            remaining=remaining,
         )
+        selected = eligible[:remaining]
+        self._affordance_selection_counts = {
+            "measured_accepted": len(eligible),
+            "selected": len(selected),
+            "quota_discarded": len(eligible) - len(selected),
+        }
         for row, accepted in enumerate(measured_rows):
             metadata = self._demo_episode_metadata[row]["augmentation"]
             metadata["measured_success"] = accepted
@@ -728,6 +735,11 @@ class EmbodiedEnv(BaseEnv):
         self._affordance_sampling_context = None
         self._affordance_collection_metadata = None
         self._affordance_accepted_env_ids = ()
+        self._affordance_selection_counts = {
+            "measured_accepted": 0,
+            "selected": 0,
+            "quota_discarded": 0,
+        }
         if options is None or "reset_ids" not in options:
             reset_ids = torch.arange(self.num_envs, device=self.device)
         else:

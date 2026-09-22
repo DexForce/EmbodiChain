@@ -68,7 +68,13 @@ class _Env:
 
     def select_affordance_episode_rows(self, result, program, remaining):
         assert program is self.program
-        return result.rows[:remaining]
+        selected = result.rows[:remaining]
+        self._affordance_selection_counts = {
+            "measured_accepted": len(result.rows),
+            "selected": len(selected),
+            "quota_discarded": len(result.rows) - len(selected),
+        }
+        return selected
 
     def commit_demo_rows(self, rows):
         self.events.append("commit")
@@ -130,6 +136,11 @@ def test_noncontiguous_successes_and_tail_count_receipts(monkeypatch, tmp_path):
     assert calls == [(0, 0), (1, 0)]
     manifest = _manifest(tmp_path)
     assert manifest["committed"] == 3
+    assert manifest["measured_accepted"] == 5
+    assert manifest["selected"] == 3
+    assert manifest["quota_discarded"] == 2
+    assert manifest["dataset_written"] == 3
+    assert manifest["accepted"] == manifest["selected"]
     assert manifest["status"] == "complete"
     assert env.events[-1] == "finalize"
     assert env._affordance_sampling_context is None
@@ -145,6 +156,10 @@ def test_all_failures_are_bounded(
     manifest = _manifest(tmp_path)
     assert manifest["attempts"] == expected
     assert manifest["committed"] == 0
+    assert manifest["measured_accepted"] == 0
+    assert manifest["selected"] == 0
+    assert manifest["quota_discarded"] == 0
+    assert manifest["dataset_written"] == 0
     assert manifest["status"] == "failed"
     assert env.events.count("execute") == expected
     assert env._affordance_collection_metadata is None
@@ -165,6 +180,8 @@ def test_partial_commit_failure_never_reexecutes(monkeypatch, tmp_path):
     assert env.events.count("execute") == 1
     manifest = _manifest(tmp_path)
     assert manifest["committed"] == 0
+    assert manifest["selected"] == 2
+    assert manifest["dataset_written"] == 1
     assert len(manifest["receipts"]) == 0
     assert len(manifest["dataset_receipts"]) == 1
     assert manifest["status"] == "failed"

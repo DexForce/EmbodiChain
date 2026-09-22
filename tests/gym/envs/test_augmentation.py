@@ -25,6 +25,7 @@ import torch
 
 from embodichain.lab.gym.envs.augmentation import (
     AffordanceAugmentationCfg,
+    _eligible_accepted_rows,
     _sampling_attempt,
     _select_accepted_rows,
     _project_affordance_metadata,
@@ -113,6 +114,18 @@ def test_select_accepted_rows_requires_all_row_evidence_and_exact_quota():
         )
 
 
+def test_eligible_rows_are_counted_before_quota_selection():
+    eligible = _eligible_accepted_rows(
+        completed=(True, True, True, True, True, True),
+        success=(False, True, False, False, False, True),
+        measured=(True, True, True, True, True, True),
+        lengths=(0, 5, 0, 0, 0, 7),
+    )
+    assert eligible == (1, 5)
+    assert eligible[:1] == (1,)
+    assert len(eligible) - 1 == 1
+
+
 def test_provenance_projects_only_declared_sampling_rows_and_owns_copy():
     poses = torch.eye(4).repeat(2, 1, 1)
     poses[1, 0, 3] = 0.25
@@ -187,6 +200,11 @@ def test_augmentation_row_selection_records_measured_acceptance():
     )
     assert rows == (1,)
     assert env._affordance_accepted_env_ids == (1,)
+    assert env._affordance_selection_counts == {
+        "measured_accepted": 1,
+        "selected": 1,
+        "quota_discarded": 0,
+    }
     assert metadata[2]["augmentation"]["measured_success"] is False
 
 

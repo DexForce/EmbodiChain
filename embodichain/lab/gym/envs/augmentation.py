@@ -125,13 +125,34 @@ def _select_accepted_rows(
     """Select successful, nonempty measured episodes within the remaining quota."""
     if type(remaining) is not int or remaining < 0:
         raise ValueError("remaining must be a non-negative integer.")
+    return _eligible_accepted_rows(
+        completed=completed,
+        success=success,
+        measured=measured,
+        lengths=lengths,
+    )[:remaining]
+
+
+def _eligible_accepted_rows(
+    *,
+    completed: tuple[bool, ...],
+    success: tuple[bool, ...],
+    measured: tuple[bool, ...],
+    lengths: tuple[int, ...],
+) -> tuple[int, ...]:
+    """Return all rows eligible before applying the collection quota.
+
+    Keeping eligibility separate from quota selection lets the collector report
+    measured acceptance and quota discards without changing the legacy selector
+    contract.
+    """
     if len({len(completed), len(success), len(measured), len(lengths)}) != 1:
         raise ValueError("All acceptance masks must have one value per row.")
     return tuple(
         row
         for row in range(len(success))
         if completed[row] and success[row] and measured[row] and lengths[row] > 0
-    )[:remaining]
+    )
 
 
 _SAMPLING_ROW_FIELDS = frozenset(
