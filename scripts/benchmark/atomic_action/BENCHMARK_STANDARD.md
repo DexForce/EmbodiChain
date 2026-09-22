@@ -104,6 +104,8 @@ of the taxonomy in `motion_generation/BENCHMARK_DESIGN.md` section 7:
 ## 2. robustness
 
 The same task under perturbation, reported against the nominal `success_rate`.
+Every axis stays inside the nominal domain: same assets, same scene, same
+embodiment, only their conditions varied.
 
 | Axis | What varies | Applies to |
 |---|---|---|
@@ -118,8 +120,65 @@ The same task under perturbation, reported against the nominal `success_rate`.
 
 ## 3. adaptability
 
-A different object, scene, or embodiment. Reported as the minimum and the
-variance of `success_rate` across the set.
+Adaptability evaluates **held-out** objects, scenes, or embodiments outside the
+calibration domain -- the assets, cases and runs that section 0 used to fix the
+tolerances and section 1 used to fix the stages. Robustness perturbs the
+nominal domain; adaptability leaves it.
+
+The measurement is the same skill, under the same stages and the same
+tolerance set, on a frozen and versioned held-out **domain set**. A domain is
+one held-out variation of the nominal setup -- an object mesh, an articulated
+asset, a scene layout, an end effector, an arm -- carrying its own cases.
+Frozen means three things:
+
+- The set was not used to select benchmark cases, tolerances, or skill
+  parameters. A domain that informed any of them is nominal, not held out.
+- Every case preserves the semantic goal and satisfies the binding contract of
+  the skill, so section 1 applies unchanged: same stages, same tolerance set,
+  no per-domain recalibration. A case that changes what the skill is asked to
+  achieve is a different skill, not a harder domain.
+- The set is versioned, and the version is reported with the numbers. Adding,
+  removing or editing a domain bumps it; results are comparable only within one
+  version.
+
+For each held-out domain `g`, recompute section 1 over that domain's cases:
+
+```
+success_rate[g]            = passed(last) / total     within domain g
+adaptability_coverage_rate = measured / mandatory     over applicable domains
+adaptability_mean          = mean_g success_rate[g]   equal weight per domain
+adaptability_worst         = min_g success_rate[g]
+adaptability_variance      = var_g success_rate[g]    population, across domains
+adaptability_retention     = adaptability_worst / nominal_success_rate
+```
+
+A domain declares which skills it applies to; for a skill it does not apply to
+it is `N/A` and enters none of the above. Within an applicable domain every
+case is mandatory, and `required_capabilities` is handled as in
+`motion_generation/BENCHMARK_DESIGN.md` section 5: an `unsupported` case is
+recorded with its reason and left out of that domain's denominator, but it
+lowers `adaptability_coverage_rate`; a case that passed the capability check
+and then failed counts as a failure instead. Selective execution therefore
+cannot improve the result -- dropping a hard domain shows up as missing
+coverage, not as a higher minimum.
+
+A suite is **eligible** only when
+
+- `adaptability_coverage_rate` is 100 % of mandatory cases, and
+- `adaptability_worst` and `adaptability_retention` both meet thresholds
+  carried by the suite and versioned with it.
+
+An ineligible result is still reported, together with the coverage rate that
+made it ineligible. `adaptability_mean` and `adaptability_variance` are
+reported but do not decide eligibility: a mean can hide one domain at zero,
+which is what the worst-domain threshold exists to catch.
+
+When `nominal_success_rate` is 0, retention is `N/A` -- not zero -- and
+eligibility rests on `adaptability_worst` alone. That state already fails
+section 1, so no adaptability result can credit it.
+
+Axes. Each contributes one or more domains to the set; the domains themselves,
+and the two thresholds, are owned by the suite and land with it.
 
 | Axis | What varies | Applies to |
 |---|---|---|
