@@ -575,6 +575,9 @@ def create_benchmark_object(
         asset_physics_mode=preset.asset_physics_mode,
     )
     obj = sim.add_rigid_object(cfg=cfg)
+    # Adding a body changes the spawn topology; re-prepare so the new object's
+    # body_data is bound before any benchmark reads its pose.
+    sim.prepare()
     sim.update(step=10)
     return obj
 
@@ -1095,6 +1098,537 @@ def record_static_scene_video(
         return None
 
 
+FAILURE_TAXONOMY: tuple[str, ...] = (
+    "invalid_case",
+    "unsupported_capability",
+    "checkpoint_load_failure",
+    "planner_exception",
+    "planner_reported_failure",
+    "timeout",
+    "non_finite_trajectory",
+    "waypoint_miss",
+    "joint_limit_violation",
+    "dynamic_limit_violation",
+    "self_collision",
+    "environment_collision",
+    "controller_tracking_failure",
+    "object_not_grasped",
+    "object_dropped",
+    "release_failure",
+    "task_goal_miss",
+)
+LADDER_STAGES: tuple[str, ...] = (
+    "planning_success",
+    "motion_valid",
+    "execution_success",
+    "task_success",
+)
+JOINT_LIMIT_TOLERANCE_RAD = 1e-3
+# Physics steps per replayed waypoint. The planners emit one waypoint per
+# physics step, but the simulated position drive cannot converge that fast: a
+# measured sweep on OpenDoor gave max arm tracking errors of 1.38/0.92/0.44/
+# 0.16/0.05/0.02 rad at 1/2/4/8/16/32 steps per waypoint, and the measured
+# hinge error tracked it (0.23/0.13/0.07/0.05/0.03/0.02 rad). At 16 steps the
+# target-joint measurement has converged to within 0.006 rad of the 32-step
+# value, so the replay measures the skill rather than the drive.
+DEFAULT_REPLAY_STEPS_PER_WAYPOINT = 16
+# Maximum arm tracking error tolerated before a case is reported as a
+# controller failure instead of crediting or blaming the skill.
+REPLAY_TRACKING_TOLERANCE_RAD = 0.10
+
+
+@dataclass
+class SuccessLadder:
+    """Layered atomic-action outcome shared by every skill benchmark.
+
+    The stages follow the suite protocol in
+    ``scripts/benchmark/motion_generation/BENCHMARK_DESIGN.md`` section 7:
+    ``planning_success -> motion_valid -> execution_success -> task_success``.
+    Every stage is recorded, not only the final verdict.
+    """
+
+    planning_success: bool = False
+    motion_valid: bool = False
+    execution_success: bool = False
+    task_success: bool = False
+    failure_stage: str = ""
+    failure_reason: str = ""
+
+    def fail(self, stage: str, reason: str) -> "SuccessLadder":
+        """Record the first failing stage and its taxonomy reason.
+
+        Args:
+            stage: Ladder stage name from :data:`LADDER_STAGES`.
+            reason: Failure reason from :data:`FAILURE_TAXONOMY`.
+
+        Returns:
+            This ladder, to allow ``return ladder.fail(...)``.
+        """
+        if stage not in LADDER_STAGES:
+            raise ValueError(f"Unknown ladder stage {stage!r}.")
+        if reason not in FAILURE_TAXONOMY:
+            raise ValueError(f"Unknown failure reason {reason!r}.")
+        if not self.failure_stage:
+            self.failure_stage = stage
+            self.failure_reason = reason
+        return self
+
+    def as_row_fields(self) -> dict[str, object]:
+        """Return the ladder columns shared by every benchmark metric table."""
+        return {
+            "planning_success": f"{float(self.planning_success):.6f}",
+            "motion_valid": f"{float(self.motion_valid):.6f}",
+            "execution_success": f"{float(self.execution_success):.6f}",
+            "task_success": f"{float(self.task_success):.6f}",
+            "failure_stage": self.failure_stage or "N/A",
+            "failure_reason": self.failure_reason or "N/A",
+        }
+
+
+def check_motion_valid(traj, robot) -> tuple[bool, str]:
+    """Validate a planned trajectory independently of any planner's own epsilon.
+
+    A trajectory is valid when it is non-empty, entirely finite, and stays
+    inside the robot's joint position limits.
+
+    Args:
+        traj: Planned positions with shape ``(num_envs, num_waypoints, dof)``.
+        robot: Robot providing ``get_qpos_limits``.
+
+    Returns:
+        ``(motion_valid, failure_reason)``; the reason is empty when valid.
+    """
+    torch = ensure_torch()
+    if traj is None or getattr(traj, "ndim", 0) < 3 or traj.shape[1] == 0:
+        return False, "non_finite_trajectory"
+    if not bool(torch.isfinite(traj).all()):
+        return False, "non_finite_trajectory"
+
+    try:
+        limits = robot.get_qpos_limits()
+    except Exception:
+        # Without limits the finite check above is the strongest available
+        # statement; do not fabricate a limit violation.
+        return True, ""
+
+    dof = traj.shape[-1]
+    if limits.shape[1] < dof:
+        return True, ""
+    lower = limits[0, :dof, 0].to(traj.device)
+    upper = limits[0, :dof, 1].to(traj.device)
+    # Unlimited joints are reported as non-finite bounds; ignore them.
+    valid = torch.isfinite(lower) & torch.isfinite(upper)
+    if not bool(valid.any()):
+        return True, ""
+    below = traj[..., valid] < (lower[valid] - JOINT_LIMIT_TOLERANCE_RAD)
+    above = traj[..., valid] > (upper[valid] + JOINT_LIMIT_TOLERANCE_RAD)
+    if bool(below.any()) or bool(above.any()):
+        return False, "joint_limit_violation"
+    return True, ""
+
+
+@dataclass(frozen=True)
+class JointDisplacementTrace:
+    """Signed displacement of one articulation joint across a physical replay.
+
+    Displacement is measured relative to the joint position recorded before the
+    replay starts, so it is independent of the asset's zero convention.
+
+    ``measured_position`` is the value at the caller-selected evaluation
+    waypoint. Contact skills must be scored while the robot still controls the
+    target joint: once the hand releases and the arm retracts, an undriven
+    hinge, drawer, or knob is free to rebound, and the post-replay resting
+    value describes the asset's dynamics rather than the skill's achievement.
+    ``settled_position`` retains that resting value for diagnostics.
+    """
+
+    initial_position: float
+    measured_position: float
+    settled_position: float
+    measured_displacement: float
+    settled_displacement: float
+    peak_signed_displacement: float
+    max_tracking_error_rad: float = 0.0
+
+
+def waypoint_step_counts(
+    waypoint_dt,
+    physics_dt: float,
+    waypoint_count: int,
+    fallback_steps: int = 4,
+) -> list[int]:
+    """Resolve physics steps per waypoint from a planned trajectory's timing.
+
+    Contact skills are sensitive to replay rate: holding each commanded
+    waypoint longer than the planner intended keeps pushing a position
+    controlled arm into the contact, which over-actuates the manipulated
+    joint. This mirrors the step derivation used by the tutorial replay so
+    benchmark replays execute at the planned speed.
+
+    Args:
+        waypoint_dt: Per-waypoint arrival intervals for one environment, or
+            None to fall back to a fixed rate.
+        physics_dt: Simulation physics timestep in seconds.
+        waypoint_count: Number of trajectory waypoints.
+        fallback_steps: Steps per waypoint used when timing is unavailable.
+
+    Returns:
+        Physics step counts, one per waypoint, each at least one.
+    """
+    if waypoint_dt is None or physics_dt <= 0.0:
+        return [fallback_steps] * waypoint_count
+
+    counts: list[int] = []
+    for index in range(waypoint_count):
+        next_index = min(index + 1, waypoint_count - 1)
+        try:
+            duration = float(waypoint_dt[next_index])
+        except (IndexError, TypeError, ValueError):
+            counts.append(fallback_steps)
+            continue
+        ratio = duration / physics_dt
+        nearest = round(ratio)
+        if math.isclose(ratio, nearest, rel_tol=1.0e-6, abs_tol=1.0e-9):
+            counts.append(max(1, int(nearest)))
+        else:
+            counts.append(max(1, math.ceil(ratio)))
+    return counts
+
+
+def replay_and_track_scalar(
+    sim,
+    robot,
+    traj,
+    read_value: Callable[[int], float],
+    measure_waypoint: int | None = None,
+    waypoint_dt=None,
+    physics_dt: float = 0.0,
+    steps_per_waypoint: int = DEFAULT_REPLAY_STEPS_PER_WAYPOINT,
+    hold_steps: int = 60,
+    hold_substeps: int = 2,
+) -> JointDisplacementTrace | None:
+    """Replay a trajectory while sampling one scalar scene measurement.
+
+    This is the shared physical-replay primitive for every skill benchmark.
+    ``read_value`` may read an articulation joint, an object tilt angle, or any
+    other scalar the skill's task-success rule needs.
+
+    Args:
+        sim: Simulation manager to step.
+        robot: Robot receiving the replayed joint positions.
+        traj: Planned positions with shape ``(num_envs, num_waypoints, dof)``.
+        read_value: Returns the tracked scalar at the current simulation
+            state, given the waypoint index just executed. The index is ``-1``
+            before the first waypoint and ``waypoint_count`` during the hold,
+            which lets a skill capture a reference at a segment boundary.
+        measure_waypoint: Waypoint index scored as the skill's achievement.
+            Defaults to the final waypoint.
+        waypoint_dt: Planned per-waypoint arrival intervals for one
+            environment. When given, the replay runs at the planned rate.
+        physics_dt: Simulation physics timestep, required with ``waypoint_dt``.
+        steps_per_waypoint: Fallback physics steps per waypoint when no
+            planned timing is available.
+        hold_steps: Terminal hold iterations after the last waypoint.
+        hold_substeps: Physics steps per terminal hold iteration.
+
+    Returns:
+        The measurement trace, or None when the trajectory is unusable.
+    """
+    if traj is None or getattr(traj, "ndim", 0) < 3 or traj.shape[1] == 0:
+        return None
+
+    waypoint_count = int(traj.shape[1])
+    if measure_waypoint is None:
+        measure_waypoint = waypoint_count - 1
+    measure_waypoint = max(0, min(int(measure_waypoint), waypoint_count - 1))
+
+    step_counts = waypoint_step_counts(
+        waypoint_dt, physics_dt, waypoint_count, steps_per_waypoint
+    )
+
+    initial_position = read_value(-1)
+    samples = [initial_position]
+    measured_position = initial_position
+    max_tracking_error = 0.0
+    for waypoint_index in range(waypoint_count):
+        commanded = traj[:, waypoint_index, :]
+        robot.set_qpos(commanded)
+        sim.update(step=step_counts[waypoint_index])
+        # Verify the arm actually reached the commanded waypoint. Scoring the
+        # scene is only meaningful when the executed motion matches the planned
+        # one; a large error here means the replay measured the controller.
+        achieved = robot.get_qpos(target=False)
+        error = float((achieved - commanded).abs().max())
+        max_tracking_error = max(max_tracking_error, error)
+        value = read_value(waypoint_index)
+        samples.append(value)
+        if waypoint_index == measure_waypoint:
+            measured_position = value
+
+    final_qpos = traj[:, -1, :]
+    for _ in range(hold_steps):
+        robot.set_qpos(final_qpos)
+        sim.update(step=hold_substeps)
+        samples.append(read_value(waypoint_count))
+
+    settled_position = samples[-1]
+    displacements = [value - initial_position for value in samples]
+    peak = max(displacements, key=abs)
+    return JointDisplacementTrace(
+        initial_position=initial_position,
+        measured_position=measured_position,
+        settled_position=settled_position,
+        measured_displacement=measured_position - initial_position,
+        settled_displacement=settled_position - initial_position,
+        peak_signed_displacement=peak,
+        max_tracking_error_rad=max_tracking_error,
+    )
+
+
+def replay_and_track_joint(
+    sim,
+    robot,
+    traj,
+    articulation,
+    joint_index: int,
+    measure_waypoint: int | None = None,
+    waypoint_dt=None,
+    physics_dt: float = 0.0,
+    steps_per_waypoint: int = DEFAULT_REPLAY_STEPS_PER_WAYPOINT,
+    hold_steps: int = 60,
+    hold_substeps: int = 2,
+) -> JointDisplacementTrace | None:
+    """Replay a trajectory in physics while tracking one articulation joint.
+
+    Both the actuation waypoints and the terminal hold are sampled, so a joint
+    that reaches its extreme mid-motion and then rebounds (a button, a
+    free-swinging door) still reports the peak it actually attained.
+
+    Args:
+        sim: Simulation manager to step.
+        robot: Robot receiving the replayed joint positions.
+        traj: Planned positions with shape ``(num_envs, num_waypoints, dof)``.
+        articulation: Articulation owning the tracked joint.
+        joint_index: Index of the tracked joint in ``articulation``.
+        measure_waypoint: Waypoint index scored as the skill's achievement.
+            Defaults to the final waypoint.
+        waypoint_dt: Planned per-waypoint arrival intervals for one
+            environment. When given, the replay runs at the planned rate.
+        physics_dt: Simulation physics timestep, required with ``waypoint_dt``.
+        steps_per_waypoint: Fallback physics steps per waypoint when no
+            planned timing is available.
+        hold_steps: Terminal hold iterations after the last waypoint.
+        hold_substeps: Physics steps per terminal hold iteration.
+
+    Returns:
+        The displacement trace, or None when the trajectory is unusable.
+    """
+
+    def read(waypoint_index: int) -> float:
+        del waypoint_index
+        return float(articulation.get_qpos(target=False)[0, joint_index])
+
+    return replay_and_track_scalar(
+        sim=sim,
+        robot=robot,
+        traj=traj,
+        read_value=read,
+        measure_waypoint=measure_waypoint,
+        waypoint_dt=waypoint_dt,
+        physics_dt=physics_dt,
+        steps_per_waypoint=steps_per_waypoint,
+        hold_steps=hold_steps,
+        hold_substeps=hold_substeps,
+    )
+
+
+@dataclass
+class ContactCaseOutcome:
+    """Result of running one articulated-contact case through the ladder."""
+
+    ladder: SuccessLadder
+    trace: JointDisplacementTrace | None = None
+    elapsed_s: float = 0.0
+    cpu_delta_mb: float = 0.0
+    gpu_delta_mb: float = 0.0
+    peak_gpu_mb: float = 0.0
+    trajectory = None
+
+    @property
+    def trajectory_waypoints(self) -> int:
+        """Number of planned waypoints, or zero when planning failed."""
+        traj = self.trajectory
+        if traj is None or getattr(traj, "ndim", 0) < 3:
+            return 0
+        return int(traj.shape[1])
+
+
+def run_articulated_contact_case(
+    sim,
+    robot,
+    articulation,
+    atomic_engine,
+    build_invocation: Callable[[], tuple[object, object]],
+    joint_index: int,
+    actuation_segment: str,
+    evaluate: Callable[[JointDisplacementTrace], tuple[bool, str]],
+    hold_steps: int = 60,
+) -> ContactCaseOutcome:
+    """Run one contact skill through planning, validation, and physical replay.
+
+    The target joint is scored at the last waypoint of ``actuation_segment``,
+    the point where the skill stops commanding the joint. Later segments open
+    the hand and retract the arm, after which an undriven hinge, drawer, or
+    knob moves under its own dynamics rather than the skill's control.
+
+    Args:
+        sim: Simulation manager to step.
+        robot: Robot executing the trajectory.
+        articulation: Articulation owning the manipulated joint.
+        atomic_engine: Engine used to compile the invocation.
+        build_invocation: Returns the ``(invocation, context)`` pair to compile.
+        joint_index: Index of the manipulated joint in ``articulation``.
+        actuation_segment: Segment name whose end is scored.
+        evaluate: Maps the displacement trace to ``(task_success, reason)``.
+        hold_steps: Terminal hold iterations after the last waypoint.
+
+    Returns:
+        The ladder result, displacement trace, and cost metrics for the case.
+    """
+    ladder = SuccessLadder()
+    outcome = ContactCaseOutcome(ladder=ladder)
+
+    invocation, context = build_invocation()
+    try:
+        elapsed, mem_delta, peak_gpu, result = timed_call(
+            lambda: atomic_engine.compile((invocation,), context)
+        )
+    except Exception as exc:
+        print(f"    planner exception: {type(exc).__name__}: {exc}")
+        ladder.fail("planning_success", "planner_exception")
+        return outcome
+
+    outcome.elapsed_s = elapsed
+    outcome.cpu_delta_mb = mem_delta["cpu_mb"]
+    outcome.gpu_delta_mb = mem_delta["gpu_mb"]
+    outcome.peak_gpu_mb = peak_gpu
+
+    ladder.planning_success = bool(result.plan_success.all().item())
+    traj = result.trajectory.positions
+    outcome.trajectory = traj
+    if not ladder.planning_success:
+        ladder.fail("planning_success", "planner_reported_failure")
+        return outcome
+
+    motion_valid, motion_reason = check_motion_valid(traj, robot)
+    ladder.motion_valid = motion_valid
+    if not motion_valid:
+        ladder.fail("motion_valid", motion_reason)
+        return outcome
+
+    try:
+        measure_waypoint = result.segment(0, actuation_segment).stop - 1
+    except (KeyError, AttributeError, IndexError):
+        measure_waypoint = int(traj.shape[1]) - 1
+
+    try:
+        trace = replay_and_track_joint(
+            sim=sim,
+            robot=robot,
+            traj=traj,
+            articulation=articulation,
+            joint_index=joint_index,
+            measure_waypoint=measure_waypoint,
+            steps_per_waypoint=DEFAULT_REPLAY_STEPS_PER_WAYPOINT,
+            hold_steps=hold_steps,
+        )
+        ladder.execution_success = trace is not None
+    except Exception as exc:
+        print(f"    replay exception: {type(exc).__name__}: {exc}")
+        trace = None
+        ladder.fail("execution_success", "controller_tracking_failure")
+
+    outcome.trace = trace
+    if trace is not None and (
+        trace.max_tracking_error_rad > REPLAY_TRACKING_TOLERANCE_RAD
+    ):
+        # The executed motion did not match the plan, so the manipulated joint
+        # reading describes the drive, not the skill. Do not score task success.
+        ladder.execution_success = False
+        ladder.fail("execution_success", "controller_tracking_failure")
+        return outcome
+
+    if ladder.execution_success and trace is not None:
+        task_success, reason = evaluate(trace)
+        ladder.task_success = task_success
+        if not task_success:
+            ladder.fail("task_success", reason)
+    elif not ladder.failure_stage:
+        ladder.fail("execution_success", "controller_tracking_failure")
+    return outcome
+
+
+def warmup_planning(callable_fn: Callable[[], object]) -> bool:
+    """Run one discarded planning call so timings exclude first-call cost.
+
+    The first compile in a process pays Warp/torch kernel compilation and
+    allocator warm-up, which would otherwise be charged to whichever case
+    happens to run first and make cases incomparable.
+
+    Args:
+        callable_fn: Planning call to execute and discard.
+
+    Returns:
+        True when the warm-up call completed without raising.
+    """
+    try:
+        callable_fn()
+        sync_cuda()
+        return True
+    except Exception as exc:
+        print(f"Warning: benchmark warm-up call failed: {type(exc).__name__}: {exc}")
+        return False
+
+
+def build_ladder_leaderboard(
+    action_name: str,
+    results: Sequence[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Aggregate ladder stage rates for one action into a leaderboard row.
+
+    Args:
+        action_name: Atomic action identifier.
+        results: Case results each carrying a ``ladder`` entry.
+
+    Returns:
+        A single-row leaderboard reporting every ladder stage rate.
+    """
+    if not results:
+        return []
+
+    count = len(results)
+
+    def rate(stage: str) -> str:
+        total = sum(
+            1.0
+            for result in results
+            if bool(getattr(result["ladder"], stage))  # type: ignore[index]
+        )
+        return f"{total / count:.2%}"
+
+    return [
+        {
+            "rank": 1,
+            "algorithm": action_name,
+            "planning_success_rate": rate("planning_success"),
+            "motion_valid_rate": rate("motion_valid"),
+            "execution_success_rate": rate("execution_success"),
+            "task_success_rate": rate("task_success"),
+            "evaluated_cases": count,
+        }
+    ]
+
+
 def format_float(value: float | None, precision: int = 6) -> str:
     """Format finite floats for tables and use N/A for missing values."""
     if value is None or not math.isfinite(value):
@@ -1185,7 +1719,10 @@ __all__ = [
     "add_profile_benchmark_args",
     "add_video_benchmark_args",
     "build_video_output_path",
+    "build_ladder_leaderboard",
     "build_single_action_leaderboard",
+    "check_motion_valid",
+    "ContactCaseOutcome",
     "create_antipodal_object_semantics",
     "create_benchmark_object",
     "create_mesh_benchmark_object",
@@ -1196,10 +1733,14 @@ __all__ = [
     "describe_object_preset",
     "ensure_repo_root",
     "ensure_torch",
+    "FAILURE_TAXONOMY",
     "format_float",
     "format_vector3",
     "FULL_MESH_OBJECT_TYPES",
     "FULL_POSITION_CASE_NAMES",
+    "JointDisplacementTrace",
+    "JOINT_LIMIT_TOLERANCE_RAD",
+    "LADDER_STAGES",
     "MESH_OBJECT_PRESETS",
     "MeshObjectPreset",
     "PICKUP_APPROACH_CASES",
@@ -1213,12 +1754,15 @@ __all__ = [
     "park_rigid_object",
     "pickup_approach_direction_tuple",
     "record_static_scene_video",
+    "replay_and_track_joint",
+    "replay_and_track_scalar",
     "replay_trajectory_for_physical_validation",
     "replay_trajectory_with_recording",
     "reset_rigid_object",
     "reset_rigid_object_xy",
     "reset_robot",
     "resolve_pickup_approach_direction",
+    "run_articulated_contact_case",
     "resolve_profile",
     "select_mesh_object_presets",
     "select_pickup_approaches",
@@ -1229,7 +1773,10 @@ __all__ = [
     "SMOKE_PICKUP_APPROACH_CASES",
     "SMOKE_MESH_OBJECT_TYPES",
     "SMOKE_POSITION_CASE_NAMES",
+    "SuccessLadder",
     "timed_call",
+    "warmup_planning",
+    "waypoint_step_counts",
     "summarize_video_recording",
     "write_markdown_report",
     "xy_distance_m",
