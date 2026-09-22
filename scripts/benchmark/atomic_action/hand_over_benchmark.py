@@ -47,6 +47,7 @@ from scripts.benchmark.atomic_action.common import (
     format_float,
     hand_is_released,
     object_position_tuple,
+    release_simulation,
     replay_and_track_channels,
     replay_trajectory_with_recording,
     reset_rigid_object,
@@ -339,22 +340,6 @@ def _run_case(
     )
 
 
-def _release_simulation(sim) -> None:
-    """Tear down one case's simulation so the next case can build its own."""
-    from embodichain.lab.sim import SimulationManager
-
-    if not SimulationManager.is_instantiated():
-        return
-    if not getattr(sim, "_is_constructed", False):
-        SimulationManager.reset(getattr(sim, "instance_id", 0))
-        return
-    if sim.is_window_recording():
-        sim.stop_window_record()
-    sim.wait_window_record_saves()
-    sim.destroy(exit_process=False)
-    SimulationManager.flush_cleanup_queue()
-
-
 def _case_result(
     case: HandOverCase,
     repeat: int,
@@ -585,7 +570,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         finally:
             # SimulationManager is a singleton, so a multi-case sweep must tear
             # the current scene down before the next case builds its own.
-            _release_simulation(sim)
+            release_simulation(sim)
 
     perf_rows, metric_rows = _build_rows(report_results)
     leaderboard_rows = build_stage_leaderboard("hand_over", report_results)

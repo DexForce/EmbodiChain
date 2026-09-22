@@ -1308,6 +1308,34 @@ def hand_is_released(robot, hand_control_part: str, open_qpos, close_qpos) -> bo
     return to_open < to_close
 
 
+def release_simulation(sim=None) -> None:
+    """Tear down a simulation so the next one can build its own.
+
+    The simulator is a singleton keyed by instance id, and a planner resolves
+    its robot through that instance. A benchmark that runs after another in the
+    same process therefore has to start from a released singleton, or it builds
+    its scene as a second instance and then fails to find its own robot.
+
+    Args:
+        sim: Simulation manager to release, or None to release the current
+            instance if there is one.
+    """
+    from embodichain.lab.sim import SimulationManager
+
+    if not SimulationManager.is_instantiated():
+        return
+    if sim is None:
+        sim = SimulationManager.get_instance()
+    if not getattr(sim, "_is_constructed", False):
+        SimulationManager.reset(getattr(sim, "instance_id", 0))
+        return
+    if sim.is_window_recording():
+        sim.stop_window_record()
+    sim.wait_window_record_saves()
+    sim.destroy(exit_process=False)
+    SimulationManager.flush_cleanup_queue()
+
+
 def check_motion_valid(traj, robot) -> tuple[bool, str]:
     """Check a planned trajectory as a diagnostic, not as a success gate.
 
@@ -1975,6 +2003,7 @@ __all__ = [
     "park_rigid_object",
     "pickup_approach_direction_tuple",
     "record_static_scene_video",
+    "release_simulation",
     "replay_and_track_channels",
     "replay_and_track_joint",
     "replay_and_track_scalar",

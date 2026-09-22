@@ -35,6 +35,7 @@ from scripts.benchmark.atomic_action.common import (
     POSITION_CASES,
     add_profile_benchmark_args,
     add_video_benchmark_args,
+    release_simulation,
     resolve_profile,
 )
 
@@ -337,6 +338,10 @@ def _run_in_process_benchmarks(
         child_args = _make_child_args(args, action_name)
         report_path = module.run_all_benchmarks(child_args)
         reports.append(report_path)
+        # Each benchmark builds its own scene. Leaving the previous one
+        # standing makes the next benchmark a second simulator instance, whose
+        # planner then resolves against the robots of the first.
+        release_simulation()
     return reports
 
 

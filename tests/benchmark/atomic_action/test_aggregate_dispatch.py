@@ -29,13 +29,16 @@ import argparse
 import importlib
 import inspect
 import re
+import types
 from pathlib import Path
 
 import pytest
 
+from scripts.benchmark.atomic_action import run_benchmark
 from scripts.benchmark.atomic_action.run_benchmark import (
     ACTION_MODULES,
     _make_child_args,
+    _run_in_process_benchmarks,
     add_benchmark_args,
 )
 
@@ -117,3 +120,41 @@ def test_a_skill_without_grasp_sampling_is_not_given_grasp_arguments() -> None:
     assert not hasattr(child_args, "n_sample")
     assert not hasattr(child_args, "force_reannotate")
     assert child_args.device == args.device
+
+
+def test_each_in_process_benchmark_starts_from_a_released_simulation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The simulator singleton is torn down between benchmarks.
+
+    Leaving the previous scene standing makes the next benchmark a second
+    simulator instance, and its planner then resolves against the first
+    benchmark's robots instead of its own.
+    """
+    calls: list[str] = []
+
+    def fake_import(module_name: str) -> types.SimpleNamespace:
+        def run_all_benchmarks(args: argparse.Namespace) -> Path:
+            del args
+            calls.append(f"run:{module_name}")
+            return Path(f"{module_name}.md")
+
+        return types.SimpleNamespace(
+            add_benchmark_args=lambda parser: None,
+            run_all_benchmarks=run_all_benchmarks,
+        )
+
+    monkeypatch.setattr(run_benchmark.importlib, "import_module", fake_import)
+    monkeypatch.setattr(
+        run_benchmark, "release_simulation", lambda: calls.append("release")
+    )
+
+    reports = _run_in_process_benchmarks(_aggregate_args(), ["press", "hand_over"])
+
+    assert calls == [
+        "run:" + ACTION_MODULES["press"],
+        "release",
+        "run:" + ACTION_MODULES["hand_over"],
+        "release",
+    ]
+    assert len(reports) == 2
