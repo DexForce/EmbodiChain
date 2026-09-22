@@ -38,6 +38,7 @@ EXPECTED_IMPORT_REGISTERED_TASK_MODULES = {
     "MatchObjectContainer-v1": "embodichain_tasks.manipulation.tableware.match_object_container",
     "PlaceObjectDrawer-v1": "embodichain_tasks.manipulation.tableware.place_object_drawer",
     "PushCubeRL": "embodichain_tasks.manipulation.push_cube",
+    "RepeatedPickPlaceRlinf-Franka-v1": "embodichain_tasks.manipulation.repeated_pick_place",
     "ScoopIce-v1": "embodichain_tasks.manipulation.tableware.scoop_ice",
     "SimpleTask-v1": "embodichain_tasks.special.simple_task",
     "StackBlocksTwo-v1": "embodichain_tasks.manipulation.tableware.stack_blocks_two",
@@ -46,7 +47,7 @@ EXPECTED_IMPORT_REGISTERED_TASK_MODULES = {
 }
 REMOVED_AGENT_ENV_IDS = {"PourWaterAgent-v3", "RearrangementAgent-v3"}
 CONFIG_DEFINED_TASK_PROGRAM_TASKS = {"pour_water"}
-RL_SIMULATOR_ENV_IDS = {"CartPoleRL", "PushCubeRL"}
+RL_SIMULATOR_ENV_IDS = {"CartPoleRL", "PushCubeRL", "RepeatedPickPlaceRlinf-Franka-v1"}
 TABLEWARE_CONFIG_TASKS = {
     "blocks_ranking_rgb",
     "blocks_ranking_size",

@@ -80,8 +80,9 @@ class MockEnvForEef(MockEnv):
     def __init__(self, num_envs: int = 2, action_dim: int = 6):
         super().__init__(num_envs, action_dim)
 
-    def compute_ik(self, pose, joint_seed):
+    def compute_ik(self, pose, joint_seed, name=None):
         """Return (all success, joint_seed) to simulate IK success."""
+        del pose, name
         batch_size = joint_seed.shape[0]
         ret = torch.ones(batch_size, dtype=torch.bool, device=self.device)
         return ret, joint_seed.clone()

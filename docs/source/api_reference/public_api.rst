@@ -341,6 +341,7 @@ embodichain.lab.gym.envs.managers.actions
    QposTerm
    QposDenormalizedTerm
    QposNormalizedTerm
+   EefPoseGripperTerm
    EefPoseTerm
    QvelTerm
    QfTerm
@@ -2189,6 +2190,15 @@ embodichain_tasks.configs
 .. autosummary::
 
    get_config_path
+
+embodichain_tasks.manipulation.repeated_pick_place
+------------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.repeated_pick_place
+
+.. autosummary::
+
+   RepeatedPickPlaceRlinfEnv
 
 embodichain_tasks.manipulation.push_cube
 ----------------------------------------

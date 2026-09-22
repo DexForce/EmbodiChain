@@ -94,6 +94,7 @@ _TASKS = {
         frozenset({"pick", "place", "hand_over"}),
     ),
 }
+_PYTHON_TASK_ENV_MODULES = frozenset({"repeated_pick_place"})
 _TEST_ENV_ID = "ConfiguredTaskProgramIntegrationTest-v1"
 _TABLEWARE_TASKS = {
     "pour_water": (
@@ -953,8 +954,10 @@ def test_integration_registration_rejects_reusing_an_id_for_changed_config(
 
 
 def test_examples_have_no_importable_task_environment_modules() -> None:
-    """All three environment implementations are now serialized configuration."""
+    """Config-defined examples stay module-free unless RL needs Python state logic."""
     for task_name in _TASKS:
+        if task_name in _PYTHON_TASK_ENV_MODULES:
+            continue
         module_name = f"embodichain_tasks.manipulation.{task_name}"
         assert importlib.util.find_spec(module_name) is None
 

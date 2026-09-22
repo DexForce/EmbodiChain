@@ -42,6 +42,7 @@ from tensordict import TensorDict
 
 from embodichain.lab.sim.types import EnvAction
 from embodichain.utils.math import matrix_from_euler, matrix_from_quat
+
 from .action_manager import ActionTerm
 from .cfg import ActionTermCfg
 
@@ -54,12 +55,13 @@ if TYPE_CHECKING:
 __all__ = [
     "DefaultJointPositionTerm",
     "DeltaQposTerm",
-    "QposTerm",
+    "EefPoseGripperTerm",
+    "EefPoseTerm",
+    "QfTerm",
     "QposDenormalizedTerm",
     "QposNormalizedTerm",
-    "EefPoseTerm",
+    "QposTerm",
     "QvelTerm",
-    "QfTerm",
 ]
 
 
@@ -259,6 +261,7 @@ class EefPoseTerm(ActionTerm):
         super().__init__(cfg, env)
         self._scale = cfg.params.get("scale", 1.0)
         self._pose_dim = cfg.params.get("pose_dim", 7)  # 6 for euler, 7 for quat
+        self._part_name = cfg.params.get("part_name")
 
     @property
     def input_key(self) -> str:
@@ -286,19 +289,66 @@ class EefPoseTerm(ActionTerm):
                 f"EEF pose action must be 6D or 7D, got {scaled.shape[-1]}D"
             )
         # Batch IK: robot.compute_ik supports (num_envs, 4, 4) pose and (num_envs, dof) seed
+        joint_seed = current_qpos
+        part_joint_ids = None
+        if self._part_name is not None:
+            part_joint_ids = self._env.robot.get_joint_ids(
+                self._part_name, remove_mimic=True
+            )
+            joint_seed = current_qpos[:, part_joint_ids]
         ret, qpos_ik = self._env.robot.compute_ik(
             pose=target_pose,
-            joint_seed=current_qpos,
+            joint_seed=joint_seed,
+            name=self._part_name,
         )
-        # Fallback to current_qpos where IK failed
-        result_qpos = torch.where(
-            ret.unsqueeze(-1).expand_as(qpos_ik), qpos_ik, current_qpos
-        )
+        if part_joint_ids is None or qpos_ik.shape[-1] == current_qpos.shape[-1]:
+            result_qpos = torch.where(
+                ret.unsqueeze(-1).expand_as(qpos_ik), qpos_ik, current_qpos
+            )
+        else:
+            result_qpos = current_qpos.clone()
+            selected_qpos = torch.where(
+                ret.unsqueeze(-1).expand_as(qpos_ik),
+                qpos_ik,
+                current_qpos[:, part_joint_ids],
+            )
+            result_qpos[:, part_joint_ids] = selected_qpos
         return TensorDict(
             {"qpos": result_qpos, "ik_success": ret},
             batch_size=[batch_size],
             device=self.device,
         )
+
+
+class EefPoseGripperTerm(EefPoseTerm):
+    """Convert a 7D Cartesian action into arm IK targets and gripper joints.
+
+    The action is ``[x, y, z, roll, pitch, yaw, gripper]``. The first six
+    values use the same absolute-pose convention as :class:`EefPoseTerm`; the
+    final value is normalized from ``[-1, 1]`` to the active hand joint limits.
+    """
+
+    @property
+    def action_dim(self) -> int:
+        return 7
+
+    def process_action(self, action: torch.Tensor) -> EnvAction:
+        if action.shape[-1] != 7:
+            raise ValueError(
+                f"EefPoseGripperTerm expects 7D actions, got {action.shape[-1]}D."
+            )
+
+        arm_action = action[..., :6]
+        result = super().process_action(arm_action)
+        hand_joint_ids = self._env.robot.get_joint_ids("hand", remove_mimic=True)
+        if not hand_joint_ids:
+            raise ValueError("EefPoseGripperTerm requires a robot hand control part.")
+
+        limits = self._env.robot.body_data.qpos_limits[0, hand_joint_ids]
+        gripper = action[..., 6:7].clamp(-1.0, 1.0)
+        hand_qpos = limits[:, 0] + (gripper + 1.0) * 0.5 * (limits[:, 1] - limits[:, 0])
+        result["qpos"][:, hand_joint_ids] = hand_qpos.expand(-1, len(hand_joint_ids))
+        return result
 
 
 class QvelTerm(ActionTerm):
