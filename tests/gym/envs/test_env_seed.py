@@ -44,6 +44,7 @@ class _ResetEnv(BaseEnv):
         self._num_envs = 1
         self.sim = SimpleNamespace(
             device=torch.device("cpu"),
+            is_window_opened=False,
             reset_objects_state=MagicMock(
                 side_effect=lambda **_: self.reset_events.append("reset_objects")
             ),
@@ -107,6 +108,7 @@ def test_reset_seed_replays_gym_rng_and_reseeds_event_manager(monkeypatch) -> No
 def test_reset_publishes_episode_state_before_visual_observation() -> None:
     """Reset state must reach render consumers before capture and observations."""
     env = _ResetEnv()
+    env.sim.is_window_opened = True
 
     env.reset()
 
@@ -114,6 +116,21 @@ def test_reset_publishes_episode_state_before_visual_observation() -> None:
         "reset_objects",
         "initialize_episode",
         "sync_render",
+        "capture",
+        "get_obs",
+    ]
+
+
+def test_headless_reset_leaves_publication_to_visual_consumers() -> None:
+    """State-only training resets must not publish the entire render scene."""
+    env = _ResetEnv()
+
+    env.reset()
+
+    env.sim.sync_render_state.assert_not_called()
+    assert env.reset_events == [
+        "reset_objects",
+        "initialize_episode",
         "capture",
         "get_obs",
     ]

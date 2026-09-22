@@ -6,11 +6,13 @@ and readiness reporting. Return to the [simulation overview](simulation-system.m
 ## Rendering does not advance physics
 
 `NewtonPhysicsCfg.sync_to_renderer=None` preserves DexSim's consumer-aware
-per-step policy. Camera rendering and reset observations explicitly synchronize
-on demand; correctness must not depend on continuous render sync in headless
-training. `SimulationManager.sync_render_state()` and backend render hooks
-publish state without advancing physics time. Marker publication while paused
-uses `capture_visualization(force=True)`.
+per-step policy. Nonempty camera groups, Viser captures and simulation-time
+recording frames synchronize when consumed. Empty camera groups must not publish
+render transforms. Reset publishes immediately only for an open native window;
+headless state-only observations need no render synchronization.
+`SimulationManager.sync_render_state()` remains an explicit publication API and
+backend render hooks publish without advancing physics time. Marker publication
+while paused uses `capture_visualization(force=True)`.
 
 Viser forces headless mode and is mutually exclusive with the native window.
 An empty server may start before assets are declared; it must not finalize

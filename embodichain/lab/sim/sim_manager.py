@@ -1662,14 +1662,18 @@ class SimulationManager:
     def render_camera_group(self, group_ids: list[int]) -> None:
         """Synchronize physics state and render camera groups.
 
+        An empty group list skips synchronization and rendering. Startup
+        readiness reporting still runs for state-only observations.
+
         Args:
             group_ids (list[int]): The list of camera group ids to render.
 
         Note: This interface is only valid when Ray Tracing rendering backend is enabled.
         """
 
-        self.sync_render_state()
-        self._world.render_camera_group(group_ids)
+        if group_ids:
+            self.sync_render_state()
+            self._world.render_camera_group(group_ids)
         self._log_scene_summary()
 
     def update(
@@ -3982,6 +3986,9 @@ class SimulationManager:
         state.accumulated_sim_time = max(
             0.0, state.accumulated_sim_time - state.time_step
         )
+        # Publish from the simulation thread only when a frame is due. The
+        # render-thread recorder must not wait on its own render publication.
+        self.sync_render_state()
         return self._capture_window_record_frame(state)
 
     def _save_window_record_worker(

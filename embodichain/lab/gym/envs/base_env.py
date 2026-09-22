@@ -930,7 +930,10 @@ class BaseEnv(gym.Env):
                 self._initialize_episode(reset_ids, **options)
             self._elapsed_steps[reset_ids] = 0
 
-            self.sim.sync_render_state()
+            # Cameras and Viser synchronize when they capture. Only the native
+            # window needs an immediate publication after this direct reset.
+            if self.sim.is_window_opened:
+                self.sim.sync_render_state()
             self.sim.capture_visualization_safely(force=True)
 
             with self._profiler.section("get_obs"):

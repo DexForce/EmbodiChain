@@ -1248,6 +1248,20 @@ def test_render_camera_group_syncs_state_before_rendering() -> None:
     assert lifecycle == ["sync", "render", "summary"]
 
 
+def test_empty_camera_group_does_not_publish_render_state() -> None:
+    """State-only observations must not cross the physics-to-render bridge."""
+    sim = object.__new__(SimulationManager)
+    sim.sync_render_state = MagicMock()
+    sim._world = SimpleNamespace(render_camera_group=MagicMock())
+    sim._log_scene_summary = MagicMock()
+
+    sim.render_camera_group([])
+
+    sim.sync_render_state.assert_not_called()
+    sim._world.render_camera_group.assert_not_called()
+    sim._log_scene_summary.assert_called_once_with()
+
+
 def test_register_kinematic_joint_trajectory_expands_each_arena() -> None:
     sim, builder = _make_runtime_control_sim_manager()
     frame_count = 3
@@ -2017,6 +2031,15 @@ def test_start_window_record_rejects_concurrent_sessions() -> None:
 
 def test_headless_recording_uses_sim_time_and_captures_frames() -> None:
     sim = _make_sim_manager()
+    lifecycle: list[str] = []
+    sim.sync_render_state = MagicMock(side_effect=lambda: lifecycle.append("sync"))
+    original_capture = sim._capture_window_record_frame
+
+    def capture(state: _WindowRecordState) -> int:
+        lifecycle.append("capture")
+        return original_capture(state)
+
+    sim._capture_window_record_frame = capture
 
     assert sim.start_window_record(look_at=DEFAULT_LOOK_AT, fps=5, max_memory=1)
     state = sim._window_record_state
@@ -2030,14 +2053,32 @@ def test_headless_recording_uses_sim_time_and_captures_frames() -> None:
 
     sim._step_window_record_from_sim_update(state, physics_dt=0.1)
     assert len(state.frames) == 0
+    assert lifecycle == []
 
     sim._step_window_record_from_sim_update(state, physics_dt=0.1)
     assert len(state.frames) == 1
+    assert lifecycle == ["sync", "capture"]
     assert sim._window_record_camera.render_count == 1
     np.testing.assert_allclose(
         sim._window_record_camera.last_pose,
         state.fixed_pose,
     )
+
+
+def test_render_thread_recording_does_not_republish_render_state() -> None:
+    """Native recording consumes state already published by simulation calls."""
+    sim = _make_sim_manager(window=object())
+    sim.sync_render_state = MagicMock()
+    assert sim.start_window_record(look_at=DEFAULT_LOOK_AT, fps=5, max_memory=1)
+    state = sim._window_record_state
+    assert state is not None
+    assert state.capture_from_sim_update is False
+    state.last_capture_time = 0.0
+
+    sim._step_window_record(state)
+
+    assert len(state.frames) == 1
+    sim.sync_render_state.assert_not_called()
 
 
 def test_stop_window_record_waits_for_background_export(monkeypatch) -> None:
