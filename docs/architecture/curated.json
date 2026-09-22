@@ -672,7 +672,7 @@
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 20,
-          "excerpt": "\"\"\"Inverse-kinematics solvers sharing the ``BaseSolver`` interface.\n\nProvides analytic (SRS, OPW, UR), numerical (Pinocchio, Pink, Differential), and learning-based (PyTorch, NeuralIK) solvers, one per robot control part.\n\"\"\""
+          "excerpt": "\"\"\"Inverse-kinematics solvers sharing the ``BaseSolver`` interface.\n\nProvides analytic (SRS, OPW, UR, FEP), numerical (Pinocchio, Pink, Differential), and learning-based (PyTorch, NeuralIK) solvers, one per robot control part.\n\"\"\""
         }
       ],
       "documentation": [
@@ -1479,7 +1479,7 @@
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 22,
-          "excerpt": "\"\"\"Kinematics computations and scalar motion profiles.\n\nPrivate Warp kernels implement OPW, SRS, UR, and trapezoidal/Double-S profiles.\nStateful solver interfaces and robot configuration remain in\n``embodichain.lab.sim.motion.solvers``.\nPure batched manipulability helpers live in :mod:`.manipulability`.\"\"\""
+          "excerpt": "\"\"\"Kinematics computations and scalar motion profiles.\n\nPrivate Warp kernels implement FEP, OPW, SRS, UR, and trapezoidal/Double-S profiles.\nStateful solver interfaces and robot configuration remain in\n``embodichain.lab.sim.motion.solvers``.\nPure batched manipulability helpers live in :mod:`.manipulability`.\"\"\""
         }
       ],
       "documentation": [

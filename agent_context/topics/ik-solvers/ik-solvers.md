@@ -29,7 +29,7 @@ current options and dependencies. The main change sites are:
 
 | Need | Solver module under `motion/solvers/` |
 |---|---|
-| Analytical structure for SRS, OPW or UR arms | `srs_solver.py`, `opw_solver.py`, `ur_solver.py` |
+| Analytical structure for SRS, OPW, UR or Franka (FEP) arms | `srs_solver.py`, `opw_solver.py`, `ur_solver.py`, `fep_solver.py` |
 | General iterative PK solve and multi-start seeds | `pytorch_solver.py` |
 | Reduced Pinocchio model or task-based QP | `pinocchio_solver.py`, `pink_solver.py` |
 | Jacobian differential commands | `differential_solver.py` |
@@ -75,13 +75,26 @@ Candidate count `K` belongs to the solver; OPW implements this capability.
 ## Computation and state ownership
 
 Stateful configuration, device buffers, seed policy, TCP and limit updates stay
-in `lab/sim/motion/solvers`. Pure OPW/SRS/UR kernels belong to
+in `lab/sim/motion/solvers`. Pure OPW/SRS/UR/FEP kernels belong to
 `compute/kinematics/_warp/` and cannot import simulation modules.
 `utils/warp/kinematics/*_solver.py` retains compatibility aliases only.
 
 Analytical scratch reuse must not let later calls mutate earlier public results.
 See [buffer lifecycle](solver-details.md#analytical-buffers-and-selection) before
 changing allocation, stream behavior or nearest/all-solutions dispatch.
+
+FEP validates Franka-compatible URDF geometry and shares one CPU/CUDA kernel.
+The seed fixes q7 unless `redundancy_search` is enabled; finite search failure
+does not prove global unreachability. Arm-angle preferences are soft, while
+FK acceptance, joint limits and `max_joint_step` remain hard constraints.
+Per-call `arm_angle` belongs to `FEPSolver.get_ik`; Robot's generic IK facade
+uses the solver configuration. `ik_solution_selection="manipulability"` ranks
+valid fixed-q7 branches, or the eight candidates retained by search, using the
+shared Yoshikawa helper. It does not rank every sampled q7 candidate. Near-equal
+scores use weighted seed distance to avoid mirror-branch jumps from roundoff.
+`num_samples` is rejected; enable adaptive `redundancy_search` explicitly.
+Franka's default remains Pytorch; the opt-in FEP example lives in
+`examples/sim/motion/solvers/fep_solver.py`.
 
 ## Focused validation
 

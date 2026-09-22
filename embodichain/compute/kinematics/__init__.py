@@ -16,7 +16,7 @@
 
 """Kinematics computations and scalar motion profiles.
 
-Private Warp kernels implement OPW, SRS, UR, and trapezoidal/Double-S profiles.
+Private Warp kernels implement FEP, OPW, SRS, UR, and trapezoidal/Double-S profiles.
 Stateful solver interfaces and robot configuration remain in
 ``embodichain.lab.sim.motion.solvers``.
 Pure batched manipulability helpers live in :mod:`.manipulability`."""
