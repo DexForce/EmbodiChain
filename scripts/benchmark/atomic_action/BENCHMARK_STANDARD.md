@@ -63,11 +63,21 @@ stage is reached only when every earlier stage passed.
 
 ```
 stage_success_rate[i] = passed(i) / reached(i)      reached(i) = passed(i-1)
-success_rate          = passed(last) / total
+success_rate          = passed(last) / measured     measured = total - unsupported
+coverage_rate         = measured / total
 ```
 
 Closing stages count: a skill that lifts an object and then drops it did not
 pick it up.
+
+A case this embodiment cannot serve at all -- every sampled grasp outside the
+arm's physical reach, a capability the robot does not have -- is recorded with
+`unsupported_capability` and leaves every denominator, as
+`motion_generation/BENCHMARK_DESIGN.md` section 5 prescribes for an unsupported
+case. It lowers `coverage_rate`, which is always reported, so dropping a hard
+case cannot improve a rate. Reaching an object is the embodiment's business,
+not the skill's: a grasp the arm cannot attain says nothing about whether the
+skill grasps well, and scoring it as a miss blames the wrong thing.
 
 | Skill | Tolerances | Stages (in order) | Criterion |
 |---|---|---|---|

@@ -49,6 +49,7 @@ from scripts.benchmark.atomic_action.common import (
     park_rigid_object,
     PHYSICAL_PICK_MIN_LIFT_M,
     dropped_below_support,
+    has_attainable_grasp_candidate,
     pickup_approach_direction_tuple,
     PositionCase,
     record_static_scene_video,
@@ -72,6 +73,7 @@ from scripts.benchmark.atomic_action.common import (
 
 PICK_SAMPLE_INTERVAL = 120
 HAND_INTERP_STEPS = 12
+PICK_PRE_GRASP_DISTANCE = 0.15
 
 
 def add_benchmark_args(parser: argparse.ArgumentParser) -> None:
@@ -182,6 +184,27 @@ def _run_case(
             "pick_up",
             {"primary": {"motion": "arm", "grasp": "hand"}},
         )
+        # A case whose sampled grasps are all out of the arm's physical reach
+        # is not a skill failure; it is a case this embodiment cannot serve.
+        if not has_attainable_grasp_candidate(
+            sim=sim,
+            robot=robot,
+            semantics=semantics,
+            grasp_pose_generator=create_benchmark_grasp_pose_generator(case_args),
+            object_pose=obj.get_local_pose(to_matrix=True),
+            approach_direction=approach_direction,
+            pre_grasp_distance=PICK_PRE_GRASP_DISTANCE,
+        ):
+            initialize_pre_pick_robot_pose(robot, obj, hand_open)
+            return _unsupported_case_result(
+                case_id=case_id,
+                object_preset=object_preset,
+                position_case=position_case,
+                approach=approach,
+                approach_direction_text=approach_direction_text,
+                repeat=repeat,
+                object_initial_z_m=initial_obj_position[2],
+            )
         elapsed, mem_delta, peak_gpu, result = timed_call(
             lambda: atomic_engine.compile(
                 (
@@ -192,7 +215,7 @@ def _run_case(
                         motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
                         skill_options=PickUpOptions(
                             approach_direction=approach_direction,
-                            pre_grasp_distance=0.15,
+                            pre_grasp_distance=PICK_PRE_GRASP_DISTANCE,
                             lift_height=0.16,
                             hand_interp_steps=HAND_INTERP_STEPS,
                         ),
@@ -437,6 +460,47 @@ def _run_case(
             "failure_reason": f"exception:{type(exc).__name__}:{exc}",
             "video_path": str(video_path) if video_path is not None else "",
         }
+
+
+def _unsupported_case_result(
+    *,
+    case_id: str,
+    object_preset,
+    position_case,
+    approach: str,
+    approach_direction_text: str,
+    repeat: int,
+    object_initial_z_m: float,
+) -> dict[str, object]:
+    """Record a case this embodiment cannot serve, with no stage measured."""
+    return {
+        "case_id": case_id,
+        "object_type": object_preset.object_type,
+        "material": object_preset.material_name,
+        "quadrant": position_case.quadrant,
+        "position_case": position_case.name,
+        "init_xy": position_case.xy,
+        "approach": approach,
+        "approach_direction": approach_direction_text,
+        "repeat": repeat,
+        "ladder": StageLadder(stages=SKILL_STAGES["pick_up"]).unsupported(),
+        "planning_success": False,
+        "held_created": False,
+        "physical_pick_success": False,
+        "success": False,
+        "cost_time_ms": 0.0,
+        "cpu_delta_mb": 0.0,
+        "gpu_delta_mb": 0.0,
+        "peak_gpu_mb": 0.0,
+        "lift_height_m": None,
+        "object_initial_z_m": object_initial_z_m,
+        "object_final_z_m": None,
+        "object_lift_delta_m": None,
+        "object_xy_drift_m": None,
+        "trajectory_waypoints": 0,
+        "failure_reason": "unsupported_capability",
+        "video_path": "",
+    }
 
 
 def _build_rows(results: list[dict[str, object]]):

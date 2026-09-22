@@ -220,3 +220,46 @@ def test_release_compares_the_two_commands_the_skill_used() -> None:
 
     assert hand_is_released(_Robot([0.005, 0.005]), "hand", open_qpos, close_qpos)
     assert not hand_is_released(_Robot([0.038, 0.038]), "hand", open_qpos, close_qpos)
+
+
+def test_an_unsupported_case_leaves_every_denominator() -> None:
+    """A case the embodiment cannot serve lowers coverage, not the rates."""
+    served = _ladder(("grasped", True), ("lifted", True), ("held", True))
+    missed = _ladder(("grasped", True), ("lifted", False))
+    unsupported = StageLadder(stages=SKILL_STAGES["pick_up"]).unsupported()
+
+    row = build_stage_leaderboard(
+        "pick_up",
+        [{"ladder": served}, {"ladder": missed}, {"ladder": unsupported}],
+    )[0]
+
+    assert row["coverage_rate"] == "66.67%"
+    assert row["evaluated_cases"] == 2
+    assert row["unsupported_cases"] == 1
+    # Two measured cases: both grasped, one lifted, one held.
+    assert row["grasped_rate"] == "100.00%"
+    assert row["lifted_rate"] == "50.00%"
+    assert row["success_rate"] == "50.00%"
+
+
+def test_an_unsupported_case_measures_no_stage() -> None:
+    """Nothing was measured, so no stage is marked failed."""
+    ladder = StageLadder(stages=SKILL_STAGES["pick_up"]).unsupported()
+    fields = ladder.as_row_fields()
+
+    assert ladder.failure_reason == "unsupported_capability"
+    assert not ladder.success
+    assert fields["failure_stage"] == "N/A"
+    assert all(fields[stage] == "N/A" for stage in SKILL_STAGES["pick_up"])
+
+
+def test_a_suite_of_only_unsupported_cases_reports_no_rate() -> None:
+    """With nothing measured, a rate is N/A rather than zero."""
+    row = build_stage_leaderboard(
+        "pick_up",
+        [{"ladder": StageLadder(stages=SKILL_STAGES["pick_up"]).unsupported()}],
+    )[0]
+
+    assert row["coverage_rate"] == "0.00%"
+    assert row["success_rate"] == "N/A"
+    assert row["grasped_rate"] == "N/A"

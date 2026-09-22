@@ -1243,6 +1243,15 @@ class StageLadder:
         """Record ``stage`` as failed with a taxonomy reason."""
         return self.record(stage, False, reason)
 
+    def unsupported(self) -> "StageLadder":
+        """Record that this embodiment cannot serve the case.
+
+        No stage is marked failed, because none was measured: the case leaves
+        every denominator and lowers the suite's coverage instead.
+        """
+        self.failure_reason = "unsupported_capability"
+        return self
+
     def as_row_fields(self) -> dict[str, object]:
         """Return this case's stage columns plus the shared diagnostics.
 
@@ -1334,6 +1343,105 @@ def release_simulation(sim=None) -> None:
     sim.wait_window_record_saves()
     sim.destroy(exit_process=False)
     SimulationManager.flush_cleanup_queue()
+
+
+GRASP_ATTAINABILITY_MAX_CANDIDATES = 8
+GRASP_ATTAINABILITY_TOLERANCE_RAD = 0.05
+GRASP_ATTAINABILITY_HOLD_ITERATIONS = 40
+GRASP_ATTAINABILITY_HOLD_STEPS = 4
+
+
+def _drive_arm_to(sim, robot, qpos, control_part: str) -> float:
+    """Command one arm configuration and return how far the arm stops short."""
+    for _ in range(GRASP_ATTAINABILITY_HOLD_ITERATIONS):
+        robot.set_qpos(qpos, name=control_part, target=True)
+        sim.update(step=GRASP_ATTAINABILITY_HOLD_STEPS)
+    achieved = robot.get_qpos(name=control_part, target=False)
+    return float((achieved - qpos).abs().max())
+
+
+def has_attainable_grasp_candidate(
+    sim,
+    robot,
+    semantics,
+    grasp_pose_generator,
+    object_pose,
+    approach_direction,
+    pre_grasp_distance: float,
+    control_part: str = "arm",
+) -> bool:
+    """Whether the robot can physically reach any sampled grasp on this object.
+
+    An inverse-kinematics solution only says a joint configuration exists. The
+    arm still has to get there: an object lying against the ground cannot be
+    grasped by a gripper held horizontally at its height, and an object close
+    to the base sits inside the arm's inner workspace, where every branch folds
+    into something the drive cannot attain. Both produce plans that execute
+    into thin air, which is a property of this embodiment and scene rather than
+    a skill failure, so the caller reports those cases as
+    ``unsupported_capability``.
+
+    Each candidate is driven in physics from the current state, pre-grasp then
+    grasp, and the first one that arrives ends the search. The robot state is
+    restored before returning.
+
+    Args:
+        sim: Simulation manager to step.
+        robot: Robot whose arm is tested.
+        semantics: Object semantics carrying the antipodal affordance.
+        grasp_pose_generator: Grasp pose service used by the benchmark.
+        object_pose: Batched object pose with shape ``(num_envs, 4, 4)``.
+        approach_direction: Unit approach vector with shape ``(3,)``.
+        pre_grasp_distance: Stand-off distance along the approach direction.
+        control_part: Name of the arm control part.
+
+    Returns:
+        True when at least one sampled grasp is physically attainable.
+    """
+    initial_qpos = robot.get_qpos().clone()
+    start_qpos = robot.get_qpos(name=control_part).clone()
+    candidates = semantics.affordance.get_grasp_candidates(
+        grasp_pose_generator, object_pose, approach_direction
+    )
+    poses = candidates.poses[0]
+    valid = candidates.valid[0]
+
+    attainable = False
+    tested = 0
+    for index in range(poses.shape[0]):
+        if tested >= GRASP_ATTAINABILITY_MAX_CANDIDATES:
+            break
+        if not bool(valid[index]):
+            continue
+        grasp_pose = poses[index : index + 1]
+        pre_grasp_pose = grasp_pose.clone()
+        pre_grasp_pose[..., :3, 3] -= approach_direction * pre_grasp_distance
+        pre_grasp_ok, pre_grasp_qpos = robot.compute_ik(
+            pose=pre_grasp_pose, joint_seed=start_qpos, name=control_part
+        )
+        if not bool(pre_grasp_ok.all()):
+            continue
+        grasp_ok, grasp_qpos = robot.compute_ik(
+            pose=grasp_pose, joint_seed=pre_grasp_qpos, name=control_part
+        )
+        if not bool(grasp_ok.all()):
+            continue
+        tested += 1
+        robot.set_qpos(initial_qpos, target=False)
+        robot.set_qpos(initial_qpos, target=True)
+        robot.clear_dynamics()
+        sim.update(step=GRASP_ATTAINABILITY_HOLD_STEPS)
+        _drive_arm_to(sim, robot, pre_grasp_qpos, control_part)
+        error = _drive_arm_to(sim, robot, grasp_qpos, control_part)
+        if error < GRASP_ATTAINABILITY_TOLERANCE_RAD:
+            attainable = True
+            break
+
+    robot.set_qpos(initial_qpos, target=False)
+    robot.set_qpos(initial_qpos, target=True)
+    robot.clear_dynamics()
+    sim.update(step=GRASP_ATTAINABILITY_HOLD_STEPS)
+    return attainable
 
 
 def check_motion_valid(traj, robot) -> tuple[bool, str]:
@@ -1841,36 +1949,50 @@ def build_stage_leaderboard(
     Follows ``BENCHMARK_STANDARD.md`` section 1::
 
         stage_success_rate[i] = passed(i) / reached(i)   reached(i) = passed(i-1)
-        success_rate          = passed(last) / total
+        success_rate          = passed(last) / measured
 
-    A stage nobody reached reports ``N/A`` rather than zero, so a rate always
-    describes the cases that actually got there.
+    A case the embodiment cannot serve is recorded with
+    ``unsupported_capability`` and leaves every denominator, exactly as
+    ``motion_generation/BENCHMARK_DESIGN.md`` section 5 prescribes; it lowers
+    ``coverage_rate`` instead, so selective execution cannot improve a result.
+    A stage nobody reached reports ``N/A`` rather than zero.
 
     Args:
         action_name: Atomic action identifier.
         results: Case results each carrying a ``ladder`` entry.
 
     Returns:
-        A single-row leaderboard reporting every stage rate and the overall
-        success rate.
+        A single-row leaderboard reporting coverage, every stage rate and the
+        overall success rate.
     """
     if not results:
         return []
 
     ladders = [result["ladder"] for result in results]
+    measured = [
+        ladder
+        for ladder in ladders
+        if ladder.failure_reason != "unsupported_capability"
+    ]
     stages = ladders[0].stages
     row: dict[str, object] = {"rank": 1, "algorithm": action_name}
+    row["coverage_rate"] = f"{len(measured) / len(ladders):.2%}"
     for index, stage in enumerate(stages):
         earlier = stages[:index]
         reached = sum(
             1
-            for ladder in ladders
+            for ladder in measured
             if all(ladder.passed.get(name, False) for name in earlier)
         )
-        passed = sum(1 for ladder in ladders if ladder.passed.get(stage, False))
+        passed = sum(1 for ladder in measured if ladder.passed.get(stage, False))
         row[f"{stage}_rate"] = f"{passed / reached:.2%}" if reached else "N/A"
-    row["success_rate"] = f"{sum(1 for l in ladders if l.success) / len(ladders):.2%}"
-    row["evaluated_cases"] = len(ladders)
+    row["success_rate"] = (
+        f"{sum(1 for l in measured if l.success) / len(measured):.2%}"
+        if measured
+        else "N/A"
+    )
+    row["evaluated_cases"] = len(measured)
+    row["unsupported_cases"] = len(ladders) - len(measured)
     return [row]
 
 
@@ -1968,6 +2090,7 @@ __all__ = [
     "build_single_action_leaderboard",
     "check_motion_valid",
     "dropped_below_support",
+    "has_attainable_grasp_candidate",
     "hand_is_released",
     "ContactCaseOutcome",
     "create_antipodal_object_semantics",

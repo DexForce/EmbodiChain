@@ -42,6 +42,7 @@ from scripts.benchmark.atomic_action.common import (
     create_antipodal_object_semantics,
     create_benchmark_grasp_pose_generator,
     create_benchmark_object,
+    has_attainable_grasp_candidate,
     describe_object_preset,
     ensure_repo_root,
     ensure_torch,
@@ -88,9 +89,14 @@ PLACE_CASES = {
     "center": PlaceCase("center", (-0.35, 0.00, 0.12)),
 }
 PICK_SAMPLE_INTERVAL = 120
+PICK_PRE_GRASP_DISTANCE = 0.15
 PLACE_SAMPLE_INTERVAL = 120
 HAND_INTERP_STEPS = 12
 PLACE_LIFT_HEIGHT = 0.14
+
+
+class UnsupportedCase(RuntimeError):
+    """Raised when this embodiment cannot serve a benchmark case at all."""
 
 
 def add_benchmark_args(parser: argparse.ArgumentParser) -> None:
@@ -211,6 +217,22 @@ def _prepare_held_state(
         obj=obj,
         preset=object_preset,
     )
+    # A case whose sampled grasps are all out of the arm's physical reach is
+    # not a skill failure; it is a case this embodiment cannot serve.
+    if not has_attainable_grasp_candidate(
+        sim=sim,
+        robot=robot,
+        semantics=semantics,
+        grasp_pose_generator=create_benchmark_grasp_pose_generator(pickup_args),
+        object_pose=obj.get_local_pose(to_matrix=True),
+        approach_direction=resolve_pickup_approach_direction(
+            pickup_approach, position_case, sim.device
+        ),
+        pre_grasp_distance=PICK_PRE_GRASP_DISTANCE,
+    ):
+        initialize_pre_pick_robot_pose(robot, obj, hand_open)
+        raise UnsupportedCase("No sampled grasp on this object is attainable.")
+
     result = atomic_engine.compile(
         (
             ActionInvocation(
@@ -225,7 +247,7 @@ def _prepare_held_state(
                     approach_direction=resolve_pickup_approach_direction(
                         pickup_approach, position_case, sim.device
                     ),
-                    pre_grasp_distance=0.15,
+                    pre_grasp_distance=PICK_PRE_GRASP_DISTANCE,
                     lift_height=0.16,
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),
@@ -537,6 +559,12 @@ def _run_case(
             "video_path": str(video_path) if video_path is not None else "",
         }
     except Exception as exc:
+        unsupported = isinstance(exc, UnsupportedCase)
+        case_ladder = StageLadder(stages=SKILL_STAGES["place"])
+        if unsupported:
+            case_ladder.unsupported()
+        else:
+            case_ladder.fail("released", "planner_exception")
         video_path = None
         if should_record_case(args, recorded_count, False):
             try:
@@ -576,9 +604,7 @@ def _run_case(
             "place_case": case.name,
             "repeat": repeat,
             "planning_success": False,
-            "ladder": StageLadder(stages=SKILL_STAGES["place"]).fail(
-                "released", "planner_exception"
-            ),
+            "ladder": case_ladder,
             "released": False,
             "physical_pick_success": False,
             "physical_place_success": False,
@@ -595,7 +621,11 @@ def _run_case(
             "place_z_error_m": None,
             "precondition_waypoints": 0,
             "trajectory_waypoints": 0,
-            "failure_reason": f"exception:{type(exc).__name__}:{exc}",
+            "failure_reason": (
+                "unsupported_capability"
+                if unsupported
+                else f"exception:{type(exc).__name__}:{exc}"
+            ),
             "video_path": str(video_path) if video_path is not None else "",
         }
 
