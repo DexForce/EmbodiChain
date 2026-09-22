@@ -74,6 +74,56 @@ impact are established.
   file or subsystem coverage ledger and review dependency foundations before
   their consumers.
 
+## Explicitly requested PR publication
+
+Keep review read-only unless the user explicitly asks to publish the findings
+to a remote PR. A request to review, audit, or approve a change alone does not
+authorize remote comments or a review event.
+
+When publication is explicitly requested:
+
+1. Verify the repository, PR number, base branch, head commit, and changed
+   files before posting. If the target is not unambiguous, ask for the PR
+   identifier rather than guessing.
+2. Write every comment and review summary posted to the remote PR in English.
+   The conversational review may use the user's language, but translate the
+   finding faithfully before publication. Preserve code identifiers, paths,
+   and short log excerpts when they are needed as evidence.
+3. Publish each actionable finding as an inline comment on the smallest
+   relevant changed line when the hosting integration supports it. Put
+   findings that cannot be anchored to a changed line in a top-level review
+   summary. Preserve the finding priority and evidence in the posted text.
+4. Use a normal comment review by default. Submit `request changes` or
+   `approve` only when the user explicitly requests that exact review event;
+   never infer approval authority from a review request.
+5. Use an available GitHub connector or authenticated `gh` workflow. Do not
+   claim that comments were posted if the integration is unavailable or a
+   request fails. If publication is unavailable, return the complete,
+   copy-ready Markdown review instead.
+6. Report the published comment or review URLs, any findings that were not
+   posted, and any partial failures. Avoid duplicate comments when the same
+   finding has already been posted for the same head commit.
+
+Do not publish speculative open questions or residual risks as defects. They
+may be included in the top-level summary only when clearly labeled as such.
+
+### Trigger phrases
+
+The skill may be selected for review requests containing terms such as
+`review`, `audit`, `inspect`, `assess`, or `approve`. These terms authorize
+analysis only; they do not authorize remote PR changes.
+
+Publication requires an explicit remote-posting request, for example:
+
+- “publish/post/submit the review findings to the PR”
+- “add inline comments to the PR”
+- “leave the review comments on GitHub”
+- “把评审意见提交到 PR” or “在 PR 上添加评审评论”
+
+Phrases such as “review this PR”, “approve this PR”, or “给我评审建议” do not
+by themselves trigger publication. In particular, “approve this PR” selects
+the review task but does not authorize an `approve` review event.
+
 ## 1. Resolve the review target
 
 Read the applicable `AGENTS.md` instructions first. Determine the exact delta
