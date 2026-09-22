@@ -63,13 +63,13 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     run_tutorial,
 )
 
-MICROWAVE_ASSET = "MicrowaveOven/microwave_oven_with_inertials.urdf"
-BUTTON_LINK_NAME = "button_cap"
+MICROWAVE_ASSET = "Microwave/microwave.urdf"
+BUTTON_LINK_NAME = "button_link"
 MICROWAVE_POSITION = (-1.0, -0.30, 0.4)
 MICROWAVE_ORIENTATION = (0.0, 0.0, 90)  # degrees
-PRESS_SAMPLE_INTERVAL = 140
+PRESS_SAMPLE_INTERVAL = 256
 HAND_INTERP_STEPS = 12
-POST_TRAJECTORY_STEPS = 240
+POST_TRAJECTORY_STEPS = 256
 RIGID_BUTTON_POSITION = (-0.7, -0.00, 0.70)
 RIGID_BUTTON_SIZE = (0.04, 0.02, 0.04)
 BUTTON_SCENE_ENTITY_ID = "press-target"

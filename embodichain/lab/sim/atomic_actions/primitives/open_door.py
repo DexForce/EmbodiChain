@@ -14,7 +14,16 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""OpenDoor atomic action implementation."""
+"""OpenDoor atomic action implementation.
+
+The ``scripts/tutorials/atomic_action/open_door.py`` example loads
+``Microwave/microwave.urdf`` and resolves the ``handle_link`` target through
+``door_handle_fixed_joint`` to ``door_hinge``. Its invocation requests
+``MotionPolicy.sample_count=300``, ``hand_interp_steps=30``, and
+``door_waypoint_count=50`` as tutorial-specific sampling overrides. The
+tutorial host performs 240 final-pose updates after replay, with two physics
+steps per update.
+"""
 
 from __future__ import annotations
 
