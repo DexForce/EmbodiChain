@@ -64,8 +64,8 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     run_tutorial,
 )
 
-MICROWAVE_ASSET = "MicrowaveOven/microwave_oven_with_inertials.urdf"
-HANDLE_LINK_NAME = "door_handle"
+MICROWAVE_ASSET = "Microwave/microwave.urdf"
+HANDLE_LINK_NAME = "handle_link"
 MICROWAVE_SCENE_ENTITY_ID = "microwave"
 MICROWAVE_POSITION = (-1.0, 0.20, 0.4)
 MICROWAVE_ORIENTATION = (0.0, 0.0, 90.0)  # degrees
