@@ -15,6 +15,8 @@ Paths below are relative to `embodichain/lab/sim/` unless qualified.
 | Cache loading / point or voxel sampling | `workspace/runtime.py`: `RobotWorkspace`, `WorkspaceSample` |
 | Runtime binding config | `workspace/cfg.py`: `RobotWorkspaceCfg`; `cfg.py`: `RobotCfg.workspace_cfg` |
 | Robot-facing sampling and FK | `objects/robot.py`: `sample_reachable_pose()` |
+| Manipulability visualization and score/point alignment | `workspace/visualizers/manipulability_visualizer.py`: `ManipulabilityVisualizer`, `align_manipulability_scores` |
+| Robot plus colored workspace in native DexSim or Viser | `analyze-workspace --vis-type manipulability` |
 | Analyze CLI | `embodichain/lab/scripts/analyze_workspace.py` |
 | Legacy session-cache CLI | `embodichain/cli/workspace_cache.py` → `workspace/caches/cache_utils.py` |
 
@@ -64,6 +66,7 @@ cache-key inputs, runtime selection and cache failure diagnosis.
 | Sampling/FK/IK analysis | `tests/sim/motion/workspace/test_analyzer.py` |
 | Cache identity and CLI cache behavior | `tests/sim/motion/workspace/test_cache.py` |
 | Runtime alignment, base pose, bounds and invalid padding | `tests/sim/motion/workspace/test_runtime.py` |
+| Manipulability color mapping, normalization and score alignment | `tests/sim/motion/workspace/test_manipulability_visualization.py` |
 | Workspace-aware event sampling | `tests/gym/envs/managers/test_workspace_randomization.py` |
 
 Use [robot-system](../robot-system/robot-system.md) for robot config/kinematic

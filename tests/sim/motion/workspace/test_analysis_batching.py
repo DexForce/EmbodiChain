@@ -33,6 +33,7 @@ from embodichain.lab.sim.motion.workspace.configs import (
     DimensionConstraint,
     SamplingConfig,
     SamplingStrategy,
+    VisualizationType,
 )
 from embodichain.lab.sim.motion.workspace.samplers import (
     RandomSampler,
@@ -294,3 +295,80 @@ def test_cli_exposes_compact_constrained_sobol_defaults():
         False,
     )
     assert xyz.shape == colors.shape == (5, 3)
+
+
+def test_cli_exposes_manipulability_visualization_without_narrowing_metrics():
+    """`--vis-type manipulability` must carry its normalization, not its own metric set."""
+    from embodichain.lab.scripts.analyze_workspace import (
+        parse_args,
+        build_analyzer_config,
+    )
+
+    cfg = build_analyzer_config(
+        parse_args(
+            [
+                "--robot",
+                "ur",
+                "--vis-type",
+                "manipulability",
+                "--manipulability-log-scale",
+                "--manipulability-percentile",
+                "0",
+                "100",
+            ]
+        ),
+        "arm",
+    )
+    assert cfg.visualization.vis_type == VisualizationType.MANIPULABILITY
+    assert cfg.visualization.manipulability_log_scale
+    assert cfg.visualization.manipulability_percentile_clip == (0.0, 100.0)
+    # The default metric set already computes manipulability; selecting the
+    # visualization must not silently switch the other metrics off.
+    default = build_analyzer_config(parse_args(["--robot", "ur"]), "arm")
+    assert cfg.metric.enabled_metrics == default.metric.enabled_metrics
+    assert not default.visualization.manipulability_log_scale
+
+
+def test_viser_keeps_manipulability_but_still_falls_back_for_geometry_types():
+    """Viser renders manipulability directly; voxel and sphere have no browser form."""
+    analyzer = _analyzer()
+    analyzer.workspace_points = torch.zeros((4, 3))
+    analyzer.manipulability_scores = torch.tensor([0.1, 0.2, 0.3, 0.4])
+    analyzer.sim_manager = Mock()
+    created = {}
+
+    def capture(vis_type, backend):
+        created["vis_type"] = vis_type
+        created["backend"] = backend
+        return Mock()
+
+    analyzer._create_visualizer_with_config = (
+        lambda factory, vis_type, backend: capture(vis_type, backend)
+    )
+
+    analyzer.visualize(vis_type=VisualizationType.MANIPULABILITY, backend="viser")
+    assert created["vis_type"] == VisualizationType.MANIPULABILITY
+
+    analyzer.visualize(vis_type=VisualizationType.VOXEL, backend="viser")
+    assert created["vis_type"] == VisualizationType.POINT_CLOUD
+
+
+def test_manipulability_color_cfg_follows_the_backend_point_size_unit():
+    """Native point size is screen pixels; Viser point size is scene units."""
+    analyzer = _analyzer()
+    analyzer.manipulability_scores = torch.tensor([0.1, 0.2])
+    analyzer.config.visualization.point_size = 3.0
+    analyzer.config.visualization.viser_point_size = 0.006
+    analyzer.config.visualization.manipulability_log_scale = True
+    analyzer.config.visualization.manipulability_percentile_clip = (5.0, 95.0)
+
+    from embodichain.lab.sim.motion.workspace.visualizers import VisualizerFactory
+
+    factory = VisualizerFactory()
+    for backend, expected in (("sim_manager", 3.0), ("viser", 0.006)):
+        visualizer = analyzer._create_visualizer_with_config(
+            factory, VisualizationType.MANIPULABILITY, backend
+        )
+        assert visualizer.color_cfg.point_size == expected
+        assert visualizer.color_cfg.log_scale
+        assert visualizer.color_cfg.percentile_clip == (5.0, 95.0)

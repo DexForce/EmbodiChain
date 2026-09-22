@@ -1658,6 +1658,28 @@ embodichain.lab.sim.motion.workspace.visualizers.base_visualizer
    IVisualizer
    BaseVisualizer
 
+embodichain.lab.sim.motion.workspace.visualizers.manipulability_visualizer
+---------------------------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.workspace.visualizers.manipulability_visualizer
+
+.. autosummary::
+
+   ManipulabilityColorCfg
+   ManipulabilityPointSet
+   ManipulabilityNormalization
+   ManipulabilityColorMapping
+   InspectionSelection
+   PointInspection
+   ManipulabilityVisualizer
+   align_manipulability_scores
+   normalize_manipulability
+   map_manipulability_colors
+   select_inspection_indices
+   inspect_points
+   translational_manipulability_ellipsoid
+   ellipsoid_surface
+
 embodichain.lab.sim.motion.workspace.visualizers.point_cloud_visualizer
 -----------------------------------------------------------------------
 
