@@ -28,7 +28,7 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.gen_sim.task_engine._task_program.align_held import _AlignHeldLowerer
+from embodichain.gen_sim.task_engine._task_program.align_held import _AlignHeldFactory
 
 from embodichain.gen_sim.task_engine._task_program.configured import (
     decode_task_lowerer,
@@ -494,13 +494,22 @@ def test_motion_diagnostics_preserve_the_underlying_result(
     }
 
 
-def test_current_pose_upright_binding_preserves_each_environments_position() -> None:
+@pytest.mark.parametrize("verify_retention", [False, True])
+def test_current_pose_upright_binding_preserves_each_environments_position(
+    verify_retention: bool,
+) -> None:
     poses = torch.eye(4).repeat(2, 1, 1)
     poses[:, :3, 3] = torch.tensor([[0.1, -0.2, 1.0], [0.3, 0.2, 1.2]])
     before = poses.clone()
     robot = Mock()
-    lowerer = _AlignHeldLowerer(
-        (("can", "current_object_pose", True, (1.0, 0.0, 0.0), None),), robot
+    lowerer = _AlignHeldFactory(
+        (("can", "current_object_pose", True, (1.0, 0.0, 0.0), None),),
+        verify_retention=verify_retention,
+    ).create(
+        simulation=None,
+        robot=robot,
+        scene_registry=Mock(),
+        engine=SimpleNamespace(robot=robot),
     )
     context = SimpleNamespace(
         batch_size=2,
@@ -545,9 +554,21 @@ def test_current_pose_upright_binding_preserves_each_environments_position() -> 
     )
     torch.testing.assert_close(poses, before)
     assert robot.mock_calls == []
+    assert lowerer.preserves_symbolic_state is not verify_retention
+    if verify_retention:
+        assert lowerer.effect_contract_kind is SemanticEffectKind.ATTACH
+        assert result.registered_effect.effect_kind is SemanticEffectKind.ATTACH
+        effect = result.registered_effect.held_objects[0]
+        assert effect.object_id == "can"
+        assert effect.relation is HeldObjectRelation.ATTACHED
+        assert effect.slot_id == "primary"
+    else:
+        assert lowerer.effect_contract_kind is None
+        assert result.registered_effect is None
 
 
-def test_upright_alignment_lifts_before_rotating() -> None:
+@pytest.mark.parametrize("verify_retention", [False, True])
+def test_upright_alignment_lifts_before_rotating(verify_retention: bool) -> None:
     pose = torch.eye(4).unsqueeze(0)
     pose[:, :3, :3] = torch.tensor([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]])
     pose[:, :3, 3] = torch.tensor([0.1, 0.2, 1.0])
@@ -556,8 +577,14 @@ def test_upright_alignment_lifts_before_rotating() -> None:
         cfg=SimpleNamespace(solver_cfg={"arm": SimpleNamespace(root_link_name="base")}),
         get_link_pose=lambda **kw: torch.eye(4).unsqueeze(0),
     )
-    lowerer = _AlignHeldLowerer(
-        (("can", "staging", False, (0.0, 0.0, 1.0), (0.1, 0.2, 1.3)),), robot
+    lowerer = _AlignHeldFactory(
+        (("can", "staging", False, (0.0, 0.0, 1.0), (0.1, 0.2, 1.3)),),
+        verify_retention=verify_retention,
+    ).create(
+        simulation=None,
+        robot=robot,
+        scene_registry=Mock(),
+        engine=SimpleNamespace(robot=robot),
     )
     held = SimpleNamespace(
         semantics=SimpleNamespace(entity_id="can"),
@@ -608,6 +635,7 @@ def test_upright_alignment_lifts_before_rotating() -> None:
         waypoints[:, 1, :3, 2], torch.tensor([[0.0, 0.0, 1.0]]), atol=1e-6, rtol=0
     )
     torch.testing.assert_close(pose, original)
+    assert (result.registered_effect is not None) is verify_retention
 
 
 def test_coordinated_hold_lowerer_retains_both_verified_attachments() -> None:
