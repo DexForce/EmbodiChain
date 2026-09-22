@@ -558,6 +558,26 @@ class _MoveHeldObjectLowerer(RegisteredSemanticLowerer):
         )
 
 
+class _DrawerTransportLowerer(_MoveHeldObjectLowerer):
+    """Keep v36 drawer transport effectless; the drawer engine owns its path."""
+
+    effect_contract_kind: ClassVar[SemanticEffectKind | None] = None
+    preserves_symbolic_state: ClassVar[bool] = True
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+        option_template: ActionOptions,
+    ) -> SemanticLowering:
+        lowered = super().lower(
+            call, context=context, bound=bound, option_template=option_template
+        )
+        return replace(lowered, registered_effect=None)
+
+
 @dataclass(frozen=True, slots=True)
 class _MoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
     """Validate canonical references for configured transport goals."""
@@ -596,6 +616,30 @@ class _MoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
             if type(route.pose) is _SceneEntityTarget:
                 scene_registry.lookup(route.pose.entity_id)
         return _MoveHeldObjectLowerer(self.routes)
+
+
+@dataclass(frozen=True, slots=True)
+class _DrawerTransportLowererFactory(_MoveHeldObjectLowererFactory):
+    """An explicit decoder route for the unmodified drawer transport contract."""
+
+    revision: ClassVar[str] = "drawer-1"
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> RegisteredSemanticLowerer:
+        _MoveHeldObjectLowererFactory.create(
+            self,
+            simulation=simulation,
+            robot=robot,
+            scene_registry=scene_registry,
+            engine=engine,
+        )
+        return _DrawerTransportLowerer(self.routes)
 
 
 @dataclass(frozen=True, slots=True)

@@ -48,7 +48,7 @@ from .motion import (
 
 __all__: list[str] = []
 
-ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v3"
+ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v4"
 
 
 def probe_initial_plan(env: Any, deployment: Any, program: Any) -> dict[str, Any]:
@@ -174,6 +174,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
             )
 
     def create_atomic_action_engine(self, profile: Any) -> Any:
+        """Keep drawer-owned transport separate from ordinary GenSim wrappers."""
         if self._drawers:
             from .drawer_runtime import DrawerPlacementEngine
 
@@ -184,27 +185,18 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 drawer_observations=self._drawers,
             )
             self.task_program_registration.validate_engine(engine)
-        else:
-            engine = super().create_atomic_action_engine(profile)
+            return engine
+
+        engine = super().create_atomic_action_engine(profile)
         from .actions import GenSimMoveHeldObject, GenSimPour
 
         engine.register(GenSimMoveHeldObject(), replace=True)
         engine.register(GenSimPour(self._pour_receivers), replace=True)
         self.task_program_registration.validate_engine(engine)
         return engine
-        return engine
 
     def registration_owned_segment_policy_ports(self) -> tuple[Any, Any]:
         return self._task_post_port, self.segment_policy_port
-
-    def create_atomic_action_engine(self, profile: Any) -> Any:
-        """Install task-owned wrappers after the shared engine contract is validated."""
-        engine = super().create_atomic_action_engine(profile)
-        from .actions import GenSimMoveHeldObject, GenSimPour
-
-        engine.register(GenSimMoveHeldObject(), replace=True)
-        engine.register(GenSimPour(self._pour_receivers), replace=True)
-        return engine
 
 
 @dataclass(frozen=True, slots=True)
