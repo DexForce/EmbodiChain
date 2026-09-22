@@ -8,33 +8,37 @@ tables are in `outputs/benchmarks/`.
 
 `success_rate` is the last link of a chain. Each stage is scored only on the
 cases that reached it, so a rate says what fraction of the cases that got there
-passed, and the product of the chain is the suite's `success_rate`:
+passed:
 
 ```
 stage_success_rate[i] = passed(i) / reached(i)      reached(i) = passed(i-1)
-success_rate          = passed(last) / total
+success_rate          = passed(last) / measured     measured = total - unsupported
+coverage_rate         = measured / total
 ```
 
-Plan validity and replay tracking are reported per case and fail nothing.
+A case this embodiment cannot serve at all is recorded with
+`unsupported_capability`, leaves every denominator, and lowers `coverage_rate`
+instead. Section 3 shows what that covers and how it was measured. Plan
+validity and replay tracking are reported per case and fail nothing.
 
 ---
 
 ## 1. Results
 
-| Skill | Cases | Stage chain | `success_rate` |
-|---|---|---|---|
-| `move_joints` | 3 | reached 100% | **100%** |
-| `move_end_effector` | 4 | reached 100% | **100%** |
-| `open_door` | 3 | grasped 100% → opened 100% → released 100% | **100%** |
-| `slide` | 3 | grasped 100% → slid 100% → released 100% | **100%** |
-| `press` | 3 | contacted 100% → pressed 100% | **100%** |
-| `pour` | 3 | poured 100% | **100%** |
-| `twist` | 3 | grasped 100% → twisted 100% → released 100% | **100%** |
-| `axis_align` | 2 | grasped 100% → aligned 100% → held 100% | **100%** |
-| `pick_up` | 48 | grasped 87.50% → lifted 59.52% → held 100% | **52.08%** |
-| `place` | 48 | released 87.50% → placed 42.86% → stable 100% | **37.50%** |
-| `move_held_object` | 48 | transported 27.08% | **27.08%** |
-| `hand_over` | 2 | grasped 100% → transferred 100% → handed_over 100% → placed 0% | **0%** |
+| Skill | Cases | Coverage | Stage chain | `success_rate` |
+|---|---|---|---|---|
+| `move_joints` | 3 | 100% | reached 100% | **100%** |
+| `move_end_effector` | 4 | 100% | reached 100% | **100%** |
+| `slide` | 3 | 100% | grasped 100% → slid 100% → released 100% | **100%** |
+| `press` | 3 | 100% | contacted 100% → pressed 100% | **100%** |
+| `pour` | 3 | 100% | poured 100% | **100%** |
+| `twist` | 3 | 100% | grasped 100% → twisted 100% → released 100% | **100%** |
+| `axis_align` | 2 | 100% | grasped 100% → aligned 100% → held 100% | **100%** |
+| `open_door` | 3 | 100% | grasped 66.67% → opened 100% → released 100% | **66.67%** |
+| `pick_up` | 48 | 64.58% | grasped 100% → lifted 74.19% → held 100% | **74.19%** |
+| `place` | 48 | 60.42% | released 100% → placed 48.28% → stable 100% | **48.28%** |
+| `move_held_object` | 48 | 56.25% | transported 48.15% | **48.15%** |
+| `hand_over` | 2 | 100% | grasped 100% → transferred 100% → handed_over 100% → placed 0% | **0%** |
 
 Measured values behind the passing skills, against the tolerance each is scored
 at:
@@ -43,12 +47,12 @@ at:
 |---|---|---|
 | `move_joints` | 0.002996 rad, all three cases | 0.00524 rad |
 | `move_end_effector` | 0.0006 – 0.0015 m | 0.003 m |
-| `open_door` | hinge error 0.0232 – 0.0289 rad | 0.08727 rad |
 | `slide` | travel error 0.0002 – 0.0010 m | 0.01 m |
 | `press` | peak 6.00 mm of a 6 mm stroke, all three cases | 80 % of stroke |
-| `pour` | peak-rotation error 0.0035 – 0.0054 rad | 0.08727 rad |
+| `pour` | peak-rotation error 0.0035 – 0.0059 rad | 0.08727 rad |
 | `twist` | end-effector rotation error 0.0024 – 0.0085 rad | 0.08727 rad |
-| `axis_align` | residual axis angle 0.0480, 0.0485 rad | 0.08727 rad |
+| `axis_align` | residual axis angle 0.0412, 0.0480 rad | 0.08727 rad |
+| `open_door` | hinge error 0.0258, 0.0275 rad on the two cases it grasped | 0.08727 rad |
 
 `move_joints` and `move_end_effector` are read off the robot after a physical
 replay and a terminal settle. Read from the planner's last waypoint, as the
@@ -57,96 +61,129 @@ solver.
 
 ---
 
-## 2. Where the four failing skills lose their cases
+## 2. Where the failing skills lose their cases
 
 Each subsection carries one recorded case, captured with the suite's own
 `--record_video --record_failed_video --video_case_limit 1`. A clip's numbers
-are from the run that produced it, so they differ from the aggregate above:
-grasp sampling is stochastic and every run is `--repeat 1`.
+are from the run that produced it, so they differ from the table above: grasp
+sampling is stochastic and every run is `--repeat 1`.
 
-### `pick_up` — 52.08 %, and the grasp state disagrees with the scene
+### `pick_up` — 74.19 % of 31 measured cases, losing 8 at `lifted`
 
-| Outcome | Cases |
-|---|---|
-| Passed every stage | 25 |
-| Failed `lifted` | 17 |
-| Failed `grasped`, `planner_reported_failure` | 6 |
-
-Of the 17 that failed `lifted`, **15 never moved the object at all** — the
-measured lift is under 5 mm. The skill's own held-object state reports a grasp
-in every one of them, which is what `grasped` scores; the object stays on the
-table. That gap between the held-object state and the scene is the finding, and
-it is only visible because the two are separate stages.
-
-`held` is 100 %: nothing that came up ever fell.
+Every measured case grasps, and nothing that came up ever fell, so the whole
+loss sits at `lifted`: the hand closes, the arm follows its plan, and the
+object does not rise 4 cm. Lift over the measured cases has a median of
+0.1563 m, so the eight failures are not near misses — they are cases where the
+object barely moves.
 
 ![PickUp fails to lift the object](../../../docs/source/_static/benchmarks/atomic_action/pick_up_lift_miss.gif)
 
-`sugar_box:q1_near:side`, one of the fifteen. The hand closes, the arm follows
-its plan, and the object is still on the table: lift −0.000147 m.
+`sugar_box:q1_near:side`. The hand closes, the arm follows its plan, and the
+object never leaves the table: lift −0.000147 m.
 
-### `place` — 37.50 %, and the tighter tolerance is not the main cause
+### `place` — 48.28 % of 29 measured cases, losing 15 at `placed`
 
-| Outcome | Cases |
-|---|---|
-| Passed every stage | 18 |
-| Failed `placed` | 24 |
-| Failed `released`, PickUp precondition raised | 6 |
-
-XY error over the 42 scored cases has a median of 0.0163 m. At the standard's
-1 cm, 18 pass; at the 10 cm the suite used before, 25 would. **The tolerance
-change accounts for 7 cases; the other 17 miss by more than 10 cm.** `stable`
-is 100 %: whatever landed on the target stayed there.
+Release always happens and nothing that landed on the target moved afterwards.
+XY error over the measured cases has a median of 0.0101 m against the
+standard's 1 cm and a maximum of 0.6373 m: half the cases sit right at the
+tolerance, and a tail misses by more than half a metre.
 
 ![Place releases far from the commanded pose](../../../docs/source/_static/benchmarks/atomic_action/place_target_miss.gif)
 
-`sugar_box:q1_near:top:left_bin`. The hand opens and the object is 0.4286 m
-from the commanded pose; the PickUp precondition had lifted it 0.000805 m.
+`sugar_box:q1_near:top:left_bin`. The hand opens 0.4286 m from the commanded
+pose, against 0.01 m.
 
-### `move_held_object` — 27.08 %, and the misses are half a metre
+### `move_held_object` — 48.15 % of 27 measured cases
 
-| Position and rotation error, 40 scored cases | Cases |
-|---|---|
-| Within 1 cm and 5° | 13 |
-| Rotation only outside | 1 |
-| Both outside | 26 |
-
-Median position error is **0.5411 m**, maximum 1.6343 m. At the 12 cm the suite
-used before, only 15 of the 40 would pass, so this is not a tolerance effect:
-the skill puts the object somewhere else entirely in most coverage poses. The
-remaining 8 of the 48 produced no measurement because the case failed earlier.
-
-This skill also gained an orientation criterion. Its goal commands a pose, not
-a point, and only the position was scored before; exactly one case fails on
-rotation alone, so the criterion is not what moved the number.
+Median position error is 0.0064 m, inside the 1 cm tolerance, but the tail runs
+to 0.6478 m: 14 of the 26 scored cases land inside 1 cm and the rest are not
+close. One further case failed its PickUp precondition with a `RuntimeError`
+and is reported as an exception rather than as an unsupported case.
 
 ![MoveHeldObject leaves the object far from the commanded pose](../../../docs/source/_static/benchmarks/atomic_action/move_held_object_target_miss.gif)
 
-`sugar_box:q1_near:top:front_left`, the worst of the four and the first thing
-worth looking at: 0.8288 m and 1.5911 rad from the commanded pose.
+`sugar_box:q1_near:top:front_left`: 0.8288 m and 1.5911 rad from the commanded
+pose.
 
-### `hand_over` — 0 %, failing only at the last stage
+### `hand_over` — 0 % of 2 cases, failing only at `placed`
 
 Both cases pass `grasped`, `transferred` and `handed_over`, then miss `placed`:
-delivery distance 0.2372 m and 0.0764 m against the derived budget of
-3 × `TASK_POSITION_TOLERANCE_M` = 0.03 m. Neither case dropped the object.
-
-An earlier run of the same two cases measured 0.1123 m and 0.0678 m. Grasp
-sampling is stochastic and every number here is `--repeat 1`, so these are point
-estimates, not confidence intervals.
+delivery distance 0.1048 m and 0.0680 m against the derived budget of
+3 × `TASK_POSITION_TOLERANCE_M` = 0.03 m. Neither case dropped the object;
+the minimum object height was 0.5319 m and 0.5342 m.
 
 ![HandOver delivers outside its budget](../../../docs/source/_static/benchmarks/atomic_action/hand_over_delivery_miss.gif)
 
-`vertical_can`. The transfer itself is clean -- both arms hold the can, the
-handing arm lets go, the object never drops below 0.5319 m -- and only the
-delivery misses, at 0.1981 m.
+`vertical_can`. The transfer itself is clean and only the delivery misses.
+
+### `open_door` — 66.67 % of 3 cases, losing `open_90` at `grasped`
+
+The hinge does not move at all on that case (0.0000 rad,
+`object_not_grasped`), while the other two open to within 0.0275 rad.
+Section 4 carries the caveat that belongs with this number.
 
 ---
 
-## 3. The replay rate does not decide these results
+## 3. The cases this embodiment cannot serve
+
+`pick_up`, `place` and `move_held_object` each report about 40 % of their cases
+as `unsupported_capability`:
+
+| Skill | Unsupported | In `q1`, near the base | With a `side` approach |
+|---|---|---|---|
+| `pick_up` | 17 of 48 | 9 of 12 | 13 of 24 |
+| `place` | 19 of 48 | 11 of 12 | 14 of 24 |
+| `move_held_object` | 21 of 48 | 11 of 12 | 16 of 24 |
+
+Both groups were measured, not assumed.
+
+**Objects near the base.** For an object 0.18 m from the base axis, all three
+distinct IK branches of the grasp pose exist, and driving the arm to each one
+stalls: the shoulder stops 0.44 rad short, with every other joint tracking to
+0.01 rad and the limits nowhere near. The pose is inside the arm's inner
+workspace.
+
+**Side approaches.** A side approach asks for a horizontal gripper at the
+height of an object lying on the ground. Probing one case at increasing
+heights, 0 of the sampled grasps are attainable at the object's own height and
+3 of 3 become attainable once lifted 0.20 m, while the top approach is
+attainable at every height. The gripper is hitting the ground.
+
+Both produce a plan that executes into thin air, and the skill's own screen
+cannot see either: it accepts a candidate when IK returns a solution, which
+says a configuration exists, not that the arm can get to it.
+`has_attainable_grasp_candidate()` drives each sampled grasp in physics and
+records the case as unsupported only when none of them arrives.
+
+Two consequences are visible in section 1. `grasped` and `released` are now
+100 %, because the cases where the skill reported a held object that the scene
+did not show were all unattainable ones. And the rates rose once those cases
+left the denominator: `pick_up` from 52.08 % to 74.19 %, `place` from 37.50 %
+to 48.28 %, `move_held_object` from 27.08 % to 48.15 %.
+
+The case set itself is unchanged. The positions, approaches and object presets
+are the ones #318 shipped.
+
+---
+
+## 4. These are single-sample estimates
+
+Everything is `--repeat 1`, and grasp sampling is stochastic. `open_door` shows
+what that means: the same three cases, the same code, run twice, scored 100 %
+and then 66.67 %, because `open_90` grasped the handle on one run and not on
+the other. Every 100 % in section 1 carries that caveat, and the failing rates
+move too — an earlier run of the same two `hand_over` cases measured 0.2372 m
+and 0.0764 m against this run's 0.1048 m and 0.0680 m.
+
+Raising `--repeat` is the fix, at the same multiple of runtime.
+
+---
+
+## 5. The replay rate does not decide these results
 
 The physical-validation replay moved from 4 to the 16 physics steps per
-waypoint the standard calibrates at. Running `pick_up` coverage at both rates:
+waypoint the standard calibrates at. Running `pick_up` coverage at both rates,
+before the unsupported rule existed:
 
 | Steps per waypoint | grasped | lifted | held | `success_rate` |
 |---|---|---|---|---|
@@ -159,21 +196,21 @@ being measured.
 
 ---
 
-## 4. Two criteria that do not discriminate
+## 6. Two criteria that do not discriminate
 
 - **`press`** passes at every commanded depth. Commanding 10, 20 or 30 mm all
   drive the button to 6.00 mm of its 6 mm stroke, so the 80 % rule shows that
   the button was pressed and nothing about how far it was asked to go.
 - **`twist`'s knob joint** is a diagnostic, not the criterion. It reaches
-  2.0261, 2.5326 and 3.1416 rad for 0.5236, 0.7854 and 1.5708 rad commanded:
+  2.0593, 2.5270 and 3.1416 rad for 0.5236, 0.7854 and 1.5708 rad commanded:
   the gripper wedges against the 5 cm knob and the joint offers no resistance,
-  and the 90° case is simply at the asset's limit. The executed end-effector
-  rotation about the knob axis, which the standard scores, is within 0.0085 rad
-  in all three cases. The axis is probed off the asset rather than assumed.
+  and the 90° case is at the asset's limit. The executed end-effector rotation
+  about the knob axis, which the standard scores, is within 0.0085 rad in all
+  three cases. The axis is probed off the asset rather than assumed.
 
 ---
 
-## 5. Not covered
+## 7. Not covered
 
 `push_object`, `coordinated_pickment` and `coordinated_placement` have stages
 defined in the standard but no benchmark module.
@@ -183,7 +220,7 @@ of the standard only.
 
 ---
 
-## 6. Reproducing
+## 8. Reproducing
 
 ```
 PY=/home/lqin/miniconda3/envs/embodichain311/bin/python
