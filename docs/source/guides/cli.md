@@ -82,7 +82,15 @@ demo or RL capabilities:
 
 ```bash
 embodichain list-task
+embodichain list-task --category manipulation
+embodichain show-task embodichain_tasks:repeated_pick_place
 ```
+
+`show-task` displays a logical task's named deployments, launch commands and
+available validation records. `list-task --export-html task-gallery.html`
+exports the same catalog as a static gallery. For simulator-free discovery,
+pass `--config-root PACKAGE=PATH` with a `configs/tasks` directory.
+See {doc}`task_catalog` for catalog authoring and gallery export.
 
 ---
 

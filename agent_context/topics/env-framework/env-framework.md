@@ -10,7 +10,7 @@ Lightweight RL environments have a separate owner in
 | Request | Owning file / resolution path |
 |---|---|
 | Command dispatch | `embodichain/cli/main.py`; `embodichain/__main__.py` is the module entry wrapper |
-| Task discovery / `list-task` | `embodichain/cli/list_task.py` → package discovery and runnable config scan |
+| Task discovery / gallery / `show-task` | `embodichain/cli/_task_catalog.py` → shared logical-task/deployment records; `list_task.py` and `show_task.py` render them |
 | Launch / CLI overrides | `embodichain/lab/scripts/run_env.py` → `build_env_cfg_from_args()` → `config_to_cfg()` |
 | Generic component expansion | `embodichain/lab/gym/utils/_component_composition.py` |
 | Config decoding | `embodichain/lab/gym/utils/gym_utils.py` |

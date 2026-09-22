@@ -44,6 +44,7 @@ RL tasks sometimes drop the `-v<N>` suffix (`CartPoleRL`, `PushCubeRL`).
 | `task_program/integration.yaml` | Nested semantic `scene_binding` and allowlisted service declarations | Physical scene assets |
 | `configs/components/execution_policies/*.yaml` | Reusable execution policy | Physical environment/embodiment ownership |
 | `<task>/agents/<algorithm>.{json,yaml}` | Optional RL training configuration | Task identity or Python registration ownership |
+| `<task>/catalog.yaml` | Logical task key, presentation metadata and named deployment references | Gym registration or duplicated runtime settings |
 
 Component files do not use compatibility `version` fields. Inline runnable
 Gym configs remain supported when no conflicting component selector is used.
@@ -145,8 +146,9 @@ selected embodiment, supported use, and runnable config filename:
   the `task_program` component mapping;
 - `[Expert Demo: Handwritten Trajectory]` means the registered task class
   overrides `create_demo_segments()` or `create_demo_action_list()`;
-- `[RL]` comes from explicit simulator `supports_rl`, a task-local agents
-  directory, or a registered lightweight learning environment;
+- `[RL]` comes from explicit simulator `supports_rl`, a training configuration
+  whose `trainer.gym_config` resolves to that deployment (or equivalent
+  JSON/YAML environment entry), or a registered lightweight learning environment;
 - `[Environment Only]` means none of those supported execution paths is
   currently declared.
 
@@ -159,6 +161,15 @@ deployments. A pure `env.yaml` component has `environment_id` but no `id`, so
 it is not listed and deployment filenames do not need an `env*` prefix. The
 framework-level `EmbodiedEnv-v1` registration is omitted because it
 is a reusable base environment rather than an installed task-package entry.
+
+An optional task-local `catalog.yaml` names logical tasks and deployments without
+registering an environment. The shared catalog powers `show-task`, category
+filtering and `list-task --export-html`. `--config-root PACKAGE=PATH` selects
+explicit config roots for static browsing without simulation imports; it cannot
+infer Python-only handwritten capabilities. Uncataloged tasks retain inferred
+records. Metadata must point to existing runnable configs and a valid default;
+capabilities remain deployment-specific. A catalog's optional validation report
+is provenance, not a replacement for measured runtime results.
 
 ---
 
