@@ -90,7 +90,8 @@ FK acceptance, joint limits and `max_joint_step` remain hard constraints.
 Per-call `arm_angle` belongs to `FEPSolver.get_ik`; Robot's generic IK facade
 uses the solver configuration. `ik_solution_selection="manipulability"` ranks
 valid fixed-q7 branches, or the eight candidates retained by search, using the
-shared Yoshikawa helper. It does not rank every sampled q7 candidate.
+shared Yoshikawa helper. It does not rank every sampled q7 candidate. Near-equal
+scores use weighted seed distance to avoid mirror-branch jumps from roundoff.
 `num_samples` is rejected; enable adaptive `redundancy_search` explicitly.
 Franka's default remains Pytorch; the opt-in FEP example lives in
 `examples/sim/motion/solvers/fep_solver.py`.

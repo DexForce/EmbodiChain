@@ -200,14 +200,27 @@ def test_manipulability_ranks_valid_retained_candidates(
     scores = candidates.new_full(valid.shape, -torch.inf)
     scores[valid] = yoshikawa_manipulability(solver.get_jacobian(candidates[valid]))
     assert bool((scores[:2].amax(1) > scores[:2, 0] + 1e-6).all())
-    expected = candidates[
-        torch.arange(len(seed), device=solver.device), scores.argmax(1)
-    ]
 
     solver.cfg.ik_solution_selection = "manipulability"
     success, result = solver.get_ik(target, seed)
     assert success.tolist() == [True, True, False]
     assert result.shape == (3, 7)
+    selected_scores = yoshikawa_manipulability(solver.get_jacobian(result[success]))
+    maximum = scores[success].amax(1)
+    assert bool((selected_scores >= maximum - (1e-8 + 1e-5 * maximum.abs())).all())
+    tied = valid & (
+        scores
+        >= scores.amax(1, keepdim=True)
+        - (1e-8 + 1e-5 * scores.amax(1, keepdim=True).abs())
+    )
+    distances = (
+        (candidates - seed[:, None]).square()
+        * torch.as_tensor(solver.ik_nearest_weight, device=solver.device)[None, None]
+    ).sum(-1)
+    expected = candidates[
+        torch.arange(len(seed), device=solver.device),
+        distances.masked_fill(~tied, torch.inf).argmin(1),
+    ]
     torch.testing.assert_close(result, expected)
     _assert_pose_accuracy(target[success], solver.get_fk(result[success]))
     _assert_limits(solver, result)
@@ -219,6 +232,28 @@ def test_manipulability_ranks_valid_retained_candidates(
     torch.testing.assert_close(all_joints, candidates)
     empty_valid, empty_joints = solver.get_ik(target[:0], seed[:0])
     assert empty_valid.shape == (0,) and empty_joints.shape == (0, 7)
+
+
+def test_manipulability_ties_preserve_sequential_circle_continuity(
+    solver: FEPSolver,
+) -> None:
+    seed = solver.get_default_qpos_seed()[None]
+    seed[:, 1] = -0.4
+    home = solver.get_fk(seed)
+    angle = torch.linspace(0, 0.7, 40, device=solver.device)
+    targets = home.repeat(len(angle), 1, 1)
+    targets[:, 0, 3] += 0.12 * (angle.cos() - 1)
+    targets[:, 1, 3] += 0.12 * angle.sin()
+    solver.cfg.ik_solution_selection = "manipulability"
+
+    maximum_step = 0.0
+    for target in targets:
+        valid, joints = solver.get_ik(target[None], seed)
+        assert bool(valid.all())
+        maximum_step = max(maximum_step, float((joints - seed).abs().max()))
+        seed = joints
+
+    assert maximum_step < 0.05
 
 
 def test_fep_rejects_numerical_sampling_and_unknown_selection(

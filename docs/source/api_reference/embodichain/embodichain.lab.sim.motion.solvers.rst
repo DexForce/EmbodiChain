@@ -97,7 +97,9 @@ seed. Every accepted solution satisfies the actual URDF FK, TCP and joint limits
 Yoshikawa score. At fixed q7 this ranks the geometric branches. During search
 it ranks only the eight candidates retained by the continuity, arm-angle and
 limit-margin scores, not every sampled candidate. All-solutions ordering is
-unchanged. Nearest-result shapes are ``(N,)`` and ``(N, 7)``; Robot's IK
+unchanged. Scores within a small relative tolerance use weighted seed distance
+as a deterministic continuity tie-break. Nearest-result shapes are ``(N,)`` and
+``(N, 7)``; Robot's IK
 interface and the batch adapter also return joints without a candidate axis.
 
 Enable ``redundancy_search`` to sample and refine q7 using seed distance,

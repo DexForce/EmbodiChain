@@ -701,7 +701,17 @@ class FEPSolver(BaseSolver):
                 feasible = candidates[mask]
                 if len(feasible):
                     scores[mask] = yoshikawa_manipulability(self.get_jacobian(feasible))
-                best = scores.argmax(dim=1)
+                # Mirror-symmetric branches have the same theoretical score,
+                # but determinant rounding can differ across devices/chunks.
+                # Treat relative 1e-5 score differences as ties and preserve
+                # continuity by selecting the closest tied branch to the seed.
+                maximum = scores.amax(dim=1, keepdim=True)
+                tolerance = 1e-8 + 1e-5 * maximum.abs()
+                tied = mask & (scores >= maximum - tolerance)
+                distances = (
+                    (candidates - seed[start:end, None]).square() * weights[None, None]
+                ).sum(dim=-1)
+                best = distances.masked_fill(~tied, torch.inf).argmin(dim=1)
                 # All-invalid rows retain slot zero's clamped seed fallback.
                 selected = candidates[torch.arange(len(mask), device=self.device), best]
                 valid[start:end, 0] = mask.any(dim=1)
