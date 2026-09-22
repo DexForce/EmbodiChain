@@ -440,7 +440,10 @@ def load_deployment(
     from .align_held import with_held_alignment
 
     registration = with_held_alignment(
-        registration, program=program, constraints=constraints
+        registration,
+        program=program,
+        constraints=constraints,
+        verify_retention=not drawers,
     )
     from .release_clearance import CLEAR_RELEASED_CALL, with_release_clearance
 
