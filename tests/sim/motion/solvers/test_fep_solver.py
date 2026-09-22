@@ -197,21 +197,25 @@ def test_manipulability_ranks_valid_retained_candidates(
     # A live nonuniform weight remains relevant to search-pool construction.
     solver.set_ik_nearest_weight(np.array([2.0, 0.2, 1.0, 0.5, 3.0, 0.7, 1.0]))
     valid, candidates = solver.get_ik(target, seed, return_all_solutions=True)
-    scores = candidates.new_full(valid.shape, -torch.inf)
-    scores[valid] = yoshikawa_manipulability(solver.get_jacobian(candidates[valid]))
+    scores = torch.full(
+        valid.shape, -torch.inf, dtype=torch.float64, device=solver.device
+    )
+    scores[valid] = yoshikawa_manipulability(
+        solver.get_jacobian(candidates[valid]).double()
+    )
     assert bool((scores[:2].amax(1) > scores[:2, 0] + 1e-6).all())
 
     solver.cfg.ik_solution_selection = "manipulability"
     success, result = solver.get_ik(target, seed)
     assert success.tolist() == [True, True, False]
     assert result.shape == (3, 7)
-    selected_scores = yoshikawa_manipulability(solver.get_jacobian(result[success]))
+    selected_scores = yoshikawa_manipulability(
+        solver.get_jacobian(result[success]).double()
+    )
     maximum = scores[success].amax(1)
-    assert bool((selected_scores >= maximum - (1e-8 + 1e-5 * maximum.abs())).all())
-    tied = valid & (
-        scores
-        >= scores.amax(1, keepdim=True)
-        - (1e-8 + 1e-5 * scores.amax(1, keepdim=True).abs())
+    assert bool(torch.isclose(selected_scores, maximum, rtol=1e-5, atol=1e-12).all())
+    tied = valid & torch.isclose(
+        scores, scores.amax(1, keepdim=True), rtol=1e-5, atol=1e-12
     )
     distances = (
         (candidates - seed[:, None]).square()

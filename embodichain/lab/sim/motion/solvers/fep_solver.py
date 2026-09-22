@@ -697,17 +697,23 @@ class FEPSolver(BaseSolver):
                 )
             if select_manipulability:
                 mask, candidates = valid[start:end], joints[start:end]
-                scores = candidates.new_full(mask.shape, -torch.inf)
+                scores = torch.full(
+                    mask.shape, -torch.inf, dtype=torch.float64, device=self.device
+                )
                 feasible = candidates[mask]
                 if len(feasible):
-                    scores[mask] = yoshikawa_manipulability(self.get_jacobian(feasible))
+                    # Float64 scoring suppresses batch/device-dependent roundoff
+                    # in the determinant for symmetric branches.
+                    scores[mask] = yoshikawa_manipulability(
+                        self.get_jacobian(feasible).double()
+                    )
                 # Mirror-symmetric branches have the same theoretical score,
                 # but determinant rounding can differ across devices/chunks.
                 # Treat relative 1e-5 score differences as ties and preserve
                 # continuity by selecting the closest tied branch to the seed.
                 maximum = scores.amax(dim=1, keepdim=True)
-                tolerance = 1e-8 + 1e-5 * maximum.abs()
-                tied = mask & (scores >= maximum - tolerance)
+                maximum = torch.where(mask.any(dim=1, keepdim=True), maximum, 0.0)
+                tied = mask & torch.isclose(scores, maximum, rtol=1e-5, atol=1e-12)
                 distances = (
                     (candidates - seed[start:end, None]).square() * weights[None, None]
                 ).sum(dim=-1)
