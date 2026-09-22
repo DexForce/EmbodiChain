@@ -16,10 +16,10 @@
 
 """Benchmark OpenDoor atomic action across microwave hinge opening targets.
 
-Reports the four-level success ladder (planning_success, motion_valid,
-execution_success, task_success) defined in
-``scripts/benchmark/motion_generation/BENCHMARK_DESIGN.md``. Task success
-requires the physically replayed hinge to reach the commanded opening angle.
+Reports the ordered stages defined for OpenDoor in ``BENCHMARK_STANDARD.md``:
+grasped, opened, released. The hinge is scored in physics at the end of the
+commanded door-actuation segment; plan validity and replay tracking are
+reported as diagnostics and never fail the skill.
 Run: embodichain benchmark atomic-action --action open_door
 """
 
@@ -33,13 +33,16 @@ from pathlib import Path
 from scripts.benchmark.atomic_action.common import (
     CPU_MEMORY_BACKEND,
     DEFAULT_REPLAY_STEPS_PER_WAYPOINT,
-    REPLAY_TRACKING_TOLERANCE_RAD,
-    SuccessLadder,
+    ENGAGED_MIN_DISPLACEMENT,
+    SKILL_STAGES,
+    StageLadder,
+    TASK_ROTATION_TOLERANCE_RAD,
     add_common_benchmark_args,
     add_grasp_benchmark_args,
-    build_ladder_leaderboard,
+    build_stage_leaderboard,
     build_video_output_path,
     check_motion_valid,
+    hand_is_released,
     ensure_repo_root,
     ensure_torch,
     format_float,
@@ -74,9 +77,6 @@ TRAJECTORY_SAMPLE_COUNT = 120
 HAND_INTERP_STEPS = 12
 DOOR_WAYPOINT_COUNT = 50
 REPLAY_HOLD_STEPS = 60
-# Measured hinge error of a healthy replay is ~0.02 rad; 0.15 rad (8.6 deg)
-# keeps that comfortably inside while still rejecting a door that never moved.
-HINGE_SUCCESS_TOLERANCE_RAD = 0.15
 
 
 def add_benchmark_args(parser: argparse.ArgumentParser) -> None:
@@ -193,8 +193,12 @@ def _run_case(
     args: argparse.Namespace,
     recorded_count: int,
 ) -> dict[str, object]:
-    """Run one OpenDoor case through the full four-level success ladder."""
-    ladder = SuccessLadder()
+    """Run one OpenDoor case through its stages."""
+    from scripts.tutorials.atomic_action.tutorial_utils import (
+        get_hand_open_close_qpos,
+    )
+
+    ladder = StageLadder(stages=SKILL_STAGES["open_door"])
     _reset_scene(robot, microwave, initial_qpos, initial_hinge_qpos)
     sim.update(step=4)
 
@@ -208,21 +212,21 @@ def _run_case(
         )
     except Exception as exc:
         print(f"    planner exception: {type(exc).__name__}: {exc}")
-        ladder.fail("planning_success", "planner_exception")
+        ladder.fail("grasped", "planner_exception")
         return _case_result(case, repeat, ladder, 0.0, None, None, open_angle, "")
 
-    ladder.planning_success = bool(result.plan_success.all().item())
     traj = result.trajectory.positions
-    if not ladder.planning_success:
-        ladder.fail("planning_success", "planner_reported_failure")
+    if not bool(result.plan_success.all().item()):
+        ladder.fail("grasped", "planner_reported_failure")
         return _case_result(
             case, repeat, ladder, elapsed, mem_delta, None, open_angle, "", peak_gpu
         )
 
-    motion_valid, motion_reason = check_motion_valid(traj, robot)
+    motion_valid, motion_detail = check_motion_valid(traj, robot)
     ladder.motion_valid = motion_valid
-    if not motion_valid:
-        ladder.fail("motion_valid", motion_reason)
+    ladder.motion_detail = motion_detail
+    if motion_detail == "non_finite_trajectory":
+        ladder.fail("grasped", "planner_reported_failure")
         return _case_result(
             case,
             repeat,
@@ -250,38 +254,46 @@ def _run_case(
             articulation=microwave,
             joint_index=hinge_joint_index,
             measure_waypoint=measure_waypoint,
-            # This door swing needs a slower replay than the shared default.
-            # At 16 the arm trails the plan by 0.66 rad and the tracking
-            # gate rejects the run; 64 keeps it inside the gate in both
-            # profiles and lands the hinge within 0.001 rad of the command.
+            # This door swing is replayed slower than the shared default.
+            # The rate is a measurement configuration, not a criterion: at 16
+            # steps the arm trails the plan by 0.66 rad, so the hinge reading
+            # would describe the drive, and at 64 it lands within 0.001 rad of
+            # the command in both profiles.
             steps_per_waypoint=4 * DEFAULT_REPLAY_STEPS_PER_WAYPOINT,
             hold_steps=REPLAY_HOLD_STEPS,
         )
-        ladder.execution_success = trace is not None
     except Exception as exc:
         print(f"    replay exception: {type(exc).__name__}: {exc}")
         trace = None
-        ladder.fail("execution_success", "controller_tracking_failure")
 
-    if trace is not None and (
-        trace.max_tracking_error_rad > REPLAY_TRACKING_TOLERANCE_RAD
-    ):
-        # The arm did not follow the plan, so the hinge reading describes the
-        # drive rather than OpenDoor. Do not score task success.
-        ladder.execution_success = False
-        ladder.fail("execution_success", "controller_tracking_failure")
-    elif ladder.execution_success and trace is not None:
+    if trace is None:
+        ladder.fail("grasped", "invalid_case")
+    else:
+        ladder.max_tracking_error_rad = trace.max_tracking_error_rad
+        # A hinge cannot move unless the hand held its handle, so the hinge
+        # having left its initial angle is the scene evidence that the grasp
+        # took. A door that never moved failed to be grasped; one that moved
+        # but stopped short missed the goal, and the two have different owners.
+        ladder.record(
+            "grasped",
+            abs(trace.measured_displacement) > ENGAGED_MIN_DISPLACEMENT,
+            "object_not_grasped",
+        )
         # The hinge target is an absolute angle, so compare the replayed
         # absolute position rather than the displacement.
         hinge_error = abs(trace.measured_position - open_angle)
-        ladder.task_success = hinge_error <= HINGE_SUCCESS_TOLERANCE_RAD
-        if not ladder.task_success:
-            ladder.fail("task_success", "task_goal_miss")
-    elif not ladder.failure_stage:
-        ladder.fail("execution_success", "controller_tracking_failure")
+        ladder.record(
+            "opened", hinge_error <= TASK_ROTATION_TOLERANCE_RAD, "task_goal_miss"
+        )
+        hand_open, hand_close = get_hand_open_close_qpos(robot)
+        ladder.record(
+            "released",
+            hand_is_released(robot, "hand", hand_open, hand_close),
+            "release_failure",
+        )
 
     video_path = ""
-    if should_record_case(args, recorded_count, ladder.task_success):
+    if should_record_case(args, recorded_count, ladder.success):
         _reset_scene(robot, microwave, initial_qpos, initial_hinge_qpos)
         recorded = replay_trajectory_with_recording(
             sim=sim,
@@ -311,7 +323,7 @@ def _run_case(
 def _case_result(
     case: DoorCase,
     repeat: int,
-    ladder: SuccessLadder,
+    ladder: StageLadder,
     elapsed: float,
     mem_delta: dict[str, float] | None,
     trace,
@@ -344,7 +356,7 @@ def _case_result(
         "trajectory_waypoints": (
             int(traj.shape[1]) if traj is not None and traj.ndim >= 3 else 0
         ),
-        "success": ladder.task_success,
+        "success": ladder.success,
         "video_path": video_path,
     }
 
@@ -368,19 +380,15 @@ def _build_rows(results: list[dict[str, object]]):
                 "trajectory_waypoints": result["trajectory_waypoints"],
             }
         )
-        ladder: SuccessLadder = result["ladder"]  # type: ignore[assignment]
+        ladder: StageLadder = result["ladder"]  # type: ignore[assignment]
         metric_rows.append(
             {
                 "sample_size": 1,
                 "impl": "open_door",
                 "case_id": result["case_id"],
                 "door_case": result["door_case"],
-                "success_rate": f"{float(ladder.task_success):.6f}",
                 **ladder.as_row_fields(),
                 "target_angle_rad": format_float(result["target_angle_rad"], 4),
-                "max_tracking_error_rad": format_float(
-                    result["max_tracking_error_rad"], 4
-                ),
                 "hinge_initial_rad": format_float(result["hinge_initial_rad"], 4),
                 "hinge_measured_rad": format_float(result["hinge_measured_rad"], 4),
                 "hinge_peak_signed_rad": format_float(
@@ -484,18 +492,23 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             results.append(result)
             if result["video_path"]:
                 video_paths.append(str(result["video_path"]))
-            ladder: SuccessLadder = result["ladder"]  # type: ignore[assignment]
+            ladder: StageLadder = result["ladder"]  # type: ignore[assignment]
+            stages = " ".join(
+                f"{stage}={'ok' if ladder.passed[stage] else 'FAIL'}"
+                for stage in ladder.stages
+                if stage in ladder.passed
+            )
             print(
                 f"  {result['case_id']:<20} "
                 f"time={result['cost_time_ms']:>9.2f} ms | "
-                f"plan={ladder.planning_success} valid={ladder.motion_valid} "
-                f"exec={ladder.execution_success} task={ladder.task_success} "
+                f"{stages} "
                 f"hinge_err={format_float(result['hinge_error_rad'], 4)} "
+                f"track={format_float(ladder.max_tracking_error_rad, 4)} "
                 f"[{ladder.failure_reason or 'ok'}]"
             )
 
     perf_rows, metric_rows = _build_rows(results)
-    leaderboard_rows = build_ladder_leaderboard("open_door", results)
+    leaderboard_rows = build_stage_leaderboard("open_door", results)
     report_path = write_markdown_report(
         benchmark_name="atomic_action_open_door",
         perf_rows=perf_rows,
@@ -505,10 +518,14 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             f"Profile: {profile}",
             f"CPU memory backend: {CPU_MEMORY_BACKEND}",
             f"Grasp samples: {n_sample}",
-            "task_success requires the physically replayed hinge angle to reach "
-            f"the commanded target within {HINGE_SUCCESS_TOLERANCE_RAD} rad, "
-            "measured at the last waypoint of the commanded door-actuation "
-            "('open') segment.",
+            "Stages: grasped (the hinge left its initial angle), opened (the "
+            "replayed hinge angle reached the commanded target within "
+            f"{TASK_ROTATION_TOLERANCE_RAD} rad), released (the hand ended "
+            "nearer its open command than its closed one). The hinge is scored "
+            "at the last waypoint of the commanded door-actuation ('open') "
+            "segment.",
+            "motion_valid and max_tracking_error_rad are diagnostics; neither "
+            "fails a stage.",
             "hinge_settled_rad is the resting angle after release and retract. "
             "This microwave hinge is undriven (drive_type='none'), so it swings "
             "freely once released; that value is diagnostic, not a success gate.",

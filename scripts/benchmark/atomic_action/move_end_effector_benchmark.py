@@ -30,11 +30,15 @@ from pathlib import Path
 from scripts.benchmark.atomic_action.common import (
     CPU_MEMORY_BACKEND,
     add_common_benchmark_args,
-    build_single_action_leaderboard,
+    PRIMITIVE_POSITION_TOLERANCE_M,
+    SKILL_STAGES,
+    StageLadder,
+    build_stage_leaderboard,
     build_video_output_path,
     ensure_repo_root,
     ensure_torch,
     format_float,
+    replay_and_track_scalar,
     replay_trajectory_with_recording,
     reset_robot,
     resolve_profile,
@@ -61,7 +65,10 @@ POSE_CASES = {
 DEFAULT_POSE_CASES = tuple(POSE_CASES.keys())
 MOVE_SAMPLE_INTERVAL = 80
 # Endpoint accuracy of the planned trajectory against the commanded pose.
-SUCCESS_TOLERANCE_M = 0.01
+# The end-effector error is read from the robot after a physical replay and a
+# terminal settle. Reading the planned trajectory's last waypoint reports
+# 0.00002 m here, which describes the solver rather than the robot.
+SETTLE_STEPS = 60
 
 
 def add_benchmark_args(parser: argparse.ArgumentParser) -> None:
@@ -163,32 +170,56 @@ def _run_case(
         )
         reset_robot(robot, initial_qpos)
 
+    ladder = StageLadder(stages=SKILL_STAGES["move_end_effector"])
     final_error_m = None
-    if is_success and traj.shape[1] > 0:
-        arm_joint_ids = robot.get_joint_ids(name="arm")
-        final_arm_qpos = traj[:, -1, arm_joint_ids]
-        final_pose = robot.compute_fk(qpos=final_arm_qpos, name="arm", to_matrix=True)[
-            0
-        ]
-        final_error_m = float(torch.linalg.norm(final_pose[:3, 3] - target_pose[:3, 3]))
-    target_reached = bool(
-        is_success
-        and final_error_m is not None
-        and final_error_m <= SUCCESS_TOLERANCE_M
-    )
+    if not is_success or traj.shape[1] == 0:
+        ladder.fail("reached", "planner_reported_failure")
+    else:
+
+        def read_translation_error(waypoint_index: int) -> float:
+            del waypoint_index
+            achieved = robot.compute_fk(
+                qpos=robot.get_qpos(name="arm", target=False),
+                name="arm",
+                to_matrix=True,
+            )[0]
+            return float(torch.linalg.norm(achieved[:3, 3] - target_pose[:3, 3]))
+
+        reset_robot(robot, initial_qpos)
+        trace = replay_and_track_scalar(
+            sim=sim,
+            robot=robot,
+            traj=traj,
+            read_value=read_translation_error,
+            hold_steps=SETTLE_STEPS,
+        )
+        if trace is None:
+            ladder.fail("reached", "invalid_case")
+        else:
+            # MoveEndEffector binds only a motion endpoint, so it is scored
+            # after the terminal settle with the drive converged.
+            final_error_m = trace.settled_position
+            ladder.max_tracking_error_rad = trace.max_tracking_error_rad
+            ladder.record(
+                "reached",
+                final_error_m <= PRIMITIVE_POSITION_TOLERANCE_M,
+                "task_goal_miss",
+            )
+        reset_robot(robot, initial_qpos)
     return {
         "case_id": f"{pose_case.name}:r{repeat}",
         "target_case": pose_case.name,
         "repeat": repeat,
+        "ladder": ladder,
         "planning_success": bool(is_success),
-        "target_reached": target_reached,
+        "target_reached": ladder.success,
         "cost_time_ms": elapsed * 1000.0,
         "cpu_delta_mb": mem_delta["cpu_mb"],
         "gpu_delta_mb": mem_delta["gpu_mb"],
         "peak_gpu_mb": peak_gpu,
         "final_error_m": final_error_m,
         "trajectory_waypoints": int(traj.shape[1]) if traj.ndim >= 2 else 0,
-        "failure_reason": "" if target_reached else "target_not_reached",
+        "failure_reason": ladder.failure_reason,
         "video_path": str(video_path) if video_path is not None else "",
     }
 
@@ -217,11 +248,9 @@ def _build_rows(results: list[dict[str, object]]):
                 "impl": "move_end_effector",
                 "case_id": result["case_id"],
                 "target_case": result["target_case"],
-                "success_rate": f"{float(result['target_reached']):.6f}",
-                "planning_success_rate": f"{float(result['planning_success']):.6f}",
+                **result["ladder"].as_row_fields(),
                 "translation_err_m": format_float(result["final_error_m"]),
                 "trajectory_waypoints": result["trajectory_waypoints"],
-                "failure_reason": result["failure_reason"] or "N/A",
             }
         )
     return perf_rows, metric_rows
@@ -297,7 +326,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             )
 
     perf_rows, metric_rows = _build_rows(results)
-    leaderboard_rows = build_single_action_leaderboard("move_end_effector", metric_rows)
+    leaderboard_rows = build_stage_leaderboard("move_end_effector", results)
     report_path = write_markdown_report(
         benchmark_name="atomic_action_move_end_effector",
         perf_rows=perf_rows,
@@ -306,7 +335,10 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         notes=[
             f"Profile: {profile}",
             f"CPU memory backend: {CPU_MEMORY_BACKEND}",
-            f"Success tolerance: {SUCCESS_TOLERANCE_M} m translation error.",
+            "Stage: reached (the end-effector translation error after a "
+            f"physical replay and a {SETTLE_STEPS}-iteration settle is within "
+            f"{PRIMITIVE_POSITION_TOLERANCE_M} m). The error is measured on the "
+            "robot, not on the planned trajectory's last waypoint.",
             "Replay videos: " + (", ".join(video_paths) if video_paths else "disabled"),
         ],
     )

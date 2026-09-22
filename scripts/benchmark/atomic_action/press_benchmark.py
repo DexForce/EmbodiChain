@@ -16,10 +16,10 @@
 
 """Benchmark Press atomic action on the microwave start button.
 
-Reports the four-level success ladder (planning_success, motion_valid,
-execution_success, task_success). Task success requires the button's prismatic
-joint to reach a configured fraction of its stroke during the commanded press
-segment; the design protocol allows the button to rebound afterwards.
+Reports the ordered stages defined for Press in ``BENCHMARK_STANDARD.md``:
+contacted, pressed. The button's prismatic joint must reach the configured
+fraction of its stroke during the commanded press segment; the peak signed
+displacement is used, so a button that rebounds afterwards still counts.
 Run: embodichain benchmark atomic-action --action press
 """
 
@@ -32,10 +32,12 @@ from pathlib import Path
 from scripts.benchmark.atomic_action.common import (
     CPU_MEMORY_BACKEND,
     DEFAULT_REPLAY_STEPS_PER_WAYPOINT,
-    REPLAY_TRACKING_TOLERANCE_RAD,
-    SuccessLadder,
+    ENGAGED_MIN_DISPLACEMENT,
+    PHYSICAL_PRESS_MIN_STROKE_RATIO,
+    SKILL_STAGES,
+    StageLadder,
     add_common_benchmark_args,
-    build_ladder_leaderboard,
+    build_stage_leaderboard,
     build_video_output_path,
     check_motion_valid,
     ensure_repo_root,
@@ -60,7 +62,6 @@ REPLAY_HOLD_STEPS = 60
 # The microwave button joint is a 6 mm prismatic stroke. Requiring 80% of the
 # asset's own usable stroke keeps the gate asset-relative instead of hard-coding
 # a millimetre figure that would not transfer to another button.
-PRESS_MIN_STROKE_FRACTION = 0.8
 
 
 @dataclass(frozen=True)
@@ -167,15 +168,15 @@ def _run_case(
     args: argparse.Namespace,
     recorded_count: int,
 ) -> dict[str, object]:
-    """Run one Press case through the full four-level success ladder."""
-    ladder = SuccessLadder()
+    """Run one Press case through its stages."""
+    ladder = StageLadder(stages=SKILL_STAGES["press"])
     _reset_scene(robot, microwave, initial_qpos, initial_button_qpos)
     sim.update(step=4)
 
     invocation, context = _build_invocation(
         atomic_engine, microwave, case, sim.sim_config.physics_dt
     )
-    required_travel_m = PRESS_MIN_STROKE_FRACTION * button_stroke_m
+    required_travel_m = PHYSICAL_PRESS_MIN_STROKE_RATIO * button_stroke_m
 
     try:
         elapsed, mem_delta, peak_gpu, result = timed_call(
@@ -183,15 +184,15 @@ def _run_case(
         )
     except Exception as exc:
         print(f"    planner exception: {type(exc).__name__}: {exc}")
-        ladder.fail("planning_success", "planner_exception")
+        ladder.fail("contacted", "planner_exception")
         return _case_result(
             case, repeat, ladder, 0.0, None, None, required_travel_m, ""
         )
 
-    ladder.planning_success = bool(result.plan_success.all().item())
+    plan_success = bool(result.plan_success.all().item())
     traj = result.trajectory.positions
-    if not ladder.planning_success:
-        ladder.fail("planning_success", "planner_reported_failure")
+    if not plan_success:
+        ladder.fail("contacted", "planner_reported_failure")
         return _case_result(
             case,
             repeat,
@@ -204,10 +205,11 @@ def _run_case(
             peak_gpu,
         )
 
-    motion_valid, motion_reason = check_motion_valid(traj, robot)
+    motion_valid, motion_detail = check_motion_valid(traj, robot)
     ladder.motion_valid = motion_valid
-    if not motion_valid:
-        ladder.fail("motion_valid", motion_reason)
+    ladder.motion_detail = motion_detail
+    if motion_detail == "non_finite_trajectory":
+        ladder.fail("contacted", "planner_reported_failure")
         return _case_result(
             case,
             repeat,
@@ -232,31 +234,29 @@ def _run_case(
             steps_per_waypoint=DEFAULT_REPLAY_STEPS_PER_WAYPOINT,
             hold_steps=REPLAY_HOLD_STEPS,
         )
-        ladder.execution_success = trace is not None
     except Exception as exc:
         print(f"    replay exception: {type(exc).__name__}: {exc}")
         trace = None
-        ladder.fail("execution_success", "controller_tracking_failure")
 
-    if trace is not None and (
-        trace.max_tracking_error_rad > REPLAY_TRACKING_TOLERANCE_RAD
-    ):
-        # The arm did not follow the plan, so the button reading describes the
-        # drive rather than Press. Do not score task success.
-        ladder.execution_success = False
-        ladder.fail("execution_success", "controller_tracking_failure")
-    elif ladder.execution_success and trace is not None:
+    if trace is None:
+        ladder.fail("contacted", "invalid_case")
+    else:
+        ladder.max_tracking_error_rad = trace.max_tracking_error_rad
+        ladder.record(
+            "contacted",
+            abs(trace.peak_signed_displacement) > ENGAGED_MIN_DISPLACEMENT,
+            "task_goal_miss",
+        )
         # The button travels along +qpos; use the peak signed displacement so a
-        # button that reaches its stroke and rebounds still counts, exactly as
-        # the design protocol specifies for contact skills.
-        ladder.task_success = abs(trace.peak_signed_displacement) >= required_travel_m
-        if not ladder.task_success:
-            ladder.fail("task_success", "task_goal_miss")
-    elif not ladder.failure_stage:
-        ladder.fail("execution_success", "controller_tracking_failure")
+        # button that reaches its stroke and rebounds still counts.
+        ladder.record(
+            "pressed",
+            abs(trace.peak_signed_displacement) >= required_travel_m,
+            "task_goal_miss",
+        )
 
     video_path = ""
-    if should_record_case(args, recorded_count, ladder.task_success):
+    if should_record_case(args, recorded_count, ladder.success):
         _reset_scene(robot, microwave, initial_qpos, initial_button_qpos)
         recorded = replay_trajectory_with_recording(
             sim=sim,
@@ -286,7 +286,7 @@ def _run_case(
 def _case_result(
     case: PressCase,
     repeat: int,
-    ladder: SuccessLadder,
+    ladder: StageLadder,
     elapsed: float,
     mem_delta: dict[str, float] | None,
     trace,
@@ -316,7 +316,7 @@ def _case_result(
         "trajectory_waypoints": (
             int(traj.shape[1]) if traj is not None and traj.ndim >= 3 else 0
         ),
-        "success": ladder.task_success,
+        "success": ladder.success,
         "video_path": video_path,
     }
 
@@ -340,14 +340,13 @@ def _build_rows(results: list[dict[str, object]]):
                 "trajectory_waypoints": result["trajectory_waypoints"],
             }
         )
-        ladder: SuccessLadder = result["ladder"]  # type: ignore[assignment]
+        ladder: StageLadder = result["ladder"]  # type: ignore[assignment]
         metric_rows.append(
             {
                 "sample_size": 1,
                 "impl": "press",
                 "case_id": result["case_id"],
                 "press_case": result["press_case"],
-                "success_rate": f"{float(ladder.task_success):.6f}",
                 **ladder.as_row_fields(),
                 "commanded_press_m": format_float(result["commanded_press_m"], 4),
                 "required_travel_m": format_float(result["required_travel_m"], 4),
@@ -415,7 +414,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     button_stroke_m = float(button_limits[1] - button_limits[0])
     print(
         f"Button joint {BUTTON_JOINT_NAME!r}: stroke={button_stroke_m * 1000.0:.2f} mm, "
-        f"required travel={PRESS_MIN_STROKE_FRACTION * button_stroke_m * 1000.0:.2f} mm"
+        f"required travel={PHYSICAL_PRESS_MIN_STROKE_RATIO * button_stroke_m * 1000.0:.2f} mm"
     )
 
     atomic_engine = AtomicActionEngine(
@@ -457,18 +456,23 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             results.append(result)
             if result["video_path"]:
                 video_paths.append(str(result["video_path"]))
-            ladder: SuccessLadder = result["ladder"]  # type: ignore[assignment]
+            ladder: StageLadder = result["ladder"]  # type: ignore[assignment]
+            stages = " ".join(
+                f"{stage}={'ok' if ladder.passed[stage] else 'FAIL'}"
+                for stage in ladder.stages
+                if stage in ladder.passed
+            )
             print(
                 f"  {result['case_id']:<22} "
                 f"time={result['cost_time_ms']:>9.2f} ms | "
-                f"plan={ladder.planning_success} valid={ladder.motion_valid} "
-                f"exec={ladder.execution_success} task={ladder.task_success} "
+                f"{stages} "
+                f"track={format_float(ladder.max_tracking_error_rad, 4)} "
                 f"peak={format_float(result['button_peak_signed_m'], 5)} "
                 f"[{ladder.failure_reason or 'ok'}]"
             )
 
     perf_rows, metric_rows = _build_rows(results)
-    leaderboard_rows = build_ladder_leaderboard("press", results)
+    leaderboard_rows = build_stage_leaderboard("press", results)
     report_path = write_markdown_report(
         benchmark_name="atomic_action_press",
         perf_rows=perf_rows,
@@ -479,10 +483,16 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             f"CPU memory backend: {CPU_MEMORY_BACKEND}",
             f"Button joint: {BUTTON_JOINT_NAME}, usable stroke "
             f"{button_stroke_m * 1000.0:.2f} mm.",
-            "task_success requires the peak signed button displacement during "
-            f"replay to reach {PRESS_MIN_STROKE_FRACTION:.0%} of that stroke "
-            f"({PRESS_MIN_STROKE_FRACTION * button_stroke_m * 1000.0:.2f} mm). "
-            "Rebound after the press segment is allowed.",
+            "Stages: contacted (the button moved at all), pressed (the peak "
+            "signed button displacement during replay reached "
+            f"{PHYSICAL_PRESS_MIN_STROKE_RATIO:.0%} of that stroke, "
+            f"{PHYSICAL_PRESS_MIN_STROKE_RATIO * button_stroke_m * 1000.0:.2f} "
+            "mm). Rebound after the press segment is allowed.",
+            "This criterion only shows that the button moved: commanding 3 mm "
+            "still drives it to 5.66 mm of its 6 mm stroke, so the ratio does "
+            "not discriminate commanded depth on this asset.",
+            "motion_valid and max_tracking_error_rad are diagnostics; neither "
+            "fails a stage.",
             "Planning time excludes a discarded warm-up compile.",
             *summarize_video_recording(args, results, video_paths),
         ],

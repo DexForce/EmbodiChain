@@ -16,9 +16,10 @@
 
 """Benchmark HandOver atomic action on the dual-arm tutorial scene.
 
-Reports the four-level success ladder (planning_success, motion_valid,
-execution_success, task_success). Task success requires the object to reach the
-commanded delivery pose without ever being dropped during the transfer.
+Reports the ordered stages defined for HandOver in ``BENCHMARK_STANDARD.md``:
+grasped, transferred, handed_over, placed. The delivery budget is the derived
+one the standard gives a skill that breaks and re-establishes contact three
+times, and the object must never be dropped during the transfer.
 Run: embodichain benchmark atomic-action --action hand_over
 """
 
@@ -31,18 +32,22 @@ from pathlib import Path
 from scripts.benchmark.atomic_action.common import (
     CPU_MEMORY_BACKEND,
     DEFAULT_REPLAY_STEPS_PER_WAYPOINT,
-    REPLAY_TRACKING_TOLERANCE_RAD,
-    SuccessLadder,
+    ENGAGED_MIN_DISPLACEMENT,
+    SKILL_STAGES,
+    StageLadder,
+    TASK_POSITION_TOLERANCE_M,
     add_common_benchmark_args,
     add_grasp_benchmark_args,
-    build_ladder_leaderboard,
+    build_stage_leaderboard,
     build_video_output_path,
     check_motion_valid,
     ensure_repo_root,
     ensure_torch,
+    dropped_below_support,
     format_float,
+    hand_is_released,
     object_position_tuple,
-    replay_and_track_scalar,
+    replay_and_track_channels,
     replay_trajectory_with_recording,
     reset_rigid_object,
     reset_robot,
@@ -66,12 +71,11 @@ SUPPORT_SURFACE_Z = 0.50
 FINAL_OBJECT_XYZ = (0.0, -0.2, 0.6)
 SETTLE_ITERATIONS = 50
 REPLAY_HOLD_STEPS = 60
-# Delivery tolerance on the object's final position. Matches the magnitude of
-# the existing MoveHeldObject placement tolerance (0.12 m) used by this suite.
-HANDOVER_DELIVERY_TOLERANCE_M = 0.12
-# The object is dropped if it ever falls well below the support surface it was
-# lifted from; 0.15 m under the surface clears normal transfer dips.
-HANDOVER_DROP_Z_M = SUPPORT_SURFACE_Z - 0.15
+# HandOver breaks and re-establishes contact three times -- source grasp,
+# transfer, delivery -- so its delivery budget is the derived one from
+# BENCHMARK_STANDARD.md section 0 rather than a constant of its own.
+HANDOVER_CONTACT_PHASES = 3
+HANDOVER_DELIVERY_TOLERANCE_M = HANDOVER_CONTACT_PHASES * TASK_POSITION_TOLERANCE_M
 
 
 @dataclass(frozen=True)
@@ -164,8 +168,8 @@ def _run_case(
     args: argparse.Namespace,
     recorded_count: int,
 ) -> dict[str, object]:
-    """Run one HandOver case through the full four-level success ladder."""
-    ladder = SuccessLadder()
+    """Run one HandOver case through its stages."""
+    ladder = StageLadder(stages=SKILL_STAGES["hand_over"])
     reset_robot(robot, initial_qpos)
     reset_rigid_object(obj, initial_object_pose)
     sim.update(step=10)
@@ -179,25 +183,26 @@ def _run_case(
         )
     except Exception as exc:
         print(f"    planner exception: {type(exc).__name__}: {exc}")
-        ladder.fail("planning_success", "planner_exception")
+        ladder.fail("grasped", "planner_exception")
         return _case_result(case, repeat, ladder, 0.0, None, None, None, None, "")
 
-    ladder.planning_success = bool(result.plan_success.all().item())
+    plan_success = bool(result.plan_success.all().item())
     traj = result.trajectory.positions
-    if not ladder.planning_success:
+    if not plan_success:
         for plan in result.action_plans:
             if not plan.plan_success.all():
                 messages = plan.diagnostics.messages or ("planning failed",)
                 print(f"    plan failure [{plan.skill_id}]: {'; '.join(messages)}")
-        ladder.fail("planning_success", "planner_reported_failure")
+        ladder.fail("grasped", "planner_reported_failure")
         return _case_result(
             case, repeat, ladder, elapsed, mem_delta, None, None, None, "", peak_gpu
         )
 
-    motion_valid, motion_reason = check_motion_valid(traj, robot)
+    motion_valid, motion_detail = check_motion_valid(traj, robot)
     ladder.motion_valid = motion_valid
-    if not motion_valid:
-        ladder.fail("motion_valid", motion_reason)
+    ladder.motion_detail = motion_detail
+    if motion_detail == "non_finite_trajectory":
+        ladder.fail("grasped", "planner_reported_failure")
         return _case_result(
             case,
             repeat,
@@ -212,48 +217,100 @@ def _run_case(
             traj,
         )
 
-    state: dict[str, float] = {"min_z": float("inf")}
+    from scripts.tutorials.atomic_action.tutorial_utils import (
+        get_hand_open_close_qpos,
+    )
+
+    initial_position = object_position_tuple(obj)
+
+    def tool_center_point(control_part: str):
+        pose = robot.compute_fk(
+            robot.get_qpos(name=control_part), name=control_part, to_matrix=True
+        )
+        return (
+            float(pose[0, 0, 3]),
+            float(pose[0, 1, 3]),
+            float(pose[0, 2, 3]),
+        )
 
     def read_delivery_distance(waypoint_index: int) -> float:
         del waypoint_index
+        return xyz_distance_m(object_position_tuple(obj), FINAL_OBJECT_XYZ)
+
+    def read_travel(waypoint_index: int) -> float:
+        del waypoint_index
+        return xyz_distance_m(object_position_tuple(obj), initial_position)
+
+    def read_height(waypoint_index: int) -> float:
+        del waypoint_index
+        return object_position_tuple(obj)[2]
+
+    def read_hand_balance(waypoint_index: int) -> float:
+        # Positive while the object is nearer the handing arm, negative once
+        # the receiving arm is the closer of the two. Comparing the two hands
+        # against each other needs no grasp radius.
+        del waypoint_index
         position = object_position_tuple(obj)
-        state["min_z"] = min(state["min_z"], position[2])
-        return xyz_distance_m(position, FINAL_OBJECT_XYZ)
+        return xyz_distance_m(position, tool_center_point("left_arm")) - xyz_distance_m(
+            position, tool_center_point("right_arm")
+        )
 
     try:
-        trace = replay_and_track_scalar(
+        traces = replay_and_track_channels(
             sim=sim,
             robot=robot,
             traj=traj,
-            read_value=read_delivery_distance,
+            readers={
+                "delivery": read_delivery_distance,
+                "travel": read_travel,
+                "height": read_height,
+                "hand_balance": read_hand_balance,
+            },
             steps_per_waypoint=DEFAULT_REPLAY_STEPS_PER_WAYPOINT,
             hold_steps=REPLAY_HOLD_STEPS,
         )
-        ladder.execution_success = trace is not None
     except Exception as exc:
         print(f"    replay exception: {type(exc).__name__}: {exc}")
-        trace = None
-        ladder.fail("execution_success", "controller_tracking_failure")
+        traces = None
 
-    min_z = state["min_z"] if state["min_z"] != float("inf") else None
-    dropped = min_z is not None and min_z < HANDOVER_DROP_Z_M
-    if trace is not None and (
-        trace.max_tracking_error_rad > REPLAY_TRACKING_TOLERANCE_RAD
-    ):
-        ladder.execution_success = False
-        ladder.fail("execution_success", "controller_tracking_failure")
-    elif ladder.execution_success and trace is not None:
-        delivered = trace.settled_position <= HANDOVER_DELIVERY_TOLERANCE_M
-        ladder.task_success = delivered and not dropped
-        if not ladder.task_success:
-            ladder.fail(
-                "task_success", "object_dropped" if dropped else "task_goal_miss"
-            )
-    elif not ladder.failure_stage:
-        ladder.fail("execution_success", "controller_tracking_failure")
+    trace = None if traces is None else traces["delivery"]
+    min_z = None
+    if trace is None:
+        ladder.fail("grasped", "invalid_case")
+    else:
+        ladder.max_tracking_error_rad = trace.max_tracking_error_rad
+        min_z = traces["height"].min_position
+        dropped = dropped_below_support(min_z, SUPPORT_SURFACE_Z)
+        # The handing arm holds the object: it left the pose it was resting in.
+        ladder.record(
+            "grasped",
+            traces["travel"].max_position > ENGAGED_MIN_DISPLACEMENT,
+            "object_not_grasped",
+        )
+        # The object ended up on the receiving arm's side of the two hands, and
+        # stayed above the support plane while doing so.
+        ladder.record(
+            "transferred",
+            traces["hand_balance"].min_position < 0.0 and not dropped,
+            "object_dropped" if dropped else "task_goal_miss",
+        )
+        left_open, left_close = get_hand_open_close_qpos(
+            robot, hand_control_part="left_hand", close_qpos=HAND_CLOSE_QPOS
+        )
+        # The handing arm let go and the object is still held, not on the floor.
+        ladder.record(
+            "handed_over",
+            hand_is_released(robot, "left_hand", left_open, left_close) and not dropped,
+            "object_dropped" if dropped else "release_failure",
+        )
+        ladder.record(
+            "placed",
+            trace.settled_position <= HANDOVER_DELIVERY_TOLERANCE_M,
+            "task_goal_miss",
+        )
 
     video_path = ""
-    if should_record_case(args, recorded_count, ladder.task_success):
+    if should_record_case(args, recorded_count, ladder.success):
         reset_robot(robot, initial_qpos)
         reset_rigid_object(obj, initial_object_pose)
         recorded = replay_trajectory_with_recording(
@@ -301,7 +358,7 @@ def _release_simulation(sim) -> None:
 def _case_result(
     case: HandOverCase,
     repeat: int,
-    ladder: SuccessLadder,
+    ladder: StageLadder,
     elapsed: float,
     mem_delta: dict[str, float] | None,
     trace,
@@ -330,7 +387,7 @@ def _case_result(
         "trajectory_waypoints": (
             int(traj.shape[1]) if traj is not None and traj.ndim >= 3 else 0
         ),
-        "success": ladder.task_success,
+        "success": ladder.success,
         "video_path": video_path,
     }
 
@@ -354,14 +411,13 @@ def _build_rows(results: list[dict[str, object]]):
                 "trajectory_waypoints": result["trajectory_waypoints"],
             }
         )
-        ladder: SuccessLadder = result["ladder"]  # type: ignore[assignment]
+        ladder: StageLadder = result["ladder"]  # type: ignore[assignment]
         metric_rows.append(
             {
                 "sample_size": 1,
                 "impl": "hand_over",
                 "case_id": result["case_id"],
                 "hand_over_case": result["hand_over_case"],
-                "success_rate": f"{float(ladder.task_success):.6f}",
                 **ladder.as_row_fields(),
                 "max_tracking_error_rad": format_float(
                     result["max_tracking_error_rad"], 4
@@ -512,12 +568,16 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
                 report_results.append(result)
                 if result["video_path"]:
                     video_paths.append(str(result["video_path"]))
-                ladder: SuccessLadder = result["ladder"]  # type: ignore[assignment]
+                ladder: StageLadder = result["ladder"]  # type: ignore[assignment]
+                stages = " ".join(
+                    f"{stage}={'ok' if ladder.passed[stage] else 'FAIL'}"
+                    for stage in ladder.stages
+                    if stage in ladder.passed
+                )
                 print(
                     f"  {result['case_id']:<26} "
                     f"time={result['cost_time_ms']:>9.2f} ms | "
-                    f"plan={ladder.planning_success} valid={ladder.motion_valid} "
-                    f"exec={ladder.execution_success} task={ladder.task_success} "
+                    f"{stages} "
                     f"dist={format_float(result['final_delivery_distance_m'], 4)} "
                     f"min_z={format_float(result['min_object_z_m'], 3)} "
                     f"[{ladder.failure_reason or 'ok'}]"
@@ -528,7 +588,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             _release_simulation(sim)
 
     perf_rows, metric_rows = _build_rows(report_results)
-    leaderboard_rows = build_ladder_leaderboard("hand_over", report_results)
+    leaderboard_rows = build_stage_leaderboard("hand_over", report_results)
     report_path = write_markdown_report(
         benchmark_name="atomic_action_hand_over",
         perf_rows=perf_rows,
@@ -540,10 +600,18 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             f"Grasp samples: {n_sample}",
             f"Dual-arm robot: {DUAL_ROBOT_TYPE}, source=left_arm/left_hand, "
             "destination=right_arm/right_hand.",
-            "task_success requires the object to settle within "
+            "Stages: grasped (the object left the pose it rested in), "
+            "transferred (it ended on the receiving arm's side of the two "
+            "hands without falling), handed_over (the handing hand ended "
+            "nearer its open command than its closed one, object still up), "
+            "placed (it settled within "
             f"{HANDOVER_DELIVERY_TOLERANCE_M:.3f} m of the commanded delivery "
-            f"pose {FINAL_OBJECT_XYZ} and never to fall below "
-            f"{HANDOVER_DROP_Z_M:.3f} m during the transfer.",
+            f"pose {FINAL_OBJECT_XYZ}).",
+            f"The delivery budget is {HANDOVER_CONTACT_PHASES} x "
+            "TASK_POSITION_TOLERANCE_M, the derived budget the standard gives "
+            "a skill that breaks and re-establishes contact.",
+            "motion_valid and max_tracking_error_rad are diagnostics; neither "
+            "fails a stage.",
             "object_dropped uses the minimum object height observed across the "
             "whole replay, so a mid-transfer drop is caught even if the object "
             "later comes to rest near the target.",

@@ -29,12 +29,16 @@ from pathlib import Path
 
 from scripts.benchmark.atomic_action.common import (
     CPU_MEMORY_BACKEND,
+    PRIMITIVE_ROTATION_TOLERANCE_RAD,
+    SKILL_STAGES,
+    StageLadder,
     add_common_benchmark_args,
-    build_single_action_leaderboard,
+    build_stage_leaderboard,
     build_video_output_path,
     ensure_repo_root,
     ensure_torch,
     format_float,
+    replay_and_track_scalar,
     replay_trajectory_with_recording,
     reset_robot,
     resolve_profile,
@@ -69,7 +73,10 @@ SEQUENCE_CASES = {
 }
 DEFAULT_SEQUENCE_CASES = tuple(SEQUENCE_CASES.keys())
 MOVE_JOINTS_SAMPLE_INTERVAL = 80
-SUCCESS_TOLERANCE_RAD = 1e-4
+# Joint error is read from the robot after a physical replay and a terminal
+# settle, not from the planned trajectory's last waypoint: that reports
+# 0.000000 rad here, which describes the solver rather than the robot.
+SETTLE_STEPS = 60
 
 
 def add_benchmark_args(parser: argparse.ArgumentParser) -> None:
@@ -156,6 +163,7 @@ def _run_case(
             atomic_engine.initial_context(control_dt=sim.sim_config.physics_dt),
         )
     )
+    ladder = StageLadder(stages=SKILL_STAGES["move_joints"])
     is_success = bool(result.plan_success.all().item())
     traj = result.trajectory.positions
     video_path = None
@@ -173,29 +181,54 @@ def _run_case(
         reset_robot(robot, initial_qpos)
 
     final_error_rad = None
-    if is_success and traj.shape[1] > 0:
+    if not is_success:
+        ladder.fail("reached", "planner_reported_failure")
+    elif traj.shape[1] == 0:
+        ladder.fail("reached", "planner_reported_failure")
+    else:
         arm_joint_ids = robot.get_joint_ids(name="arm")
-        final_qpos = traj[:, -1, arm_joint_ids][0]
         expected = _qpos(JOINT_TARGETS[case.sequence[-1]], sim.device)
-        final_error_rad = float(torch.linalg.norm(final_qpos - expected))
-    target_reached = bool(
-        is_success
-        and final_error_rad is not None
-        and final_error_rad <= SUCCESS_TOLERANCE_RAD
-    )
+
+        def read_joint_error(waypoint_index: int) -> float:
+            del waypoint_index
+            achieved = robot.get_qpos(name="arm", target=False)[0]
+            return float(torch.linalg.norm(achieved - expected))
+
+        reset_robot(robot, initial_qpos)
+        trace = replay_and_track_scalar(
+            sim=sim,
+            robot=robot,
+            traj=traj,
+            read_value=read_joint_error,
+            hold_steps=SETTLE_STEPS,
+        )
+        if trace is None:
+            ladder.fail("reached", "invalid_case")
+        else:
+            # MoveJoints binds only a motion endpoint, so it is scored after
+            # the terminal settle with the drive converged.
+            final_error_rad = trace.settled_position
+            ladder.max_tracking_error_rad = trace.max_tracking_error_rad
+            ladder.record(
+                "reached",
+                final_error_rad <= PRIMITIVE_ROTATION_TOLERANCE_RAD,
+                "task_goal_miss",
+            )
+        reset_robot(robot, initial_qpos)
     return {
         "case_id": f"{case.name}:r{repeat}",
         "sequence_case": case.name,
         "repeat": repeat,
+        "ladder": ladder,
         "planning_success": bool(is_success),
-        "target_reached": target_reached,
+        "target_reached": ladder.success,
         "cost_time_ms": elapsed * 1000.0,
         "cpu_delta_mb": mem_delta["cpu_mb"],
         "gpu_delta_mb": mem_delta["gpu_mb"],
         "peak_gpu_mb": peak_gpu,
         "final_error_rad": final_error_rad,
         "trajectory_waypoints": int(traj.shape[1]) if traj.ndim >= 2 else 0,
-        "failure_reason": "" if target_reached else "target_not_reached",
+        "failure_reason": ladder.failure_reason,
         "video_path": str(video_path) if video_path is not None else "",
     }
 
@@ -224,11 +257,9 @@ def _build_rows(results: list[dict[str, object]]):
                 "impl": "move_joints",
                 "case_id": result["case_id"],
                 "sequence_case": result["sequence_case"],
-                "success_rate": f"{float(result['target_reached']):.6f}",
-                "planning_success_rate": f"{float(result['planning_success']):.6f}",
+                **result["ladder"].as_row_fields(),
                 "joint_err_rad": format_float(result["final_error_rad"]),
                 "trajectory_waypoints": result["trajectory_waypoints"],
-                "failure_reason": result["failure_reason"] or "N/A",
             }
         )
     return perf_rows, metric_rows
@@ -310,7 +341,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             )
 
     perf_rows, metric_rows = _build_rows(results)
-    leaderboard_rows = build_single_action_leaderboard("move_joints", metric_rows)
+    leaderboard_rows = build_stage_leaderboard("move_joints", results)
     report_path = write_markdown_report(
         benchmark_name="atomic_action_move_joints",
         perf_rows=perf_rows,
@@ -319,7 +350,10 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         notes=[
             f"Profile: {profile}",
             f"CPU memory backend: {CPU_MEMORY_BACKEND}",
-            f"Success tolerance: {SUCCESS_TOLERANCE_RAD} rad joint error.",
+            "Stage: reached (the arm joint error after a physical replay and "
+            f"a {SETTLE_STEPS}-iteration settle is within "
+            f"{PRIMITIVE_ROTATION_TOLERANCE_RAD} rad). The error is measured on "
+            "the robot, not on the planned trajectory's last waypoint.",
             "Replay videos: " + (", ".join(video_paths) if video_paths else "disabled"),
         ],
     )

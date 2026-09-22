@@ -16,10 +16,10 @@
 
 """Benchmark Pour atomic action as a PickUp-then-Pour sequence.
 
-Reports the four-level success ladder (planning_success, motion_valid,
-execution_success, task_success). Pour rotates a held object about its own
-internal axis, so task success is measured as the signed rotation the object
-actually turned about that axis during the commanded pour segment.
+Reports the ordered stage defined for Pour in ``BENCHMARK_STANDARD.md``:
+poured. Pour rotates a held object about its own internal axis and returns it,
+so the stage is measured as the peak signed rotation the object actually
+turned about that axis during the commanded pour segment.
 Run: embodichain benchmark atomic-action --action pour
 """
 
@@ -33,11 +33,13 @@ from pathlib import Path
 from scripts.benchmark.atomic_action.common import (
     CPU_MEMORY_BACKEND,
     DEFAULT_REPLAY_STEPS_PER_WAYPOINT,
-    REPLAY_TRACKING_TOLERANCE_RAD,
-    SuccessLadder,
+    ENGAGED_MIN_DISPLACEMENT,
+    SKILL_STAGES,
+    StageLadder,
+    TASK_ROTATION_TOLERANCE_RAD,
     add_common_benchmark_args,
     add_grasp_benchmark_args,
-    build_ladder_leaderboard,
+    build_stage_leaderboard,
     build_video_output_path,
     check_motion_valid,
     ensure_repo_root,
@@ -66,7 +68,6 @@ LIFT_HEIGHT = 0.16
 REPLAY_HOLD_STEPS = 60
 # Commanded-versus-achieved pour rotation tolerance. Uses the same angular
 # tolerance as the other rotation skills; see BENCHMARK_STANDARD.md.
-POUR_TOLERANCE_RAD = 0.15
 
 
 @dataclass(frozen=True)
@@ -202,9 +203,9 @@ def _run_case(
     args: argparse.Namespace,
     recorded_count: int,
 ) -> dict[str, object]:
-    """Run one Pour case through the full four-level success ladder."""
+    """Run one Pour case through its stages."""
     torch = ensure_torch()
-    ladder = SuccessLadder()
+    ladder = StageLadder(stages=SKILL_STAGES["pour"])
     reset_robot(robot, initial_qpos)
     reset_rigid_object(obj, initial_object_pose)
     sim.update(step=10)
@@ -218,25 +219,26 @@ def _run_case(
         )
     except Exception as exc:
         print(f"    planner exception: {type(exc).__name__}: {exc}")
-        ladder.fail("planning_success", "planner_exception")
+        ladder.fail("poured", "planner_exception")
         return _case_result(case, repeat, ladder, 0.0, None, None, "")
 
-    ladder.planning_success = bool(result.plan_success.all().item())
+    plan_success = bool(result.plan_success.all().item())
     traj = result.trajectory.positions
-    if not ladder.planning_success:
+    if not plan_success:
         for plan in result.action_plans:
             if not plan.plan_success.all():
                 messages = plan.diagnostics.messages or ("planning failed",)
                 print(f"    plan failure [{plan.skill_id}]: {'; '.join(messages)}")
-        ladder.fail("planning_success", "planner_reported_failure")
+        ladder.fail("poured", "planner_reported_failure")
         return _case_result(
             case, repeat, ladder, elapsed, mem_delta, None, "", peak_gpu
         )
 
-    motion_valid, motion_reason = check_motion_valid(traj, robot)
+    motion_valid, motion_detail = check_motion_valid(traj, robot)
     ladder.motion_valid = motion_valid
-    if not motion_valid:
-        ladder.fail("motion_valid", motion_reason)
+    ladder.motion_detail = motion_detail
+    if motion_detail == "non_finite_trajectory":
+        ladder.fail("poured", "planner_reported_failure")
         return _case_result(
             case, repeat, ladder, elapsed, mem_delta, None, "", peak_gpu, traj
         )
@@ -274,19 +276,15 @@ def _run_case(
             steps_per_waypoint=DEFAULT_REPLAY_STEPS_PER_WAYPOINT,
             hold_steps=REPLAY_HOLD_STEPS,
         )
-        ladder.execution_success = trace is not None
     except Exception as exc:
         print(f"    replay exception: {type(exc).__name__}: {exc}")
         trace = None
-        ladder.fail("execution_success", "controller_tracking_failure")
 
     rotation_error = None
-    if trace is not None and (
-        trace.max_tracking_error_rad > REPLAY_TRACKING_TOLERANCE_RAD
-    ):
-        ladder.execution_success = False
-        ladder.fail("execution_success", "controller_tracking_failure")
-    elif ladder.execution_success and trace is not None:
+    if trace is None:
+        ladder.fail("poured", "invalid_case")
+    else:
+        ladder.max_tracking_error_rad = trace.max_tracking_error_rad
         # Pour rotates to the poured pose and then returns to the pose it
         # started from, all inside one "pour" segment, so the end of the
         # segment is back at zero rotation by construction. The achieved pour
@@ -294,14 +292,14 @@ def _run_case(
         rotation_error = abs(
             abs(trace.peak_signed_displacement) - abs(case.rotate_angle_rad)
         )
-        ladder.task_success = rotation_error <= POUR_TOLERANCE_RAD
-        if not ladder.task_success:
-            ladder.fail("task_success", "task_goal_miss")
-    elif not ladder.failure_stage:
-        ladder.fail("execution_success", "controller_tracking_failure")
+        ladder.record(
+            "poured",
+            rotation_error <= TASK_ROTATION_TOLERANCE_RAD,
+            "task_goal_miss",
+        )
 
     video_path = ""
-    if should_record_case(args, recorded_count, ladder.task_success):
+    if should_record_case(args, recorded_count, ladder.success):
         reset_robot(robot, initial_qpos)
         reset_rigid_object(obj, initial_object_pose)
         recorded = replay_trajectory_with_recording(
@@ -334,7 +332,7 @@ def _run_case(
 def _case_result(
     case: PourCase,
     repeat: int,
-    ladder: SuccessLadder,
+    ladder: StageLadder,
     elapsed: float,
     mem_delta: dict[str, float] | None,
     trace,
@@ -367,7 +365,7 @@ def _case_result(
         "trajectory_waypoints": (
             int(traj.shape[1]) if traj is not None and traj.ndim >= 3 else 0
         ),
-        "success": ladder.task_success,
+        "success": ladder.success,
         "video_path": video_path,
     }
 
@@ -391,14 +389,13 @@ def _build_rows(results: list[dict[str, object]]):
                 "trajectory_waypoints": result["trajectory_waypoints"],
             }
         )
-        ladder: SuccessLadder = result["ladder"]  # type: ignore[assignment]
+        ladder: StageLadder = result["ladder"]  # type: ignore[assignment]
         metric_rows.append(
             {
                 "sample_size": 1,
                 "impl": "pour",
                 "case_id": result["case_id"],
                 "pour_case": result["pour_case"],
-                "success_rate": f"{float(ladder.task_success):.6f}",
                 **ladder.as_row_fields(),
                 "commanded_rotation_rad": format_float(
                     result["commanded_rotation_rad"], 4
@@ -515,12 +512,16 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             results.append(result)
             if result["video_path"]:
                 video_paths.append(str(result["video_path"]))
-            ladder: SuccessLadder = result["ladder"]  # type: ignore[assignment]
+            ladder: StageLadder = result["ladder"]  # type: ignore[assignment]
+            stages = " ".join(
+                f"{stage}={'ok' if ladder.passed[stage] else 'FAIL'}"
+                for stage in ladder.stages
+                if stage in ladder.passed
+            )
             print(
                 f"  {result['case_id']:<22} "
                 f"time={result['cost_time_ms']:>9.2f} ms | "
-                f"plan={ladder.planning_success} valid={ladder.motion_valid} "
-                f"exec={ladder.execution_success} task={ladder.task_success} "
+                f"{stages} "
                 f"peak={format_float(result['peak_rotation_rad'], 4)} "
                 f"z0={format_float(result['pour_start_object_z_m'], 3)} "
                 f"err={format_float(result['rotation_error_rad'], 4)} "
@@ -528,7 +529,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             )
 
     perf_rows, metric_rows = _build_rows(results)
-    leaderboard_rows = build_ladder_leaderboard("pour", results)
+    leaderboard_rows = build_stage_leaderboard("pour", results)
     report_path = write_markdown_report(
         benchmark_name="atomic_action_pour",
         perf_rows=perf_rows,
@@ -542,7 +543,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             "covers both invocations.",
             "task_success requires the peak signed rotation of the object "
             "about its own internal axis during the commanded 'pour' segment "
-            f"to match the commanded angle within {POUR_TOLERANCE_RAD:.3f} rad.",
+            f"to match the commanded angle within {TASK_ROTATION_TOLERANCE_RAD:.3f} rad.",
             "Pour rotates to the poured pose and returns to its starting pose "
             "inside a single 'pour' segment, so the end-of-segment rotation is "
             "zero by construction; the peak is the achieved pour.",

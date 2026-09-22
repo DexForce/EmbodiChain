@@ -16,10 +16,10 @@
 
 """Benchmark AxisAlign atomic action on the tutorial cube.
 
-Reports the four-level success ladder (planning_success, motion_valid,
-execution_success, task_success). Task success requires the angle between the
-object's internal axis and the commanded target axis to fall within tolerance
-at the end of the commanded alignment segment.
+Reports the ordered stages defined for AxisAlign in ``BENCHMARK_STANDARD.md``:
+grasped, aligned, held. The angle between the object's internal axis and the
+commanded target axis is scored at the end of the commanded alignment segment,
+and the object must still be held, and not dropped, after the settle.
 Run: embodichain benchmark atomic-action --action axis_align
 """
 
@@ -33,17 +33,21 @@ from pathlib import Path
 from scripts.benchmark.atomic_action.common import (
     CPU_MEMORY_BACKEND,
     DEFAULT_REPLAY_STEPS_PER_WAYPOINT,
-    REPLAY_TRACKING_TOLERANCE_RAD,
-    SuccessLadder,
+    ENGAGED_MIN_DISPLACEMENT,
+    SKILL_STAGES,
+    StageLadder,
+    TASK_ROTATION_TOLERANCE_RAD,
     add_common_benchmark_args,
     add_grasp_benchmark_args,
-    build_ladder_leaderboard,
+    build_stage_leaderboard,
     build_video_output_path,
     check_motion_valid,
     ensure_repo_root,
     ensure_torch,
+    dropped_below_support,
     format_float,
-    replay_and_track_scalar,
+    object_position_tuple,
+    replay_and_track_channels,
     replay_trajectory_with_recording,
     reset_rigid_object,
     reset_robot,
@@ -61,10 +65,6 @@ HAND_INTERP_STEPS = 12
 PRE_GRASP_DISTANCE = 0.15
 LIFT_HEIGHT = 0.16
 REPLAY_HOLD_STEPS = 60
-# Angle between the object's internal axis and the commanded target axis.
-# 0.15 rad (8.6 deg) matches the articulated-skill angular tolerance used by
-# OpenDoor and Twist; see BENCHMARK_STANDARD.md for the measured basis.
-AXIS_ALIGN_TOLERANCE_RAD = 0.15
 
 
 @dataclass(frozen=True)
@@ -179,9 +179,9 @@ def _run_case(
     args: argparse.Namespace,
     recorded_count: int,
 ) -> dict[str, object]:
-    """Run one AxisAlign case through the full four-level success ladder."""
+    """Run one AxisAlign case through its stages."""
     torch = ensure_torch()
-    ladder = SuccessLadder()
+    ladder = StageLadder(stages=SKILL_STAGES["axis_align"])
     reset_robot(robot, initial_qpos)
     reset_rigid_object(obj, initial_object_pose)
     sim.update(step=10)
@@ -199,21 +199,22 @@ def _run_case(
         )
     except Exception as exc:
         print(f"    planner exception: {type(exc).__name__}: {exc}")
-        ladder.fail("planning_success", "planner_exception")
+        ladder.fail("grasped", "planner_exception")
         return _case_result(case, repeat, ladder, 0.0, None, None, initial_angle, "")
 
-    ladder.planning_success = bool(result.plan_success.all().item())
+    plan_success = bool(result.plan_success.all().item())
     traj = result.trajectory.positions
-    if not ladder.planning_success:
-        ladder.fail("planning_success", "planner_reported_failure")
+    if not plan_success:
+        ladder.fail("grasped", "planner_reported_failure")
         return _case_result(
             case, repeat, ladder, elapsed, mem_delta, None, initial_angle, "", peak_gpu
         )
 
-    motion_valid, motion_reason = check_motion_valid(traj, robot)
+    motion_valid, motion_detail = check_motion_valid(traj, robot)
     ladder.motion_valid = motion_valid
-    if not motion_valid:
-        ladder.fail("motion_valid", motion_reason)
+    ladder.motion_detail = motion_detail
+    if motion_detail == "non_finite_trajectory":
+        ladder.fail("grasped", "planner_reported_failure")
         return _case_result(
             case,
             repeat,
@@ -233,38 +234,52 @@ def _run_case(
         measure_waypoint = int(traj.shape[1]) - 1
 
     try:
-        trace = replay_and_track_scalar(
+        traces = replay_and_track_channels(
             sim=sim,
             robot=robot,
             traj=traj,
-            read_value=lambda _index: object_axis_angle_rad(
-                obj, internal_axis, target_axis
-            ),
+            readers={
+                "angle": lambda _index: object_axis_angle_rad(
+                    obj, internal_axis, target_axis
+                ),
+                "height": lambda _index: object_position_tuple(obj)[2],
+            },
             measure_waypoint=measure_waypoint,
             steps_per_waypoint=DEFAULT_REPLAY_STEPS_PER_WAYPOINT,
             hold_steps=REPLAY_HOLD_STEPS,
         )
-        ladder.execution_success = trace is not None
     except Exception as exc:
         print(f"    replay exception: {type(exc).__name__}: {exc}")
-        trace = None
-        ladder.fail("execution_success", "controller_tracking_failure")
+        traces = None
 
-    if trace is not None and (
-        trace.max_tracking_error_rad > REPLAY_TRACKING_TOLERANCE_RAD
-    ):
-        ladder.execution_success = False
-        ladder.fail("execution_success", "controller_tracking_failure")
-    elif ladder.execution_success and trace is not None:
+    trace = None if traces is None else traces["angle"]
+    if trace is None:
+        ladder.fail("grasped", "invalid_case")
+    else:
+        height = traces["height"]
+        ladder.max_tracking_error_rad = trace.max_tracking_error_rad
+        # The object can only be reoriented while the hand holds it, so the
+        # axis having moved off its initial angle is the evidence of a grasp.
+        ladder.record(
+            "grasped",
+            abs(trace.measured_displacement) > ENGAGED_MIN_DISPLACEMENT,
+            "object_not_grasped",
+        )
         # The tracked scalar is already the axis angle error to the target.
-        ladder.task_success = trace.measured_position <= AXIS_ALIGN_TOLERANCE_RAD
-        if not ladder.task_success:
-            ladder.fail("task_success", "task_goal_miss")
-    elif not ladder.failure_stage:
-        ladder.fail("execution_success", "controller_tracking_failure")
+        ladder.record(
+            "aligned",
+            trace.measured_position <= TASK_ROTATION_TOLERANCE_RAD,
+            "task_goal_miss",
+        )
+        dropped = dropped_below_support(height.min_position, height.initial_position)
+        ladder.record(
+            "held",
+            (not dropped) and trace.settled_position <= TASK_ROTATION_TOLERANCE_RAD,
+            "object_dropped" if dropped else "task_goal_miss",
+        )
 
     video_path = ""
-    if should_record_case(args, recorded_count, ladder.task_success):
+    if should_record_case(args, recorded_count, ladder.success):
         reset_robot(robot, initial_qpos)
         reset_rigid_object(obj, initial_object_pose)
         recorded = replay_trajectory_with_recording(
@@ -295,7 +310,7 @@ def _run_case(
 def _case_result(
     case: AxisAlignCase,
     repeat: int,
-    ladder: SuccessLadder,
+    ladder: StageLadder,
     elapsed: float,
     mem_delta: dict[str, float] | None,
     trace,
@@ -323,7 +338,7 @@ def _case_result(
         "trajectory_waypoints": (
             int(traj.shape[1]) if traj is not None and traj.ndim >= 3 else 0
         ),
-        "success": ladder.task_success,
+        "success": ladder.success,
         "video_path": video_path,
     }
 
@@ -347,7 +362,7 @@ def _build_rows(results: list[dict[str, object]]):
                 "trajectory_waypoints": result["trajectory_waypoints"],
             }
         )
-        ladder: SuccessLadder = result["ladder"]  # type: ignore[assignment]
+        ladder: StageLadder = result["ladder"]  # type: ignore[assignment]
         metric_rows.append(
             {
                 "sample_size": 1,
@@ -355,7 +370,6 @@ def _build_rows(results: list[dict[str, object]]):
                 "case_id": result["case_id"],
                 "align_case": result["align_case"],
                 "target_axis": result["target_axis"],
-                "success_rate": f"{float(ladder.task_success):.6f}",
                 **ladder.as_row_fields(),
                 "max_tracking_error_rad": format_float(
                     result["max_tracking_error_rad"], 4
@@ -468,19 +482,23 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             results.append(result)
             if result["video_path"]:
                 video_paths.append(str(result["video_path"]))
-            ladder: SuccessLadder = result["ladder"]  # type: ignore[assignment]
+            ladder: StageLadder = result["ladder"]  # type: ignore[assignment]
+            stages = " ".join(
+                f"{stage}={'ok' if ladder.passed[stage] else 'FAIL'}"
+                for stage in ladder.stages
+                if stage in ladder.passed
+            )
             print(
                 f"  {result['case_id']:<22} "
                 f"time={result['cost_time_ms']:>9.2f} ms | "
-                f"plan={ladder.planning_success} valid={ladder.motion_valid} "
-                f"exec={ladder.execution_success} task={ladder.task_success} "
+                f"{stages} "
                 f"angle0={format_float(result['initial_axis_angle_rad'], 4)} "
                 f"angle={format_float(result['final_axis_angle_rad'], 4)} "
                 f"[{ladder.failure_reason or 'ok'}]"
             )
 
     perf_rows, metric_rows = _build_rows(results)
-    leaderboard_rows = build_ladder_leaderboard("axis_align", results)
+    leaderboard_rows = build_stage_leaderboard("axis_align", results)
     report_path = write_markdown_report(
         benchmark_name="atomic_action_axis_align",
         perf_rows=perf_rows,
@@ -491,11 +509,14 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             f"CPU memory backend: {CPU_MEMORY_BACKEND}",
             f"Grasp samples: {n_sample}",
             f"Object internal axis: {INTERNAL_AXIS}.",
-            "task_success requires the angle between the object's internal axis "
-            "and the commanded target axis to be at most "
-            f"{AXIS_ALIGN_TOLERANCE_RAD:.3f} rad "
-            f"({math.degrees(AXIS_ALIGN_TOLERANCE_RAD):.1f} deg) at the end of "
-            "the commanded 'manipulate' segment, while the object is still held.",
+            "Stages: grasped (the object's axis left its initial angle), "
+            "aligned (the angle between the object's internal axis and the "
+            f"commanded target axis is at most {TASK_ROTATION_TOLERANCE_RAD:.3f} "
+            f"rad, {math.degrees(TASK_ROTATION_TOLERANCE_RAD):.1f} deg, at the "
+            "end of the commanded 'manipulate' segment), held (it is still "
+            "within that angle after the settle and was never dropped).",
+            "motion_valid and max_tracking_error_rad are diagnostics; neither "
+            "fails a stage.",
             "initial_axis_angle_rad is the angle before the skill runs; a case "
             "only demonstrates alignment when it starts meaningfully misaligned.",
             "Planning time excludes a discarded warm-up compile and includes "

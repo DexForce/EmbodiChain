@@ -32,7 +32,9 @@ from scripts.benchmark.atomic_action.common import (
     add_grasp_benchmark_args,
     add_object_position_benchmark_args,
     add_pickup_approach_benchmark_args,
-    build_single_action_leaderboard,
+    SKILL_STAGES,
+    StageLadder,
+    build_stage_leaderboard,
     build_video_output_path,
     create_antipodal_object_semantics,
     create_benchmark_grasp_pose_generator,
@@ -46,6 +48,7 @@ from scripts.benchmark.atomic_action.common import (
     object_position_tuple,
     park_rigid_object,
     PHYSICAL_PICK_MIN_LIFT_M,
+    dropped_below_support,
     pickup_approach_direction_tuple,
     PositionCase,
     record_static_scene_video,
@@ -213,6 +216,8 @@ def _run_case(
         final_obj_position = None
         object_lift_delta_m = None
         object_xy_drift_m = None
+        replay_min_z_m = None
+        replay_final_waypoint_z_m = None
 
         if bool(is_success) and getattr(traj, "ndim", 0) >= 3 and traj.shape[1] > 0:
             reset_robot(robot, initial_qpos)
@@ -223,12 +228,19 @@ def _run_case(
 
             def _on_validation_step(waypoint_index: int) -> None:
                 nonlocal should_clear_object_dynamics
+                nonlocal replay_min_z_m
+                nonlocal replay_final_waypoint_z_m
                 if (
                     should_clear_object_dynamics
                     and waypoint_index + 1 >= post_grasp_clear_step
                 ):
                     obj.clear_dynamics()
                     should_clear_object_dynamics = False
+                height = object_position_tuple(obj)[2]
+                replay_final_waypoint_z_m = height
+                replay_min_z_m = (
+                    height if replay_min_z_m is None else min(replay_min_z_m, height)
+                )
 
             final_obj_position = replay_trajectory_for_physical_validation(
                 sim=sim,
@@ -249,11 +261,35 @@ def _run_case(
         held_created = bool(
             is_success and final_state.get_held_object("arm") is not None
         )
-        physical_pick_success = bool(
-            held_created
-            and object_lift_delta_m is not None
-            and object_lift_delta_m >= PHYSICAL_PICK_MIN_LIFT_M
-        )
+        ladder = StageLadder(stages=SKILL_STAGES["pick_up"])
+        if not is_success:
+            ladder.fail("grasped", "planner_reported_failure")
+        else:
+            # The skill's own held-object state is the grasp measurement: it is
+            # what every later stage is asserted against.
+            ladder.record("grasped", held_created, "object_not_grasped")
+            lift_at_segment_end_m = None
+            if replay_final_waypoint_z_m is not None:
+                lift_at_segment_end_m = (
+                    replay_final_waypoint_z_m - initial_obj_position[2]
+                )
+            ladder.record(
+                "lifted",
+                lift_at_segment_end_m is not None
+                and lift_at_segment_end_m >= PHYSICAL_PICK_MIN_LIFT_M,
+                "task_goal_miss",
+            )
+            dropped = replay_min_z_m is not None and dropped_below_support(
+                replay_min_z_m, initial_obj_position[2]
+            )
+            ladder.record(
+                "held",
+                (not dropped)
+                and object_lift_delta_m is not None
+                and object_lift_delta_m >= PHYSICAL_PICK_MIN_LIFT_M,
+                "object_dropped" if dropped else "task_goal_miss",
+            )
+        physical_pick_success = ladder.success
 
         video_path = None
         if should_record_case(args, recorded_count, physical_pick_success):
@@ -313,16 +349,7 @@ def _run_case(
             )[0]
             lift_height_m = float(final_pose[2, 3] - start_pose[2, 3])
         success = physical_pick_success
-        if success:
-            failure_reason = ""
-        elif not is_success:
-            failure_reason = "planning_failed"
-        elif not held_created:
-            failure_reason = "held_object_missing"
-        elif object_lift_delta_m is None:
-            failure_reason = "physical_replay_missing"
-        else:
-            failure_reason = "physical_pick_lift_too_low"
+        failure_reason = ladder.failure_reason
         return {
             "case_id": case_id,
             "object_type": object_preset.object_type,
@@ -333,6 +360,7 @@ def _run_case(
             "approach": approach,
             "approach_direction": approach_direction_text,
             "repeat": repeat,
+            "ladder": ladder,
             "planning_success": bool(is_success),
             "held_created": held_created,
             "physical_pick_success": physical_pick_success,
@@ -389,6 +417,9 @@ def _run_case(
             "approach": approach,
             "approach_direction": "N/A",
             "repeat": repeat,
+            "ladder": StageLadder(stages=SKILL_STAGES["pick_up"]).fail(
+                "grasped", "planner_exception"
+            ),
             "planning_success": False,
             "held_created": False,
             "physical_pick_success": False,
@@ -443,19 +474,13 @@ def _build_rows(results: list[dict[str, object]]):
                 "position_case": result["position_case"],
                 "approach": result["approach"],
                 "approach_direction": result["approach_direction"],
-                "success_rate": f"{float(result['success']):.6f}",
-                "planning_success_rate": f"{float(result['planning_success']):.6f}",
-                "held_object_rate": f"{float(result['held_created']):.6f}",
-                "physical_pick_success_rate": (
-                    f"{float(result['physical_pick_success']):.6f}"
-                ),
+                **result["ladder"].as_row_fields(),
                 "lift_height_m": format_float(result["lift_height_m"]),
                 "object_initial_z_m": format_float(result["object_initial_z_m"]),
                 "object_final_z_m": format_float(result["object_final_z_m"]),
                 "object_lift_delta_m": format_float(result["object_lift_delta_m"]),
                 "object_xy_drift_m": format_float(result["object_xy_drift_m"]),
                 "trajectory_waypoints": result["trajectory_waypoints"],
-                "failure_reason": result["failure_reason"] or "N/A",
             }
         )
     return perf_rows, metric_rows
@@ -552,7 +577,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
                     )
 
     perf_rows, metric_rows = _build_rows(results)
-    leaderboard_rows = build_single_action_leaderboard("pick_up", metric_rows)
+    leaderboard_rows = build_stage_leaderboard("pick_up", results)
     report_path = write_markdown_report(
         benchmark_name="atomic_action_pick_up",
         perf_rows=perf_rows,

@@ -16,9 +16,9 @@
 
 """Benchmark Slide atomic action on the drawer prismatic joint.
 
-Reports the four-level success ladder (planning_success, motion_valid,
-execution_success, task_success). Task success requires the drawer joint to
-reach the commanded translation distance during the commanded pull segment.
+Reports the ordered stages defined for Slide in ``BENCHMARK_STANDARD.md``:
+grasped, slid, released. The drawer joint must reach the commanded translation
+distance at the end of the commanded pull segment, and the hand must let go.
 Run: embodichain benchmark atomic-action --action slide
 """
 
@@ -30,14 +30,18 @@ from pathlib import Path
 
 from scripts.benchmark.atomic_action.common import (
     CPU_MEMORY_BACKEND,
-    SuccessLadder,
+    ENGAGED_MIN_DISPLACEMENT,
+    SKILL_STAGES,
+    StageLadder,
+    TASK_POSITION_TOLERANCE_M,
     add_common_benchmark_args,
     add_grasp_benchmark_args,
-    build_ladder_leaderboard,
+    build_stage_leaderboard,
     build_video_output_path,
     ensure_repo_root,
     ensure_torch,
     format_float,
+    hand_is_released,
     replay_trajectory_with_recording,
     reset_robot,
     resolve_profile,
@@ -53,9 +57,6 @@ TRAJECTORY_SAMPLE_COUNT = 140
 HAND_INTERP_STEPS = 12
 APPROACH_DISTANCE = 0.10
 REPLAY_HOLD_STEPS = 60
-# Commanded-versus-achieved drawer travel tolerance. Calibrated from the
-# measured pull error on this asset; see BENCHMARK_STANDARD.md.
-SLIDE_TOLERANCE_M = 0.03
 
 
 @dataclass(frozen=True)
@@ -154,14 +155,13 @@ def _build_rows(results: list[dict[str, object]]):
                 "trajectory_waypoints": result["trajectory_waypoints"],
             }
         )
-        ladder: SuccessLadder = result["ladder"]  # type: ignore[assignment]
+        ladder: StageLadder = result["ladder"]  # type: ignore[assignment]
         metric_rows.append(
             {
                 "sample_size": 1,
                 "impl": "slide",
                 "case_id": result["case_id"],
                 "slide_case": result["slide_case"],
-                "success_rate": f"{float(ladder.task_success):.6f}",
                 **ladder.as_row_fields(),
                 "commanded_travel_m": format_float(result["commanded_travel_m"], 4),
                 "max_tracking_error_rad": format_float(
@@ -233,7 +233,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     drawer_stroke_m = float(drawer_limits[1] - drawer_limits[0])
     print(
         f"Drawer joint {DRAWER_JOINT_NAME!r}: stroke={drawer_stroke_m:.3f} m, "
-        f"tolerance={SLIDE_TOLERANCE_M:.3f} m"
+        f"tolerance={TASK_POSITION_TOLERANCE_M:.3f} m"
     )
 
     n_sample = 1000 if profile == "smoke" else args.n_sample
@@ -277,11 +277,27 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             _reset_scene(robot, drawer, initial_qpos, initial_drawer_qpos)
             sim.update(step=4)
 
-            def evaluate(trace, case=case):
+            def evaluate(ladder, traces, case=case):
+                trace = traces["joint"]
+                # A drawer only moves while its handle is held, so the drawer
+                # having left its initial position is the scene evidence that
+                # the grasp took.
+                ladder.record(
+                    "grasped",
+                    abs(trace.measured_displacement) > ENGAGED_MIN_DISPLACEMENT,
+                    "object_not_grasped",
+                )
                 error = abs(
                     abs(trace.measured_displacement) - case.translation_distance_m
                 )
-                return (error <= SLIDE_TOLERANCE_M, "task_goal_miss")
+                ladder.record(
+                    "slid", error <= TASK_POSITION_TOLERANCE_M, "task_goal_miss"
+                )
+                ladder.record(
+                    "released",
+                    hand_is_released(robot, "hand", hand_open, hand_close),
+                    "release_failure",
+                )
 
             outcome = run_articulated_contact_case(
                 sim=sim,
@@ -293,6 +309,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
                 ),
                 joint_index=drawer_joint_index,
                 actuation_segment="pull",
+                stages=SKILL_STAGES["slide"],
                 evaluate=evaluate,
                 hold_steps=REPLAY_HOLD_STEPS,
             )
@@ -304,7 +321,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
                 )
 
             video_path = ""
-            if should_record_case(args, len(video_paths), outcome.ladder.task_success):
+            if should_record_case(args, len(video_paths), outcome.ladder.success):
                 _reset_scene(robot, drawer, initial_qpos, initial_drawer_qpos)
                 recorded = replay_trajectory_with_recording(
                     sim=sim,
@@ -341,23 +358,27 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
                 "drawer_settled_disp_m": trace.settled_displacement if trace else None,
                 "travel_error_m": travel_error,
                 "trajectory_waypoints": outcome.trajectory_waypoints,
-                "success": outcome.ladder.task_success,
+                "success": outcome.ladder.success,
                 "video_path": video_path,
             }
             results.append(result)
             ladder = outcome.ladder
+            stages = " ".join(
+                f"{stage}={'ok' if ladder.passed[stage] else 'FAIL'}"
+                for stage in ladder.stages
+                if stage in ladder.passed
+            )
             print(
                 f"  {result['case_id']:<22} "
                 f"time={result['cost_time_ms']:>9.2f} ms | "
-                f"plan={ladder.planning_success} valid={ladder.motion_valid} "
-                f"exec={ladder.execution_success} task={ladder.task_success} "
+                f"{stages} "
                 f"travel={format_float(result['drawer_measured_disp_m'], 4)} "
                 f"err={format_float(travel_error, 4)} "
                 f"[{ladder.failure_reason or 'ok'}]"
             )
 
     perf_rows, metric_rows = _build_rows(results)
-    leaderboard_rows = build_ladder_leaderboard("slide", results)
+    leaderboard_rows = build_stage_leaderboard("slide", results)
     report_path = write_markdown_report(
         benchmark_name="atomic_action_slide",
         perf_rows=perf_rows,
@@ -369,12 +390,16 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             f"Grasp samples: {n_sample}",
             f"Drawer joint: {DRAWER_JOINT_NAME}, usable stroke "
             f"{drawer_stroke_m:.3f} m.",
-            "task_success requires the replayed drawer travel at the end of the "
-            "commanded 'pull' segment to match the commanded translation within "
-            f"{SLIDE_TOLERANCE_M:.3f} m.",
+            "Stages: grasped (the drawer left its initial position), slid "
+            "(the replayed travel at the end of the commanded 'pull' segment "
+            f"matched the command within {TASK_POSITION_TOLERANCE_M:.3f} m), "
+            "released (the hand ended nearer its open command than its closed "
+            "one).",
             "drawer_settled_disp_m is the resting travel after release and "
             "retract. The drawer joint is undriven (drive_type='none'), so that "
-            "value is diagnostic, not a success gate.",
+            "value is a diagnostic.",
+            "motion_valid and max_tracking_error_rad are diagnostics; neither "
+            "fails a stage.",
             "Planning time excludes a discarded warm-up compile and includes "
             "handle grasp-pose generation.",
             *summarize_video_recording(args, results, video_paths),

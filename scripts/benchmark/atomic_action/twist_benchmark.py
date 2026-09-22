@@ -16,9 +16,10 @@
 
 """Benchmark Twist atomic action on the microwave power knob.
 
-Reports the four-level success ladder (planning_success, motion_valid,
-execution_success, task_success). Task success requires the knob's revolute
-joint to reach the commanded twist angle during the commanded twist segment.
+Reports the ordered stages defined for Twist in ``BENCHMARK_STANDARD.md``:
+grasped, twisted, released. The twisted stage scores the executed end-effector
+rotation about the knob axis; the knob joint's own rotation is a diagnostic,
+because this knob offers almost no resistance and over-rotates.
 Run: embodichain benchmark atomic-action --action twist
 """
 
@@ -31,13 +32,17 @@ from pathlib import Path
 
 from scripts.benchmark.atomic_action.common import (
     CPU_MEMORY_BACKEND,
-    SuccessLadder,
+    ENGAGED_MIN_DISPLACEMENT,
+    SKILL_STAGES,
+    StageLadder,
+    TASK_ROTATION_TOLERANCE_RAD,
     add_common_benchmark_args,
-    build_ladder_leaderboard,
+    build_stage_leaderboard,
     build_video_output_path,
     ensure_repo_root,
     ensure_torch,
     format_float,
+    hand_is_released,
     replay_trajectory_with_recording,
     reset_robot,
     resolve_profile,
@@ -53,9 +58,101 @@ TWIST_SAMPLE_INTERVAL = 140
 HAND_INTERP_STEPS = 12
 PRE_GRASP_DISTANCE = 0.12
 REPLAY_HOLD_STEPS = 60
-# Commanded-versus-achieved knob rotation tolerance. Calibrated from the
-# measured twist error on this asset; see BENCHMARK_STANDARD.md.
-TWIST_TOLERANCE_RAD = 0.15
+# Angle used to read the knob joint's axis off the asset itself.
+AXIS_PROBE_ANGLE_RAD = 0.05
+
+
+def _knob_axis_world(sim, microwave, joint_index: int):
+    """Return the knob joint's rotation axis in world coordinates.
+
+    The axis is measured from the asset rather than assumed: the knob joint is
+    perturbed by a small angle, the resulting change in the knob link's
+    orientation is a rotation about that joint's axis, and its direction is
+    read back out of that rotation. The joint is restored afterwards.
+
+    Args:
+        sim: Simulation manager, stepped so the probe reaches the link pose.
+        microwave: Articulation owning the knob joint.
+        joint_index: Index of the knob joint.
+
+    Returns:
+        Unit axis in world coordinates with shape ``(3,)``.
+    """
+    from scripts.tutorials.atomic_action.twist import KNOB_LINK_NAME
+
+    torch = ensure_torch()
+    initial_qpos = microwave.get_qpos(target=False).clone()
+    before = microwave.get_link_pose(KNOB_LINK_NAME, to_matrix=True)[0, :3, :3].clone()
+    probed = initial_qpos.clone()
+    probed[:, joint_index] = probed[:, joint_index] + AXIS_PROBE_ANGLE_RAD
+    microwave.set_qpos(probed, target=False)
+    microwave.set_qpos(probed, target=True)
+    sim.update(step=1)
+    after = microwave.get_link_pose(KNOB_LINK_NAME, to_matrix=True)[0, :3, :3].clone()
+    microwave.set_qpos(initial_qpos, target=False)
+    microwave.set_qpos(initial_qpos, target=True)
+    microwave.clear_dynamics()
+    sim.update(step=1)
+
+    relative = before.transpose(0, 1) @ after
+    axis = torch.stack(
+        [
+            relative[2, 1] - relative[1, 2],
+            relative[0, 2] - relative[2, 0],
+            relative[1, 0] - relative[0, 1],
+        ]
+    )
+    norm = torch.linalg.vector_norm(axis)
+    if float(norm) <= 1.0e-6:
+        raise RuntimeError("The knob joint did not rotate its link; axis unknown.")
+    return before @ (axis / norm)
+
+
+def _make_twist_rotation_reader(robot, axis_world, reference_waypoint: int):
+    """Return a reader for the end-effector rotation about the knob axis.
+
+    The standard scores Twist on what the hand did, not on where the knob
+    ended: this knob offers almost no resistance, so the gripper wedges against
+    it and drags it past the command. The reference orientation is captured at
+    the start of the twist segment, after the approach has already reoriented
+    the hand.
+
+    Args:
+        robot: Robot whose arm pose is read.
+        axis_world: Unit knob axis in world coordinates.
+        reference_waypoint: Waypoint index at which the reference orientation
+            is captured.
+
+    Returns:
+        Callable returning the signed rotation in radians, zero until the
+        reference is captured.
+    """
+    torch = ensure_torch()
+    state: dict[str, object] = {}
+
+    def perpendicular_component(rotation):
+        for column in (0, 1):
+            direction = rotation[:, column]
+            projected = direction - axis_world * torch.dot(direction, axis_world)
+            norm = torch.linalg.vector_norm(projected)
+            if float(norm) > 1.0e-6:
+                return projected / norm
+        raise RuntimeError("The end-effector frame is degenerate about the knob axis.")
+
+    def read(waypoint_index: int) -> float:
+        pose = robot.compute_fk(robot.get_qpos(name="arm"), name="arm", to_matrix=True)
+        current = perpendicular_component(pose[0, :3, :3])
+        if waypoint_index <= reference_waypoint:
+            state["reference"] = current
+            return 0.0
+        reference = state.get("reference")
+        if reference is None:
+            return 0.0
+        sine = torch.dot(axis_world, torch.linalg.cross(reference, current))
+        cosine = torch.dot(reference, current)
+        return float(torch.atan2(sine, cosine))
+
+    return read
 
 
 @dataclass(frozen=True)
@@ -152,14 +249,13 @@ def _build_rows(results: list[dict[str, object]]):
                 "trajectory_waypoints": result["trajectory_waypoints"],
             }
         )
-        ladder: SuccessLadder = result["ladder"]  # type: ignore[assignment]
+        ladder: StageLadder = result["ladder"]  # type: ignore[assignment]
         metric_rows.append(
             {
                 "sample_size": 1,
                 "impl": "twist",
                 "case_id": result["case_id"],
                 "twist_case": result["twist_case"],
-                "success_rate": f"{float(ladder.task_success):.6f}",
                 **ladder.as_row_fields(),
                 "commanded_angle_rad": format_float(result["commanded_angle_rad"], 4),
                 "max_tracking_error_rad": format_float(
@@ -173,6 +269,7 @@ def _build_rows(results: list[dict[str, object]]):
                 "knob_settled_disp_rad": format_float(
                     result["knob_settled_disp_rad"], 4
                 ),
+                "ee_rotation_rad": format_float(result["ee_rotation_rad"], 4),
                 "angle_error_rad": format_float(result["angle_error_rad"], 4),
             }
         )
@@ -223,9 +320,10 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     hand_open, hand_close = get_hand_open_close_qpos(robot)
 
     knob_joint_index = microwave.joint_names.index(KNOB_JOINT_NAME)
+    knob_axis_world = _knob_axis_world(sim, microwave, knob_joint_index)
     print(
         f"Knob joint {KNOB_JOINT_NAME!r} (link cap_1), "
-        f"tolerance={TWIST_TOLERANCE_RAD:.3f} rad"
+        f"tolerance={TASK_ROTATION_TOLERANCE_RAD:.3f} rad"
     )
 
     atomic_engine = AtomicActionEngine(
@@ -252,11 +350,37 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             _reset_scene(robot, microwave, initial_qpos, initial_knob_qpos)
             sim.update(step=4)
 
-            def evaluate(trace, case=case):
-                error = abs(
-                    abs(trace.measured_displacement) - abs(case.twist_angle_rad)
+            def build_readers(compiled):
+                try:
+                    reference = compiled.segment(0, "twist").start - 1
+                except (KeyError, AttributeError, IndexError):
+                    reference = -1
+                return {
+                    "ee_rotation": _make_twist_rotation_reader(
+                        robot, knob_axis_world, reference
+                    )
+                }
+
+            def evaluate(ladder, traces, case=case):
+                knob = traces["joint"]
+                rotation = traces["ee_rotation"]
+                # A knob cannot turn unless the hand is on it, so the knob
+                # leaving its initial angle is the evidence that the grasp
+                # took. Where the knob ended is then only a diagnostic.
+                ladder.record(
+                    "grasped",
+                    abs(knob.measured_displacement) > ENGAGED_MIN_DISPLACEMENT,
+                    "object_not_grasped",
                 )
-                return (error <= TWIST_TOLERANCE_RAD, "task_goal_miss")
+                error = abs(abs(rotation.measured_position) - abs(case.twist_angle_rad))
+                ladder.record(
+                    "twisted", error <= TASK_ROTATION_TOLERANCE_RAD, "task_goal_miss"
+                )
+                ladder.record(
+                    "released",
+                    hand_is_released(robot, "hand", hand_open, hand_close),
+                    "release_failure",
+                )
 
             outcome = run_articulated_contact_case(
                 sim=sim,
@@ -268,18 +392,21 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
                 ),
                 joint_index=knob_joint_index,
                 actuation_segment="twist",
+                stages=SKILL_STAGES["twist"],
                 evaluate=evaluate,
+                build_extra_readers=build_readers,
                 hold_steps=REPLAY_HOLD_STEPS,
             )
             trace = outcome.trace
+            rotation = outcome.channels.get("ee_rotation")
             angle_error = None
-            if trace is not None:
+            if rotation is not None:
                 angle_error = abs(
-                    abs(trace.measured_displacement) - abs(case.twist_angle_rad)
+                    abs(rotation.measured_position) - abs(case.twist_angle_rad)
                 )
 
             video_path = ""
-            if should_record_case(args, len(video_paths), outcome.ladder.task_success):
+            if should_record_case(args, len(video_paths), outcome.ladder.success):
                 _reset_scene(robot, microwave, initial_qpos, initial_knob_qpos)
                 recorded = replay_trajectory_with_recording(
                     sim=sim,
@@ -314,25 +441,33 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
                     trace.peak_signed_displacement if trace else None
                 ),
                 "knob_settled_disp_rad": trace.settled_displacement if trace else None,
+                "ee_rotation_rad": (
+                    rotation.measured_position if rotation is not None else None
+                ),
                 "angle_error_rad": angle_error,
                 "trajectory_waypoints": outcome.trajectory_waypoints,
-                "success": outcome.ladder.task_success,
+                "success": outcome.ladder.success,
                 "video_path": video_path,
             }
             results.append(result)
             ladder = outcome.ladder
+            stages = " ".join(
+                f"{stage}={'ok' if ladder.passed[stage] else 'FAIL'}"
+                for stage in ladder.stages
+                if stage in ladder.passed
+            )
             print(
                 f"  {result['case_id']:<22} "
                 f"time={result['cost_time_ms']:>9.2f} ms | "
-                f"plan={ladder.planning_success} valid={ladder.motion_valid} "
-                f"exec={ladder.execution_success} task={ladder.task_success} "
+                f"{stages} "
                 f"rot={format_float(result['knob_measured_disp_rad'], 4)} "
+                f"ee_rot={format_float(result['ee_rotation_rad'], 4)} "
                 f"err={format_float(angle_error, 4)} "
                 f"[{ladder.failure_reason or 'ok'}]"
             )
 
     perf_rows, metric_rows = _build_rows(results)
-    leaderboard_rows = build_ladder_leaderboard("twist", results)
+    leaderboard_rows = build_stage_leaderboard("twist", results)
     report_path = write_markdown_report(
         benchmark_name="atomic_action_twist",
         perf_rows=perf_rows,
@@ -342,11 +477,19 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             f"Profile: {profile}",
             f"CPU memory backend: {CPU_MEMORY_BACKEND}",
             f"Knob joint: {KNOB_JOINT_NAME} (target link cap_1).",
-            "task_success requires the replayed knob rotation at the end of the "
-            "commanded 'twist' segment to match the commanded angle within "
-            f"{TWIST_TOLERANCE_RAD:.3f} rad.",
-            "knob_settled_disp_rad is the resting rotation after release and "
-            "retract; it is diagnostic, not a success gate.",
+            "Stages: grasped (the knob left its initial angle), twisted (the "
+            "executed end-effector rotation about the knob axis matched the "
+            f"command within {TASK_ROTATION_TOLERANCE_RAD:.3f} rad at the end "
+            "of the 'twist' segment), released (the hand ended nearer its open "
+            "command than its closed one).",
+            "The knob joint's own rotation is a diagnostic. It offers almost "
+            "no resistance, so the gripper wedges against it and drags it past "
+            "the command; knob_settled_disp_rad is the resting value after "
+            "release and retract.",
+            "The knob axis is measured from the asset by probing the joint, "
+            "not assumed from the affordance default.",
+            "motion_valid and max_tracking_error_rad are diagnostics; neither "
+            "fails a stage.",
             "Planning time excludes a discarded warm-up compile.",
             *summarize_video_recording(args, results, video_paths),
         ],
