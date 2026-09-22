@@ -59,6 +59,11 @@ solver.
 
 ## 2. Where the four failing skills lose their cases
 
+Each subsection carries one recorded case, captured with the suite's own
+`--record_video --record_failed_video --video_case_limit 1`. A clip's numbers
+are from the run that produced it, so they differ from the aggregate above:
+grasp sampling is stochastic and every run is `--repeat 1`.
+
 ### `pick_up` — 52.08 %, and the grasp state disagrees with the scene
 
 | Outcome | Cases |
@@ -75,6 +80,11 @@ it is only visible because the two are separate stages.
 
 `held` is 100 %: nothing that came up ever fell.
 
+![PickUp fails to lift the object](../../../docs/source/_static/benchmarks/atomic_action/pick_up_lift_miss.gif)
+
+`sugar_box:q1_near:side`, one of the fifteen. The hand closes, the arm follows
+its plan, and the object is still on the table: lift −0.000147 m.
+
 ### `place` — 37.50 %, and the tighter tolerance is not the main cause
 
 | Outcome | Cases |
@@ -87,6 +97,11 @@ XY error over the 42 scored cases has a median of 0.0163 m. At the standard's
 1 cm, 18 pass; at the 10 cm the suite used before, 25 would. **The tolerance
 change accounts for 7 cases; the other 17 miss by more than 10 cm.** `stable`
 is 100 %: whatever landed on the target stayed there.
+
+![Place releases far from the commanded pose](../../../docs/source/_static/benchmarks/atomic_action/place_target_miss.gif)
+
+`sugar_box:q1_near:top:left_bin`. The hand opens and the object is 0.4286 m
+from the commanded pose; the PickUp precondition had lifted it 0.000805 m.
 
 ### `move_held_object` — 27.08 %, and the misses are half a metre
 
@@ -105,6 +120,11 @@ This skill also gained an orientation criterion. Its goal commands a pose, not
 a point, and only the position was scored before; exactly one case fails on
 rotation alone, so the criterion is not what moved the number.
 
+![MoveHeldObject leaves the object far from the commanded pose](../../../docs/source/_static/benchmarks/atomic_action/move_held_object_target_miss.gif)
+
+`sugar_box:q1_near:top:front_left`, the worst of the four and the first thing
+worth looking at: 0.8288 m and 1.5911 rad from the commanded pose.
+
 ### `hand_over` — 0 %, failing only at the last stage
 
 Both cases pass `grasped`, `transferred` and `handed_over`, then miss `placed`:
@@ -114,6 +134,12 @@ delivery distance 0.2372 m and 0.0764 m against the derived budget of
 An earlier run of the same two cases measured 0.1123 m and 0.0678 m. Grasp
 sampling is stochastic and every number here is `--repeat 1`, so these are point
 estimates, not confidence intervals.
+
+![HandOver delivers outside its budget](../../../docs/source/_static/benchmarks/atomic_action/hand_over_delivery_miss.gif)
+
+`vertical_can`. The transfer itself is clean -- both arms hold the can, the
+handing arm lets go, the object never drops below 0.5319 m -- and only the
+delivery misses, at 0.1981 m.
 
 ---
 
