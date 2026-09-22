@@ -1,0 +1,13 @@
+task_key: microduck_flat
+title: MicroDuck Flat Velocity
+summary: Track planar velocity and yaw-rate commands with the MicroDuck biped on flat terrain.
+tags:
+- locomotion
+- reinforcement_learning
+- biped
+default_deployment: default
+deployments:
+  default:
+    config: env.yaml
+  newton:
+    config: env.newton.yaml

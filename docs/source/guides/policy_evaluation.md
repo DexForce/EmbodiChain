@@ -7,6 +7,19 @@ loads the selected checkpoint, and writes a standalone evaluation report.
 The command runs Headless by default. Add `--viewer` to open the original
 simulator task in the DexSim Viewer.
 
+## Evaluation and qualification
+
+| Stage | Purpose | Evidence |
+|---|---|---|
+| Training-time evaluation | Measure learning progress when `trainer.enable_eval` is enabled | Periodic completed-episode metrics in training logs |
+| Saved-checkpoint evaluation | Reload a particular policy and evaluate deterministic actions in the selected task | `evaluation.json` with checkpoint/config paths, seed, episode count and metrics |
+| Qualification | Decide whether that checkpoint meets the requirements of a task and deployment | Recorded criteria, thresholds, measurements and a decision with supporting evidence |
+
+All seven bundled locomotion tasks set `enable_eval: false` in their PPO
+configurations. They need an explicit post-training evaluation. The current
+`eval-policy` command reports measurements; it does not apply qualification
+thresholds or write a pass/fail decision.
+
 ## Training output
 
 `train-rl` records the files required by a later evaluation:
@@ -108,6 +121,96 @@ embodichain eval-policy \
 
 `--gym-config` can be omitted when the training configuration already refers to
 the task configuration.
+
+## Headless locomotion checkpoint example
+
+Use a checkpoint trained with the Go2 Default deployment's
+`embodichain_tasks/configs/tasks/locomotion/velocity/go2_flat/agents/ppo.yaml`.
+Set `go2_run` to that run's directory and `go2_checkpoint` to the specific saved
+checkpoint to assess. Keep the training and environment snapshots from the same
+run; a Newton checkpoint uses the snapshots produced by `agents/ppo.newton.yaml`.
+
+```bash
+go2_run=/absolute/path/to/go2-training-run
+go2_checkpoint="$go2_run/checkpoints/selected-policy.pt"
+
+embodichain eval-policy \
+  --checkpoint "$go2_checkpoint" \
+  --config "$go2_run/configs/train.yaml" \
+  --gym-config "$go2_run/configs/gym.yaml" \
+  --seed 42 \
+  --episodes 32 \
+  --num-envs 16 \
+  --device cuda:0 \
+  --sim-device gpu \
+  --output outputs/go2-default-evaluation
+```
+
+This runs headless and writes
+`outputs/go2-default-evaluation/<timestamp>-policy/evaluation.json`. The explicit
+paths also work for runs without `run-manifest.json`. The task configuration
+selects the backend, command distribution, disturbances and episode horizon;
+preserve those settings when comparing checkpoints. Keep Default and Newton
+results separate. The seed makes the evaluation inputs repeatable within the
+chosen software and device setup.
+
+Check `inputs.checkpoint`, `inputs.configs`, `inputs.seed`, `inputs.num_envs`
+and `result.episodes` before interpreting `result.metrics`:
+
+| Metric | Meaning in native headless evaluation |
+|---|---|
+| `eval/avg_reward` | Mean sum of rewards over the requested completed episodes; compare under the same reward configuration |
+| `eval/avg_length` | Mean episode length in control steps; compare with the configured `max_episode_steps` |
+| `eval/success_rate` | Mean terminal success signal; **not applicable** to the seven locomotion tasks, which return false by design |
+| `eval/metrics/linear_velocity_error` | Mean terminal planar velocity error norm, in m/s, for velocity tasks |
+| `eval/metrics/yaw_rate_error` | Mean terminal absolute yaw-rate error, in rad/s, for velocity tasks |
+| `eval/metrics/root_height` | Mean terminal root height, in m |
+| `eval/metrics/maximum_illegal_contact_force` | Where emitted, mean of the task's maximum contact force at each episode's final step, in N |
+| `eval/metrics/progress` | Humanoid Run's mean terminal potential difference; this is a per-step progress reward input, not total distance traveled |
+
+`eval/metrics/*` samples scalar task metrics **at episode completion**, then
+averages across episodes. It does not average each metric over the trajectory.
+The native headless report stores aggregate metrics, without individual episode
+traces or termination reasons. Locomotion's `eval/success_rate: 0.0` should be
+recorded as **not applicable** in a qualification assessment. When a task emits
+no success field at all, the report contains `null` for this metric.
+
+## Locomotion qualification
+
+Choose acceptance bounds before evaluating a checkpoint. Record the task,
+deployment, checkpoint, command distribution, disturbances, episode horizon,
+seeds, episode count and software versions alongside those bounds. Backend and
+robot differences require separate criteria and results.
+
+| Task family | Criteria to assess | Evidence beyond the aggregate report |
+|---|---|---|
+| G1 and H1_2 velocity | Planar/yaw tracking within the chosen tolerances, upright posture and acceptable survival under commands and pushes | Trajectory tracking errors, tilt/fall counts, timeout fraction and posture/height traces |
+| Go1 and Go2 velocity | Tracking tolerances, survival and stable stepping without sustained foot dragging | Tracking traces, tilt/fall counts, timeout fraction and foot-clearance/contact observations |
+| ANYmal-C velocity | Tracking tolerances, survival, base-contact failures and undesired thigh contacts | Tracking traces, base/thigh contact traces and termination reasons |
+| MicroDuck velocity | Tracking tolerances, survival, trunk clearance and avoidance of body contact | Tracking/height/tilt traces, body-contact events and termination reasons |
+| Humanoid Run | Sustained forward progress toward the target, upright torso and acceptable survival | Forward displacement over time, torso-height traces and fall/timeout counts |
+
+For tracking, specify the command frame, time window, error statistic and bound.
+For survival, count timeouts and failures separately; mean episode length alone
+does not give the fraction that reached the horizon. Derive stability evidence
+from recorded trajectories or an instrumented rollout; Viewer playback can help
+inspect posture and contact behavior. The existing task termination limits
+describe reset conditions, while qualification bounds describe the required
+policy quality.
+
+Record each criterion's threshold, measured value and evidence location, then
+state pass, fail or unavailable. Missing trajectory or failure-count evidence
+leaves the associated criterion unavailable. Training completion, increasing
+reward and a checkpoint loading successfully establish different facts from
+meeting these criteria. Longer training is justified by learning curves and
+repeat evaluations, rather than a fixed iteration count alone.
+
+The catalog exposes Default/Newton configurations and their PPO training routes.
+Its qualification field remains unavailable until suitable evidence is attached.
+Raw `evaluation.json` uses an RL metrics schema; it should not be attached as an
+ordered-placement physical validation report. An automated locomotion validator
+would need explicit thresholds and criterion results in a compatible report
+schema.
 
 ## Execution paths
 

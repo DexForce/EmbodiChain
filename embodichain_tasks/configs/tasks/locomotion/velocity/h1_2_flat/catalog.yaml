@@ -1,0 +1,13 @@
+task_key: h1_2_flat
+title: Unitree H1_2 Flat Velocity
+summary: Track planar velocity and yaw-rate commands with the Unitree H1_2 humanoid on flat terrain.
+tags:
+- locomotion
+- reinforcement_learning
+- humanoid
+default_deployment: default
+deployments:
+  default:
+    config: env.yaml
+  newton:
+    config: env.newton.yaml
