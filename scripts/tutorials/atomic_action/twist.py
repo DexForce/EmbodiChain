@@ -64,7 +64,6 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     run_tutorial,
 )
 
-# MICROWAVE_ASSET = "MicrowaveOven/microwave_oven_with_inertials.urdf"
 MICROWAVE_ASSET = "Microwave/microwave.urdf"
 KNOB_LINK_NAME = "knob_link"
 MICROWAVE_POSITION = (-1.0, -0.30, 0.4)

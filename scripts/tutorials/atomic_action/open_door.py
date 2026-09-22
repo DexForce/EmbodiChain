@@ -118,10 +118,10 @@ def create_microwave(sim: SimulationManager) -> Articulation:
 
 
 def create_door_handle_semantics(microwave: Articulation) -> ObjectSemantics:
-    """Resolve the first parent revolute joint from ``door_handle``.
+    """Resolve the parent door hinge from ``handle_link``.
 
-    Only the handle link is configured. ``OpenDoorAffordance`` traverses the
-    fixed ``door_to_door_handle_fixed`` joint and resolves ``door_hinge``.
+    For ``Microwave/microwave.urdf``, ``OpenDoorAffordance`` traverses the
+    fixed ``door_handle_fixed_joint`` and resolves ``door_hinge``.
     """
     affordance = OpenDoorAffordance.from_articulation(
         microwave,
