@@ -1517,7 +1517,7 @@ def _integration_payload(
                     "simulation.coordinated_transport",
                     _COORDINATED_HOLD_CALL_ID,
                     _AXIS_ALIGN_CALL_ID,
-                    _MOVE_HELD_OBJECT_CALL_ID,
+                    *((_MOVE_HELD_OBJECT_CALL_ID,) if not drawers else ()),
                     *pick_routes,
                     _PLACE_RELATIVE_CALL_ID,
                 )
@@ -1577,7 +1577,14 @@ def _integration_payload(
                     else []
                 ),
                 *(
-                    [{"kind": "move_held_object", "routes": move_held_routes}]
+                    [
+                        {
+                            "kind": (
+                                "drawer_transport" if drawers else "move_held_object"
+                            ),
+                            "routes": move_held_routes,
+                        }
+                    ]
                     if move_held_routes
                     else []
                 ),

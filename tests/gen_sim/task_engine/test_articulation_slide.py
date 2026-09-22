@@ -1145,6 +1145,38 @@ def test_drawer_open_place_close_builds_one_link_owned_container(
     assert "drawer" not in {b.entity_id for b in binding.rigid_objects}
     assert len(binding.articulations) == len(binding.containers) == 1
     route = deployment.integration.adapter_factory.drawer_routes[0]
+    integration = load_config(paths.integration)
+    assert (
+        "simulation.move_held_object" not in integration["profile"]["effect_monitors"]
+    )
+    transport_factory = next(
+        f
+        for f in deployment.integration.registration.registered_semantic_lowerer_factories
+        if f.call_id == "simulation.move_held_object"
+    )
+    from embodichain.lab.task_program.semantics import RegisteredSemanticCall
+    from embodichain.lab.sim.atomic_actions import MoveHeldObjectOptions
+
+    robot = object()
+    lowerer = transport_factory.create(
+        simulation=None,
+        robot=robot,
+        scene_registry=SimpleNamespace(
+            resolve=lambda *a, **kw: None, lookup=lambda *a: None
+        ),
+        engine=SimpleNamespace(robot=robot),
+    )
+    assert lowerer.effect_contract_kind is None
+    assert lowerer.preserves_symbolic_state
+    lowered = lowerer.lower(
+        RegisteredSemanticCall(
+            call_id=lowerer.call_id, arguments={"target": route.affordance}
+        ),
+        context=None,
+        bound=None,
+        option_template=MoveHeldObjectOptions(),
+    )
+    assert lowered.registered_effect is None
     assert load_config(paths.execution_policy)["motion"]["sample_count"] >= 260
     assert binding.containers[0].parent_id == route.binding.link_id
     assert route.binding.part_id

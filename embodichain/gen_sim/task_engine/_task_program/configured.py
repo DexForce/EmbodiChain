@@ -56,6 +56,7 @@ from .services import (
     make_pick_factory,
     _MoveHeldObjectRoute,
     _MoveHeldObjectLowererFactory,
+    _DrawerTransportLowererFactory,
     _CoordinatedTransportRoute,
     _CoordinatedTransportLowererFactory,
     _CoordinatedHoldLowererFactory,
@@ -206,7 +207,7 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                 )
             )
         return make_pick_factory(tuple(routes), call_id)
-    if kind == "move_held_object":
+    if kind in {"move_held_object", "drawer_transport"}:
         config = _mapping(value, path=path, required=frozenset({"kind", "routes"}))
         routes: list[_MoveHeldObjectRoute] = []
         for index, raw in enumerate(_sequence(config["routes"], path=f"{path}.routes")):
@@ -227,7 +228,12 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                     pose=_decode_goal_pose(route["pose"], path=f"{route_path}.pose"),
                 )
             )
-        return _MoveHeldObjectLowererFactory(tuple(routes))
+        factory = (
+            _DrawerTransportLowererFactory
+            if kind == "drawer_transport"
+            else _MoveHeldObjectLowererFactory
+        )
+        return factory(tuple(routes))
     if kind in {"coordinated_transport", "coordinated_hold"}:
         config = _mapping(
             value,

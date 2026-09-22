@@ -27,6 +27,53 @@ from embodichain.gen_sim.task_engine._task_program.drawer_geometry import (
 )
 
 
+@pytest.mark.parametrize("has_drawers", [False, True])
+def test_factory_selects_runtime_without_shadowing_drawer_engine(
+    monkeypatch: pytest.MonkeyPatch, has_drawers: bool
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from embodichain.gen_sim.task_engine._task_program.assembly import _TaskFactory
+    from embodichain.gen_sim.task_engine._task_program import drawer_runtime
+    from embodichain.lab.task_program.integrations.simulation.environment import (
+        SimulationTaskProgramFactory,
+    )
+    from embodichain.gen_sim.task_engine._task_program.actions import (
+        GenSimMoveHeldObject,
+        GenSimPour,
+    )
+
+    standard, drawer = Mock(), Mock()
+    parent = Mock(return_value=standard)
+    constructor = Mock(return_value=drawer)
+    monkeypatch.setattr(
+        SimulationTaskProgramFactory, "create_atomic_action_engine", parent
+    )
+    monkeypatch.setattr(drawer_runtime, "DrawerPlacementEngine", constructor)
+    registration = SimpleNamespace(validate_engine=Mock())
+    factory = object.__new__(_TaskFactory)
+    factory._drawers = (object(),) if has_drawers else ()
+    factory._pour_receivers = {}
+    factory._create_motion_generator = Mock(return_value=object())
+    factory._grasp_pose_generators = {}
+    factory._registration = registration
+    profile = SimpleNamespace(action_control_profiles=lambda: {})
+    result = _TaskFactory.create_atomic_action_engine(factory, profile)
+    if has_drawers:
+        assert result is drawer
+        constructor.assert_called_once()
+        parent.assert_not_called()
+        drawer.register.assert_not_called()
+    else:
+        assert result is standard
+        parent.assert_called_once()
+        constructor.assert_not_called()
+        assert [type(c.args[0]) for c in standard.register.call_args_list] == [
+            GenSimMoveHeldObject,
+            GenSimPour,
+        ]
+
+
 def drawer_meshes() -> list[trimesh.Trimesh]:
     return [
         trimesh.creation.box(
