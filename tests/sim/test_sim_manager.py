@@ -35,6 +35,7 @@ from embodichain.lab.sim.cfg import (
     DefaultPhysicsCfg,
     DLSSCfg,
     MarkerCfg,
+    NewtonPhysicsCfg,
     RenderCfg,
     RobotCfg,
     RobotPresetCfg,
@@ -258,6 +259,9 @@ class FakeVisualizationRuntime:
         self.stopped = False
 
     def capture(self, **kwargs: object) -> bool:
+        before_capture = kwargs.pop("before_capture", None)
+        if before_capture is not None:
+            before_capture()
         self.capture_calls.append(kwargs)
         return True
 
@@ -319,6 +323,8 @@ def _make_sim_manager(
     sim._window_camera_pose_input_control = None
     sim._env = FakeEnv()
     sim._world = FakeWorld()
+    sim.physics = DefaultPhysicsBackend(sim)
+    sim._pending_record_dt = 0.0
     sim._native_default_plane = object()
     sim._default_plane = SimpleNamespace(native=lambda: sim._native_default_plane)
     sim._visualization_runtime = None
@@ -341,6 +347,9 @@ def _make_visualization_sim_manager() -> (
     sim.profiler = Profiler(None, torch.device("cpu"))
     sim._is_initialized_gpu_physics = False
     sim._world = FakeWorld()
+    sim.physics = DefaultPhysicsBackend(sim)
+    sim._pending_record_dt = 0.0
+    sim.is_window_opened = False
     sim.prepare = MagicMock()
     sim.sync_render_state = MagicMock()
     sim._window_record_state = None
@@ -1237,6 +1246,7 @@ def test_constructor_starts_visualization_after_default_scene(
 def test_render_camera_group_syncs_state_before_rendering() -> None:
     lifecycle: list[str] = []
     sim = object.__new__(SimulationManager)
+    sim.is_window_opened = False
     sim.sync_render_state = MagicMock(side_effect=lambda: lifecycle.append("sync"))
     sim._world = SimpleNamespace(
         render_camera_group=lambda _group_ids: lifecycle.append("render")
@@ -1251,6 +1261,7 @@ def test_render_camera_group_syncs_state_before_rendering() -> None:
 def test_empty_camera_group_does_not_publish_render_state() -> None:
     """State-only observations must not cross the physics-to-render bridge."""
     sim = object.__new__(SimulationManager)
+    sim.is_window_opened = False
     sim.sync_render_state = MagicMock()
     sim._world = SimpleNamespace(render_camera_group=MagicMock())
     sim._log_scene_summary = MagicMock()
@@ -1260,6 +1271,172 @@ def test_empty_camera_group_does_not_publish_render_state() -> None:
     sim.sync_render_state.assert_not_called()
     sim._world.render_camera_group.assert_not_called()
     sim._log_scene_summary.assert_called_once_with()
+
+
+def test_empty_camera_group_still_publishes_for_an_open_window() -> None:
+    sim = object.__new__(SimulationManager)
+    sim.is_window_opened = True
+    sim.sync_render_state = MagicMock()
+    sim._world = SimpleNamespace(render_camera_group=MagicMock())
+    sim._log_scene_summary = MagicMock()
+
+    sim.render_camera_group([])
+
+    sim.sync_render_state.assert_called_once_with()
+    sim._world.render_camera_group.assert_not_called()
+
+
+def test_recording_and_viser_share_substep_publication() -> None:
+    sim, runtime = _make_visualization_sim_manager()
+    sim._window_record_state = _WindowRecordState(
+        time_step=0.01,
+        max_memory_bytes=1024,
+        output_dir="unused",
+        video_name="unused",
+        save_kwargs={},
+        capture_from_sim_update=True,
+    )
+    sim._capture_window_record_frame = MagicMock()
+
+    sim.update(0.01, 1)
+
+    sim.sync_render_state.assert_called_once_with()
+    sim._capture_window_record_frame.assert_called_once()
+    assert len(runtime.capture_calls) == 1
+
+
+def _make_render_frame_sim(*, window=False, viser=False, automatic_sync=False):
+    """Track published state through real manager/backend scheduling methods."""
+    sim, runtime = _make_visualization_sim_manager()
+    sim.sim_config.physics_cfg = NewtonPhysicsCfg(sync_to_renderer=automatic_sync)
+    sim.sim_config.visualization.backend = "viser" if viser else "none"
+    sim.physics = NewtonPhysicsBackend(sim)
+    sim.is_window_opened = window
+    sim._log_scene_summary = lambda: None
+    sim._visualization_manifest_topology_revision = sim._visualization_topology_revision
+    state = {"value": 0, "published": None}
+    publications = []
+    rendered = []
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(is_finalized=True, result=object())
+    )
+
+    def advance(_dt, *, sync_to_dexsim):
+        # Automatic publication must not duplicate the manager's frame.
+        assert sync_to_dexsim is False
+        state["value"] += 1
+
+    def publish(_result):
+        state["published"] = state["value"]
+        publications.append(state["value"])
+
+    sim._world.update = advance
+    sim._world.render_camera_group = lambda ids: rendered.append(state["published"])
+    sim.physics.sync_render_state = publish
+    sim.sync_render_state = SimulationManager.sync_render_state.__get__(sim)
+    return sim, runtime, state, publications, rendered
+
+
+@pytest.mark.parametrize("automatic_sync", [None, False, True])
+@pytest.mark.parametrize("window", [False, True])
+def test_window_publication_respects_consumers_with_all_newton_policies(
+    automatic_sync, window
+):
+    sim, _, _, publications, rendered = _make_render_frame_sim(
+        window=window, automatic_sync=automatic_sync
+    )
+    for _ in range(3):
+        sim.update(0.01, 1, render_final_step=False)
+        with sim.render_frame():
+            sim.render_camera_group([])
+    assert publications == ([1, 2, 3] if window or automatic_sync is True else [])
+    assert rendered == []
+
+
+@pytest.mark.parametrize("camera", [False, True])
+@pytest.mark.parametrize("record", [False, True])
+@pytest.mark.parametrize("viser", [False, True])
+def test_final_substep_consumers_share_publication(camera, record, viser):
+    sim, runtime, state, publications, rendered = _make_render_frame_sim(viser=viser)
+    recorded = []
+    if record:
+        sim._window_record_state = _WindowRecordState(
+            time_step=0.01,
+            max_memory_bytes=1024,
+            output_dir="unused",
+            video_name="unused",
+            save_kwargs={},
+            capture_from_sim_update=True,
+        )
+        sim._capture_window_record_frame = lambda _: recorded.append(state["published"])
+    sim.update(0.01, 3, render_final_step=False)
+    # Interval events may directly edit state after physics. All final-frame
+    # consumers must see this edit, not a cached final-substep publication.
+    state["value"] = 30
+    with sim.render_frame():
+        sim.render_camera_group([3] if camera else [])
+    expected = [1, 2] if record or viser else []
+    if camera or record or viser:
+        expected += [30]
+    assert publications == expected
+    assert rendered == ([30] if camera else [])
+    assert recorded == ([1, 2, 30] if record else [])
+    assert len(runtime.capture_calls) == (3 if viser else 0)
+
+
+def test_render_frames_and_independent_reads_refresh_direct_state_writes():
+    sim, _, state, publications, rendered = _make_render_frame_sim()
+    for value in (4, 7):
+        state["value"] = value  # A reset/pose write without a physics step.
+        with sim.render_frame():
+            sim.render_camera_group([1])
+            sim.render_camera_group([2])
+    state["value"] = 9
+    sim.render_camera_group([1])
+    state["value"] = 12
+    sim.render_camera_group([1])
+    assert publications == [4, 7, 9, 12]
+    assert rendered == [4, 4, 7, 7, 9, 12]
+
+
+def test_explicit_publication_inside_frame_refreshes_after_state_edit():
+    sim, _, state, publications, rendered = _make_render_frame_sim()
+    with sim.render_frame():
+        sim.render_camera_group([1])
+        state["value"] = 5
+        sim.sync_render_state()
+        sim.render_camera_group([1])
+    assert publications == [0, 5]
+    assert rendered == [0, 5]
+
+
+def test_failed_frame_discards_publication_and_preserves_record_cadence():
+    sim, _, state, publications, _ = _make_render_frame_sim()
+    sim.update(0.01, 1, render_final_step=False)
+    with pytest.raises(ValueError, match="observation failed"):
+        with sim.render_frame():
+            sim.render_camera_group([1])
+            raise ValueError("observation failed")
+    assert sim._render_state_published is None
+    assert sim._pending_record_dt == pytest.approx(0.01)
+    state["value"] = 8
+    with sim.render_frame():
+        sim.render_camera_group([1])
+    assert publications == [1, 8]
+    assert sim._pending_record_dt == 0
+
+
+def test_failed_publication_retries_within_the_same_frame():
+    sim, _, _, _, _ = _make_render_frame_sim()
+    sim.physics.sync_render_state = MagicMock(
+        side_effect=[RuntimeError("bridge"), None]
+    )
+    with sim.render_frame():
+        with pytest.raises(RuntimeError, match="bridge"):
+            sim.render_camera_group([1])
+        sim.render_camera_group([1])
+        sim.render_camera_group([2])
+    assert sim.physics.sync_render_state.call_count == 2
 
 
 def test_register_kinematic_joint_trajectory_expands_each_arena() -> None:

@@ -55,12 +55,20 @@ class _ResetEnv(BaseEnv):
                 side_effect=lambda **_: self.reset_events.append("capture")
             ),
         )
+        self.sim.render_frame = self._render_frame
         self._profiler = _ProfilerStub()
         self._task_success = torch.zeros(1, dtype=torch.bool)
         self._detached_uids_for_reset: list[str] = []
         self._elapsed_steps = torch.zeros(1, dtype=torch.int32)
         self.event_manager = MagicMock()
         self.initial_random_value = 0.0
+
+    @contextmanager
+    def _render_frame(self, *, force_visualization: bool = False):
+        if self.sim.is_window_opened:
+            self.sim.sync_render_state()
+        yield
+        self.sim.capture_visualization_safely(force=force_visualization)
 
     def is_task_success(self, **kwargs) -> torch.Tensor:
         del kwargs
@@ -116,8 +124,8 @@ def test_reset_publishes_episode_state_before_visual_observation() -> None:
         "reset_objects",
         "initialize_episode",
         "sync_render",
-        "capture",
         "get_obs",
+        "capture",
     ]
 
 
@@ -131,8 +139,8 @@ def test_headless_reset_leaves_publication_to_visual_consumers() -> None:
     assert env.reset_events == [
         "reset_objects",
         "initialize_episode",
-        "capture",
         "get_obs",
+        "capture",
     ]
 
 
