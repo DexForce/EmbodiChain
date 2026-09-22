@@ -1777,3 +1777,54 @@ def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
         "relation",
     }
     assert generated["integration_fingerprint"] != "0" * 64
+
+    from embodichain.gen_sim.task_engine._task_program.assembly import (
+        compose_deployment,
+        load_deployment,
+    )
+    from embodichain.gen_sim.task_engine._task_program.align_held import (
+        with_held_alignment,
+    )
+
+    deployment = load_deployment(
+        task_program=load_config(paths.deployment)["task_program"],
+        skill_profile=load_config(paths.embodiment)["skill_profile"],
+        base_dir=paths.deployment.parent,
+    )
+    registration = deployment.integration.registration
+    for preset in registration.robot_profile_binding.presets:
+        monitor = preset.effect_monitors["gen_sim.align_held"]
+        assert monitor.monitor_id == "builtin.composite_effect"
+        assert monitor.params["attached_translation_threshold"] == 0.06
+    factory = next(
+        factory
+        for factory in registration.registered_semantic_lowerer_factories
+        if factory.call_id == "gen_sim.align_held"
+    )
+    assert factory.verify_retention
+
+    base = compose_deployment(
+        task_program=load_config(paths.deployment)["task_program"],
+        skill_profile=load_config(paths.embodiment)["skill_profile"],
+        base_dir=paths.deployment.parent,
+    ).integration.registration
+    effectless = with_held_alignment(
+        base,
+        program=load_config(paths.program),
+        constraints={
+            "upright": SimpleNamespace(entity="bottle", local_axis=tuple(expected_axis))
+        },
+        verify_retention=False,
+    )
+    for before, drawer, retained in zip(
+        base.robot_profile_binding.presets,
+        effectless.robot_profile_binding.presets,
+        registration.robot_profile_binding.presets,
+        strict=True,
+    ):
+        assert drawer.effect_monitors == before.effect_monitors
+        assert {
+            key: value
+            for key, value in retained.effect_monitors.items()
+            if key != "gen_sim.align_held"
+        } == before.effect_monitors

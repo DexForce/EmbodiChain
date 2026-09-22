@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import math
 from typing import Any, ClassVar
 
 import torch
@@ -29,13 +30,19 @@ from embodichain.lab.sim.atomic_actions.primitives.move_held_object import (
     MoveHeldObjectOptions,
 )
 from embodichain.lab.task_program.compiler.lowering import (
+    RegisteredHeldObjectEffect,
     RegisteredSemanticLowerer,
+    RegisteredSemanticEffect,
     SemanticLowering,
 )
 from embodichain.lab.task_program.semantics import (
+    EffectAssurance,
+    EffectMonitorRef,
+    HeldObjectRelation,
     RegisteredSemanticCall,
     SceneObjectRef,
     SemanticCallDescriptor,
+    SemanticEffectKind,
     SkillPolicyPreset,
 )
 from embodichain.utils.math import axis_angle_to_rotation_matrix
@@ -83,6 +90,21 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
         held = context.task.get_held_object(key)
         if held is None or held.semantics.entity_id != args["object"]:
             raise ValueError("Held alignment requires the declared object to be held.")
+        effect = (
+            RegisteredSemanticEffect(
+                effect_kind=SemanticEffectKind.ATTACH,
+                held_objects=(
+                    RegisteredHeldObjectEffect(
+                        expectation_id="primary",
+                        relation=HeldObjectRelation.ATTACHED,
+                        object_id=args["object"],
+                        slot_id="primary",
+                    ),
+                ),
+            )
+            if self.effect_contract_kind is SemanticEffectKind.ATTACH
+            else None
+        )
         observed = context.scene.entities[args["object"]]
         if observed.confidence <= 0:
             raise ValueError("Held alignment requires a current object observation.")
@@ -117,7 +139,9 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
             pose[:, :3, 3] = pose.new_tensor(position)
             staging_pose[:, :3, 3] = pose[:, :3, 3]
         if args["preserve_yaw"]:
-            return SemanticLowering(goal=HeldObjectPoseGoal(pose))
+            return SemanticLowering(
+                goal=HeldObjectPoseGoal(pose), registered_effect=effect
+            )
         # Upright leaves yaw free. Prefer a TCP approaching from its arm root
         # rather than forcing the wrist to point back toward the robot base.
         motion = resource.endpoints["motion"].runtime_target
@@ -146,18 +170,27 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
             torch.stack((staging_pose, pose), dim=1) if position is not None else pose
         )
         return SemanticLowering(
-            goal=HeldObjectPoseGoal(target_poses, world_yaw_free=True)
+            goal=HeldObjectPoseGoal(target_poses, world_yaw_free=True),
+            registered_effect=effect,
         )
+
+
+class _RetainedAlignHeldLowerer(_AlignHeldLowerer):
+    """Match the non-drawer GenSim action's measured attachment postcondition."""
+
+    effect_contract_kind: ClassVar[SemanticEffectKind] = SemanticEffectKind.ATTACH
+    preserves_symbolic_state: ClassVar[bool] = False
 
 
 @dataclass(frozen=True, slots=True)
 class _AlignHeldFactory:
     call_id: ClassVar[str] = ALIGN_HELD_CALL
-    revision: ClassVar[str] = "5"
+    revision: ClassVar[str] = "6"
     target_descriptor = MoveHeldObject.descriptor()
     routes: tuple[
         tuple[str, str, bool, tuple[float, ...], tuple[float, ...] | None], ...
     ]
+    verify_retention: bool = False
 
     def create(
         self, *, simulation: Any, robot: Any, scene_registry: Any, engine: Any
@@ -166,11 +199,18 @@ class _AlignHeldFactory:
             raise ValueError("Held alignment must bind the factory's robot.")
         for obj, _, _, _, _ in self.routes:
             scene_registry.resolve(obj, expected_type=SceneObjectRef)
-        return _AlignHeldLowerer(self.routes, robot)
+        lowerer = (
+            _RetainedAlignHeldLowerer if self.verify_retention else _AlignHeldLowerer
+        )
+        return lowerer(self.routes, robot)
 
 
 def with_held_alignment(
-    registration: Any, *, program: dict[str, Any], constraints: Any
+    registration: Any,
+    *,
+    program: dict[str, Any],
+    constraints: Any,
+    verify_retention: bool = False,
 ) -> Any:
     axes = {
         cfg.entity: cfg.local_axis
@@ -207,7 +247,7 @@ def with_held_alignment(
         )
     if not routes:
         return registration
-    factory = _AlignHeldFactory(tuple(routes.values()))
+    factory = _AlignHeldFactory(tuple(routes.values()), verify_retention)
     catalog = registration.call_catalog.with_descriptor(
         SemanticCallDescriptor(
             call_id=ALIGN_HELD_CALL,
@@ -219,12 +259,26 @@ def with_held_alignment(
     for preset in registration.robot_profile_binding.presets:
         options = dict(preset.action_option_templates)
         options[ALIGN_HELD_CALL] = MoveHeldObjectOptions()
+        monitors = dict(preset.effect_monitors)
+        if verify_retention and preset.effect_assurance is EffectAssurance.VERIFIED:
+            # Match the ordinary GenSim transport's measured retention contract.
+            monitors[ALIGN_HELD_CALL] = EffectMonitorRef(
+                "builtin.composite_effect",
+                "1",
+                {
+                    "consecutive_samples": 3,
+                    "attached_translation_threshold": 0.06,
+                    "attached_rotation_threshold": 3.0,
+                    "detached_translation_threshold": 0.08,
+                    "detached_rotation_threshold": math.pi,
+                },
+            )
         presets.append(
             SkillPolicyPreset(
                 preset_id=preset.preset_id,
                 required_planner=preset.required_planner,
                 action_option_templates=options,
-                effect_monitors=preset.effect_monitors,
+                effect_monitors=monitors,
                 effect_assurance=preset.effect_assurance,
                 motion_policy=preset.motion_policy,
                 tracking_policy=preset.tracking_policy,
