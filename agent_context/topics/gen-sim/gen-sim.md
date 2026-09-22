@@ -87,8 +87,8 @@ controls. Imported mimic behavior and shared robot defaults are unchanged.
 E1 placement on another object retains its original position tolerance and adds
 the existing stack stability checks for vertical orientation, support gap and
 reference stability. Source pose matrices take precedence over Euler fields.
-Generated held-object transports declare a measured attachment postcondition.
-GenSim installs task-owned wrappers around the existing MoveHeldObject and Pour
+Generated non-drawer held-object transports declare a measured attachment postcondition.
+For deployments without drawer routes, GenSim installs wrappers around MoveHeldObject and Pour
 descriptors after shared engine validation; shared Lab action classes and
 options remain unchanged. The transport wrapper stages above the target and
 returns the input attachment as its expected effect, so the existing composite
@@ -167,6 +167,12 @@ old global articulation-physics override.
 E6-open / E1-inside / E6-close composition is owned by
 `_task_program/drawer_binding.py`, `drawer_geometry.py`, `drawer_runtime.py`,
 and `drawer_curobo.py`.
+When drawer routes exist, the adapter creates `DrawerPlacementEngine` and does
+not install the ordinary GenSim transport/pour wrappers. The local
+`drawer_transport` lowerer keeps the v36 effectless transport contract; its
+motion command and later Place/E6 acceptance are not a new transport retention
+certificate. Engine selection and lowerer/monitor selection must change together.
+Adapter contract v4 rejects older bundles; regenerate after this merge repair.
 Inside targets share E6's asset-qualified part/link identity, never a duplicate
 rigid root. Geometry supplies a floor/center hint, not an interior certificate.
 The GenSim adapter refreshes the placement target from actual link/object poses
