@@ -1368,6 +1368,7 @@ def has_attainable_grasp_candidate(
     object_pose,
     approach_direction,
     pre_grasp_distance: float,
+    obj=None,
     control_part: str = "arm",
 ) -> bool:
     """Whether the robot can physically reach any sampled grasp on this object.
@@ -1382,8 +1383,8 @@ def has_attainable_grasp_candidate(
     ``unsupported_capability``.
 
     Each candidate is driven in physics from the current state, pre-grasp then
-    grasp, and the first one that arrives ends the search. The robot state is
-    restored before returning.
+    grasp, and the first one that arrives ends the search. The robot pose, and
+    the object pose when ``obj`` is given, are restored before returning.
 
     Args:
         sim: Simulation manager to step.
@@ -1393,6 +1394,8 @@ def has_attainable_grasp_candidate(
         object_pose: Batched object pose with shape ``(num_envs, 4, 4)``.
         approach_direction: Unit approach vector with shape ``(3,)``.
         pre_grasp_distance: Stand-off distance along the approach direction.
+        obj: Manipulated object, restored afterwards when given, since probing
+            a grasp can nudge it.
         control_part: Name of the arm control part.
 
     Returns:
@@ -1400,6 +1403,7 @@ def has_attainable_grasp_candidate(
     """
     initial_qpos = robot.get_qpos().clone()
     start_qpos = robot.get_qpos(name=control_part).clone()
+    initial_object_pose = None if obj is None else obj.get_local_pose().clone()
     candidates = semantics.affordance.get_grasp_candidates(
         grasp_pose_generator, object_pose, approach_direction
     )
@@ -1440,6 +1444,8 @@ def has_attainable_grasp_candidate(
     robot.set_qpos(initial_qpos, target=False)
     robot.set_qpos(initial_qpos, target=True)
     robot.clear_dynamics()
+    if initial_object_pose is not None:
+        reset_rigid_object(obj, initial_object_pose)
     sim.update(step=GRASP_ATTAINABILITY_HOLD_STEPS)
     return attainable
 

@@ -194,8 +194,8 @@ def _run_case(
             object_pose=obj.get_local_pose(to_matrix=True),
             approach_direction=approach_direction,
             pre_grasp_distance=PICK_PRE_GRASP_DISTANCE,
+            obj=obj,
         ):
-            initialize_pre_pick_robot_pose(robot, obj, hand_open)
             return _unsupported_case_result(
                 case_id=case_id,
                 object_preset=object_preset,

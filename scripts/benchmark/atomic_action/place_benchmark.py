@@ -229,8 +229,8 @@ def _prepare_held_state(
             pickup_approach, position_case, sim.device
         ),
         pre_grasp_distance=PICK_PRE_GRASP_DISTANCE,
+        obj=obj,
     ):
-        initialize_pre_pick_robot_pose(robot, obj, hand_open)
         raise UnsupportedCase("No sampled grasp on this object is attainable.")
 
     result = atomic_engine.compile(

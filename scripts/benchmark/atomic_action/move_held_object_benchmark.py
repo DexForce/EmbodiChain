@@ -195,6 +195,9 @@ def _prepare_held_state(
         PickUpOptions,
         SceneSnapshot,
     )
+    from scripts.tutorials.atomic_action.tutorial_utils import (
+        initialize_pre_pick_robot_pose,
+    )
     from scripts.tutorials.atomic_action.move_held_object import (
         get_hand_open_close_qpos,
         make_pre_pick_eef_pose,
@@ -231,8 +234,13 @@ def _prepare_held_state(
         {"primary": {"motion": "arm", "grasp": "hand"}},
     )
     # A case whose sampled grasps are all out of the arm's physical reach is
-    # not a skill failure; it is a case this embodiment cannot serve.
-    if not has_attainable_grasp_candidate(
+    # not a skill failure; it is a case this embodiment cannot serve. The probe
+    # runs from the pre-pick pose, the state the other grasp benchmarks ask the
+    # same question from, and the robot is put back afterwards so the
+    # measurement itself is unchanged.
+    state_before_probe = robot.get_qpos().clone()
+    initialize_pre_pick_robot_pose(robot, obj, hand_open)
+    attainable = has_attainable_grasp_candidate(
         sim=sim,
         robot=robot,
         semantics=semantics,
@@ -242,8 +250,12 @@ def _prepare_held_state(
             pickup_approach, position_case, sim.device
         ),
         pre_grasp_distance=PICK_PRE_GRASP_DISTANCE,
-    ):
-        initialize_pre_pick_robot_pose(robot, obj, hand_open)
+        obj=obj,
+    )
+    robot.set_qpos(state_before_probe, target=False)
+    robot.set_qpos(state_before_probe, target=True)
+    robot.clear_dynamics()
+    if not attainable:
         raise UnsupportedCase("No sampled grasp on this object is attainable.")
 
     result = atomic_engine.compile(
