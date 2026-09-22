@@ -74,6 +74,35 @@ impact are established.
   file or subsystem coverage ledger and review dependency foundations before
   their consumers.
 
+## Explicitly requested PR publication
+
+Keep review read-only unless the user explicitly asks to publish the findings
+to a remote PR. A request to review, audit, or approve a change alone does not
+authorize remote comments or a review event.
+
+When publication is explicitly requested:
+
+1. Verify the repository, PR number, base branch, head commit, and changed
+   files before posting. If the target is not unambiguous, ask for the PR
+   identifier rather than guessing.
+2. Publish each actionable finding as an inline comment on the smallest
+   relevant changed line when the hosting integration supports it. Put
+   findings that cannot be anchored to a changed line in a top-level review
+   summary. Preserve the finding priority and evidence in the posted text.
+3. Use a normal comment review by default. Submit `request changes` or
+   `approve` only when the user explicitly requests that exact review event;
+   never infer approval authority from a review request.
+4. Use an available GitHub connector or authenticated `gh` workflow. Do not
+   claim that comments were posted if the integration is unavailable or a
+   request fails. If publication is unavailable, return the complete,
+   copy-ready Markdown review instead.
+5. Report the published comment or review URLs, any findings that were not
+   posted, and any partial failures. Avoid duplicate comments when the same
+   finding has already been posted for the same head commit.
+
+Do not publish speculative open questions or residual risks as defects. They
+may be included in the top-level summary only when clearly labeled as such.
+
 ## 1. Resolve the review target
 
 Read the applicable `AGENTS.md` instructions first. Determine the exact delta
