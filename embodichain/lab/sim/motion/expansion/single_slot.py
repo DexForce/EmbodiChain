@@ -159,6 +159,29 @@ class SingleSlotRunner:
             reason=receipt.error or None,
         )
 
+    def run_until_empty(
+        self, *, max_attempts: int | None = None
+    ) -> tuple[SingleSlotOutcome, ...]:
+        """Consume the current bounded queue through the same single slot.
+
+        Args:
+            max_attempts: Optional guard against an externally re-filled queue.
+
+        Returns:
+            Outcomes in the exact FIFO attempt order. The method never refills
+            the coordinator and never owns a retry policy.
+        """
+        if max_attempts is not None and (
+            type(max_attempts) is not int or max_attempts < 0
+        ):
+            raise ValueError("max_attempts must be a non-negative integer or None")
+        outcomes: list[SingleSlotOutcome] = []
+        while self._coordinator.pending_count:
+            if max_attempts is not None and len(outcomes) >= max_attempts:
+                raise RuntimeError("single-slot attempt budget exhausted")
+            outcomes.append(self.run_next())
+        return tuple(outcomes)
+
     @property
     def coordinator(self) -> CandidateCoordinator:
         """Return the coordinator owned by this runner."""
