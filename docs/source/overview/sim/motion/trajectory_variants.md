@@ -121,8 +121,10 @@ The first figure plots every variant's arm joints against time. Curves separate
 between waypoints and rejoin inside the shaded contact phases, and the title
 carries the largest contact-phase deviation of any variant from the reference,
 which is `0.00e+00 rad`: contact windows are preserved exactly, not
-approximately. With a hundred variants the curves are coloured by the operator
-that produced them rather than named one by one.
+approximately. With a hundred variants the legend groups instead of
+naming each curve: colour is the operator that produced the path and the dash
+pattern is the timing signature, so two variants that share a geometry and
+differ only in their timing stay distinguishable.
 
 <figure style="text-align: center; margin: 16px 0;">
   <img src="../../../_static/trajectory_variants/joint_trajectories.png" alt="Arm joints of 100 trajectory variants against time" style="width: 100%; height: auto;"/>
@@ -243,7 +245,10 @@ suit the task.
 * - {func}`~embodichain.lab.sim.motion.expansion.plan_trajectory_variants` with
     {func}`~embodichain.lab.sim.motion.expansion.apply_trajectory_variant`
   - You want the enumeration and the application separately, for example to log
-    the intended assignment before planning.
+    the intended assignment before planning. Unconfigured, this pair leaves the
+    null-space factor off, because neither call sees whether you have
+    Jacobians; pass `default_variant_factors(redundancy=True)` to both if you
+    do.
 * - `velocity_limits` and `acceleration_limits`
   - You want sampled motion-limit rejection on top of joint-limit rejection.
 * - `max_attempts`

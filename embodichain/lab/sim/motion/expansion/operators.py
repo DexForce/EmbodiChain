@@ -35,6 +35,7 @@ from .contracts import (
 )
 
 __all__ = [
+    "TIMING_PROFILES",
     "ProposalRejected",
     "allowed_phases",
     "rotate_grasp_about_object_axis",

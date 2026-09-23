@@ -357,3 +357,18 @@ def test_every_requested_spatial_method_needs_its_operator() -> None:
         cfg.validate_capabilities(**registries)
     registries["operators"] = ("joint_residual", "via_points", "retime")
     cfg.validate_capabilities(**registries)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"augmentation": {"factors": {"timing": {"profiles": "uniform"}}}},
+        {"augmentation": {"factors": {"ik": {"task_rows": "0"}}}},
+    ],
+)
+def test_only_spatial_method_accepts_a_bare_name(payload: dict[str, object]) -> None:
+    # The single-name spelling is a compatibility shim for spatial.method. Any
+    # other sequence field must reach its own validator as a sequence, or an
+    # unsupported name would be split into characters or silently wrapped.
+    with pytest.raises(ValueError, match="must be a sequence"):
+        TrajectoryGenerationJobCfg.from_mapping(payload)

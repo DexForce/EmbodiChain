@@ -99,9 +99,10 @@ def _decode(cls: type, data: Mapping[str, Any], path: str = "") -> Any:
             decoded[key] = _decode(expected, value, name)
         elif get_origin(expected) is tuple:
             member = get_args(expected)[0]
-            # Accept one value where a sequence of names is expected, so a
-            # single-choice spelling keeps working after a field grows.
-            if member is str and isinstance(value, str):
+            # ``spatial.method`` used to name a single method, so a bare string
+            # still decodes there. Every other sequence field requires a
+            # sequence, which keeps its own schema check from being skipped.
+            if (cls, key) in _SINGLE_NAME_COMPATIBLE and isinstance(value, str):
                 value = (value,)
             if not isinstance(value, (list, tuple)):
                 raise ValueError(f"{name} must be a sequence")
@@ -168,6 +169,10 @@ class _SpatialCfg:
         _count(self.via_count, "spatial.via_count")
         if self.via_count > _MAX_VIA_POINTS:
             raise ValueError(f"spatial.via_count must be at most {_MAX_VIA_POINTS}")
+
+
+_SINGLE_NAME_COMPATIBLE = frozenset({(_SpatialCfg, "method")})
+"""Sequence fields that also accept one bare name, for backward compatibility."""
 
 
 @configclass

@@ -221,6 +221,28 @@ class TrajectoryVariantSet:
         object.__setattr__(self, "rejected", dict(self.rejected))
 
 
+def _reject_cartesian_factors(cfg: TrajectoryAugmentationCfg) -> None:
+    """Refuse a configuration whose factors cannot produce a qpos variant.
+
+    The approach factor moves a Cartesian standoff pose, which has to be
+    replanned through IK before it is a trajectory. Accepting it here would
+    return an unchanged trajectory to a caller who asked for approach
+    variation.
+
+    Args:
+        cfg: Resolved augmentation settings.
+
+    Raises:
+        ValueError: If the approach factor is enabled.
+    """
+    if cfg.factors.approach.enabled:
+        raise ValueError(
+            "the approach factor produces Cartesian standoff poses and cannot "
+            "be applied to a qpos reference; consume it with "
+            "perturb_approach_direction before planning, then disable it here"
+        )
+
+
 def plan_trajectory_variants(
     count: int, cfg: TrajectoryAugmentationCfg | None = None
 ) -> tuple[TrajectoryVariant, ...]:
@@ -236,7 +258,11 @@ def plan_trajectory_variants(
     Args:
         count: Number of variants to enumerate, at least one.
         cfg: Augmentation settings whose enabled factors select the
-            combinations. Defaults to :func:`default_variant_factors`.
+            combinations. Defaults to :func:`default_variant_factors` with
+            redundancy off, because this function cannot know whether the
+            caller has task Jacobians. Pass
+            ``default_variant_factors(redundancy=True)``, or use
+            :func:`expand_trajectory_variants`, to include posture variants.
 
     Returns:
         Deterministically ordered variants beginning with the reference branch.
@@ -247,18 +273,13 @@ def plan_trajectory_variants(
     """
     if type(count) is not int or count < 1:
         raise ValueError("count must be a positive integer")
-    cfg = default_variant_factors() if cfg is None else cfg
+    # Planning alone cannot see whether the caller can supply Jacobians, so an
+    # unconfigured enumeration offers only factors that need no extra input.
+    # Otherwise the documented plan-then-apply workflow would hand
+    # apply_trajectory_variant a posture variant it cannot execute.
+    cfg = default_variant_factors(redundancy=False) if cfg is None else cfg
     factors = cfg.factors
-    if factors.approach.enabled:
-        # The approach factor moves a Cartesian standoff pose, which has to be
-        # replanned through IK before it is a trajectory. Enumerating qpos
-        # variants from a configuration that requests it would drop it without
-        # a trace.
-        raise ValueError(
-            "the approach factor produces Cartesian standoff poses and cannot "
-            "be applied to a qpos reference; consume it with "
-            "perturb_approach_direction before planning, then disable it here"
-        )
+    _reject_cartesian_factors(cfg)
     operators: list[str] = []
     if factors.spatial.enabled:
         operators.extend(factors.spatial.method)
@@ -367,7 +388,8 @@ def apply_trajectory_variant(
         template: Annotated reference whose phase endpoints are already fixed.
         variant: Factor combination to apply; a nominal variant returns the reference.
         cfg: Augmentation settings supplying operator magnitudes and the seed.
-            Defaults to :func:`default_variant_factors`.
+            Defaults to :func:`default_variant_factors`, with redundancy
+            enabled only when ``task_jacobians`` is supplied.
         joint_limits: Finite lower/upper limits with shape ``(D, 2)``.
         control_dt: Authoritative host control period used by retiming.
         task_jacobians: Reference spatial Jacobians ``(N, R, C)`` for the
@@ -383,7 +405,11 @@ def apply_trajectory_variant(
         ValueError: If the variant names an unknown operator, if required inputs
             are missing, or if an operator rejects its own proposal.
     """
-    cfg = default_variant_factors() if cfg is None else cfg
+    # Mirror the planner: without Jacobians a posture variant cannot run, so an
+    # unconfigured application resolves the same conservative policy.
+    if cfg is None:
+        cfg = default_variant_factors(redundancy=task_jacobians is not None)
+    _reject_cartesian_factors(cfg)
     if generator is None:
         _, generator = _variant_generator(cfg, template, variant)
     result = template

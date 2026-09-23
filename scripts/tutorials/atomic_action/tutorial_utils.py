@@ -743,7 +743,7 @@ def save_variant_joint_plot(result, robot: Robot, path: str | pathlib.Path) -> N
     figure, axes = plt.subplots(rows, 3, figsize=(13, 3.1 * rows), sharex=True)
     flat = axes.flatten()
     drift = _contact_phase_drift(result)
-    styles, _ = _variant_styles(result)
+    styles, groups = _variant_styles(result)
     for position, joint in enumerate(arm):
         axis = flat[position]
         for row in range(len(result.variants)):
@@ -778,15 +778,31 @@ def save_variant_joint_plot(result, robot: Robot, path: str | pathlib.Path) -> N
     for axis in flat[-3:]:
         axis.set_xlabel("time (s)")
     flat[0].set_ylabel("joint position (rad)")
-    handles, labels = flat[0].get_legend_handles_labels()
-    figure.legend(
-        handles,
-        labels,
-        loc="lower center",
-        ncol=3,
-        frameon=False,
-        fontsize=9,
-    )
+    if groups is None:
+        handles, labels = flat[0].get_legend_handles_labels()
+        figure.legend(
+            handles, labels, loc="lower center", ncol=3, frameon=False, fontsize=9
+        )
+    else:
+        # Two legends, because a crowded plot encodes the geometry operator in
+        # the colour and the timing signature in the dash pattern.
+        for index, (title, anchor) in enumerate(
+            (("path geometry", 0.27), ("timing", 0.73))
+        ):
+            handles, labels = _variant_legend_handles(
+                groups["geometry" if index == 0 else "timing"]
+            )
+            figure.legend(
+                handles,
+                labels,
+                title=title,
+                loc="lower center",
+                bbox_to_anchor=(anchor, 0.0),
+                ncol=2,
+                frameon=False,
+                fontsize=9,
+                title_fontsize=9,
+            )
     figure.suptitle(
         "Trajectory variants: curves separate between waypoints and rejoin inside "
         f"the shaded contact phases (max contact deviation {drift:.2e} rad)",
@@ -820,56 +836,117 @@ OPERATOR_COLOURS = {
     "via_points": "tab:orange",
     "nullspace_residual": "tab:green",
 }
+TIMING_DASHES = (
+    (5, 2),
+    (1, 1.4),
+    (6, 2, 1, 2),
+    (3, 1, 1, 1, 1, 1),
+    (2, 2),
+    (9, 2, 1, 2),
+    (1, 3),
+)
+"""Dash patterns that distinguish timing variants once the legend is grouped."""
 
 
-def _variant_styles(result) -> tuple[list, bool]:
-    """Return per-variant plot keywords, grouping by operator when crowded.
+def _timing_linestyles(count: int) -> list:
+    """Return ``count`` visually distinct line styles.
+
+    Reusing a pattern would make two timing signatures look alike, which is
+    what the grouped legend exists to avoid, so patterns past the table are
+    stretched copies rather than repeats.
+
+    Args:
+        count: Number of distinct timing signatures to distinguish.
+
+    Returns:
+        One line style per signature, the first of them a plain line.
+    """
+    styles: list = ["-"]
+    for index in range(max(count - 1, 0)):
+        base = TIMING_DASHES[index % len(TIMING_DASHES)]
+        stretch = 1.0 + 0.6 * (index // len(TIMING_DASHES))
+        styles.append((0, tuple(round(value * stretch, 2) for value in base)))
+    return styles[:count]
+
+
+def _timing_key(variant) -> str:
+    """Return a variant's timing signature, used as a legend entry."""
+    return f"{variant.timing_profile} x{variant.duration_scale:g}"
+
+
+def _variant_styles(result) -> tuple[list, dict | None]:
+    """Return per-variant plot keywords, grouping the legend when crowded.
 
     Naming a hundred variants individually produces an unreadable legend, so
-    past a threshold the curves are coloured by the operator that produced
-    them and each operator is named once.
+    past a threshold the curves carry their provenance in two channels
+    instead: colour names the spatial operator and the dash pattern names the
+    timing signature. Every accepted variant therefore stays identifiable even
+    when two of them share a geometry and differ only in their timing.
 
     Args:
         result: Accepted variants.
 
     Returns:
-        One keyword mapping per variant and whether grouping was applied.
+        One keyword mapping per variant, and the legend groups to draw when
+        grouping was applied, or ``None`` when every variant is named directly.
     """
-    crowded = len(result.variants) > VARIANT_CROWD_THRESHOLD
-    seen: set[str] = set()
+    from embodichain.lab.sim.motion.expansion import NOMINAL_OPERATOR
+
+    if len(result.variants) <= VARIANT_CROWD_THRESHOLD:
+        styles = [
+            {
+                "color": "black" if variant.is_nominal else None,
+                "linewidth": 2.4 if variant.is_nominal else 1.3,
+                "linestyle": "--" if variant.is_nominal else "-",
+                "zorder": 3 if variant.is_nominal else 2,
+                "label": (
+                    "reference"
+                    if variant.is_nominal
+                    else f"{variant.spatial_operator} {_timing_key(variant)}"
+                ),
+            }
+            for variant in result.variants
+        ]
+        return styles, None
+
+    timings = sorted({_timing_key(variant) for variant in result.variants})
+    dashes = dict(zip(timings, _timing_linestyles(len(timings))))
+    operators = sorted({variant.spatial_operator for variant in result.variants})
     styles = []
     for variant in result.variants:
         nominal = variant.is_nominal
-        if crowded:
-            operator = variant.spatial_operator
-            label = None if operator in seen else operator
-            seen.add(operator)
-            styles.append(
-                {
-                    "color": OPERATOR_COLOURS.get(operator),
-                    "linewidth": 2.4 if nominal else 0.9,
-                    "linestyle": "--" if nominal else "-",
-                    "alpha": 1.0 if nominal else 0.35,
-                    "zorder": 3 if nominal else 2,
-                    "label": "reference" if nominal else label,
-                }
-            )
-            continue
         styles.append(
             {
-                "color": "black" if nominal else None,
-                "linewidth": 2.4 if nominal else 1.3,
-                "linestyle": "--" if nominal else "-",
+                "color": OPERATOR_COLOURS.get(variant.spatial_operator),
+                "linewidth": 2.6 if nominal else 0.9,
+                "linestyle": "-" if nominal else dashes[_timing_key(variant)],
+                "alpha": 1.0 if nominal else 0.35,
                 "zorder": 3 if nominal else 2,
-                "label": (
-                    "reference"
-                    if nominal
-                    else f"{variant.spatial_operator} x{variant.duration_scale:g}"
-                    f" {variant.timing_profile}"
-                ),
             }
         )
-    return styles, crowded
+    groups = {
+        "geometry": [
+            ("reference", {"color": "black", "linewidth": 2.6}),
+            *(
+                (name, {"color": OPERATOR_COLOURS.get(name), "linewidth": 1.8})
+                for name in operators
+                if name != NOMINAL_OPERATOR
+            ),
+        ],
+        "timing": [
+            (key, {"color": "0.35", "linewidth": 1.4, "linestyle": dashes[key]})
+            for key in timings
+        ],
+    }
+    return styles, groups
+
+
+def _variant_legend_handles(entries: list) -> tuple[list, list]:
+    """Build proxy lines for one grouped legend column."""
+    from matplotlib.lines import Line2D
+
+    handles = [Line2D([], [], **style) for _, style in entries]
+    return handles, [label for label, _ in entries]
 
 
 def _waypoint_tool_positions(result, paths: list) -> torch.Tensor:
@@ -1006,7 +1083,7 @@ def save_tool_path_view(
     if centre is not None:
         _draw_ground_box(space, centre, object_size)
 
-    styles, crowded = _variant_styles(result)
+    styles, groups = _variant_styles(result)
     for row, variant in enumerate(result.variants):
         tool = paths[row]
         space.plot(tool[:, 0], tool[:, 1], tool[:, 2], **styles[row])
@@ -1047,7 +1124,13 @@ def save_tool_path_view(
     space.set_xlabel("x (m)")
     space.set_ylabel("y (m)")
     space.set_zlabel("z (m)")
-    space.legend(loc="upper left", fontsize=8, framealpha=0.85)
+    handles, labels = space.get_legend_handles_labels()
+    if groups is not None:
+        for entries in (groups["geometry"], groups["timing"]):
+            extra, names = _variant_legend_handles(entries)
+            handles.extend(extra)
+            labels.extend(names)
+    space.legend(handles, labels, loc="upper left", fontsize=8, framealpha=0.85)
     space.set_title(
         "Tool paths of every trajectory variant\n"
         f"stars are the annotated waypoints and spread by {spread:.1e} m; "

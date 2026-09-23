@@ -296,7 +296,11 @@ touching a trajectory. Ordinal zero is always the unmodified reference, and
 later ordinals cycle through the enabled spatial operators, then the duration
 scales, then the time warps. ``apply_trajectory_variant`` applies one such
 combination, running at most one joint-path operator so a null-space
-projection is never stacked on an already displaced joint path.
+projection is never stacked on an already displaced joint path. Neither
+function can see whether the caller has Jacobians, so both resolve the default
+policy with the null-space factor off and the pair works unconfigured. Pass
+``default_variant_factors(redundancy=True)`` to both, or use
+``expand_trajectory_variants``, to include posture variants.
 
 ``expand_trajectory_variants`` collects several variants for one fixed scene. It
 rejects proposals that an operator refuses, that fail sampled motion limits, or

@@ -476,7 +476,7 @@ def test_the_default_policy_offers_every_joint_path_operator() -> None:
     assert set(policy.factors.spatial.method) == {"joint_residual", "via_points"}
     operators = {
         variant.spatial_operator
-        for variant in plan_trajectory_variants(4)
+        for variant in plan_trajectory_variants(4, cfg=policy)
         if not variant.is_nominal
     }
     assert operators == {"joint_residual", "via_points", "nullspace_residual"}
@@ -550,4 +550,60 @@ def test_a_malformed_jacobian_is_not_counted_as_a_rejected_proposal() -> None:
             joint_limits=joint_limits(),
             control_dt=0.1,
             task_jacobians=torch.zeros(3, 5, JOINTS),
+        )
+
+
+def test_the_unconfigured_plan_then_apply_workflow_runs_without_jacobians() -> None:
+    reference = template()
+    limits = joint_limits()
+    # Planning cannot see whether the caller has Jacobians, so the variants it
+    # offers unconfigured must all be applicable without them.
+    variants = plan_trajectory_variants(8)
+    assert not any(
+        variant.spatial_operator == "nullspace_residual" for variant in variants
+    )
+    for variant in variants:
+        applied = apply_trajectory_variant(
+            reference, variant, joint_limits=limits, control_dt=0.1
+        )
+        assert applied.positions.shape[1] == JOINTS
+
+
+def test_planning_still_offers_posture_variants_when_asked_for_redundancy() -> None:
+    policy = default_variant_factors(redundancy=True)
+    variants = plan_trajectory_variants(8, cfg=policy)
+    assert any(variant.spatial_operator == "nullspace_residual" for variant in variants)
+    jacobians = task_jacobians()
+    for variant in variants:
+        apply_trajectory_variant(
+            template(),
+            variant,
+            cfg=policy,
+            joint_limits=joint_limits(),
+            control_dt=0.1,
+            task_jacobians=jacobians,
+        )
+
+
+def test_application_enables_redundancy_only_when_jacobians_are_supplied() -> None:
+    posture = next(
+        variant
+        for variant in plan_trajectory_variants(
+            8, cfg=default_variant_factors(redundancy=True)
+        )
+        if variant.spatial_operator == "nullspace_residual"
+    )
+    # The same variant applied without a configuration follows the Jacobians:
+    # present means the posture factor runs, absent means it is not reachable.
+    applied = apply_trajectory_variant(
+        template(),
+        posture,
+        joint_limits=joint_limits(),
+        control_dt=0.1,
+        task_jacobians=task_jacobians(),
+    )
+    assert applied.positions.shape[0] == SAMPLES
+    with pytest.raises(ValueError, match="nullspace_residual"):
+        apply_trajectory_variant(
+            template(), posture, joint_limits=joint_limits(), control_dt=0.1
         )
