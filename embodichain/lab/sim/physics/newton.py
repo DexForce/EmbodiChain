@@ -111,6 +111,14 @@ class NewtonPhysicsBackend(PhysicsBackend):
             )
         backend.sync_to_dexsim(result.world)
 
+    def _step(self, physics_dt: float) -> None:
+        """Let the manager batch window and offscreen consumers after stepping."""
+        self._manager._world.update(physics_dt, sync_to_dexsim=False)
+
+    @property
+    def _requires_step_render_sync(self) -> bool:
+        return self._manager.sim_config.physics_cfg.sync_to_renderer is True
+
     def prepare_for_teardown(self) -> None:
         """Release Newton render views while Spawn still owns their parents."""
         if self._runtime_device is not None and self._runtime_device.startswith("cuda"):

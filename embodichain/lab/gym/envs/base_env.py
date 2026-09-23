@@ -602,7 +602,11 @@ class BaseEnv(gym.Env):
             sensor for sensor in self.sensors.values() if sensor.requires_substep_update
         ]
         if not sensors:
-            self.sim.update(self.physics_dt, self.cfg.sim_steps_per_control)
+            self.sim.update(
+                self.physics_dt,
+                self.cfg.sim_steps_per_control,
+                render_final_step=False,
+            )
             return
         for sensor in sensors:
             sensor.begin_control_step()
@@ -615,6 +619,7 @@ class BaseEnv(gym.Env):
             self.physics_dt,
             self.cfg.sim_steps_per_control,
             after_substep=sample_substep,
+            render_final_step=False,
         )
 
     def _update_sim_state(self, **kwargs):
@@ -930,11 +935,9 @@ class BaseEnv(gym.Env):
                 self._initialize_episode(reset_ids, **options)
             self._elapsed_steps[reset_ids] = 0
 
-            self.sim.sync_render_state()
-            self.sim.capture_visualization_safely(force=True)
-
-            with self._profiler.section("get_obs"):
-                obs = self.get_obs(**options)
+            with self.sim.render_frame(force_visualization=True):
+                with self._profiler.section("get_obs"):
+                    obs = self.get_obs(**options)
             with self._profiler.section("get_info"):
                 info = self.get_info(**options)
 
@@ -1009,8 +1012,9 @@ class BaseEnv(gym.Env):
             with self._profiler.section("update_sim_state"):
                 self._update_sim_state(**kwargs)
 
-            with self._profiler.section("get_obs"):
-                obs = self.get_obs(**kwargs)
+            with self.sim.render_frame():
+                with self._profiler.section("get_obs"):
+                    obs = self.get_obs(**kwargs)
             with self._profiler.section("get_info"):
                 info = self.get_info(**kwargs)
             with self._profiler.section("reward"):

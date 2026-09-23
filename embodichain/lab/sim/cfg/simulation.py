@@ -32,6 +32,19 @@ from dexsim.types import DenoiserType, Renderer, ToneMappingType
 
 from embodichain.utils import configclass, logger
 
+__all__ = [
+    "DLSSCfg",
+    "RenderCfg",
+    "GPUMemoryCfg",
+    "PhysicsBackendCfg",
+    "DefaultPhysicsCfg",
+    "NewtonCollisionPipelineCfg",
+    "NewtonPhysicsCfg",
+    "physics_cfg_for_backend",
+    "physics_backend_from_cfg",
+    "validate_physics_cfg",
+]
+
 if TYPE_CHECKING:
     from dexsim.engine.newton_physics import NewtonCfg
     from dexsim.engine.newton_physics.solvers_cfg import NewtonSolverCfg
@@ -521,11 +534,14 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     """
 
     sync_to_renderer: bool | None = None
-    """Automatic Newton-to-render sync policy for each physics update.
+    """Newton-to-render publication policy.
 
-    ``None`` preserves DexSim's consumer-aware default, ``True`` always syncs,
-    and ``False`` disables per-step sync. Camera rendering still performs an
-    explicit on-demand sync through :class:`SimulationManager`.
+    ``None`` and ``False`` let :class:`SimulationManager` publish on demand
+    for windows, cameras, recording and browser visualization. ``True`` also
+    requests publication on steps without a visual consumer. The manager batches
+    consumers within each render frame. Direct DexSim ``World.update`` callers
+    retain the underlying automatic policy: window-aware for ``None``, always
+    for ``True``, and disabled for ``False``.
     """
 
     debug_mode: bool = False

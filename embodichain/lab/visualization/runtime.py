@@ -21,7 +21,7 @@ import threading
 from collections import deque
 from dataclasses import dataclass, replace
 from time import perf_counter
-from typing import Generic, TypeVar
+from typing import Callable, Generic, TypeVar
 
 from .backends.base import VisualizationBackend
 from .cfg import VisualizationCfg
@@ -487,6 +487,7 @@ class VisualizationRuntime:
         overlays: SceneOverlays | None = None,
         force: bool = False,
         capture_camera_images: bool = True,
+        before_capture: Callable[[], None] | None = None,
     ) -> bool:
         """Capture a due frame and enqueue it without waiting for Viser.
 
@@ -498,6 +499,8 @@ class VisualizationRuntime:
             capture_camera_images: Whether camera images may be captured in
                 this call. Simulation batches disable this for intermediate
                 physics substeps.
+            before_capture: Publish source state only after a frame is due,
+                immediately before reading scene or camera data.
 
         Returns:
             ``True`` when a frame was captured, otherwise ``False`` when limited.
@@ -522,6 +525,8 @@ class VisualizationRuntime:
         )
         if not scene_due and not image_due:
             return False
+        if before_capture is not None:
+            before_capture()
         if scene_due:
             if pose_due:
                 self._next_capture_time = now + 1.0 / self.cfg.scene_fps
