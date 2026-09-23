@@ -140,14 +140,18 @@ class SingleSlotRunner:
             return SingleSlotOutcome("capacity_unavailable", candidate_id=candidate_id)
 
         episode_id, commit_id = session.episode_ids(item.spec.identity)
-        prepared = self._restorer.restore(item)
-        session.mark_rollout_started(item.spec.identity)
-        episode = self._executor.execute(
-            item,
-            prepared,
-            episode_id=episode_id,
-            commit_id=commit_id,
-        )
+        try:
+            prepared = self._restorer.restore(item)
+            session.mark_rollout_started(item.spec.identity)
+            episode = self._executor.execute(
+                item,
+                prepared,
+                episode_id=episode_id,
+                commit_id=commit_id,
+            )
+        except Exception:
+            session.release(item.spec.identity, reason="execution_failed")
+            raise
         if not session.accept_episode(episode):
             return SingleSlotOutcome("measured_rejected", candidate_id=candidate_id)
         receipt = self._sink.submit(episode, submission_id=0)
