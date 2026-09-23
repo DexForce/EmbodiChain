@@ -1,6 +1,6 @@
 ---
 name: review-pr
-description: Review EmbodiChain pull requests, branches, commits, patches, or working-tree diffs for correctness regressions, architecture-contract violations, compatibility risks, unsafe resource behavior, and missing tests. Use when asked to review, audit, inspect, assess, or approve an EmbodiChain change; produce prioritized, evidence-backed findings without modifying the change unless the user explicitly asks for fixes.
+description: Review EmbodiChain pull requests, branches, commits, patches, or working-tree diffs for correctness regressions, architecture-contract violations, compatibility risks, unsafe resource behavior, and missing tests. Use when asked to review, audit, inspect, assess, or approve an EmbodiChain change; coordinate independent expert reviewers when subagents are available, and produce prioritized, evidence-backed findings without modifying the change unless the user explicitly asks for fixes.
 ---
 
 # Review EmbodiChain Changes
@@ -11,49 +11,66 @@ and packaging boundaries before deciding whether it is safe.
 
 ## Reviewer identity
 
-Act as a senior cross-disciplinary reviewer. Apply the relevant perspectives
-below together, resolving tradeoffs in favor of demonstrated safety,
-correctness, and explicit project contracts. Do not turn an identity into a
-generic checklist or report an unproven concern as a finding.
+Act as the lead reviewer coordinating the relevant experts below. Use actual
+subagents when available and permitted; role names alone do not constitute
+independent reviews. Resolve tradeoffs in favor of demonstrated safety,
+correctness, and explicit project contracts. Do not report an unproven concern
+as a finding.
 
-- **Architect** — Protect subsystem ownership, layering, dependency direction,
+- **Architect** (`architecture`) — Protect subsystem ownership, layering, dependency direction,
   public API and configuration contracts, extension boundaries, and viable
   evolution paths.
-- **Public API / developer experience engineer** — Review public import paths,
+- **Public API / developer experience engineer** (`api`) — Review public import paths,
   signatures, defaults, configuration schemas, CLI behavior, task discovery,
   error messages, documentation examples, migration paths, and installed-wheel
   usability from an external user's perspective.
-- **High-performance computing expert** — Identify reachable hot-path
+- **High-performance computing expert** (`hpc`) — Identify reachable hot-path
   regressions in algorithmic complexity, batching/vectorization, allocation
   and memory layout, CPU/GPU transfers or synchronization, parallel or
   distributed execution, resource contention, and determinism.
-- **Engine expert** — Inspect simulation, update, and rendering lifecycles;
+- **Engine expert** (`engine`) — Inspect simulation, update, and rendering lifecycles;
   scheduling and data-flow order; backend abstractions; resource ownership;
   error recovery; and system integration at scale.
-- **Robotics algorithm expert** — Validate coordinate frames, units,
+- **Robotics algorithm expert** (`robotics`) — Validate coordinate frames, units,
   kinematics and dynamics, motion planning, control timing, collision and
   safety constraints, numerical stability, and physical realizability.
-- **AI scientist** — Review data and label integrity, train/evaluation
+- **AI scientist** (`ai`) — Review data and label integrity, train/evaluation
   separation, metrics, experiment design and reproducibility, inference and
   training behavior, reinforcement-learning semantics, and statistical claims.
-- **Agentic engineer** — Review goal and task decomposition, state and
+- **Agentic engineer** (`agentic`) — Review goal and task decomposition, state and
   semantic contracts, tool and action interfaces, planning/execution/
   verification loops, recovery and cancellation, observability, and safe
   autonomy.
-- **Security and trust-boundary engineer** — Inspect user-controlled
+- **Security and trust-boundary engineer** (`security`) — Inspect user-controlled
   configuration and Task Programs, file paths, subprocesses, native or plugin
   boundaries, credentials, package loading, and CI permissions for unsafe
   execution, data exposure, privilege escalation, or fail-open behavior.
 
+Supplemental roles may be delegated separately or included as lenses in an
+existing expert's scope:
+
+- **Reliability / operations engineer** (`reliability`) — Review lifecycle,
+  restart, retries, idempotence, bounded queues, observability, and worker
+  failure handling when these need coverage beyond the engine or agentic pass.
+- **Verification / test quality engineer** (`verification`) — Check test oracles,
+  regression claims, negative and boundary cases, determinism, and whether
+  tests exercise the contract rather than mirror the implementation. This pass
+  is required for test or validation changes, but a separate agent is optional.
+
 ### Role selection
 
-Select perspectives from the changed files and their contract neighbors; do
-not apply every role as a generic checklist. Read
-[references/reviewer-perspectives.md](references/reviewer-perspectives.md) when
-the change touches public APIs, untrusted inputs, long-running operations, or
-test and release boundaries. Keep the evidence standard unchanged: a role may
-raise a finding only when a reachable scenario, violated contract, and concrete
-impact are established.
+After building the change model, read
+[references/reviewer-perspectives.md](references/reviewer-perspectives.md) to
+select roles from the changed files and their contract neighbors. Select only
+roles with a concrete review surface; do not start every role mechanically.
+Announce the selected role IDs, their scopes, and the execution mode before
+starting the expert passes. Explain omitted roles collectively when useful.
+
+Read and follow [references/expert-protocol.md](references/expert-protocol.md)
+for dispatch, independent results, lead verification, and fallback. This skill
+explicitly requests subagent delegation for selected expert reviews when the
+host permits it. A delegated expert performs only its assigned pass and returns
+the result contract; it does not spawn reviewers or write the final review.
 
 ## Review contract
 
@@ -73,6 +90,56 @@ impact are established.
 - Continue through the full diff after finding an issue. For a large PR, keep a
   file or subsystem coverage ledger and review dependency foundations before
   their consumers.
+
+## Explicitly requested PR publication
+
+Keep review read-only unless the user explicitly asks to publish the findings
+to a remote PR. A request to review, audit, or approve a change alone does not
+authorize remote comments or a review event.
+
+When publication is explicitly requested:
+
+1. Verify the repository, PR number, base branch, head commit, and changed
+   files before posting. If the target is not unambiguous, ask for the PR
+   identifier rather than guessing.
+2. Write every comment and review summary posted to the remote PR in English.
+   The conversational review may use the user's language, but translate the
+   finding faithfully before publication. Preserve code identifiers, paths,
+   and short log excerpts when they are needed as evidence.
+3. Publish each actionable finding as an inline comment on the smallest
+   relevant changed line when the hosting integration supports it. Put
+   findings that cannot be anchored to a changed line in a top-level review
+   summary. Preserve the finding priority and evidence in the posted text.
+4. Use a normal comment review by default. Submit `request changes` or
+   `approve` only when the user explicitly requests that exact review event;
+   never infer approval authority from a review request.
+5. Use an available GitHub connector or authenticated `gh` workflow. Do not
+   claim that comments were posted if the integration is unavailable or a
+   request fails. If publication is unavailable, return the complete,
+   copy-ready Markdown review instead.
+6. Report the published comment or review URLs, any findings that were not
+   posted, and any partial failures. Avoid duplicate comments when the same
+   finding has already been posted for the same head commit.
+
+Do not publish speculative open questions or residual risks as defects. They
+may be included in the top-level summary only when clearly labeled as such.
+
+### Trigger phrases
+
+The skill may be selected for review requests containing terms such as
+`review`, `audit`, `inspect`, `assess`, or `approve`. These terms authorize
+analysis only; they do not authorize remote PR changes.
+
+Publication requires an explicit remote-posting request, for example:
+
+- “publish/post/submit the review findings to the PR”
+- “add inline comments to the PR”
+- “leave the review comments on GitHub”
+- “把评审意见提交到 PR” or “在 PR 上添加评审评论”
+
+Phrases such as “review this PR”, “approve this PR”, or “给我评审建议” do not
+by themselves trigger publication. In particular, “approve this PR” selects
+the review task but does not authorize an `approve` review event.
 
 ## 1. Resolve the review target
 
@@ -132,7 +199,10 @@ and its observable output, error, state transition, or side effect.
 
 ## 3. Run focused review passes
 
-Apply every relevant pass, using the matrix for subsystem-specific contracts.
+Execute the selected expert passes using the expert protocol. Each expert
+applies the relevant checks below and the subsystem matrix within its scope;
+the lead covers remaining changed files and cross-role integration. Do not
+finalize until every selected role has a result or an explicit incomplete status.
 
 ### Correctness and state
 
@@ -272,17 +342,34 @@ omitting a row:
 | --- | --- |
 | Review target | `<base>...<head>`, PR number, commit range, or local working tree |
 | Scope | `<count>` changed files; affected subsystems |
+| Execution | `multi-agent`, `single-agent fallback`, or `mixed`; reason for fallback, if any |
 | Findings | `P0: <n>; P1: <n>; P2: <n>; P3: <n>` |
-| Merge assessment | `Block`, `Changes requested`, `Non-blocking findings`, or `No actionable findings` |
+| Merge assessment | `Block`, `Changes requested`, `Non-blocking findings`, `No actionable findings`, or `Incomplete` |
 | Validation | Focused commands and outcomes, or `Not run` |
 | Residual risks | Important untested or unavailable surfaces, or `None identified` |
 
 Use `Block` when any P0 or P1 finding exists, `Changes requested` when the
 highest finding is P2, `Non-blocking findings` when only P3 findings exist, and
-`No actionable findings` when every count is zero.
+`No actionable findings` when every count is zero and selected scopes are
+complete. If any selected scope remains unreviewed, use `Incomplete` unless
+confirmed P0/P1 findings already require `Block`; describe known findings and
+coverage gaps separately.
 
-After the review-summary table, add only the supporting sections that need more
-detail:
+After the review-summary table, include the role-coverage table, even when no
+findings survive lead verification. Localize labels, retain stable role IDs,
+and provide one row per selected role:
+
+| Role | Selection reason / scope | Executor / mode | Status / evidence | Candidate disposition |
+| --- | --- | --- | --- | --- |
+| `<role-id>` | Concrete changed contract | Agent ID or `lead / fallback` | `complete`, `partial`, or `unavailable`; result reference or concise inspected evidence and checks | Accepted, merged, rejected, unresolved candidate IDs; or `none` |
+
+Only actual returned results count as completed expert passes. A zero-finding
+result is valid; a missing or failed result is not. Link saved reports when
+available; otherwise summarize inspected paths/contracts and validation limits.
+Explain unselected roles briefly outside the table; never mark them completed.
+Report incomplete scope as residual risk, not as a code defect.
+
+Then add only the supporting sections that need more detail:
 
 - **Open questions / assumptions** — facts that could change the conclusion.
 - **Validation details** — commands run, results, and important checks not run.

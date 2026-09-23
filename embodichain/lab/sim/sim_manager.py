@@ -666,6 +666,8 @@ class SimulationManager:
         self._ready_spawn_topology_revision = -1
         self._synced_spawn_render_topology_revision = -1
         self._camera_attachment_topology_revision = -1
+        self._render_state_published: bool | None = None
+        self._pending_record_dt = 0.0
 
         self._visualization_runtime = None
         self._visualization_overlays: SceneOverlays | None = None
@@ -1016,16 +1018,18 @@ class SimulationManager:
         )
         self._visualization_error_reported = False
         logger.log_info(f"Viser visualization ready at {runtime.endpoint}")
+        before_capture = None
         if (
             getattr(self, "_spawn_scene", None) is not None
             and self.spawn_result is not None
         ):
-            self.sync_render_state()
+            before_capture = self._ensure_render_state
         runtime.capture(
             sim_step=self._visualization_sim_step,
             sim_time=self._visualization_sim_time,
             overlays=self._visualization_overlays,
             force=True,
+            before_capture=before_capture,
         )
         return runtime
 
@@ -1067,13 +1071,13 @@ class SimulationManager:
             != self._visualization_topology_revision
         ):
             self.refresh_visualization()
-        self.sync_render_state()
         return runtime.capture(
             sim_step=self._visualization_sim_step,
             sim_time=self._visualization_sim_time,
             overlays=self._visualization_overlays,
             force=force,
             capture_camera_images=capture_camera_images,
+            before_capture=self._ensure_render_state,
         )
 
     def capture_visualization_safely(
@@ -1618,6 +1622,76 @@ class SimulationManager:
             return
         self.physics.sync_render_state(result)
         self._synced_spawn_render_topology_revision = topology_revision
+        if getattr(self, "_render_state_published", None) is not None:
+            self._render_state_published = True
+
+    def _ensure_render_state(self) -> None:
+        """Reuse publication only inside a caller-owned, read-only frame."""
+        if getattr(self, "_render_state_published", None) is True:
+            return
+        self.sync_render_state()
+        if getattr(self, "_render_state_published", None) is not None:
+            self._render_state_published = True
+
+    @contextmanager
+    def render_frame(
+        self,
+        *,
+        force_visualization: bool = False,
+        capture_camera_images: bool = True,
+    ) -> Iterator[None]:
+        """Share one state publication across the frame's visual consumers.
+
+        Render camera observations inside this context. On exit, due recording
+        and Viser frames consume the same state. An open native window is a
+        consumer even when automatic Newton synchronization is disabled.
+
+        .. attention::
+            Complete physics steps, resets and direct state writes before
+            entering. If state must change inside the context, explicitly call
+            :meth:`sync_render_state` afterwards. Publication is never cached
+            across contexts or independent camera/visualization calls.
+
+        Args:
+            force_visualization: Bypass the Viser frame-rate limiter.
+            capture_camera_images: Allow Viser to capture camera images.
+
+        Yields:
+            Control to the caller rendering this frame's camera observations.
+        """
+        previous = getattr(self, "_render_state_published", None)
+        self._render_state_published = False
+        record_dt = self._pending_record_dt
+        self._pending_record_dt = 0.0
+        observations_complete = False
+        try:
+            if self.is_window_opened or (
+                record_dt > 0 and self.physics._requires_step_render_sync
+            ):
+                self._ensure_render_state()
+            yield
+            observations_complete = True
+            if (
+                self._window_record_state is not None
+                and self._window_record_state.capture_from_sim_update
+                and record_dt > 0
+            ):
+                with self.profiler.section("window_record_capture"):
+                    self._step_window_record_from_sim_update(
+                        self._window_record_state, record_dt
+                    )
+            if self.sim_config.visualization.backend == "viser":
+                with self.profiler.section("visualization_capture"):
+                    self.capture_visualization_safely(
+                        force=force_visualization,
+                        capture_camera_images=capture_camera_images,
+                    )
+        finally:
+            if not observations_complete:
+                self._pending_record_dt += record_dt
+            # A nested frame may contain an explicit publication after a state
+            # edit. Never restore an outer frame's obsolete publication flag.
+            self._render_state_published = None if previous is None else False
 
     def sync_render_state(self) -> None:
         """Publish current physics state to render resources without stepping.
@@ -1634,6 +1708,8 @@ class SimulationManager:
                 "Render-state synchronization requires a prepared Spawn scene."
             )
         self.physics.sync_render_state(result)
+        if getattr(self, "_render_state_published", None) is not None:
+            self._render_state_published = True
 
     def enable_physics(self, enable: bool) -> None:
         """Enable or disable physics simulation.
@@ -1662,14 +1738,20 @@ class SimulationManager:
     def render_camera_group(self, group_ids: list[int]) -> None:
         """Synchronize physics state and render camera groups.
 
+        An empty group list skips camera rendering. An open native window still
+        consumes current state. Use :meth:`render_frame` to share publication
+        with recording and browser visualization.
+
         Args:
             group_ids (list[int]): The list of camera group ids to render.
 
         Note: This interface is only valid when Ray Tracing rendering backend is enabled.
         """
 
-        self.sync_render_state()
-        self._world.render_camera_group(group_ids)
+        if group_ids or self.is_window_opened:
+            self._ensure_render_state()
+        if group_ids:
+            self._world.render_camera_group(group_ids)
         self._log_scene_summary()
 
     def update(
@@ -1678,6 +1760,7 @@ class SimulationManager:
         step: int = 10,
         *,
         after_substep: Callable[[float], None] | None = None,
+        render_final_step: bool = True,
     ) -> None:
         """Advance physics explicitly and publish the resulting simulation state.
 
@@ -1691,6 +1774,9 @@ class SimulationManager:
             after_substep: Observer called with the elapsed physics time after
                 each world update, before recording and visualization. It runs
                 inside this update call and is not retained by the manager.
+            render_final_step: Render the final substep immediately. Gym defers
+                it until after interval events, then enters :meth:`render_frame`
+                around observations to share publication with other consumers.
         """
         with self.profiler.section("sim_update", is_root=True):
             with self.profiler.section("gpu_physics_check"):
@@ -1707,25 +1793,16 @@ class SimulationManager:
                         with _temporary_warp_kernel_log_suppression(
                             self.sim_config.physics_cfg
                         ):
-                            self._world.update(physics_dt)
+                            self.physics._step(physics_dt)
                     self._visualization_sim_step += 1
                     self._visualization_sim_time += physics_dt
                     if after_substep is not None:
                         with self.profiler.section("after_substep"):
                             after_substep(physics_dt)
-                    if (
-                        self._window_record_state is not None
-                        and self._window_record_state.capture_from_sim_update
-                    ):
-                        with self.profiler.section("window_record_capture"):
-                            self._step_window_record_from_sim_update(
-                                self._window_record_state, physics_dt
-                            )
-                    if self.sim_config.visualization.backend == "viser":
-                        with self.profiler.section("visualization_capture"):
-                            self.capture_visualization_safely(
-                                capture_camera_images=i == step - 1
-                            )
+                    self._pending_record_dt += physics_dt
+                    if render_final_step or i < step - 1:
+                        with self.render_frame(capture_camera_images=i == step - 1):
+                            pass
 
             if step > 0:
                 self._log_scene_summary()
@@ -1885,6 +1962,8 @@ class SimulationManager:
         ):
             self.enable_window_camera_pose_hotkey(**self._window_camera_pose_hotkey_cfg)
         self.is_window_opened = True
+        if self.spawn_result is not None:
+            self.sync_render_state()
         self._log_scene_summary()
         return True
 
@@ -3982,6 +4061,9 @@ class SimulationManager:
         state.accumulated_sim_time = max(
             0.0, state.accumulated_sim_time - state.time_step
         )
+        # Publish from the simulation thread only when a frame is due. The
+        # render-thread recorder must not wait on its own render publication.
+        self._ensure_render_state()
         return self._capture_window_record_frame(state)
 
     def _save_window_record_worker(

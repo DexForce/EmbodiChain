@@ -122,6 +122,8 @@ class TestAnalyzerManipulability:
             },
         }
         self.robot: Robot = self.sim.add_robot(cfg=CobotMagicCfg.from_dict(cfg_dict))
+        # The analyzer reads robot.body_data, which only exists once the
+        # simulation has been prepared.
         self.sim.prepare()
 
     def teardown_method(self):

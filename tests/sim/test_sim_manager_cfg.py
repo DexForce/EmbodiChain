@@ -234,6 +234,7 @@ def test_warp_runtime_init_honors_newton_log_suppression(
         sim_manager.wp.config.log_level = previous_log_level
 
 
+@pytest.mark.no_sim
 def test_newton_warp_log_suppression_covers_world_update() -> None:
     previous_log_level = sim_manager.wp.config.log_level
     observed_log_levels = []
@@ -259,9 +260,12 @@ def test_newton_warp_log_suppression_covers_world_update() -> None:
         _world=World(),
         _visualization_sim_step=0,
         _visualization_sim_time=0.0,
+        _pending_record_dt=0.0,
         _window_record_state=None,
+        render_frame=lambda **_kwargs: nullcontext(),
         _log_scene_summary=lambda: None,
     )
+    manager.physics = DefaultPhysicsBackend(manager)
     try:
         SimulationManager.update(manager, physics_dt=0.01, step=1)
         assert observed_log_levels == [sim_manager.wp.LOG_WARNING]
