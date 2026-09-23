@@ -78,7 +78,8 @@ REPLAY_HOLD_STEPS = 60
 HANDOVER_CONTACT_PHASES = 3
 HANDOVER_DELIVERY_TOLERANCE_M = HANDOVER_CONTACT_PHASES * TASK_POSITION_TOLERANCE_M
 # The commanded release pose is 10 cm above the table. Allow the object's
-# origin to settle by that distance without loosening horizontal placement.
+# origin to settle by that distance. Above-target error keeps the horizontal
+# delivery budget, since settling cannot explain an upward offset.
 HANDOVER_HEIGHT_TOLERANCE_M = 0.10
 
 
@@ -128,10 +129,12 @@ def _select_cases(case_names: list[str]) -> list[HandOverCase]:
 
 
 def _delivery_goal_reached(xy_error_m: float, height_error_m: float) -> bool:
-    """Check horizontal precision and the separate post-release height budget."""
+    """Check XY distance and signed height error (final Z minus target Z)."""
     return (
         0.0 <= xy_error_m <= HANDOVER_DELIVERY_TOLERANCE_M
-        and 0.0 <= height_error_m <= HANDOVER_HEIGHT_TOLERANCE_M
+        and -HANDOVER_HEIGHT_TOLERANCE_M
+        <= height_error_m
+        <= HANDOVER_DELIVERY_TOLERANCE_M
     )
 
 
@@ -298,7 +301,7 @@ def _run_case(
         dropped = dropped_below_support(min_z, SUPPORT_SURFACE_Z)
         final_position = object_position_tuple(obj)
         final_xy_error = xy_distance_m(final_position, FINAL_OBJECT_XYZ)
-        final_height_error = abs(final_position[2] - FINAL_OBJECT_XYZ[2])
+        final_height_error = final_position[2] - FINAL_OBJECT_XYZ[2]
         # The handing arm holds the object: it left the pose it was resting in.
         ladder.record(
             "grasped",
@@ -622,15 +625,18 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             "hands without falling), handed_over (the handing hand ended "
             "nearer its open command than its closed one, object still up), "
             "placed (settled XY error <= "
-            f"{HANDOVER_DELIVERY_TOLERANCE_M:.3f} m and absolute height error <= "
-            f"{HANDOVER_HEIGHT_TOLERANCE_M:.3f} m from the commanded delivery "
+            f"{HANDOVER_DELIVERY_TOLERANCE_M:.3f} m and signed height error in "
+            f"[-{HANDOVER_HEIGHT_TOLERANCE_M:.3f}, "
+            f"+{HANDOVER_DELIVERY_TOLERANCE_M:.3f}] m from the commanded delivery "
             f"pose {FINAL_OBJECT_XYZ}).",
             f"The horizontal delivery budget is {HANDOVER_CONTACT_PHASES} x "
             "TASK_POSITION_TOLERANCE_M, the derived budget the standard gives "
             "a skill that breaks and re-establishes contact.",
-            "The height budget permits settling after release onto the table; "
+            "The downward height budget permits settling after release onto the table; "
+            "upward error uses the horizontal budget. "
             "final_delivery_distance_m remains a 3D diagnostic, while "
-            "final_delivery_xy_error_m and final_delivery_z_error_m decide placed.",
+            "final_delivery_xy_error_m and final_delivery_z_error_m decide placed. "
+            "final_delivery_z_error_m is signed: final Z minus target Z.",
             "motion_valid and max_tracking_error_rad are diagnostics; neither "
             "fails a stage.",
             "object_dropped uses the minimum object height observed across the "

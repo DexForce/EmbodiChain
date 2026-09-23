@@ -90,7 +90,6 @@ OBJECT_ROT_HORIZONTAL = (90.0, 0.0, 0.0)
 FINAL_OBJECT_XYZ = (-0.2, -0.2, 0.6)
 # ---------------------------------------------------------------------------
 
-HAND_CLOSE_QPOS = 0.04
 HANDOVER_SAMPLE_INTERVAL = 220
 HANDOVER_HAND_INTERP_STEPS = 10
 HANDOVER_PRE_GRASP_DISTANCE = 0.08
@@ -213,12 +212,11 @@ def run_handover_demo(
         planner=getattr(args, "planner", "trapezoidal"),
     )
 
-    hand_close_qpos = None if args.robot == "ur10" else HAND_CLOSE_QPOS
     left_open, left_close = get_hand_open_close_qpos(
-        robot, hand_control_part="left_hand", close_qpos=hand_close_qpos
+        robot, hand_control_part="left_hand"
     )
     right_open, right_close = get_hand_open_close_qpos(
-        robot, hand_control_part="right_hand", close_qpos=hand_close_qpos
+        robot, hand_control_part="right_hand"
     )
 
     final_pose = torch.eye(4, dtype=torch.float32)

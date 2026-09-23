@@ -31,18 +31,25 @@ from scripts.benchmark.atomic_action.common import SKILL_STAGES, StageLadder
     ("xy_error", "height_error", "expected"),
     [
         # Observed can/pencil settling must not consume the horizontal budget.
-        (0.02, 0.041777, True),
-        (0.02, 0.065871, True),
-        (0.03, 0.10, True),
+        (0.02, -0.041777, True),
+        (0.02, -0.065871, True),
+        (0.03, -0.10, True),
+        (0.03, 0.03, True),
+        (0.0, 0.0, True),
+        # The same resting offsets above the target must not count as placed.
+        (0.02, 0.041777, False),
+        (0.02, 0.065871, False),
+        (0.0, 0.10, False),
+        (0.0, 0.031, False),
         (0.031, 0.0, False),
-        (0.031, 0.065871, False),
-        (0.0, 0.101, False),
+        (0.031, -0.065871, False),
+        (0.0, -0.101, False),
         (float("nan"), 0.0, False),
         (0.0, float("nan"), False),
         (float("inf"), 0.0, False),
         (0.0, float("inf"), False),
+        (0.0, float("-inf"), False),
         (-0.01, 0.0, False),
-        (0.0, -0.01, False),
     ],
 )
 def test_delivery_uses_independent_horizontal_and_height_budgets(
@@ -54,7 +61,7 @@ def test_delivery_uses_independent_horizontal_and_height_budgets(
 
 def test_report_keeps_3d_distance_as_a_diagnostic() -> None:
     """A passing placement can have a 3D error above the old 3 cm threshold."""
-    xy_error, height_error = 0.02, 0.065871
+    xy_error, height_error = 0.02, -0.065871
     distance = math.hypot(xy_error, height_error)
     ladder = StageLadder(stages=SKILL_STAGES["hand_over"])
     for stage in ladder.stages[:-1]:

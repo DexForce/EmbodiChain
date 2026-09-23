@@ -800,7 +800,7 @@ def get_hand_open_close_qpos(
         robot: Robot containing the gripper control part.
         hand_control_part: Name of the gripper control part.
         close_qpos: Desired scalar close magnitude or explicit per-joint closed
-            positions, clamped to joint limits. Defaults to 0.7 for Robotiq
+            positions, clamped to joint limits. Defaults to 0.55 for Robotiq
             2F-140 hands and 0.036 for PGI hands.
 
     Returns:
