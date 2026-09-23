@@ -106,6 +106,12 @@ class LeRobotRecorder(Functor):
     - Recording observation-action pairs during episodes
     - Converting data to LeRobot format
     - Saving episodes when they complete
+
+    ``action_mode='joint'`` (the default) stores measured active-joint qpos as
+    ``observation.state`` and the controller action as the primary ``action``.
+    ``action_mode='eef'`` stores the raw absolute
+    ``[x, y, z, roll, pitch, yaw, gripper]`` command as ``action`` while the
+    measured FK pose remains an optional ``observation.eef_pose`` feature.
     """
 
     def __init__(self, cfg: DatasetFunctorCfg, env: EmbodiedEnv):
@@ -142,6 +148,15 @@ class LeRobotRecorder(Functor):
         # Optional parameters
         self.instruction = params.get("instruction", None)
         self.extra = params.get("extra", {})
+        self.action_mode = str(params.get("action_mode", "joint"))
+        if self.action_mode not in {"joint", "eef"}:
+            raise ValueError(
+                "LeRobotRecorder action_mode must be 'joint' or 'eef', got "
+                f"{self.action_mode!r}."
+            )
+        self.record_eef_observation = bool(
+            params.get("record_eef_observation", self.action_mode == "eef")
+        )
 
         # Experimental parameters for extra episode info saving.
         self.use_videos = params.get("use_videos", False)
@@ -208,6 +223,36 @@ class LeRobotRecorder(Functor):
                 "resample observations before recording."
             )
         return dataset_fps
+
+    def _action_contract(self) -> dict[str, Any]:
+        """Describe the primary action and auxiliary EEF fields in metadata."""
+        action_mode = getattr(self, "action_mode", "joint")
+        record_eef_observation = getattr(self, "record_eef_observation", False)
+        if action_mode == "eef":
+            return {
+                "version": 1,
+                "primary": "action",
+                "mode": "eef_pose_gripper",
+                "encoding": "xyz_rpy_gripper",
+                "frame": "arena",
+                "rotation": "rpy_radians",
+                "gripper": "normalized_minus_one_to_one",
+                "requested_target": "action",
+                "measured_observation": "observation.eef_pose",
+                "executed_command": "controller.qpos",
+            }
+        return {
+            "version": 1,
+            "primary": "action",
+            "mode": "joint_position",
+            "encoding": "active_joint_order",
+            "frame": "robot_joint_space",
+            "requested_target": "action",
+            "measured_observation": (
+                "observation.eef_pose" if record_eef_observation else None
+            ),
+            "executed_command": "controller.qpos",
+        }
 
     @property
     def dataset_path(self) -> str:
@@ -280,6 +325,18 @@ class LeRobotRecorder(Functor):
                 continue
             obs_list = self._env.rollout_buffer["obs"][env_id, :step]
             action_list = self._env.rollout_buffer["actions"][env_id, :step]
+            if getattr(self, "action_mode", "joint") == "eef":
+                raw_action_getter = getattr(self._env, "get_raw_action_history", None)
+                if raw_action_getter is None:
+                    raise RuntimeError(
+                        "action_mode='eef' requires raw action history from the environment."
+                    )
+                action_list = raw_action_getter(env_id, step)
+                if len(action_list) != step:
+                    raise RuntimeError(
+                        "Raw EEF action history length does not match the episode "
+                        f"length ({len(action_list)} != {step})."
+                    )
             annotations = {
                 key: self._env.rollout_buffer[key][env_id, :step]
                 for key in DEMO_ANNOTATION_KEYS
@@ -632,6 +689,7 @@ class LeRobotRecorder(Functor):
         previous_total_time = self.total_time
         self.total_time += current_episode_time
         episode_extra_info["total_time"] = self.total_time
+        episode_extra_info["action_contract"] = self._action_contract()
 
         depth_prefix = f"{LeRobotKey.OBS_PREFIX.value}depth."
         episode_index = self.curr_episode
@@ -1193,6 +1251,9 @@ class LeRobotRecorder(Functor):
             if expert_action_spec is None
             else list(expert_action_spec.feature_names)
         )
+        if self.action_mode == "eef":
+            action_dim = 7
+            action_names = ["x", "y", "z", "roll", "pitch", "yaw", "gripper"]
         features[LeRobotKey.ACTION.value] = {
             "dtype": "float32",
             "shape": (action_dim,),
@@ -1295,10 +1356,52 @@ class LeRobotRecorder(Functor):
             }
 
         self._modify_feature_names(features)
+        if self.record_eef_observation:
+            features["observation.eef_pose"] = {
+                "dtype": "float32",
+                "shape": (7,),
+                "names": ["x", "y", "z", "roll", "pitch", "yaw", "gripper"],
+            }
         return features
 
-    @staticmethod
-    def _camera_feature_key(sensor_name: str, frame_name: str) -> str:
+    def _to_eef_observation(self, qpos: torch.Tensor) -> torch.Tensor:
+        """Convert measured Franka qpos into an auxiliary EEF observation."""
+        qpos = qpos.to(device=self._env.device, dtype=torch.float32)
+        arm_ids = self._env.robot.get_joint_ids("arm", remove_mimic=True)
+        pose = self._env.robot.compute_fk(
+            qpos=qpos[:, arm_ids], name="arm", to_matrix=True
+        )
+        rotation = pose[:, :3, :3]
+        sy = torch.sqrt(rotation[:, 0, 0] ** 2 + rotation[:, 1, 0] ** 2)
+        singular = sy < 1e-6
+        roll = torch.atan2(rotation[:, 2, 1], rotation[:, 2, 2])
+        pitch = torch.atan2(-rotation[:, 2, 0], sy)
+        yaw = torch.atan2(rotation[:, 1, 0], rotation[:, 0, 0])
+        singular_roll = torch.atan2(-rotation[:, 1, 2], rotation[:, 1, 1])
+        roll = torch.where(singular, singular_roll, roll)
+        yaw = torch.where(singular, torch.zeros_like(yaw), yaw)
+
+        hand_ids = self._env.robot.get_joint_ids("hand", remove_mimic=True)
+        hand_qpos = qpos[:, hand_ids].mean(dim=-1)
+        limits = self._env.robot.body_data.qpos_limits[0, hand_ids]
+        gripper = (
+            2.0
+            * (hand_qpos - limits[:, 0].mean())
+            / (limits[:, 1].mean() - limits[:, 0].mean())
+            - 1.0
+        )
+        return torch.cat(
+            (
+                pose[:, :3, 3],
+                roll[:, None],
+                pitch[:, None],
+                yaw[:, None],
+                gripper[:, None],
+            ),
+            dim=-1,
+        )
+
+    def _camera_feature_key(self, sensor_name: str, frame_name: str) -> str:
         """Return the LeRobot feature key for a camera frame.
 
         Args:
@@ -1460,11 +1563,16 @@ class LeRobotRecorder(Functor):
                         f"Unsupported sensor type for '{sensor_name}' when converting to LeRobot format. Currently only support Camera and ContactSensor."
                     )
 
-        # Add state (use LeRobot standard key "observation.state")
+        # Keep the measured joint state as the primary observation state. An
+        # EEF pose derived from FK is auxiliary observation data, never an
+        # implicit replacement for the commanded action.
         frame[LeRobotKey.OBS_STATE.value] = obs["robot"]["qpos"].cpu()
-        # Keep additional proprio data that may be useful even though not in official LeRobot format
         frame[LeRobotKey.OBS_QVEL.value] = obs["robot"]["qvel"].cpu()
         frame[LeRobotKey.OBS_QF.value] = obs["robot"]["qf"].cpu()
+        if self.record_eef_observation:
+            frame["observation.eef_pose"] = self._to_eef_observation(
+                obs["robot"]["qpos"].unsqueeze(0)
+            )[0].cpu()
 
         # Add extra observation features if they exist
         for key in obs.keys():
@@ -1501,6 +1609,16 @@ class LeRobotRecorder(Functor):
                             break
                 if isinstance(action_tensor, torch.Tensor):
                     action_data = action_tensor.cpu()
+
+        if self.action_mode == "eef":
+            if isinstance(action, TensorDict):
+                action_data = action.get("eef_pose", None)
+            if action_data is None:
+                raise ValueError(
+                    "action_mode='eef' requires an explicit eef_pose command; "
+                    "an observed/FK-derived pose cannot be used as the action."
+                )
+            action_data = torch.as_tensor(action_data).cpu()
 
         frame[LeRobotKey.ACTION.value] = action_data
 

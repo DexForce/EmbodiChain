@@ -22,6 +22,7 @@ from functools import wraps
 from datetime import datetime
 import os
 import threading
+import copy
 import torch
 import numpy as np
 import gymnasium as gym
@@ -371,6 +372,7 @@ class EmbodiedEnv(BaseEnv):
         self.reward_manager: RewardManager | None = None
         self.action_manager: ActionManager | None = None
         self.dataset_manager: DatasetManager | None = None
+        self._record_raw_actions = False
 
         super().__init__(cfg, **kwargs)
 
@@ -406,6 +408,7 @@ class EmbodiedEnv(BaseEnv):
             if dataset_terms and not self.cfg.filter_dataset_saving:
                 self.dataset_manager = DatasetManager(self.cfg.dataset, self)
                 self.cfg.init_rollout_buffer = True
+                self._record_raw_actions = True
 
             self.rollout_buffer: TensorDict | None = None
             self._max_rollout_steps = 0
@@ -424,6 +427,9 @@ class EmbodiedEnv(BaseEnv):
             self._traj_buffer: TensorDict | None = None
             self._traj_steps: torch.Tensor | None = None
             self._traj_raw_action: EnvAction | None = None
+            self._raw_action_history: list[list[EnvAction]] = [
+                [] for _ in range(self.num_envs)
+            ]
             self._traj_save_count = 0
             self._traj_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             if self.cfg.record_trajectory:
@@ -1068,6 +1074,9 @@ class EmbodiedEnv(BaseEnv):
         if self.cfg.dataset and self.dataset_manager is not None:
             with self._profiler.section("dataset_reset"):
                 self.dataset_manager.reset(env_ids=env_ids)
+
+        for env_id in env_ids_to_process.cpu().tolist():
+            self._raw_action_history[env_id].clear()
 
     def _clear_expert_rollout_rows(self, env_ids: torch.Tensor) -> None:
         """Invalidate selected expert-buffer rows without clearing large frames."""
@@ -1954,6 +1963,7 @@ class EmbodiedEnv(BaseEnv):
         is_controller_action = isinstance(action, ControllerAction)
         if is_controller_action:
             action = action.value
+        self._record_raw_action(action)
         record_position_velocity = (
             self._traj_buffer is not None
             and getattr(self, "expert_action_spec", None) is not None
@@ -1977,6 +1987,34 @@ class EmbodiedEnv(BaseEnv):
                 active_joint_ids=self.active_joint_ids,
             )
         return action
+
+    def _record_raw_action(self, action: EnvAction) -> None:
+        """Keep a CPU copy of raw policy actions for explicit dataset contracts."""
+        if not getattr(self, "_record_raw_actions", True):
+            return
+        if isinstance(action, TensorDict):
+            rows = [action[index].detach().cpu() for index in range(self.num_envs)]
+        elif isinstance(action, torch.Tensor):
+            rows = [
+                action[index].detach().cpu().clone() for index in range(self.num_envs)
+            ]
+        else:
+            rows = [copy.deepcopy(action) for _ in range(self.num_envs)]
+        for index, row in enumerate(rows):
+            self._raw_action_history[index].append(row)
+
+    def get_raw_action_history(self, env_id: int, length: int | None = None) -> Any:
+        """Return raw actions recorded for one environment episode."""
+        rows = self._raw_action_history[int(env_id)]
+        if length is not None:
+            rows = rows[:length]
+        if not rows:
+            return torch.empty((0, 0), dtype=torch.float32)
+        if all(isinstance(row, torch.Tensor) for row in rows):
+            return torch.stack(rows, dim=0)
+        if all(isinstance(row, TensorDict) for row in rows):
+            return TensorDict.stack(rows, dim=0)
+        return rows
 
     def _postprocess_action(self, action):
         if self.action_manager is not None:

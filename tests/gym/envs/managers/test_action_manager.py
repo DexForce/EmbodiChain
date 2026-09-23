@@ -22,7 +22,9 @@ import torch
 from embodichain.lab.gym.envs.managers import ActionManager
 from embodichain.lab.gym.envs.managers.actions import (
     DeltaQposTerm,
+    EefPoseGripperTerm,
     EefPoseTerm,
+    JointPositionGripperTerm,
     QposTerm,
     QposDenormalizedTerm,
     QposNormalizedTerm,
@@ -87,6 +89,32 @@ class MockEnvForEef(MockEnv):
         return ret, joint_seed.clone()
 
 
+class MockEnvForGripper(MockEnvForEef):
+    """Mock robot with arm and one non-mimic gripper joint."""
+
+    def __init__(self, num_envs: int = 2):
+        super().__init__(num_envs=num_envs, action_dim=8)
+        self._qpos_limits = torch.zeros(1, 8, 2)
+        self._qpos_limits[..., 0] = -1.0
+        self._qpos_limits[..., 1] = 1.0
+
+    def get_joint_ids(self, name, remove_mimic=False):
+        del remove_mimic
+        return list(range(7)) if name == "arm" else [7]
+
+    def compute_ik(self, pose, joint_seed, name=None):
+        del pose, name
+        return super().compute_ik(pose=None, joint_seed=joint_seed)
+
+    @property
+    def body_data(self):
+        class BodyData:
+            def __init__(_, limits):
+                _.qpos_limits = limits
+
+        return BodyData(self._qpos_limits)
+
+
 def test_delta_qpos_term_process_action():
     """DeltaQposTerm: qpos = current_qpos + scale * action."""
     env = MockEnv(num_envs=4, action_dim=6)
@@ -149,6 +177,7 @@ def test_eef_pose_term_process_action_6d():
     assert "ik_success" in result
     assert result["qpos"].shape == (2, 6)
     assert result["ik_success"].shape == (2,)
+    assert result["eef_pose"].shape == (2, 6)
     # Mock returns joint_seed (zeros); verify output matches
     torch.testing.assert_close(result["qpos"], env.get_qpos())
     assert term.action_dim == 6
@@ -169,6 +198,7 @@ def test_eef_pose_term_process_action_7d():
     assert "qpos" in result
     assert "ik_success" in result
     assert result["qpos"].shape == (2, 6)
+    assert result["eef_pose"].shape == (2, 7)
     torch.testing.assert_close(result["qpos"], env.get_qpos())
     assert term.action_dim == 7
 
@@ -181,6 +211,34 @@ def test_eef_pose_term_invalid_dim_raises():
 
     with pytest.raises(ValueError, match="EEF pose action must be 6D or 7D"):
         term.process_action(torch.zeros(2, 5))
+
+
+def test_eef_pose_gripper_term_maps_shared_gripper():
+    """EEF pose plus normalized gripper action maps to arm and hand qpos."""
+    env = MockEnvForGripper()
+    term = EefPoseGripperTerm(
+        ActionTermCfg(func=EefPoseGripperTerm, params={"part_name": "arm"}), env
+    )
+
+    action = torch.zeros(2, 7)
+    action[:, 6] = 1.0
+    result = term.process_action(action)
+
+    assert result["qpos"].shape == (2, 8)
+    torch.testing.assert_close(result["eef_pose"], action)
+    torch.testing.assert_close(result["qpos"][:, 7], torch.ones(2))
+
+
+def test_joint_position_gripper_term_maps_arm_and_hand():
+    """Eight joint actions map seven arm joints and one shared gripper."""
+    env = MockEnvForGripper()
+    term = JointPositionGripperTerm(ActionTermCfg(func=JointPositionGripperTerm), env)
+
+    action = torch.arange(16, dtype=torch.float32).reshape(2, 8)
+    result = term.process_action(action)
+
+    torch.testing.assert_close(result[:, :7], action[:, :7])
+    torch.testing.assert_close(result[:, 7], torch.ones(2))
 
 
 def test_qvel_term_process_action():

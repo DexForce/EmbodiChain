@@ -29,3 +29,30 @@ Generate a simulator-free local gallery from the source checkout with:
 ```bash
 embodichain list-task --config-root embodichain_tasks=embodichain_tasks/configs/tasks --category manipulation --export-html task-gallery.html
 ```
+
+## Dataset action contract
+
+The LeRobot recorder keeps joint position as the default primary action. A
+recorded row is aligned as `(observation_t, action_t)`: the observation is read
+before the controller applies the action, and the next row observes the
+resulting simulation state.
+
+| Mode | Primary `action` | `observation.state` | Auxiliary EEF field | Controller boundary |
+|---|---|---|---|---|
+| `joint` (default) | Active joints in the configured joint order | Measured active-joint qpos | Optional measured `observation.eef_pose` | `controller.qpos` |
+| `eef` | `[x, y, z, roll, pitch, yaw, gripper]` | Measured active-joint qpos | Optional measured `observation.eef_pose` | IK-generated `controller.qpos` |
+
+EEF actions are absolute arena-frame targets. Rotation is XYZ Euler/RPY in
+radians, and gripper values are normalized to `[-1, 1]`. The requested EEF
+target is captured from the raw policy command; it is never reconstructed from
+the measured pose. The executed joint command and action contract are recorded
+in the episode metadata. Select EEF recording explicitly:
+
+```yaml
+params:
+  action_mode: eef
+  record_eef_observation: true
+```
+
+Datasets generated before this contract was introduced should be treated as a
+separate schema and regenerated before SFT or policy evaluation.

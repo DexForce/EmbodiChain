@@ -21,6 +21,7 @@ import json
 import threading
 import warnings
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -30,6 +31,7 @@ from tensordict import TensorDict
 from unittest.mock import MagicMock, Mock, patch
 
 from embodichain.lab.gym.envs.expert_trajectory import build_expert_action_spec
+from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
 
 # Skip all tests if LeRobot is not available
 try:
@@ -333,6 +335,90 @@ class TestLeRobotRecorderFeatures:
         }
         assert "annotation.segment_attempt_id" in features
         assert "annotation.continuity_id" in features
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_eef_action_uses_requested_target_and_declares_contract(
+        self, mock_lerobot_dataset
+    ):
+        """EEF mode records the requested target instead of measured FK pose."""
+        env = MockEnvForDataset(num_joints=6, has_sensors=False)
+        mock_dataset_instance = Mock()
+        mock_dataset_instance.meta = Mock()
+        mock_dataset_instance.meta.info = {"fps": 30}
+        mock_lerobot_dataset.create.return_value = mock_dataset_instance
+        recorder = LeRobotRecorder(
+            MockFunctorCfg(
+                params={
+                    "save_path": "/tmp/test_dataset",
+                    "action_mode": "eef",
+                    "record_eef_observation": False,
+                }
+            ),
+            env,
+        )
+
+        features = recorder._build_features()
+        assert features[LeRobotKey.ACTION.value]["shape"] == (7,)
+        assert recorder._action_contract()["requested_target"] == "action"
+
+        obs = TensorDict(
+            {
+                "robot": {
+                    "qpos": torch.zeros(6),
+                    "qvel": torch.zeros(6),
+                    "qf": torch.zeros(6),
+                },
+                "sensor": {},
+            },
+            batch_size=[],
+        )
+        requested = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, -1.0])
+        action = TensorDict(
+            {"qpos": torch.zeros(6), "eef_pose": requested}, batch_size=[]
+        )
+        frame = recorder._convert_frame_to_lerobot(obs, action, "test_task")
+        torch.testing.assert_close(frame[LeRobotKey.ACTION.value], requested)
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_eef_action_mode_declares_explicit_action_and_observation(
+        self, mock_lerobot_dataset
+    ):
+        """EEF mode exposes a 7D command and optional measured pose feature."""
+        env = MockEnvForDataset(num_joints=6)
+        mock_dataset_instance = Mock()
+        mock_dataset_instance.meta = Mock()
+        mock_dataset_instance.meta.info = {"fps": 30}
+        mock_lerobot_dataset.create.return_value = mock_dataset_instance
+
+        recorder = LeRobotRecorder(
+            MockFunctorCfg(
+                params={
+                    "save_path": "/tmp/test_dataset",
+                    "robot_meta": {"robot_type": "test_robot"},
+                    "instruction": {"lang": "test task"},
+                    "action_mode": "eef",
+                    "record_eef_observation": True,
+                }
+            ),
+            env,
+        )
+
+        features = recorder._build_features()
+        assert features[LeRobotKey.ACTION.value]["shape"] == (7,)
+        assert "observation.eef_pose" in features
+
+
+def test_raw_action_history_preserves_eef_command():
+    """Raw policy actions remain available after action preprocessing."""
+    env = SimpleNamespace(
+        num_envs=1, _record_raw_actions=True, _raw_action_history=[[]]
+    )
+    raw_action = torch.tensor([[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, -1.0]])
+
+    EmbodiedEnv._record_raw_action(env, raw_action)
+    recorded = EmbodiedEnv.get_raw_action_history(env, 0)
+
+    torch.testing.assert_close(recorded, raw_action)
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_position_velocity_action_feature_uses_canonical_layout(

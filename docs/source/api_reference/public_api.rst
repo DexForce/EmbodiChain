@@ -342,6 +342,8 @@ embodichain.lab.gym.envs.managers.actions
    QposDenormalizedTerm
    QposNormalizedTerm
    EefPoseTerm
+   EefPoseGripperTerm
+   JointPositionGripperTerm
    QvelTerm
    QfTerm
 
@@ -2198,6 +2200,19 @@ embodichain_tasks.manipulation.push_cube
 .. autosummary::
 
    PushCubeEnv
+
+embodichain_tasks.manipulation.repeated_pick_place
+--------------------------------------------------
+
+RLinf-facing repeated pick-and-place task registrations with explicit EEF and
+joint-position action variants.
+
+.. currentmodule:: embodichain_tasks.manipulation.repeated_pick_place
+
+.. autosummary::
+
+   RepeatedPickPlaceRlinfEnv
+   RepeatedPickPlaceRlinfJointEnv
 
 embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
 -----------------------------------------------------------
