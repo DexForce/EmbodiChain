@@ -26,6 +26,8 @@ are available in :mod:`actions` module.
 from __future__ import annotations
 
 import inspect
+from collections.abc import Mapping
+
 import torch
 import numpy as np
 import gymnasium as gym
@@ -228,6 +230,8 @@ class ActionManager(ManagerBase):
                         shape=(term.action_dim,),
                         dtype=np.float32,
                     )
+            if len(terms) == 1:
+                return next(iter(spaces.values()))
             if len(spaces) == 1 and "qpos" in spaces:
                 return spaces["qpos"]
             else:
@@ -297,6 +301,12 @@ class ActionManager(ManagerBase):
         if len(mode_terms) == 1:
             term_name = mode_terms[0]
             term = self._terms[term_name]
+            if isinstance(action, TensorDict) and term.input_key in action:
+                action = action[term.input_key]
+            elif isinstance(action, Mapping) and term.input_key in action:
+                action = torch.as_tensor(
+                    action[term.input_key], device=self._env.device
+                )
             return term.process_action(action)
         else:
             for name in mode_terms:

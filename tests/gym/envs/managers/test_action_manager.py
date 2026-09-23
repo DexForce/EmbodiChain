@@ -16,8 +16,10 @@
 
 from __future__ import annotations
 
+import gymnasium as gym
 import pytest
 import torch
+from tensordict import TensorDict
 
 from embodichain.lab.gym.envs.managers import ActionManager
 from embodichain.lab.gym.envs.managers.actions import (
@@ -251,6 +253,48 @@ def test_joint_position_gripper_term_exposes_eight_dim_action_space():
     assert manager.single_action_space.shape == (8,)
     assert manager.single_action_space.low[-1] == -1.0
     assert manager.single_action_space.high[-1] == 1.0
+
+
+def test_eef_pose_gripper_term_exposes_flat_box_action_space():
+    """A sole EEF term exposes the flat policy contract and gripper bounds."""
+    env = MockEnvForGripper()
+    manager = ActionManager(
+        {
+            "eef": ActionTermCfg(
+                func=EefPoseGripperTerm,
+                params={"part_name": "arm"},
+            )
+        },
+        env,
+    )
+
+    space = manager.single_action_space
+    assert isinstance(space, gym.spaces.Box)
+    assert space.shape == (7,)
+    assert space.low[-1] == -1.0
+    assert space.high[-1] == 1.0
+
+
+def test_single_eef_term_unwraps_tensor_dict_policy_action():
+    """Dict-shaped Gym actions are unwrapped before the sole EEF term runs."""
+    env = MockEnvForGripper()
+    manager = ActionManager(
+        {
+            "eef": ActionTermCfg(
+                func=EefPoseGripperTerm,
+                params={"part_name": "arm"},
+            )
+        },
+        env,
+    )
+    eef_action = torch.zeros(2, 7)
+    eef_action[:, 6] = 1.0
+
+    result = manager.process_action(
+        TensorDict({"eef_pose": eef_action}, batch_size=[2])
+    )
+
+    torch.testing.assert_close(result["eef_pose"], eef_action)
 
 
 def test_qvel_term_process_action():

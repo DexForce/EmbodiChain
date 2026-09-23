@@ -1075,8 +1075,11 @@ class EmbodiedEnv(BaseEnv):
             with self._profiler.section("dataset_reset"):
                 self.dataset_manager.reset(env_ids=env_ids)
 
-        for env_id in env_ids_to_process.cpu().tolist():
-            self._raw_action_history[env_id].clear()
+        raw_action_history = getattr(self, "_raw_action_history", None)
+        if raw_action_history is not None:
+            for env_id in env_ids_to_process.cpu().tolist():
+                if 0 <= env_id < len(raw_action_history):
+                    raw_action_history[env_id].clear()
 
     def _clear_expert_rollout_rows(self, env_ids: torch.Tensor) -> None:
         """Invalidate selected expert-buffer rows without clearing large frames."""
@@ -1453,6 +1456,18 @@ class EmbodiedEnv(BaseEnv):
                 "skipping action storage in rollout buffer."
             )
             action_to_store = None
+        if action_to_store is not None and not (
+            expert_action_spec is not None
+            and expert_action_spec.joint_command_mode == "position_velocity"
+        ):
+            robot = getattr(self, "robot", None)
+            get_qpos = getattr(robot, "get_qpos", None)
+            active_joint_ids = getattr(self, "active_joint_ids", None)
+            if callable(get_qpos) and active_joint_ids is not None:
+                active_dim = len(active_joint_ids)
+                full_dim = int(get_qpos().shape[-1])
+                if action_to_store.shape[-1] == full_dim and full_dim != active_dim:
+                    action_to_store = action_to_store[..., active_joint_ids]
         if action_to_store is not None:
             self.rollout_buffer["actions"][buffer_env_ids, buffer_step_ids] = (
                 action_to_store[env_ids].to(buffer_device)
@@ -1963,16 +1978,23 @@ class EmbodiedEnv(BaseEnv):
         is_controller_action = isinstance(action, ControllerAction)
         if is_controller_action:
             action = action.value
-        self._record_raw_action(action)
         record_position_velocity = (
             self._traj_buffer is not None
             and getattr(self, "expert_action_spec", None) is not None
             and self.expert_action_spec.joint_command_mode == "position_velocity"
         )
-        if self._traj_buffer is not None and not record_position_velocity:
-            self._traj_raw_action = (
-                action.clone() if hasattr(action, "clone") else action
-            )
+        # Action terms may mutate a TensorDict while composing multiple
+        # controller commands. Snapshot before preprocessing so the dataset
+        # contract always receives the policy request, not the transformed
+        # command.
+        retain_raw_action = getattr(self, "_record_raw_actions", False) or (
+            self._traj_buffer is not None and not record_position_velocity
+        )
+        raw_action = (
+            (action.clone() if hasattr(action, "clone") else copy.deepcopy(action))
+            if retain_raw_action
+            else action
+        )
         if self.action_manager is not None and not is_controller_action:
             action = self.action_manager.process_action(action, mode="pre")
         elif not is_controller_action:
@@ -1986,26 +2008,52 @@ class EmbodiedEnv(BaseEnv):
                 spec=self.expert_action_spec,
                 active_joint_ids=self.active_joint_ids,
             )
+        elif self._traj_buffer is not None:
+            self._traj_raw_action = raw_action
+        # Do not retain malformed actions: validation, masking and trajectory
+        # encoding above are the ownership boundary for raw-action history.
+        self._record_raw_action(raw_action)
         return action
 
     def _record_raw_action(self, action: EnvAction) -> None:
         """Keep a CPU copy of raw policy actions for explicit dataset contracts."""
-        if not getattr(self, "_record_raw_actions", True):
+        if not getattr(self, "_record_raw_actions", False):
             return
+        num_envs = int(self.num_envs)
+        raw_action_history = getattr(self, "_raw_action_history", None)
+        if raw_action_history is None:
+            raw_action_history = [[] for _ in range(num_envs)]
+            self._raw_action_history = raw_action_history
+
         if isinstance(action, TensorDict):
-            rows = [action[index].detach().cpu() for index in range(self.num_envs)]
+            if tuple(action.batch_size) != (num_envs,):
+                return
+            rows = [
+                action[index].detach().cpu().clone() for index in range(self.num_envs)
+            ]
         elif isinstance(action, torch.Tensor):
+            if action.ndim == 0 or action.shape[0] != num_envs:
+                return
             rows = [
                 action[index].detach().cpu().clone() for index in range(self.num_envs)
             ]
         else:
             rows = [copy.deepcopy(action) for _ in range(self.num_envs)]
+        active_mask = getattr(self, "_demo_active_mask", None)
+        if active_mask is not None and getattr(self, "_demo_no_auto_reset", False):
+            active_mask = torch.as_tensor(active_mask, device="cpu", dtype=torch.bool)
+        else:
+            active_mask = None
         for index, row in enumerate(rows):
-            self._raw_action_history[index].append(row)
+            if active_mask is None or bool(active_mask[index]):
+                raw_action_history[index].append(row)
 
     def get_raw_action_history(self, env_id: int, length: int | None = None) -> Any:
         """Return raw actions recorded for one environment episode."""
-        rows = self._raw_action_history[int(env_id)]
+        raw_action_history = getattr(self, "_raw_action_history", None)
+        if raw_action_history is None:
+            return torch.empty((0, 0), dtype=torch.float32)
+        rows = raw_action_history[int(env_id)]
         if length is not None:
             rows = rows[:length]
         if not rows:

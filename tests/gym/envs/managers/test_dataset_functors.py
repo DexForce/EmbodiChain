@@ -342,6 +342,10 @@ class TestLeRobotRecorderFeatures:
     ):
         """EEF mode records the requested target instead of measured FK pose."""
         env = MockEnvForDataset(num_joints=6, has_sensors=False)
+        env.expert_action_spec = build_expert_action_spec(
+            joint_names=[f"joint_{index}" for index in range(6)],
+            joint_command_mode="position",
+        )
         mock_dataset_instance = Mock()
         mock_dataset_instance.meta = Mock()
         mock_dataset_instance.meta.info = {"fps": 30}
@@ -360,6 +364,8 @@ class TestLeRobotRecorderFeatures:
         features = recorder._build_features()
         assert features[LeRobotKey.ACTION.value]["shape"] == (7,)
         assert recorder._action_contract()["requested_target"] == "action"
+        assert recorder._action_contract()["measured_observation"] is None
+        assert "controller.qpos" in features
 
         obs = TensorDict(
             {
@@ -374,10 +380,11 @@ class TestLeRobotRecorderFeatures:
         )
         requested = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, -1.0])
         action = TensorDict(
-            {"qpos": torch.zeros(6), "eef_pose": requested}, batch_size=[]
+            {"controller_qpos": torch.zeros(6), "eef_pose": requested}, batch_size=[]
         )
         frame = recorder._convert_frame_to_lerobot(obs, action, "test_task")
         torch.testing.assert_close(frame[LeRobotKey.ACTION.value], requested)
+        torch.testing.assert_close(frame["controller.qpos"], torch.zeros(6))
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_eef_action_mode_declares_explicit_action_and_observation(
@@ -406,19 +413,6 @@ class TestLeRobotRecorderFeatures:
         features = recorder._build_features()
         assert features[LeRobotKey.ACTION.value]["shape"] == (7,)
         assert "observation.eef_pose" in features
-
-
-def test_raw_action_history_preserves_eef_command():
-    """Raw policy actions remain available after action preprocessing."""
-    env = SimpleNamespace(
-        num_envs=1, _record_raw_actions=True, _raw_action_history=[[]]
-    )
-    raw_action = torch.tensor([[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, -1.0]])
-
-    EmbodiedEnv._record_raw_action(env, raw_action)
-    recorded = EmbodiedEnv.get_raw_action_history(env, 0)
-
-    torch.testing.assert_close(recorded, raw_action)
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_position_velocity_action_feature_uses_canonical_layout(
@@ -455,6 +449,10 @@ def test_raw_action_history_preserves_eef_command():
             "joint_0.velocity",
             "joint_1.velocity",
         ]
+        contract = recorder._action_contract()
+        assert contract["mode"] == "joint_position_velocity"
+        assert contract["qpos_slice"] == [0, 2]
+        assert contract["qvel_slice"] == [2, 4]
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_build_features_with_sensor(self, mock_lerobot_dataset):
@@ -994,6 +992,19 @@ class TestLeRobotRecorderFrameConversion:
         assert torch.equal(frame["observation.mask.camera"], mask)
         assert frame["observation.depth.camera"].dtype == torch.float32
         assert frame["observation.mask.camera"].dtype == torch.int32
+
+
+def test_raw_action_history_preserves_eef_command():
+    """Raw policy actions remain available after action preprocessing."""
+    env = SimpleNamespace(
+        num_envs=1, _record_raw_actions=True, _raw_action_history=[[]]
+    )
+    raw_action = torch.tensor([[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, -1.0]])
+
+    EmbodiedEnv._record_raw_action(env, raw_action)
+    recorded = EmbodiedEnv.get_raw_action_history(env, 0)
+
+    torch.testing.assert_close(recorded, raw_action)
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")

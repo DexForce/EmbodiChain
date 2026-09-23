@@ -125,6 +125,7 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/open_drawer/task_program/integration.yaml"),
         Path("tasks/manipulation/repeated_pick_place/env.yaml"),
         Path("tasks/manipulation/repeated_pick_place/env.rlinf.yaml"),
+        Path("tasks/manipulation/repeated_pick_place/env.rlinf_expert.yaml"),
         Path("tasks/manipulation/repeated_pick_place/env.rlinf_joint.yaml"),
         Path("tasks/manipulation/repeated_pick_place/task.franka.rlinf_joint.yaml"),
         Path("tasks/manipulation/repeated_pick_place/env.newton.yaml"),

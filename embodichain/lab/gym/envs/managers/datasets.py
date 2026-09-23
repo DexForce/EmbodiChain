@@ -238,7 +238,29 @@ class LeRobotRecorder(Functor):
                 "rotation": "rpy_radians",
                 "gripper": "normalized_minus_one_to_one",
                 "requested_target": "action",
-                "measured_observation": "observation.eef_pose",
+                "measured_observation": (
+                    "observation.eef_pose" if record_eef_observation else None
+                ),
+                "executed_command": "controller.qpos",
+            }
+        expert_action_spec = getattr(self._env, "expert_action_spec", None)
+        if (
+            expert_action_spec is not None
+            and expert_action_spec.joint_command_mode == "position_velocity"
+        ):
+            return {
+                "version": 1,
+                "primary": "action",
+                "mode": "joint_position_velocity",
+                "encoding": "active_joint_position_velocity",
+                "joint_command_mode": "position_velocity",
+                "qpos_slice": list(expert_action_spec.qpos_slice),
+                "qvel_slice": list(expert_action_spec.qvel_slice or ()),
+                "frame": "robot_joint_space",
+                "requested_target": "action",
+                "measured_observation": (
+                    "observation.eef_pose" if record_eef_observation else None
+                ),
                 "executed_command": "controller.qpos",
             }
         return {
@@ -246,6 +268,7 @@ class LeRobotRecorder(Functor):
             "primary": "action",
             "mode": "joint_position",
             "encoding": "active_joint_order",
+            "joint_command_mode": "position",
             "frame": "robot_joint_space",
             "requested_target": "action",
             "measured_observation": (
@@ -253,6 +276,57 @@ class LeRobotRecorder(Functor):
             ),
             "executed_command": "controller.qpos",
         }
+
+    def _eef_action_list(self, env_id: int, step: int, controller_actions: Any) -> Any:
+        """Pair raw EEF requests with the executed controller qpos rows.
+
+        The rollout buffer stores the post-IK controller command, while the
+        EEF dataset contract needs the pre-IK policy request as its primary
+        action. Keep both values in one TensorDict so fragment slicing and
+        asynchronous persistence retain the same alignment guarantees.
+        """
+        raw_action_getter = getattr(self._env, "get_raw_action_history", None)
+        if raw_action_getter is None:
+            raise RuntimeError(
+                "action_mode='eef' requires raw action history from the environment."
+            )
+        raw_actions = raw_action_getter(env_id, step)
+        if len(raw_actions) != step:
+            raise RuntimeError(
+                "Raw EEF action history length does not match the episode "
+                f"length ({len(raw_actions)} != {step})."
+            )
+
+        if isinstance(raw_actions, TensorDict):
+            eef_actions = raw_actions.get("eef_pose", None)
+            if eef_actions is None:
+                raise RuntimeError(
+                    "Raw EEF action history must contain an 'eef_pose' field."
+                )
+        else:
+            eef_actions = torch.as_tensor(raw_actions)
+
+        if isinstance(controller_actions, TensorDict):
+            controller_qpos = controller_actions.get("qpos", None)
+        else:
+            controller_qpos = controller_actions
+        if controller_qpos is None:
+            raise RuntimeError(
+                "EEF dataset recording requires executed controller qpos rows."
+            )
+        controller_qpos = torch.as_tensor(controller_qpos)
+        if len(controller_qpos) != step:
+            raise RuntimeError(
+                "Executed controller qpos length does not match the episode "
+                f"length ({len(controller_qpos)} != {step})."
+            )
+        return TensorDict(
+            {
+                "eef_pose": eef_actions.detach().cpu().clone(),
+                "controller_qpos": controller_qpos.detach().cpu().clone(),
+            },
+            batch_size=[step],
+        )
 
     @property
     def dataset_path(self) -> str:
@@ -324,19 +398,10 @@ class LeRobotRecorder(Functor):
             if step <= 0:
                 continue
             obs_list = self._env.rollout_buffer["obs"][env_id, :step]
-            action_list = self._env.rollout_buffer["actions"][env_id, :step]
+            controller_actions = self._env.rollout_buffer["actions"][env_id, :step]
+            action_list = controller_actions
             if getattr(self, "action_mode", "joint") == "eef":
-                raw_action_getter = getattr(self._env, "get_raw_action_history", None)
-                if raw_action_getter is None:
-                    raise RuntimeError(
-                        "action_mode='eef' requires raw action history from the environment."
-                    )
-                action_list = raw_action_getter(env_id, step)
-                if len(action_list) != step:
-                    raise RuntimeError(
-                        "Raw EEF action history length does not match the episode "
-                        f"length ({len(action_list)} != {step})."
-                    )
+                action_list = self._eef_action_list(env_id, step, controller_actions)
             annotations = {
                 key: self._env.rollout_buffer[key][env_id, :step]
                 for key in DEMO_ANNOTATION_KEYS
@@ -1362,6 +1427,11 @@ class LeRobotRecorder(Functor):
                 "shape": (7,),
                 "names": ["x", "y", "z", "roll", "pitch", "yaw", "gripper"],
             }
+        features["controller.qpos"] = {
+            "dtype": "float32",
+            "shape": (state_dim,),
+            "names": joint_names,
+        }
         return features
 
     def _to_eef_observation(self, qpos: torch.Tensor) -> torch.Tensor:
@@ -1588,12 +1658,22 @@ class LeRobotRecorder(Functor):
                     value = value.unsqueeze(0)
                 frame[key] = value.cpu()
 
-        # Add action.
+        # Add action and retain the executed qpos command separately from an
+        # EEF request.  The latter is the post-IK controller output, not the
+        # measured pose or the requested Cartesian target.
+        controller_qpos = None
+        if isinstance(action, TensorDict):
+            controller_qpos = action.get("controller_qpos", None)
+            if controller_qpos is None:
+                controller_qpos = action.get("qpos", None)
+
         if isinstance(action, torch.Tensor):
             action_data = action.cpu()
         elif isinstance(action, TensorDict):
             expert_action_spec = getattr(self._env, "expert_action_spec", None)
-            if expert_action_spec is not None:
+            if self.action_mode == "eef":
+                action_data = action.get("eef_pose", None)
+            elif expert_action_spec is not None:
                 action_data = encode_expert_action(
                     action,
                     spec=expert_action_spec,
@@ -1619,6 +1699,26 @@ class LeRobotRecorder(Functor):
                     "an observed/FK-derived pose cannot be used as the action."
                 )
             action_data = torch.as_tensor(action_data).cpu()
+
+        if controller_qpos is None and isinstance(action_data, torch.Tensor):
+            state_dim = len(self._env.active_joint_ids)
+            if action_data.shape[-1] >= state_dim and self.action_mode != "eef":
+                controller_qpos = action_data[..., :state_dim]
+        if controller_qpos is None and self.action_mode == "eef":
+            raise ValueError(
+                "action_mode='eef' requires the executed controller qpos command."
+            )
+        if controller_qpos is not None:
+            controller_qpos = torch.as_tensor(controller_qpos)
+            active_joint_ids = getattr(self._env, "active_joint_ids", None)
+            if (
+                active_joint_ids is not None
+                and controller_qpos.shape[-1] != len(active_joint_ids)
+                and active_joint_ids
+                and max(active_joint_ids) < controller_qpos.shape[-1]
+            ):
+                controller_qpos = controller_qpos[..., active_joint_ids]
+            frame["controller.qpos"] = controller_qpos.cpu()
 
         frame[LeRobotKey.ACTION.value] = action_data
 

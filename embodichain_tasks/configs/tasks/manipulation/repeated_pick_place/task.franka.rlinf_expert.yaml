@@ -1,7 +1,7 @@
 id: TaskProgramRepeatedPickPlaceRlinfExpert-Franka-v1
 
 environment:
-  component: env.yaml
+  component: env.rlinf_expert.yaml
 
 task_program:
   program: task_program/program.yaml

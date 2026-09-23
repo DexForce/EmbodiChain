@@ -230,7 +230,12 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
                 if step <= 0:
                     continue
                 obs_view = env.rollout_buffer["obs"][env_id, :step]
-                action_view = env.rollout_buffer["actions"][env_id, :step]
+                controller_actions = env.rollout_buffer["actions"][env_id, :step]
+                action_view = controller_actions
+                if getattr(self, "action_mode", "joint") == "eef":
+                    action_view = self._eef_action_list(
+                        env_id, step, controller_actions
+                    )
                 # Clone in the caller thread: the rollout buffer is cleared and
                 # reused by the next episode on reset, so the worker must not hold
                 # a view into it.

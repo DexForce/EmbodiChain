@@ -341,6 +341,19 @@ class EefPoseGripperTerm(EefPoseTerm):
     def action_dim(self) -> int:
         return 7
 
+    @property
+    def action_space(self) -> gym.spaces.Box:
+        """Return the flat pose-plus-gripper policy space.
+
+        Pose coordinates are intentionally unbounded here; task-specific
+        workspace limits belong to the controller/IK boundary. The gripper
+        coordinate is normalized and therefore has an explicit ``[-1, 1]``
+        contract.
+        """
+        low = np.array([-np.inf] * 6 + [-1.0], dtype=np.float32)
+        high = np.array([np.inf] * 6 + [1.0], dtype=np.float32)
+        return gym.spaces.Box(low=low, high=high, dtype=np.float32)
+
     def process_action(self, action: torch.Tensor) -> EnvAction:
         if action.shape[-1] != 7:
             raise ValueError(

@@ -9,6 +9,9 @@ physical environment is selected separately from the robot embodiment and progra
 | ur5 | ur5_dh_pgi_140_80 | default | `task.ur5.yaml` |
 | franka_newton | franka_panda | newton | `task.franka.newton.yaml` |
 | ur5_newton | ur5_dh_pgi_140_80 | newton | `task.ur5.newton.yaml` |
+| franka_rlinf | franka_panda_vla | default | `task.franka.rlinf.yaml` |
+| franka_rlinf_joint | franka_panda_vla | default | `task.franka.rlinf_joint.yaml` |
+| franka_rlinf_expert | franka_panda_vla | default | `task.franka.rlinf_expert.yaml` |
 
 Inspect the available deployments:
 

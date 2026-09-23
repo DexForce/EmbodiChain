@@ -45,8 +45,17 @@ class RepeatedPickPlaceRlinfEnv(EmbodiedEnv):
         )
 
     def reset(self, *args: Any, **kwargs: Any) -> tuple[EnvObs, dict[str, Any]]:
+        options = kwargs.get("options")
+        if options is None and len(args) >= 2:
+            options = args[1]
         observation, info = super().reset(*args, **kwargs)
-        self._success_hold_steps.zero_()
+        if options is None or "reset_ids" not in options:
+            reset_ids = torch.arange(self.num_envs, device=self.device)
+        else:
+            reset_ids = torch.as_tensor(
+                options["reset_ids"], device=self.device, dtype=torch.long
+            ).reshape(-1)
+        self._success_hold_steps[reset_ids] = 0
         return observation, info
 
     def compute_task_state(
