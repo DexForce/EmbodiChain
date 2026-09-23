@@ -13,6 +13,7 @@ Online sampling and demonstration persistence belong to
 | Locked download and ZIP integrity | `embodichain/data/dataset.py`: `EmbodiChainDataset`, `_dataset_download_lock()` |
 | CLI list/download | `embodichain/data/download.py`: `CATEGORY_MODULES`, `get_registry()`, `download_asset()` |
 | Dataset class visibility | `embodichain/data/__init__.py`, `embodichain/data/assets/__init__.py` |
+| Pretrained policy bundles | `embodichain/data/assets/policy_assets.py`: `download_pretrained_policy()` |
 | Unified CLI registration | `embodichain/cli/main.py`: `embodichain data` |
 
 ## Resolution path
@@ -51,6 +52,18 @@ configured remote sources, with the model entry at the ZIP root.
 and exits nonzero if any requested asset failed.
 `_ensure_extract()` copies non-ZIP downloads into the extract tree
 when needed. Solver/planner checkpoint download helpers can have separate paths.
+
+## Pretrained policy bundles
+
+`eval-policy --pretrained` reads the official model index at a pinned HF commit,
+then downloads only `policies/<model-id>/`. Named revisions resolve once before
+both downloads. Files use a revision-specific `local_dir` because RunManifest
+rejects paths resolving outside its RUN, including default HF blob symlinks.
+The CLI records repository provenance and writes reports outside the model
+cache. Robot references still use `get_data_path()` and its existing asset cache.
+Task packages must already be installed; downloading weights does not register
+new environment implementations. Test the Hub boundary with fake downloads and
+validate a real selected-model download separately.
 
 ## Failure diagnosis and change sites
 

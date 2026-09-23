@@ -6,6 +6,7 @@
 |------|------|
 | Unified CLI | `embodichain train-rl --config <train.yaml-or-json>` |
 | CLI implementation | `embodichain/learning/rl/train.py` → `cli()` |
+| Standalone evaluation | `embodichain/learning/rl/policy_evaluation/cli.py`; local RUN/checkpoint, pretrained bundle or external Profile |
 | Programmatic training | `embodichain/learning/rl/train.py` → `train_from_config()` |
 | Algorithm registry | `embodichain/learning/rl/algo/__init__.py` |
 | Policy registry | `embodichain/learning/rl/models/__init__.py` |
@@ -20,7 +21,10 @@ The compatibility module entry point is:
 python -m embodichain.learning.rl.train --config <train.yaml-or-json>
 ```
 
-Prefer the unified `embodichain train-rl` command.
+Prefer the unified `embodichain train-rl` command. Pretrained evaluation resolves
+a downloaded RUN before using the same native runtime and checkpoint loader;
+model-cache and repository revision ownership belong to
+[data assets](../data-assets/data-assets.md#pretrained-policy-bundles).
 
 ## Configuration Resolution
 
