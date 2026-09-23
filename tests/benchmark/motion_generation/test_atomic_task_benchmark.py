@@ -988,7 +988,8 @@ def test_atomic_case_manifest_retains_robot_skill_object_and_parameters(tmp_path
     payload = json.loads(path.read_text(encoding="utf-8"))
     serialized = payload["cases"][0]
 
-    assert payload["case_schema_version"] == 2
+    assert payload["case_schema_version"] == 3
+    assert serialized["domain"] is None
     assert serialized["robot_id"] == "franka_pgi"
     assert serialized["skill_id"] == "move_end_effector"
     assert serialized["primary_success"] == "task_success"
@@ -1175,3 +1176,151 @@ def test_runner_skips_video_outside_measured_phase(tmp_path):
 
     assert path is None
     provider.record_replay.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "execution_ok,motion_ok", [(True, True), (False, True), (True, False)]
+)
+def test_physical_evaluator_dispatch_preserves_row_results_and_execution_gates(
+    monkeypatch, execution_ok: bool, motion_ok: bool
+) -> None:
+    """Physical evidence stays row-local and cannot override failed execution."""
+    from scripts.benchmark.motion_generation import contracts
+    from scripts.benchmark.motion_generation.scenarios import atomic_task
+
+    case = replace(
+        _atomic_case(), batch_size=2, target_waypoints=torch.eye(4).repeat(2, 1, 1, 1)
+    )
+    motion = (
+        replace(
+            _atomic_outcome(),
+            motion_valid=motion_ok,
+            failure_code=None if motion_ok else "motion_failed",
+        ),
+        replace(_atomic_outcome(), env_index=1),
+    )
+    monkeypatch.setattr(
+        atomic_task, "compute_case_outcomes", lambda *args, **kwargs: motion
+    )
+    observation = contracts.ExecutionObservation(
+        execution_success=torch.tensor([execution_ok, True]),
+        final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
+        joint_tracking_rmse_rad=torch.zeros(2),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.5,
+        object_lift_delta_m=torch.tensor([0.1, 0.0]),
+    )
+
+    class LiftEvaluator:
+        def evaluate(self, case, observation, motion_outcomes):
+            # Only measured evidence is available; the compiled plan has no input slot.
+            return tuple(
+                contracts.PhysicalEvaluation(
+                    env_index=index,
+                    stages=(
+                        contracts.StageOutcome(
+                            stage_id="lift",
+                            status="passed" if height > 0.05 else "failed",
+                            failure_code=None if height > 0.05 else "object_not_lifted",
+                            measurements={"height_m": height},
+                        ),
+                    ),
+                )
+                for index, height in reversed(
+                    list(enumerate(observation.object_lift_delta_m.tolist()))
+                )
+            )
+
+    provider = create_atomic_skill_provider("pick_up")
+    monkeypatch.setattr(provider, "physical_evaluator", lambda: LiftEvaluator())
+
+    def forbid_legacy(*args, **kwargs):
+        raise AssertionError("A physical evaluator must bypass legacy task_result")
+
+    monkeypatch.setattr(provider, "task_result", forbid_legacy)
+    scenario = AtomicTaskScenario()
+    scenario._case_providers[case.case_id] = provider
+    monkeypatch.setattr(scenario, "_execute", lambda *args: observation)
+    robot = Mock(device=torch.device("cpu"))
+    robot.get_joint_ids.return_value = list(range(7))
+    result = scenario.evaluate_case(
+        _compiled_replay_batch([True, True]),
+        case,
+        robot,
+        "arm",
+        load_suite("atomic_franka_pgi_curobo"),
+        planning_time_ms=2.0,
+    )
+    assert [row.task_success for row in result.outcomes] == [
+        execution_ok and motion_ok,
+        False,
+    ]
+    assert result.outcomes[1].failure_code == "object_not_lifted"
+    assert result.outcomes[1].failure_stage == "lift"
+    assert result.outcomes[0].stages[0].measurements["height_m"] == pytest.approx(0.1)
+    if not motion_ok:
+        assert result.outcomes[0].failure_code == "motion_failed"
+    elif not execution_ok:
+        assert result.outcomes[0].failure_code == "controller_tracking_failure"
+
+
+def test_runner_freezes_domain_manifest_before_each_planner(
+    monkeypatch, tmp_path
+) -> None:
+    """The same case population and provenance reach all candidate records."""
+    from scripts.benchmark.motion_generation import runner as runner_module
+    from scripts.benchmark.motion_generation.config import DomainCfg
+
+    suite = load_suite("atomic_franka_pgi_curobo")
+    suite.tracks = [suite.enabled_tracks()[0]]
+    suite.tracks[0].domain = DomainCfg(id="nominal", version="v1", kind="nominal")
+    specs = [suite.planners[0], replace(suite.planners[0], id="second")]
+    runner = BenchmarkRunner(suite, specs, device="cpu", output_root=tmp_path)
+    provider = Mock()
+    provider.batch_sizes.return_value = [1]
+    provider.generate_cases.return_value = [_atomic_case()]
+    provider.required_capabilities = frozenset()
+    monkeypatch.setattr(
+        runner_module, "create_scenario_provider", lambda name: provider
+    )
+    monkeypatch.setattr(runner_module, "environment_metadata", lambda: {})
+    monkeypatch.setattr(
+        runner_module.SimulationManager, "flush_cleanup_queue", lambda: None
+    )
+    monkeypatch.setattr(
+        runner, "_create_simulation", lambda batch_size: (Mock(), Mock())
+    )
+    manifests = []
+
+    def run_adapter(writer, sim, robot, spec, cases, capabilities, scenario):
+        manifest = json.loads((runner._run_dir / "case_manifest.json").read_text())
+        manifests.append(manifest)
+        assert manifest["cases"][0]["domain"] == {
+            "id": "nominal",
+            "version": "v1",
+            "kind": "nominal",
+        }
+        metadata = PlannerMetadata(
+            algorithm_id=spec.id,
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter=spec.adapter,
+            config_hash=spec.id,
+            capabilities=frozenset(),
+        )
+        runner.metadata[spec.id] = metadata
+        runner._append(
+            writer,
+            TrialRecord(
+                **runner._base_record(
+                    metadata, cases[0], TrialPhase.MEASURED, repeat=0
+                ),
+                outcomes=(_atomic_outcome(),),
+            ),
+        )
+
+    monkeypatch.setattr(runner, "_run_adapter", run_adapter)
+    result = runner.run()
+    assert len(manifests) == 2
+    assert manifests[0] == manifests[1]
+    assert all(record.domain.version == "v1" for record in result.records)
+    assert provider.generate_cases.return_value[0].domain is None

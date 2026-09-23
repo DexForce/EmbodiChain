@@ -23,6 +23,8 @@ from enum import Enum
 
 import torch
 
+from .contracts import EvaluationDomain, StageOutcome
+
 __all__ = [
     "AlgorithmRole",
     "BenchmarkCase",
@@ -95,6 +97,7 @@ class BenchmarkCase:
     primary_success: str = "motion_valid"
     full_start_qpos: torch.Tensor | None = None
     case_parameters: dict[str, object] = field(default_factory=dict)
+    domain: EvaluationDomain | None = None
 
 
 @dataclass(frozen=True)
@@ -141,6 +144,8 @@ class CaseOutcome:
     waypoint_min_translation_err_mm_at_orientation: tuple[float | None, ...] = ()
     executed_final_translation_err_mm: float | None = None
     executed_final_rotation_err_deg: float | None = None
+    stages: tuple[StageOutcome, ...] = ()
+    failure_stage: str | None = None
 
 
 @dataclass(frozen=True)
@@ -180,6 +185,7 @@ class TrialRecord:
     trajectory_waypoints: int | None = None
     metadata: dict[str, object] = field(default_factory=dict)
     outcomes: tuple[CaseOutcome, ...] = ()
+    domain: EvaluationDomain | None = None
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-serializable mapping while retaining numeric values."""
