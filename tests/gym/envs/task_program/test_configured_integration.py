@@ -779,6 +779,18 @@ def test_rigidized_articulation_scene_decodes_link_backed_grasp() -> None:
     assert binding.rigidized_articulation_grasps[0].grasp_link == "lower_two_layers"
 
 
+@pytest.mark.parametrize("collision_role", ("static", "dynamic"))
+def test_rigidized_articulation_config_rejects_unavailable_collision_geometry(
+    collision_role: str,
+) -> None:
+    """Configured articulation objects cannot claim a planner collision role."""
+    payload = _rigidized_articulation_payload()
+    payload["scene"]["rigidized_articulations"][0]["collision_role"] = collision_role
+
+    with pytest.raises(ValueError, match="rigidized.*collision_role.*none"):
+        _decode_configured_task_program_integration(payload)
+
+
 def test_rigidized_articulation_requires_locked_qpos() -> None:
     payload = _rigidized_articulation_payload()
     root = payload["scene"]["rigidized_articulations"][0]
