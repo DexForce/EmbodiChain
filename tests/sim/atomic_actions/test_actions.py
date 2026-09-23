@@ -2491,7 +2491,14 @@ def test_press_closes_hand_without_changing_projected_attachment() -> None:
     assert torch.equal(projected_held.object_to_eef, held.object_to_eef)
 
 
-def test_twist_plans_six_segments_from_articulation_link() -> None:
+@pytest.mark.parametrize(
+    ("sample_count", "hand_interp_steps"),
+    [(24, 3), (256, 20)],
+    ids=["compact", "microwave"],
+)
+def test_twist_plans_six_segments_from_articulation_link(
+    sample_count: int, hand_interp_steps: int
+) -> None:
     affordance = TwistAffordance(
         grasp_position=(2.0, 0.0, 0.0),
     )
@@ -2510,15 +2517,15 @@ def test_twist_plans_six_segments_from_articulation_link() -> None:
             skill_id="twist",
             goal=TwistGoal(semantics, torch.eye(4)),
             binding=_binding(action),
-            motion_policy=MotionPolicy(sample_count=24),
-            skill_options=TwistOptions(hand_interp_steps=3),
+            motion_policy=MotionPolicy(sample_count=sample_count),
+            skill_options=TwistOptions(hand_interp_steps=hand_interp_steps),
         ),
         _context(),
     )
 
     assert plan.plan_success.tolist() == [True, True]
     trajectory = _joint_trajectory(plan)
-    assert trajectory.positions.shape == (NUM_ENVS, 24, ROBOT_DOF)
+    assert trajectory.positions.shape == (NUM_ENVS, sample_count, ROBOT_DOF)
     assert [segment.name for segment in plan.segments] == [
         "approach",
         "reach",
@@ -2549,7 +2556,14 @@ def test_twist_plans_six_segments_from_articulation_link() -> None:
     assert torch.allclose(first_target[:, :3, 3], expected_pre_grasp_position)
 
 
-def test_twist_plans_from_explicit_rigid_object_pose_snapshot() -> None:
+@pytest.mark.parametrize(
+    ("sample_count", "hand_interp_steps"),
+    [(24, 3), (256, 20)],
+    ids=["compact", "full"],
+)
+def test_twist_plans_from_explicit_rigid_object_pose_snapshot(
+    sample_count: int, hand_interp_steps: int
+) -> None:
     semantics = ObjectSemantics(
         affordance=TwistAffordance(
             grasp_position=(0.0, 0.0, 0.0),
@@ -2568,8 +2582,8 @@ def test_twist_plans_from_explicit_rigid_object_pose_snapshot() -> None:
             skill_id="twist",
             goal=TwistGoal(semantics, torch.eye(4)),
             binding=_binding(action),
-            motion_policy=MotionPolicy(sample_count=24),
-            skill_options=TwistOptions(hand_interp_steps=3),
+            motion_policy=MotionPolicy(sample_count=sample_count),
+            skill_options=TwistOptions(hand_interp_steps=hand_interp_steps),
         ),
         _context(),
     )
@@ -3191,7 +3205,14 @@ def _door_affordance(*, opening_direction: int = 1) -> OpenDoorAffordance:
     )
 
 
-def test_open_door_plans_approach_grasp_arc_release_and_rotated_retract() -> None:
+@pytest.mark.parametrize(
+    ("sample_count", "hand_interp_steps", "door_waypoint_count"),
+    [(24, 3, 4), (300, 30, 50)],
+    ids=["compact", "microwave"],
+)
+def test_open_door_plans_approach_grasp_arc_release_and_rotated_retract(
+    sample_count: int, hand_interp_steps: int, door_waypoint_count: int
+) -> None:
     affordance = _door_affordance()
     semantics = ObjectSemantics(
         affordance=affordance,
@@ -3218,8 +3239,8 @@ def test_open_door_plans_approach_grasp_arc_release_and_rotated_retract() -> Non
 
     _GRASP_GENERATORS[id(action)].get_valid_grasp_poses = Mock(side_effect=sample_grasp)
     options = OpenDoorOptions(
-        hand_interp_steps=3,
-        door_waypoint_count=4,
+        hand_interp_steps=hand_interp_steps,
+        door_waypoint_count=door_waypoint_count,
         approach_distance=0.1,
         retract_distance=0.1,
     )
@@ -3235,7 +3256,7 @@ def test_open_door_plans_approach_grasp_arc_release_and_rotated_retract() -> Non
                 open_fraction=1.0 / 3.0,
             ),
             binding=_binding(action),
-            motion_policy=MotionPolicy(sample_count=24),
+            motion_policy=MotionPolicy(sample_count=sample_count),
             skill_options=options,
         ),
         _context(scene=_door_scene(link_pose)),
@@ -3245,7 +3266,7 @@ def test_open_door_plans_approach_grasp_arc_release_and_rotated_retract() -> Non
     assert plan.plan_success.tolist() == [True, True]
     assert plan.scene_dependencies == ("target",)
     assert plan.scene_dependency_end_segment == "reach"
-    assert trajectory.positions.shape == (NUM_ENVS, 24, ROBOT_DOF)
+    assert trajectory.positions.shape == (NUM_ENVS, sample_count, ROBOT_DOF)
     assert [segment.name for segment in plan.segments] == [
         "approach",
         "reach",
@@ -3590,7 +3611,14 @@ def test_open_door_validates_goal_binding_owner_and_endpoint_coverage() -> None:
         )
 
 
-def test_press_plans_close_approach_press_and_retract() -> None:
+@pytest.mark.parametrize(
+    ("sample_count", "hand_interp_steps"),
+    [(24, 3), (256, 12)],
+    ids=["compact", "microwave"],
+)
+def test_press_plans_close_approach_press_and_retract(
+    sample_count: int, hand_interp_steps: int
+) -> None:
     affordance = PressAffordance(
         press_axis=torch.tensor([1.0, 0.0, 0.0]),
         press_position=(0.0, 0.0, 0.0),
@@ -3604,7 +3632,7 @@ def test_press_plans_close_approach_press_and_retract() -> None:
     generator = _motion_generator()
     action = _bind_action(generator, Press())
     options = PressOptions(
-        hand_interp_steps=3,
+        hand_interp_steps=hand_interp_steps,
         approach_distance=0.1,
         press_distance=0.02,
     )
@@ -3615,7 +3643,7 @@ def test_press_plans_close_approach_press_and_retract() -> None:
             skill_id="press",
             goal=PressGoal(semantics, torch.eye(4)),
             binding=_binding(action),
-            motion_policy=MotionPolicy(sample_count=24),
+            motion_policy=MotionPolicy(sample_count=sample_count),
             skill_options=options,
         ),
         _context(),
@@ -3623,7 +3651,7 @@ def test_press_plans_close_approach_press_and_retract() -> None:
 
     assert plan.plan_success.tolist() == [True, True]
     trajectory = _joint_trajectory(plan)
-    assert trajectory.positions.shape == (NUM_ENVS, 24, ROBOT_DOF)
+    assert trajectory.positions.shape == (NUM_ENVS, sample_count, ROBOT_DOF)
     assert [segment.name for segment in plan.segments] == [
         "close",
         "approach",
@@ -3644,7 +3672,9 @@ def test_press_plans_close_approach_press_and_retract() -> None:
     planned_targets = [
         call.kwargs["pose"] for call in generator.robot.compute_ik.call_args_list
     ]
-    motion_lengths = Press._motion_segment_lengths(24, options.hand_interp_steps)
+    motion_lengths = Press._motion_segment_lengths(
+        sample_count, options.hand_interp_steps
+    )
     contact_stop = 1 + motion_lengths[1] - 1
     press_stop = contact_stop + motion_lengths[2] - 1
     assert torch.allclose(planned_targets[0][:, :3, 3], expected_approach)

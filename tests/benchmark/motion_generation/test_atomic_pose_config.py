@@ -64,6 +64,13 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     }
     assert skills["pick_up"]["grasp_source"] == "fixed"
     assert skills["press"]["press_distance_m"] == pytest.approx(0.008)
+    assert {
+        skill_id: (
+            skills[skill_id]["sample_count"],
+            skills[skill_id]["hand_interp_steps"],
+        )
+        for skill_id in ("press", "twist")
+    } == {"press": (256, 12), "twist": (256, 20)}
     assert skills["pick_up"]["object_position_jitter_m"] == [0.03, 0.03, 0.0]
     assert skills["move_end_effector"]["target_offset_jitter_m"] == [
         0.03,
@@ -73,7 +80,7 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     assert {
         entry["id"]: entry["asset_path"] for entry in track.config["articulations"]
     } == {
-        "microwave": "MicrowaveOven/microwave_oven_with_inertials.urdf",
+        "microwave": "Microwave/microwave.urdf",
         "drawer": "Drawer/model_split_links_with_inertials.urdf",
     }
     assert {
@@ -92,9 +99,9 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
         )
         for skill_id in ("press", "slide", "twist")
     } == {
-        "press": ("microwave", "button_cap", "start_button_press"),
+        "press": ("microwave", "button_link", "button_joint"),
         "slide": ("drawer", "large_handle_bar", "cabinet_to_drawer"),
-        "twist": ("microwave", "cap_1", "power_knob_rotation"),
+        "twist": ("microwave", "knob_link", "knob_joint"),
     }
 
 
