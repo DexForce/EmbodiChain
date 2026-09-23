@@ -143,7 +143,7 @@ class AffordancePoseCandidates:
     """Batched pose candidates with cost and explicit validity.
 
     Args:
-        poses: Homogeneous poses with shape ``(B, K, 4, 4)``.
+        poses: World-frame homogeneous poses with shape ``(B, K, 4, 4)``.
         costs: Lower-is-better candidate costs with shape ``(B, K)``.
         valid: Real-candidate mask with shape ``(B, K)``.
     """
@@ -232,7 +232,13 @@ class AffordanceSample:
     Args:
         success: Per-row legal-sample mask with shape ``(B,)``.
         poses: Selected poses with shape ``(B, 4, 4)``.
-        metadata: Sampling provenance and selection diagnostics.
+        metadata: Sampling provenance and selection diagnostics. Affordance
+            samplers record ``pose_frame="world"``, ``selected_poses``, optional
+            world-frame ``reference_poses``, ``env_ids``, and geometric
+            ``success`` as JSON-compatible values. Row lists follow the input
+            batch order. Failed rows retain identity placeholder poses and
+            must be interpreted with ``success``; this is not IK or execution
+            success. Candidate IDs identify only each row's candidate pool.
     """
 
     success: torch.Tensor
@@ -359,6 +365,7 @@ def _sample_pose_candidates(
         success=success,
         poses=output,
         metadata={
+            **_pose_sampling_metadata(output, success, env_ids, reference_poses),
             "key": key,
             "sampling": None if sampling is None else sampling.metadata(),
             "candidate_ids": torch.where(success, selected, -1).cpu().tolist(),
@@ -367,6 +374,24 @@ def _sample_pose_candidates(
             "reused": reused,
         },
     )
+
+
+def _pose_sampling_metadata(
+    poses: torch.Tensor,
+    success: torch.Tensor,
+    env_ids: torch.Tensor,
+    reference_poses: torch.Tensor | None,
+) -> dict[str, object]:
+    """Snapshot selected geometry and its comparison frame in world coordinates."""
+    return {
+        "pose_frame": "world",
+        "selected_poses": poses.detach().cpu().tolist(),
+        "reference_poses": (
+            None if reference_poses is None else reference_poses.detach().cpu().tolist()
+        ),
+        "success": success.cpu().tolist(),
+        "env_ids": env_ids.cpu().tolist(),
+    }
 
 
 def _roll_poses(poses: torch.Tensor, angles: torch.Tensor) -> torch.Tensor:

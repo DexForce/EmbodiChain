@@ -4486,6 +4486,16 @@ def test_handover_samples_both_grasps_and_selects_active_arm_metadata(
         assert sample["valid_candidate_counts"] == [2, 2]
         assert sample["reused"] == [False, False]
         assert sample["control_parts"] == parts
+        assert sample["pose_frame"] == "world"
+        assert sample["success"] == [True, True]
+        assert sample["env_ids"] == [0, 1]
+        for row, part in enumerate(parts):
+            held = plan.effect_candidates.held_object_updates[part]
+            reference = torch.tensor(sample["reference_poses"][row])
+            selected_pose = torch.tensor(sample["selected_poses"][row])
+            torch.testing.assert_close(
+                selected_pose, reference @ held.object_to_eef[row]
+            )
 
     # The selected candidates also reach the plan's actual held-object frames.
     expected_offsets = torch.tensor([0.0, grasp_offset if sampling_enabled else 0.0])
@@ -4546,6 +4556,8 @@ def test_handover_sampling_preserves_failed_rows_and_reports_reuse(
         assert sample["valid_candidate_counts"] == [0, 1]
         assert sample["unique_candidate_counts"] == [0, 1]
         assert sample["reused"] == [False, True]
+        assert sample["success"] == [False, True]
+        assert sample["selected_poses"][0] == torch.eye(4).tolist()
     torch.testing.assert_close(
         _joint_trajectory(plan).positions[0],
         context.robot.qpos[0].expand(24, -1),
