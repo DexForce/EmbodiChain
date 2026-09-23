@@ -241,6 +241,18 @@ def test_joint_position_gripper_term_maps_arm_and_hand():
     torch.testing.assert_close(result[:, 7], torch.ones(2))
 
 
+def test_joint_position_gripper_term_exposes_eight_dim_action_space():
+    """The policy space matches seven arm joints plus normalized gripper."""
+    env = MockEnvForGripper()
+    manager = ActionManager(
+        {"joint": ActionTermCfg(func=JointPositionGripperTerm)}, env
+    )
+
+    assert manager.single_action_space.shape == (8,)
+    assert manager.single_action_space.low[-1] == -1.0
+    assert manager.single_action_space.high[-1] == 1.0
+
+
 def test_qvel_term_process_action():
     """QvelTerm: qvel = scale * action."""
     env = MockEnv(num_envs=2, action_dim=3)

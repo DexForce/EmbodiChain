@@ -37,6 +37,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import gymnasium as gym
+import numpy as np
 import torch
 from tensordict import TensorDict
 
@@ -370,6 +372,15 @@ class JointPositionGripperTerm(ActionTerm):
     @property
     def action_dim(self) -> int:
         return 8
+
+    @property
+    def action_space(self) -> gym.spaces.Box:
+        """Return arm joint limits plus normalized shared-gripper bounds."""
+        arm_ids = self._env.robot.get_joint_ids("arm", remove_mimic=True)
+        limits = self._env.robot.body_data.qpos_limits[0, arm_ids]
+        low = torch.cat((limits[:, 0], limits.new_tensor([-1.0]))).cpu().numpy()
+        high = torch.cat((limits[:, 1], limits.new_tensor([1.0]))).cpu().numpy()
+        return gym.spaces.Box(low=low, high=high, dtype=np.float32)
 
     def process_action(self, action: torch.Tensor) -> torch.Tensor:
         if action.shape[-1] != 8:

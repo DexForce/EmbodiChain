@@ -184,6 +184,10 @@ class ActionManager(ManagerBase):
             # Create dict action space for multiple terms.
             spaces = {}
             for name, term in terms:
+                custom_space = getattr(term, "action_space", None)
+                if custom_space is not None:
+                    spaces[term.input_key] = custom_space
+                    continue
                 if term.input_key == "qpos":
                     qpos_limits = (
                         self._env.robot.body_data.qpos_limits[
