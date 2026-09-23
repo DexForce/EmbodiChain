@@ -330,12 +330,82 @@ class _SourceCfg:
     kind: str = "handwritten"
     source_id: str = "handwritten_qpos"
     template_id: str = "reference_0"
+    reference_family_count: int = 1
 
     def __post_init__(self) -> None:
-        if self.kind not in ("handwritten", "atomic"):
-            raise ValueError("source.kind must be handwritten or atomic")
+        if self.kind not in (
+            "handwritten",
+            "motion_generator",
+            "atomic",
+            "atomic_action",
+            "task_program",
+        ):
+            raise ValueError(
+                "source.kind must be handwritten, motion_generator, "
+                "atomic_action, or task_program"
+            )
         _id(self.source_id, "source_id")
         _id(self.template_id, "template_id")
+        _count(self.reference_family_count, "source.reference_family_count")
+
+
+@configclass
+class _AffordanceCfg:
+    """Source-neutral Affordance proposal policy."""
+
+    enabled: bool = False
+    branches_per_family: int = 1
+    max_proposals: int = 128
+
+    def __post_init__(self) -> None:
+        _boolean(self.enabled, "affordance.enabled")
+        _count(self.branches_per_family, "affordance.branches_per_family")
+        _count(self.max_proposals, "affordance.max_proposals")
+
+
+@configclass
+class _ProfileCfg:
+    """Named scene, dynamics, observation, or perception profile."""
+
+    enabled: bool = False
+    profiles: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _boolean(self.enabled, "profile.enabled")
+        values = tuple(self.profiles)
+        if any(type(value) is not str or not value.strip() for value in values):
+            raise ValueError("profile names must be non-empty strings")
+        if len(set(values)) != len(values):
+            raise ValueError("profile names must be unique")
+        if self.enabled and not values:
+            raise ValueError("an enabled profile group needs at least one profile")
+        self.profiles = values
+
+
+@configclass
+class _SchedulingCfg:
+    """Candidate selection policy and bounded logical generation budget."""
+
+    policy: str = "fifo"
+    candidate_budget: int = 128
+    reference_family_budget: int = 1
+    exploration_fraction: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.policy not in ("fifo", "coverage_per_cost"):
+            raise ValueError("scheduling.policy must be fifo or coverage_per_cost")
+        _count(self.candidate_budget, "scheduling.candidate_budget")
+        _count(
+            self.reference_family_budget,
+            "scheduling.reference_family_budget",
+        )
+        _positive(
+            self.exploration_fraction,
+            "scheduling.exploration_fraction",
+            allow_zero=True,
+        )
+        if self.exploration_fraction > 1:
+            raise ValueError("scheduling.exploration_fraction must be <= 1")
 
 
 @configclass
@@ -353,6 +423,7 @@ class _ExecutionCfg:
     ready_low_watermark: int = 1
     ready_high_watermark: int = 16
     ready_max_bytes: int = 268435456
+    max_inflight: int = 1
     overlap_planning_and_physics: bool = False
 
     def __post_init__(self) -> None:
@@ -361,6 +432,7 @@ class _ExecutionCfg:
         _count(self.ready_low_watermark, "ready_low_watermark", 0)
         _count(self.ready_high_watermark, "ready_high_watermark")
         _count(self.ready_max_bytes, "ready_max_bytes")
+        _count(self.max_inflight, "execution.max_inflight")
         if self.ready_low_watermark >= self.ready_high_watermark:
             raise ValueError(
                 "ready_low_watermark must be less than ready_high_watermark"
@@ -477,6 +549,12 @@ class TrajectoryGenerationJobCfg:
 
     source: _SourceCfg = _SourceCfg()
     augmentation: TrajectoryAugmentationCfg = TrajectoryAugmentationCfg()
+    affordance: _AffordanceCfg = _AffordanceCfg()
+    scene_randomization: _ProfileCfg = _ProfileCfg()
+    dynamics_randomization: _ProfileCfg = _ProfileCfg()
+    observation: _ProfileCfg = _ProfileCfg()
+    perception: _ProfileCfg = _ProfileCfg()
+    scheduling: _SchedulingCfg = _SchedulingCfg()
     planning: _PlanningCfg = _PlanningCfg()
     execution: _ExecutionCfg = _ExecutionCfg()
     reset: _ResetCfg = _ResetCfg()

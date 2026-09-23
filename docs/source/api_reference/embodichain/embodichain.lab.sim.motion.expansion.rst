@@ -20,6 +20,7 @@ and persistence confirmations; this package does not instantiate them.
    :nosignatures:
 
    CandidateIdentity
+   CandidateSpec
    CandidateTrajectoryBatch
    CommitReceipt
    ExpertEpisode
@@ -69,6 +70,10 @@ proper SE(3) transforms, including rotation orthogonality and handedness.
 Tensor inputs are detached and cloned at construction; consumers must still
 treat the resulting owned tensors as read-only.
 
+``CandidateSpec`` combines one Affordance selection and one trajectory variant
+under a single slot-independent candidate identity. Observation profiles are
+post-rollout fan-out metadata and do not create additional physical candidates.
+
 Templates declare the complete joint order and use explicit qpos values.
 ``dt[0]`` is zero and each subsequent ``dt`` is the positive arrival interval
 from the preceding sample. Phase ranges are half-open sample intervals
@@ -107,6 +112,9 @@ the package itself does not write or verify storage.
    :members:
 
 .. autoclass:: CandidateIdentity
+   :members:
+
+.. autoclass:: CandidateSpec
    :members:
 
 .. autoclass:: CandidateTrajectoryBatch
@@ -364,6 +372,7 @@ The package import path above is convenient for callers combining them.
    TrajectoryPhase
    TrajectoryTemplate
    CandidateIdentity
+   CandidateSpec
    CandidateTrajectoryBatch
    ValidationCheck
    ValidationResult

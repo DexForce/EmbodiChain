@@ -31,6 +31,7 @@ from .cfg import (
 )
 from .contracts import (
     CandidateIdentity,
+    CandidateSpec,
     CandidateTrajectoryBatch,
     CommitReceipt,
     ExpertEpisode,
@@ -75,6 +76,7 @@ from .session import GenerationSession
 __all__ = [
     "SPATIAL_METHODS",
     "CandidateIdentity",
+    "CandidateSpec",
     "CandidateTrajectoryBatch",
     "CommitReceipt",
     "ExpertEpisode",

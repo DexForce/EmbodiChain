@@ -62,6 +62,44 @@ def test_job_decodes_nested_schema_and_round_trips_without_imports() -> None:
     )
 
 
+def test_generation_profile_is_source_neutral_and_separates_observation_profiles():
+    cfg = TrajectoryGenerationJobCfg.from_mapping(
+        {
+            "source": {
+                "kind": "motion_generator",
+                "reference_family_count": 4,
+            },
+            "affordance": {
+                "enabled": True,
+                "branches_per_family": 3,
+            },
+            "scheduling": {
+                "policy": "coverage_per_cost",
+                "reference_family_budget": 4,
+                "exploration_fraction": 0.2,
+            },
+            "observation": {
+                "enabled": True,
+                "profiles": ["rgb_train_aug_v1"],
+            },
+        }
+    )
+    assert cfg.source.kind == "motion_generator"
+    assert cfg.source.reference_family_count == 4
+    assert cfg.affordance.branches_per_family == 3
+    assert cfg.scheduling.reference_family_budget == 4
+    assert cfg.observation.profiles == ("rgb_train_aug_v1",)
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ["handwritten", "motion_generator", "atomic_action", "task_program"],
+)
+def test_generation_profile_accepts_all_source_adapters(kind):
+    cfg = TrajectoryGenerationJobCfg.from_mapping({"source": {"kind": kind}})
+    assert cfg.source.kind == kind
+
+
 @pytest.mark.parametrize(
     "payload",
     [

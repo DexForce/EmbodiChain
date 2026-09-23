@@ -39,6 +39,7 @@ __all__ = [
     "TrajectoryPhase",
     "TrajectoryTemplate",
     "CandidateIdentity",
+    "CandidateSpec",
     "CandidateTrajectoryBatch",
     "ValidationCheck",
     "ValidationResult",
@@ -317,6 +318,46 @@ class CandidateIdentity:
             _text(self.parent_id, "parent_id")
             if self.parent_id == self.candidate_id:
                 raise ValueError("a candidate cannot be its own parent")
+
+
+@dataclass(frozen=True)
+class CandidateSpec:
+    """Source-neutral physical candidate lineage before slot assignment.
+
+    Affordance and trajectory factors remain independently inspectable, while
+    the coordinator assigns one final candidate identity.  Observation
+    profiles describe post-rollout fan-out and do not create additional
+    physical candidates.
+    """
+
+    identity: CandidateIdentity
+    affordance_selection: Mapping[str, object] = field(default_factory=dict)
+    trajectory_variant: Mapping[str, object] = field(default_factory=dict)
+    compatibility_key: str = "default"
+    estimated_cost: float = 0.0
+    observation_profiles: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.identity, CandidateIdentity):
+            raise TypeError("identity must be a CandidateIdentity.")
+        for name in ("affordance_selection", "trajectory_variant"):
+            value = getattr(self, name)
+            if not isinstance(value, Mapping):
+                raise TypeError(f"{name} must be a mapping.")
+            object.__setattr__(self, name, MappingProxyType(dict(_json(value))))
+        _text(self.compatibility_key, "compatibility_key")
+        if (
+            type(self.estimated_cost) not in (int, float)
+            or not math.isfinite(float(self.estimated_cost))
+            or self.estimated_cost < 0
+        ):
+            raise ValueError("estimated_cost must be finite and non-negative")
+        profiles = tuple(self.observation_profiles)
+        if any(type(profile) is not str or not profile for profile in profiles):
+            raise ValueError("observation_profiles must contain non-empty strings")
+        if len(set(profiles)) != len(profiles):
+            raise ValueError("observation_profiles must be unique")
+        object.__setattr__(self, "observation_profiles", profiles)
 
 
 @dataclass(frozen=True)

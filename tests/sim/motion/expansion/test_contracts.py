@@ -23,6 +23,7 @@ import torch
 
 from embodichain.lab.sim.motion.expansion import (
     CandidateIdentity,
+    CandidateSpec,
     CandidateTrajectoryBatch,
     CommitReceipt,
     ExpertEpisode,
@@ -43,6 +44,24 @@ def _identity(candidate_id: str = "candidate") -> CandidateIdentity:
     return CandidateIdentity(
         "case", "initial", candidate_id, "geometry", "source", "revision", "template"
     )
+
+
+def test_candidate_spec_keeps_physical_identity_separate_from_observation_fanout():
+    spec = CandidateSpec(
+        identity=_identity(),
+        affordance_selection={"geometry_family": "grasp_a", "ordinal": 2},
+        trajectory_variant={"operator": "via_points", "ordinal": 1},
+        compatibility_key="case:initial:dt:validator",
+        estimated_cost=1.25,
+        observation_profiles=("rgb_train_aug_v1", "depth_eval_v1"),
+    )
+
+    assert spec.identity.candidate_id == "candidate"
+    assert spec.affordance_selection["geometry_family"] == "grasp_a"
+    assert spec.trajectory_variant["operator"] == "via_points"
+    assert spec.observation_profiles == ("rgb_train_aug_v1", "depth_eval_v1")
+    with pytest.raises(TypeError):
+        spec.affordance_selection["new"] = "mutation"  # type: ignore[index]
 
 
 def _template(**changes: object) -> TrajectoryTemplate:
