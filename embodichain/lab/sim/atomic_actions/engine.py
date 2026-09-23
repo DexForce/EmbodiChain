@@ -55,10 +55,6 @@ class AtomicActionEngine:
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
-        plan_transform: (
-            Callable[[ResolvedActionRequest, PlanningContext, ActionPlan], ActionPlan]
-            | None
-        ) = None,
     ) -> None:
         """Initialize one engine and bind its built-in action implementations.
 
@@ -76,15 +72,9 @@ class AtomicActionEngine:
             scene_provider: Optional default scene-observation source used by
                 :meth:`initial_context` when the caller does not supply an
                 explicit scene snapshot. The provider is borrowed by reference.
-            plan_transform: Optional collector-owned transform applied after the
-                normal plan has been validated and before it is returned to an
-                execution/session caller. The transform must return a complete
-                revalidated :class:`ActionPlan`; ordinary callers leave it unset.
         """
         if scene_provider is not None and not isinstance(scene_provider, SceneProvider):
             raise TypeError("scene_provider must implement SceneProvider.")
-        if plan_transform is not None and not callable(plan_transform):
-            raise TypeError("plan_transform must be callable or None.")
         self._planning_services = ActionPlanningServices(
             motion_generator,
             control_profiles=control_profiles,
@@ -92,7 +82,6 @@ class AtomicActionEngine:
             grasp_pose_generators=grasp_pose_generators,
         )
         self._scene_provider = scene_provider
-        self._plan_transform = plan_transform
         self._actions: dict[str, AtomicAction] = {}
         self._skill_catalog_revision = 0
         if load_builtins:
@@ -361,6 +350,11 @@ class AtomicActionEngine:
         self,
         request: ResolvedActionRequest,
         context: PlanningContext | None = None,
+        *,
+        plan_transform: (
+            Callable[[ResolvedActionRequest, PlanningContext, ActionPlan], ActionPlan]
+            | None
+        ) = None,
     ) -> ActionPlan:
         """Plan an already-resolved request without rebuilding its snapshot.
 
@@ -386,8 +380,10 @@ class AtomicActionEngine:
         self._validate_context(current)
         plan = action.plan(request, current)
         self._validate_plan(plan, current, request)
-        if self._plan_transform is not None:
-            transformed = self._plan_transform(request, current, plan)
+        if plan_transform is not None:
+            if not callable(plan_transform):
+                raise TypeError("plan_transform must be callable or None.")
+            transformed = plan_transform(request, current, plan)
             if not isinstance(transformed, ActionPlan):
                 raise TypeError("plan_transform must return an ActionPlan.")
             self._validate_plan(transformed, current, request)
@@ -398,6 +394,11 @@ class AtomicActionEngine:
         self,
         invocation: ActionInvocation,
         context: PlanningContext | None = None,
+        *,
+        plan_transform: (
+            Callable[[ResolvedActionRequest, PlanningContext, ActionPlan], ActionPlan]
+            | None
+        ) = None,
     ) -> ActionPlan:
         """Plan one registered invocation through the engine-owned backend.
 
@@ -413,7 +414,7 @@ class AtomicActionEngine:
         """
         current = self.initial_context() if context is None else context
         request = self._resolve(invocation)
-        return self._plan_request(request, current)
+        return self._plan_request(request, current, plan_transform=plan_transform)
 
     def initial_context(
         self,

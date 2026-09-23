@@ -155,13 +155,11 @@ def _engine(
     control_profiles: dict[str, ControlPartCommandProfile] | None = None,
     *,
     load_builtins: bool = False,
-    plan_transform=None,
 ) -> AtomicActionEngine:
     return AtomicActionEngine(
         _motion_generator(batch_size, robot_dof),
         control_profiles=control_profiles,
         load_builtins=load_builtins,
-        plan_transform=plan_transform,
     )
 
 
@@ -604,10 +602,13 @@ def test_plan_transform_runs_after_normal_plan_validation() -> None:
         calls.append((request, context, plan))
         return plan.snapshot()
 
-    engine = _engine(plan_transform=transform)
+    engine = _engine()
     engine.register(StubAction())
 
-    plan = engine.plan(_invocation(engine, torch.ones(2, 3)))
+    plan = engine.plan(
+        _invocation(engine, torch.ones(2, 3)),
+        plan_transform=transform,
+    )
 
     assert plan.success_all
     assert len(calls) == 1
@@ -615,8 +616,11 @@ def test_plan_transform_runs_after_normal_plan_validation() -> None:
 
 
 def test_plan_transform_must_return_a_validated_action_plan() -> None:
-    engine = _engine(plan_transform=lambda request, context, plan: object())
+    engine = _engine()
     engine.register(StubAction())
 
     with pytest.raises(TypeError, match="must return an ActionPlan"):
-        engine.plan(_invocation(engine, torch.ones(2, 3)))
+        engine.plan(
+            _invocation(engine, torch.ones(2, 3)),
+            plan_transform=lambda request, context, plan: object(),
+        )
