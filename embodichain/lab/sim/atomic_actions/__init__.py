@@ -127,6 +127,7 @@ from .runtime_commands import (
     TimedCommandSequence,
 )
 from .transports import EndpointCommandRouter, EndpointCommandTransport
+from .trajectory_adapter import ActionPlanTemplateAdapter
 from .tracking import (
     BASE_POSE_CHANNEL,
     JOINT_POSITION_CHANNEL,
@@ -306,6 +307,7 @@ __all__ = [
     "EndpointCommand",
     "EndpointCommandRouter",
     "EndpointCommandTransport",
+    "ActionPlanTemplateAdapter",
     "EntityState",
     "EffectExpectationResult",
     "EffectVerificationRequest",

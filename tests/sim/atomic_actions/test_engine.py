@@ -27,6 +27,7 @@ import torch
 
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
+    ActionPlanTemplateAdapter,
     ActionControlOverrides,
     ActionInvocation,
     ActionOptions,
@@ -55,6 +56,11 @@ from embodichain.lab.sim.atomic_actions import (
     TimedTrajectory,
     TrackingPolicy,
 )
+from embodichain.lab.sim.motion.expansion import (
+    TrajectoryVariant,
+    apply_trajectory_variant,
+    default_variant_factors,
+)
 
 ACTION_DT = 0.02
 
@@ -63,6 +69,7 @@ class StubAction(AtomicAction[JointPositionGoal, ActionOptions]):
     """Deterministic test action that commands every robot joint."""
 
     skill_id: ClassVar[str] = "stub"
+    sample_count: ClassVar[int] = 2
     GoalType: ClassVar[type] = JointPositionGoal
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
@@ -94,8 +101,19 @@ class StubAction(AtomicAction[JointPositionGoal, ActionOptions]):
         if torch.isnan(target).any(dim=1).any():
             success &= ~torch.isnan(target).any(dim=1)
             target = torch.nan_to_num(target)
+        fractions = torch.linspace(
+            0.0,
+            1.0,
+            self.sample_count,
+            device=context.robot.qpos.device,
+            dtype=context.robot.qpos.dtype,
+        )
         trajectory = TimedTrajectory.from_uniform_step(
-            torch.stack([context.robot.qpos, target], dim=1),
+            torch.lerp(
+                context.robot.qpos[:, None, :],
+                target[:, None, :],
+                fractions[None, :, None],
+            ),
             env_ids=context.env_ids,
             step_dt=ACTION_DT,
         )
@@ -111,6 +129,13 @@ class OtherStubAction(StubAction):
     """Second configured skill used to verify shared engine resources."""
 
     skill_id: ClassVar[str] = "other_stub"
+
+
+class ThreeFrameStubAction(StubAction):
+    """Stub action with an interior free-phase sample for variant tests."""
+
+    sample_count: ClassVar[int] = 3
+    binding_contract: ClassVar[SkillBindingContract] = StubAction.binding_contract
 
 
 class StubSceneProvider:
@@ -624,3 +649,47 @@ def test_plan_transform_must_return_a_validated_action_plan() -> None:
             _invocation(engine, torch.ones(2, 3)),
             plan_transform=lambda request, context, plan: object(),
         )
+
+
+def test_action_plan_template_adapter_rebuilds_same_grid_commands() -> None:
+    engine = _engine(batch_size=1)
+    action = ThreeFrameStubAction()
+    engine.register(action)
+    invocation = _invocation(engine, torch.ones(1, 3))
+    context = engine.initial_context()
+    plan = engine.plan(invocation, context)
+    request = action.resolve_request(invocation)
+    adapter = ActionPlanTemplateAdapter(
+        source_id="stub",
+        source_revision="test",
+        template_id="stub:0",
+        joint_names=("j0", "j1", "j2"),
+        phase_permissions={"stub": ("joint_residual",)},
+    )
+
+    template = adapter.export(plan)
+    variant = apply_trajectory_variant(
+        template,
+        TrajectoryVariant(1, "joint_residual", 1.0, "uniform"),
+        cfg=default_variant_factors(redundancy=False),
+        joint_limits=torch.tensor([[-2.0, 2.0]] * 3),
+        control_dt=ACTION_DT,
+    )
+    rebuilt = engine.rebuild_plan_from_trajectory(
+        request,
+        context,
+        plan,
+        TimedTrajectory.from_positions(
+            variant.positions.unsqueeze(0),
+            env_ids=context.env_ids,
+            dt=variant.dt.unsqueeze(0),
+        ),
+    )
+
+    assert rebuilt.success_all
+    assert rebuilt.commands.frame_count == plan.commands.frame_count
+    assert not torch.equal(
+        rebuilt.joint_trajectory.positions,
+        plan.joint_trajectory.positions,
+    )
+    assert tuple(segment.name for segment in rebuilt.segments) == ("stub",)

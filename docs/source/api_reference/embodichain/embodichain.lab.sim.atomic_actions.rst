@@ -299,6 +299,16 @@ Planning and state
 .. autoclass:: ActionPlan
    :members:
 
+.. autoclass:: ActionPlanTemplateAdapter
+   :members:
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.trajectory_adapter
+
+.. autosummary::
+   :nosignatures:
+
+   ActionPlanTemplateAdapter
+
 Engine and execution
 --------------------
 

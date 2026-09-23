@@ -645,5 +645,66 @@ class AtomicActionEngine:
                 "Action plan must record the planning collision-world revision."
             )
 
+    def rebuild_plan_from_trajectory(
+        self,
+        request: ResolvedActionRequest,
+        context: PlanningContext,
+        plan: ActionPlan,
+        trajectory: TimedTrajectory,
+    ) -> ActionPlan:
+        """Rebuild a complete plan from a same-grid full-joint trajectory.
+
+        This is the execution-side boundary for trajectory expansion. The
+        caller supplies a trajectory with the same frame count as the original
+        plan; timing-grid remapping and phase-index changes remain the
+        responsibility of a later adapter.
+
+        Args:
+            request: Resolved request that produced ``plan``.
+            context: Planning context used for the original plan.
+            plan: Original validated action plan.
+            trajectory: Replacement full-joint trajectory on the same grid.
+
+        Returns:
+            A newly lowered and validated action plan with commands, tracking,
+            segments, and effect metadata rebuilt together.
+        """
+        if not isinstance(plan, ActionPlan):
+            raise TypeError("plan must be an ActionPlan.")
+        if not isinstance(trajectory, TimedTrajectory):
+            raise TypeError("trajectory must be a TimedTrajectory.")
+        if trajectory.batch_size != context.batch_size:
+            raise ValueError("trajectory batch must match the planning context.")
+        if trajectory.waypoint_count != plan.commands.frame_count:
+            raise ValueError(
+                "same-grid plan rebuilding requires the original frame count."
+            )
+        if not torch.equal(trajectory.env_ids, context.env_ids):
+            raise ValueError("trajectory env_ids must match the planning context.")
+        action = self._actions.get(request.skill_id)
+        if action is None:
+            raise KeyError(
+                f"No atomic action registered for skill {request.skill_id!r}."
+            )
+        segment_lengths = {
+            segment.name: segment.stop - segment.start for segment in plan.segments
+        }
+        rebuilt = action.build_plan(
+            request,
+            context,
+            success=plan.plan_success,
+            trajectory=trajectory,
+            expected_effects=plan.expected_effects,
+            effect_candidates=plan.effect_candidates,
+            effect_verification=plan.effect_verification,
+            replannable=plan.replannable,
+            diagnostics=plan.diagnostics,
+            segment_lengths=segment_lengths,
+            scene_dependency_monitor_until=plan.scene_dependency_monitor_until,
+            scene_dependency_end_segment=plan.scene_dependency_end_segment,
+        )
+        self._validate_plan(rebuilt, context, request)
+        return rebuilt
+
 
 __all__ = ["AtomicActionEngine"]
