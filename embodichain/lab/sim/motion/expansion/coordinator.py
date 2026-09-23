@@ -25,7 +25,13 @@ from dataclasses import dataclass
 import torch
 
 from .cfg import TrajectoryGenerationJobCfg
-from .contracts import CandidateSpec, SceneCase, TrajectoryTemplate
+from .contracts import (
+    CandidateSpec,
+    CandidateTrajectoryBatch,
+    SceneCase,
+    TrajectoryTemplate,
+    ValidationResult,
+)
 from .session import GenerationSession
 from .source import SourceAdapter, SourceContext
 from .variants import expand_trajectory_variants
@@ -39,6 +45,20 @@ class CandidateWorkItem:
 
     spec: CandidateSpec
     template: TrajectoryTemplate
+
+    def to_batch(self) -> CandidateTrajectoryBatch:
+        """Return the single-row logical batch consumed by GenerationSession."""
+        return CandidateTrajectoryBatch(
+            positions=self.template.positions.unsqueeze(0),
+            dt=self.template.dt.unsqueeze(0),
+            valid_length=torch.tensor(
+                [self.template.positions.shape[0]], dtype=torch.int64
+            ),
+            identities=(self.spec.identity,),
+            joint_names=self.template.joint_names,
+            phases=(self.template.phases,),
+            factors=(self.spec.trajectory_variant,),
+        )
 
 
 class CandidateCoordinator:
@@ -201,3 +221,20 @@ class CandidateCoordinator:
     def take_next(self) -> CandidateWorkItem | None:
         """Remove and return the next candidate in deterministic FIFO order."""
         return None if not self._pending else self._pending.popleft()
+
+    def admit_planned(
+        self,
+        item: CandidateWorkItem,
+        validation: ValidationResult,
+    ) -> None:
+        """Admit one host-validated candidate to GenerationSession's ready pool.
+
+        The host owns collision/path validation; this method only transfers the
+        immutable candidate and its validation result into the session state.
+        It never executes or persists the candidate.
+        """
+        if not isinstance(item, CandidateWorkItem):
+            raise TypeError("item must be a CandidateWorkItem")
+        if not isinstance(validation, ValidationResult):
+            raise TypeError("validation must be a ValidationResult")
+        self._session.add_planned(item.to_batch(), validation)

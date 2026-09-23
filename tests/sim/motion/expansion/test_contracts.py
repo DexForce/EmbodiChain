@@ -159,7 +159,16 @@ def test_candidate_coordinator_queues_source_variants_with_session_identity():
     assert coordinator.pending_count == 2
     assert len({item.spec.identity.candidate_id for item in items}) == 2
     assert all(item.spec.identity.source_id == "handwritten" for item in items)
-    assert coordinator.take_next() == items[0]
+    first = coordinator.take_next()
+    assert first == items[0]
+    assert first.to_batch().identities[0] == first.spec.identity
+    coordinator.admit_planned(
+        first,
+        ValidationResult((ValidationCheck("path_collision", "passed"),)),
+    )
+    ready = session.take_ready("case", "initial", episode_byte_budget=1024)
+    assert ready is not None
+    assert ready.identities[0] == first.spec.identity
     assert coordinator.pending_count == 1
 
 
