@@ -81,6 +81,7 @@ from .source import (
 )
 from .single_slot import (
     EpisodeSink,
+    FixedSceneInitialStatePort,
     InitialStatePort,
     MeasuredExecutor,
     SingleSlotOutcome,
@@ -137,6 +138,7 @@ __all__ = [
     "InitialStatePort",
     "MeasuredExecutor",
     "EpisodeSink",
+    "FixedSceneInitialStatePort",
     "SingleSlotOutcome",
     "SingleSlotRunner",
 ]

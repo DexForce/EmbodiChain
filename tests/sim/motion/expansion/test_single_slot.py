@@ -22,6 +22,7 @@ from embodichain.lab.sim.motion.expansion import (
     CandidateCoordinator,
     CommitReceipt,
     ExpertEpisode,
+    FixedSceneInitialStatePort,
     GenerationSession,
     SceneCase,
     SingleSlotRunner,
@@ -80,6 +81,26 @@ class _Sink:
             scene_case_id=episode.identity.scene_case_id,
             submission_id=submission_id,
         )
+
+
+class _FixedHost:
+    def __init__(self):
+        self.calls = 0
+
+    def restore_initial(self):
+        self.calls += 1
+        return self.calls
+
+    def verify_initial(self, binding):
+        assert binding == self.calls
+        return ValidationResult((ValidationCheck("initial", "passed"),))
+
+
+def test_fixed_scene_port_adapts_restore_and_verify_contract():
+    host = _FixedHost()
+    port = FixedSceneInitialStatePort(host)
+    assert port.restore(object()) == 1
+    assert host.calls == 1
 
 
 def test_single_slot_runner_completes_measured_receipt_lifecycle():

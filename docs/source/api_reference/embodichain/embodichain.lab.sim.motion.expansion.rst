@@ -26,6 +26,7 @@ and persistence confirmations; this package does not instantiate them.
    InitialStatePort
    MeasuredExecutor
    EpisodeSink
+   FixedSceneInitialStatePort
    SingleSlotOutcome
    SingleSlotRunner
    CandidateTrajectoryBatch
@@ -439,6 +440,7 @@ The package import path above is convenient for callers combining them.
    InitialStatePort
    MeasuredExecutor
    EpisodeSink
+   FixedSceneInitialStatePort
    SingleSlotOutcome
    SingleSlotRunner
 

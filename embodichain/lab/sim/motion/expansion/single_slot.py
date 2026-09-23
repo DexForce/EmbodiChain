@@ -28,6 +28,7 @@ __all__ = [
     "InitialStatePort",
     "MeasuredExecutor",
     "EpisodeSink",
+    "FixedSceneInitialStatePort",
     "SingleSlotOutcome",
     "SingleSlotRunner",
 ]
@@ -67,6 +68,30 @@ class EpisodeSink(Protocol):
         submission_id: int,
     ) -> CommitReceipt:
         """Persist and confirm one episode synchronously or through a bounded sink."""
+
+
+class FixedSceneInitialStatePort:
+    """Adapt a fixed-scene host's restore/verify methods to ``InitialStatePort``.
+
+    The host is intentionally duck-typed so this foundation does not import
+    PR591's simulator-specific implementation. A compatible host must expose
+    ``restore_initial()`` and ``verify_initial(binding)``.
+    """
+
+    def __init__(self, host: object) -> None:
+        if not callable(getattr(host, "restore_initial", None)):
+            raise TypeError("host must provide restore_initial()")
+        if not callable(getattr(host, "verify_initial", None)):
+            raise TypeError("host must provide verify_initial(binding)")
+        self._host = host
+
+    def restore(self, item: CandidateWorkItem) -> object:
+        """Restore and verify the host-owned fixed initial state."""
+        binding = self._host.restore_initial()
+        result = self._host.verify_initial(binding)
+        if not getattr(result, "accepted", False):
+            raise RuntimeError("fixed-scene initial-state verification failed")
+        return binding
 
 
 @dataclass(frozen=True)
