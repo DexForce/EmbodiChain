@@ -16,7 +16,7 @@
 - Keep `program.yaml` provider-independent and use the existing built-in `pick` and `place` calls with `rubiks_cube` as a `SceneObjectRef`.
 - The configured Task Program lock mode requires a floating articulation root and coincident joint limits at every declared `locked_qpos` value.
 - `locked_qpos` is owned by the rigidized-articulation root binding; `grasp_link` is owned by its nested antipodal affordance.
-- The Rubik's-cube asset contract remains `RubiksCube/rubiks_cube_001.usdc` under the configured EmbodiChain data root; this change does not add a downloader.
+- The Rubik's-cube asset contract remains `RubiksCube/rubiks_cube_001.usdc`; register the published `demo/RubiksCube.zip` bundle so standard config resolution downloads it into the EmbodiChain data root.
 - Do not add cube twisting, dynamic articulation geometry, a new Task Program language node, or a new Semantic Call.
 - Preserve existing rigid-object, articulation, link, placement-affordance, and direct Atomic Skill behavior.
 - New source files require the DexForce 2021-2026 Apache 2.0 header, `from __future__ import annotations`, public type annotations, static `__all__`, and Google-style docstrings.
@@ -28,7 +28,7 @@
 2. NaN or infinite tolerances, joint readings, joint limits, poses, vertices, and triangle topology must fail before an affordance is published; Tasks 1 and 3 pin the relevant layers.
 3. A rigidized-articulation semantic UID must resolve only from `simulation.articulation`, never from `background` or `rigid_object`; Task 4 pins the cross-category failure.
 4. A fixed root, incomplete lock, displaced joint, or arena-dependent root-to-link transform must fail during live binding assembly; Tasks 1 and 3 pin these failures.
-5. The example must remain discoverable from an installed wheel and fail clearly when the external Rubik's-cube asset is absent; Task 5 pins package data and read-only deployment inspection, while documenting the runtime asset prerequisite.
+5. The example must remain discoverable from an installed wheel, resolve the registered Rubik's-cube bundle, and apply its configured coincident joint limits through `asset_physics_mode="overlay"`.
 
 ---
 
@@ -886,13 +886,13 @@ Expected: tests and inspector PASS, and the runnable ID appears exactly once. Th
 
 - [ ] **Step 7: Record the asset-bound physical qualification command**
 
-When `RubiksCube/rubiks_cube_001.usdc` and DexSim are available, run:
+After registering the published Rubik's-cube bundle, run with DexSim:
 
 ```bash
 python -m embodichain.lab.scripts.run_env --task TaskProgramRubiksCubePickPlace-v1 --num-envs 1
 ```
 
-Qualify positive cube lift, `abs(top_turn) <= 1e-3`, successful Place, and final Task Program acceptance. If the asset is absent, retain the loader's path-bearing missing-asset error and report physical qualification as unavailable; do not weaken static tests or synthesize an asset.
+Qualify automatic asset resolution, positive cube lift, `abs(top_turn) <= 1e-3`, successful Place, and final Task Program acceptance.
 
 - [ ] **Step 8: Format and commit the example unit**
 

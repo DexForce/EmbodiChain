@@ -34,11 +34,12 @@ This change will:
   Semantic Call;
 - add a `rubiks_cube_pick_place` configured task based on
   `repeated_pick_place`;
-- add focused configuration, registry, lowering, and geometry tests.
+- register the published `demo/RubiksCube.zip` asset bundle;
+- add focused asset, configuration, registry, lowering, and geometry tests.
 
 This change will not add cube twisting, dynamic articulation geometry, a new
-Task Program language node, or an asset downloader. The example expects
-`RubiksCube/rubiks_cube_001.usdc` under the configured EmbodiChain data root,
+Task Program language node, or a new Semantic Call. The example resolves
+`RubiksCube/rubiks_cube_001.usdc` through the standard EmbodiChain data registry,
 matching PR #632's tutorial asset contract.
 
 ## Semantic Model
@@ -230,10 +231,10 @@ Focused tests will cover:
 8. the Rubik's-cube deployment through the read-only deployment inspector;
 9. package-data coverage for the new YAML files.
 
-When DexSim and the asset are available, physical qualification must also
+When DexSim is available, physical qualification must also
 measure positive cube lift, bounded `top_turn` displacement, successful Place,
-and final Task Program acceptance. Static validation does not substitute for
-that run.
+and final Task Program acceptance using the automatically downloaded asset.
+Static validation does not substitute for that run.
 
 ## Compatibility
 

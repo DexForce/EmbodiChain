@@ -619,6 +619,25 @@ def test_rubiks_cube_example_registers_rigidized_articulation_scene(
     )
 
 
+def test_rubiks_cube_physical_config_applies_declared_joint_lock(
+    registered_test_ids: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The runtime applies the coincident limits required by scene binding."""
+    path = _config_path("rubiks_cube_pick_place")
+    config = _gym_config("rubiks_cube_pick_place")
+    env_id = config["id"]
+    assert type(env_id) is str
+    registered_test_ids.append(env_id)
+    monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
+
+    cfg = config_to_cfg(config, source_path=path)
+    cube_cfg = next(item for item in cfg.articulation if item.uid == "rubiks_cube")
+
+    assert cube_cfg.asset_physics_mode == "overlay"
+    assert cube_cfg.qpos_limits == {"top_turn": [0.0, 0.0]}
+
+
 def test_grasp_generator_resolves_named_model_and_library_defaults() -> None:
     """Serialized services name reusable geometry and omit policy defaults."""
     factory = _decode_grasp_generator(
