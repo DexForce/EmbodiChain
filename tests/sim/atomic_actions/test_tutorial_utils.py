@@ -326,7 +326,7 @@ def test_atomic_action_tutorial_uses_native_mujoco_contact_settings() -> None:
         (
             "press",
             "create_button_semantics",
-            "button_cap",
+            "button_link",
             "press_axis",
             (-1.0, -1.0, -0.5),
             (-2.0 / 3.0, -2.0 / 3.0, -1.0 / 3.0),
@@ -334,7 +334,7 @@ def test_atomic_action_tutorial_uses_native_mujoco_contact_settings() -> None:
         (
             "twist",
             "create_knob_semantics",
-            "cap_1",
+            "knob_link",
             "twist_axis",
             (0.5, -1.0, -1.0),
             (1.0 / 3.0, -2.0 / 3.0, -2.0 / 3.0),
@@ -1132,12 +1132,12 @@ def test_shared_tutorial_tunes_selected_newton_articulation_link() -> None:
         sim,
         articulation_cfg,
         group_name="newton_handle_contacts",
-        link_names_expr=["door_handle"],
+        link_names_expr=["handle_link"],
     )
 
     assert "existing" in articulation_cfg.link_attrs
     override = articulation_cfg.link_attrs["newton_handle_contacts"]
-    assert override.link_names_expr == ["door_handle"]
+    assert override.link_names_expr == ["handle_link"]
     assert override.attrs.material_props.ke == pytest.approx(
         NEWTON_GRASP_CONTACT_STIFFNESS
     )
@@ -1156,9 +1156,9 @@ def test_shared_tutorial_tunes_selected_newton_articulation_link() -> None:
     ("module_name", "factory_name", "group_name", "contact_link"),
     (
         ("slide", "create_drawer", "newton_handle_contacts", "large_handle_bar"),
-        ("open_door", "create_microwave", "newton_handle_contacts", "door_handle"),
-        ("twist", "create_microwave", "newton_knob_contacts", "cap_1"),
-        ("press", "create_microwave", "newton_button_contacts", "button_cap"),
+        ("open_door", "create_microwave", "newton_handle_contacts", "handle_link"),
+        ("twist", "create_microwave", "newton_knob_contacts", "knob_link"),
+        ("press", "create_microwave", "newton_button_contacts", "button_link"),
     ),
 )
 def test_articulation_contact_tutorials_author_newton_material_before_spawn(

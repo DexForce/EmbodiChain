@@ -784,7 +784,12 @@ generic `ActionBinding`, and the action keeps the gripper closed for all arm
 motion segments. Applications that require force/contact confirmation must
 verify it externally.
 
-**Example:** `scripts/tutorials/atomic_action/press.py`
+**Example:** `scripts/tutorials/atomic_action/press.py` loads
+`Microwave/microwave.urdf` and targets `button_link`, whose parent prismatic
+joint is `button_joint`. It requests `MotionPolicy.sample_count=256` with
+`PressOptions.hand_interp_steps=12`, then holds the final pose for 256
+simulation updates, with two physics steps per update. `--rigid_object`
+selects the standalone rigid button with the same sampling settings.
 
 (builtin-slide)=
 
@@ -904,10 +909,13 @@ policy therefore needs
 `sample_count >= 2 * hand_interp_steps + door_waypoint_count + 7`.
 
 **Example:** `scripts/tutorials/atomic_action/open_door.py` configures only the
-microwave's `door_handle` link. Automatic traversal resolves `door_hinge`
-through the intermediate fixed joint. Its absolute `--open_angle` value is
-normalized against the resolved hinge limits and passed as the goal's
-`open_fraction`.
+`handle_link` target in `Microwave/microwave.urdf`. Automatic traversal resolves
+`door_hinge` through `door_handle_fixed_joint`. Its absolute `--open_angle`
+value is normalized against the resolved hinge limits and passed as the goal's
+`open_fraction`. The tutorial requests `MotionPolicy.sample_count=300`,
+`OpenDoorOptions.hand_interp_steps=30`, and `door_waypoint_count=50` by
+default, then holds the final pose for 240 simulation updates, with two physics
+steps per update.
 
 (builtin-twist)=
 
@@ -963,7 +971,12 @@ completion therefore means commanded motion completion only. Applications that
 need semantic success must observe button/contact or articulation state and
 verify it outside the side-effect-free planner.
 
-**Example:** `scripts/tutorials/atomic_action/twist.py`
+**Example:** `scripts/tutorials/atomic_action/twist.py` loads
+`Microwave/microwave.urdf` and targets `knob_link`, whose parent revolute joint
+is `knob_joint`. It requests `MotionPolicy.sample_count=256` with
+`TwistOptions.hand_interp_steps=20`, then holds the final pose for 256
+simulation updates, with two physics steps per update. `--rigid_object`
+selects the standalone rigid knob with the same sampling settings.
 
 (builtin-coordinated-pickment)=
 

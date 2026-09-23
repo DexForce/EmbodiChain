@@ -206,7 +206,7 @@ def test_atomic_suite_is_franka_pgi_and_curobo_only():
             "press_distance_m",
         )
     } == {
-        "sample_count": 140,
+        "sample_count": 256,
         "hand_interp_steps": 12,
         "approach_distance_m": 0.12,
         "press_distance_m": 0.03,
@@ -237,8 +237,8 @@ def test_atomic_suite_is_franka_pgi_and_curobo_only():
             "twist_angle_rad",
         )
     } == {
-        "sample_count": 140,
-        "hand_interp_steps": 12,
+        "sample_count": 256,
+        "hand_interp_steps": 20,
         "twist_waypoint_count": 8,
         "pre_grasp_distance_m": 0.12,
         "twist_angle_rad": pytest.approx(-0.7853981634),
@@ -255,7 +255,7 @@ def test_atomic_suite_is_franka_pgi_and_curobo_only():
     assert set(articulations) == {"microwave", "drawer"}
     assert articulations["microwave"] == {
         "id": "microwave",
-        "asset_path": "MicrowaveOven/microwave_oven_with_inertials.urdf",
+        "asset_path": "Microwave/microwave.urdf",
         "position": [-1.0, -0.30, 0.4],
         "rotation_deg": [0.0, 0.0, 90.0],
         "init_qpos": [0.0, 0.0, 0.0, 0.0],
@@ -284,8 +284,8 @@ def test_atomic_suite_is_franka_pgi_and_curobo_only():
         for key in ("articulation", "target_link", "target_joint")
     } == {
         "articulation": "microwave",
-        "target_link": "button_cap",
-        "target_joint": "start_button_press",
+        "target_link": "button_link",
+        "target_joint": "button_joint",
     }
     assert {
         key: skills_by_id["slide"][key]
@@ -300,8 +300,8 @@ def test_atomic_suite_is_franka_pgi_and_curobo_only():
         for key in ("articulation", "target_link", "target_joint")
     } == {
         "articulation": "microwave",
-        "target_link": "cap_1",
-        "target_joint": "power_knob_rotation",
+        "target_link": "knob_link",
+        "target_joint": "knob_joint",
     }
 
 
@@ -325,13 +325,16 @@ def test_randomized_atomic_suite_covers_six_skills_with_fixed_seed_sweep():
         for item in track.config["skills"]
     )
     assert track.config["articulations"][0]["id"] == "microwave"
+    assert track.config["articulations"][0]["asset_path"] == "Microwave/microwave.urdf"
     press = next(item for item in track.config["skills"] if item["id"] == "press")
+    assert press["sample_count"] == 256
+    assert press["hand_interp_steps"] == 12
     assert {
         key: press[key] for key in ("articulation", "target_link", "target_joint")
     } == {
         "articulation": "microwave",
-        "target_link": "button_cap",
-        "target_joint": "start_button_press",
+        "target_link": "button_link",
+        "target_joint": "button_joint",
     }
     assert press["articulation_position_jitter_m"] == [0.03, 0.03, 0.015]
 
@@ -461,13 +464,13 @@ def test_atomic_cube_uses_current_rigid_object_physics_api():
             "press",
             {
                 "name": "microwave_start_button",
-                "sample_count": 140,
+                "sample_count": 256,
                 "hand_interp_steps": 12,
                 "approach_distance_m": 0.12,
                 "press_distance_m": 0.03,
                 "articulation": "microwave",
-                "target_link": "button_cap",
-                "target_joint": "start_button_press",
+                "target_link": "button_link",
+                "target_joint": "button_joint",
                 "minimum_joint_delta_m": 0.004,
             },
             "prismatic",
@@ -494,14 +497,14 @@ def test_atomic_cube_uses_current_rigid_object_physics_api():
             "twist",
             {
                 "name": "microwave_power_knob",
-                "sample_count": 140,
-                "hand_interp_steps": 12,
+                "sample_count": 256,
+                "hand_interp_steps": 20,
                 "twist_waypoint_count": 8,
                 "pre_grasp_distance_m": 0.12,
                 "twist_angle_rad": -0.7853981634,
                 "articulation": "microwave",
-                "target_link": "cap_1",
-                "target_joint": "power_knob_rotation",
+                "target_link": "knob_link",
+                "target_joint": "knob_joint",
                 "minimum_joint_delta_rad": 0.5,
             },
             "revolute",
@@ -574,7 +577,8 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
     assert case.target_waypoints.shape == (batch_size, expected_waypoints, 4, 4)
     assert case.reference_qpos.shape == (batch_size, expected_waypoints, 7)
     assert torch.isfinite(case.target_waypoints).all()
-    assert case.case_parameters["sample_count"] == 140
+    assert case.case_parameters["sample_count"] == config["sample_count"]
+    assert case.case_parameters["hand_interp_steps"] == config["hand_interp_steps"]
     assert case.object_id == config["articulation"]
     assert case.case_parameters["target_link"] == config["target_link"]
     assert case.case_parameters["target_joint"] == config["target_joint"]
