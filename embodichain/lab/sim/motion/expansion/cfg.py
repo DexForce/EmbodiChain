@@ -365,7 +365,6 @@ class _SourceCfg:
     kind: str = "handwritten"
     source_id: str = "handwritten_qpos"
     template_id: str = "reference_0"
-    reference_family_count: int = 1
 
     def __post_init__(self) -> None:
         if self.kind not in (
@@ -381,7 +380,6 @@ class _SourceCfg:
             )
         _id(self.source_id, "source_id")
         _id(self.template_id, "template_id")
-        _count(self.reference_family_count, "source.reference_family_count")
 
 
 @configclass
@@ -396,25 +394,6 @@ class _AffordanceCfg:
         _boolean(self.enabled, "affordance.enabled")
         _count(self.branches_per_family, "affordance.branches_per_family")
         _count(self.max_proposals, "affordance.max_proposals")
-
-
-@configclass
-class _ProfileCfg:
-    """Named scene, dynamics, observation, or perception profile."""
-
-    enabled: bool = False
-    profiles: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        _boolean(self.enabled, "profile.enabled")
-        values = tuple(self.profiles)
-        if any(type(value) is not str or not value.strip() for value in values):
-            raise ValueError("profile names must be non-empty strings")
-        if len(set(values)) != len(values):
-            raise ValueError("profile names must be unique")
-        if self.enabled and not values:
-            raise ValueError("an enabled profile group needs at least one profile")
-        self.profiles = values
 
 
 @configclass
@@ -585,10 +564,6 @@ class TrajectoryGenerationJobCfg:
     source: _SourceCfg = _SourceCfg()
     augmentation: TrajectoryAugmentationCfg = TrajectoryAugmentationCfg()
     affordance: _AffordanceCfg = _AffordanceCfg()
-    scene_randomization: _ProfileCfg = _ProfileCfg()
-    dynamics_randomization: _ProfileCfg = _ProfileCfg()
-    observation: _ProfileCfg = _ProfileCfg()
-    perception: _ProfileCfg = _ProfileCfg()
     scheduling: _SchedulingCfg = _SchedulingCfg()
     planning: _PlanningCfg = _PlanningCfg()
     execution: _ExecutionCfg = _ExecutionCfg()
