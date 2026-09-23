@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Iterable, Mapping, TYPE_CHECKING
+from typing import Callable, Iterable, Mapping, TYPE_CHECKING
 
 import torch
 
@@ -350,6 +350,11 @@ class AtomicActionEngine:
         self,
         request: ResolvedActionRequest,
         context: PlanningContext | None = None,
+        *,
+        plan_transform: (
+            Callable[[ResolvedActionRequest, PlanningContext, ActionPlan], ActionPlan]
+            | None
+        ) = None,
     ) -> ActionPlan:
         """Plan an already-resolved request without rebuilding its snapshot.
 
@@ -375,12 +380,25 @@ class AtomicActionEngine:
         self._validate_context(current)
         plan = action.plan(request, current)
         self._validate_plan(plan, current, request)
+        if plan_transform is not None:
+            if not callable(plan_transform):
+                raise TypeError("plan_transform must be callable or None.")
+            transformed = plan_transform(request, current, plan)
+            if not isinstance(transformed, ActionPlan):
+                raise TypeError("plan_transform must return an ActionPlan.")
+            self._validate_plan(transformed, current, request)
+            plan = transformed
         return plan
 
     def plan(
         self,
         invocation: ActionInvocation,
         context: PlanningContext | None = None,
+        *,
+        plan_transform: (
+            Callable[[ResolvedActionRequest, PlanningContext, ActionPlan], ActionPlan]
+            | None
+        ) = None,
     ) -> ActionPlan:
         """Plan one registered invocation through the engine-owned backend.
 
@@ -396,7 +414,7 @@ class AtomicActionEngine:
         """
         current = self.initial_context() if context is None else context
         request = self._resolve(invocation)
-        return self._plan_request(request, current)
+        return self._plan_request(request, current, plan_transform=plan_transform)
 
     def initial_context(
         self,
