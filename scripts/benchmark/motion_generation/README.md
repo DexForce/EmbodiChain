@@ -101,3 +101,103 @@ scenes. Use `--no-headless` instead to open the live simulator viewer.
   against non-target appliance links or other environment geometry
 - Dual-arm actions and multi-action chains
 - Latency-budget Pareto sweeps, confidence intervals, subprocess isolation
+
+
+## Atomic Skill contract foundation (#669)
+
+The first migration layer provides shared contracts while preserving existing
+skill scoring. It does not yet implement official embodiment component loading,
+new physical success criteria, segment/contact sampling, domain generation, or
+domain-level aggregation. The three existing report tables remain unchanged.
+
+### Domain provenance
+
+Add `domain` alongside `scenario` in an existing track. This YAML fragment
+shows the new fields; retain the track's existing `config`:
+
+```yaml
+tracks:
+  - id: atomic-nominal
+    scenario: atomic_task
+    domain:
+      id: nominal
+      version: v1
+      kind: nominal
+```
+
+`domain` accepts exactly `id`, `version`, and `kind`. The kind is `nominal`,
+`robustness`, or `held_out`; IDs and versions must be nonempty strings. This
+field declares provenance only: it does not perturb scenes, select held-out
+objects, or establish training/evaluation separation. Use separate tracks for
+separate populations until domain generators are added. Existing suites without
+this declaration retain `domain: null`; randomized suites are not silently
+classified as nominal.
+
+The runner snapshots this identity onto generated cases and carries it into all
+associated lifecycle/trial records. `case_manifest.json` now uses
+`case_schema_version: 3` and contains the optional `domain` on each case. Each
+track/batch population is written before any planner evaluates that population;
+later populations extend the manifest. Planner configuration hashes stay in
+trial records, separate from planner-independent case content.
+
+### Provider and evaluator interfaces
+
+`atomic_skill.py` owns `AtomicSkillCaseProvider`; the previous import from
+`scenarios.atomic_task` remains available. Existing providers continue to use
+`task_result()`. A migrated provider overrides `physical_evaluator()` to return
+an implementation of `contracts.PhysicalStageEvaluator`:
+
+```python
+def evaluate(
+    self,
+    case: BenchmarkCase,
+    observation: ExecutionObservation,
+    motion_outcomes: tuple[CaseOutcome, ...],
+) -> tuple[PhysicalEvaluation, ...]:
+    ...
+```
+
+The evaluator receives frozen task inputs, measured replay observations, and
+motion-validation results. It receives neither the scenario/engine nor a
+`CompiledTrajectory` or `projected_context`. `ExecutionObservation` currently
+contains the existing measured replay summary. Missing optional measurements
+mean unavailable evidence; the follow-up evaluation work must extend observation
+collection before claiming grasp/release/retention or intermediate-stage success.
+
+Return one `PhysicalEvaluation` per environment, each containing the same ordered
+stage IDs. `StageOutcome.status` distinguishes `passed`, `failed`, `not_reached`,
+and `not_applicable`. Failed stages require a failure code; measurements retain
+finite numeric values with units in their names. After a failed or unreached
+stage, subsequent stages cannot be reached. Duplicate/missing environment rows,
+duplicate stage IDs, and inconsistent stage order are evaluator errors, recorded
+by the existing runner as `metric_evaluation_error`.
+
+Task success requires at least one applicable stage and every applicable stage
+to pass. An all-inapplicable or incomplete result cannot establish success.
+Physical success also remains gated by motion validity and execution success.
+Raw outcomes retain `stages` and `failure_stage`; legacy outcomes have empty
+stages. Stage/domain aggregation and reporting are separate follow-up work.
+
+### Follow-up ownership
+
+- **Embodiment and case integration:** build against `AtomicSkillCaseProvider`,
+  reuse official component loading, and keep case generation independent of
+  planner outcomes. Do not duplicate the runner lifecycle or artifact writers.
+- **Physical evaluation:** extend `ExecutionObservation` with measured segment
+  and contact evidence, implement evaluators and counterexample tests, then opt
+  providers into `physical_evaluator()` individually.
+- **Framework and statistics:** add versioned domain generators and aggregation
+  after agreeing on capability eligibility, stage denominators, and retention.
+
+Contract tests can run without the simulator engine:
+
+```bash
+python -m pytest -q tests/benchmark/motion_generation/test_contracts.py
+```
+
+Runner/evaluator integration and existing benchmark regressions use the normal
+EmbodiChain environment:
+
+```bash
+python -m pytest -q tests/benchmark/motion_generation
+```
