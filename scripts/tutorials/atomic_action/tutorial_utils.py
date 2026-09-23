@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import pathlib
 import re
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
@@ -155,6 +156,7 @@ TOP_DOWN_EEF_ROTATION = (
 
 TutorialCliFeature = Literal[
     "affordance_sampling",
+    "trajectory_variants",
     "debug_state",
     "diagnose_plan",
     "grasp_sampling",
@@ -269,6 +271,39 @@ def create_tutorial_argument_parser(
             default=0,
             help="Explicit resampling-attempt identity (not a retry count).",
         )
+    if "trajectory_variants" in features:
+        parser.add_argument(
+            "--trajectory_variants",
+            type=int,
+            default=None,
+            help=(
+                "How many variants to generate; defaults to --num_envs. It may "
+                "exceed --num_envs, in which case only the first ones replay."
+            ),
+        )
+        variants = parser.add_argument_group(
+            "advanced variant options",
+            "Override the default augmentation policy. Omit them all and the "
+            "expansion helpers enable every implemented factor themselves.",
+        )
+        variants.add_argument("--variant_seed", type=int, default=None)
+        variants.add_argument(
+            "--spatial_methods",
+            nargs="+",
+            choices=("joint_residual", "via_points"),
+            default=None,
+        )
+        variants.add_argument("--via_count", type=int, default=None)
+        variants.add_argument("--joint_offset_scale", type=float, default=None)
+        variants.add_argument("--duration_scales", type=float, nargs="+", default=None)
+        variants.add_argument("--dedup_tolerance", type=float, default=None)
+        variants.add_argument("--no_redundancy", action="store_true")
+        variants.add_argument(
+            "--variant_plot_dir",
+            type=str,
+            default=None,
+            help="Write a joint-trajectory plot and a replay filmstrip here.",
+        )
     if "headless_play" in features:
         parser.add_argument(
             "--headless_play",
@@ -360,6 +395,754 @@ def log_affordance_branch_diagnostics(plan: ActionPlan) -> None:
                 f"Affordance branch {row} ({sample.get('key', name)}): "
                 f"success={success}, {detail}."
             )
+
+
+_JUNCTION_DUPLICATE_TOLERANCE = 1.0e-5
+
+
+def _drop_action_junctions(
+    positions: torch.Tensor, intervals: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Remove the zero-duration sample each compiled action repeats at a join.
+
+    Concatenating actions leaves the previous action's final waypoint and the
+    next action's first waypoint at the same instant. That duplicate is not a
+    timed waypoint, and leaving it in would make the reference look
+    non-uniformly timed. A join that is not a duplicate is real motion in zero
+    time, so it is refused rather than discarded.
+
+    Args:
+        positions: Reference joint positions with shape ``(N, dof)``.
+        intervals: Arrival intervals with shape ``(N,)`` and ``intervals[0] == 0``.
+
+    Returns:
+        The compacted positions and intervals, plus a map from an original
+        sample index to its compacted index, with one extra trailing entry.
+
+    Raises:
+        ValueError: If a zero-duration sample moves the robot.
+    """
+    keep = torch.ones(positions.shape[0], dtype=torch.bool)
+    for index in range(1, positions.shape[0]):
+        if float(intervals[index]) != 0:
+            continue
+        drift = float((positions[index] - positions[index - 1]).abs().max())
+        if drift > _JUNCTION_DUPLICATE_TOLERANCE:
+            raise ValueError(
+                f"Sample {index} advances {drift:.3e} rad in zero time; the "
+                "reference cannot be placed on a command clock."
+            )
+        keep[index] = False
+    counts = torch.cumsum(keep.long(), 0)
+    remap = torch.cat((torch.zeros(1, dtype=torch.long), counts))
+    return positions[keep], intervals[keep], remap
+
+
+def parse_trajectory_variant_arguments(
+    parser: argparse.ArgumentParser,
+) -> argparse.Namespace:
+    """Parse a variant tutorial's arguments and map variants to environments.
+
+    Args:
+        parser: Tutorial parser with the ``trajectory_variants`` feature enabled.
+
+    Returns:
+        Parsed arguments with matching variant and environment counts.
+    """
+    args = parser.parse_args()
+    if args.trajectory_variants is None:
+        args.trajectory_variants = args.num_envs
+    if args.trajectory_variants < 1:
+        parser.error("--trajectory_variants must be positive.")
+    if args.variant_seed is not None and args.variant_seed < 0:
+        parser.error("--variant_seed must be non-negative.")
+    if args.via_count is not None and args.via_count < 1:
+        parser.error("--via_count must be positive.")
+    if args.joint_offset_scale is not None and not 0 < args.joint_offset_scale <= 1:
+        parser.error("--joint_offset_scale must lie in (0, 1].")
+    if args.dedup_tolerance is not None and not 0 < args.dedup_tolerance <= 1:
+        parser.error("--dedup_tolerance must lie in (0, 1].")
+    # Variants are generated from one reference, so their count is independent
+    # of how many of them a run replays in parallel. Only default the two to
+    # each other; an explicit --trajectory_variants may exceed --num_envs, and
+    # the extra variants are then plotted without being executed.
+    return args
+
+
+def create_trajectory_variant_cfg(
+    args: argparse.Namespace,
+) -> "TrajectoryAugmentationCfg | None":
+    """Return a variant override configuration, or ``None`` for the default.
+
+    Asking for a number of variants needs no configuration; the expansion
+    helpers enable every implemented factor the inputs support. Only an
+    advanced flag rebuilds the policy.
+
+    Args:
+        args: Validated arguments from :func:`parse_trajectory_variant_arguments`.
+
+    Returns:
+        A decoded configuration, or ``None`` when no override was requested.
+    """
+    from embodichain.lab.sim.motion.expansion import (
+        TrajectoryAugmentationCfg,
+        default_variant_factors,
+    )
+
+    overrides = (
+        args.variant_seed,
+        args.spatial_methods,
+        args.via_count,
+        args.joint_offset_scale,
+        args.duration_scales,
+        args.dedup_tolerance,
+    )
+    if not args.no_redundancy and all(value is None for value in overrides):
+        return None
+    policy = default_variant_factors(
+        seed=args.variant_seed or 0, redundancy=not args.no_redundancy
+    )
+    settings = policy.to_dict()
+    spatial = settings["factors"]["spatial"]
+    if args.spatial_methods is not None:
+        spatial["method"] = list(args.spatial_methods)
+    if args.via_count is not None:
+        spatial["via_count"] = args.via_count
+    if args.joint_offset_scale is not None:
+        spatial["joint_offset_scale"] = args.joint_offset_scale
+    if args.duration_scales is not None:
+        settings["factors"]["timing"]["duration_scales"] = list(args.duration_scales)
+    if args.dedup_tolerance is not None:
+        settings["coverage"]["joint_dedup_normalized_tol"] = args.dedup_tolerance
+    return TrajectoryAugmentationCfg.from_mapping(settings)
+
+
+def _variant_arm_columns(robot: Robot, control_part: str) -> tuple[int, ...]:
+    """Return the arm's joint columns in solver-Jacobian order.
+
+    Declaring the controlled joints in solver order means a supplied Jacobian's
+    columns already line up, so no permutation is needed anywhere else.
+    """
+    solver = robot.get_solver(control_part)
+    solver_names = list(getattr(solver, "joint_names", None) or ())
+    if not solver_names:
+        raise RuntimeError(
+            f"Control part {control_part!r} needs a solver that declares its "
+            "joint names before posture variants can be planned."
+        )
+    robot_names = list(robot.joint_names)
+    return tuple(robot_names.index(name) for name in solver_names)
+
+
+def expand_tutorial_trajectory_variants(
+    compiled,
+    robot: Robot,
+    args: argparse.Namespace,
+    *,
+    phase_kinds: Sequence[Mapping[str, str]],
+    retimable: Sequence[Collection[str]] = (),
+    control_part: str = "arm",
+):
+    """Expand one compiled action into a distinct variant per simulation row.
+
+    Phase boundaries come from the action's own named segments, so a tutorial
+    declares only which of them may move. Contact segments stay locked, which
+    is what keeps the planned waypoints exact.
+
+    Args:
+        compiled: Compiled trajectory whose segments annotate the reference.
+        robot: Tutorial robot supplying joint limits and the arm solver.
+        args: Validated variant arguments.
+        phase_kinds: One mapping per compiled action, naming each segment
+            ``free``, ``contact`` or ``hold``.
+        retimable: Free segment names per compiled action that may also change
+            duration. Restrict this when the tutorial triggers an event at a
+            fixed step index.
+        control_part: Control part whose joints the operators may move. The
+            configuration's ``ik.task_rows`` selects which Jacobian rows the
+            posture factor holds.
+
+    Returns:
+        The accepted variants, their factors and the rejection accounting.
+    """
+    from embodichain.lab.sim.motion.expansion import (
+        SceneCase,
+        TrajectoryPhase,
+        TrajectoryTemplate,
+        expand_trajectory_variants,
+    )
+
+    path_operators = ("joint_residual", "via_points", "nullspace_residual")
+    arm_columns = _variant_arm_columns(robot, control_part)
+    positions = compiled.trajectory.positions[0]
+    intervals = compiled.trajectory.dt[0].clone()
+    intervals[0] = 0
+    positions, intervals, remap = _drop_action_junctions(positions, intervals)
+    spacing = intervals[1:]
+    control_dt = float(spacing[0]) if spacing.numel() else 0.0
+    if control_dt <= 0 or bool((spacing - control_dt).abs().max() > 1e-6):
+        raise ValueError(
+            "Variant retiming needs a reference on a fixed command clock; this "
+            "action produced non-uniform arrival intervals."
+        )
+    phases = []
+    for index, kinds in enumerate(phase_kinds):
+        allowed = set(retimable[index]) if index < len(retimable) else set()
+        for name, kind in kinds.items():
+            segment = compiled.segment(index, name)
+            start, stop = int(remap[segment.start]), int(remap[segment.stop])
+            operators: tuple[str, ...] = ()
+            if kind == "free":
+                operators = path_operators + (("retime",) if name in allowed else ())
+            phases.append(
+                TrajectoryPhase(f"{index}_{name}", start, stop, kind, operators)
+            )
+    template = TrajectoryTemplate(
+        source_id="atomic_action_tutorial",
+        source_revision=f"waypoints{positions.shape[0]}",
+        template_id="tutorial_reference",
+        joint_names=tuple(robot.joint_names),
+        positions=positions,
+        dt=intervals,
+        phases=tuple(phases),
+        allowed_operators=path_operators + ("retime",),
+        controlled_joint_indices=arm_columns,
+    )
+    cfg = create_trajectory_variant_cfg(args)
+    jacobians = None
+    if cfg is None or cfg.factors.ik.enabled:
+        # Supply every spatial row; the configuration selects the constrained
+        # ones, so the tutorial does not duplicate that decision.
+        jacobians = robot.get_solver(control_part).get_jacobian(
+            positions[:, list(arm_columns)]
+        )
+    return expand_trajectory_variants(
+        template,
+        cfg=cfg,
+        case=SceneCase(
+            scene_case_id="atomic_action_tutorial",
+            initial_state_id="tutorial_initial_state",
+            scene_signature=str(robot.uid),
+            task_id=control_part,
+            robot_profile_id=getattr(args, "robot", "ur5"),
+        ),
+        count=args.trajectory_variants,
+        joint_limits=robot.get_qpos_limits()[0],
+        control_dt=control_dt,
+        task_jacobians=jacobians,
+    )
+
+
+def log_trajectory_variant_diagnostics(result, requested: int) -> None:
+    """Log each accepted variant's factors and every rejected proposal.
+
+    Args:
+        result: Accepted variants and their rejection accounting.
+        requested: Number of simulation rows that need a trajectory.
+    """
+    batch = result.candidates
+    for row, variant in enumerate(result.variants):
+        logger.log_info(
+            f"Trajectory variant {row}: operator={variant.spatial_operator}, "
+            f"duration_scale={variant.duration_scale}, "
+            f"profile={variant.timing_profile}, "
+            f"samples={int(batch.valid_length[row])}, "
+            f"family={batch.identities[row].geometry_family_id[:16]}."
+        )
+    if result.rejected:
+        logger.log_info(
+            f"Rejected {sum(result.rejected.values())} of {result.attempted} "
+            f"proposals: {dict(sorted(result.rejected.items()))}."
+        )
+    if len(result.variants) < requested:
+        logger.log_warning(
+            f"Only {len(result.variants)} distinct variants survived for "
+            f"{requested} rows; the remaining rows reuse earlier variants."
+        )
+
+
+def trajectory_variant_rows(result, num_envs: int) -> TimedTrajectory:
+    """Assign one accepted variant per simulation row, reusing when short.
+
+    Arrival intervals are preserved so replay spends the planned number of
+    physics steps on each waypoint instead of a fixed default.
+
+    Args:
+        result: Accepted variants padded to a common horizon.
+        num_envs: Number of simulation rows to fill.
+
+    Returns:
+        A timed trajectory with one row per environment.
+    """
+    batch = result.candidates
+    selection = [index % batch.positions.shape[0] for index in range(num_envs)]
+    positions = batch.positions[selection].clone()
+    return TimedTrajectory(
+        positions=positions,
+        velocities=None,
+        accelerations=None,
+        dt=batch.dt[selection].clone(),
+        env_ids=torch.arange(num_envs, dtype=torch.long, device=positions.device),
+    )
+
+
+VARIANT_PLOT_DPI = 130
+
+
+def _contact_phase_drift(result) -> float:
+    """Return the largest contact-phase deviation of any variant.
+
+    Contact phases are never retimed and never touched by an operator, so this
+    should be zero. Reporting it turns the plot's visual claim into a number.
+
+    Args:
+        result: Accepted variants sharing one reference.
+
+    Returns:
+        The maximum absolute joint deviation, in radians.
+    """
+    batch = result.candidates
+    reference = {phase.phase_id: phase for phase in batch.phases[0]}
+    worst = 0.0
+    for row in range(1, len(result.variants)):
+        for phase in batch.phases[row]:
+            source = reference.get(phase.phase_id)
+            if source is None or phase.kind == "free":
+                continue
+            variant_window = batch.positions[row, phase.start_index : phase.stop_index]
+            reference_window = batch.positions[
+                0, source.start_index : source.stop_index
+            ]
+            if variant_window.shape != reference_window.shape:
+                continue
+            worst = max(worst, float((variant_window - reference_window).abs().max()))
+    return worst
+
+
+def save_variant_joint_plot(result, robot: Robot, path: str | pathlib.Path) -> None:
+    """Plot every variant's controlled joints against time.
+
+    Curves meet inside the shaded contact windows and separate between them,
+    which is the claim variant expansion makes: the planned waypoints stay put
+    while the free motion differs.
+
+    Args:
+        result: Accepted variants from :func:`expand_tutorial_trajectory_variants`.
+        robot: Robot supplying joint names for the subplot titles.
+        path: Destination ``.png`` path.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    batch = result.candidates
+    joint_names = list(robot.joint_names)
+    arm = [i for i, name in enumerate(joint_names) if "gripper" not in name]
+    rows = (len(arm) + 2) // 3
+    figure, axes = plt.subplots(rows, 3, figsize=(13, 3.1 * rows), sharex=True)
+    flat = axes.flatten()
+    drift = _contact_phase_drift(result)
+    styles, groups = _variant_styles(result)
+    for position, joint in enumerate(arm):
+        axis = flat[position]
+        for row in range(len(result.variants)):
+            length = int(batch.valid_length[row])
+            time = batch.dt[row, :length].cumsum(0).cpu()
+            values = batch.positions[row, :length, joint].cpu()
+            # Only the first subplot contributes to the shared legend.
+            style = dict(styles[row])
+            if position:
+                style.pop("label", None)
+            axis.plot(time, values, **style)
+        # Shade every row's own contact window. Retimed rows reach theirs
+        # later, so shading only the reference would misplace the bands.
+        shaded = range(min(len(result.variants), VARIANT_CROWD_THRESHOLD))
+        for row in shaded:
+            elapsed = batch.dt[row, : int(batch.valid_length[row])].cumsum(0).cpu()
+            for phase in batch.phases[row]:
+                if phase.kind == "free":
+                    continue
+                axis.axvspan(
+                    float(elapsed[phase.start_index]),
+                    float(elapsed[phase.stop_index - 1]),
+                    color="0.85",
+                    alpha=0.45,
+                    linewidth=0,
+                    zorder=1,
+                )
+        axis.set_title(joint_names[joint], fontsize=10)
+        axis.grid(alpha=0.3)
+    for spare in range(len(arm), len(flat)):
+        flat[spare].axis("off")
+    for axis in flat[-3:]:
+        axis.set_xlabel("time (s)")
+    flat[0].set_ylabel("joint position (rad)")
+    if groups is None:
+        handles, labels = flat[0].get_legend_handles_labels()
+        figure.legend(
+            handles, labels, loc="lower center", ncol=3, frameon=False, fontsize=9
+        )
+    else:
+        # Two legends, because a crowded plot encodes the geometry operator in
+        # the colour and the timing signature in the dash pattern.
+        for index, (title, anchor) in enumerate(
+            (("path geometry", 0.27), ("timing", 0.73))
+        ):
+            handles, labels = _variant_legend_handles(
+                groups["geometry" if index == 0 else "timing"]
+            )
+            figure.legend(
+                handles,
+                labels,
+                title=title,
+                loc="lower center",
+                bbox_to_anchor=(anchor, 0.0),
+                ncol=2,
+                frameon=False,
+                fontsize=9,
+                title_fontsize=9,
+            )
+    figure.suptitle(
+        "Trajectory variants: curves separate between waypoints and rejoin inside "
+        f"the shaded contact phases (max contact deviation {drift:.2e} rad)",
+        fontsize=11,
+    )
+    figure.tight_layout(rect=(0, 0.1, 1, 0.97))
+    destination = pathlib.Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(destination, dpi=VARIANT_PLOT_DPI)
+    plt.close(figure)
+    logger.log_info(f"Saved variant joint plot to {destination}.")
+
+
+def _variant_tool_paths(robot: Robot, result, control_part: str) -> list:
+    """Return each variant's tool-centre path in the arena frame."""
+    solver = robot.get_solver(control_part)
+    columns = list(_variant_arm_columns(robot, control_part))
+    batch = result.candidates
+    paths = []
+    for row in range(len(result.variants)):
+        length = int(batch.valid_length[row])
+        arm_qpos = batch.positions[row, :length][:, columns].to(robot.device)
+        paths.append(solver.get_fk(arm_qpos)[:, :3, 3].detach().cpu())
+    return paths
+
+
+VARIANT_CROWD_THRESHOLD = 12
+OPERATOR_COLOURS = {
+    "none": "black",
+    "joint_residual": "tab:blue",
+    "via_points": "tab:orange",
+    "nullspace_residual": "tab:green",
+}
+TIMING_DASHES = (
+    (5, 2),
+    (1, 1.4),
+    (6, 2, 1, 2),
+    (3, 1, 1, 1, 1, 1),
+    (2, 2),
+    (9, 2, 1, 2),
+    (1, 3),
+)
+"""Dash patterns that distinguish timing variants once the legend is grouped."""
+
+
+def _timing_linestyles(count: int) -> list:
+    """Return ``count`` visually distinct line styles.
+
+    Reusing a pattern would make two timing signatures look alike, which is
+    what the grouped legend exists to avoid, so patterns past the table are
+    stretched copies rather than repeats.
+
+    Args:
+        count: Number of distinct timing signatures to distinguish.
+
+    Returns:
+        One line style per signature, the first of them a plain line.
+    """
+    styles: list = ["-"]
+    for index in range(max(count - 1, 0)):
+        base = TIMING_DASHES[index % len(TIMING_DASHES)]
+        stretch = 1.0 + 0.6 * (index // len(TIMING_DASHES))
+        styles.append((0, tuple(round(value * stretch, 2) for value in base)))
+    return styles[:count]
+
+
+def _timing_key(variant) -> str:
+    """Return a variant's timing signature, used as a legend entry."""
+    return f"{variant.timing_profile} x{variant.duration_scale:g}"
+
+
+def _variant_styles(result) -> tuple[list, dict | None]:
+    """Return per-variant plot keywords, grouping the legend when crowded.
+
+    Naming a hundred variants individually produces an unreadable legend, so
+    past a threshold the curves carry their provenance in two channels
+    instead: colour names the spatial operator and the dash pattern names the
+    timing signature. Every accepted variant therefore stays identifiable even
+    when two of them share a geometry and differ only in their timing.
+
+    Args:
+        result: Accepted variants.
+
+    Returns:
+        One keyword mapping per variant, and the legend groups to draw when
+        grouping was applied, or ``None`` when every variant is named directly.
+    """
+    from embodichain.lab.sim.motion.expansion import NOMINAL_OPERATOR
+
+    if len(result.variants) <= VARIANT_CROWD_THRESHOLD:
+        styles = [
+            {
+                "color": "black" if variant.is_nominal else None,
+                "linewidth": 2.4 if variant.is_nominal else 1.3,
+                "linestyle": "--" if variant.is_nominal else "-",
+                "zorder": 3 if variant.is_nominal else 2,
+                "label": (
+                    "reference"
+                    if variant.is_nominal
+                    else f"{variant.spatial_operator} {_timing_key(variant)}"
+                ),
+            }
+            for variant in result.variants
+        ]
+        return styles, None
+
+    timings = sorted({_timing_key(variant) for variant in result.variants})
+    dashes = dict(zip(timings, _timing_linestyles(len(timings))))
+    operators = sorted({variant.spatial_operator for variant in result.variants})
+    styles = []
+    for variant in result.variants:
+        nominal = variant.is_nominal
+        styles.append(
+            {
+                "color": OPERATOR_COLOURS.get(variant.spatial_operator),
+                "linewidth": 2.6 if nominal else 0.9,
+                "linestyle": "-" if nominal else dashes[_timing_key(variant)],
+                "alpha": 1.0 if nominal else 0.35,
+                "zorder": 3 if nominal else 2,
+            }
+        )
+    groups = {
+        "geometry": [
+            ("reference", {"color": "black", "linewidth": 2.6}),
+            *(
+                (name, {"color": OPERATOR_COLOURS.get(name), "linewidth": 1.8})
+                for name in operators
+                if name != NOMINAL_OPERATOR
+            ),
+        ],
+        "timing": [
+            (key, {"color": "0.35", "linewidth": 1.4, "linestyle": dashes[key]})
+            for key in timings
+        ],
+    }
+    return styles, groups
+
+
+def _variant_legend_handles(entries: list) -> tuple[list, list]:
+    """Build proxy lines for one grouped legend column."""
+    from matplotlib.lines import Line2D
+
+    handles = [Line2D([], [], **style) for _, style in entries]
+    return handles, [label for label, _ in entries]
+
+
+def _waypoint_tool_positions(result, paths: list) -> torch.Tensor:
+    """Return each variant's tool position at every annotated phase boundary.
+
+    Phase endpoints are the waypoints the operators must leave alone, so
+    stacking them across variants turns "the waypoints did not move" into
+    something measurable.
+
+    Args:
+        result: Accepted variants sharing one phase structure.
+        paths: Per-variant tool paths in the arena frame.
+
+    Returns:
+        Positions with shape ``(rows, boundaries, 3)``.
+    """
+    batch = result.candidates
+    stacked = []
+    for row in range(len(result.variants)):
+        indices: list[int] = []
+        for phase in batch.phases[row]:
+            indices.extend((phase.start_index, phase.stop_index - 1))
+        stacked.append(paths[row][indices])
+    return torch.stack(stacked)
+
+
+def _robot_link_points(robot: Robot, control_part: str) -> torch.Tensor:
+    """Return the arm's link origins at the robot's current configuration.
+
+    The chain continues past the control part into the tool so the drawing
+    reaches the point the paths start from. Fingers branch off it and would
+    fold the polyline back on itself, so they are left out.
+    """
+    part = list(robot.get_link_names(control_part) or [])
+    tail = [
+        name
+        for name in (robot.link_names or [])
+        if name not in part and "finger" not in name
+    ]
+    names = part + tail
+    points: list[torch.Tensor] = []
+    for name in names:
+        try:
+            pose = robot.get_link_pose(name, to_matrix=True)
+        except Exception:  # A control part may name a frame without a body.
+            continue
+        points.append(pose[0, :3, 3].detach().cpu())
+    return torch.stack(points)
+
+
+def _draw_ground_box(axis, centre: torch.Tensor, size: Sequence[float]) -> None:
+    """Draw a solid box centred on ``centre`` with full extents ``size``."""
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+    half = [0.5 * float(value) for value in size]
+    lower = [float(centre[index]) - half[index] for index in range(3)]
+    upper = [float(centre[index]) + half[index] for index in range(3)]
+    x0, y0, z0 = lower
+    x1, y1, z1 = upper
+    faces = [
+        [(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0)],
+        [(x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)],
+        [(x0, y0, z0), (x1, y0, z0), (x1, y0, z1), (x0, y0, z1)],
+        [(x0, y1, z0), (x1, y1, z0), (x1, y1, z1), (x0, y1, z1)],
+        [(x0, y0, z0), (x0, y1, z0), (x0, y1, z1), (x0, y0, z1)],
+        [(x1, y0, z0), (x1, y1, z0), (x1, y1, z1), (x1, y0, z1)],
+    ]
+    axis.add_collection3d(
+        Poly3DCollection(
+            faces, facecolor="0.55", edgecolor="0.25", alpha=0.75, linewidths=0.6
+        )
+    )
+
+
+def save_tool_path_view(
+    robot: Robot,
+    result,
+    path: str | pathlib.Path,
+    *,
+    target_object: RigidObject | None = None,
+    object_size: Sequence[float] = (0.05, 0.05, 0.05),
+    control_part: str = "arm",
+) -> None:
+    """Draw every variant's tool path beside the arm's starting configuration.
+
+    Stars mark the annotated waypoints, and every variant draws its own, so a
+    waypoint an operator had moved would show up as a scattered cluster rather
+    than a single star.
+
+    Args:
+        robot: Robot whose arm solver supplies forward kinematics. Its current
+            configuration is drawn, so call this before replaying anything.
+        result: Accepted variants from :func:`expand_tutorial_trajectory_variants`.
+        path: Destination ``.png`` path.
+        target_object: Optional manipulated object, drawn at its current pose.
+        object_size: Full extents of that object, in metres.
+        control_part: Control part whose tool path is drawn.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    paths = _variant_tool_paths(robot, result, control_part)
+    batch = result.candidates
+    lowest = min(float(tool[:, 2].min()) for tool in paths)
+    waypoints = _waypoint_tool_positions(result, paths)
+    spread = float(
+        (waypoints.max(dim=0).values - waypoints.min(dim=0).values).abs().max()
+    )
+    links = _robot_link_points(robot, control_part)
+    centre = (
+        None
+        if target_object is None
+        else target_object.get_local_pose(to_matrix=True)[0, :3, 3].detach().cpu()
+    )
+
+    figure = plt.figure(figsize=(9.5, 7.4))
+    space = figure.add_subplot(1, 1, 1, projection="3d")
+
+    space.plot(
+        links[:, 0],
+        links[:, 1],
+        links[:, 2],
+        color="0.25",
+        linewidth=4.0,
+        marker="o",
+        markersize=6,
+        markerfacecolor="0.85",
+        solid_capstyle="round",
+        label="arm at its starting configuration",
+        zorder=1,
+    )
+    if centre is not None:
+        _draw_ground_box(space, centre, object_size)
+
+    styles, groups = _variant_styles(result)
+    for row, variant in enumerate(result.variants):
+        tool = paths[row]
+        space.plot(tool[:, 0], tool[:, 1], tool[:, 2], **styles[row])
+        marks = waypoints[row]
+        space.plot(
+            marks[:, 0],
+            marks[:, 1],
+            marks[:, 2],
+            color="0.15",
+            marker="*",
+            markersize=14,
+            markerfacecolor="gold",
+            markeredgecolor="0.15",
+            markeredgewidth=0.7,
+            linestyle="none",
+            zorder=6,
+            label="waypoints" if row == 0 else None,
+        )
+
+    stacked = torch.cat(paths + [links])
+    bounds = torch.stack((stacked.min(dim=0).values, stacked.max(dim=0).values))
+    if centre is not None:
+        extent = torch.tensor(object_size, dtype=bounds.dtype) * 0.5
+        bounds[0] = torch.minimum(bounds[0], centre - extent)
+        bounds[1] = torch.maximum(bounds[1], centre + extent)
+    margin = 0.06
+    space.set_xlim(float(bounds[0, 0]) - margin, float(bounds[1, 0]) + margin)
+    space.set_ylim(float(bounds[0, 1]) - margin, float(bounds[1, 1]) + margin)
+    space.set_zlim(0.0, float(bounds[1, 2]) + margin)
+    # Keep the three axes to scale so the arm and the paths are comparable.
+    space.set_box_aspect(
+        tuple(
+            max(float(bounds[1, index] - bounds[0, index]), 0.15) for index in range(3)
+        )
+    )
+    space.locator_params(nbins=5)
+    space.view_init(elev=24, azim=-70)
+    space.set_xlabel("x (m)")
+    space.set_ylabel("y (m)")
+    space.set_zlabel("z (m)")
+    handles, labels = space.get_legend_handles_labels()
+    if groups is not None:
+        for entries in (groups["geometry"], groups["timing"]):
+            extra, names = _variant_legend_handles(entries)
+            handles.extend(extra)
+            labels.extend(names)
+    space.legend(handles, labels, loc="upper left", fontsize=8, framealpha=0.85)
+    space.set_title(
+        "Tool paths of every trajectory variant\n"
+        f"stars are the annotated waypoints and spread by {spread:.1e} m; "
+        f"the lowest tool centre stays {lowest * 100:.1f} cm above the ground",
+        fontsize=10,
+    )
+    figure.tight_layout()
+    destination = pathlib.Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(destination, dpi=VARIANT_PLOT_DPI)
+    plt.close(figure)
+    logger.log_info(f"Saved tool-path view to {destination}.")
 
 
 def _tutorial_physics_cfg(
@@ -1641,6 +2424,13 @@ def create_tutorial_robot_cfg(
 
 
 __all__ = [
+    "save_tool_path_view",
+    "save_variant_joint_plot",
+    "trajectory_variant_rows",
+    "log_trajectory_variant_diagnostics",
+    "expand_tutorial_trajectory_variants",
+    "create_trajectory_variant_cfg",
+    "parse_trajectory_variant_arguments",
     "DEFAULT_AUTO_PLAY_LOOK_AT",
     "DEFAULT_AXIS_LEN",
     "DEFAULT_AXIS_SIZE",

@@ -14,6 +14,7 @@
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
 | Standalone physical playback | `embodichain/lab/sim/motion/execution.py` |
 | Candidate generation and coverage bookkeeping | `embodichain/lab/sim/motion/expansion/` |
+| Distinct trajectory variants for fixed waypoints | `embodichain/lab/sim/motion/expansion/variants.py` |
 
 ## Choose the layer
 
@@ -85,10 +86,46 @@ dataset: host integrations own restoration, rollout, validation and persistence.
 Keep algorithm modules free of direct Gym imports.
 
 Motion-limit checks are not collision/task-success certification.
-`rotate_grasp_about_object_axis` changes a reference TCP candidate around a
-fixed object's local axis; callers choose geometry-valid angles and replan.
-Grasp generation itself belongs to `embodichain.toolkits.graspkit`, composed
-by Atomic Skills/Task Program rather than embedded in `MotionGenerator`.
+`rotate_grasp_about_object_axis` and `perturb_approach_direction` change TCP
+candidates around a fixed object axis or approach cone; both emit Cartesian
+poses that callers must replan, and neither certifies the contact. Grasp
+generation itself belongs to `embodichain.toolkits.graspkit`, composed by
+Atomic Skills/Task Program rather than embedded in `MotionGenerator`.
+
+`variants.py` varies execution when waypoints are already fixed. Its qpos
+operators (`joint_residual`, `via_points`, `nullspace_residual`, `retime`
+profiles) vanish with
+zero derivative at every phase endpoint and never touch `contact`/`hold`
+phases, so annotated waypoints stay exact. Joint-limit rejection covers only
+the joints an operator moved; an observed reference can hold an untouched joint
+microradians outside its range, and checking it would reject every proposal.
+`nullspace_residual` holds the caller's declared task rows to first order only;
+the caller owns the Jacobian frame and column order, and a fully constrained
+task raises. At most one joint-path operator runs per variant, though `spatial.method`
+may name several so each becomes its own variant; a single name is still
+accepted.
+`expand_trajectory_variants` deduplicates one fixed scene on measured
+geometry/timing and counts every rejection under a key naming its reason. Only
+`ProposalRejected` is a rejection; malformed arguments stay plain `ValueError`
+and propagate rather than hiding in a rejection count.
+Configuration is optional: omitting it resolves `default_variant_factors`,
+which enables every implemented factor the inputs support and drops the ik
+factor when no Jacobians are supplied. An explicit config is never overridden, and an
+explicitly enabled factor that cannot produce a qpos variant raises rather than
+disappearing: `ik` without Jacobians, and `approach`, which owns Cartesian
+standoff poses the caller must replan. The resolved config is reported on the result.
+
+`scripts/tutorials/atomic_action/place.py` is the demonstration host, hooked
+the way the Affordance sampling tutorials are: shared helpers live in
+`tutorial_utils.py`, the tutorial declares only which named segments may move,
+and one variant replays per simulation row. Phases come from the action's own
+`TrajectorySegment` ranges; only motion at or after the lift is retimed so the
+shared `clear_dynamics()` step stays aligned. `--variant_plot_dir` writes a
+joint-trajectory figure and a tool-path figure with waypoint markers. Task
+Program, Gym lifecycle, dataset persistence and `GenerationSession` collection
+bookkeeping are deliberately out of scope; this is a direct-simulation
+contract. Keep `joint_dedup_normalized_tol` below `joint_offset_scale`, or
+genuinely different variants are discarded as duplicates.
 
 `expansion/manipulability.py` profiles posture conditioning through
 `embodichain.compute.kinematics.yoshikawa_manipulability`. Callers supply the

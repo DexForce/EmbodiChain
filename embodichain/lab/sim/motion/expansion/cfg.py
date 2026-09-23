@@ -32,7 +32,22 @@ from typing import Any, get_args, get_origin, get_type_hints
 
 from embodichain.utils import configclass
 
-__all__ = ["TrajectoryAugmentationCfg", "TrajectoryGenerationJobCfg"]
+from .operators import TIMING_PROFILES
+
+__all__ = [
+    "SPATIAL_METHODS",
+    "TrajectoryAugmentationCfg",
+    "TrajectoryGenerationJobCfg",
+]
+
+SPATIAL_METHODS = ("joint_residual", "via_points")
+"""Joint-path methods the spatial factor can enumerate."""
+
+_MAX_VIA_POINTS = 8
+"""Allocation bound on interior knots per augmented phase."""
+
+_SPATIAL_JACOBIAN_ROWS = 6
+"""Row count of a spatial Jacobian: linear velocity first, then angular."""
 
 
 def _positive(value: float, name: str, *, allow_zero: bool = False) -> None:
@@ -83,9 +98,14 @@ def _decode(cls: type, data: Mapping[str, Any], path: str = "") -> Any:
         if hasattr(expected, "__dataclass_fields__"):
             decoded[key] = _decode(expected, value, name)
         elif get_origin(expected) is tuple:
+            member = get_args(expected)[0]
+            # ``spatial.method`` used to name a single method, so a bare string
+            # still decodes there. Every other sequence field requires a
+            # sequence, which keeps its own schema check from being skipped.
+            if (cls, key) in _SINGLE_NAME_COMPATIBLE and isinstance(value, str):
+                value = (value,)
             if not isinstance(value, (list, tuple)):
                 raise ValueError(f"{name} must be a sequence")
-            member = get_args(expected)[0]
             if any(
                 type(item) not in ((float, int) if member is float else (member,))
                 for item in value
@@ -122,13 +142,23 @@ class _DisabledFactorCfg:
 @configclass
 class _SpatialCfg:
     enabled: bool = False
-    method: str = "joint_residual"
+    method: tuple[str, ...] = ("joint_residual",)
     joint_offset_scale: float = 0.05
+    via_count: int = 1
 
     def __post_init__(self) -> None:
         _boolean(self.enabled, "spatial.enabled")
-        if self.method not in ("joint_residual", "via_points"):
-            raise ValueError("spatial.method must be joint_residual or via_points")
+        methods = (self.method,) if isinstance(self.method, str) else tuple(self.method)
+        if not methods:
+            raise ValueError("spatial.method must name at least one method")
+        for value in methods:
+            if value not in SPATIAL_METHODS:
+                raise ValueError(
+                    f"spatial.method entries must be in {list(SPATIAL_METHODS)}"
+                )
+        if len(set(methods)) != len(methods):
+            raise ValueError("spatial.method entries must be unique")
+        self.method = methods
         _positive(
             self.joint_offset_scale, "spatial.joint_offset_scale", allow_zero=True
         )
@@ -136,12 +166,69 @@ class _SpatialCfg:
             raise ValueError(
                 "spatial.joint_offset_scale is normalized and must be <= 1"
             )
+        _count(self.via_count, "spatial.via_count")
+        if self.via_count > _MAX_VIA_POINTS:
+            raise ValueError(f"spatial.via_count must be at most {_MAX_VIA_POINTS}")
+
+
+_SINGLE_NAME_COMPATIBLE = frozenset({(_SpatialCfg, "method")})
+"""Sequence fields that also accept one bare name, for backward compatibility."""
+
+
+@configclass
+class _IkCfg:
+    enabled: bool = False
+    method: str = "nullspace_residual"
+    normalized_scale: float = 0.05
+    task_rows: tuple[int, ...] = (0, 1, 2, 3, 4)
+
+    def __post_init__(self) -> None:
+        _boolean(self.enabled, "ik.enabled")
+        _fixed(self.method, "nullspace_residual", "ik.method")
+        _positive(self.normalized_scale, "ik.normalized_scale", allow_zero=True)
+        if self.normalized_scale > 1:
+            raise ValueError("ik.normalized_scale is normalized and must be <= 1")
+        rows = tuple(self.task_rows)
+        if not rows or len(set(rows)) != len(rows):
+            raise ValueError("ik.task_rows must be a nonempty sequence of unique rows")
+        for row in rows:
+            if type(row) is not int or not 0 <= row < _SPATIAL_JACOBIAN_ROWS:
+                raise ValueError(
+                    "ik.task_rows must index a spatial Jacobian row in "
+                    f"[0, {_SPATIAL_JACOBIAN_ROWS})"
+                )
+        self.task_rows = rows
+
+
+@configclass
+class _ApproachCfg:
+    enabled: bool = False
+    cone_half_angle_rad: float = 0.0
+    directions: int = 1
+    align_tool: bool = True
+
+    def __post_init__(self) -> None:
+        _boolean(self.enabled, "approach.enabled")
+        _boolean(self.align_tool, "approach.align_tool")
+        _positive(
+            self.cone_half_angle_rad, "approach.cone_half_angle_rad", allow_zero=True
+        )
+        if self.cone_half_angle_rad >= math.pi / 2:
+            raise ValueError(
+                "approach.cone_half_angle_rad must be smaller than a right angle"
+            )
+        _count(self.directions, "approach.directions")
+        if self.enabled and self.cone_half_angle_rad == 0:
+            raise ValueError(
+                "enabled approach variation requires a positive cone half angle"
+            )
 
 
 @configclass
 class _TimingCfg:
     enabled: bool = False
     duration_scales: tuple[float, ...] = (1.0,)
+    profiles: tuple[str, ...] = ("uniform",)
 
     def __post_init__(self) -> None:
         _boolean(self.enabled, "timing.enabled")
@@ -155,8 +242,20 @@ class _TimingCfg:
         if len(set(self.duration_scales)) != len(self.duration_scales):
             raise ValueError("timing.duration_scales must be unique")
         self.duration_scales = tuple(self.duration_scales)
-        if not self.enabled and self.duration_scales != (1.0,):
-            raise ValueError("disabled timing must retain the reference duration scale")
+        if not isinstance(self.profiles, (list, tuple)) or not self.profiles:
+            raise ValueError("timing.profiles must be a nonempty sequence")
+        for value in self.profiles:
+            if value not in TIMING_PROFILES:
+                raise ValueError(
+                    f"timing.profiles must contain only {list(TIMING_PROFILES)}"
+                )
+        if len(set(self.profiles)) != len(self.profiles):
+            raise ValueError("timing.profiles must be unique")
+        self.profiles = tuple(self.profiles)
+        if not self.enabled and (
+            self.duration_scales != (1.0,) or self.profiles != ("uniform",)
+        ):
+            raise ValueError("disabled timing must retain the reference time law")
 
 
 @configclass
@@ -196,8 +295,8 @@ class _ManipulabilityCfg:
 @configclass
 class _FactorsCfg:
     contact: _DisabledFactorCfg = _DisabledFactorCfg()
-    ik: _DisabledFactorCfg = _DisabledFactorCfg()
-    approach: _DisabledFactorCfg = _DisabledFactorCfg()
+    ik: _IkCfg = _IkCfg()
+    approach: _ApproachCfg = _ApproachCfg()
     spatial: _SpatialCfg = _SpatialCfg()
     timing: _TimingCfg = _TimingCfg()
     manipulability: _ManipulabilityCfg = _ManipulabilityCfg()
@@ -483,12 +582,21 @@ class TrajectoryGenerationJobCfg:
         for value, registry, name in references:
             if value not in registry:
                 raise ValueError(f"unregistered {name}: {value!r}")
-        spatial = self.augmentation.factors.spatial
-        if spatial.enabled and spatial.method not in operators:
+        factors = self.augmentation.factors
+        spatial = factors.spatial
+        if spatial.enabled:
+            for method in spatial.method:
+                if method not in operators:
+                    raise ValueError(
+                        f"spatial operator capability unavailable: {method!r}"
+                    )
+        if factors.ik.enabled and factors.ik.method not in operators:
             raise ValueError(
-                f"spatial operator capability unavailable: {spatial.method!r}"
+                f"ik operator capability unavailable: {factors.ik.method!r}"
             )
-        if self.augmentation.factors.timing.enabled and "retime" not in operators:
+        if factors.approach.enabled and "perturb_approach_direction" not in operators:
+            raise ValueError("approach operator capability unavailable")
+        if factors.timing.enabled and "retime" not in operators:
             raise ValueError("retime operator capability unavailable")
         manipulability = self.augmentation.factors.manipulability
         if (

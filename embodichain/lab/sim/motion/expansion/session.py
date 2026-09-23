@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, replace
-import hashlib
 import json
 import math
 import time
@@ -37,6 +36,7 @@ from .contracts import (
     SceneCase,
     ValidationCheck,
     ValidationResult,
+    _digest,
 )
 from .coverage import CoverageIndex, describe_trajectory
 from .manipulability import ManipulabilityBands
@@ -56,12 +56,6 @@ class _Attempt:
     reason: str | None = None
     planning_validation: ValidationResult | None = None
     rollout_validation: ValidationResult | None = None
-
-
-def _digest(*values: object) -> str:
-    return hashlib.sha256(
-        json.dumps(values, separators=(",", ":")).encode()
-    ).hexdigest()
 
 
 def _tensor_bytes(*values: torch.Tensor | None) -> int:

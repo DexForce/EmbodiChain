@@ -25,6 +25,9 @@ Choose a capability
    * - Generate variations of an expert trajectory
      - :doc:`Trajectory augmentation API </api_reference/embodichain/embodichain.lab.sim.motion.expansion>`:
        candidates, variation operators, coverage, and generation budgets.
+   * - Collect several ways of executing one fixed set of waypoints
+     - :doc:`trajectory_variants`: path, posture, timing, and approach variation
+       for imitation learning and reinforcement-learning post-training.
 
 Trajectory augmentation requires host integrations for scene reset, planning,
 rollout, task validation, and dataset persistence.
@@ -39,5 +42,6 @@ for the complete public interface.
    :maxdepth: 1
 
    motion_generator
+   trajectory_variants
    planners/index
    solvers/index
