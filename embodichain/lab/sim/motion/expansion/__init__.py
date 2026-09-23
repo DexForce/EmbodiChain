@@ -72,7 +72,12 @@ from .operators import (
     via_points,
 )
 from .session import GenerationSession
-from .source import SourceAdapter, SourceContext
+from .source import (
+    PlanResultSourceAdapter,
+    SourceAdapter,
+    SourceContext,
+    TemplateSourceAdapter,
+)
 
 __all__ = [
     "SPATIAL_METHODS",
@@ -117,4 +122,6 @@ __all__ = [
     "GenerationSession",
     "SourceAdapter",
     "SourceContext",
+    "TemplateSourceAdapter",
+    "PlanResultSourceAdapter",
 ]

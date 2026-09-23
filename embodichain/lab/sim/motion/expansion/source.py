@@ -18,12 +18,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Generic, Protocol, TypeVar
+from dataclasses import dataclass, replace
+import math
+from typing import ClassVar, Generic, Protocol, TypeVar
 
-from .contracts import SceneCase, TrajectoryTemplate
+import torch
 
-__all__ = ["SourceContext", "SourceAdapter"]
+from embodichain.lab.sim.motion.planners import PlanResult
+
+from .contracts import SceneCase, TrajectoryPhase, TrajectoryTemplate
+
+__all__ = [
+    "SourceContext",
+    "SourceAdapter",
+    "TemplateSourceAdapter",
+    "PlanResultSourceAdapter",
+]
 
 SourceT = TypeVar("SourceT")
 
@@ -43,8 +53,12 @@ class SourceContext:
             value = getattr(self, name)
             if type(value) is not str or not value.strip():
                 raise ValueError(f"{name} must be a non-empty string")
-        if type(self.control_dt) not in (int, float) or self.control_dt <= 0:
-            raise ValueError("control_dt must be positive")
+        if (
+            type(self.control_dt) not in (int, float)
+            or not math.isfinite(float(self.control_dt))
+            or self.control_dt <= 0
+        ):
+            raise ValueError("control_dt must be finite and positive")
 
 
 class SourceAdapter(Protocol, Generic[SourceT]):
@@ -64,3 +78,77 @@ class SourceAdapter(Protocol, Generic[SourceT]):
         context: SourceContext,
     ) -> TrajectoryTemplate:
         """Export one complete, phase-annotated qpos template."""
+
+
+@dataclass(frozen=True)
+class TemplateSourceAdapter:
+    """Adapt an already annotated handwritten qpos template."""
+
+    kind: ClassVar[str] = "handwritten"
+
+    def export_template(
+        self,
+        source: TrajectoryTemplate,
+        *,
+        context: SourceContext,
+    ) -> TrajectoryTemplate:
+        """Return an owned template with coordinator-owned source identity."""
+        if not isinstance(source, TrajectoryTemplate):
+            raise TypeError("source must be a TrajectoryTemplate")
+        if source.positions.shape[0] < 2:
+            raise ValueError("a source template needs at least two samples")
+        return replace(
+            source,
+            source_id=context.source_id,
+            source_revision=context.source_revision,
+            template_id=context.unit_id,
+        )
+
+
+@dataclass(frozen=True)
+class PlanResultSourceAdapter:
+    """Adapt one single-row MotionGenerator result to a qpos template.
+
+    Phase annotations and editable operators are supplied by the caller because
+    a generic PlanResult does not own semantic contact or hold boundaries.
+    """
+
+    joint_names: tuple[str, ...]
+    phases: tuple[TrajectoryPhase, ...] = ()
+    validator_id: str = "default"
+    kind: ClassVar[str] = "motion_generator"
+
+    def export_template(
+        self,
+        source: PlanResult,
+        *,
+        context: SourceContext,
+    ) -> TrajectoryTemplate:
+        """Convert one successful single-row result with explicit timing."""
+        if not isinstance(source, PlanResult):
+            raise TypeError("source must be a PlanResult")
+        if source.positions is None or source.dt is None:
+            raise ValueError("PlanResult must contain positions and dt")
+        if source.positions.ndim != 3 or source.positions.shape[0] != 1:
+            raise ValueError("the initial source adapter supports one plan row")
+        if source.dt.shape != source.positions.shape[:2]:
+            raise ValueError("PlanResult dt must match positions batch and horizon")
+        success = source.success
+        if isinstance(success, torch.Tensor):
+            if success.numel() != 1 or not bool(success.reshape(-1)[0].item()):
+                raise ValueError("cannot export an unsuccessful PlanResult")
+        elif success is not True:
+            raise ValueError("cannot export an unsuccessful PlanResult")
+        if len(self.joint_names) != source.positions.shape[-1]:
+            raise ValueError("joint_names must match PlanResult joint width")
+        return TrajectoryTemplate(
+            source_id=context.source_id,
+            source_revision=context.source_revision,
+            template_id=context.unit_id,
+            joint_names=tuple(self.joint_names),
+            positions=source.positions[0],
+            dt=source.dt[0],
+            phases=self.phases,
+            validator_id=self.validator_id,
+            controlled_joint_indices=tuple(range(len(self.joint_names))),
+        )

@@ -34,7 +34,12 @@ from embodichain.lab.sim.motion.expansion import (
     ValidationCheck,
     ValidationResult,
 )
-from embodichain.lab.sim.motion.expansion.source import SourceContext
+from embodichain.lab.sim.motion.expansion.source import (
+    PlanResultSourceAdapter,
+    SourceContext,
+    TemplateSourceAdapter,
+)
+from embodichain.lab.sim.motion.planners import PlanResult
 
 
 def _case() -> SceneCase:
@@ -75,6 +80,34 @@ def test_source_context_keeps_provider_and_physical_clock_explicit():
     )
     assert context.scene_case.scene_case_id == "case"
     assert context.control_dt == pytest.approx(0.02)
+
+
+def test_source_adapters_share_one_template_contract():
+    context = SourceContext(
+        source_id="motion",
+        source_revision="git:abc",
+        unit_id="unit_0",
+        scene_case=_case(),
+        control_dt=0.1,
+    )
+    source_template = _template()
+    handwritten = TemplateSourceAdapter().export_template(
+        source_template, context=context
+    )
+    generated = PlanResultSourceAdapter(
+        joint_names=("arm", "tool"),
+    ).export_template(
+        PlanResult(
+            success=True,
+            positions=source_template.positions.unsqueeze(0),
+            dt=source_template.dt.unsqueeze(0),
+        ),
+        context=context,
+    )
+
+    assert handwritten.template_id == generated.template_id == "unit_0"
+    torch.testing.assert_close(handwritten.positions, generated.positions)
+    torch.testing.assert_close(handwritten.dt, generated.dt)
 
 
 def _template(**changes: object) -> TrajectoryTemplate:

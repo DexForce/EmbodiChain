@@ -61,6 +61,8 @@ and persistence confirmations; this package does not instantiate them.
    GenerationSession
    SourceContext
    SourceAdapter
+   TemplateSourceAdapter
+   PlanResultSourceAdapter
 
 Values and Evidence
 ~~~~~~~~~~~~~~~~~~~
@@ -128,6 +130,12 @@ the package itself does not write or verify storage.
    :members:
 
 .. autoclass:: SourceAdapter
+   :members:
+
+.. autoclass:: TemplateSourceAdapter
+   :members:
+
+.. autoclass:: PlanResultSourceAdapter
    :members:
 
 .. autoclass:: CandidateTrajectoryBatch
@@ -399,6 +407,8 @@ The package import path above is convenient for callers combining them.
 
    SourceContext
    SourceAdapter
+   TemplateSourceAdapter
+   PlanResultSourceAdapter
 
 .. currentmodule:: embodichain.lab.sim.motion.expansion.cfg
 
