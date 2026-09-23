@@ -122,6 +122,8 @@ required `locked_qpos` mapping and binds a physical `simulation.articulation`
 UID as a `SceneObjectRef`. Its `antipodal_grasp` child owns a required
 `grasp_link`; ordinary rigid-object antipodal fields (`mesh_env_id` and
 `internal_axis`) remain unchanged and are not accepted on that link-backed
-child. The configured decoder derives those relations and normalizes the
+child. Configured rigidized articulations accept only `collision_role: none`:
+their link-local grasp mesh does not provide planner collision geometry.
+The configured decoder derives those relations and normalizes the
 authoring hierarchy into the flat `SimulationSceneBinding` / `SceneRegistry`
 index. Scene-level affordance collections are not accepted.

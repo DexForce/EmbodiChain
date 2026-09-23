@@ -256,7 +256,7 @@ def create_rigidized_articulation_antipodal_affordance(
     joint_position_tolerance: float = 1.0e-3,
     link_transform_tolerance: float = 1.0e-5,
 ) -> AntipodalAffordance:
-    """Build root-frame antipodal geometry for a rigidized articulation link.
+    """Build root-frame, link-scoped grasp geometry for a rigidized articulation.
 
     Args:
         articulation: Native articulation providing named joint, link, pose,
@@ -269,7 +269,7 @@ def create_rigidized_articulation_antipodal_affordance(
             agreement across arenas.
 
     Returns:
-        Owned antipodal mesh expressed in the articulation-root frame.
+        Owned link-scoped antipodal mesh in the articulation-root frame.
 
     Raises:
         TypeError: If a declared value or native reading has an invalid type.
@@ -318,7 +318,11 @@ def create_rigidized_articulation_antipodal_affordance(
     root_frame = (local @ transform[:3, :3].transpose(0, 1) + transform[:3, 3]).to(
         vertices.dtype
     )
-    return AntipodalAffordance(mesh_vertices=root_frame, mesh_triangles=triangles)
+    return AntipodalAffordance(
+        mesh_vertices=root_frame,
+        mesh_triangles=triangles,
+        mesh_scope="link",
+    )
 
 
 class ArticulationJointGeometry(Protocol):

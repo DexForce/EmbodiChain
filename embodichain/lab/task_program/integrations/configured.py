@@ -381,8 +381,14 @@ def _decode_rigidized_articulation(
     }
     if not locked_qpos:
         raise ValueError(f"{path}.locked_qpos must not be empty.")
+    common = _decode_scene_entity_common(config, path=path)
+    if common["collision_role"] is not SceneCollisionRole.NONE:
+        raise ValueError(
+            f"{path} rigidized articulation collision_role must be 'none' in "
+            "configured integrations; no planner collision geometry is available."
+        )
     return SimulationRigidizedArticulationObjectBinding(
-        **_decode_scene_entity_common(config, path=path),
+        **common,
         locked_qpos=locked_qpos,
         default_grasp_affordance=_optional_identifier(
             config.get("default_grasp_affordance"),

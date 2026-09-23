@@ -190,6 +190,7 @@ class TestRootFrameTransform:
             label="rubiks_cube",
         )
 
+        assert semantics.affordance.mesh_scope == "link"
         homogeneous = torch.cat(
             [
                 LINK_VERTICES.to(torch.float64),
