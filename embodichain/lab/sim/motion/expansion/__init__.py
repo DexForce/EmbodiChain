@@ -29,6 +29,7 @@ from .cfg import (
     TrajectoryAugmentationCfg,
     TrajectoryGenerationJobCfg,
 )
+from .coordinator import CandidateCoordinator, CandidateWorkItem
 from .contracts import (
     CandidateIdentity,
     CandidateSpec,
@@ -83,6 +84,8 @@ __all__ = [
     "SPATIAL_METHODS",
     "CandidateIdentity",
     "CandidateSpec",
+    "CandidateCoordinator",
+    "CandidateWorkItem",
     "CandidateTrajectoryBatch",
     "CommitReceipt",
     "ExpertEpisode",

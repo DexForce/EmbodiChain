@@ -21,6 +21,8 @@ and persistence confirmations; this package does not instantiate them.
 
    CandidateIdentity
    CandidateSpec
+   CandidateCoordinator
+   CandidateWorkItem
    CandidateTrajectoryBatch
    CommitReceipt
    ExpertEpisode
@@ -124,6 +126,12 @@ the package itself does not write or verify storage.
    :members:
 
 .. autoclass:: CandidateSpec
+   :members:
+
+.. autoclass:: CandidateCoordinator
+   :members:
+
+.. autoclass:: CandidateWorkItem
    :members:
 
 .. autoclass:: SourceContext
@@ -409,6 +417,14 @@ The package import path above is convenient for callers combining them.
    SourceAdapter
    TemplateSourceAdapter
    PlanResultSourceAdapter
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.coordinator
+
+.. autosummary::
+   :nosignatures:
+
+   CandidateCoordinator
+   CandidateWorkItem
 
 .. currentmodule:: embodichain.lab.sim.motion.expansion.cfg
 

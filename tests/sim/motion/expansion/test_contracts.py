@@ -22,6 +22,7 @@ import pytest
 import torch
 
 from embodichain.lab.sim.motion.expansion import (
+    CandidateCoordinator,
     CandidateIdentity,
     CandidateSpec,
     CandidateTrajectoryBatch,
@@ -39,6 +40,8 @@ from embodichain.lab.sim.motion.expansion.source import (
     SourceContext,
     TemplateSourceAdapter,
 )
+from embodichain.lab.sim.motion.expansion.cfg import TrajectoryGenerationJobCfg
+from embodichain.lab.sim.motion.expansion.session import GenerationSession
 from embodichain.lab.sim.motion.planners import PlanResult
 
 
@@ -108,6 +111,56 @@ def test_source_adapters_share_one_template_contract():
     assert handwritten.template_id == generated.template_id == "unit_0"
     torch.testing.assert_close(handwritten.positions, generated.positions)
     torch.testing.assert_close(handwritten.dt, generated.dt)
+
+
+def test_candidate_coordinator_queues_source_variants_with_session_identity():
+    cfg = TrajectoryGenerationJobCfg.from_mapping(
+        {
+            "augmentation": {
+                "factors": {
+                    "spatial": {
+                        "enabled": True,
+                        "method": ["joint_residual"],
+                        "joint_offset_scale": 0.1,
+                    }
+                },
+                "coverage": {"joint_dedup_normalized_tol": 0.001},
+            },
+            "scheduling": {"candidate_budget": 4},
+        }
+    )
+    case = _case()
+    session = GenerationSession(cfg)
+    limits = torch.tensor([[-2.0, 2.0], [-2.0, 2.0]])
+    session.register_case(case, limits, joint_names=("arm", "tool"))
+    context = SourceContext(
+        source_id="handwritten",
+        source_revision="test",
+        unit_id="unit_0",
+        scene_case=case,
+        control_dt=0.1,
+    )
+    coordinator = CandidateCoordinator(
+        cfg,
+        session=session,
+        source_adapter=TemplateSourceAdapter(),
+        source_context=context,
+        joint_limits=limits,
+    )
+
+    source_template = _template(
+        phases=(TrajectoryPhase("free", 0, 3, "free", ("joint_residual",)),),
+        allowed_operators=("joint_residual",),
+        controlled_joint_indices=(0, 1),
+    )
+    items = coordinator.enqueue_source(source_template, count=2)
+
+    assert len(items) == 2
+    assert coordinator.pending_count == 2
+    assert len({item.spec.identity.candidate_id for item in items}) == 2
+    assert all(item.spec.identity.source_id == "handwritten" for item in items)
+    assert coordinator.take_next() == items[0]
+    assert coordinator.pending_count == 1
 
 
 def _template(**changes: object) -> TrajectoryTemplate:
