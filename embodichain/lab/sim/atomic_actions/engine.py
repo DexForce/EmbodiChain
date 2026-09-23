@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Iterable, Mapping, TYPE_CHECKING
+from typing import Callable, Iterable, Mapping, TYPE_CHECKING
 
 import torch
 
@@ -55,6 +55,10 @@ class AtomicActionEngine:
         load_builtins: bool = True,
         tracking_runtime: TrackingRuntime | None = None,
         scene_provider: SceneProvider | None = None,
+        plan_transform: (
+            Callable[[ResolvedActionRequest, PlanningContext, ActionPlan], ActionPlan]
+            | None
+        ) = None,
     ) -> None:
         """Initialize one engine and bind its built-in action implementations.
 
@@ -72,9 +76,15 @@ class AtomicActionEngine:
             scene_provider: Optional default scene-observation source used by
                 :meth:`initial_context` when the caller does not supply an
                 explicit scene snapshot. The provider is borrowed by reference.
+            plan_transform: Optional collector-owned transform applied after the
+                normal plan has been validated and before it is returned to an
+                execution/session caller. The transform must return a complete
+                revalidated :class:`ActionPlan`; ordinary callers leave it unset.
         """
         if scene_provider is not None and not isinstance(scene_provider, SceneProvider):
             raise TypeError("scene_provider must implement SceneProvider.")
+        if plan_transform is not None and not callable(plan_transform):
+            raise TypeError("plan_transform must be callable or None.")
         self._planning_services = ActionPlanningServices(
             motion_generator,
             control_profiles=control_profiles,
@@ -82,6 +92,7 @@ class AtomicActionEngine:
             grasp_pose_generators=grasp_pose_generators,
         )
         self._scene_provider = scene_provider
+        self._plan_transform = plan_transform
         self._actions: dict[str, AtomicAction] = {}
         self._skill_catalog_revision = 0
         if load_builtins:
@@ -375,6 +386,12 @@ class AtomicActionEngine:
         self._validate_context(current)
         plan = action.plan(request, current)
         self._validate_plan(plan, current, request)
+        if self._plan_transform is not None:
+            transformed = self._plan_transform(request, current, plan)
+            if not isinstance(transformed, ActionPlan):
+                raise TypeError("plan_transform must return an ActionPlan.")
+            self._validate_plan(transformed, current, request)
+            plan = transformed
         return plan
 
     def plan(

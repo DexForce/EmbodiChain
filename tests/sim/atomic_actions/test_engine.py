@@ -155,11 +155,13 @@ def _engine(
     control_profiles: dict[str, ControlPartCommandProfile] | None = None,
     *,
     load_builtins: bool = False,
+    plan_transform=None,
 ) -> AtomicActionEngine:
     return AtomicActionEngine(
         _motion_generator(batch_size, robot_dof),
         control_profiles=control_profiles,
         load_builtins=load_builtins,
+        plan_transform=plan_transform,
     )
 
 
@@ -593,3 +595,28 @@ def test_engine_rejects_plan_for_a_different_skill() -> None:
 
     with pytest.raises(ValueError, match="must match its request"):
         engine.compile((_invocation(engine, torch.zeros(2, 3)),))
+
+
+def test_plan_transform_runs_after_normal_plan_validation() -> None:
+    calls = []
+
+    def transform(request, context, plan):
+        calls.append((request, context, plan))
+        return plan.snapshot()
+
+    engine = _engine(plan_transform=transform)
+    engine.register(StubAction())
+
+    plan = engine.plan(_invocation(engine, torch.ones(2, 3)))
+
+    assert plan.success_all
+    assert len(calls) == 1
+    assert calls[0][2].skill_id == "stub"
+
+
+def test_plan_transform_must_return_a_validated_action_plan() -> None:
+    engine = _engine(plan_transform=lambda request, context, plan: object())
+    engine.register(StubAction())
+
+    with pytest.raises(TypeError, match="must return an ActionPlan"):
+        engine.plan(_invocation(engine, torch.ones(2, 3)))
