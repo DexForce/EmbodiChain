@@ -809,6 +809,21 @@ def test_rigidized_articulation_rejects_invalid_locked_qpos(
         _decode_configured_task_program_integration(payload)
 
 
+@pytest.mark.parametrize(
+    "field_name",
+    ("joint_position_tolerance", "link_transform_tolerance"),
+)
+def test_rigidized_articulation_rejects_unsafe_large_tolerance(
+    field_name: str,
+) -> None:
+    payload = _rigidized_articulation_payload()
+    root = payload["scene"]["rigidized_articulations"][0]
+    root[field_name] = 10.0
+
+    with pytest.raises(ValueError, match=f"{field_name}.*at most"):
+        _decode_configured_task_program_integration(payload)
+
+
 def test_rigidized_articulation_grasp_requires_grasp_link() -> None:
     payload = _rigidized_articulation_payload()
     grasp = payload["scene"]["rigidized_articulations"][0]["affordances"][0]

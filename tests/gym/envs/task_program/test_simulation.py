@@ -392,8 +392,10 @@ def test_rigidized_articulation_binding_rejects_invalid_locked_qpos(
     [
         ("joint_position_tolerance", 0.0, ValueError),
         ("joint_position_tolerance", float("inf"), ValueError),
+        ("joint_position_tolerance", 10.0, ValueError),
         ("link_transform_tolerance", -1.0, ValueError),
         ("link_transform_tolerance", True, TypeError),
+        ("link_transform_tolerance", 10.0, ValueError),
     ],
 )
 def test_rigidized_articulation_binding_rejects_invalid_tolerance(
@@ -512,6 +514,13 @@ def test_rigidized_articulation_binding_rejects_fixed_root() -> None:
 
 def test_rigidized_articulation_binding_requires_coincident_limits() -> None:
     simulation = _RigidizedSimulation(_RigidizedArticulation(limits=(-1.0, 1.0)))
+
+    with pytest.raises(ValueError, match="coincident"):
+        _rigidized_scene_binding().build(simulation)  # type: ignore[arg-type]
+
+
+def test_rigidized_articulation_limit_lock_uses_fixed_safety_epsilon() -> None:
+    simulation = _RigidizedSimulation(_RigidizedArticulation(limits=(-4.0e-4, 4.0e-4)))
 
     with pytest.raises(ValueError, match="coincident"):
         _rigidized_scene_binding().build(simulation)  # type: ignore[arg-type]

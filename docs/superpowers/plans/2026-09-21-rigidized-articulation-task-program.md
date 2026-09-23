@@ -15,6 +15,7 @@
 - Preserve the direct PR #632 Python API `create_rigidized_articulation_antipodal_semantics`; it must delegate to the reusable geometry builder.
 - Keep `program.yaml` provider-independent and use the existing built-in `pick` and `place` calls with `rubiks_cube` as a `SceneObjectRef`.
 - The configured Task Program lock mode requires a floating articulation root and coincident joint limits at every declared `locked_qpos` value.
+- Configured tolerances may only tighten the safe maxima (`1e-3` for joint-state agreement and `1e-5` for cross-arena transforms); joint-limit coincidence uses a fixed internal epsilon.
 - `locked_qpos` is owned by the rigidized-articulation root binding; `grasp_link` is owned by its nested antipodal affordance.
 - The Rubik's-cube asset contract remains `RubiksCube/rubiks_cube_001.usdc`; register the published `demo/RubiksCube.zip` bundle so standard config resolution downloads it into the EmbodiChain data root.
 - Do not add cube twisting, dynamic articulation geometry, a new Task Program language node, or a new Semantic Call.

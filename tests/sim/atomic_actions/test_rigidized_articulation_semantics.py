@@ -413,6 +413,24 @@ class TestRejectedConfigurations:
                 **{field_name: value},
             )
 
+    @pytest.mark.parametrize(
+        "field_name",
+        ["joint_position_tolerance", "link_transform_tolerance"],
+    )
+    def test_unsafe_large_tolerance_is_rejected(self, field_name: str) -> None:
+        cube = _StubArticulation(
+            root_to_link=torch.eye(4, dtype=torch.float64),
+            qpos={"top_turn": 0.0},
+        )
+
+        with pytest.raises(ValueError, match=f"{field_name}.*at most"):
+            create_rigidized_articulation_antipodal_affordance(
+                cube,
+                grasp_link="top_layer",
+                locked_qpos={"top_turn": 0.0},
+                **{field_name: 10.0},
+            )
+
     def test_non_finite_measured_qpos_is_rejected(self) -> None:
         cube = _StubArticulation(
             root_to_link=torch.eye(4, dtype=torch.float64),

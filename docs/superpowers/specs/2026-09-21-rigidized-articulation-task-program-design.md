@@ -236,6 +236,11 @@ measure positive cube lift, bounded `top_turn` displacement, successful Place,
 and final Task Program acceptance using the automatically downloaded asset.
 Static validation does not substitute for that run.
 
+Configured tolerances may only tighten the safe maxima (`1e-3` for joint-state
+agreement and `1e-5` for cross-arena root-to-link transforms). Native
+joint-limit coincidence is an invariant checked with a fixed internal epsilon;
+it is not weakened by either authoring tolerance.
+
 ## Compatibility
 
 Existing rigid-object, articulation, link, and affordance configuration stays

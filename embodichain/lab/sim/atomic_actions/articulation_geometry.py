@@ -41,13 +41,27 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Articulation
 
 
-def _positive_finite_tolerance(value: object, *, field_name: str) -> float:
-    """Return one positive finite tolerance."""
+_MAX_RIGIDIZED_JOINT_POSITION_TOLERANCE = 1.0e-3
+_MAX_RIGIDIZED_LINK_TRANSFORM_TOLERANCE = 1.0e-5
+
+
+def _rigidized_articulation_tolerance(
+    value: object,
+    *,
+    field_name: str,
+) -> float:
+    """Return one bounded positive tolerance for rigidized geometry."""
     if isinstance(value, bool) or not isinstance(value, numbers.Real):
         raise TypeError(f"{field_name} must be a real number.")
     tolerance = float(value)
     if not math.isfinite(tolerance) or tolerance <= 0.0:
         raise ValueError(f"{field_name} must be finite and greater than zero.")
+    maximum = {
+        "joint_position_tolerance": _MAX_RIGIDIZED_JOINT_POSITION_TOLERANCE,
+        "link_transform_tolerance": _MAX_RIGIDIZED_LINK_TRANSFORM_TOLERANCE,
+    }[field_name]
+    if tolerance > maximum:
+        raise ValueError(f"{field_name} must be at most {maximum:.1e}.")
     return tolerance
 
 
@@ -263,10 +277,10 @@ def create_rigidized_articulation_antipodal_affordance(
             drive, limit, FK, and link-mesh queries.
         grasp_link: Native link whose mesh supplies the grasp geometry.
         locked_qpos: Exact position required for every native joint.
-        joint_position_tolerance: Positive tolerance for measured positions,
-            targets, and coincident limits.
-        link_transform_tolerance: Positive tolerance for root-to-link transform
-            agreement across arenas.
+        joint_position_tolerance: Positive tolerance, no greater than ``1e-3``,
+            for measured positions, targets, and direct-Python lock checks.
+        link_transform_tolerance: Positive tolerance, no greater than ``1e-5``,
+            for root-to-link transform agreement across arenas.
 
     Returns:
         Owned antipodal mesh expressed in the articulation-root frame.
@@ -276,10 +290,10 @@ def create_rigidized_articulation_antipodal_affordance(
         ValueError: If the articulation is not consistently rigidized, the
             selected link is absent, or its transformed mesh is invalid.
     """
-    joint_tolerance = _positive_finite_tolerance(
+    joint_tolerance = _rigidized_articulation_tolerance(
         joint_position_tolerance, field_name="joint_position_tolerance"
     )
-    transform_tolerance = _positive_finite_tolerance(
+    transform_tolerance = _rigidized_articulation_tolerance(
         link_transform_tolerance, field_name="link_transform_tolerance"
     )
     locked = _validated_locked_qpos(articulation, locked_qpos)

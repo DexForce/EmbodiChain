@@ -122,6 +122,9 @@ required `locked_qpos` mapping and binds a physical `simulation.articulation`
 UID as a `SceneObjectRef`. Its `antipodal_grasp` child owns a required
 `grasp_link`; ordinary rigid-object antipodal fields (`mesh_env_id` and
 `internal_axis`) remain unchanged and are not accepted on that link-backed
-child. The configured decoder derives those relations and normalizes the
-authoring hierarchy into the flat `SimulationSceneBinding` / `SceneRegistry`
-index. Scene-level affordance collections are not accepted.
+child. Joint-position and cross-arena transform tolerances may only tighten the
+safe maxima of `1e-3` and `1e-5`; native joint-limit coincidence is proven with
+a fixed internal epsilon rather than an author-controlled tolerance. The
+configured decoder derives those relations and normalizes the authoring
+hierarchy into the flat `SimulationSceneBinding` / `SceneRegistry` index.
+Scene-level affordance collections are not accepted.

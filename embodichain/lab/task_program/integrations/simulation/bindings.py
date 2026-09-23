@@ -42,6 +42,9 @@ from embodichain.lab.sim.atomic_actions import (
     EntityState,
     create_rigidized_articulation_antipodal_affordance,
 )
+from embodichain.lab.sim.atomic_actions.articulation_geometry import (
+    _rigidized_articulation_tolerance,
+)
 from embodichain.lab.task_program.semantics.profiles import (
     ControlPartEndpoint,
     ResourceEndpoint,
@@ -97,6 +100,7 @@ _IDENTITY_POSE = (
     0.0,
     1.0,
 )
+_LOCKED_LIMIT_COINCIDENCE_TOLERANCE = 1.0e-6
 
 
 def _identifier(value: str, *, field_name: str) -> str:
@@ -239,12 +243,16 @@ class SimulationRigidizedArticulationObjectBinding:
         semantic_type: Optional semantic object classification.
         default_grasp_affordance: Optional default grasp affordance ID.
         geometry_provider: Optional planner-facing collision geometry provider.
-        joint_position_tolerance: Positive joint and limit comparison tolerance.
-        link_transform_tolerance: Positive cross-arena transform tolerance.
+        joint_position_tolerance: Positive joint-state tolerance no greater than
+            ``1e-3``. Configured limit coincidence uses a separate fixed epsilon.
+        link_transform_tolerance: Positive cross-arena transform tolerance no
+            greater than ``1e-5``.
 
     .. attention::
        Live configured assembly accepts only floating roots whose native joint
-       limits are finite and coincident at every declared lock position.
+       limits are finite and coincident at every declared lock position. The
+       coincidence proof uses a fixed safety epsilon and cannot be weakened by
+       an authoring tolerance.
     """
 
     entity_id: str
@@ -289,9 +297,10 @@ class SimulationRigidizedArticulationObjectBinding:
             "joint_position_tolerance",
             "link_transform_tolerance",
         ):
-            tolerance = _finite(getattr(self, field_name), field_name=field_name)
-            if tolerance <= 0.0:
-                raise ValueError(f"{field_name} must be greater than zero.")
+            tolerance = _rigidized_articulation_tolerance(
+                getattr(self, field_name),
+                field_name=field_name,
+            )
             object.__setattr__(self, field_name, tolerance)
 
 
@@ -622,7 +631,7 @@ def _require_coincident_locked_limits(
         [binding.locked_qpos[name] for name in joint_names],
         dtype=torch.float64,
     ).reshape(1, joint_count)
-    tolerance = binding.joint_position_tolerance
+    tolerance = _LOCKED_LIMIT_COINCIDENCE_TOLERANCE
     coincident = (
         ((limits[..., 1] - limits[..., 0]).abs() <= tolerance)
         & ((limits[..., 0] - expected).abs() <= tolerance)
