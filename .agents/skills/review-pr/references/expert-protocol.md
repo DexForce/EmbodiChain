@@ -25,6 +25,16 @@
 
 Use a task packet with these fields (Markdown is sufficient):
 
+For a dedicated supplemental pass, use the `reliability` or `verification`
+role ID and responsibilities defined in SKILL.md consistently in the packet,
+result, candidate IDs, and role-coverage row. If the lens is included in an
+existing expert's assignment, retain that expert's role ID and name the lens
+in its scope, returned coverage, and coverage-table evidence. For example, an
+`engine` reviewer covering `reliability` returns `engine-*` candidates under
+the `engine` row; a dedicated `reliability` reviewer returns `reliability-*`
+candidates under its own row. Do not count an embedded lens as an independent
+reviewer or add a second completed role row for it.
+
 ```text
 Assignment: delegated expert pass; do not delegate further.
 Role: <stable role ID and its responsibilities from SKILL.md>

@@ -46,6 +46,17 @@ as a finding.
   boundaries, credentials, package loading, and CI permissions for unsafe
   execution, data exposure, privilege escalation, or fail-open behavior.
 
+Supplemental roles may be delegated separately or included as lenses in an
+existing expert's scope:
+
+- **Reliability / operations engineer** (`reliability`) — Review lifecycle,
+  restart, retries, idempotence, bounded queues, observability, and worker
+  failure handling when these need coverage beyond the engine or agentic pass.
+- **Verification / test quality engineer** (`verification`) — Check test oracles,
+  regression claims, negative and boundary cases, determinism, and whether
+  tests exercise the contract rather than mirror the implementation. This pass
+  is required for test or validation changes, but a separate agent is optional.
+
 ### Role selection
 
 After building the change model, read

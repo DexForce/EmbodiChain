@@ -52,9 +52,9 @@ scenario reachable and the impact concrete.
 
 ## Supplemental lenses
 
-`reliability` is a supplemental lens for lifecycle and restart behavior that is
-not fully explained by the engine or agentic passes. `verification` is a
-mandatory pass for every test or validation change; check that tests observe
-the contract and would fail on the relevant old behavior rather than merely
-mirroring the implementation. These lenses do not require separate agents,
-but may be assigned to one when the host has capacity.
+`reliability` and `verification` have stable role IDs and responsibilities in
+`SKILL.md` under Reviewer identity. Use `reliability` when lifecycle or restart
+coverage needs a supplemental pass; `verification` remains required for test
+or validation changes. Separate agents are optional. Follow the
+[expert protocol](expert-protocol.md) to record either a dedicated supplemental
+role or a lens within an existing role's scope consistently.
