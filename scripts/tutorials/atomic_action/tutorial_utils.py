@@ -113,6 +113,7 @@ TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
     palm_depth=0.096,
 )
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.036
+DEFAULT_ROBOTIQ_GRIPPER_CLOSE_QPOS = 0.55
 NEWTON_GRASP_CONTACT_STIFFNESS = 4.0e4
 NEWTON_GRASP_CONTACT_DAMPING = 4.0e2
 # MuJoCo-Warp's default contact dimension (3) has no torsional friction.  A
@@ -223,7 +224,7 @@ def create_tutorial_argument_parser(
         "--robot",
         choices=TUTORIAL_ROBOTS,
         default="ur5",
-        help="Robot construction to use (default: ur5).",
+        help="Robot construction to use (default: %(default)s).",
     )
     parser.add_argument(
         "--planner",
@@ -785,7 +786,7 @@ def get_hand_open_close_qpos(
     robot: Robot,
     *,
     hand_control_part: str = "hand",
-    close_qpos: float | Sequence[float] = DEFAULT_GRIPPER_CLOSE_QPOS,
+    close_qpos: float | Sequence[float] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return open and closed positions for a tutorial parallel gripper.
 
@@ -799,7 +800,8 @@ def get_hand_open_close_qpos(
         robot: Robot containing the gripper control part.
         hand_control_part: Name of the gripper control part.
         close_qpos: Desired scalar close magnitude or explicit per-joint closed
-            positions, clamped to joint limits.
+            positions, clamped to joint limits. Defaults to 0.7 for Robotiq
+            2F-140 hands and 0.036 for PGI hands.
 
     Returns:
         Open and closed joint-position tensors on the robot device.
@@ -812,6 +814,12 @@ def get_hand_open_close_qpos(
         re.fullmatch(ROBOTIQ_HAND_JOINT_PATTERN, joint_name)
         for joint_name in hand_joint_names
     )
+    if close_qpos is None:
+        close_qpos = (
+            DEFAULT_ROBOTIQ_GRIPPER_CLOSE_QPOS
+            if is_robotiq_2f_140
+            else DEFAULT_GRIPPER_CLOSE_QPOS
+        )
     if isinstance(close_qpos, Sequence) and not isinstance(close_qpos, (str, bytes)):
         hand_close = torch.as_tensor(
             close_qpos,
@@ -1645,6 +1653,7 @@ __all__ = [
     "DEFAULT_AXIS_LEN",
     "DEFAULT_AXIS_SIZE",
     "DEFAULT_GRIPPER_CLOSE_QPOS",
+    "DEFAULT_ROBOTIQ_GRIPPER_CLOSE_QPOS",
     "DEFAULT_TUTORIAL_SUN_DIRECTION",
     "DEFAULT_TUTORIAL_SUN_INTENSITY",
     "GRIPPER_HAND_JOINT_PATTERN",

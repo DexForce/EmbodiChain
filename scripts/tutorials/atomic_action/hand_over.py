@@ -84,10 +84,10 @@ SUPPORT_SURFACE_CENTER = (
 # --- Adjustable scene placeholders -----------------------------------------
 # The object starts on one side and is delivered to the other. HandOver chooses
 # the nearer arm for pickup and computes the middle handover position itself.
-OBJECT_INIT_XY = (0.0, 0.02)
+OBJECT_INIT_XY = (-0.2, 0.02)
 OBJECT_ROT_VERTICAL = (90.0, 0.0, 0.0)
 OBJECT_ROT_HORIZONTAL = (90.0, 0.0, 0.0)
-FINAL_OBJECT_XYZ = (0.0, -0.2, 0.6)
+FINAL_OBJECT_XYZ = (-0.2, -0.2, 0.6)
 # ---------------------------------------------------------------------------
 
 HAND_CLOSE_QPOS = 0.04
@@ -116,6 +116,7 @@ def parse_arguments() -> argparse.Namespace:
         default_device="cpu",
         default_renderer="hybrid",
     )
+    parser.set_defaults(robot="ur10")
     parser.add_argument(
         "--is_horizontal",
         action="store_true",
@@ -212,11 +213,12 @@ def run_handover_demo(
         planner=getattr(args, "planner", "trapezoidal"),
     )
 
+    hand_close_qpos = None if args.robot == "ur10" else HAND_CLOSE_QPOS
     left_open, left_close = get_hand_open_close_qpos(
-        robot, hand_control_part="left_hand", close_qpos=HAND_CLOSE_QPOS
+        robot, hand_control_part="left_hand", close_qpos=hand_close_qpos
     )
     right_open, right_close = get_hand_open_close_qpos(
-        robot, hand_control_part="right_hand", close_qpos=HAND_CLOSE_QPOS
+        robot, hand_control_part="right_hand", close_qpos=hand_close_qpos
     )
 
     final_pose = torch.eye(4, dtype=torch.float32)

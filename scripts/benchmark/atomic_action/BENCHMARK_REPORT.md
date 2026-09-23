@@ -6,6 +6,11 @@ Twelve skills measured under
 default backend, 10 ms physics timestep, one environment, `--repeat 1`. Per-case
 tables are in `outputs/benchmarks/`.
 
+The HandOver numbers below use the former 3D delivery-error limit of 3 cm.
+The current standard checks settled XY error against 3 cm and absolute height
+error against 10 cm to allow settling after release. These historical results
+have not been recomputed under that revised criterion.
+
 `success_rate` is the last link of a chain. Each stage is scored only on the
 cases that reached it, so a rate says what fraction of the cases that got there
 passed:

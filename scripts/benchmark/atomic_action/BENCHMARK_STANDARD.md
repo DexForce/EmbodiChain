@@ -53,6 +53,14 @@ absolute, never scaled by commanded magnitude.
 A skill that breaks and re-establishes contact gets a derived budget rather
 than its own constant: `n * TASK_POSITION_TOLERANCE_M` for `n` contact phases.
 
+For `HandOver`, this derived budget applies to the settled **XY** delivery
+error (3 cm). Its final stage is measured after release and settle, so absolute
+height error has a separate `HANDOVER_HEIGHT_TOLERANCE_M = 0.10` m budget,
+matching the nominal release pose's 10 cm clearance above the support plane.
+This allows the can and pencil to reach their different resting heights.
+Both limits must pass; the cross-cutting drop rule still applies. Reports keep
+the 3D delivery distance as a diagnostic and list XY and height errors separately.
+
 ---
 
 ## 1. success_rate
@@ -95,7 +103,7 @@ skill grasps well, and scoring it as a miss blames the wrong thing.
 | `Twist` | `TASK_*` | `grasped` → `twisted` → `released` | knob held / **end-effector rotation about the knob axis** within 5° / released |
 | `CoordinatedPickment` | `TASK_*` | `dual_grasped` → `lifted` → `moved` → `held` | both hands contact / lift ≥ 4 cm / pose ≤ 1 cm·5° / still pinched |
 | `CoordinatedPlacement` | `TASK_*` | `aligned` → `released` → `stable` | relative pose ≤ 1 cm·5° / both hands open / drift ≤ 1 cm·5° |
-| `HandOver` | `TASK_*` | `grasped` → `transferred` → `handed_over` → `placed` | handing arm holds / both arms hold / released and still held / delivery ≤ 3 cm |
+| `HandOver` | `TASK_*` | `grasped` → `transferred` → `handed_over` → `placed` | handing arm holds / both arms hold / released and still held / settled XY delivery ≤ 3 cm and absolute height error ≤ 10 cm |
 
 Cross-cutting: for any skill holding an object, falling more than
 `PHYSICAL_DROP_MARGIN_M` below the support plane at any point fails the current
