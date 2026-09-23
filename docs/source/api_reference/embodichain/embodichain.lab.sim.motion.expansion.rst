@@ -23,6 +23,11 @@ and persistence confirmations; this package does not instantiate them.
    CandidateSpec
    CandidateCoordinator
    CandidateWorkItem
+   InitialStatePort
+   MeasuredExecutor
+   EpisodeSink
+   SingleSlotOutcome
+   SingleSlotRunner
    CandidateTrajectoryBatch
    CommitReceipt
    ExpertEpisode
@@ -425,6 +430,17 @@ The package import path above is convenient for callers combining them.
 
    CandidateCoordinator
    CandidateWorkItem
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.single_slot
+
+.. autosummary::
+   :nosignatures:
+
+   InitialStatePort
+   MeasuredExecutor
+   EpisodeSink
+   SingleSlotOutcome
+   SingleSlotRunner
 
 .. currentmodule:: embodichain.lab.sim.motion.expansion.cfg
 

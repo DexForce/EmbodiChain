@@ -79,6 +79,13 @@ from .source import (
     SourceContext,
     TemplateSourceAdapter,
 )
+from .single_slot import (
+    EpisodeSink,
+    InitialStatePort,
+    MeasuredExecutor,
+    SingleSlotOutcome,
+    SingleSlotRunner,
+)
 
 __all__ = [
     "SPATIAL_METHODS",
@@ -127,4 +134,9 @@ __all__ = [
     "SourceContext",
     "TemplateSourceAdapter",
     "PlanResultSourceAdapter",
+    "InitialStatePort",
+    "MeasuredExecutor",
+    "EpisodeSink",
+    "SingleSlotOutcome",
+    "SingleSlotRunner",
 ]

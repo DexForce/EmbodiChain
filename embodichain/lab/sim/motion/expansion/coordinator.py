@@ -120,6 +120,11 @@ class CandidateCoordinator:
         return len(self._pending)
 
     @property
+    def session(self) -> GenerationSession:
+        """Return the session that owns candidate lifecycle and receipts."""
+        return self._session
+
+    @property
     def source_case(self) -> SceneCase:
         """Return the scene case shared by the current source context."""
         return self._source_context.scene_case
