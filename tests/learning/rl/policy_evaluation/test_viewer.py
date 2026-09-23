@@ -28,6 +28,7 @@ pytest.importorskip("dexsim.kit.motion_policy.evaluator")
 from dexsim.kit.motion_policy import EvaluationFrame, PolicyContext
 
 from embodichain.learning.rl.evaluation import infer_policy_action
+from embodichain.learning.rl.policy_evaluation import PolicyViewerCameraCfg
 from embodichain.learning.rl.policy_evaluation.viewer import (
     EmbodiChainTaskEnvironment,
     EmbodiChainTaskPolicyAdapter,
@@ -55,6 +56,19 @@ class Window:
     def __init__(self) -> None:
         self.titles = []
         self.keys = set()
+        self.camera_pose = np.eye(4)
+        self.look_at_calls = []
+        self.pan_enabled = True
+
+    def set_look_at(self, eye, target, up):
+        self.look_at_calls.append((eye.copy(), target.copy(), up.copy()))
+        self.camera_pose[:3, 3] = eye
+
+    def set_camera_orbit_pan_enabled(self, enabled):
+        self.pan_enabled = enabled
+
+    def translate_camera_orbit(self, delta):
+        self.camera_pose[:3, 3] += delta
 
     def set_window_title(self, title):
         self.titles.append(title)
@@ -255,3 +269,139 @@ def test_viewer_closes_resources_when_evaluator_creation_fails(monkeypatch):
 
     assert env.exit_process_values == [False]
     assert policy.training is True
+
+
+class CameraEnvironment(Environment):
+    policy_viewer_camera_cfg = PolicyViewerCameraCfg(
+        eye_offset=(-2.0, -1.0, 1.0), target_height=0.5
+    )
+
+    def __init__(self):
+        super().__init__()
+        self.root_pose = np.array([1.0, 2.0, 0.5, 0.0, 0.0, 0.0, 1.0])
+
+    def get_policy_viewer_target_pose(self):
+        return self.root_pose.copy()
+
+
+def _camera_task():
+    env = CameraEnvironment()
+    task = EmbodiChainTaskEnvironment(env, seed=1)
+    task.open_viewer("Tracking test")
+    task.reset()
+    return env, task, env.world.window
+
+
+def test_camera_uses_initial_heading_and_fixed_world_height():
+    env = CameraEnvironment()
+    # A 90-degree initial yaw rotates the rear-quarter (-2, -1) offset to (1, -2).
+    env.root_pose[2:] = [3.0, 0.0, 0.0, np.sqrt(0.5), np.sqrt(0.5)]
+    task = EmbodiChainTaskEnvironment(env, seed=1)
+    task.open_viewer("Tracking test")
+    task.reset()
+    eye, target, up = env.world.window.look_at_calls[-1]
+    np.testing.assert_allclose(eye, [2.0, 0.0, 1.5], atol=1e-14)
+    np.testing.assert_allclose(target, [1.0, 2.0, 0.5])
+    np.testing.assert_array_equal(up, [0.0, 0.0, 1.0])
+    assert not env.world.window.pan_enabled
+    task.close()
+
+
+def test_camera_follows_xy_and_preserves_manual_orbit_and_zoom():
+    env, task, window = _camera_task()
+    # Stand in for a user orbit/zoom adjustment after initialization.
+    window.camera_pose[:3, :3] = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
+    window.camera_pose[:3, 3] = [8, -3, 7]
+    before = window.camera_pose.copy()
+    env.root_pose = np.array([1.5, 1.0, 2.0, 0.0, 0.0, 1.0, 0.0])
+
+    task.step(torch.zeros((1, 1)))
+
+    np.testing.assert_array_equal(window.camera_pose[:3, :3], before[:3, :3])
+    np.testing.assert_allclose(window.camera_pose[:3, 3] - before[:3, 3], [0.5, -1, 0])
+    assert len(window.look_at_calls) == 1
+    assert env.action_manager.calls == 1
+    task.close()
+
+
+def test_camera_t_toggle_is_edge_triggered_and_recenters_on_resume():
+    from dexsim.types import InputKey
+
+    env, task, window = _camera_task()
+    before = window.camera_pose.copy()
+    window.keys.add(InputKey.SCANCODE_T)
+    assert task.poll() is None
+    assert task.poll() is None
+    assert window.pan_enabled
+    env.root_pose[:3] = [6, 8, 4]
+    task.step(torch.zeros((1, 1)))
+    np.testing.assert_array_equal(window.camera_pose, before)
+    window.keys.clear()
+    task.poll()
+    window.keys.add(InputKey.SCANCODE_T)
+    task.poll()
+    assert not window.pan_enabled
+    np.testing.assert_allclose(window.look_at_calls[-1][1], [6, 8, 0.5])
+    assert len(window.look_at_calls) == 2
+    task.close()
+
+
+def test_camera_reset_restores_tracking_and_new_heading():
+    from dexsim.types import InputKey
+
+    env, task, window = _camera_task()
+    window.keys.add(InputKey.SCANCODE_T)
+    task.poll()
+    env.root_pose[:] = [4, 5, 2, 0, 0, 1, 0]
+    window.keys = {InputKey.SCANCODE_BACKSPACE}
+    assert task.poll() == "manual reset"
+    task.reset()
+    assert not window.pan_enabled
+    np.testing.assert_allclose(window.look_at_calls[-1][0], [6, 6, 1.5])
+    env.root_pose[0] += 0.25
+    task.step(torch.zeros((1, 1)))
+    np.testing.assert_allclose(window.camera_pose[:3, 3], [6.25, 6, 1.5])
+    task.close()
+
+
+def test_camera_is_optional_for_existing_tasks():
+    from dexsim.types import InputKey
+
+    env = Environment()
+    task = EmbodiChainTaskEnvironment(env, seed=1)
+    task.open_viewer("Existing task")
+    task.reset()
+    env.world.window.keys.add(InputKey.SCANCODE_T)
+    task.poll()
+    task.step(torch.zeros((1, 1)))
+    assert env.world.window.look_at_calls == []
+    task.close()
+
+
+def test_camera_requires_explicit_pose_provider():
+    env = Environment()
+    env.policy_viewer_camera_cfg = PolicyViewerCameraCfg()
+    task = EmbodiChainTaskEnvironment(env, seed=1)
+    with pytest.raises(ValueError, match="Environment.*get_policy_viewer_target_pose"):
+        task.open_viewer("Invalid target")
+    task.close()
+
+
+@pytest.mark.parametrize("offset", [(0, 0, 1), (float("nan"), 1, 1), (1, 2)])
+def test_camera_rejects_invalid_presets(offset):
+    env = CameraEnvironment()
+    env.policy_viewer_camera_cfg = PolicyViewerCameraCfg(eye_offset=offset)
+    task = EmbodiChainTaskEnvironment(env, seed=1)
+    with pytest.raises(ValueError, match="eye_offset"):
+        task.open_viewer("Invalid preset")
+    task.close()
+
+
+def test_camera_initialization_failure_closes_original_environment():
+    env = CameraEnvironment()
+    env.root_pose[3:] = 0
+    with pytest.raises(ValueError, match="quaternion"):
+        evaluate_native_viewer(
+            _runtime(env), seed=1, episodes=1, control_steps=None, duration=None
+        )
+    assert env.exit_process_values == [False]
