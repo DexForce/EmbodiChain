@@ -24,7 +24,11 @@ initialization and requires the simulation package dependencies.
 
 from __future__ import annotations
 
-from .cfg import TrajectoryAugmentationCfg, TrajectoryGenerationJobCfg
+from .cfg import (
+    SPATIAL_METHODS,
+    TrajectoryAugmentationCfg,
+    TrajectoryGenerationJobCfg,
+)
 from .contracts import (
     CandidateIdentity,
     CandidateTrajectoryBatch,
@@ -38,15 +42,38 @@ from .contracts import (
     ValidationResult,
 )
 from .coverage import CoverageIndex, TrajectoryDescriptor, describe_trajectory
+from .manipulability import (
+    GuidedResidual,
+    ManipulabilityBands,
+    ManipulabilityProfile,
+    describe_manipulability,
+    manipulability_guided_residual,
+)
+from .variants import (
+    NOMINAL_OPERATOR,
+    TrajectoryVariant,
+    TrajectoryVariantSet,
+    apply_trajectory_variant,
+    default_variant_factors,
+    expand_trajectory_variants,
+    plan_trajectory_variants,
+    sample_approach_cone,
+)
 from .operators import (
+    TIMING_PROFILES,
+    ProposalRejected,
     joint_residual,
+    nullspace_residual,
+    perturb_approach_direction,
     retime,
     rotate_grasp_about_object_axis,
     validate_motion_limits,
+    via_points,
 )
 from .session import GenerationSession
 
 __all__ = [
+    "SPATIAL_METHODS",
     "CandidateIdentity",
     "CandidateTrajectoryBatch",
     "CommitReceipt",
@@ -62,9 +89,27 @@ __all__ = [
     "CoverageIndex",
     "TrajectoryDescriptor",
     "describe_trajectory",
+    "GuidedResidual",
+    "ManipulabilityBands",
+    "ManipulabilityProfile",
+    "describe_manipulability",
+    "manipulability_guided_residual",
+    "NOMINAL_OPERATOR",
+    "TrajectoryVariant",
+    "TrajectoryVariantSet",
+    "apply_trajectory_variant",
+    "default_variant_factors",
+    "expand_trajectory_variants",
+    "plan_trajectory_variants",
+    "sample_approach_cone",
+    "TIMING_PROFILES",
+    "ProposalRejected",
     "joint_residual",
+    "nullspace_residual",
+    "perturb_approach_direction",
     "retime",
     "rotate_grasp_about_object_axis",
     "validate_motion_limits",
+    "via_points",
     "GenerationSession",
 ]

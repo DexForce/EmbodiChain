@@ -44,11 +44,14 @@ topics:
   keywords: [BaseEnv, EmbodiedEnv, EnvCfg, register_env, list-task, run-env, target_control_frequency,
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
-    ExpertTrajectoryCfg, AffordanceAugmentationCfg, offline affordance collection, joint_command_mode, position_velocity, qpos qvel, expert action schema]
+    ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema,
+    show-task, task catalog, task gallery, 任务画廊]
   paths: [topics/env-framework/env-framework.md]
   source_of_truth:
   - embodichain/cli/main.py
   - embodichain/cli/list_task.py
+  - embodichain/cli/_task_catalog.py
+  - embodichain/cli/show_task.py
   - embodichain/lab/scripts/run_env.py
   - embodichain/lab/gym/utils/gym_utils.py
   - embodichain/lab/gym/utils/_component_composition.py
@@ -57,13 +60,10 @@ topics:
   - embodichain/lab/gym/envs/_startup_summary.py
   - embodichain/lab/gym/envs/embodied_env.py
   - embodichain/lab/gym/envs/expert_trajectory.py
-  - embodichain/lab/gym/envs/augmentation.py
-  - embodichain/lab/scripts/_affordance_collection.py
   - embodichain/lab/gym/envs/demo.py
   - embodichain/lab/gym/utils/profiler.py
   watch_paths: [embodichain/lab/gym/envs/base_env.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/gym/envs/expert_trajectory.py,
-    embodichain/lab/gym/envs/demo.py, embodichain/lab/gym/envs/augmentation.py,
-    embodichain/lab/scripts/_affordance_collection.py,
+    embodichain/lab/gym/envs/demo.py,
     embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_env.py,
     embodichain_tasks/, tests/gym/envs/]
   related_topics: [simulation-system, manager-functor, sim-visualization, task-programs, data-pipeline]
@@ -91,7 +91,7 @@ topics:
   title: IK Solver System
   aliases: [ik solver, inverse kinematics, IK 求解器, 逆运动学]
   keywords: [BaseSolver, SolverCfg, SRSSolver, OPWSolver, URSolver, PinkSolver, PytorchSolver, PinocchioSolver,
-    DifferentialSolver, NeuralIKSolver, QposSeedSampler, QposSeedSelSampler, NullSpacePostureTask, compute kinematics, Warp
+    DifferentialSolver, NeuralIKSolver, FEPSolver, FEPSolverCfg, FEP, QposSeedSampler, QposSeedSelSampler, NullSpacePostureTask, compute kinematics, Warp
       kinematics]
   paths: [topics/ik-solvers/ik-solvers.md]
   source_of_truth:
@@ -160,10 +160,14 @@ topics:
 - id: motion-planning
   title: Motion Planning
   aliases: [motion planning, trajectory planning, trajectory playback, fixed-cadence trajectory playback, motion expansion,
-    trajectory expansion, trajectory augmentation, fixed scene trajectory augmentation, 轨迹播放, 轨迹扩增, 运动规划,
-    轨迹规划]
+    trajectory expansion, trajectory augmentation, fixed scene trajectory augmentation, trajectory variants,
+    trajectory variant expansion, 轨迹播放, 轨迹扩增, 运动规划, 轨迹规划, 轨迹变体]
   keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
     expansion, GenerationSession, TrajectoryAugmentationCfg, CandidateTrajectoryBatch,
+    ManipulabilityBands, manipulability_guided_residual, manipulability coverage bands,
+    TrajectoryVariant, plan_trajectory_variants, apply_trajectory_variant, expand_trajectory_variants,
+    via_points, nullspace_residual, perturb_approach_direction, sample_approach_cone, TIMING_PROFILES,
+    trajectory variant, 轨迹变体, 固定路点,
     collision world, compute trajectory, trajectory resampling, trajectory warping, retime_to_control_grid,
     JointTrajectoryPlaybackCfg, play_joint_trajectory, quaternion, xyzw, wxyz]
   paths: [topics/motion-planning/motion-planning.md]
@@ -330,14 +334,12 @@ topics:
   aliases: [online data, online dataset, async recorder, dataset persistence, 数据管线, 在线数据, 数据集持久化, 数据保存,
     深度视频]
   keywords: [OnlineDataEngine, OnlineDataset, sample_batch, lock_index, LeRobotRecorder, AsyncLeRobotRecorder,
-    DepthSidecarManager, depth_meta.json, fragment_id, finalize, DemoCommitReceipt, expert action schema, qpos_slice, qvel_slice]
+    DepthSidecarManager, depth_meta.json, fragment_id, finalize, expert action schema, qpos_slice, qvel_slice]
   paths: [topics/data-pipeline/data-pipeline.md]
   source_of_truth:
   - embodichain/data_pipeline/engine/data.py
   - embodichain/data_pipeline/datasets/online_data.py
   - embodichain/lab/gym/envs/managers/dataset_manager.py
-  - embodichain/lab/gym/envs/managers/episode_commit.py
-  - embodichain/lab/scripts/_affordance_collection.py
   - embodichain/lab/gym/envs/managers/datasets.py
   - embodichain/lab/gym/envs/managers/async_datasets.py
   - embodichain/data_pipeline/depth_video/writer.py
@@ -345,7 +347,6 @@ topics:
   - embodichain/lab/scripts/run_env.py
   watch_paths: [embodichain/data_pipeline/, embodichain/lab/gym/envs/managers/dataset_manager.py, embodichain/lab/gym/envs/managers/datasets.py,
     embodichain/lab/gym/envs/managers/async_datasets.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/scripts/run_env.py,
-    embodichain/lab/gym/envs/managers/episode_commit.py, embodichain/lab/scripts/_affordance_collection.py,
     tests/data_pipeline/]
   related_topics: [manager-functor, env-framework, task-programs, sensor-system]
   status: active
@@ -354,7 +355,7 @@ topics:
   aliases: [robot workspace, workspace analyzer, reachability cache, 机器人工作空间, 可达空间, 工作空间缓存]
   keywords: [WorkspaceAnalyzer, AnalysisMode, ResultsCache, RobotWorkspace, RobotWorkspaceCfg, workspace_cfg,
     sample_reachable_pose, analyze-workspace, workspace-cache, results.npz, manipulability_scores,
-    ManipulabilityMetric]
+    ManipulabilityMetric, ManipulabilityVisualizer, align_manipulability_scores, manipulability ellipsoid]
   paths: [topics/robot-workspace/robot-workspace.md]
   source_of_truth:
   - embodichain/lab/sim/motion/workspace/analyzer.py

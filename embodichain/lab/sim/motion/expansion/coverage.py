@@ -267,6 +267,21 @@ class CoverageIndex:
         self._aliases[geometry_family_id] = family
         return True
 
+    def family_of(self, commit_id: str) -> str:
+        """Return the geometry family a reserved commit was grouped into.
+
+        Near-identical geometries share one family even when their proposals
+        requested different family identifiers, so this is the authoritative
+        lineage for splitting a dataset by trajectory family.
+
+        Args:
+            commit_id: Previously reserved persistence identity.
+
+        Returns:
+            The resolved geometry family identifier.
+        """
+        return self._entries[commit_id].family_id
+
     def confirm(self, commit_id: str) -> None:
         """Confirm a reserved commit; repeated confirmations are idempotent.
 
