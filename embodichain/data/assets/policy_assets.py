@@ -29,7 +29,7 @@ from requests.exceptions import RequestException
 __all__ = ["download_pretrained_policy"]
 
 _REPO_ID = "DexForceAI/embodichain_model"
-_DEFAULT_REVISION = "28ed627f35dd5af38dedf7bee25ab44cad170e63"
+_DEFAULT_REVISION = "8ffe514999cc7d86a894f921af71d74b2117ae7b"
 _BUNDLE_FILES = (
     "run-manifest.json",
     "checkpoint.pt",
