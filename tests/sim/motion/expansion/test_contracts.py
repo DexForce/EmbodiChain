@@ -34,6 +34,7 @@ from embodichain.lab.sim.motion.expansion import (
     ValidationCheck,
     ValidationResult,
 )
+from embodichain.lab.sim.motion.expansion.source import SourceContext
 
 
 def _case() -> SceneCase:
@@ -62,6 +63,18 @@ def test_candidate_spec_keeps_physical_identity_separate_from_observation_fanout
     assert spec.observation_profiles == ("rgb_train_aug_v1", "depth_eval_v1")
     with pytest.raises(TypeError):
         spec.affordance_selection["new"] = "mutation"  # type: ignore[index]
+
+
+def test_source_context_keeps_provider_and_physical_clock_explicit():
+    context = SourceContext(
+        source_id="atomic_pick",
+        source_revision="git:abc",
+        unit_id="call_0",
+        scene_case=_case(),
+        control_dt=0.02,
+    )
+    assert context.scene_case.scene_case_id == "case"
+    assert context.control_dt == pytest.approx(0.02)
 
 
 def _template(**changes: object) -> TrajectoryTemplate:

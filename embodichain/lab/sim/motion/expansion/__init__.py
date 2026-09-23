@@ -72,6 +72,7 @@ from .operators import (
     via_points,
 )
 from .session import GenerationSession
+from .source import SourceAdapter, SourceContext
 
 __all__ = [
     "SPATIAL_METHODS",
@@ -114,4 +115,6 @@ __all__ = [
     "validate_motion_limits",
     "via_points",
     "GenerationSession",
+    "SourceAdapter",
+    "SourceContext",
 ]

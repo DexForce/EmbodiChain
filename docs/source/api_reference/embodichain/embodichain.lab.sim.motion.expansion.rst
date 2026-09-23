@@ -59,6 +59,8 @@ and persistence confirmations; this package does not instantiate them.
    expand_trajectory_variants
    sample_approach_cone
    GenerationSession
+   SourceContext
+   SourceAdapter
 
 Values and Evidence
 ~~~~~~~~~~~~~~~~~~~
@@ -73,6 +75,11 @@ treat the resulting owned tensors as read-only.
 ``CandidateSpec`` combines one Affordance selection and one trajectory variant
 under a single slot-independent candidate identity. Observation profiles are
 post-rollout fan-out metadata and do not create additional physical candidates.
+
+``SourceAdapter`` is the provider-neutral boundary for handwritten,
+MotionGenerator, Atomic Action, and Task Program sources. It exports a complete
+qpos template but does not own slots, simulator stepping, candidate identity, or
+persistence.
 
 Templates declare the complete joint order and use explicit qpos values.
 ``dt[0]`` is zero and each subsequent ``dt`` is the positive arrival interval
@@ -115,6 +122,12 @@ the package itself does not write or verify storage.
    :members:
 
 .. autoclass:: CandidateSpec
+   :members:
+
+.. autoclass:: SourceContext
+   :members:
+
+.. autoclass:: SourceAdapter
    :members:
 
 .. autoclass:: CandidateTrajectoryBatch
@@ -378,6 +391,14 @@ The package import path above is convenient for callers combining them.
    ValidationResult
    ExpertEpisode
    CommitReceipt
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.source
+
+.. autosummary::
+   :nosignatures:
+
+   SourceContext
+   SourceAdapter
 
 .. currentmodule:: embodichain.lab.sim.motion.expansion.cfg
 
