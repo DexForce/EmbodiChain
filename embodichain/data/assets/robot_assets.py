@@ -587,3 +587,29 @@ class AlohaMini(EmbodiChainDataset):
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+
+
+class TianjiMarvin(EmbodiChainDataset):
+    """Dataset class for the Tianji Marvin robot.
+
+    Directory structure:
+        TianjiMarvin/
+            robot_acd.urdf
+            robot_with_ee_acd.urdf
+    Example usage:
+        >>> from embodichain.data.assets.robot_assets import TianjiMarvin
+        >>> dataset = TianjiMarvin()
+        or
+        >>> from embodichain.data import get_data_path
+        >>> print(get_data_path("TianjiMarvin/robot_with_ee_acd.urdf"))
+    """
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "TianjiMarvin.zip"),
+            "26912baf970d03a77d83284472ec4806",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
