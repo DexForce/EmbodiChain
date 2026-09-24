@@ -1385,6 +1385,62 @@ def _prepared_axis_scene(
 
 
 @pytest.mark.parametrize(
+    "extents,rotation,horizontal,axis",
+    [
+        ((0.06, 0.24, 0.06), [0.0, 0.0, 0.0], False, [0.0, 0.0, 1.0]),
+        ((0.06, 0.24, 0.06), [90.0, 0.0, 0.0], True, [0.0, 0.0, 1.0]),
+        ((0.24, 0.06, 0.06), [0.0, 0.0, 90.0], True, [1.0, 0.0, 0.0]),
+    ],
+)
+def test_handover_source_region_follows_measured_axis(
+    tmp_path, extents, rotation, horizontal, axis
+):
+    scene = _prepared_axis_scene(tmp_path, source_extents=extents)
+    scene.planner_objects[0]["init_rot"][:] = rotation
+    graph = _fresh_handover_graph()
+    graph["nodes"][0]["call"] = {
+        "kind": "pick",
+        "object": "bottle",
+        "resources": {"primary": "left"},
+    }
+    graph["nodes"][1]["call"]["object"] = "bottle"
+    generated, paths = generate_task_program_bundle(
+        graph, scene, tmp_path / "bundle", robot_profile="dual_franka"
+    )
+    _verify_program_projection(paths.program, generated)
+    integration = load_config(paths.integration)
+    call_id = generated["nodes"][0]["call"]["call_id"]
+    assert call_id == (
+        "gen_sim.pick.handover_horizontal_source.bottle"
+        if horizontal
+        else "gen_sim.pick.handover_source"
+    )
+    options = integration["profile"]["action_options"][call_id]
+    assert options["pick_object_part"] == "top"
+    assert "pick_object_local_axis" not in options
+    factory = next(
+        x
+        for x in integration["runtime_services"]["registered_semantic_lowerers"]
+        if x.get("call_id") == call_id
+    )
+    assert "grasp_region" not in factory["routes"][0]
+    assert len(generated["nodes"]) == 3
+    if horizontal:
+        assert np.linalg.norm(options["approach_direction"]) == pytest.approx(1.0)
+        binding = next(
+            x
+            for x in integration["scene_binding"]["rigid_objects"]
+            if x["entity_id"] == "bottle"
+        )
+        assert binding["affordances"][0]["internal_axis"] == axis
+        constraints = load_config(paths.program.parent / "constraints.json")["presets"]
+        final = constraints[f"gen_sim.{generated['nodes'][-1]['id']}.stable"]
+        assert final["kind"] == "hold"
+        assert abs(final["world_axis"][2]) < 1e-6
+        assert final["motion_parts"] == ["right_arm"]
+
+
+@pytest.mark.parametrize(
     ("task_type", "terminal"), [("E1", "place"), ("E4", "hold"), ("E4", "place")]
 )
 def test_explicit_orientation_bundle_uses_shared_preflight_and_terminal_post(
@@ -1495,9 +1551,12 @@ def test_explicit_orientation_bundle_uses_shared_preflight_and_terminal_post(
         assert transport_monitor["params"]["attached_translation_threshold"] == 0.06
     if task_type == "E4":
         source_call = generated["nodes"][0]["call"]
-        assert source_call["call_id"] == "gen_sim.pick.handover_source"
+        assert (
+            source_call["call_id"] == "gen_sim.pick.handover_horizontal_source.bottle"
+        )
         options = integration["profile"]["action_options"]
         assert options[source_call["call_id"]]["pick_object_part"] == "top"
+        assert "pick_object_local_axis" not in options[source_call["call_id"]]
         assert options["hand_over"]["receive_pick_object_part"] == "center"
         assert source_call["call_id"] in integration["profile"]["effect_monitors"]
     assert integration["profile"]["action_options"]["place"][

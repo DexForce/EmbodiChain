@@ -17,6 +17,7 @@
 """Task-owned immutable route declarations and skill binding services."""
 
 from __future__ import annotations
+from copy import deepcopy
 from dataclasses import dataclass, make_dataclass, replace
 import hashlib
 import math
@@ -374,6 +375,34 @@ class _PickLowerer(RegisteredSemanticLowerer):
         )
 
 
+class _HorizontalHandoverPickLowerer(_PickLowerer):
+    """Carry source-only grasp geometry in an owned affordance snapshot."""
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+        option_template: ActionOptions,
+    ) -> SemanticLowering:
+        from .actions import _HANDOVER_SOURCE_AXIS
+
+        lowering = super().lower(
+            call, context=context, bound=bound, option_template=option_template
+        )
+        semantics = deepcopy(lowering.goal.semantics)
+        axis = getattr(semantics.affordance, "internal_axis", None)
+        if not isinstance(axis, torch.Tensor) or axis.shape != (3,):
+            raise ValueError(
+                "Horizontal handover source requires its declared local axis."
+            )
+        semantics.affordance.set_custom_config(
+            _HANDOVER_SOURCE_AXIS, tuple(float(value) for value in axis.detach().cpu())
+        )
+        return replace(lowering, goal=replace(lowering.goal, semantics=semantics))
+
+
 @dataclass(frozen=True, slots=True)
 class _PickLowererFactory(RegisteredSemanticLowererFactory):
     """Resolve canonical objects for configured pickup targets."""
@@ -427,17 +456,19 @@ def make_pick_factory(
 ) -> _PickLowererFactory:
     """Bind a task policy alias to the baseline's class-level factory identity.
 
-    Only an inert identifier is specialized; the lowerer implementation and
-    target Atomic Skill remain unchanged. No executable code comes from data.
+    Ordinary aliases retain the baseline lowerer. Horizontal E4 sources opt
+    into task-owned grasp geometry without extending the shared goal/options.
+    No executable code comes from data.
     """
     if call_id == _PICK_CALL_ID:
         return _PickLowererFactory(routes)
     if not call_id.startswith("gen_sim.pick."):
         raise ValueError("Task Pick aliases must use the gen_sim.pick namespace.")
     suffix = hashlib.sha256(call_id.encode("utf-8")).hexdigest()[:16]
+    horizontal = call_id.startswith("gen_sim.pick.handover_horizontal_source.")
     lowerer_type = type(
         f"_TaskPickLowerer_{suffix}",
-        (_PickLowerer,),
+        (_HorizontalHandoverPickLowerer if horizontal else _PickLowerer,),
         {"call_id": call_id, "__module__": __name__, "__slots__": ()},
     )
     factory_type = make_dataclass(
@@ -447,6 +478,7 @@ def make_pick_factory(
         namespace={
             "call_id": call_id,
             "lowerer_type": lowerer_type,
+            **({"revision": "3"} if horizontal else {}),
             "__module__": __name__,
         },
         frozen=True,

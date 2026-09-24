@@ -81,6 +81,7 @@ _AXIS_ALIGN_CALL_ID: Final = "simulation.axis_align"
 _COORDINATED_TRANSPORT_CALL_ID: Final = "simulation.coordinated_transport"
 _PARK_CALL_ID: Final = "simulation.park"
 _HANDOVER_SOURCE_PICK: Final = "gen_sim.pick.handover_source"
+_HORIZONTAL_HANDOVER_SOURCE_PICK: Final = "gen_sim.pick.handover_horizontal_source"
 _DEFAULT_PICK_LIFT_HEIGHT: Final = 0.16
 _PLACE_RELATIVE_CALL_ID: Final = "simulation.place_relative"
 _STACK_PLACE_CALL_ID: Final = "gen_sim.stack_place"
@@ -240,12 +241,21 @@ def generate_task_program_bundle(
         _write_json(root / "asset_adaptation.json", adaptation)
     selected_graph = _refine_upright_targets(selected_graph, scene)
     selected_graph = _refine_coordinated_targets(selected_graph, scene)
+    scene_objects = {item["runtime_uid"]: item for item in scene.planner_objects}
     for node in selected_graph["nodes"]:
         if node["task_type"] == "E4" and node["call"]["kind"] == "pick":
             call = node["call"]
+            source = scene_objects[call["object"]]
+            world_axis = _initial_rotation(source) @ np.asarray(
+                _longest_local_axis(source)
+            )
             node["call"] = {
                 "kind": "registered",
-                "call_id": _HANDOVER_SOURCE_PICK,
+                "call_id": (
+                    f"{_HORIZONTAL_HANDOVER_SOURCE_PICK}.{call['object']}"
+                    if abs(float(world_axis[2])) < 0.5
+                    else _HANDOVER_SOURCE_PICK
+                ),
                 "arguments": {
                     "object": call["object"],
                     "target": f"{node['task_instance_id']}_source_grasp",
@@ -503,6 +513,13 @@ def _task_stability_payload(
         and node["call"]["arguments"].get("target") == "current_object_pose"
     }
     terminal_nodes = {group["node_ids"][-1] for group in graph["task_groups"]}
+    horizontal_handover_groups = {
+        node["task_instance_id"]
+        for node in graph["nodes"]
+        if node["call"]
+        .get("call_id", "")
+        .startswith(_HORIZONTAL_HANDOVER_SOURCE_PICK + ".")
+    }
     routes = {
         (r["object_id"], r["reference_entity_id"], r["relation"]): r
         for r in _relative_place_route_payloads(graph, scene, settled=True)
@@ -518,6 +535,23 @@ def _task_stability_payload(
     presets: dict[str, Any] = {}
     for node in graph["nodes"]:
         call = node["call"]
+        if (
+            call["kind"] == "hand_over"
+            and node["id"] in terminal_nodes
+            and node["task_instance_id"] in horizontal_handover_groups
+        ):
+            object_id = str(call["object"])
+            axis = _longest_local_axis(objects[object_id])
+            presets[f"gen_sim.{node['id']}.stable"] = {
+                "kind": "hold",
+                "entity": object_id,
+                "local_axis": axis,
+                "world_axis": (
+                    _initial_rotation(objects[object_id]) @ np.asarray(axis)
+                ).tolist(),
+                "minimum_alignment": math.cos(math.pi / 18.0),
+                "motion_parts": [motion_parts[call["resources"]["destination"]]],
+            }
         if call["kind"] == "place" and node.get("task_instance_id") in oriented_groups:
             object_id = str(call["object"])
             presets[f"gen_sim.{node['id']}.stable"] = {
@@ -933,6 +967,7 @@ def _integration_payload(
     move_held_routes: list[dict[str, Any]] = []
     pour_geometry: dict[str, dict[str, Any]] = {}
     upright_move_objects: set[str] = set()
+    horizontal_handover_objects: set[str] = set()
     pick_routes: dict[str, list[dict[str, Any]]] = {}
     upright_released: set[str] = set()
     generic_picks_are_upright: list[bool] = []
@@ -1014,19 +1049,35 @@ def _integration_payload(
                 coordinated_hold_routes.append(route)
             else:
                 coordinated_routes.append(route)
-        elif call["kind"] == "registered" and call["call_id"] == _HANDOVER_SOURCE_PICK:
+        elif call["kind"] == "registered" and (
+            call["call_id"] == _HANDOVER_SOURCE_PICK
+            or call["call_id"].startswith(_HORIZONTAL_HANDOVER_SOURCE_PICK + ".")
+        ):
             arguments = call["arguments"]
-            referenced_objects.add(str(arguments["object"]))
-            pick_routes.setdefault(_HANDOVER_SOURCE_PICK, []).append(
+            object_id = str(arguments["object"])
+            call_id = call["call_id"]
+            horizontal = call_id.startswith(_HORIZONTAL_HANDOVER_SOURCE_PICK + ".")
+            referenced_objects.add(object_id)
+            pick_routes.setdefault(call_id, []).append(
                 {
-                    "object_id": str(arguments["object"]),
+                    "object_id": object_id,
                     "target_id": str(arguments["target"]),
                 }
             )
-            pick_options[_HANDOVER_SOURCE_PICK] = {
+            pick_options[call_id] = {
                 **default_pick_options,
                 "pick_object_part": "top",
             }
+            if horizontal:
+                source = scene_objects[object_id]
+                horizontal_handover_objects.add(object_id)
+                axis = _initial_rotation(source) @ np.asarray(
+                    _longest_local_axis(source)
+                )
+                approach = np.array([0.0, 0.0, -1.0]) - axis
+                pick_options[call_id]["approach_direction"] = (
+                    approach / np.linalg.norm(approach)
+                ).tolist()
         elif call["kind"] == "registered" and (
             call["call_id"] == _PICK_CALL_ID
             or call["call_id"].startswith("gen_sim.pick.")
@@ -1216,7 +1267,13 @@ def _integration_payload(
                 "entity_id": f"{entity_id}_grasp",
                 "kind": "antipodal_grasp",
             }
-            if entity_id in axis_align_objects | pour_objects | upright_move_objects:
+            if (
+                entity_id
+                in axis_align_objects
+                | pour_objects
+                | upright_move_objects
+                | horizontal_handover_objects
+            ):
                 grasp_affordance["internal_axis"] = _longest_local_axis(source)
             affordances.append(grasp_affordance)
         occupied_landings: list[tuple[list[float], dict[str, Any]]] = []
@@ -1779,7 +1836,12 @@ def _add_handover_staging(graph: SemanticTaskGraph, scene: Any) -> SemanticTaskG
         eligible = (
             node["task_type"] == "E4"
             and pick["task_instance_id"] == node["task_instance_id"]
-            and pick_call.get("call_id") == _HANDOVER_SOURCE_PICK
+            and (
+                pick_call.get("call_id") == _HANDOVER_SOURCE_PICK
+                or pick_call.get("call_id", "").startswith(
+                    _HORIZONTAL_HANDOVER_SOURCE_PICK + "."
+                )
+            )
             and pick_call.get("arguments", {}).get("object") == object_id
             and pick_call.get("resources", {}).get("primary")
             == call["resources"]["source"]

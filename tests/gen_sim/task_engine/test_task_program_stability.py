@@ -348,6 +348,8 @@ def test_upright_hold_checks_orientation_without_inventing_a_position_goal() -> 
         {"minimum_alignment": 1.1},
         {"absolute_alignment": "false"},
         {"target_axis": [0.0, 0.0, 1.0]},
+        {"world_axis": [0.0, 0.0, 0.0]},
+        {"world_axis": [1.0, 0.0, 0.0]},
     ],
 )
 def test_upright_constraint_rejects_invalid_values(invalid_field: dict) -> None:
@@ -367,6 +369,35 @@ def test_upright_constraint_normalizes_declared_local_axis() -> None:
         {"kind": "upright", "entity": "cube", "local_axis": [2.0, 0.0, 0.0]}
     )
     assert cfg.local_axis == (1.0, 0.0, 0.0)
+
+
+def test_horizontal_hold_checks_declared_axis_and_rejects_vertical_pose():
+    pose = torch.eye(4).repeat(3, 1, 1)
+    pose[0, :3, :3] = torch.tensor([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+    pose[2, :3, :3] = torch.tensor([[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]])
+    cfg = StabilityConstraint.decode(
+        {
+            "entity": "cup",
+            "kind": "hold",
+            "local_axis": [1.0, 0.0, 0.0],
+            "world_axis": [0.0, 2.0, 0.0],
+            "motion_parts": ["right_arm"],
+            "duration": 0.08,
+            "timeout": 0.12,
+        }
+    )
+    assert cfg.world_axis == (0.0, 1.0, 0.0)
+    port, policy, segment = _local_port(cfg, pose)
+    list(
+        port.actions(
+            policy, segment=segment, active_mask=torch.ones(3, dtype=torch.bool)
+        )
+    )
+    assert port.post_policy_result(policy, segment=segment).tolist() == [
+        True,
+        False,
+        False,
+    ]
 
 
 def test_stability_rejects_conflicting_absolute_and_relative_targets() -> None:

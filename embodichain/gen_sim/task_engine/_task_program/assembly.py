@@ -188,8 +188,9 @@ class _TaskFactory(SimulationTaskProgramFactory):
             return engine
 
         engine = super().create_atomic_action_engine(profile)
-        from .actions import GenSimMoveHeldObject, GenSimPlace, GenSimPour
+        from .actions import GenSimMoveHeldObject, GenSimPickUp, GenSimPlace, GenSimPour
 
+        engine.register(GenSimPickUp(), replace=True)
         engine.register(GenSimMoveHeldObject(), replace=True)
         engine.register(GenSimPlace(), replace=True)
         engine.register(GenSimPour(self._pour_receivers), replace=True)

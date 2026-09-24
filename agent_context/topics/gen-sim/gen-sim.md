@@ -110,14 +110,23 @@ this visual path. Without usable Task Engine LLM configuration, text-only
 binding and its existing conflict behavior remain unchanged.
 E4 may defer unnamed transfer/receiver arms as `auto`; the planner binds the
 source from the held state or nearest scene side and the other arm as receiver,
-while preserving explicitly named arms. Multiple children
+while preserving explicitly named arms. For scene-horizontal objects, generated
+source lowerers snapshot the measured object-local axis into task-owned grasp
+metadata and declare an end-directed diagonal approach. The GenSim Pick wrapper
+uses that axis only for marked source calls, retaining shared Pick options and
+the receiver's separate center-grasp candidates. Unmarked Pick calls delegate
+unchanged. Terminal preserve-pose handovers verify receiver attachment and the
+declared world-axis alignment; ordinary upright constraints still use world Z.
+Regenerate horizontal E4 bundles after lowerer revisions; do not bypass their
+fingerprint checks or extend the shared Pick/AxisAlign configuration schema.
+Multiple children
 placed inside the same measured container reserve each prior landing footprint
 and margin; insufficient space or an unmeasured shared floor fails preflight
 instead of assigning overlapping destinations. These are planning contracts,
 not physical placement acceptance.
 Generated non-drawer held-object transports declare a measured attachment postcondition.
-For deployments without drawer routes, GenSim installs wrappers around MoveHeldObject and Pour
-descriptors after shared engine validation; shared Lab action classes and
+For deployments without drawer routes, GenSim installs PickUp, MoveHeldObject,
+Place and Pour wrappers after shared engine validation; shared Lab action classes and
 options remain unchanged. The transport wrapper stages above the target and
 returns the input attachment as its expected effect, so the existing composite
 monitor verifies retention before observed-transform reconciliation. This is
