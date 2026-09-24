@@ -151,6 +151,8 @@ source:
   unit_scope: action
   template_id: place
   phase_permissions:
+    approach: []
+    release: []
     retract: [joint_residual, via_points]
   phase_kinds:
     approach: free
