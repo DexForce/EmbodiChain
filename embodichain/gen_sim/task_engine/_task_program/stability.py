@@ -54,6 +54,7 @@ class StabilityConstraint:
     translation_drift: float = 0.02
     rotation_drift: float = math.pi / 18.0
     motion_parts: tuple[str, ...] = ()
+    world_axis: tuple[float, float, float] | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in {"upright", "stack", "hold", "placement"}:
@@ -94,6 +95,7 @@ class StabilityConstraint:
             raise ValueError("minimum_alignment must be in [0, 1].")
         for name in (
             "local_axis",
+            "world_axis",
             "reference_axis",
             "displacement",
             "target_position",
@@ -153,6 +155,10 @@ class StabilityConstraint:
             raise ValueError("Stack stability requires support geometry and both axes.")
         if self.kind == "upright" and self.local_axis is None:
             raise ValueError("Upright stability requires its object-local axis.")
+        if self.world_axis is not None and (
+            self.kind != "hold" or self.local_axis is None
+        ):
+            raise ValueError("A world-axis hold requires its object-local axis.")
         if (self.reference is None) != (
             self.displacement is None
         ) and self.kind != "stack":
@@ -283,7 +289,10 @@ class TaskStabilityPort:
             valid = torch.isfinite(pose).all(dim=-1).all(dim=-1)
             measurements: dict[str, Any] = {}
             if cfg.local_axis is not None:
-                alignment = (pose[:, :3, :3] @ pose.new_tensor(cfg.local_axis))[:, 2]
+                world_axis = pose.new_tensor(cfg.world_axis or (0.0, 0.0, 1.0))
+                alignment = (
+                    (pose[:, :3, :3] @ pose.new_tensor(cfg.local_axis)) * world_axis
+                ).sum(-1)
                 valid &= alignment >= cfg.minimum_alignment
                 measurements["alignment"] = alignment.tolist()
             reference = self._pose(cfg.reference) if cfg.reference is not None else None
