@@ -399,6 +399,39 @@ See the Profiling section under Run Env for report format. Outputs are written t
 
 ## Policy Evaluation
 
+### Pretrained policies
+
+Download an official policy and open its simulator task:
+
+```bash
+embodichain eval-policy --pretrained g1-flat-ppo-newton \
+    --viewer --command 0.3 0 0 --device cuda:0 --sim-device gpu
+```
+
+Model IDs are directory names under `policies/` in
+[DexForceAI/embodichain_model](https://huggingface.co/DexForceAI/embodichain_model).
+The shipped default selects a tested HF commit. `--revision <commit-or-tag>`
+can select another repository snapshot; named revisions resolve to one commit
+before the index and model are downloaded. That snapshot must use a supported
+model format and an installed task package.
+
+The first run downloads only the selected model bundle, then resolves robot
+assets through the existing asset downloader. Later runs reuse downloaded
+files. The published locomotion configs default to `fast-rt`; `--duration 20`
+bounds a Viewer run. Omit `--viewer` and use `--episodes 1 --num-envs 1` for
+Headless evaluation.
+
+`--cache-dir` changes the model cache root, which defaults to
+`~/.cache/embodichain/policies`. Robot assets still use `EMBODICHAIN_DATA_ROOT`.
+Reports default to `./outputs/policy_eval/<model-id>/` and record the actual HF
+repository, commit and model ID. `--output` overrides that output location.
+
+`--pretrained` cannot be combined with RUN, `--profile`, `--checkpoint`,
+`--config` or `--gym-config`: each published bundle supplies its matching
+weights and configuration. `--offline` remains an external Profile option.
+
+### Local checkpoints
+
 Evaluate the latest checkpoint from an EmbodiChain training run:
 
 ```bash
@@ -428,6 +461,9 @@ embodichain eval-policy \
 | Argument | Default | Description |
 |---|---|---|
 | ``RUN`` | *(optional)* | Training run containing ``run-manifest.json`` |
+| ``--pretrained`` | *(optional)* | Official pretrained model ID; supplies a complete RUN |
+| ``--revision`` | Tested HF commit | Repository revision for ``--pretrained`` |
+| ``--cache-dir`` | Model or Profile cache | Cache root for ``--pretrained`` or external Profiles |
 | ``--checkpoint`` | ``latest`` with RUN | ``latest``, ``best``, or a checkpoint path |
 | ``--config`` | RUN manifest | Training configuration override |
 | ``--gym-config`` | RUN manifest | Simulator task configuration override |
@@ -441,7 +477,7 @@ embodichain eval-policy \
 | ``--renderer`` | Training configuration or ``hybrid`` | Viewer renderer |
 | ``--device`` | Training configuration | PyTorch inference device |
 | ``--sim-device`` | Inference device | Simulation device |
-| ``--output`` | RUN or checkpoint evaluations | Evaluation output parent directory |
+| ``--output`` | RUN/checkpoint evaluations; ``outputs/policy_eval/<model-id>`` for pretrained | Evaluation output parent directory |
 
 External Motion Profiles use the same command with `--profile`. See
 {doc}`policy_evaluation` for training-run layout, execution paths, Viewer

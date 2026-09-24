@@ -48,6 +48,21 @@ embodichain.data.assets.planner_assets
 
    download_neural_planner_checkpoint
 
+embodichain.data.assets.policy_assets
+-------------------------------------
+
+Resolve one official model ID to a pinned repository snapshot and materialize
+its native RUN files inside the model cache. The returned provenance records
+the exact repository and revision used for evaluation.
+
+.. currentmodule:: embodichain.data.assets.policy_assets
+
+.. autosummary::
+
+   download_pretrained_policy
+
+.. autofunction:: download_pretrained_policy
+
 embodichain.data.assets.solver_assets
 -------------------------------------
 
