@@ -916,6 +916,12 @@ def _bridge(
     return bridge, runtime, clock
 
 
+def test_bridge_without_generation_provider_has_no_records() -> None:
+    bridge, _, _ = _bridge(duration=STEP_DT)
+
+    assert bridge.generation_records == ()
+
+
 @pytest.mark.parametrize(
     "overrides, expected_total",
     [

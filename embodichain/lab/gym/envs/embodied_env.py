@@ -90,10 +90,12 @@ from embodichain.data import get_data_path
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim.motion.expansion import TrajectoryGenerationJobCfg
     from embodichain.lab.task_program import CompiledTaskProgram, TaskProgramCfg
     from embodichain.lab.task_program.integrations import (
         TaskProgramAdapterFactory,
         TaskProgramEnvironmentAdapter,
+        TaskProgramGenerationRecord,
     )
     from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
 
@@ -2234,17 +2236,35 @@ class EmbodiedEnv(BaseEnv):
     def create_task_program_bridge(
         self,
         program: CompiledTaskProgram,
+        *,
+        generation_profile: TrajectoryGenerationJobCfg | None = None,
+        generation_candidate_index: int = 0,
     ) -> TaskProgramDemoBridge:
         """Create the Gym demo bridge through the explicit adapter.
 
         Args:
             program: Compiled provider-free Task Program.
+            generation_profile: Optional episode-scoped Generation Profile.
+            generation_candidate_index: FIFO candidate ordinal selected from
+                each matching Atomic plan.
 
         Returns:
             Atomic demo bridge whose segments are consumed lazily.
 
         """
-        return self._checked_task_program_adapter().create_bridge(program)
+        return self._checked_task_program_adapter().create_bridge(
+            program,
+            generation_profile=generation_profile,
+            candidate_index=generation_candidate_index,
+        )
+
+    @property
+    def task_program_generation_records(
+        self,
+    ) -> tuple[TaskProgramGenerationRecord, ...]:
+        """Return records owned by the active generated Task Program episode."""
+        bridge = getattr(self, "_active_task_program_bridge", None)
+        return () if bridge is None else bridge.generation_records
 
     def is_task_success(self, **kwargs: Any) -> torch.Tensor:
         """Return completed Task Program acceptance or legacy task success.
@@ -2286,6 +2306,8 @@ class EmbodiedEnv(BaseEnv):
         self,
         *args,
         task_program: TaskProgramCfg | CompiledTaskProgram | None = None,
+        generation_profile: TrajectoryGenerationJobCfg | None = None,
+        generation_candidate_index: int = 0,
         **kwargs,
     ) -> Iterable[DemoSegment] | None:
         """Create the semantic segments that make up one task episode.
@@ -2300,6 +2322,10 @@ class EmbodiedEnv(BaseEnv):
             *args: Positional arguments forwarded to the legacy planner.
             task_program: Optional episode-level program config or provider-free
                 compiled program.
+            generation_profile: Optional source-neutral profile applied to
+                matching grounded Atomic calls in this episode.
+            generation_candidate_index: FIFO candidate ordinal selected from
+                each generated reference.
             **kwargs: Keyword arguments forwarded to the legacy planner.
 
         Returns:
@@ -2320,9 +2346,20 @@ class EmbodiedEnv(BaseEnv):
                 if type(selected_program) is CompiledTaskProgram
                 else self.compile_task_program(selected_program)
             )
-            bridge = self.create_task_program_bridge(compiled_program)
+            bridge = self.create_task_program_bridge(
+                compiled_program,
+                generation_profile=generation_profile,
+                generation_candidate_index=generation_candidate_index,
+            )
             self._active_task_program_bridge = bridge
             return bridge.iter_segments()
+
+        if generation_profile is not None:
+            raise ValueError("generation_profile requires a selected Task Program")
+        if generation_candidate_index != 0:
+            raise ValueError(
+                "generation_candidate_index requires a selected Task Program"
+            )
 
         actions = self.create_demo_action_list(*args, **kwargs)
         if actions is None:

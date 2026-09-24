@@ -30,7 +30,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 import math
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, TYPE_CHECKING, runtime_checkable
 
 import torch
 from tensordict import TensorDict
@@ -72,6 +72,12 @@ from embodichain.lab.task_program.semantics.calls import Pick, Place
 from embodichain.lab.task_program.semantics.integration import SemanticValidationError
 from embodichain.lab.task_program.semantics.profiles import EffectAssurance
 from embodichain.lab.sim.types import EnvAction
+
+if TYPE_CHECKING:
+    from embodichain.lab.task_program.integrations.generation import (
+        TaskProgramCandidatePlanTransformFactory,
+        TaskProgramGenerationRecord,
+    )
 
 _SAFE_HOLD_ACTION_KINDS = frozenset(
     {"runtime_safe_hold", "runtime_wait_hold", "runtime_abort_safe_hold"}
@@ -978,6 +984,9 @@ class TaskProgramDemoBridge:
         validator_port: SegmentValidatorPort | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
         parallel_safety_validator: ParallelCommandSafetyValidator | None = None,
+        generation_trace_provider: (
+            TaskProgramCandidatePlanTransformFactory | None
+        ) = None,
     ) -> None:
         if not isinstance(program, CompiledTaskProgramPort):
             raise TypeError("program must implement CompiledTaskProgramPort.")
@@ -1009,6 +1018,19 @@ class TaskProgramDemoBridge:
                 "parallel_safety_validator must implement "
                 "ParallelCommandSafetyValidator."
             )
+        if generation_trace_provider is not None:
+            from embodichain.lab.task_program.integrations.generation import (
+                TaskProgramCandidatePlanTransformFactory,
+            )
+
+            if not isinstance(
+                generation_trace_provider,
+                TaskProgramCandidatePlanTransformFactory,
+            ):
+                raise TypeError(
+                    "generation_trace_provider must be a "
+                    "TaskProgramCandidatePlanTransformFactory or None."
+                )
         self._program = program
         self._runtime = runtime
         self._sink = command_sink
@@ -1017,6 +1039,7 @@ class TaskProgramDemoBridge:
         self._validator_port = validator_port
         self._runner_cfg = deepcopy(runner_cfg or ExecutionRunnerCfg())
         self._parallel_safety_validator = parallel_safety_validator
+        self._generation_trace_provider = generation_trace_provider
         self._active_segment_id: str | None = None
         self._eligible_mask: torch.Tensor | None = None
         self._program_completed = False
@@ -1030,6 +1053,13 @@ class TaskProgramDemoBridge:
     def program_completed(self) -> bool:
         """Return whether every compiled segment completed its full lifecycle."""
         return self._program_completed
+
+    @property
+    def generation_records(self) -> tuple[TaskProgramGenerationRecord, ...]:
+        """Return owned generation records from the optional transform provider."""
+        if self._generation_trace_provider is None:
+            return ()
+        return self._generation_trace_provider.records
 
     @property
     def completion_mask(self) -> torch.Tensor:

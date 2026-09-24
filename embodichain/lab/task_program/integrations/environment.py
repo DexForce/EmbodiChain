@@ -32,6 +32,7 @@ import math
 from typing import Protocol, runtime_checkable
 
 from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
+from embodichain.lab.sim.motion.expansion import TrajectoryGenerationJobCfg
 from embodichain.lab.sim.atomic_actions.runner import (
     ExecutionRunnerCfg,
     ObservationProvider,
@@ -70,6 +71,9 @@ from embodichain.lab.task_program.semantics.profiles import (
     RobotSkillProfile,
 )
 from embodichain.lab.task_program.runtime.executor import SemanticCallExecutor
+from embodichain.lab.task_program.runtime.generation import (
+    TaskProgramPlanTransformFactory,
+)
 from embodichain.lab.task_program.semantics.scene import SceneRegistry
 
 from embodichain.lab.gym.envs.task_program.bridge import (
@@ -90,6 +94,7 @@ from .catalog import (
     IntegrationFingerprintMismatch,
     SimulationTaskProgramRegistration,
 )
+from .generation import TaskProgramCandidatePlanTransformFactory
 from embodichain.lab.task_program.language.schema import (
     TaskProgramCfg,
     TaskProgramIntegrationCfg,
@@ -290,6 +295,8 @@ class TaskProgramRuntimeAssembly:
     runner_cfg: ExecutionRunnerCfg
     parallel_safety_validator: ParallelCommandSafetyValidator | None
     runtime: SemanticCallExecutor
+    plan_transform_factory: TaskProgramPlanTransformFactory | None = None
+    generation_trace_provider: TaskProgramCandidatePlanTransformFactory | None = None
 
 
 class TaskProgramEnvironmentAdapter:
@@ -657,10 +664,31 @@ class TaskProgramEnvironmentAdapter:
     def _assemble_execution_runtime(
         self,
         semantic: SemanticExecutorComponents,
+        *,
+        plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+        generation_trace_provider: (
+            TaskProgramCandidatePlanTransformFactory | None
+        ) = None,
     ) -> TaskProgramRuntimeAssembly:
         """Attach live observation, evidence, command, and runtime boundaries."""
         if type(semantic) is not SemanticExecutorComponents:
             raise TypeError("semantic must be exactly SemanticExecutorComponents.")
+        if plan_transform_factory is not None and not isinstance(
+            plan_transform_factory,
+            TaskProgramPlanTransformFactory,
+        ):
+            raise TypeError(
+                "plan_transform_factory must implement "
+                "TaskProgramPlanTransformFactory or be None."
+            )
+        if generation_trace_provider is not None and not isinstance(
+            generation_trace_provider,
+            TaskProgramCandidatePlanTransformFactory,
+        ):
+            raise TypeError(
+                "generation_trace_provider must be a "
+                "TaskProgramCandidatePlanTransformFactory or None."
+            )
         self._validate_registration_ownership()
 
         clock = EnvironmentStepClock(self._step_dt)
@@ -744,6 +772,7 @@ class TaskProgramEnvironmentAdapter:
             evidence_collector,
             clock=clock,
             runner_cfg=deepcopy(selected_runner_cfg),
+            plan_transform_factory=plan_transform_factory,
         )
         parallel_safety_validator = self._parallel_safety_validator
         if (
@@ -790,9 +819,17 @@ class TaskProgramEnvironmentAdapter:
             runner_cfg=selected_runner_cfg,
             parallel_safety_validator=parallel_safety_validator,
             runtime=runtime,
+            plan_transform_factory=plan_transform_factory,
+            generation_trace_provider=generation_trace_provider,
         )
 
-    def create_bridge(self, program: CompiledTaskProgram) -> TaskProgramDemoBridge:
+    def create_bridge(
+        self,
+        program: CompiledTaskProgram,
+        *,
+        generation_profile: TrajectoryGenerationJobCfg | None = None,
+        candidate_index: int = 0,
+    ) -> TaskProgramDemoBridge:
         """Create a fresh Gym bridge for one provider-free compiled program.
 
         Args:
@@ -807,7 +844,33 @@ class TaskProgramEnvironmentAdapter:
         self._preflight_program_surfaces(program)
         semantic = self._assemble_semantic_components(program.integration)
         self._preflight_program(program, semantic.compiler)
-        assembly = self._assemble_execution_runtime(semantic)
+        if generation_profile is not None and not isinstance(
+            generation_profile,
+            TrajectoryGenerationJobCfg,
+        ):
+            raise TypeError(
+                "generation_profile must be a TrajectoryGenerationJobCfg or None."
+            )
+        if type(candidate_index) is not int or candidate_index < 0:
+            raise ValueError("candidate_index must be a non-negative integer.")
+        if generation_profile is None and candidate_index != 0:
+            raise ValueError("candidate_index requires a generation_profile.")
+        generation = (
+            None
+            if generation_profile is None
+            else TaskProgramCandidatePlanTransformFactory(
+                generation_profile,
+                candidate_index=candidate_index,
+                program_id=program.program_id,
+                integration_id=self._scene_registry_id,
+                robot_profile_id=self._robot_profile_id,
+            )
+        )
+        assembly = self._assemble_execution_runtime(
+            semantic,
+            plan_transform_factory=generation,
+            generation_trace_provider=generation,
+        )
         return TaskProgramDemoBridge(
             program,
             assembly.runtime,
@@ -817,6 +880,7 @@ class TaskProgramEnvironmentAdapter:
             validator_port=self._validator_port,
             runner_cfg=assembly.runner_cfg,
             parallel_safety_validator=assembly.parallel_safety_validator,
+            generation_trace_provider=assembly.generation_trace_provider,
         )
 
     def _preflight_program_surfaces(
