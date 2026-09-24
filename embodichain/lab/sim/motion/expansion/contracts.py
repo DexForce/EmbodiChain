@@ -39,6 +39,7 @@ __all__ = [
     "TrajectoryPhase",
     "TrajectoryTemplate",
     "CandidateIdentity",
+    "ProposalRequest",
     "CandidateSpec",
     "CandidateTrajectoryBatch",
     "ValidationCheck",
@@ -318,6 +319,35 @@ class CandidateIdentity:
             _text(self.parent_id, "parent_id")
             if self.parent_id == self.candidate_id:
                 raise ValueError("a candidate cannot be its own parent")
+
+
+@dataclass(frozen=True)
+class ProposalRequest:
+    """Validated input for one transactional candidate identity allocation."""
+
+    scene_case_id: str
+    initial_state_id: str
+    source_id: str
+    source_revision: str
+    template_id: str
+    operator_id: str
+    geometry_family_id: str | None = None
+    parent_id: str | None = None
+
+    def __post_init__(self) -> None:
+        for name in (
+            "scene_case_id",
+            "initial_state_id",
+            "source_id",
+            "source_revision",
+            "template_id",
+            "operator_id",
+        ):
+            _text(getattr(self, name), name)
+        for name in ("geometry_family_id", "parent_id"):
+            value = getattr(self, name)
+            if value is not None:
+                _text(value, name)
 
 
 @dataclass(frozen=True)

@@ -31,6 +31,7 @@ from embodichain.lab.sim.motion.expansion.contracts import (
     CandidateTrajectoryBatch,
     CommitReceipt,
     ExpertEpisode,
+    ProposalRequest,
     SceneCase,
     TrajectoryPhase,
     ValidationCheck,
@@ -70,6 +71,44 @@ def _propose(session: GenerationSession, case: SceneCase = CASE, **kwargs: objec
         operator_id="joint_residual",
         **kwargs,
     )
+
+
+def test_generation_streams_advance_and_replay_across_sessions() -> None:
+    def draw(session: GenerationSession) -> torch.Tensor:
+        generator = session.generation_generator(
+            "case",
+            "initial",
+            source_id="source",
+            source_revision="revision",
+            template_id="template",
+            operation_id="trajectory_expansion",
+        )
+        return torch.rand(4, generator=generator)
+
+    left = _session()
+    right = _session()
+
+    left_first = draw(left)
+    left_second = draw(left)
+    right_first = draw(right)
+
+    assert torch.equal(left_first, right_first)
+    assert not torch.equal(left_first, left_second)
+
+
+def test_propose_many_is_atomic_when_budget_is_insufficient() -> None:
+    session = _session(collection={"max_proposals": 1})
+    requests = (
+        ProposalRequest("case", "initial", "source", "r1", "template", "nominal"),
+        ProposalRequest("case", "initial", "source", "r1", "template", "residual"),
+    )
+
+    with pytest.raises(RuntimeError, match="Proposal budget"):
+        session.propose_many(requests)
+
+    snapshot = session.snapshot()
+    assert snapshot["counts"]["proposed"] == 0
+    assert snapshot["audit"] == ()
 
 
 def _batch(*identities: CandidateIdentity) -> CandidateTrajectoryBatch:

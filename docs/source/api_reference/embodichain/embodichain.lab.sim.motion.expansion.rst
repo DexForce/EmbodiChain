@@ -20,6 +20,7 @@ and persistence confirmations; this package does not instantiate them.
    :nosignatures:
 
    CandidateIdentity
+   ProposalRequest
    CandidateSpec
    CandidateCoordinator
    CandidateWorkItem
@@ -129,6 +130,9 @@ the package itself does not write or verify storage.
    :members:
 
 .. autoclass:: CandidateIdentity
+   :members:
+
+.. autoclass:: ProposalRequest
    :members:
 
 .. autoclass:: CandidateSpec
@@ -407,6 +411,7 @@ The package import path above is convenient for callers combining them.
    TrajectoryPhase
    TrajectoryTemplate
    CandidateIdentity
+   ProposalRequest
    CandidateSpec
    CandidateTrajectoryBatch
    ValidationCheck
