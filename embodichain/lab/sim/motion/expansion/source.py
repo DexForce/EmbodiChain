@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import math
-from typing import ClassVar, Generic, Protocol, TypeVar
+from typing import ClassVar, Generic, Protocol, TypeVar, runtime_checkable
 
 import torch
 
@@ -61,6 +61,7 @@ class SourceContext:
             raise ValueError("control_dt must be finite and positive")
 
 
+@runtime_checkable
 class SourceAdapter(Protocol, Generic[SourceT]):
     """Convert one expert source unit into a reusable trajectory template.
 

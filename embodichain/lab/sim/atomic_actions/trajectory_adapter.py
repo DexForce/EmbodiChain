@@ -24,6 +24,7 @@ from dataclasses import dataclass
 import torch
 
 from embodichain.lab.sim.motion.expansion import (
+    SourceContext,
     TrajectoryPhase,
     TrajectoryTemplate,
 )
@@ -42,25 +43,16 @@ class ActionPlanTemplateAdapter:
     unlisted operators are rejected instead of being inferred from a skill name.
     """
 
-    source_id: str
-    source_revision: str
-    template_id: str
     joint_names: tuple[str, ...]
     phase_permissions: Mapping[str, Sequence[str]]
-    phase_kinds: Mapping[str, str] | None = None
+    phase_kinds: Mapping[str, str]
     controlled_joint_indices: tuple[int, ...] | None = None
     validator_id: str = "default"
+    kind: ClassVar[str] = "atomic_action"
 
     def __post_init__(self) -> None:
-        for name in (
-            "source_id",
-            "source_revision",
-            "template_id",
-            "validator_id",
-        ):
-            value = getattr(self, name)
-            if type(value) is not str or not value.strip():
-                raise ValueError(f"{name} must be a non-empty string")
+        if type(self.validator_id) is not str or not self.validator_id.strip():
+            raise ValueError("validator_id must be a non-empty string")
         names = tuple(self.joint_names)
         if not names or len(set(names)) != len(names):
             raise ValueError("joint_names must be non-empty and unique")
@@ -69,7 +61,7 @@ class ActionPlanTemplateAdapter:
             str(name): tuple(values) for name, values in self.phase_permissions.items()
         }
         object.__setattr__(self, "phase_permissions", permissions)
-        kinds = {} if self.phase_kinds is None else dict(self.phase_kinds)
+        kinds = dict(self.phase_kinds)
         if any(kind not in ("free", "contact", "hold") for kind in kinds.values()):
             raise ValueError("phase_kinds values must be free, contact, or hold")
         object.__setattr__(self, "phase_kinds", kinds)
@@ -87,56 +79,63 @@ class ActionPlanTemplateAdapter:
             raise ValueError("controlled_joint_indices must index joint_names")
         object.__setattr__(self, "controlled_joint_indices", controlled)
 
-    def export(self, plan: ActionPlan) -> TrajectoryTemplate:
+    def export_template(
+        self,
+        source: ActionPlan,
+        *,
+        context: SourceContext,
+    ) -> TrajectoryTemplate:
         """Export a single-row, explicitly permissioned ActionPlan.
 
         Args:
-            plan: Validated plan with one successful row and a retained qpos
+            source: Validated plan with one successful row and a retained qpos
                 trajectory.
+            context: Coordinator-owned source and scene identity.
 
         Returns:
             A detached :class:`TrajectoryTemplate` on the CPU/device of the
             source plan.
         """
-        if not isinstance(plan, ActionPlan):
-            raise TypeError("plan must be an ActionPlan.")
-        trajectory = plan.joint_trajectory
+        if not isinstance(source, ActionPlan):
+            raise TypeError("source must be an ActionPlan")
+        if not isinstance(context, SourceContext):
+            raise TypeError("context must be a SourceContext")
+        trajectory = source.joint_trajectory
         if trajectory is None:
-            raise ValueError("ActionPlan must retain a joint trajectory.")
-        if trajectory.batch_size != 1 or not plan.success_all:
-            raise ValueError("The initial adapter supports one successful row.")
+            raise ValueError("ActionPlan must retain a joint trajectory")
+        if trajectory.batch_size != 1 or not source.success_all:
+            raise ValueError("the initial Atomic adapter supports one successful row")
         if trajectory.robot_dof != len(self.joint_names):
-            raise ValueError("joint_names must cover the complete plan trajectory.")
+            raise ValueError("joint_names must cover the complete plan trajectory")
+        declared = {segment.name for segment in source.segments}
+        if declared != set(self.phase_permissions) or declared != set(self.phase_kinds):
+            raise ValueError(
+                "every ActionPlan segment requires an exact phase declaration"
+            )
         phases = []
-        for segment in plan.segments:
-            if segment.name not in self.phase_permissions:
-                raise ValueError(
-                    f"Missing explicit phase permissions for {segment.name!r}."
-                )
+        for segment in source.segments:
             phases.append(
                 TrajectoryPhase(
                     segment.name,
                     segment.start,
                     segment.stop,
-                    kind=self.phase_kinds.get(segment.name, "free"),
+                    kind=self.phase_kinds[segment.name],
                     allowed_operators=tuple(self.phase_permissions[segment.name]),
                 )
             )
         return TrajectoryTemplate(
-            source_id=self.source_id,
-            source_revision=self.source_revision,
-            template_id=self.template_id,
+            source_id=context.source_id,
+            source_revision=context.source_revision,
+            template_id=context.unit_id,
             joint_names=self.joint_names,
             positions=trajectory.positions[0],
             dt=trajectory.dt[0],
             phases=tuple(phases),
             allowed_operators=tuple(
-                sorted(
-                    {
-                        operator
-                        for values in self.phase_permissions.values()
-                        for operator in values
-                    }
+                dict.fromkeys(
+                    operator
+                    for values in self.phase_permissions.values()
+                    for operator in values
                 )
             ),
             validator_id=self.validator_id,

@@ -57,6 +57,9 @@ from embodichain.lab.sim.atomic_actions import (
     TrackingPolicy,
 )
 from embodichain.lab.sim.motion.expansion import (
+    SceneCase,
+    SourceAdapter,
+    SourceContext,
     TrajectoryVariant,
     apply_trajectory_variant,
     default_variant_factors,
@@ -693,14 +696,19 @@ def test_action_plan_template_adapter_rebuilds_same_grid_commands() -> None:
     plan = engine.plan(invocation, context)
     request = action.resolve_request(invocation)
     adapter = ActionPlanTemplateAdapter(
-        source_id="stub",
-        source_revision="test",
-        template_id="stub:0",
         joint_names=("j0", "j1", "j2"),
         phase_permissions={"stub": ("joint_residual",)},
+        phase_kinds={"stub": "free"},
+    )
+    source_context = SourceContext(
+        "atomic_stub",
+        "test:r1",
+        "stub:0",
+        SceneCase("case", "initial", "signature", "task", "robot"),
+        ACTION_DT,
     )
 
-    template = adapter.export(plan)
+    template = adapter.export_template(plan, context=source_context)
     variant = apply_trajectory_variant(
         template,
         TrajectoryVariant(1, "joint_residual", 1.0, "uniform"),
@@ -726,6 +734,95 @@ def test_action_plan_template_adapter_rebuilds_same_grid_commands() -> None:
         plan.joint_trajectory.positions,
     )
     assert tuple(segment.name for segment in rebuilt.segments) == ("stub",)
+
+
+def test_action_plan_template_adapter_implements_source_contract() -> None:
+    engine = _engine(batch_size=1)
+    engine.register(ThreeFrameStubAction())
+    plan = engine.plan(_invocation(engine, torch.ones(1, 3)))
+    adapter = ActionPlanTemplateAdapter(
+        joint_names=("j0", "j1", "j2"),
+        phase_permissions={"stub": ("joint_residual",)},
+        phase_kinds={"stub": "free"},
+    )
+    context = SourceContext(
+        source_id="atomic_stub",
+        source_revision="test:r1",
+        unit_id="stub:0",
+        scene_case=SceneCase(
+            "case",
+            "initial",
+            "signature",
+            "task",
+            "robot",
+        ),
+        control_dt=ACTION_DT,
+    )
+
+    assert isinstance(adapter, SourceAdapter)
+    template = adapter.export_template(plan, context=context)
+
+    assert (template.source_id, template.source_revision, template.template_id) == (
+        "atomic_stub",
+        "test:r1",
+        "stub:0",
+    )
+
+
+def test_action_plan_template_adapter_rejects_inexact_phase_declarations() -> None:
+    engine = _engine(batch_size=1)
+    engine.register(ThreeFrameStubAction())
+    plan = engine.plan(_invocation(engine, torch.ones(1, 3)))
+    context = SourceContext(
+        "atomic_stub",
+        "test:r1",
+        "stub:0",
+        SceneCase("case", "initial", "signature", "task", "robot"),
+        ACTION_DT,
+    )
+
+    for permissions, kinds in (
+        ({}, {}),
+        (
+            {"stub": (), "extra": ()},
+            {"stub": "free", "extra": "free"},
+        ),
+    ):
+        adapter = ActionPlanTemplateAdapter(
+            joint_names=("j0", "j1", "j2"),
+            phase_permissions=permissions,
+            phase_kinds=kinds,
+        )
+        with pytest.raises(ValueError, match="exact phase declaration"):
+            adapter.export_template(plan, context=context)
+
+
+def test_action_plan_template_adapter_rejects_batch_and_failed_plan() -> None:
+    context = SourceContext(
+        "atomic_stub",
+        "test:r1",
+        "stub:0",
+        SceneCase("case", "initial", "signature", "task", "robot"),
+        ACTION_DT,
+    )
+    adapter = ActionPlanTemplateAdapter(
+        joint_names=("j0", "j1", "j2"),
+        phase_permissions={"stub": ()},
+        phase_kinds={"stub": "free"},
+    )
+    batched_engine = _engine(batch_size=2)
+    batched_engine.register(ThreeFrameStubAction())
+    batched = batched_engine.plan(_invocation(batched_engine, torch.ones(2, 3)))
+    failed_engine = _engine(batch_size=1)
+    failed_engine.register(ThreeFrameStubAction())
+    failed = failed_engine.plan(
+        _invocation(failed_engine, torch.full((1, 3), torch.nan))
+    )
+
+    with pytest.raises(ValueError, match="one successful row"):
+        adapter.export_template(batched, context=context)
+    with pytest.raises(ValueError, match="one successful row"):
+        adapter.export_template(failed, context=context)
 
 
 def test_rebuild_plan_rejects_changed_same_grid_dt() -> None:
