@@ -383,6 +383,14 @@ def _pose_sampling_metadata(
     reference_poses: torch.Tensor | None,
 ) -> dict[str, object]:
     """Snapshot selected geometry and its comparison frame in world coordinates."""
+    if poses.shape[:1] != success.shape or success.shape != env_ids.shape:
+        raise ValueError("poses, success, and env_ids must have matching rows")
+    if poses.device != success.device or success.device != env_ids.device:
+        raise ValueError("poses, success, and env_ids must share a device")
+    if reference_poses is not None and (
+        reference_poses.shape != poses.shape or reference_poses.device != poses.device
+    ):
+        raise ValueError("reference_poses must match selected pose rows and device")
     return {
         "pose_frame": "world",
         "selected_poses": poses.detach().cpu().tolist(),

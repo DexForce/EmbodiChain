@@ -24,6 +24,7 @@ import json
 import pytest
 import torch
 
+import embodichain.lab.sim.atomic_actions.affordance_sampling as sampling_module
 from embodichain.lab.sim.atomic_actions.affordance_sampling import (
     AffordancePoseCandidates,
     AffordanceSample,
@@ -294,6 +295,53 @@ def test_press_sampling_rotates_only_contact_frame_roll():
     torch.testing.assert_close(
         torch.tensor(sample.metadata["selected_poses"]), sample.poses
     )
+
+
+@pytest.mark.parametrize("sampler", ["twist", "press"])
+def test_nominal_sampling_rejects_misaligned_provenance_rows(sampler: str) -> None:
+    targets = _poses(2)
+    env_ids = torch.tensor([0], dtype=torch.long)
+
+    with pytest.raises(ValueError, match="matching rows"):
+        if sampler == "twist":
+            TwistAffordance(
+                grasp_position=(0.0, 0.0, 0.0),
+                axis_origin=(0.0, 0.0, 0.0),
+            ).sample_grasp_pose(
+                targets,
+                sampling=None,
+                env_ids=env_ids,
+            )
+        else:
+            PressAffordance(
+                press_axis=torch.tensor([0.0, 0.0, 1.0]),
+                press_position=(0.0, 0.0, 0.0),
+            ).sample_press_pose(
+                targets,
+                sampling=None,
+                env_ids=env_ids,
+            )
+
+
+def test_pose_sampling_metadata_rejects_misaligned_reference_rows() -> None:
+    with pytest.raises(ValueError, match="reference_poses must match"):
+        sampling_module._pose_sampling_metadata(
+            _poses(2),
+            torch.ones(2, dtype=torch.bool),
+            torch.arange(2),
+            _poses(1),
+        )
+
+
+@pytest.mark.gpu
+def test_pose_sampling_metadata_rejects_mismatched_devices() -> None:
+    with pytest.raises(ValueError, match="share a device"):
+        sampling_module._pose_sampling_metadata(
+            _poses(2),
+            torch.ones(2, dtype=torch.bool),
+            torch.arange(2, device="cuda"),
+            None,
+        )
 
 
 def test_twist_sampling_requires_explicit_roll_symmetry():
