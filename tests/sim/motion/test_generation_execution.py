@@ -82,8 +82,9 @@ def _template() -> TrajectoryTemplate:
 def _coordinator(
     *,
     count: int = 1,
+    **collection: int,
 ) -> tuple[GenerationSession, CandidateCoordinator, tuple[CandidateWorkItem, ...]]:
-    cfg = _cfg()
+    cfg = _cfg(**collection)
     case = SceneCase("case", "initial", "signature", "task", "robot")
     limits = torch.tensor([[-2.0, 2.0], [-2.0, 2.0]])
     session = GenerationSession(cfg)
@@ -124,6 +125,7 @@ class _Executor:
         self.fail_execution = fail_execution
         self.malformed_evidence = malformed_evidence
         self.start_rollout = start_rollout
+        self.execution_count = 0
 
     def validate_plan(self, item: CandidateWorkItem) -> ValidationResult:
         del item
@@ -140,7 +142,8 @@ class _Executor:
         commit_id: str,
         on_rollout_started,
     ) -> ExpertEpisode:
-        assert prepared == {"epoch": 1}
+        self.execution_count += 1
+        assert prepared == {"epoch": self.execution_count}
         if self.start_rollout:
             on_rollout_started()
         if self.fail_execution:
@@ -186,6 +189,25 @@ class _Sink:
             scene_case_id=episode.identity.scene_case_id,
             submission_id=submission_id,
         )
+
+
+class _ReplayedReceiptSink(_Sink):
+    def __init__(self) -> None:
+        super().__init__()
+        self.receipt: CommitReceipt | None = None
+
+    def submit(
+        self,
+        episode: ExpertEpisode,
+        *,
+        submission_id: int,
+    ) -> CommitReceipt:
+        if self.receipt is None:
+            self.receipt = super().submit(
+                episode,
+                submission_id=submission_id,
+            )
+        return self.receipt
 
 
 class _FixedHost:
@@ -324,6 +346,62 @@ def test_single_slot_runner_reports_ambiguous_write_as_pending() -> None:
     snapshot = session.snapshot()
     assert snapshot["pending_reserved_episodes"] == 1
     assert snapshot["counts"]["pending_write"] == 1
+
+
+def test_single_slot_runner_rejects_budget_before_dequeue() -> None:
+    session, coordinator, items = _coordinator()
+
+    with pytest.raises(ValueError, match="pending_max_bytes"):
+        SingleSlotRunner(
+            coordinator,
+            _Restorer(),
+            _Executor(),
+            _Sink(),
+            episode_byte_budget=session.pending_max_bytes + 1,
+        )
+
+    assert coordinator.pending_count == 1
+    assert session.snapshot()["audit"] == ((items[0].spec.identity, "proposed", 0),)
+
+
+def test_single_slot_runner_releases_assignment_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, coordinator, items = _coordinator()
+    take_ready = session.take_ready
+
+    def fail_after_assignment(*args, **kwargs):
+        assert take_ready(*args, **kwargs) is not None
+        raise RuntimeError("assignment failed")
+
+    monkeypatch.setattr(session, "take_ready", fail_after_assignment)
+
+    with pytest.raises(RuntimeError, match="assignment failed"):
+        _runner(coordinator).run_next()
+
+    snapshot = session.snapshot()
+    assert snapshot["pending_reserved_episodes"] == 0
+    assert snapshot["audit"] == ((items[0].spec.identity, "released", 0),)
+
+
+def test_single_slot_runner_rejects_unrelated_receipt() -> None:
+    session, coordinator, items = _coordinator(
+        count=2,
+        target_committed_episodes=2,
+    )
+
+    outcomes = _runner(coordinator, sink=_ReplayedReceiptSink()).run_until_empty()
+
+    assert tuple(outcome.status for outcome in outcomes) == (
+        "committed",
+        "write_pending",
+    )
+    assert outcomes[1].candidate_id == items[1].spec.identity.candidate_id
+    assert outcomes[1].reason == "sink receipt does not match submitted episode"
+    assert tuple(state for _, state, _ in session.snapshot()["audit"]) == (
+        "committed",
+        "pending_write",
+    )
 
 
 def test_single_slot_runner_reserves_its_requested_candidate() -> None:

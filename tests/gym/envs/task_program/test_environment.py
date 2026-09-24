@@ -451,7 +451,11 @@ def _program(
     )
 
 
-def _generation_profile(program_id: str = "fake_pick") -> TrajectoryGenerationJobCfg:
+def _generation_profile(
+    program_id: str = "fake_pick",
+    *,
+    template_id: str = "pick_up",
+) -> TrajectoryGenerationJobCfg:
     return TrajectoryGenerationJobCfg.from_mapping(
         {
             "source": {
@@ -459,7 +463,7 @@ def _generation_profile(program_id: str = "fake_pick") -> TrajectoryGenerationJo
                 "source_id": program_id,
                 "source_revision": "test:r1",
                 "unit_scope": "action",
-                "template_id": "pick_up",
+                "template_id": template_id,
             },
             "augmentation": {"max_variants_per_reference": 1},
             "scheduling": {"candidate_budget": 1},
@@ -566,6 +570,21 @@ def test_bridge_without_generation_profile_preserves_default_path() -> None:
 
     assert default_bridge.generation_records == ()
     assert explicit_bridge.generation_records == ()
+
+
+def test_generation_profile_rejects_skill_absent_from_program() -> None:
+    factory = _FakeEnvironmentFactory()
+    adapter = TaskProgramEnvironmentAdapter(factory, step_dt=_STEP_DT)
+    compiled = adapter.compile(_program())
+
+    with pytest.raises(ValueError, match="template_id.*not present"):
+        adapter.create_bridge(
+            compiled,
+            generation_profile=_generation_profile(template_id="place"),
+            candidate_index=0,
+        )
+
+    assert factory.observation_samples == 0
 
 
 def test_embodied_env_threads_episode_generation_profile_to_bridge() -> None:

@@ -866,6 +866,14 @@ class TaskProgramEnvironmentAdapter:
                 robot_profile_id=self._robot_profile_id,
             )
         )
+        if generation_profile is not None:
+            program_skill_ids = self._program_skill_ids(program, semantic.compiler)
+            if generation_profile.source.template_id not in program_skill_ids:
+                raise ValueError(
+                    "generation_profile source.template_id "
+                    f"{generation_profile.source.template_id!r} is not present in "
+                    f"the compiled program skills {sorted(program_skill_ids)!r}."
+                )
         assembly = self._assemble_execution_runtime(
             semantic,
             plan_transform_factory=generation,
@@ -882,6 +890,22 @@ class TaskProgramEnvironmentAdapter:
             parallel_safety_validator=assembly.parallel_safety_validator,
             generation_trace_provider=assembly.generation_trace_provider,
         )
+
+    @staticmethod
+    def _program_skill_ids(
+        program: CompiledTaskProgram,
+        compiler: SemanticCallCompiler,
+    ) -> frozenset[str]:
+        """Return every Atomic skill selected by compiled program calls."""
+        skill_ids: set[str] = set()
+        for analysis in program.preflight_analyses():
+            for call_index, call in enumerate(analysis.calls):
+                bound = compiler.integration.link_call(
+                    call,
+                    path=(*analysis.source_path, call_index, "call"),
+                )
+                skill_ids.add(bound.linked.descriptor.skill_id)
+        return frozenset(skill_ids)
 
     def _preflight_program_surfaces(
         self,

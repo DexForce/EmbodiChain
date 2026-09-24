@@ -150,6 +150,11 @@ class GenerationSession:
             0,
         )
 
+    @property
+    def pending_max_bytes(self) -> int:
+        """Return the maximum bytes reservable by pending episode writes."""
+        return self._cfg.persistence.pending_max_bytes
+
     def register_case(
         self,
         case: SceneCase,

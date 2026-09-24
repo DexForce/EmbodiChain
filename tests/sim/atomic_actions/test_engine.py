@@ -32,6 +32,7 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     ActionOptions,
     ActionPlan,
+    ArticulationJointState,
     AffordanceSamplingContext,
     AtomicAction,
     AtomicActionEngine,
@@ -53,6 +54,7 @@ from embodichain.lab.sim.atomic_actions import (
     SkillBindingContract,
     SkillEndpointRequirement,
     SkillResourceSlot,
+    StateDelta,
     TimedTrajectory,
     TrackingPolicy,
 )
@@ -685,6 +687,69 @@ def test_plan_request_exposes_the_same_call_scoped_transform() -> None:
 
     assert result.success_all
     assert calls == [request]
+
+
+def test_plan_transform_rejects_mutated_expected_effect_tensor() -> None:
+    engine = _engine()
+    engine.register(StubAction())
+
+    def transform(request, context, plan):
+        del request, context
+        transformed = replace(
+            plan,
+            expected_effects=StateDelta(
+                articulation_joint_updates={
+                    ("drawer", "joint"): ArticulationJointState(torch.tensor([0.5]))
+                }
+            ),
+        )
+        effect = transformed.expected_effects.articulation_joint_updates[
+            ("drawer", "joint")
+        ]
+        assert effect is not None
+        effect.position.fill_(torch.nan)
+        return transformed
+
+    with pytest.raises(ValueError, match="position must be finite"):
+        engine.plan(
+            _invocation(engine, torch.ones(2, 3)),
+            plan_transform=transform,
+        )
+
+
+def test_plan_transform_owns_returned_expected_effect_tensors() -> None:
+    engine = _engine()
+    engine.register(StubAction())
+    retained: list[ArticulationJointState] = []
+
+    def transform(request, context, plan):
+        del request, context
+        transformed = replace(
+            plan,
+            expected_effects=StateDelta(
+                articulation_joint_updates={
+                    ("drawer", "joint"): ArticulationJointState(torch.tensor([0.5]))
+                }
+            ),
+        )
+        effect = transformed.expected_effects.articulation_joint_updates[
+            ("drawer", "joint")
+        ]
+        assert effect is not None
+        retained.append(effect)
+        return transformed
+
+    result = engine.plan(
+        _invocation(engine, torch.ones(2, 3)),
+        plan_transform=transform,
+    )
+    retained[0].position.fill_(torch.nan)
+
+    result_effect = result.expected_effects.articulation_joint_updates[
+        ("drawer", "joint")
+    ]
+    assert result_effect is not None
+    assert torch.equal(result_effect.position, torch.tensor([0.5]))
 
 
 def test_action_plan_template_adapter_rebuilds_same_grid_commands() -> None:

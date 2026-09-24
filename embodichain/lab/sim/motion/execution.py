@@ -265,6 +265,10 @@ class SingleSlotRunner:
                 raise TypeError(f"{name} must be supplied")
         if type(episode_byte_budget) is not int or episode_byte_budget <= 0:
             raise ValueError("episode_byte_budget must be a positive integer")
+        if episode_byte_budget > coordinator.session.pending_max_bytes:
+            raise ValueError(
+                "episode_byte_budget must be within session pending_max_bytes"
+            )
         self._coordinator = coordinator
         self._restorer = restorer
         self._executor = executor
@@ -307,12 +311,20 @@ class SingleSlotRunner:
                 reason=str(error),
             )
 
-        ready = session.take_ready(
-            identity.scene_case_id,
-            identity.initial_state_id,
-            episode_byte_budget=self._episode_byte_budget,
-            candidate_id=candidate_id,
-        )
+        try:
+            ready = session.take_ready(
+                identity.scene_case_id,
+                identity.initial_state_id,
+                episode_byte_budget=self._episode_byte_budget,
+                candidate_id=candidate_id,
+            )
+        except Exception:
+            self._release_if_uncommitted(
+                session,
+                item,
+                reason="assignment_failed",
+            )
+            raise
         if ready is None:
             session.release(identity, reason="execution_capacity_unavailable")
             return SingleSlotOutcome("capacity_unavailable", candidate_id=candidate_id)
@@ -372,6 +384,35 @@ class SingleSlotRunner:
                 "write_pending",
                 candidate_id=candidate_id,
                 reason=str(error),
+                episode_id=episode_id,
+                commit_id=commit_id,
+                submission_id=submission_id,
+            )
+        expected_receipt_identity = (
+            episode.episode_id,
+            identity.candidate_id,
+            identity.attempt_id,
+            episode.commit_id,
+            identity.scene_case_id,
+            submission_id,
+        )
+        receipt_identity = (
+            (
+                receipt.episode_id,
+                receipt.candidate_id,
+                receipt.attempt_id,
+                receipt.commit_id,
+                receipt.scene_case_id,
+                receipt.submission_id,
+            )
+            if isinstance(receipt, CommitReceipt)
+            else None
+        )
+        if receipt_identity != expected_receipt_identity:
+            return SingleSlotOutcome(
+                "write_pending",
+                candidate_id=candidate_id,
+                reason="sink receipt does not match submitted episode",
                 episode_id=episode_id,
                 commit_id=commit_id,
                 submission_id=submission_id,
