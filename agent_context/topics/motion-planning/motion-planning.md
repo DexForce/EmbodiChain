@@ -13,7 +13,7 @@
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
 | Standalone playback and B=1 generation host lifecycle | `embodichain/lab/sim/motion/execution.py` |
-| Candidate generation and coverage bookkeeping | `embodichain/lab/sim/motion/expansion/` |
+| Generation Profile loading, source adapters, candidate coordination and coverage | `embodichain/lab/sim/motion/expansion/` |
 | Distinct trajectory variants for fixed waypoints | `embodichain/lab/sim/motion/expansion/variants.py` |
 
 ## Choose the layer
@@ -77,13 +77,15 @@ encode prepared actions rather than retiming a second time.
 
 ## Trajectory augmentation boundary
 
-`motion/expansion/` owns immutable candidate contracts, strict config decoding,
-phase-authorized residuals/retiming, sampled motion-limit checks and coverage.
-Candidate identity and local random seeds are independent of physical env slots.
-`GenerationSession` owns budgets, pending writes, coverage reservations and
-idempotent commit receipts. It never steps/resets an environment or writes a
-dataset: host integrations own restoration, rollout, validation and persistence.
-Keep algorithm modules free of direct Gym imports.
+`motion/expansion/` owns callable-free Generation Profiles, immutable templates
+and candidates, sampled limit checks and coverage. `load_generation_profile()`
+strictly decodes the task-local resource, separate from environment
+and Task Program deployments. `SourceAdapter` converts handwritten, planner or
+grounded Atomic sources; `CandidateCoordinator` expands, deduplicates and queues
+them. `GenerationSession` owns identities, randomness, budgets,
+reservations and receipts. None owns physical slots, environment lifecycle or
+persistence; host integrations own those boundaries. Keep expansion algorithms
+free of direct Gym imports.
 
 The generic B=1 host orchestration and its restore/executor/sink ports live in
 `motion/execution.py`, alongside standalone playback. The runner drives injected
