@@ -224,14 +224,16 @@ class ContactHistory:
         """
         if env_ids is None:
             # One fused multi-tensor zero for the full-reset case.
-            torch._foreach_zero_([
-                self._bool_pool,
-                self._force_pool,
-                self._air_pool,
-                self.contact_count,
-                self._hits,
-                self._env_hits,
-            ])
+            torch._foreach_zero_(
+                [
+                    self._bool_pool,
+                    self._force_pool,
+                    self._air_pool,
+                    self.contact_count,
+                    self._hits,
+                    self._env_hits,
+                ]
+            )
             return
         ids = env_ids
         # Pooled rows: one advanced-indexing write per dtype/shape family.
@@ -241,4 +243,3 @@ class ContactHistory:
         self.contact_count[ids] = 0
         self._hits[ids] = 0
         self._env_hits[ids] = 0
-
