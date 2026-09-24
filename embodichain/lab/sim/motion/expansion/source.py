@@ -105,6 +105,62 @@ class TemplateSourceAdapter:
         )
 
 
+def _normalized_plan_result_row(
+    positions: torch.Tensor,
+    dt: torch.Tensor,
+    phases: tuple[TrajectoryPhase, ...],
+) -> tuple[torch.Tensor, torch.Tensor, tuple[TrajectoryPhase, ...]]:
+    """Convert one planner timing row to the strict template convention."""
+    prepend = bool((dt[0] > 0).item())
+    retained = [0]
+    for index in range(1, positions.shape[0]):
+        if float(dt[index].item()) != 0.0:
+            retained.append(index)
+            continue
+        if not torch.equal(positions[index], positions[index - 1]):
+            raise ValueError("PlanResult contains a zero-duration position change")
+
+    normalized_positions = positions[retained]
+    normalized_dt = dt[retained].clone()
+    if prepend:
+        normalized_positions = torch.cat(
+            (normalized_positions[:1], normalized_positions),
+            dim=0,
+        )
+        normalized_dt = torch.cat((normalized_dt.new_zeros(1), normalized_dt))
+
+    def boundary(old_index: int, *, is_start: bool) -> int:
+        if prepend and is_start and old_index == 0:
+            return 0
+        return int(prepend) + sum(index < old_index for index in retained)
+
+    normalized_phases = []
+    for phase in phases:
+        start = boundary(phase.start_index, is_start=True)
+        stop = boundary(phase.stop_index, is_start=False)
+        if stop <= start:
+            raise ValueError(f"timing normalization erases phase {phase.phase_id!r}")
+        normalized_phases.append(
+            replace(
+                phase,
+                start_index=start,
+                stop_index=stop,
+            )
+        )
+    return normalized_positions, normalized_dt, tuple(normalized_phases)
+
+
+def _phase_permission_union(
+    phases: tuple[TrajectoryPhase, ...],
+) -> tuple[str, ...]:
+    """Return phase permissions in stable first-declaration order."""
+    return tuple(
+        dict.fromkeys(
+            operator for phase in phases for operator in phase.allowed_operators
+        )
+    )
+
+
 @dataclass(frozen=True)
 class PlanResultSourceAdapter:
     """Adapt one single-row MotionGenerator result to a qpos template.
@@ -116,6 +172,7 @@ class PlanResultSourceAdapter:
     joint_names: tuple[str, ...]
     phases: tuple[TrajectoryPhase, ...] = ()
     validator_id: str = "default"
+    allowed_operators: tuple[str, ...] | None = None
     kind: ClassVar[str] = "motion_generator"
 
     def export_template(
@@ -141,14 +198,25 @@ class PlanResultSourceAdapter:
             raise ValueError("cannot export an unsuccessful PlanResult")
         if len(self.joint_names) != source.positions.shape[-1]:
             raise ValueError("joint_names must match PlanResult joint width")
+        positions, dt, phases = _normalized_plan_result_row(
+            source.positions[0],
+            source.dt[0],
+            tuple(self.phases),
+        )
+        allowed_operators = (
+            _phase_permission_union(phases)
+            if self.allowed_operators is None
+            else tuple(self.allowed_operators)
+        )
         return TrajectoryTemplate(
             source_id=context.source_id,
             source_revision=context.source_revision,
             template_id=context.unit_id,
             joint_names=tuple(self.joint_names),
-            positions=source.positions[0],
-            dt=source.dt[0],
-            phases=self.phases,
+            positions=positions,
+            dt=dt,
+            phases=phases,
+            allowed_operators=allowed_operators,
             validator_id=self.validator_id,
             controlled_joint_indices=tuple(range(len(self.joint_names))),
         )

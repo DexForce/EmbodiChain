@@ -49,6 +49,10 @@ def _case() -> SceneCase:
     return SceneCase("case", "initial", "signature", "task", "robot")
 
 
+def _source_context() -> SourceContext:
+    return SourceContext("motion", "revision", "unit", _case(), 0.1)
+
+
 def _identity(candidate_id: str = "candidate") -> CandidateIdentity:
     return CandidateIdentity(
         "case", "initial", candidate_id, "geometry", "source", "revision", "template"
@@ -111,6 +115,72 @@ def test_source_adapters_share_one_template_contract():
     assert handwritten.template_id == generated.template_id == "unit_0"
     torch.testing.assert_close(handwritten.positions, generated.positions)
     torch.testing.assert_close(handwritten.dt, generated.dt)
+
+
+def test_plan_result_source_normalizes_representable_arrival_intervals() -> None:
+    result = PlanResult(
+        success=True,
+        positions=torch.tensor([[[0.0], [0.0], [1.0], [1.0]]]),
+        dt=torch.tensor([[0.2, 0.0, 0.3, 0.0]]),
+    )
+    phase = TrajectoryPhase("free", 0, 4, "free", ("joint_residual",))
+
+    template = PlanResultSourceAdapter(
+        ("joint",),
+        phases=(phase,),
+    ).export_template(result, context=_source_context())
+
+    assert template.dt.tolist() == pytest.approx([0.0, 0.2, 0.3])
+    assert template.positions[:, 0].tolist() == [0.0, 0.0, 1.0]
+    assert template.phases == (
+        TrajectoryPhase("free", 0, 3, "free", ("joint_residual",)),
+    )
+    assert template.allowed_operators == ("joint_residual",)
+
+
+def test_plan_result_source_rejects_zero_duration_motion() -> None:
+    result = PlanResult(
+        success=True,
+        positions=torch.tensor([[[0.0], [1.0]]]),
+        dt=torch.tensor([[0.0, 0.0]]),
+    )
+
+    with pytest.raises(ValueError, match="zero-duration position change"):
+        PlanResultSourceAdapter(("joint",)).export_template(
+            result,
+            context=_source_context(),
+        )
+
+
+def test_plan_result_source_allows_explicit_template_permissions() -> None:
+    result = PlanResult(
+        success=True,
+        positions=torch.tensor([[[0.0], [0.5], [1.0]]]),
+        dt=torch.tensor([[0.0, 0.1, 0.1]]),
+    )
+    phase = TrajectoryPhase("free", 0, 3, "free", ("joint_residual",))
+
+    template = PlanResultSourceAdapter(
+        ("joint",),
+        phases=(phase,),
+        allowed_operators=("via_points",),
+    ).export_template(result, context=_source_context())
+
+    assert template.allowed_operators == ("via_points",)
+
+
+def test_plan_result_source_rejects_duplicate_template_permissions() -> None:
+    result = PlanResult(
+        success=True,
+        positions=torch.tensor([[[0.0], [0.5], [1.0]]]),
+        dt=torch.tensor([[0.0, 0.1, 0.1]]),
+    )
+
+    with pytest.raises(ValueError, match="allowed_operators must be unique"):
+        PlanResultSourceAdapter(
+            ("joint",),
+            allowed_operators=("via_points", "via_points"),
+        ).export_template(result, context=_source_context())
 
 
 def test_candidate_coordinator_queues_source_variants_with_session_identity():
