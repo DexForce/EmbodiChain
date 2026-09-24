@@ -310,6 +310,13 @@ class EventManager(ManagerBase):
                     self._call_event_functor(
                         mode, functor_name, functor_cfg, self._env, None
                     )
+                elif functor_cfg.interval_step == 1:
+                    # Every environment is due on every step: pass None (all
+                    # rows) instead of a GPU nonzero + host len(), which
+                    # forces a device sync on every control step.
+                    self._call_event_functor(
+                        mode, functor_name, functor_cfg, self._env, None
+                    )
                 else:
                     valid_env_ids = (
                         (
