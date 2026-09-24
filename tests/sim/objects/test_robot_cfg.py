@@ -16,9 +16,11 @@
 from __future__ import annotations
 
 import enum
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import pytest
+import torch
 
 from embodichain.lab.sim.cfg import (
     ArticulationRootPropertiesCfg,
@@ -437,9 +439,112 @@ def test_robotcfg_to_dict_roundtrip():
 
 
 from embodichain.lab.sim.robots.cobotmagic import CobotMagicCfg
+from embodichain.lab.sim.robots import AlohaMiniCfg
 from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
 from embodichain.lab.sim.robots.ur_robot import URRobotCfg
 from embodichain.lab.sim.motion.solvers import OPWSolverCfg
+
+
+def test_aloha_mini_control_parts_match_source_joints():
+    cfg = AlohaMiniCfg.from_dict({})
+    assert cfg.uid == "AlohaMini"
+    assert cfg.urdf_cfg is None
+    assert cfg.fpath.endswith("AlohaMini/alohamini2pro.urdf")
+    assert {part: len(joints) for part, joints in cfg.control_parts.items()} == {
+        "left_arm": 6,
+        "right_arm": 6,
+        "left_hand": 1,
+        "right_hand": 1,
+        "torso": 1,
+    }
+    assert cfg.control_parts["torso"] == ["vertical_move"]
+    assert cfg.control_parts["left_hand"] == ["left_gripper"]
+    assert cfg.control_parts["right_hand"] == ["right_gripper"]
+    source = ET.parse(cfg.fpath).getroot()
+    movable_joints = {
+        joint.get("name")
+        for joint in source.findall("joint")
+        if joint.get("type") != "fixed"
+    }
+    controlled = [joint for joints in cfg.control_parts.values() for joint in joints]
+    assert len(controlled) == len(set(controlled))
+    assert set(controlled) <= movable_joints
+    assert movable_joints - set(controlled) == {
+        "root_x_axis_joint",
+        "root_y_axis_joint",
+        "root_z_rotation_joint",
+        "wheel1_joint",
+        "wheel2_joint",
+        "wheel3_joint",
+    }
+
+
+def test_aloha_mini_overrides_and_roundtrip():
+    cfg = AlohaMiniCfg.from_dict(
+        {
+            "uid": "aloha_mini",
+            "init_pos": [0.0, 0.0, 0.2],
+            "joint_drive_props": {"stiffness": {"torso": 2e4}},
+            "solver_cfg": {"left_arm": {"num_samples": 8}},
+        }
+    )
+    assert cfg.uid == "aloha_mini"
+    assert cfg.joint_drive_props.stiffness["torso"] == 2e4
+    assert cfg.joint_drive_props.stiffness["left_arm"] == 7e4
+    assert cfg.solver_cfg["left_arm"].num_samples == 8
+    assert cfg.solver_cfg["right_arm"].num_samples == 30
+    assert AlohaMiniCfg.from_dict(cfg.to_dict()).to_dict() == cfg.to_dict()
+
+
+def test_aloha_mini_serial_chains_match_control_joint_order():
+    cfg = AlohaMiniCfg.from_dict({})
+    chains = cfg.build_pk_serial_chain()
+    assert set(chains) == set(cfg.control_parts)
+    for part, chain in chains.items():
+        assert chain.get_joint_parameter_names() == cfg.control_parts[part]
+
+    # Torso motion is local +Z and must not contain the planar base joints.
+    torso = chains["torso"]
+    poses = torso.forward_kinematics(torch.tensor([[0.0], [0.1]])).get_matrix()
+    torch.testing.assert_close(
+        poses[1, :3, 3] - poses[0, :3, 3], torch.tensor([0.0, 0.0, 0.1])
+    )
+
+
+def test_aloha_mini_solvers_use_local_frames_and_source_tcp():
+    from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+
+    cfg = AlohaMiniCfg.from_dict({})
+    chains = cfg.build_pk_serial_chain()
+    assert set(cfg.solver_cfg) == {"left_arm", "right_arm", "torso"}
+    for part, solver_cfg in cfg.solver_cfg.items():
+        assert isinstance(solver_cfg, PytorchSolverCfg)
+        assert solver_cfg.is_only_position_constraint == (part == "torso")
+        if part.endswith("_arm"):
+            side = part.removesuffix("_arm")
+            assert solver_cfg.root_link_name == f"{side}_Base"
+            assert solver_cfg.end_link_name == f"{side}_tcp"
+        solver_cfg.urdf_path = cfg.fpath
+        solver_cfg.joint_names = cfg.control_parts[part]
+        solver = solver_cfg.init_solver(device=torch.device("cpu"))
+        assert solver.dof == len(cfg.control_parts[part])
+        qpos = torch.zeros((1, solver.dof))
+        torch.testing.assert_close(
+            solver.get_fk(qpos), chains[part].forward_kinematics(qpos).get_matrix()
+        )
+
+
+def test_aloha_mini_pk_chains_follow_overridden_asset(tmp_path):
+    cfg = AlohaMiniCfg.from_dict({})
+    source = ET.parse(cfg.fpath)
+    torso_joint = source.getroot().find("joint[@name='vertical_move']")
+    torso_joint.find("origin").set("xyz", "0 0 0.25")
+    overridden_path = tmp_path / "aloha_mini.urdf"
+    source.write(overridden_path)
+    cfg = AlohaMiniCfg.from_dict({"fpath": str(overridden_path)})
+    chain = cfg.build_pk_serial_chain()["torso"]
+    pose = chain.forward_kinematics(torch.zeros((1, 1))).get_matrix()
+    assert pose[0, 2, 3].item() == pytest.approx(0.25)
 
 
 def test_cobotmagic_from_dict_and_roundtrip():
