@@ -651,6 +651,39 @@ def test_plan_transform_must_return_a_validated_action_plan() -> None:
         )
 
 
+def test_plan_transform_revalidates_mutated_tensor_invariants() -> None:
+    engine = _engine()
+    engine.register(StubAction())
+
+    def transform(request, context, plan):
+        del request, context
+        plan.plan_success.resize_(1)
+        return plan
+
+    with pytest.raises(ValueError, match="plan_success batch"):
+        engine.plan(
+            _invocation(engine, torch.ones(2, 3)),
+            plan_transform=transform,
+        )
+
+
+def test_plan_request_exposes_the_same_call_scoped_transform() -> None:
+    engine = _engine()
+    action = StubAction()
+    engine.register(action)
+    invocation = _invocation(engine, torch.ones(2, 3))
+    request = action.resolve_request(invocation)
+    calls = []
+
+    result = engine.plan_request(
+        request,
+        plan_transform=lambda resolved, context, plan: calls.append(resolved) or plan,
+    )
+
+    assert result.success_all
+    assert calls == [request]
+
+
 def test_action_plan_template_adapter_rebuilds_same_grid_commands() -> None:
     engine = _engine(batch_size=1)
     action = ThreeFrameStubAction()
@@ -693,3 +726,43 @@ def test_action_plan_template_adapter_rebuilds_same_grid_commands() -> None:
         plan.joint_trajectory.positions,
     )
     assert tuple(segment.name for segment in rebuilt.segments) == ("stub",)
+
+
+def test_rebuild_plan_rejects_changed_same_grid_dt() -> None:
+    engine = _engine(batch_size=1)
+    action = ThreeFrameStubAction()
+    engine.register(action)
+    invocation = _invocation(engine, torch.ones(1, 3))
+    context = engine.initial_context()
+    plan = engine.plan(invocation, context)
+    request = action.resolve_request(invocation)
+    changed_timing = replace(
+        plan.joint_trajectory,
+        dt=torch.tensor([[0.0, 0.01, 0.03]]),
+    )
+
+    with pytest.raises(ValueError, match="same-grid.*dt"):
+        engine.rebuild_plan_from_trajectory(
+            request,
+            context,
+            plan,
+            changed_timing,
+        )
+
+
+def test_rebuild_plan_validates_source_plan_identity() -> None:
+    engine = _engine(batch_size=1)
+    action = ThreeFrameStubAction()
+    engine.register(action)
+    invocation = _invocation(engine, torch.ones(1, 3))
+    context = engine.initial_context()
+    plan = engine.plan(invocation, context)
+    request = action.resolve_request(invocation)
+
+    with pytest.raises(ValueError, match="invocation_id"):
+        engine.rebuild_plan_from_trajectory(
+            request,
+            context,
+            replace(plan, invocation_id="different"),
+            plan.joint_trajectory,
+        )

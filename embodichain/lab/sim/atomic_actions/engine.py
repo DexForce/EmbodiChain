@@ -43,6 +43,12 @@ if TYPE_CHECKING:
     from .execution import ExecutionSession
 
 
+PlanTransform = Callable[
+    [ResolvedActionRequest, PlanningContext, ActionPlan],
+    ActionPlan,
+]
+
+
 class AtomicActionEngine:
     """Own planning resources and coordinate side-effect-free atomic actions."""
 
@@ -316,9 +322,25 @@ class AtomicActionEngine:
         self,
         request: ResolvedActionRequest,
         context: PlanningContext | None = None,
+        *,
+        plan_transform: PlanTransform | None = None,
     ) -> ActionPlan:
-        """Plan an already-resolved request without rebuilding its snapshot."""
-        return self._plan_request(request, context)
+        """Plan an already-resolved request without rebuilding its snapshot.
+
+        Args:
+            request: Immutable request previously returned by :meth:`resolve`.
+            context: Optional latest planning state; captured when omitted.
+            plan_transform: Optional callback scoped to this planning call. The
+                callback receives and must return independently owned plan values.
+
+        Returns:
+            Validated side-effect-free action plan.
+        """
+        return self._plan_request(
+            request,
+            context,
+            plan_transform=plan_transform,
+        )
 
     def _resolve(
         self,
@@ -351,10 +373,7 @@ class AtomicActionEngine:
         request: ResolvedActionRequest,
         context: PlanningContext | None = None,
         *,
-        plan_transform: (
-            Callable[[ResolvedActionRequest, PlanningContext, ActionPlan], ActionPlan]
-            | None
-        ) = None,
+        plan_transform: PlanTransform | None = None,
     ) -> ActionPlan:
         """Plan an already-resolved request without rebuilding its snapshot.
 
@@ -383,11 +402,12 @@ class AtomicActionEngine:
         if plan_transform is not None:
             if not callable(plan_transform):
                 raise TypeError("plan_transform must be callable or None.")
-            transformed = plan_transform(request, current, plan)
+            transformed = plan_transform(request, current, plan.snapshot())
             if not isinstance(transformed, ActionPlan):
                 raise TypeError("plan_transform must return an ActionPlan.")
-            self._validate_plan(transformed, current, request)
-            plan = transformed
+            owned = transformed.snapshot()
+            self._validate_plan(owned, current, request)
+            plan = owned
         return plan
 
     def plan(
@@ -395,10 +415,7 @@ class AtomicActionEngine:
         invocation: ActionInvocation,
         context: PlanningContext | None = None,
         *,
-        plan_transform: (
-            Callable[[ResolvedActionRequest, PlanningContext, ActionPlan], ActionPlan]
-            | None
-        ) = None,
+        plan_transform: PlanTransform | None = None,
     ) -> ActionPlan:
         """Plan one registered invocation through the engine-owned backend.
 
@@ -673,38 +690,50 @@ class AtomicActionEngine:
             raise TypeError("plan must be an ActionPlan.")
         if not isinstance(trajectory, TimedTrajectory):
             raise TypeError("trajectory must be a TimedTrajectory.")
+        self._validate_context(context)
+        owned_plan = plan.snapshot()
+        self._validate_plan(owned_plan, context, request)
+        original = owned_plan.joint_trajectory
+        if original is None:
+            raise ValueError("same-grid plan rebuilding requires a joint trajectory.")
         if trajectory.batch_size != context.batch_size:
             raise ValueError("trajectory batch must match the planning context.")
-        if trajectory.waypoint_count != plan.commands.frame_count:
+        if trajectory.waypoint_count != owned_plan.commands.frame_count:
             raise ValueError(
                 "same-grid plan rebuilding requires the original frame count."
             )
         if not torch.equal(trajectory.env_ids, context.env_ids):
             raise ValueError("trajectory env_ids must match the planning context.")
+        if trajectory.dt.shape != original.dt.shape or not torch.equal(
+            trajectory.dt,
+            original.dt,
+        ):
+            raise ValueError("same-grid plan rebuilding requires identical dt.")
         action = self._actions.get(request.skill_id)
         if action is None:
             raise KeyError(
                 f"No atomic action registered for skill {request.skill_id!r}."
             )
         segment_lengths = {
-            segment.name: segment.stop - segment.start for segment in plan.segments
+            segment.name: segment.stop - segment.start
+            for segment in owned_plan.segments
         }
         rebuilt = action.build_plan(
             request,
             context,
-            success=plan.plan_success,
+            success=owned_plan.plan_success,
             trajectory=trajectory,
-            expected_effects=plan.expected_effects,
-            effect_candidates=plan.effect_candidates,
-            effect_verification=plan.effect_verification,
-            replannable=plan.replannable,
-            diagnostics=plan.diagnostics,
+            expected_effects=owned_plan.expected_effects,
+            effect_candidates=owned_plan.effect_candidates,
+            effect_verification=owned_plan.effect_verification,
+            replannable=owned_plan.replannable,
+            diagnostics=owned_plan.diagnostics,
             segment_lengths=segment_lengths,
-            scene_dependency_monitor_until=plan.scene_dependency_monitor_until,
-            scene_dependency_end_segment=plan.scene_dependency_end_segment,
+            scene_dependency_monitor_until=owned_plan.scene_dependency_monitor_until,
+            scene_dependency_end_segment=owned_plan.scene_dependency_end_segment,
         )
         self._validate_plan(rebuilt, context, request)
         return rebuilt
 
 
-__all__ = ["AtomicActionEngine"]
+__all__ = ["AtomicActionEngine", "PlanTransform"]
