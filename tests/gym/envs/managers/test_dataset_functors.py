@@ -318,6 +318,10 @@ class TestLeRobotRecorderFeatures:
         # Check shapes
         assert features[LeRobotKey.OBS_STATE.value]["shape"] == (6,)
         assert features[LeRobotKey.ACTION.value]["shape"] == (6,)
+        assert "info" not in features[LeRobotKey.ACTION.value]
+        assert "action.controller_qpos" not in features
+        assert "controller.qpos" not in features
+        assert "observation.eef_pose" not in features
         assert features["subtask_index"] == {
             "dtype": "int64",
             "shape": (1,),
@@ -335,6 +339,23 @@ class TestLeRobotRecorderFeatures:
         }
         assert "annotation.segment_attempt_id" in features
         assert "annotation.continuity_id" in features
+        assert set(features) == {
+            LeRobotKey.OBS_STATE.value,
+            LeRobotKey.OBS_QVEL.value,
+            LeRobotKey.OBS_QF.value,
+            LeRobotKey.ACTION.value,
+            "subtask_index",
+            "annotation.episode_step",
+            "annotation.segment_id",
+            "annotation.segment_step",
+            "annotation.segment_start",
+            "annotation.segment_end",
+            "annotation.segment_accepted",
+            "annotation.segment_attempt_id",
+            "annotation.continuity_id",
+            "annotation.terminated",
+            "annotation.truncated",
+        }
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_eef_action_uses_requested_target_and_declares_contract(
@@ -354,8 +375,12 @@ class TestLeRobotRecorderFeatures:
             MockFunctorCfg(
                 params={
                     "save_path": "/tmp/test_dataset",
-                    "action_mode": "eef",
-                    "record_eef_observation": False,
+                    "action_contract": {
+                        "version": 1,
+                        "representation": "eef_pose_gripper",
+                        "record_controller_qpos": True,
+                        "record_eef_observation": False,
+                    },
                 }
             ),
             env,
@@ -363,9 +388,14 @@ class TestLeRobotRecorderFeatures:
 
         features = recorder._build_features()
         assert features[LeRobotKey.ACTION.value]["shape"] == (7,)
-        assert recorder._action_contract()["requested_target"] == "action"
-        assert recorder._action_contract()["measured_observation"] is None
-        assert "controller.qpos" in features
+        contract = recorder._action_contract()
+        assert contract["requested_target"] == "action"
+        assert contract["measured_observation"] is None
+        assert features[LeRobotKey.ACTION.value]["info"] == {
+            "embodichain.action_contract": contract
+        }
+        assert "action.controller_qpos" in features
+        assert "subtask_index" not in features
 
         obs = TensorDict(
             {
@@ -380,14 +410,16 @@ class TestLeRobotRecorderFeatures:
         )
         requested = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, -1.0])
         action = TensorDict(
-            {"controller_qpos": torch.zeros(6), "eef_pose": requested}, batch_size=[]
+            {"controller_qpos": torch.zeros(6), "primary_action": requested},
+            batch_size=[],
         )
         frame = recorder._convert_frame_to_lerobot(obs, action, "test_task")
         torch.testing.assert_close(frame[LeRobotKey.ACTION.value], requested)
-        torch.testing.assert_close(frame["controller.qpos"], torch.zeros(6))
+        torch.testing.assert_close(frame["action.controller_qpos"], torch.zeros(6))
+        assert "subtask_index" not in frame
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
-    def test_eef_action_mode_declares_explicit_action_and_observation(
+    def test_eef_action_contract_declares_explicit_action_and_observation(
         self, mock_lerobot_dataset
     ):
         """EEF mode exposes a 7D command and optional measured pose feature."""
@@ -403,8 +435,11 @@ class TestLeRobotRecorderFeatures:
                     "save_path": "/tmp/test_dataset",
                     "robot_meta": {"robot_type": "test_robot"},
                     "instruction": {"lang": "test task"},
-                    "action_mode": "eef",
-                    "record_eef_observation": True,
+                    "action_contract": {
+                        "version": 1,
+                        "representation": "eef_pose_gripper",
+                        "record_eef_observation": True,
+                    },
                 }
             ),
             env,
@@ -413,6 +448,185 @@ class TestLeRobotRecorderFeatures:
         features = recorder._build_features()
         assert features[LeRobotKey.ACTION.value]["shape"] == (7,)
         assert "observation.eef_pose" in features
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_action_contract_rejects_unknown_version(self, mock_lerobot_dataset):
+        """Only the supported action-contract version can change the schema."""
+        env = MockEnvForDataset(num_joints=6, has_sensors=False)
+
+        with pytest.raises(ValueError, match="action_contract version must be 1"):
+            LeRobotRecorder(
+                MockFunctorCfg(
+                    params={
+                        "save_path": "/tmp/test_dataset",
+                        "action_contract": {
+                            "version": 2,
+                            "representation": "joint_position",
+                        },
+                    }
+                ),
+                env,
+            )
+
+        mock_lerobot_dataset.create.assert_not_called()
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    @pytest.mark.parametrize("legacy_key", ["action_mode", "record_eef_observation"])
+    def test_action_contract_rejects_superseded_top_level_options(
+        self, mock_lerobot_dataset, legacy_key: str
+    ):
+        """Removed PR-only options cannot silently fall back to the main schema."""
+        env = MockEnvForDataset(num_joints=6, has_sensors=False)
+
+        with pytest.raises(
+            ValueError, match="must be configured inside action_contract"
+        ):
+            LeRobotRecorder(
+                MockFunctorCfg(
+                    params={"save_path": "/tmp/test_dataset", legacy_key: True}
+                ),
+                env,
+            )
+
+        mock_lerobot_dataset.create.assert_not_called()
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_action_contract_rejects_unknown_representation(self, mock_lerobot_dataset):
+        """Unknown action encodings fail before a dataset is created."""
+        env = MockEnvForDataset(num_joints=6, has_sensors=False)
+
+        with pytest.raises(ValueError, match="unsupported action representation"):
+            LeRobotRecorder(
+                MockFunctorCfg(
+                    params={
+                        "save_path": "/tmp/test_dataset",
+                        "action_contract": {
+                            "version": 1,
+                            "representation": "quaternion_pose",
+                        },
+                    }
+                ),
+                env,
+            )
+
+        mock_lerobot_dataset.create.assert_not_called()
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_action_contract_rejects_unknown_fields(self, mock_lerobot_dataset):
+        """Misspelled contract settings fail at the recorder boundary."""
+        env = MockEnvForDataset(num_joints=6, has_sensors=False)
+
+        with pytest.raises(ValueError, match="unknown action_contract fields"):
+            LeRobotRecorder(
+                MockFunctorCfg(
+                    params={
+                        "save_path": "/tmp/test_dataset",
+                        "action_contract": {
+                            "version": 1,
+                            "representation": "joint_position",
+                            "record_controller_pose": True,
+                        },
+                    }
+                ),
+                env,
+            )
+
+        mock_lerobot_dataset.create.assert_not_called()
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    @pytest.mark.parametrize(
+        ("field", "value", "message"),
+        [
+            ("version", True, "version must be 1"),
+            (
+                "record_controller_qpos",
+                "false",
+                "record_controller_qpos must be a bool",
+            ),
+        ],
+    )
+    def test_action_contract_rejects_wrong_field_types(
+        self,
+        mock_lerobot_dataset,
+        field: str,
+        value: object,
+        message: str,
+    ):
+        """Contract fields do not coerce ambiguous serialized values."""
+        env = MockEnvForDataset(num_joints=6, has_sensors=False)
+        contract = {
+            "version": 1,
+            "representation": "joint_position",
+            field: value,
+        }
+
+        with pytest.raises((TypeError, ValueError), match=message):
+            LeRobotRecorder(
+                MockFunctorCfg(
+                    params={
+                        "save_path": "/tmp/test_dataset",
+                        "action_contract": contract,
+                    }
+                ),
+                env,
+            )
+
+        mock_lerobot_dataset.create.assert_not_called()
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_eef_action_contract_rejects_incompatible_action_term(
+        self, mock_lerobot_dataset
+    ):
+        """EEF recording fails before creation when the controller encoding differs."""
+        env = MockEnvForDataset(num_joints=6, has_sensors=False)
+        env.action_manager = SimpleNamespace(
+            get_terms_by_mode=lambda mode: [("eef", SimpleNamespace())]
+        )
+
+        with pytest.raises(ValueError, match="requires one compatible pre action term"):
+            LeRobotRecorder(
+                MockFunctorCfg(
+                    params={
+                        "save_path": "/tmp/test_dataset",
+                        "action_contract": {
+                            "version": 1,
+                            "representation": "eef_pose_gripper",
+                        },
+                    }
+                ),
+                env,
+            )
+
+        mock_lerobot_dataset.create.assert_not_called()
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_eef_action_contract_rejects_scaled_policy_commands(
+        self, mock_lerobot_dataset
+    ):
+        """Recorded absolute EEF targets cannot differ from controller targets."""
+        env = MockEnvForDataset(num_joints=6, has_sensors=False)
+        term = SimpleNamespace(
+            action_contract_representation="eef_pose_gripper", _scale=0.5
+        )
+        env.action_manager = SimpleNamespace(
+            get_terms_by_mode=lambda mode: [("eef", term)]
+        )
+
+        with pytest.raises(ValueError, match="requires action scale 1.0"):
+            LeRobotRecorder(
+                MockFunctorCfg(
+                    params={
+                        "save_path": "/tmp/test_dataset",
+                        "action_contract": {
+                            "version": 1,
+                            "representation": "eef_pose_gripper",
+                        },
+                    }
+                ),
+                env,
+            )
+
+        mock_lerobot_dataset.create.assert_not_called()
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_position_velocity_action_feature_uses_canonical_layout(
@@ -435,6 +649,10 @@ class TestLeRobotRecorderFeatures:
                     "instruction": {"lang": "test task"},
                     "extra": {"task_description": "test"},
                     "use_videos": False,
+                    "action_contract": {
+                        "version": 1,
+                        "representation": "joint_position_velocity",
+                    },
                 }
             ),
             env,
@@ -450,9 +668,36 @@ class TestLeRobotRecorderFeatures:
             "joint_1.velocity",
         ]
         contract = recorder._action_contract()
-        assert contract["mode"] == "joint_position_velocity"
+        assert contract["representation"] == "joint_position_velocity"
         assert contract["qpos_slice"] == [0, 2]
         assert contract["qvel_slice"] == [2, 4]
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_joint_position_contract_rejects_position_velocity_buffer(
+        self, mock_lerobot_dataset
+    ):
+        """Contract representation must match the expert rollout encoding."""
+        env = MockEnvForDataset(num_joints=2, has_sensors=False)
+        env.expert_action_spec = build_expert_action_spec(
+            joint_names=["joint_0", "joint_1"],
+            joint_command_mode="position_velocity",
+        )
+
+        with pytest.raises(ValueError, match="requires joint_command_mode='position'"):
+            LeRobotRecorder(
+                MockFunctorCfg(
+                    params={
+                        "save_path": "/tmp/test_dataset",
+                        "action_contract": {
+                            "version": 1,
+                            "representation": "joint_position",
+                        },
+                    }
+                ),
+                env,
+            )
+
+        mock_lerobot_dataset.create.assert_not_called()
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_build_features_with_sensor(self, mock_lerobot_dataset):
@@ -1007,6 +1252,92 @@ def test_raw_action_history_preserves_eef_command():
     torch.testing.assert_close(recorded, raw_action)
 
 
+def test_raw_action_history_splits_mapping_rows() -> None:
+    """Mapping-form policy actions retain one row per vector environment."""
+    env = SimpleNamespace(
+        num_envs=2, _record_raw_actions=True, _raw_action_history=[[], []]
+    )
+    raw_action = {
+        "eef_pose": torch.tensor(
+            [
+                [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, -1.0],
+                [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.0],
+            ]
+        )
+    }
+
+    EmbodiedEnv._record_raw_action(env, raw_action)
+    recorded = EmbodiedEnv.get_raw_action_history(env, 1)
+
+    assert isinstance(recorded, TensorDict)
+    torch.testing.assert_close(recorded["eef_pose"], raw_action["eef_pose"][1:2])
+
+
+@pytest.mark.parametrize("width", [6, 8])
+def test_eef_action_list_rejects_noncanonical_width(width: int) -> None:
+    """The EEF contract accepts only xyz-rpy-gripper actions."""
+    env = Mock()
+    env.get_raw_action_history.return_value = torch.zeros(2, width)
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder._env = env
+
+    with pytest.raises(RuntimeError, match=r"shape \(2, 7\)"):
+        recorder._eef_action_list(0, 2, torch.zeros(2, 3))
+
+
+def test_controller_qpos_history_preserves_executed_command() -> None:
+    """Controller history stores qpos without confusing qvel or qf commands."""
+    env = SimpleNamespace(
+        num_envs=2,
+        _record_controller_qpos=True,
+        _controller_qpos_history=[[], []],
+    )
+    qpos = torch.tensor([[0.1, 0.2], [1.1, 1.2]])
+
+    EmbodiedEnv._record_controller_qpos_action(
+        env, TensorDict({"qpos": qpos}, batch_size=[2])
+    )
+    EmbodiedEnv._record_controller_qpos_action(
+        env, TensorDict({"qvel": torch.ones(2, 2)}, batch_size=[2])
+    )
+
+    recorded = EmbodiedEnv.get_controller_qpos_history(env, 1)
+    torch.testing.assert_close(recorded, qpos[1:2])
+
+
+def test_eef_action_list_uses_controller_history() -> None:
+    """EEF persistence uses the pre-postprocess qpos captured at execution."""
+    env = Mock()
+    env.get_raw_action_history.return_value = torch.zeros(2, 7)
+    env.get_controller_qpos_history.return_value = torch.full((2, 3), 0.25)
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder._env = env
+    recorder.record_controller_qpos = True
+
+    result = recorder._eef_action_list(0, 2, torch.full((2, 3), 0.75))
+
+    torch.testing.assert_close(result["controller_qpos"], torch.full((2, 3), 0.25))
+
+
+def test_joint_contract_action_list_keeps_primary_and_executed_commands() -> None:
+    """Joint contracts can opt into provenance-safe controller qpos."""
+    env = Mock()
+    env.get_controller_qpos_history.return_value = torch.full((2, 3), 0.25)
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder._env = env
+    recorder._action_contract_cfg = {
+        "version": 1,
+        "representation": "joint_position",
+    }
+    recorder.record_controller_qpos = True
+    stored_actions = torch.full((2, 3), 0.75)
+
+    result = recorder._contract_action_list(0, 2, stored_actions)
+
+    torch.testing.assert_close(result["primary_action"], stored_actions)
+    torch.testing.assert_close(result["controller_qpos"], torch.full((2, 3), 0.25))
+
+
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
 def test_episode_metadata_sidecar_appends_json_lines(tmp_path) -> None:
     """The EmbodiChain sidecar is valid append-only JSONL."""
@@ -1306,6 +1637,102 @@ def test_multisegment_episode_round_trips_task_and_subtasks(tmp_path) -> None:
         1,
         1,
     ]
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_action_contract_uses_official_per_frame_tasks(tmp_path) -> None:
+    """Contract datasets encode segment instructions through task_index."""
+    env = MockEnvForDataset(num_joints=2, has_sensors=False)
+    recorder = LeRobotRecorder(
+        MockFunctorCfg(
+            params={
+                "save_path": str(tmp_path),
+                "robot_meta": {"robot_type": "test_robot"},
+                "instruction": {"lang": "Move the cube."},
+                "extra": {"task_description": "official_tasks"},
+                "action_contract": {
+                    "version": 1,
+                    "representation": "joint_position",
+                },
+            }
+        ),
+        env,
+    )
+    obs_list = [
+        TensorDict(
+            {
+                "robot": {
+                    "qpos": torch.zeros(2),
+                    "qvel": torch.zeros(2),
+                    "qf": torch.zeros(2),
+                }
+            },
+            batch_size=[],
+        )
+        for _ in range(2)
+    ]
+    episode_metadata = {
+        "segments": [
+            {
+                "segment_id": 0,
+                "start_step": 0,
+                "end_step": 1,
+                "instruction": "Pick up the cube.",
+            },
+            {
+                "segment_id": 1,
+                "start_step": 1,
+                "end_step": 2,
+                "instruction": "Place the cube.",
+            },
+        ]
+    }
+
+    assert recorder._save_single_episode(
+        0,
+        obs_list,
+        [torch.zeros(2), torch.zeros(2)],
+        episode_metadata=episode_metadata,
+    )
+    recorder.finalize()
+
+    loaded = LeRobotDataset(
+        repo_id=recorder.dataset_full_path.name,
+        root=recorder.dataset_full_path,
+    )
+    samples = [loaded[index] for index in range(2)]
+
+    assert [sample["task"] for sample in samples] == [
+        "Pick up the cube.",
+        "Place the cube.",
+    ]
+    assert "subtask_index" not in samples[0]
+    assert not (recorder.dataset_full_path / "meta" / "subtasks.parquet").exists()
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_legacy_episode_metadata_omits_action_contract() -> None:
+    """Omitting action_contract preserves the main sidecar schema."""
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder._env = MockEnvForDataset(has_sensors=False)
+    recorder._action_contract_cfg = None
+    recorder.use_official_task_index = False
+    recorder.instruction = None
+    recorder.extra = {}
+    recorder.total_time = 0.0
+    recorder.curr_episode = 0
+    recorder.dataset_full_path = Path("/tmp/test_dataset")
+    recorder.dataset = MagicMock()
+    recorder.dataset.meta.info = {"fps": 30}
+    recorder._depth_manager = None
+    recorder._register_subtasks = MagicMock(return_value={"unknown_task": 0})
+    recorder._convert_frame_to_lerobot = MagicMock(return_value={})
+    recorder._write_episode_metadata = MagicMock()
+
+    assert recorder._save_single_episode(0, [object()], [object()])
+
+    metadata = recorder._write_episode_metadata.call_args.args[0]
+    assert "action_contract" not in metadata
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")

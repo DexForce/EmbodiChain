@@ -230,7 +230,10 @@ class ActionManager(ManagerBase):
                         shape=(term.action_dim,),
                         dtype=np.float32,
                     )
-            if len(terms) == 1:
+            if (
+                len(terms) == 1
+                and getattr(terms[0][1], "action_space", None) is not None
+            ):
                 return next(iter(spaces.values()))
             if len(spaces) == 1 and "qpos" in spaces:
                 return spaces["qpos"]

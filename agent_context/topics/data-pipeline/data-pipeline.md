@@ -54,6 +54,15 @@ LeRobot feature width and ordered names follow that layout, while episode and
 trajectory metadata publish its version, joint names, slices, mode, and
 environment `step_dt`.
 
+LeRobot recording preserves that existing schema when `action_contract` is
+omitted. A versioned contract is opt-in and selects one primary `action`
+representation: `joint_position`, `joint_position_velocity`, or
+`eef_pose_gripper`. Contract datasets store the descriptor in the official
+action feature metadata and use per-frame LeRobot `task` / `task_index` for
+segment instructions. Auxiliary measured EEF poses and executed controller qpos
+are declared only when requested; controller qpos is captured at the robot
+boundary before action postprocessing.
+
 `dataset.save_episode()` is the LeRobot commit point. A later depth/sidecar
 failure cannot roll back that episode. Fragment IDs provide same-recorder
 deduplication and sticky partial-commit errors; they are not a crash-recovery journal.
@@ -69,6 +78,7 @@ Choose synchronous persistence or throttle production when memory bounds matter.
 |---|---|
 | Worker states, valid sampling, continuity, DataLoader | `tests/data_pipeline/test_online_data.py` |
 | Sync commit, FPS, fragments and depth routing | `tests/gym/envs/managers/test_dataset_functors.py` |
+| Legacy/action-contract schemas and official task mapping | `tests/gym/envs/managers/test_dataset_functors.py` |
 | Clone isolation, FIFO, errors and drain | `tests/gym/envs/managers/test_async_dataset_functors.py` |
 | Save/discard dispatch | `tests/gym/envs/managers/test_dataset_manager.py` |
 | Depth codec/temp files/metadata | `tests/data_pipeline/depth_video/` |

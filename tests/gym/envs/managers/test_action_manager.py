@@ -275,6 +275,18 @@ def test_eef_pose_gripper_term_exposes_flat_box_action_space():
     assert space.high[-1] == 1.0
 
 
+def test_single_legacy_eef_term_keeps_dict_action_space():
+    """Existing non-qpos singleton terms retain their public Dict contract."""
+    env = MockEnvForEef(num_envs=2, action_dim=6)
+    manager = ActionManager(
+        {"eef": ActionTermCfg(func=EefPoseTerm, params={"pose_dim": 6})}, env
+    )
+
+    space = manager.single_action_space
+    assert isinstance(space, gym.spaces.Dict)
+    assert list(space.spaces) == ["eef_pose"]
+
+
 def test_single_eef_term_unwraps_tensor_dict_policy_action():
     """Dict-shaped Gym actions are unwrapped before the sole EEF term runs."""
     env = MockEnvForGripper()

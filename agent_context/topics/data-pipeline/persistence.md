@@ -11,6 +11,10 @@
    Expert actions follow the environment's stored-action schema: active qpos by
    default, or flat `[qpos, qvel]` with matching feature names and metadata when
    position-velocity mode is enabled. The policy action space is not resized.
+   Omitting recorder `action_contract` retains this schema exactly. An explicit
+   version-1 contract selects `joint_position`, `joint_position_velocity`, or
+   canonical seven-value `eef_pose_gripper`; it also switches segment language
+   to LeRobot's per-frame `task` / `task_index` mapping.
 2. Recorder construction requires `1 / env.step_dt` to be an exact integer FPS. Non-integral
    simulation rates fail early.
 3. `_save_episodes()` slices only valid lengths. Segment-fragment mode creates independent
@@ -31,6 +35,10 @@
 8. Async enqueue clones all tensor payloads to CPU and deep-copies metadata in the caller
    before reset reuses the buffer. One FIFO worker is the sole LeRobot accessor and assigns
    deterministic episode order.
+   EEF contracts snapshot the raw policy request before preprocessing and the
+   executed active-joint qpos after controller normalization but before action
+   postprocessing. Mapping actions are split by environment before either sync
+   or async persistence.
 9. The async worker records per-payload errors but continues draining later items. Finalize
    rejects new work, queues a sentinel after all existing payloads, joins the worker, calls
    base finalization, and aggregates background plus storage errors. Its queue is unbounded,

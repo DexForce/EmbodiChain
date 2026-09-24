@@ -373,6 +373,7 @@ class EmbodiedEnv(BaseEnv):
         self.action_manager: ActionManager | None = None
         self.dataset_manager: DatasetManager | None = None
         self._record_raw_actions = False
+        self._record_controller_qpos = False
 
         super().__init__(cfg, **kwargs)
 
@@ -408,7 +409,10 @@ class EmbodiedEnv(BaseEnv):
             if dataset_terms and not self.cfg.filter_dataset_saving:
                 self.dataset_manager = DatasetManager(self.cfg.dataset, self)
                 self.cfg.init_rollout_buffer = True
-                self._record_raw_actions = True
+                self._record_raw_actions = self.dataset_manager.requires_raw_actions
+                self._record_controller_qpos = (
+                    self.dataset_manager.requires_controller_qpos
+                )
 
             self.rollout_buffer: TensorDict | None = None
             self._max_rollout_steps = 0
@@ -428,6 +432,9 @@ class EmbodiedEnv(BaseEnv):
             self._traj_steps: torch.Tensor | None = None
             self._traj_raw_action: EnvAction | None = None
             self._raw_action_history: list[list[EnvAction]] = [
+                [] for _ in range(self.num_envs)
+            ]
+            self._controller_qpos_history: list[list[torch.Tensor]] = [
                 [] for _ in range(self.num_envs)
             ]
             self._traj_save_count = 0
@@ -1080,6 +1087,11 @@ class EmbodiedEnv(BaseEnv):
             for env_id in env_ids_to_process.cpu().tolist():
                 if 0 <= env_id < len(raw_action_history):
                     raw_action_history[env_id].clear()
+        controller_qpos_history = getattr(self, "_controller_qpos_history", None)
+        if controller_qpos_history is not None:
+            for env_id in env_ids_to_process.cpu().tolist():
+                if 0 <= env_id < len(controller_qpos_history):
+                    controller_qpos_history[env_id].clear()
 
     def _clear_expert_rollout_rows(self, env_ids: torch.Tensor) -> None:
         """Invalidate selected expert-buffer rows without clearing large frames."""
@@ -1920,6 +1932,7 @@ class EmbodiedEnv(BaseEnv):
         else:
             logger.log_error(f"Unsupported action type: {type(action)}")
 
+        EmbodiedEnv._record_controller_qpos_action(self, action)
         return action
 
     def compute_task_state(
@@ -2012,7 +2025,8 @@ class EmbodiedEnv(BaseEnv):
             self._traj_raw_action = raw_action
         # Do not retain malformed actions: validation, masking and trajectory
         # encoding above are the ownership boundary for raw-action history.
-        self._record_raw_action(raw_action)
+        if not is_controller_action:
+            self._record_raw_action(raw_action)
         return action
 
     def _record_raw_action(self, action: EnvAction) -> None:
@@ -2031,6 +2045,18 @@ class EmbodiedEnv(BaseEnv):
             rows = [
                 action[index].detach().cpu().clone() for index in range(self.num_envs)
             ]
+        elif isinstance(action, Mapping):
+            tensors = {
+                key: torch.as_tensor(value).detach().cpu().clone()
+                for key, value in action.items()
+            }
+            if any(
+                value.ndim == 0 or value.shape[0] != num_envs
+                for value in tensors.values()
+            ):
+                return
+            tensor_action = TensorDict(tensors, batch_size=[num_envs])
+            rows = [tensor_action[index].clone() for index in range(num_envs)]
         elif isinstance(action, torch.Tensor):
             if action.ndim == 0 or action.shape[0] != num_envs:
                 return
@@ -2063,6 +2089,52 @@ class EmbodiedEnv(BaseEnv):
         if all(isinstance(row, TensorDict) for row in rows):
             return TensorDict.stack(rows, dim=0)
         return rows
+
+    def _record_controller_qpos_action(self, action: EnvAction) -> None:
+        """Keep qpos exactly as applied at the robot-control boundary."""
+        if not getattr(self, "_record_controller_qpos", False):
+            return
+        qpos = action.get("qpos", None) if isinstance(action, TensorDict) else action
+        if not isinstance(qpos, torch.Tensor):
+            return
+        num_envs = int(self.num_envs)
+        if qpos.ndim != 2 or qpos.shape[0] != num_envs:
+            return
+
+        history = getattr(self, "_controller_qpos_history", None)
+        if history is None:
+            history = [[] for _ in range(num_envs)]
+            self._controller_qpos_history = history
+        active_mask = getattr(self, "_demo_active_mask", None)
+        if active_mask is not None and getattr(self, "_demo_no_auto_reset", False):
+            active_mask = torch.as_tensor(active_mask, device="cpu", dtype=torch.bool)
+        else:
+            active_mask = None
+        for index in range(num_envs):
+            if active_mask is None or bool(active_mask[index]):
+                history[index].append(qpos[index].detach().cpu().clone())
+
+    def get_controller_qpos_history(
+        self, env_id: int, length: int | None = None
+    ) -> torch.Tensor:
+        """Return qpos commands captured for one environment episode.
+
+        Args:
+            env_id: Parallel environment row.
+            length: Optional maximum number of commands to return.
+
+        Returns:
+            Stacked active-joint qpos commands on CPU.
+        """
+        history = getattr(self, "_controller_qpos_history", None)
+        if history is None:
+            return torch.empty((0, 0), dtype=torch.float32)
+        rows = history[int(env_id)]
+        if length is not None:
+            rows = rows[:length]
+        if not rows:
+            return torch.empty((0, 0), dtype=torch.float32)
+        return torch.stack(rows, dim=0)
 
     def _postprocess_action(self, action):
         if self.action_manager is not None:

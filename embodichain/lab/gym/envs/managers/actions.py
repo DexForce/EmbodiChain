@@ -337,6 +337,9 @@ class EefPoseGripperTerm(EefPoseTerm):
     final value is normalized from ``[-1, 1]`` to the active hand joint limits.
     """
 
+    action_contract_representation = "eef_pose_gripper"
+    """Dataset action representation emitted by this term."""
+
     @property
     def action_dim(self) -> int:
         return 7
