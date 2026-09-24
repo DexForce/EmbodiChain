@@ -20,6 +20,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from huggingface_hub import constants
 from requests.exceptions import ConnectionError
 
 from embodichain.data.assets import policy_assets
@@ -121,7 +122,9 @@ def test_named_revision_is_resolved_before_any_file_download(
         return SimpleNamespace(sha=OTHER_REVISION)
 
     monkeypatch.setattr(
-        policy_assets, "HfApi", lambda: SimpleNamespace(model_info=model_info)
+        policy_assets,
+        "HfApi",
+        lambda **kwargs: SimpleNamespace(model_info=model_info),
     )
     root, source = policy_assets.download_pretrained_policy(
         MODEL, revision="release", cache_dir=tmp_path
@@ -130,6 +133,30 @@ def test_named_revision_is_resolved_before_any_file_download(
     assert source["revision"] == OTHER_REVISION
     assert OTHER_REVISION in root.parts
     assert all(kwargs["revision"] == OTHER_REVISION for _, kwargs in calls)
+
+
+@pytest.mark.parametrize("revision", [None, "release"])
+def test_canonical_endpoint_overrides_mirror(tmp_path, hub, monkeypatch, revision):
+    _, calls = hub
+    mirror = "https://hf-mirror.com"
+    monkeypatch.setenv("HF_ENDPOINT", mirror)
+    # The Hub reads this environment variable when its constants are imported.
+    monkeypatch.setattr(constants, "ENDPOINT", mirror)
+    api_endpoints = []
+
+    def model_info(self, repo_id, *, revision):
+        api_endpoints.append(self.endpoint)
+        return SimpleNamespace(sha=REVISION)
+
+    monkeypatch.setattr(policy_assets.HfApi, "model_info", model_info)
+    policy_assets.download_pretrained_policy(
+        MODEL, revision=revision, cache_dir=tmp_path
+    )
+    assert api_endpoints == ([] if revision is None else ["https://huggingface.co"])
+    assert len(calls) == 6  # Index and all five bundle files.
+    assert all(
+        kwargs.get("endpoint") == "https://huggingface.co" for _, kwargs in calls
+    )
 
 
 @pytest.mark.parametrize(

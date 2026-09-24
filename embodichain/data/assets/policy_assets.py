@@ -29,6 +29,8 @@ from requests.exceptions import RequestException
 __all__ = ["download_pretrained_policy"]
 
 _REPO_ID = "DexForceAI/embodichain_model"
+# Redirecting mirrors may omit the commit and ETag metadata required by the Hub.
+_HF_ENDPOINT = "https://huggingface.co"
 _DEFAULT_REVISION = "8ffe514999cc7d86a894f921af71d74b2117ae7b"
 _BUNDLE_FILES = (
     "run-manifest.json",
@@ -52,6 +54,8 @@ def download_pretrained_policy(
     to use the task's normal asset resolver. Bundles contain ``checkpoint.pt``,
     ``run-manifest.json``, ``configs/train.yaml``, ``configs/env.yaml`` and
     ``evaluation.json``. Commit-pinned files reuse the Hub's local cache.
+    Requests use the canonical endpoint regardless of ``HF_ENDPOINT``; standard
+    HTTP proxy environment variables still apply.
 
     Args:
         model_id: Model directory name from the official repository's index.
@@ -78,7 +82,9 @@ def download_pretrained_policy(
     try:
         if re.fullmatch(r"[0-9a-f]{40}", selected_revision) is None:
             selected_revision = (
-                HfApi().model_info(_REPO_ID, revision=selected_revision).sha
+                HfApi(endpoint=_HF_ENDPOINT)
+                .model_info(_REPO_ID, revision=selected_revision)
+                .sha
             )
         if (
             not isinstance(selected_revision, str)
@@ -90,6 +96,7 @@ def download_pretrained_policy(
             filename="index.json",
             revision=selected_revision,
             cache_dir=repository_cache / ".hub",
+            endpoint=_HF_ENDPOINT,
         )
         index = json.loads(Path(index_file).read_text(encoding="utf-8"))
         _validate_model(index, model_id)
@@ -100,6 +107,7 @@ def download_pretrained_policy(
                 filename=f"policies/{model_id}/{filename}",
                 revision=selected_revision,
                 local_dir=snapshot,
+                endpoint=_HF_ENDPOINT,
             )
     except (OSError, RequestException) as error:
         raise RuntimeError(
