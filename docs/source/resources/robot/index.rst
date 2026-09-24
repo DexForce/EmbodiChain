@@ -40,3 +40,8 @@ the currently supported variants.
 
 To add another model, follow :doc:`/guides/add_robot` and include its page in
 this catalog and toctree.
+
+.. toctree::
+   :maxdepth: 1
+
+   aloha_mini
