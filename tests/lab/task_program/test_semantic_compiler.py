@@ -1195,6 +1195,52 @@ def test_analysis_is_provider_free_and_propagates_object_target() -> None:
     engine.resolve(grounded.invocation)
 
 
+def test_pick_preserves_rigidized_articulation_root_frame_geometry() -> None:
+    object_ref = SceneObjectRef("rubiks_cube")
+    grasp_ref = SceneAffordanceRef("rubiks_cube_grasp")
+    root_frame_vertices = torch.tensor(
+        ((0.1, -0.2, 0.3), (0.2, -0.2, 0.3), (0.1, -0.1, 0.3)),
+        dtype=torch.float32,
+    )
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=object_ref,
+                state_provider=_PoseProvider(torch.eye(4).repeat(2, 1, 1)),
+                default_affordances={GRASP_AFFORDANCE_CAPABILITY: grasp_ref},
+            ),
+            SceneEntityRegistration(
+                ref=grasp_ref,
+                parent=object_ref,
+                native_name="lower_two_layers",
+                affordance=AntipodalAffordance(
+                    mesh_vertices=root_frame_vertices,
+                    mesh_triangles=torch.tensor(((0, 1, 2),), dtype=torch.int64),
+                ),
+                affordance_capabilities=frozenset({GRASP_AFFORDANCE_CAPABILITY}),
+                affordance_revision="1",
+                relative_pose=torch.eye(4),
+            ),
+        )
+    )
+    compiler, _ = _compiler(registry)
+    workflow = compiler.analyze(
+        (Pick(object=SceneObjectRef("rubiks_cube")),),
+        workflow_id="pick_rubiks_cube",
+    )
+
+    grounded = compiler.ground(workflow, 0, _context(registry))
+
+    goal = grounded.invocation.goal
+    assert isinstance(goal, GraspGoal)
+    assert goal.semantics.entity_id == "rubiks_cube"
+    assert isinstance(goal.semantics.affordance, AntipodalAffordance)
+    assert torch.allclose(
+        goal.semantics.affordance.mesh_vertices,
+        root_frame_vertices,
+    )
+
+
 def test_pick_lookahead_uses_downstream_place_orientation_policy() -> None:
     """Pickup feasibility must screen the object pose that Place will use."""
     registry, providers = _scene_registry()

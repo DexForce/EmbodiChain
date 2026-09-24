@@ -329,6 +329,10 @@ def _validate_scene_binding_targets(
             simulation,
             field_names=("articulation",),
         ),
+        "rigidized_articulations": _physical_scene_uids(
+            simulation,
+            field_names=("articulation",),
+        ),
     }
     for binding_field, available in physical_ids.items():
         values = binding.get(binding_field, ())

@@ -36,6 +36,7 @@ EmbodiChain data cache.
    CoordinatedPlacementAndPickment
    DeformableDemoData
    MultiW1Data
+   RubiksCube
    ScoopIceNewEnv
 
 embodichain.data.assets.planner_assets
@@ -811,9 +812,11 @@ embodichain.lab.sim.atomic_actions.sim_adapter
 
 .. autosummary::
 
+   create_rigidized_articulation_antipodal_semantics
    create_simulation_atomic_action_engine
    RigidObjectSceneProvider
    RigidObjectSceneProviderCfg
+   SceneEntity
    SceneSnapshotSupplier
    SimulationExecutionAdapter
 

@@ -403,6 +403,7 @@ def _load_configured_task_program_deployment(
         optional=frozenset(
             {
                 "rigid_objects",
+                "rigidized_articulations",
                 "articulations",
                 "links",
                 "collision_world_mode",

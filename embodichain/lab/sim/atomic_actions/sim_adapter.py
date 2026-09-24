@@ -20,13 +20,16 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import torch
 
 from embodichain.utils import configclass
 
 from .bindings import JointPositionTarget, RuntimeEndpointTarget
+from .articulation_geometry import (
+    create_rigidized_articulation_antipodal_affordance,
+)
 from .control import ControlPartCommandProfile
 from .engine import AtomicActionEngine
 from .runner import (
@@ -34,6 +37,7 @@ from .runner import (
     CommandAckStatus,
 )
 from .runtime_commands import JointPositionPayload, RuntimeCommandFrame
+from .core import ObjectSemantics
 from .scene import SceneProvider
 from .state import (
     EntityState,
@@ -45,10 +49,29 @@ from .state import (
 from .tracking import TrackingRuntime
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.objects import RigidObject, Robot
+    from embodichain.lab.sim.objects import Articulation, RigidObject, Robot
     from embodichain.lab.sim.motion.motion_generator import MotionGenerator
     from embodichain.lab.sim.sim_manager import SimulationManager
     from embodichain.toolkits.graspkit import GraspPoseGenerator
+
+
+@runtime_checkable
+class SceneEntity(Protocol):
+    """Structural contract a scene provider requires of an observed entity.
+
+    Grounding needs an identity and one pose; it never needs the rest of a
+    rigid-body API. Declaring that explicitly lets an articulation stand in as
+    one compound object without relying on incidental duck typing, and keeps
+    the requirement visible to callers instead of buried in an attribute
+    lookup.
+    """
+
+    @property
+    def uid(self) -> str:
+        """Stable scene identifier of the entity."""
+
+    def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
+        """Return the entity pose that defines its object frame."""
 
 
 @configclass
@@ -87,7 +110,7 @@ class RigidObjectSceneProvider:
 
     def __init__(
         self,
-        entities: Mapping[str, RigidObject],
+        entities: Mapping[str, SceneEntity],
         *,
         collision_entity_ids: Sequence[str] = (),
         cfg: RigidObjectSceneProviderCfg | None = None,
@@ -198,7 +221,7 @@ class RigidObjectSceneProvider:
     @staticmethod
     def _read_pose(
         entity_id: str,
-        entity: RigidObject,
+        entity: SceneEntity,
         batch_size: int,
     ) -> torch.Tensor:
         """Read and validate one rigid-object pose batch."""
@@ -246,7 +269,7 @@ class RigidObjectSceneProvider:
 
 def create_simulation_atomic_action_engine(
     motion_generator: MotionGenerator,
-    scene_entities: Sequence[RigidObject],
+    scene_entities: Sequence[SceneEntity],
     control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
     grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
     *,
@@ -282,7 +305,7 @@ def create_simulation_atomic_action_engine(
         scene_entities, Sequence
     ):
         raise TypeError("scene_entities must be a sequence of rigid objects.")
-    entities_by_id: dict[str, RigidObject] = {}
+    entities_by_id: dict[str, SceneEntity] = {}
     for entity in scene_entities:
         entity_id = getattr(entity, "uid", None)
         if not isinstance(entity_id, str) or not entity_id.strip():
@@ -298,6 +321,75 @@ def create_simulation_atomic_action_engine(
         load_builtins=load_builtins,
         tracking_runtime=tracking_runtime,
         scene_provider=RigidObjectSceneProvider(entities_by_id),
+    )
+
+
+def create_rigidized_articulation_antipodal_semantics(
+    articulation: "Articulation",
+    *,
+    grasp_link: str,
+    locked_qpos: Mapping[str, float],
+    label: str,
+    geometry: Mapping[str, Any] | None = None,
+    properties: Mapping[str, Any] | None = None,
+    joint_position_tolerance: float = 1e-3,
+    link_transform_tolerance: float = 1e-5,
+) -> ObjectSemantics:
+    """Describe a locked articulation as one antipodal-graspable rigid object.
+
+    The articulation root is the object identity and pose; one selected link is
+    only the source of grasp geometry. ``get_link_vert_face`` returns vertices
+    in the link frame, while grounding publishes the articulation root pose, so
+    the vertices are transformed by the root-to-link transform before they
+    reach the affordance. Skipping that step is correct only when the two
+    frames coincide, which is a property of one asset rather than of the
+    abstraction.
+
+    Joint locking, initial positions, ``fixed_base`` and drive parameters stay
+    with :class:`~embodichain.lab.sim.cfg.ArticulationCfg` or the physical
+    environment. ``locked_qpos`` only declares the configuration this geometry
+    is valid at, and is verified against the articulation before use.
+
+    One mesh describes the object for every arena, so the declared lock is
+    verified across the whole batch rather than on one row, and the joint must
+    be actively held rather than merely resting at the declared value.
+
+    Args:
+        articulation: Articulation treated as one compound rigid body.
+        grasp_link: Link supplying the grasp mesh.
+        locked_qpos: Declared position of every joint, which must all be held.
+        label: Semantic object category.
+        geometry: Optional non-affordance geometry metadata.
+        properties: Optional physical properties such as mass and friction.
+        joint_position_tolerance: Maximum deviation, in joint units, tolerated
+            between a declared and an observed joint position, and the
+            largest position-limit span still counted as a pinned joint.
+        link_transform_tolerance: Maximum per-entry difference tolerated
+            between two arenas' root-to-link transforms.
+
+    Returns:
+        Semantics whose mesh is expressed in the articulation-root frame and
+        whose ``entity_id`` is the articulation root UID.
+
+    Raises:
+        ValueError: If the link is unknown, a joint is undeclared, displaced
+            or unheld in any arena, the arenas disagree on the root-to-link
+            transform, or the link mesh is empty.
+    """
+    affordance = create_rigidized_articulation_antipodal_affordance(
+        articulation,
+        grasp_link=grasp_link,
+        locked_qpos=locked_qpos,
+        joint_position_tolerance=joint_position_tolerance,
+        link_transform_tolerance=link_transform_tolerance,
+    )
+
+    return ObjectSemantics(
+        affordance=affordance,
+        geometry=dict(geometry or {}),
+        entity_id=articulation.uid,
+        properties=dict(properties or {}),
+        label=label,
     )
 
 
@@ -675,9 +767,11 @@ class SimulationExecutionAdapter:
 
 
 __all__ = [
+    "create_rigidized_articulation_antipodal_semantics",
     "create_simulation_atomic_action_engine",
     "RigidObjectSceneProvider",
     "RigidObjectSceneProviderCfg",
+    "SceneEntity",
     "SceneSnapshotSupplier",
     "SimulationExecutionAdapter",
 ]

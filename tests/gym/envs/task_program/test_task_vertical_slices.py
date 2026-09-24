@@ -97,6 +97,9 @@ _REPEATED_CUBE_NEWTON_GYM_CONFIG = Path(
 _REPEATED_CUBE_FRANKA_NEWTON_GYM_CONFIG = Path(
     "tasks/manipulation/repeated_pick_place/task.franka.newton.yaml"
 )
+_RUBIKS_CUBE_GYM_CONFIG = Path(
+    "tasks/manipulation/rubiks_cube_pick_place/task.ur5.yaml"
+)
 _OPEN_DRAWER_PROGRAM = Path("tasks/manipulation/open_drawer/task_program/program.yaml")
 _OPEN_DRAWER_GYM_CONFIG = Path("tasks/manipulation/open_drawer/task.ur5.yaml")
 _OPEN_DRAWER_NEWTON_GYM_CONFIG = Path(
@@ -1041,6 +1044,7 @@ def test_cube_registration_has_no_contact_evidence_route() -> None:
     "relative_path",
     (
         Path("tasks/manipulation/repeated_pick_place/task.ur5.yaml"),
+        _RUBIKS_CUBE_GYM_CONFIG,
         Path("tasks/manipulation/open_drawer/task.ur5.yaml"),
     ),
 )
