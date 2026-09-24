@@ -53,6 +53,17 @@ absolute, never scaled by commanded magnitude.
 A skill that breaks and re-establishes contact gets a derived budget rather
 than its own constant: `n * TASK_POSITION_TOLERANCE_M` for `n` contact phases.
 
+For `HandOver`, this derived budget applies to the settled **XY** delivery
+error (3 cm). Its final stage is measured after release and settle, so signed
+height error (`final_z - target_z`) allows up to
+`HANDOVER_HEIGHT_TOLERANCE_M = 0.10` m **below** the target, matching the nominal
+release pose's 10 cm clearance above the support plane. This allows the can
+and pencil to reach their different resting heights. Error **above** the
+target keeps the 3 cm horizontal budget: settling cannot explain an upward
+offset. Both limits must pass (XY ≤ 3 cm and −10 cm ≤ Z error ≤ +3 cm);
+the cross-cutting drop rule still applies. Reports keep the 3D delivery distance
+as a diagnostic and list XY distance and signed height error separately.
+
 ---
 
 ## 1. success_rate
@@ -63,11 +74,21 @@ stage is reached only when every earlier stage passed.
 
 ```
 stage_success_rate[i] = passed(i) / reached(i)      reached(i) = passed(i-1)
-success_rate          = passed(last) / total
+success_rate          = passed(last) / measured     measured = total - unsupported
+coverage_rate         = measured / total
 ```
 
 Closing stages count: a skill that lifts an object and then drops it did not
 pick it up.
+
+A case this embodiment cannot serve at all -- every sampled grasp outside the
+arm's physical reach, a capability the robot does not have -- is recorded with
+`unsupported_capability` and leaves every denominator, as
+`motion_generation/BENCHMARK_DESIGN.md` section 5 prescribes for an unsupported
+case. It lowers `coverage_rate`, which is always reported, so dropping a hard
+case cannot improve a rate. Reaching an object is the embodiment's business,
+not the skill's: a grasp the arm cannot attain says nothing about whether the
+skill grasps well, and scoring it as a miss blames the wrong thing.
 
 | Skill | Tolerances | Stages (in order) | Criterion |
 |---|---|---|---|
@@ -85,7 +106,7 @@ pick it up.
 | `Twist` | `TASK_*` | `grasped` → `twisted` → `released` | knob held / **end-effector rotation about the knob axis** within 5° / released |
 | `CoordinatedPickment` | `TASK_*` | `dual_grasped` → `lifted` → `moved` → `held` | both hands contact / lift ≥ 4 cm / pose ≤ 1 cm·5° / still pinched |
 | `CoordinatedPlacement` | `TASK_*` | `aligned` → `released` → `stable` | relative pose ≤ 1 cm·5° / both hands open / drift ≤ 1 cm·5° |
-| `HandOver` | `TASK_*` | `grasped` → `transferred` → `handed_over` → `placed` | handing arm holds / both arms hold / released and still held / delivery ≤ 3 cm |
+| `HandOver` | `TASK_*` | `grasped` → `transferred` → `handed_over` → `placed` | handing arm holds / both arms hold / released and still held / settled XY delivery ≤ 3 cm and signed height error in [−10 cm, +3 cm] |
 
 Cross-cutting: for any skill holding an object, falling more than
 `PHYSICAL_DROP_MARGIN_M` below the support plane at any point fails the current

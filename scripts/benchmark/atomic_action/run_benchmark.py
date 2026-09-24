@@ -23,6 +23,7 @@ Run: embodichain benchmark atomic-action --action move_end_effector
 from __future__ import annotations
 
 import argparse
+import importlib
 import shlex
 import subprocess
 import sys
@@ -34,6 +35,7 @@ from scripts.benchmark.atomic_action.common import (
     POSITION_CASES,
     add_profile_benchmark_args,
     add_video_benchmark_args,
+    release_simulation,
     resolve_profile,
 )
 
@@ -43,6 +45,13 @@ ACTION_MODULES = {
     "pick_up": "scripts.benchmark.atomic_action.pickup_benchmark",
     "move_held_object": "scripts.benchmark.atomic_action.move_held_object_benchmark",
     "place": "scripts.benchmark.atomic_action.place_benchmark",
+    "open_door": "scripts.benchmark.atomic_action.open_door_benchmark",
+    "press": "scripts.benchmark.atomic_action.press_benchmark",
+    "slide": "scripts.benchmark.atomic_action.slide_benchmark",
+    "twist": "scripts.benchmark.atomic_action.twist_benchmark",
+    "axis_align": "scripts.benchmark.atomic_action.axis_align_benchmark",
+    "pour": "scripts.benchmark.atomic_action.pour_benchmark",
+    "hand_over": "scripts.benchmark.atomic_action.hand_over_benchmark",
 }
 DEFAULT_ACTIONS = tuple(ACTION_MODULES.keys())
 MESH_OBJECT_ACTIONS = {"pick_up", "move_held_object", "place"}
@@ -162,34 +171,65 @@ def _validate_object_types_for_actions(
         )
 
 
-def _make_child_args(args: argparse.Namespace) -> argparse.Namespace:
-    """Build minimal child benchmark arguments for aggregate dispatch."""
+def _make_child_args(
+    args: argparse.Namespace,
+    action_name: str,
+) -> argparse.Namespace:
+    """Build one benchmark's arguments for in-process aggregate dispatch.
+
+    The namespace starts from the selected module's own parser defaults, so a
+    benchmark's case-selection arguments are always present no matter which
+    ones it declares. Building it from a fixed list here instead would leave
+    every newly registered action without its own arguments, which the
+    benchmark then reads and fails on.
+
+    Args:
+        args: Aggregate benchmark arguments.
+        action_name: Atomic action whose module supplies the defaults.
+
+    Returns:
+        Child arguments carrying the module's defaults with the aggregate
+        run's shared settings applied over them.
+    """
+    module = importlib.import_module(ACTION_MODULES[action_name])
+    parser = argparse.ArgumentParser(add_help=False)
+    module.add_benchmark_args(parser)
+    child_args = parser.parse_args([])
+
     profile = resolve_profile(args)
-    return argparse.Namespace(
-        smoke=profile == "smoke",
-        profile=profile,
-        repeat=1,
-        device=args.device,
-        renderer=args.renderer,
-        object_types=args.object_types,
-        position_cases=args.position_cases,
-        pose_cases=["all"],
-        sequence_cases=["all"],
-        approach_cases=args.approach_cases,
-        place_cases=None,
-        held_object_cases=None,
-        n_sample=1000 if profile == "smoke" else 10000,
-        force_reannotate=False,
-        record_video=args.record_video,
-        record_failed_video=args.record_failed_video,
-        video_case_limit=args.video_case_limit,
-        video_dir=args.video_dir,
-        video_fps=args.video_fps,
-        video_max_memory=args.video_max_memory,
-        video_width=args.video_width,
-        video_height=args.video_height,
-        video_hold_steps=args.video_hold_steps,
-    )
+    shared: dict[str, object] = {
+        "smoke": profile == "smoke",
+        "profile": profile,
+        "repeat": 1,
+        "device": args.device,
+        "renderer": args.renderer,
+        "record_video": args.record_video,
+        "record_failed_video": args.record_failed_video,
+        "video_case_limit": args.video_case_limit,
+        "video_dir": args.video_dir,
+        "video_fps": args.video_fps,
+        "video_max_memory": args.video_max_memory,
+        "video_width": args.video_width,
+        "video_height": args.video_height,
+        "video_hold_steps": args.video_hold_steps,
+        # The aggregate run samples fewer grasps than a single benchmark does.
+        "n_sample": 1000 if profile == "smoke" else 10000,
+        "force_reannotate": False,
+    }
+    # Object and position selections belong to the mesh-object benchmarks, and
+    # are only forwarded when the aggregate run was given them.
+    for name, value in (
+        ("object_types", args.object_types),
+        ("position_cases", args.position_cases),
+        ("approach_cases", args.approach_cases),
+    ):
+        if value:
+            shared[name] = value
+
+    for name, value in shared.items():
+        if hasattr(child_args, name):
+            setattr(child_args, name, value)
+    return child_args
 
 
 def _make_child_cli_args(args: argparse.Namespace, action_name: str) -> list[str]:
@@ -294,11 +334,14 @@ def _run_in_process_benchmarks(
     """Run selected benchmarks in the current Python process."""
     reports: list[Path] = []
     for action_name in selected_actions:
-        module_name = ACTION_MODULES[action_name]
-        module = __import__(module_name, fromlist=["run_all_benchmarks"])
-        child_args = _make_child_args(args)
+        module = importlib.import_module(ACTION_MODULES[action_name])
+        child_args = _make_child_args(args, action_name)
         report_path = module.run_all_benchmarks(child_args)
         reports.append(report_path)
+        # Each benchmark builds its own scene. Leaving the previous one
+        # standing makes the next benchmark a second simulator instance, whose
+        # planner then resolves against the robots of the first.
+        release_simulation()
     return reports
 
 

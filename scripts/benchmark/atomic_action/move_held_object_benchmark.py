@@ -33,11 +33,16 @@ from scripts.benchmark.atomic_action.common import (
     add_grasp_benchmark_args,
     add_object_position_benchmark_args,
     add_pickup_approach_benchmark_args,
-    build_single_action_leaderboard,
+    SKILL_STAGES,
+    StageLadder,
+    TASK_POSITION_TOLERANCE_M,
+    TASK_ROTATION_TOLERANCE_RAD,
+    build_stage_leaderboard,
     build_video_output_path,
     create_antipodal_object_semantics,
     create_benchmark_grasp_pose_generator,
     create_benchmark_object,
+    has_attainable_grasp_candidate,
     describe_object_preset,
     ensure_repo_root,
     ensure_torch,
@@ -46,7 +51,6 @@ from scripts.benchmark.atomic_action.common import (
     MeshObjectPreset,
     object_position_tuple,
     park_rigid_object,
-    PHYSICAL_MOVE_HELD_OBJECT_XYZ_TOLERANCE_M,
     PHYSICAL_PICK_MIN_LIFT_M,
     pickup_approach_direction_tuple,
     PositionCase,
@@ -86,9 +90,14 @@ HELD_OBJECT_CASES = {
     "center_high": HeldObjectCase("center_high", (-0.42, 0.00, 0.58)),
 }
 PICK_SAMPLE_INTERVAL = 120
+PICK_PRE_GRASP_DISTANCE = 0.15
 MOVE_SAMPLE_INTERVAL = 60
 MOVE_HELD_OBJECT_SAMPLE_INTERVAL = 120
 HAND_INTERP_STEPS = 12
+
+
+class UnsupportedCase(RuntimeError):
+    """Raised when this embodiment cannot serve a benchmark case at all."""
 
 
 def add_benchmark_args(parser: argparse.ArgumentParser) -> None:
@@ -186,6 +195,9 @@ def _prepare_held_state(
         PickUpOptions,
         SceneSnapshot,
     )
+    from scripts.tutorials.atomic_action.tutorial_utils import (
+        initialize_pre_pick_robot_pose,
+    )
     from scripts.tutorials.atomic_action.move_held_object import (
         get_hand_open_close_qpos,
         make_pre_pick_eef_pose,
@@ -221,6 +233,31 @@ def _prepare_held_state(
         "pick_up",
         {"primary": {"motion": "arm", "grasp": "hand"}},
     )
+    # A case whose sampled grasps are all out of the arm's physical reach is
+    # not a skill failure; it is a case this embodiment cannot serve. The probe
+    # runs from the pre-pick pose, the state the other grasp benchmarks ask the
+    # same question from, and the robot is put back afterwards so the
+    # measurement itself is unchanged.
+    state_before_probe = robot.get_qpos().clone()
+    initialize_pre_pick_robot_pose(robot, obj, hand_open)
+    attainable = has_attainable_grasp_candidate(
+        sim=sim,
+        robot=robot,
+        semantics=semantics,
+        grasp_pose_generator=create_benchmark_grasp_pose_generator(pickup_args),
+        object_pose=obj.get_local_pose(to_matrix=True),
+        approach_direction=resolve_pickup_approach_direction(
+            pickup_approach, position_case, sim.device
+        ),
+        pre_grasp_distance=PICK_PRE_GRASP_DISTANCE,
+        obj=obj,
+    )
+    robot.set_qpos(state_before_probe, target=False)
+    robot.set_qpos(state_before_probe, target=True)
+    robot.clear_dynamics()
+    if not attainable:
+        raise UnsupportedCase("No sampled grasp on this object is attainable.")
+
     result = atomic_engine.compile(
         (
             ActionInvocation(
@@ -238,7 +275,7 @@ def _prepare_held_state(
                     approach_direction=resolve_pickup_approach_direction(
                         pickup_approach, position_case, sim.device
                     ),
-                    pre_grasp_distance=0.15,
+                    pre_grasp_distance=PICK_PRE_GRASP_DISTANCE,
                     lift_height=0.16,
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),
@@ -360,6 +397,7 @@ def _run_case(
         held_object_xy_error_m = None
         held_object_z_error_m = None
         held_object_xyz_error_m = None
+        held_object_rotation_error_rad = None
 
         if (
             getattr(precondition_traj, "ndim", 0) >= 3
@@ -404,6 +442,14 @@ def _run_case(
                 held_object_xy_error_m = xy_distance_m(final_obj_position, case.xyz)
                 held_object_z_error_m = abs(final_obj_position[2] - case.xyz[2])
                 held_object_xyz_error_m = xyz_distance_m(final_obj_position, case.xyz)
+                # The goal commands an orientation as well as a position, so
+                # the transported stage scores both.
+                achieved_rotation = obj.get_local_pose(to_matrix=True)[0, :3, :3]
+                relative = target_pose[:3, :3].transpose(0, 1) @ achieved_rotation
+                cosine = (torch.diagonal(relative).sum() - 1.0) / 2.0
+                held_object_rotation_error_rad = float(
+                    torch.arccos(torch.clamp(cosine, min=-1.0, max=1.0))
+                )
             reset_robot(robot, initial_qpos)
             reset_rigid_object(obj, initial_obj_pose)
 
@@ -412,25 +458,23 @@ def _run_case(
             object_lift_delta_m is not None
             and object_lift_delta_m >= PHYSICAL_PICK_MIN_LIFT_M
         )
-        physical_move_success = bool(
-            still_held
-            and physical_pick_success
-            and held_object_xyz_error_m is not None
-            and held_object_xyz_error_m <= PHYSICAL_MOVE_HELD_OBJECT_XYZ_TOLERANCE_M
-        )
-        success = physical_move_success
-        if success:
-            failure_reason = ""
-        elif not is_success:
-            failure_reason = "planning_failed"
+        ladder = StageLadder(stages=SKILL_STAGES["move_held_object"])
+        if not is_success:
+            ladder.fail("transported", "planner_reported_failure")
         elif not still_held:
-            failure_reason = "held_object_lost"
-        elif not physical_pick_success:
-            failure_reason = "physical_pick_failed"
-        elif held_object_xyz_error_m is None:
-            failure_reason = "physical_replay_missing"
+            ladder.fail("transported", "object_dropped")
         else:
-            failure_reason = "held_object_target_miss"
+            ladder.record(
+                "transported",
+                held_object_xyz_error_m is not None
+                and held_object_xyz_error_m <= TASK_POSITION_TOLERANCE_M
+                and held_object_rotation_error_rad is not None
+                and held_object_rotation_error_rad <= TASK_ROTATION_TOLERANCE_RAD,
+                "task_goal_miss",
+            )
+        physical_move_success = ladder.success
+        success = physical_move_success
+        failure_reason = ladder.failure_reason
 
         video_path = None
         if should_record_case(args, recorded_count, success):
@@ -516,12 +560,20 @@ def _run_case(
             "held_object_xy_error_m": held_object_xy_error_m,
             "held_object_z_error_m": held_object_z_error_m,
             "held_object_xyz_error_m": held_object_xyz_error_m,
+            "held_object_rotation_error_rad": held_object_rotation_error_rad,
+            "ladder": ladder,
             "precondition_waypoints": precondition_waypoints,
             "trajectory_waypoints": int(traj.shape[1]) if traj.ndim >= 2 else 0,
             "failure_reason": failure_reason,
             "video_path": str(video_path) if video_path is not None else "",
         }
     except Exception as exc:
+        unsupported = isinstance(exc, UnsupportedCase)
+        case_ladder = StageLadder(stages=SKILL_STAGES["move_held_object"])
+        if unsupported:
+            case_ladder.unsupported()
+        else:
+            case_ladder.fail("transported", "planner_exception")
         video_path = None
         if should_record_case(args, recorded_count, False):
             try:
@@ -576,9 +628,15 @@ def _run_case(
             "held_object_xy_error_m": None,
             "held_object_z_error_m": None,
             "held_object_xyz_error_m": None,
+            "held_object_rotation_error_rad": None,
+            "ladder": case_ladder,
             "precondition_waypoints": 0,
             "trajectory_waypoints": 0,
-            "failure_reason": f"exception:{type(exc).__name__}:{exc}",
+            "failure_reason": (
+                "unsupported_capability"
+                if unsupported
+                else f"exception:{type(exc).__name__}:{exc}"
+            ),
             "video_path": str(video_path) if video_path is not None else "",
         }
 
@@ -620,8 +678,7 @@ def _build_rows(results: list[dict[str, object]]):
                 "pickup_approach": result["pickup_approach"],
                 "approach_direction": result["approach_direction"],
                 "held_object_case": result["held_object_case"],
-                "success_rate": f"{float(result['success']):.6f}",
-                "planning_success_rate": f"{float(result['planning_success']):.6f}",
+                **result["ladder"].as_row_fields(),
                 "held_object_rate": f"{float(result['still_held']):.6f}",
                 "physical_pick_success_rate": (
                     f"{float(result['physical_pick_success']):.6f}"
@@ -639,6 +696,9 @@ def _build_rows(results: list[dict[str, object]]):
                 "held_object_z_error_m": format_float(result["held_object_z_error_m"]),
                 "held_object_xyz_error_m": format_float(
                     result["held_object_xyz_error_m"]
+                ),
+                "held_object_rotation_error_rad": format_float(
+                    result["held_object_rotation_error_rad"], 4
                 ),
                 "precondition_waypoints": result["precondition_waypoints"],
                 "trajectory_waypoints": result["trajectory_waypoints"],
@@ -742,7 +802,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
                         )
 
     perf_rows, metric_rows = _build_rows(results)
-    leaderboard_rows = build_single_action_leaderboard("move_held_object", metric_rows)
+    leaderboard_rows = build_stage_leaderboard("move_held_object", results)
     report_path = write_markdown_report(
         benchmark_name="atomic_action_move_held_object",
         perf_rows=perf_rows,
@@ -769,10 +829,16 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
                 f"abs(opening_axis_z) * {SIDE_GRASP_OPEN_AXIS_Z_COST_WEIGHT:.2f}."
             ),
             (
-                "Physical success rule: PickUp precondition lift delta >= "
-                f"{PHYSICAL_PICK_MIN_LIFT_M:.3f} m, held-object state is kept, "
-                "and final object XYZ error <= "
-                f"{PHYSICAL_MOVE_HELD_OBJECT_XYZ_TOLERANCE_M:.3f} m."
+                "Stage: transported (the held-object state is kept, and the "
+                "object's final pose is within "
+                f"{TASK_POSITION_TOLERANCE_M:.3f} m and "
+                f"{TASK_ROTATION_TOLERANCE_RAD:.3f} rad of the commanded pose)."
+            ),
+            (
+                "The PickUp precondition lift delta >= "
+                f"{PHYSICAL_PICK_MIN_LIFT_M:.3f} m is reported as "
+                "physical_pick_success_rate; it describes the precondition, "
+                "not MoveHeldObject."
             ),
             *summarize_video_recording(args, results, video_paths),
         ],
