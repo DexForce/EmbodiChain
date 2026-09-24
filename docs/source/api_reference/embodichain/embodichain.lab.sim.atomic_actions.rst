@@ -309,6 +309,8 @@ Planning and state
 
    ActionPlanTemplateAdapter
 
+.. currentmodule:: embodichain.lab.sim.atomic_actions
+
 Engine and execution
 --------------------
 

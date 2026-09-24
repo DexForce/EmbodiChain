@@ -18,7 +18,7 @@
 
 This showcase reuses the existing Atomic Action task scene and runs the nominal
 plan plus configured trajectory variants through the real simulator. It writes
-joint/tool-path plots and the replay filmstrip to a caller-selected directory.
+joint/tool-path plots and ``place_auto_play.mp4`` to a caller-selected directory.
 It demonstrates physical task execution and variant diversity; it is not a
 dataset qualification or confirmed EpisodeSink run.
 """
@@ -63,6 +63,15 @@ def main(argv: list[str] | None = None) -> None:
         forwarded.extend(("--trajectory_variants", "4"))
     if "--headless_play" not in forwarded:
         forwarded.append("--headless_play")
+    if "--auto_play" not in forwarded:
+        forwarded.append("--auto_play")
+    if "--auto_play_video_path" not in forwarded:
+        forwarded.extend(
+            (
+                "--auto_play_video_path",
+                str(args.output_dir / "place_auto_play.mp4"),
+            )
+        )
     previous = sys.argv
     try:
         sys.argv = ["task_environment_augmentation_showcase", *forwarded]

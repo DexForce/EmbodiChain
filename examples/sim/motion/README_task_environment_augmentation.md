@@ -14,8 +14,8 @@ python examples/sim/motion/task_environment_augmentation_showcase.py \
 The showcase uses the existing Atomic Action task scene and MotionGenerator
 planning path. It keeps contact and release waypoints fixed while varying the
 authorized free motion using joint residuals, via points, and timing profiles.
-The output directory receives the joint-trajectory and tool-path plots plus the
-replay filmstrip produced by the tutorial runtime.
+The output directory receives the joint-trajectory and tool-path plots plus
+``place_auto_play.mp4`` produced by the tutorial runtime.
 
 Useful overrides include:
 
