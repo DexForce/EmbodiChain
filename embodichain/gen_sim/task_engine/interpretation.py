@@ -646,12 +646,13 @@ def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
     if task_type == "E4":
         transfer = str(step["transfer_arm"])
         receive = str(step["receive_arm"])
-        if transfer not in {"left_arm", "right_arm"} or receive not in {
+        if transfer not in {"left_arm", "right_arm", "auto"} or receive not in {
             "left_arm",
             "right_arm",
+            "auto",
         }:
-            raise ValueError(f"{context} E4 requires two explicit arms.")
-        if transfer == receive:
+            raise ValueError(f"{context} E4 requires named arms or auto.")
+        if transfer == receive and transfer != "auto":
             raise ValueError(f"{context} E4 transfer and receive arms must differ.")
         if step["required_arm"] not in {"none", "auto"}:
             raise ValueError(
@@ -687,6 +688,10 @@ def _instruction_prompt(instruction: str) -> str:
         "Object directions are robot-relative; arm names are robot body sides. "
         "Preserve each concrete object or target phrase from the instruction as "
         "an open scene_ref.reference. Do not classify it or emit a scene UID. "
+        "Do not collapse a coordinated noun into one object: 'knife and fork' "
+        "or '刀叉' names two distinct objects. When both share one action and "
+        "target, use quantifier=count with count=2 or emit separate steps; "
+        "preserve every explicitly named member. "
         "Emit no AtomicAction, category label, affordance, coordinates, poses, "
         "paths, or reasoning. Encode explicit ordering with depends_on; same-action set "
         "members may remain independent. Use empty strings and 'none' for "
@@ -750,7 +755,9 @@ def _instruction_prompt(instruction: str) -> str:
         "has all 16 step keys; every object and target "
         "has all 5 selector keys. For an inapplicable field use the canonical "
         "default shown in the example, never omit the field. E4 must explicitly "
-        "state transfer_arm, receive_arm, and terminal_behavior. E1/E3 must explicitly state target "
+        "state transfer_arm, receive_arm, and terminal_behavior. For an E4 arm "
+        "not named in the instruction, set that arm field to auto; do not "
+        "invent a left/right side before scene binding. E1/E3 must explicitly state target "
         "and relation (except E1 layout=line). For E1 and E2, copy an explicitly "
         "named left/right arm into required_arm; use required_arm=auto only when "
         "the instruction does not specify an arm, and never use none."
@@ -812,6 +819,10 @@ def _instruction_selector_rules() -> str:
         "- kind=scene_ref: step_id is empty and reference preserves the concrete "
         "object phrase from the user's instruction. Repeated scene_ref text does "
         "not establish cross-step identity.\n"
+        "- For an explicit number N of selected objects, use quantifier='count' "
+        "and count=N, even when the instruction says 'all N'. For an unnumbered "
+        "all-set request, use quantifier='all' and count=0. A singular request "
+        "uses quantifier='one' and count=0. Do not infer N from the scene.\n"
         "- kind=step_result: use it only for a pronoun that means exactly one "
         "object, or an explicit continuation of the result of an earlier "
         "instruction step. Set step_id to that prior "
@@ -825,6 +836,15 @@ def _instruction_selector_rules() -> str:
 
 def _instruction_repair_guidance(error: Exception) -> str:
     """Add narrow semantic guidance for errors weak JSON-mode models repeat."""
+    if "quantifier=all requires count=0" in str(error):
+        return (
+            "\nQuantifier repair rule: re-read the original instruction. If it "
+            "contains an explicit number N for the selected set, use "
+            "quantifier=count with count=N. If it requests all without an "
+            "explicit number, keep quantifier=all and set count=0. Never use "
+            "quantifier=all with a nonzero count or invent a number from the "
+            "previous model response.\n"
+        )
     if "E7 target_state must be open" in str(error):
         return (
             "\nArticulation classification repair rule: re-read the original "
@@ -841,6 +861,13 @@ def _instruction_repair_guidance(error: Exception) -> str:
             "the other arm, use that arm as receive_arm. Resolve coreference from "
             "the instruction semantics; identical scene_ref text alone does not "
             "prove that two independently selected objects are the same.\n"
+        )
+    if "E4 requires named arms or auto" in str(error):
+        return (
+            "\nHandover arm repair rule: preserve any explicitly named arm. "
+            "For an arm not named by the instruction, use auto rather than "
+            "guessing left or right; scene grounding will assign a feasible "
+            "source arm and the opposite receiver.\n"
         )
     if isinstance(error, _MissingRequiredObjectError):
         return (

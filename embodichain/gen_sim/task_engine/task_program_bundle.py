@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 import json
@@ -1218,6 +1219,10 @@ def _integration_payload(
             if entity_id in axis_align_objects | pour_objects | upright_move_objects:
                 grasp_affordance["internal_axis"] = _longest_local_axis(source)
             affordances.append(grasp_affordance)
+        occupied_landings: list[tuple[list[float], dict[str, Any]]] = []
+        inside_count = sum(
+            1 for _, container_id, _, _ in inside_routes if container_id == entity_id
+        )
         for affordance_id, container_id, object_id, resource in inside_routes:
             if container_id != entity_id:
                 continue
@@ -1227,7 +1232,14 @@ def _integration_payload(
                 scene_objects[object_id],
                 resource=resource,
                 embodiment=embodiment,
+                occupied=occupied_landings,
             )
+            if target is None and inside_count > 1:
+                raise ValueError(
+                    f"Multiple objects require a measured container floor: {entity_id!r}."
+                )
+            if target is not None:
+                occupied_landings.append((target, scene_objects[object_id]))
             affordances.append(
                 {
                     "entity_id": affordance_id,
@@ -2668,6 +2680,7 @@ def _container_target_pose(
     *,
     resource: str,
     embodiment: dict[str, Any] | None,
+    occupied: Sequence[tuple[list[float], dict[str, Any]]] = (),
 ) -> list[float] | None:
     """Ground an arm-side landing on a measured, nearly level container floor."""
     if embodiment is None:
@@ -2711,10 +2724,22 @@ def _container_target_pose(
     root_local = container_rotation.T @ (root_world - container_pose[:3, 3])
     mesh = trimesh.load(str(container["shape"]["fpath"]), force="scene").to_geometry()
     mesh.vertices = _mesh_vertices(container)
-    child_vertices = (
-        _mesh_vertices(child) @ (container_rotation.T @ pose(child)[:3, :3]).T
+
+    def local_vertices(item: dict[str, Any]) -> np.ndarray:
+        return _mesh_vertices(item) @ (container_rotation.T @ pose(item)[:3, :3]).T
+
+    child_vertices = local_vertices(child)
+    occupied_footprints = [
+        (
+            float(target[3]),
+            float(target[7]),
+            float(np.linalg.norm(local_vertices(previous)[:, :2], axis=1).max()),
+        )
+        for target, previous in occupied
+    ]
+    translation = select_container_landing(
+        mesh, child_vertices, root_local, occupied=occupied_footprints
     )
-    translation = select_container_landing(mesh, child_vertices, root_local)
     return None if translation is None else _translation_pose(*translation)
 
 

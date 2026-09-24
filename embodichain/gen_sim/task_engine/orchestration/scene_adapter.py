@@ -115,7 +115,9 @@ def _discover_part_catalogs(
             except (KeyError, TypeError, ValueError):
                 pass
             payloads.append(payload)
-        catalogs[str(config["uid"])] = _rank_parts_by_vertical_position(payloads)
+        catalogs[str(config["uid"])] = _rank_parts_by_lateral_position(
+            _rank_parts_by_vertical_position(payloads)
+        )
     return catalogs
 
 
@@ -139,7 +141,7 @@ def _part_handle_center_world(config: Mapping[str, Any], part_id: str) -> list[f
 
 
 def _rank_parts_by_vertical_position(
-    parts: Sequence[Mapping[str, Any]], *, tolerance: float = 1e-4
+    parts: Sequence[Mapping[str, Any]], *, tolerance: float = 0.01
 ) -> tuple[dict[str, Any], ...]:
     ranked = [deepcopy(dict(part)) for part in parts]
     if len(ranked) < 2:
@@ -163,21 +165,68 @@ def _rank_parts_by_vertical_position(
     return tuple(ranked)
 
 
+def _rank_parts_by_lateral_position(
+    parts: Sequence[Mapping[str, Any]], *, tolerance: float = 0.01
+) -> tuple[dict[str, Any], ...]:
+    ranked = [deepcopy(dict(part)) for part in parts]
+    if not 2 <= len(ranked) <= 3:
+        return tuple(ranked)
+    centers = [
+        np.asarray(part.get("handle_center_world", ()), dtype=float) for part in ranked
+    ]
+    if any(center.shape != (3,) or not np.isfinite(center).all() for center in centers):
+        return tuple(ranked)
+    order = sorted(range(len(ranked)), key=lambda index: float(centers[index][1]))
+    offsets = [float(centers[index][1]) for index in order]
+    if any(right - left <= tolerance for left, right in zip(offsets, offsets[1:])):
+        return tuple(ranked)
+    ranked[order[0]]["lateral_rank"] = "left"
+    ranked[order[-1]]["lateral_rank"] = "right"
+    if len(ranked) % 2 == 1:
+        ranked[order[len(ranked) // 2]]["lateral_rank"] = "center"
+    return tuple(ranked)
+
+
 def _augment_grounding_objects(
     scene_objects: Sequence[Mapping[str, Any]],
     part_catalogs: Mapping[str, Sequence[Mapping[str, Any]]],
+    *,
+    scene_graph: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Expose catalog parts as synthetic semantic candidates for grounding."""
     result = [deepcopy(dict(item)) for item in scene_objects]
     by_uid = {
         str(item.get("runtime_uid", item.get("uid", ""))): item for item in result
     }
+    # Preserve the evidence source: an exported support edge is not a live
+    # contact certificate, and "on" must not be promoted to "inside".
+    for node in (scene_graph or {}).get("nodes", ()):
+        uid, parent = node["uid"], node["parent_uid"]
+        if (
+            uid in by_uid
+            and parent in by_uid
+            and uid != parent
+            and node["parent_relation"] == "on"
+        ):
+            by_uid[uid].setdefault("attributes", {})["support_evidence"] = {
+                "parent_uid": parent,
+                "relation": "on",
+                "source": node["source"],
+            }
     for articulation_id, parts in part_catalogs.items():
         parent = by_uid.get(articulation_id)
         if parent is None:
             continue
         for part in parts:
             part_id = str(part["part_id"])
+            attributes = {
+                "articulation_id": articulation_id,
+                "part_id": part_id,
+                "joint": str(part.get("joint", "")),
+            }
+            for rank in ("vertical_rank", "lateral_rank"):
+                if rank in part:
+                    attributes[rank] = str(part[rank])
             result.append(
                 {
                     "runtime_uid": f"{articulation_id}::{part_id}",
@@ -189,12 +238,13 @@ def _augment_grounding_objects(
                         f"prismatic part {part.get('link', '')} of "
                         f"{parent.get('name', articulation_id)}"
                     ),
-                    "attributes": {
-                        "articulation_id": articulation_id,
-                        "part_id": part_id,
-                        "joint": str(part.get("joint", "")),
-                    },
-                    "init_pos": list(parent.get("init_pos", (0.0, 0.0, 0.0))),
+                    "attributes": attributes,
+                    "init_pos": list(
+                        part.get(
+                            "handle_center_world",
+                            parent.get("init_pos", (0.0, 0.0, 0.0)),
+                        )
+                    ),
                 }
             )
     return result
@@ -351,13 +401,6 @@ class SceneAdapter:
             robot_profile=source_ref.robot_profile,
         )
         part_catalogs = _discover_part_catalogs(prepared)
-        grounding_objects = _augment_grounding_objects(
-            prepared.planner_objects, part_catalogs
-        )
-        grounding_inventory = SceneInventory(
-            grounding_objects,
-            robot_profile=source_ref.robot_profile,
-        )
         resolved_source = resolve_source_scene(source_ref.path)
         manifest = _build_manifest(
             prepared,
@@ -374,6 +417,15 @@ class SceneAdapter:
         conservative_scene_graph = build_conservative_scene_graph(
             prepared,
             scene_id=static_manifest["scene_id"],
+        )
+        grounding_objects = _augment_grounding_objects(
+            prepared.planner_objects,
+            part_catalogs,
+            scene_graph=conservative_scene_graph,
+        )
+        grounding_inventory = SceneInventory(
+            grounding_objects,
+            robot_profile=source_ref.robot_profile,
         )
         if fingerprint_scene_source(source_ref) != source_fingerprint:
             raise RuntimeError("Source Gym project changed while it was being adapted.")

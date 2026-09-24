@@ -32,6 +32,7 @@ def test_prompt_preserves_explicit_handover_orientation() -> None:
     assert "terminal_behavior=hold" in prompt
     assert "If placement is a separate E1 step" in prompt
     assert "Never emit terminal_behavior=place with an empty E4 target" in prompt
+    assert "For an E4 arm not named in the instruction" in prompt
     assert "Keep the received bottle upright." in prompt
 
 
@@ -48,6 +49,36 @@ def test_prompt_and_repair_guidance_use_mechanism_semantics() -> None:
     )
     assert "For E6 the drawer or sliding tray" in guidance
     assert "for E7 the hinged door" in guidance
+
+
+def test_counted_set_repair_preserves_explicit_number() -> None:
+    rules = interpretation_module._instruction_selector_rules()
+    guidance = interpretation_module._instruction_repair_guidance(
+        ValueError("InstructionIntent.steps[0].object quantifier=all requires count=0.")
+    )
+
+    assert "quantifier='count'" in rules
+    assert "quantifier='all'" in rules
+    assert "explicit number" in guidance
+    assert "quantifier=count" in guidance
+    assert "count=0" in guidance
+
+
+def test_prompt_preserves_each_member_of_compound_noun() -> None:
+    prompt = interpretation_module._instruction_prompt(
+        "Put the knife and fork on the placemat."
+    )
+    assert "knife and fork" in prompt
+    assert "quantifier=count" in prompt
+    assert "two distinct objects" in prompt
+
+
+def test_handover_arm_repair_uses_auto_without_guessing() -> None:
+    guidance = interpretation_module._instruction_repair_guidance(
+        ValueError("InstructionIntent.steps[0] E4 requires named arms or auto.")
+    )
+    assert "use auto" in guidance
+    assert "preserve any explicitly named arm" in guidance
 
 
 @pytest.mark.parametrize(

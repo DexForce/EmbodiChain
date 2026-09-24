@@ -23,7 +23,8 @@ from copy import deepcopy
 import math
 from typing import Any, Final
 
-from .contracts import TaskCandidate, validate_task_candidate
+from .agent import derive_scene_request, derive_success_spec
+from .contracts import TaskCandidate, canonical_hash, validate_task_candidate
 from .orchestration.contracts import RoleBindings, validate_role_bindings
 from .semantic_graph import SemanticTaskGraph, validate_semantic_task_graph
 
@@ -100,6 +101,7 @@ class SemanticTaskPlanner:
             raise ValueError("RoleBindings.task_id must match the TaskCandidate.")
         if bindings["candidate_id"] != selected["candidate_id"]:
             raise ValueError("RoleBindings.candidate_id must match the TaskCandidate.")
+        selected, bindings = _expand_multi_object_steps(selected, bindings)
 
         objects = {
             str(item.get("runtime_uid", item.get("uid", ""))): deepcopy(dict(item))
@@ -294,8 +296,24 @@ class SemanticTaskPlanner:
                 held_by.pop(object_id, None)
                 cleanup_resources = (resource,)
             elif task_type == "E4":
-                source = _resource(step.get("transfer_arm"), field="transfer_arm")
-                destination = _resource(step.get("receive_arm"), field="receive_arm")
+                requested_source = str(step.get("transfer_arm"))
+                requested_destination = str(step.get("receive_arm"))
+                if requested_source == "auto":
+                    if requested_destination == "left_arm":
+                        source = "right"
+                    elif requested_destination == "right_arm":
+                        source = "left"
+                    else:
+                        source = held_by.get(object_id) or self._nearest_resource(
+                            object_id, objects
+                        )
+                else:
+                    source = _resource(requested_source, field="transfer_arm")
+                destination = (
+                    ("right" if source == "left" else "left")
+                    if requested_destination == "auto"
+                    else _resource(requested_destination, field="receive_arm")
+                )
                 calls = []
                 if held_by.get(object_id) != source:
                     if object_id in held_by:
@@ -913,6 +931,88 @@ class SemanticTaskPlanner:
                 )
                 result[2] = float(table_max[2]) + 0.01 + longest_extent / 2.0
         return result
+
+
+def _expand_multi_object_steps(
+    candidate: TaskCandidate, bindings: RoleBindings
+) -> tuple[TaskCandidate, RoleBindings]:
+    """Lower independently repeatable task sets after UID grounding."""
+    steps = candidate["draft"]["steps"]
+    used_ids = {str(step["id"]) for step in steps}
+    expanded_steps: list[dict[str, Any]] = []
+    expanded_bindings = deepcopy(bindings)
+    changed = False
+    for step in steps:
+        step_id = str(step["id"])
+        object_selector = step["object"]
+        reference_id = f"{step_id}.object"
+        uids = bindings["reference_bindings"].get(reference_id, [])
+        if len(uids) <= 1 or object_selector["kind"] != "scene_ref":
+            expanded_steps.append(deepcopy(step))
+            continue
+        e5_return = (
+            step["task_type"] == "E5"
+            and step["terminal_behavior"] == "place"
+            and step["target"]["kind"] == "none"
+            and step["relation"] == "none"
+            and step["direction"] == "none"
+        )
+        if (step["task_type"] not in {"E1", "E2"} and not e5_return) or step[
+            "layout"
+        ] != "none":
+            raise UnsupportedSemanticCapabilityError(
+                f"{reference_id} cannot lower multiple objects for this task route."
+            )
+        quantifier = object_selector["quantifier"]
+        if quantifier not in {"count", "all"} or (
+            quantifier == "count" and len(uids) != object_selector["count"]
+        ):
+            raise ValueError(f"{reference_id} cardinality does not match its selector.")
+        if len(set(uids)) != len(uids):
+            raise ValueError(f"{reference_id} contains duplicate scene entities.")
+        if any(
+            selector["kind"] == "step_result" and selector["step_id"] == step_id
+            for later in steps
+            for selector in (later["object"], later["target"])
+        ):
+            raise UnsupportedSemanticCapabilityError(
+                f"{step_id} has a step_result consumer but yields multiple objects."
+            )
+        target_id = f"{step_id}.target"
+        target_uids = bindings["reference_bindings"].get(target_id, [])
+        if step["target"]["kind"] == "scene_ref" and len(target_uids) != 1:
+            raise ValueError(f"{target_id} must resolve to exactly one scene entity.")
+        copy_ids = [f"{step_id}__{index:02d}" for index in range(1, len(uids))]
+        if used_ids.intersection(copy_ids):
+            raise ValueError(
+                f"Expanded step IDs collide with an existing step: {step_id}."
+            )
+        used_ids.update(copy_ids)
+        previous_id: str | None = None
+        for copy_id, uid in zip([*copy_ids, step_id], uids):
+            copy = deepcopy(step)
+            copy["id"] = copy_id
+            copy["object"]["quantifier"] = "one"
+            copy["object"]["count"] = 0
+            copy["depends_on"] = (
+                list(step["depends_on"]) if previous_id is None else [previous_id]
+            )
+            expanded_steps.append(copy)
+            expanded_bindings["reference_bindings"][f"{copy_id}.object"] = [uid]
+            if step["target"]["kind"] == "scene_ref":
+                expanded_bindings["reference_bindings"][f"{copy_id}.target"] = list(
+                    target_uids
+                )
+            previous_id = copy_id
+        changed = True
+    if not changed:
+        return candidate, bindings
+    expanded = deepcopy(candidate)
+    expanded["draft"]["steps"] = expanded_steps
+    expanded["scene_request"] = derive_scene_request(expanded["draft"])
+    expanded["success_spec"] = derive_success_spec(expanded["draft"])
+    expanded["semantic_hash"] = canonical_hash(expanded_steps)
+    return validate_task_candidate(expanded), validate_role_bindings(expanded_bindings)
 
 
 def _resource(value: Any, *, field: str) -> str:

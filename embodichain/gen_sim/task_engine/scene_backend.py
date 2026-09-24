@@ -43,6 +43,7 @@ from .orchestration.legacy_scene import (
     convert_legacy_gym_project,
     restore_locked_scene_entities,
 )
+from .orchestration.grounding import GroundingCaller
 from .orchestration.scene_adapter import CandidateSelection, SceneAdapter
 from .orchestration.scene_source import (
     SceneSourceFingerprint,
@@ -132,6 +133,7 @@ class SceneEngineBackend:
         scene_adapter: SceneAdapter,
         *,
         force_most_likely: bool,
+        grounding_caller: GroundingCaller | None = None,
     ) -> CandidateSelection:
         """Select a task candidate from blueprint or existing-scene semantics.
 
@@ -140,6 +142,7 @@ class SceneEngineBackend:
             candidate_set: Task candidates to ground and vote.
             scene_adapter: Task-owned semantic binding adapter.
             force_most_likely: Whether ranked UID hypotheses must be resolved.
+            grounding_caller: Optional caller for UID-constrained visual grounding.
 
         Returns:
             Audited initial candidate selection.
@@ -150,11 +153,13 @@ class SceneEngineBackend:
                 scene_blueprint_objects(analysis.blueprint),
                 source_format=analysis.blueprint.schema_version,
                 force_most_likely=force_most_likely,
+                grounding_caller=grounding_caller,
             )
         adaptation = scene_adapter.adapt(
             candidate_set,
             analysis.source,
             force_most_likely=force_most_likely,
+            grounding_caller=grounding_caller,
         )
         return CandidateSelection(
             scene_manifest=adaptation.scene_manifest,
