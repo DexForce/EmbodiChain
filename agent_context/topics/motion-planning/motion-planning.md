@@ -12,7 +12,7 @@
 | Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
-| Standalone physical playback | `embodichain/lab/sim/motion/execution.py` |
+| Standalone playback and B=1 generation host lifecycle | `embodichain/lab/sim/motion/execution.py` |
 | Candidate generation and coverage bookkeeping | `embodichain/lab/sim/motion/expansion/` |
 | Distinct trajectory variants for fixed waypoints | `embodichain/lab/sim/motion/expansion/variants.py` |
 
@@ -84,6 +84,11 @@ Candidate identity and local random seeds are independent of physical env slots.
 idempotent commit receipts. It never steps/resets an environment or writes a
 dataset: host integrations own restoration, rollout, validation and persistence.
 Keep algorithm modules free of direct Gym imports.
+
+The generic B=1 host orchestration and its restore/executor/sink ports live in
+`motion/execution.py`, alongside standalone playback. The runner drives injected
+host ports and applies `GenerationSession` transitions; it does not move those
+state or coverage contracts out of `motion/expansion/`.
 
 Motion-limit checks are not collision/task-success certification.
 `rotate_grasp_about_object_axis` and `perturb_approach_direction` change TCP
