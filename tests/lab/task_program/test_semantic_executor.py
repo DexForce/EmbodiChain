@@ -105,6 +105,10 @@ from embodichain.lab.task_program.semantics.integration import (
     SemanticValidationError,
 )
 from embodichain.lab.task_program.runtime.executor import SemanticCallExecutor
+from embodichain.lab.task_program.runtime.generation import (
+    TaskProgramPlanRequest,
+    TaskProgramPlanTransformFactory,
+)
 from embodichain.lab.task_program.runtime.results import (
     SkillEndpointBindingTrace,
     SemanticExecutionStatus,
@@ -863,6 +867,39 @@ def _call(name: str) -> RegisteredSemanticCall:
     return RegisteredSemanticCall(call_id=f"test.{name}")
 
 
+class _RecordingPlanTransformFactory:
+    """Record grounded call identity and tag the installed Atomic plan."""
+
+    def __init__(self) -> None:
+        self.requests: list[TaskProgramPlanRequest] = []
+        self.transform_calls = 0
+
+    def create_plan_transform(
+        self,
+        request: TaskProgramPlanRequest,
+        *,
+        engine: AtomicActionEngine,
+    ):
+        assert isinstance(engine, AtomicActionEngine)
+        self.requests.append(request)
+
+        def transform(resolved, context, plan):
+            del resolved, context
+            self.transform_calls += 1
+            return replace(
+                plan,
+                diagnostics=replace(
+                    plan.diagnostics,
+                    metadata={
+                        **plan.diagnostics.metadata,
+                        "task_program_generation_test": True,
+                    },
+                ),
+            )
+
+        return transform
+
+
 def _system(
     decisions: tuple[EffectMonitorDecision, ...],
     *,
@@ -870,6 +907,7 @@ def _system(
     preset_runner_cfg: ExecutionRunnerCfg | None = None,
     runtime_runner_cfg: ExecutionRunnerCfg | None = None,
     install_effect_monitor: bool = True,
+    plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
 ) -> _System:
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -907,6 +945,7 @@ def _system(
         task_state=TaskState.empty(BATCH_SIZE, "cpu"),
         clock=clock,
         runner_cfg=runtime_runner_cfg,
+        plan_transform_factory=plan_transform_factory,
     )
     return _System(
         runtime,
@@ -918,6 +957,40 @@ def _system(
         collector,
         clock,
     )
+
+
+def test_executor_requests_call_scoped_plan_transform() -> None:
+    factory = _RecordingPlanTransformFactory()
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+        plan_transform_factory=factory,
+    )
+    call = _call("generation")
+
+    result = system.runtime.start(call, workflow_id="generation-workflow")
+
+    assert result.status is SemanticExecutionStatus.RUNNING
+    assert factory.transform_calls == 1
+    assert len(factory.requests) == 1
+    request = factory.requests[0]
+    assert request.workflow_id == "generation-workflow"
+    assert request.workflow_call_index == 0
+    assert request.analysis_call_index == 0
+    assert request.call is call
+    assert request.invocation is system.compiler.invocations[0]
+
+
+def test_executor_without_transform_factory_is_unchanged() -> None:
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        install_effect_monitor=False,
+    )
+
+    result = system.runtime.start(_call("baseline"), workflow_id="baseline-workflow")
+
+    assert result.status is SemanticExecutionStatus.RUNNING
+    assert system.action.plan_count == 1
 
 
 def _workflow_recovery_system(

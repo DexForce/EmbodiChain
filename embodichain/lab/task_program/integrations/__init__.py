@@ -25,6 +25,7 @@ from .environment import (
     TaskProgramRuntimeAssembly,
     PlanningObservationPort,
 )
+from .generation import TaskProgramSourceAdapter
 from .simulation import (
     AntipodalGraspAffordanceBinding,
     ContainerAffordanceBinding,
@@ -86,6 +87,7 @@ __all__ = [
     "TaskProgramEnvironmentAdapter",
     "TaskProgramEnvironmentFactory",
     "TaskProgramIntegrationCatalog",
+    "TaskProgramSourceAdapter",
     "TaskProgramRuntimeAssembly",
     "IntegrationFingerprintMismatch",
     "ParallelCommandSafetyValidatorFactory",
