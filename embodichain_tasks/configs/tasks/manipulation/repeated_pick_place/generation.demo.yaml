@@ -1,0 +1,41 @@
+source:
+  kind: task_program
+  source_id: repeated_cube_pick_place
+  source_revision: config:repeated_pick_place_v1
+  unit_scope: action
+  template_id: place
+  phase_permissions:
+    approach: []
+    release: []
+    retract: [joint_residual, via_points]
+  phase_kinds:
+    approach: free
+    release: contact
+    retract: free
+
+augmentation:
+  seed: 7
+  max_variants_per_reference: 3
+  factors:
+    spatial:
+      enabled: true
+      method: [joint_residual, via_points]
+      joint_offset_scale: 0.05
+    timing:
+      enabled: false
+
+affordance:
+  enabled: false
+
+scheduling:
+  policy: fifo
+  candidate_budget: 3
+  reference_family_budget: 1
+  exploration_fraction: 0.0
+
+execution:
+  max_inflight: 1
+
+observation:
+  enabled: false
+  profiles: []

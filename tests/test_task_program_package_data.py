@@ -32,11 +32,15 @@ from setuptools import Distribution
 from setuptools.command.build_py import build_py
 
 from setup import get_package_dir
+from embodichain.lab.sim.motion.expansion import load_generation_profile
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
 _CONFIG_PACKAGE = "embodichain_tasks.configs"
 _CONFIG_SOURCE = _REPOSITORY_ROOT / "embodichain_tasks" / "configs"
+_REPEATED_PICK_PLACE_GENERATION = Path(
+    "tasks/manipulation/repeated_pick_place/generation.demo.yaml"
+)
 _PROGRAMS = {
     Path("tasks/manipulation/repeated_pick_place/task_program/program.yaml"): (
         "repeated_cube_pick_place"
@@ -102,6 +106,7 @@ _RESOURCE_PATHS = frozenset(
     {
         *_PROGRAMS,
         *_DEPLOYMENTS,
+        _REPEATED_PICK_PLACE_GENERATION,
         Path("tasks/manipulation/repeated_pick_place/catalog.yaml"),
         Path("tasks/manipulation/repeated_pick_place/README.md"),
         Path("tasks/manipulation/push_cube/catalog.yaml"),
@@ -127,6 +132,13 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),
     }
 )
+
+
+def test_repeated_pick_place_generation_profile_strictly_loads() -> None:
+    profile = load_generation_profile(_CONFIG_SOURCE / _REPEATED_PICK_PLACE_GENERATION)
+
+    assert profile.source.kind == "task_program"
+    assert profile.augmentation.max_variants_per_reference == 3
 
 
 class _StagedConfigPackage(NamedTuple):

@@ -23,6 +23,28 @@ Task Program execution is the supported expert demonstration route. These origin
 examples do not independently qualify measured physical placement. No preview or
 physical qualification result is claimed by this catalog.
 
+## Configured trajectory-generation showcase
+
+Run the same deployment with the separate source-neutral Generation Profile:
+
+```bash
+python examples/sim/motion/repeated_pick_place_generation_showcase.py \
+  --task-config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
+  --generation-profile embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/generation.demo.yaml \
+  --output-dir /tmp/repeated-pick-place-generation \
+  --device cuda --headless
+```
+
+The showcase executes candidate ordinals 0, 1, and 2 as separate Task Program
+episodes and writes JSON provenance plus joint-trajectory plots. Add
+`--save-video` for one MP4 per candidate. The profile varies only the Place
+retract phase on the original control grid; Pick, release/contact samples, and
+phase endpoints remain unchanged.
+
+This is a projected-assurance visualization. Completion means the configured
+command sequence completed; it is not measured task success, receipt-confirmed
+coverage, or a qualified dataset commit.
+
 The task-local `catalog.yaml` names deployments; it does not register a Gym ID.
 Generate a simulator-free local gallery from the source checkout with:
 
