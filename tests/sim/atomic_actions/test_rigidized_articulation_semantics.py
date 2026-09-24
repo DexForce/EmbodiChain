@@ -22,6 +22,7 @@ import math
 
 import pytest
 import torch
+from dexsim.types import DriveType
 
 from embodichain.lab.sim.atomic_actions import (
     SceneEntity,
@@ -83,6 +84,7 @@ class _StubArticulation:
         root_pose: torch.Tensor | None = None,
         target_qpos: dict[str, float] | list[dict[str, float]] | None = None,
         stiffness: float = LOCK_STIFFNESS,
+        drive_type: DriveType | list[DriveType] = DriveType.FORCE,
         qpos_limits: tuple[float, float] | dict[str, tuple[float, float]] = TURN_LIMITS,
         vertices: torch.Tensor = LINK_VERTICES,
         triangles: torch.Tensor = LINK_TRIANGLES,
@@ -106,6 +108,11 @@ class _StubArticulation:
             else list(root_to_link)
         )
         self._stiffness = float(stiffness)
+        self._drive_types = (
+            [drive_type] * len(self._qpos)
+            if isinstance(drive_type, DriveType)
+            else list(drive_type)
+        )
         self._qpos_limits = qpos_limits
         self._vertices = vertices
         self._triangles = triangles
@@ -137,6 +144,11 @@ class _StubArticulation:
         )
         zeros = torch.zeros_like(stiffness)
         return (stiffness, zeros, zeros, zeros, zeros, zeros)
+
+    def get_joint_drive_type(self) -> list[list[DriveType]]:
+        return [
+            [drive_type] * len(self.joint_names) for drive_type in self._drive_types
+        ]
 
     def get_qpos_limits(self) -> torch.Tensor:
         limits = torch.empty(
@@ -362,6 +374,20 @@ class TestRejectedConfigurations:
                 label="cube",
             )
 
+    def test_passive_drive_with_stored_stiffness_is_not_a_lock(self) -> None:
+        cube = _StubArticulation(
+            root_to_link=torch.eye(4, dtype=torch.float64),
+            qpos={"top_turn": 0.0},
+            drive_type=DriveType.NONE,
+        )
+
+        with pytest.raises(ValueError, match="nothing holds it there"):
+            create_rigidized_articulation_antipodal_affordance(
+                cube,
+                grasp_link="top_layer",
+                locked_qpos={"top_turn": 0.0},
+            )
+
     def test_unknown_declared_joint_is_rejected(self) -> None:
         cube = _StubArticulation(
             root_to_link=torch.eye(4, dtype=torch.float64), qpos={"top_turn": 0.0}
@@ -533,6 +559,20 @@ class TestBatchedLockVerification:
                 label="cube",
             )
 
+    def test_disabled_drive_in_a_later_arena_is_rejected(self) -> None:
+        cube = _StubArticulation(
+            root_to_link=torch.eye(4, dtype=torch.float64),
+            qpos=[{"top_turn": 0.0}, {"top_turn": 0.0}],
+            drive_type=[DriveType.FORCE, DriveType.NONE],
+        )
+
+        with pytest.raises(ValueError, match="in arena 1"):
+            create_rigidized_articulation_antipodal_affordance(
+                cube,
+                grasp_link="top_layer",
+                locked_qpos={"top_turn": 0.0},
+            )
+
     def test_matching_arenas_are_accepted(self) -> None:
         cube = _StubArticulation(
             root_to_link=torch.eye(4, dtype=torch.float64),
@@ -617,6 +657,7 @@ class TestJointIsActuallyHeld:
             root_to_link=torch.eye(4, dtype=torch.float64),
             qpos={"top_turn": 0.0},
             stiffness=0.0,
+            drive_type=DriveType.NONE,
             qpos_limits=(0.0, 0.0),
         )
 

@@ -25,6 +25,7 @@ import numbers
 from typing import TYPE_CHECKING, Protocol
 
 import torch
+from dexsim.types import DriveType
 
 from .affordance import AntipodalAffordance
 
@@ -233,7 +234,25 @@ def _assert_link_is_rigid_to_root(
         joint_count,
         field_name="articulation drive stiffness",
     )
-    driven = (stiffness > 0.0) & ((target - expected).abs() <= position_tolerance)
+    drive_types = articulation.get_joint_drive_type()
+    if len(drive_types) != measured.shape[0] or any(
+        len(row) != joint_count for row in drive_types
+    ):
+        raise ValueError(
+            "articulation drive types must contain one reading per arena and joint."
+        )
+    active_drive = torch.tensor(
+        [
+            [mode in (DriveType.FORCE, DriveType.ACCELERATION) for mode in row]
+            for row in drive_types
+        ],
+        dtype=torch.bool,
+    )
+    driven = (
+        active_drive
+        & (stiffness > 0.0)
+        & ((target - expected).abs() <= position_tolerance)
+    )
 
     limits = torch.as_tensor(articulation.get_qpos_limits()).detach().cpu()
     if limits.numel() != measured.shape[0] * joint_count * 2:
@@ -256,7 +275,8 @@ def _assert_link_is_rigid_to_root(
         raise ValueError(
             f"Joint {joint_names[joint]!r} of {articulation.uid!r} rests at its "
             f"declared position in arena {arena} but nothing holds it there: drive "
-            f"stiffness is {float(stiffness[arena, joint]):.6f} with position target "
+            f"type is {drive_types[arena][joint]!s}, stiffness is "
+            f"{float(stiffness[arena, joint]):.6f} with position target "
             f"{float(target[arena, joint]):.6f}, and the position limits span "
             f"[{float(lower[arena, joint]):.6f}, {float(upper[arena, joint]):.6f}]."
         )

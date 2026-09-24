@@ -44,7 +44,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
+from embodichain.data import get_data_path
 from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     create_rigidized_articulation_antipodal_semantics,
@@ -85,9 +85,7 @@ resting on it, and sits half an edge away in Y. This constant compensates both
 so the tutorial spawns a cube that rests on the table where it is asked to.
 """
 
-DEFAULT_ASSET_PATH = str(
-    Path(EMBODICHAIN_DEFAULT_DATA_ROOT) / "RubiksCube" / "rubiks_cube_001.usdc"
-)
+DEFAULT_ASSET_PATH = "RubiksCube/rubiks_cube_001.usdc"
 TURN_JOINT = "top_turn"
 GRASP_LINK = "lower_two_layers"
 """Link whose mesh feeds antipodal grasp sampling.
@@ -156,16 +154,19 @@ def create_pick_object(sim, asset_path: str) -> Articulation:
     Raises:
         FileNotFoundError: If the asset is missing from ``asset_path``.
     """
-    if not Path(asset_path).is_file():
+    resolved_asset_path = (
+        get_data_path(asset_path) if asset_path == DEFAULT_ASSET_PATH else asset_path
+    )
+    if not Path(resolved_asset_path).is_file():
         raise FileNotFoundError(
-            f"Rubik's cube asset not found at {asset_path!r}. Pass --asset_path "
+            f"Rubik's cube asset not found at {resolved_asset_path!r}. Pass --asset_path "
             "to point at rubiks_cube_001.usdc."
         )
     offset_x, offset_y, _ = CUBE_BOTTOM_CENTER_OFFSET
     cube = sim.add_articulation(
         cfg=ArticulationCfg(
             uid=CUBE_UID,
-            fpath=asset_path,
+            fpath=resolved_asset_path,
             init_pos=[
                 OBJECT_XY[0] - offset_x,
                 OBJECT_XY[1] - offset_y,

@@ -767,13 +767,13 @@ class SimulationSceneBinding:
     rigid_objects: tuple[SimulationRigidObjectBinding, ...] = ()
     rigidized_articulations: tuple[
         SimulationRigidizedArticulationObjectBinding, ...
-    ] = ()
+    ] = field(default=(), kw_only=True)
     articulations: tuple[SimulationArticulationBinding, ...] = ()
     links: tuple[SimulationArticulationLinkBinding, ...] = ()
     antipodal_grasps: tuple[AntipodalGraspAffordanceBinding, ...] = ()
     rigidized_articulation_grasps: tuple[
         RigidizedArticulationAntipodalGraspBinding, ...
-    ] = ()
+    ] = field(default=(), kw_only=True)
     support_surfaces: tuple[SupportSurfaceAffordanceBinding, ...] = ()
     containers: tuple[ContainerAffordanceBinding, ...] = ()
     collision_world_mode: SceneCollisionWorldMode | None = None

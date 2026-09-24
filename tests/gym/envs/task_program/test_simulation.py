@@ -23,6 +23,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from dexsim.types import DriveType
 
 from embodichain.lab.task_program.integrations.simulation import (
     AntipodalGraspAffordanceBinding,
@@ -200,6 +201,9 @@ class _RigidizedArticulation:
         zeros = torch.zeros_like(self.qpos)
         return (stiffness, zeros, zeros, zeros, zeros, zeros)
 
+    def get_joint_drive_type(self) -> list[list[DriveType]]:
+        return [[DriveType.FORCE] for _ in range(_BATCH_SIZE)]
+
     def get_qpos_limits(self) -> torch.Tensor:
         return self.limits
 
@@ -354,6 +358,18 @@ def _rigidized_scene_binding() -> SimulationSceneBinding:
             ),
         ),
     )
+
+
+def test_scene_binding_preserves_existing_positional_fields() -> None:
+    articulation = SimulationArticulationBinding(
+        entity_id="drawer", simulation_uid="native_drawer"
+    )
+
+    binding = SimulationSceneBinding("scene", (), (articulation,), (), (), (), (), None)
+
+    assert binding.articulations == (articulation,)
+    assert binding.rigidized_articulations == ()
+    assert binding.rigidized_articulation_grasps == ()
 
 
 def test_rigidized_articulation_binding_declares_object_and_grasp() -> None:
