@@ -73,7 +73,7 @@ def test_generation_profile_is_source_neutral_and_uses_one_family_budget():
                 "branches_per_family": 3,
             },
             "scheduling": {
-                "policy": "coverage_per_cost",
+                "policy": "fifo",
                 "reference_family_budget": 4,
                 "exploration_fraction": 0.2,
             },
@@ -81,7 +81,15 @@ def test_generation_profile_is_source_neutral_and_uses_one_family_budget():
     )
     assert cfg.source.kind == "motion_generator"
     assert cfg.affordance.branches_per_family == 3
+    assert cfg.scheduling.policy == "fifo"
     assert cfg.scheduling.reference_family_budget == 4
+
+
+def test_generation_profile_rejects_unimplemented_scheduler() -> None:
+    with pytest.raises(ValueError, match="coverage_per_cost.*not implemented"):
+        TrajectoryGenerationJobCfg.from_mapping(
+            {"scheduling": {"policy": "coverage_per_cost"}}
+        )
 
 
 @pytest.mark.parametrize(

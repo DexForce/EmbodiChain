@@ -185,11 +185,12 @@ sections used by a standalone generation job. Both ``from_mapping`` methods
 reject unknown fields and invalid types or ranges. ``validate_semantics``
 rechecks mutable configuration objects.
 
-The initial schema requires ``planning.batch_mode: env_rows``,
+The initial schema accepts only FIFO candidate scheduling and requires
+``planning.batch_mode: env_rows``,
 ``execution.pool_mode: per_env_case``, ``execution.scheduler: full_batch``,
 provided initial states, and synchronous persistence. It limits each candidate
 to one rollout attempt. Write retries reuse the same episode and commit ID.
-Other scheduling modes, overlapping planning and physics, and the still
+Coverage-per-cost and other scheduling modes, overlapping planning and physics, and the still
 unimplemented ``contact``, ``contact_timing`` and ``recovery`` factors are
 rejected. Control periods remain owned by the host.
 

@@ -406,8 +406,10 @@ class _SchedulingCfg:
     exploration_fraction: float = 0.0
 
     def __post_init__(self) -> None:
-        if self.policy not in ("fifo", "coverage_per_cost"):
-            raise ValueError("scheduling.policy must be fifo or coverage_per_cost")
+        if self.policy == "coverage_per_cost":
+            raise ValueError("scheduling.policy coverage_per_cost is not implemented")
+        if self.policy != "fifo":
+            raise ValueError("scheduling.policy currently supports only fifo")
         _count(self.candidate_budget, "scheduling.candidate_budget")
         _count(
             self.reference_family_budget,

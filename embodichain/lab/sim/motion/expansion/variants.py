@@ -509,6 +509,7 @@ def expand_trajectory_variants(
     velocity_limits: torch.Tensor | None = None,
     acceleration_limits: torch.Tensor | None = None,
     task_jacobians: torch.Tensor | None = None,
+    generator: torch.Generator | None = None,
     max_attempts: int | None = None,
 ) -> TrajectoryVariantSet:
     """Generate up to ``count`` distinct execution variants for one fixed reference.
@@ -544,6 +545,8 @@ def expand_trajectory_variants(
             when the ik factor is enabled. ``cfg.factors.ik.task_rows`` selects
             the constrained rows, so supply every row the task could constrain
             rather than pre-reducing them.
+        generator: Optional private CPU generator shared by the sequential
+            proposal draws. Omission preserves standalone digest-based streams.
         max_attempts: Optional proposal budget; defaults to four per requested variant.
 
     Returns:
@@ -556,6 +559,8 @@ def expand_trajectory_variants(
     """
     if type(count) is not int or count < 1:
         raise ValueError("count must be a positive integer")
+    if generator is not None and not isinstance(generator, torch.Generator):
+        raise TypeError("generator must be a torch.Generator or None")
     if cfg is None:
         # Without Jacobians the redundancy factor could only propose variants
         # that fail, so leave it out rather than spend attempts on them.
@@ -588,7 +593,8 @@ def expand_trajectory_variants(
         if len(accepted) >= count:
             break
         evaluated += 1
-        digest, generator = _variant_generator(cfg, template, variant)
+        digest, derived_generator = _variant_generator(cfg, template, variant)
+        proposal_generator = derived_generator if generator is None else generator
         try:
             candidate = apply_trajectory_variant(
                 template,
@@ -597,7 +603,7 @@ def expand_trajectory_variants(
                 joint_limits=joint_limits,
                 control_dt=control_dt,
                 task_jacobians=task_jacobians,
-                generator=generator,
+                generator=proposal_generator,
             )
         except ProposalRejected as error:
             # Only a rejected draw is bookkeeping. A malformed argument or an

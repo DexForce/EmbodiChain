@@ -255,6 +255,106 @@ def _template(**changes: object) -> TrajectoryTemplate:
     return TrajectoryTemplate(**fields)
 
 
+def _coordinator_fixture(
+    *,
+    max_proposals: int = 100,
+) -> tuple[
+    GenerationSession,
+    CandidateCoordinator,
+    TrajectoryTemplate,
+]:
+    cfg = TrajectoryGenerationJobCfg.from_mapping(
+        {
+            "augmentation": {
+                "factors": {
+                    "spatial": {
+                        "enabled": True,
+                        "method": ["joint_residual"],
+                        "joint_offset_scale": 0.1,
+                    }
+                },
+                "coverage": {"joint_dedup_normalized_tol": 0.001},
+            },
+            "scheduling": {"candidate_budget": 8},
+            "collection": {"max_proposals": max_proposals},
+        }
+    )
+    case = _case()
+    limits = torch.tensor([[-2.0, 2.0], [-2.0, 2.0]])
+    session = GenerationSession(cfg)
+    session.register_case(case, limits, joint_names=("arm", "tool"))
+    coordinator = CandidateCoordinator(
+        cfg,
+        session=session,
+        source_adapter=TemplateSourceAdapter(),
+        source_context=SourceContext(
+            "handwritten",
+            "test",
+            "unit_0",
+            case,
+            0.1,
+        ),
+        joint_limits=limits,
+    )
+    template = _template(
+        phases=(TrajectoryPhase("free", 0, 3, "free", ("joint_residual",)),),
+        allowed_operators=("joint_residual",),
+        controlled_joint_indices=(0, 1),
+    )
+    return session, coordinator, template
+
+
+def test_candidate_coordinator_refills_with_novel_variants() -> None:
+    _, coordinator, template = _coordinator_fixture()
+
+    first = coordinator.enqueue_source(template, count=2)
+    second = coordinator.enqueue_source(template, count=2)
+
+    assert len(first) == 2
+    assert len(second) == 1
+    assert not torch.equal(first[1].template.positions, second[0].template.positions)
+
+
+def test_candidate_coordinator_namespaces_affordance_geometry() -> None:
+    _, coordinator, template = _coordinator_fixture()
+    first_template = replace(
+        template,
+        positions=torch.tensor([[0.0, 0.0], [0.5, 0.0], [1.0, 0.0]]),
+    )
+    second_template = replace(
+        template,
+        positions=torch.tensor([[0.0, 0.0], [-0.5, 0.0], [1.0, 0.0]]),
+    )
+
+    first = coordinator.enqueue_source(
+        first_template,
+        count=1,
+        affordance_selection={"grasp": "left"},
+    )[0]
+    second = coordinator.enqueue_source(
+        second_template,
+        count=1,
+        affordance_selection={"grasp": "right"},
+    )[0]
+
+    assert first.spec.identity.candidate_id != second.spec.identity.candidate_id
+    assert (
+        first.spec.identity.geometry_family_id
+        != second.spec.identity.geometry_family_id
+    )
+
+
+def test_candidate_coordinator_enqueue_is_atomic() -> None:
+    session, coordinator, template = _coordinator_fixture(max_proposals=1)
+
+    with pytest.raises(RuntimeError, match="Proposal budget"):
+        coordinator.enqueue_source(template, count=2)
+
+    assert coordinator.pending_count == 0
+    assert session.snapshot()["counts"]["proposed"] == 0
+    assert session.snapshot()["audit"] == ()
+
+
 def _batch(**changes: object) -> CandidateTrajectoryBatch:
     fields = dict(
         positions=torch.tensor(

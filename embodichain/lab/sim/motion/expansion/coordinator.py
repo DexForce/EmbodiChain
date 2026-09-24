@@ -21,6 +21,8 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass
+import hashlib
+import json
 
 import torch
 
@@ -28,15 +30,55 @@ from .cfg import TrajectoryGenerationJobCfg
 from .contracts import (
     CandidateSpec,
     CandidateTrajectoryBatch,
+    ProposalRequest,
     SceneCase,
     TrajectoryTemplate,
     ValidationResult,
+    _json,
 )
 from .session import GenerationSession
 from .source import SourceAdapter, SourceContext
-from .variants import expand_trajectory_variants
+from .variants import TrajectoryVariant, expand_trajectory_variants
 
 __all__ = ["CandidateCoordinator", "CandidateWorkItem"]
+
+
+def _plain_json(value: object) -> object:
+    """Convert validated immutable JSON values to ordinary containers."""
+    if isinstance(value, Mapping):
+        return {key: _plain_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_plain_json(item) for item in value]
+    return value
+
+
+def _trajectory_fingerprint(template: TrajectoryTemplate) -> str:
+    """Return an exact content digest for one unpadded candidate template."""
+    metadata = {
+        "joint_names": template.joint_names,
+        "positions_shape": tuple(template.positions.shape),
+        "positions_dtype": str(template.positions.dtype),
+        "dt_shape": tuple(template.dt.shape),
+        "dt_dtype": str(template.dt.dtype),
+        "phases": tuple(
+            (
+                phase.phase_id,
+                phase.start_index,
+                phase.stop_index,
+                phase.kind,
+                phase.allowed_operators,
+            )
+            for phase in template.phases
+        ),
+        "allowed_operators": template.allowed_operators,
+        "controlled_joint_indices": template.controlled_joint_indices,
+    }
+    digest = hashlib.sha256(
+        json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode()
+    )
+    digest.update(template.positions.detach().cpu().contiguous().numpy().tobytes())
+    digest.update(template.dt.detach().cpu().contiguous().numpy().tobytes())
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True)
@@ -113,6 +155,7 @@ class CandidateCoordinator:
             None if task_jacobians is None else task_jacobians.detach().clone()
         )
         self._pending: deque[CandidateWorkItem] = deque()
+        self._seen_fingerprints: set[str] = set()
 
     @property
     def pending_count(self) -> int:
@@ -156,9 +199,6 @@ class CandidateCoordinator:
         """
         if type(count) is not int or count < 1:
             raise ValueError("count must be a positive integer")
-        budget = self._cfg.scheduling.candidate_budget
-        if len(self._pending) + count > budget:
-            raise BufferError("candidate queue budget is full")
         template = self._source_adapter.export_template(
             source,
             context=self._source_context,
@@ -167,6 +207,29 @@ class CandidateCoordinator:
             raise TypeError(
                 "SourceAdapter.export_template must return TrajectoryTemplate"
             )
+        normalized_affordance = _json(
+            {} if affordance_selection is None else dict(affordance_selection)
+        )
+        affordance = _plain_json(normalized_affordance)
+        assert isinstance(affordance, dict)
+        affordance_payload = json.dumps(
+            affordance,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        operation_id = (
+            "trajectory_expansion:"
+            + hashlib.sha256(affordance_payload.encode()).hexdigest()
+        )
+        generator = self._session.generation_generator(
+            self._source_context.scene_case.scene_case_id,
+            self._source_context.scene_case.initial_state_id,
+            source_id=self._source_context.source_id,
+            source_revision=self._source_context.source_revision,
+            template_id=self._source_context.unit_id,
+            operation_id=operation_id,
+        )
         variants = expand_trajectory_variants(
             template,
             case=self._source_context.scene_case,
@@ -177,6 +240,7 @@ class CandidateCoordinator:
             velocity_limits=self._velocity_limits,
             acceleration_limits=self._acceleration_limits,
             task_jacobians=self._task_jacobians,
+            generator=generator,
         )
         key = compatibility_key or (
             f"{self._source_context.scene_case.scene_case_id}:"
@@ -184,19 +248,9 @@ class CandidateCoordinator:
             f"dt={self._source_context.control_dt:g}:"
             f"validator={template.validator_id}"
         )
-        affordance = {} if affordance_selection is None else dict(affordance_selection)
-        created: list[CandidateWorkItem] = []
+        prepared: list[tuple[TrajectoryVariant, TrajectoryTemplate, str]] = []
+        batch_fingerprints: set[str] = set()
         for index, variant in enumerate(variants.variants):
-            provisional = variants.candidates.identities[index]
-            identity, _ = self._session.propose(
-                self._source_context.scene_case.scene_case_id,
-                self._source_context.scene_case.initial_state_id,
-                source_id=self._source_context.source_id,
-                source_revision=self._source_context.source_revision,
-                template_id=self._source_context.unit_id,
-                operator_id=variant.spatial_operator,
-                geometry_family_id=provisional.geometry_family_id,
-            )
             row = variants.candidates.row(index)
             length = int(row.valid_length[0].item())
             row_template = TrajectoryTemplate(
@@ -211,16 +265,49 @@ class CandidateCoordinator:
                 validator_id=template.validator_id,
                 controlled_joint_indices=template.controlled_joint_indices,
             )
+            fingerprint = _trajectory_fingerprint(row_template)
+            if (
+                fingerprint in self._seen_fingerprints
+                or fingerprint in batch_fingerprints
+            ):
+                continue
+            batch_fingerprints.add(fingerprint)
+            prepared.append((variant, row_template, fingerprint))
+        if not prepared:
+            return ()
+        budget = self._cfg.scheduling.candidate_budget
+        if len(self._pending) + len(prepared) > budget:
+            raise BufferError("candidate queue budget is full")
+        allocations = self._session.propose_many(
+            tuple(
+                ProposalRequest(
+                    self._source_context.scene_case.scene_case_id,
+                    self._source_context.scene_case.initial_state_id,
+                    self._source_context.source_id,
+                    self._source_context.source_revision,
+                    self._source_context.unit_id,
+                    variant.spatial_operator,
+                )
+                for variant, _, _ in prepared
+            )
+        )
+        created: list[CandidateWorkItem] = []
+        for (variant, row_template, fingerprint), (identity, _) in zip(
+            prepared,
+            allocations,
+            strict=True,
+        ):
             spec = CandidateSpec(
                 identity=identity,
                 affordance_selection=affordance,
                 trajectory_variant=variant.factors,
                 compatibility_key=key,
-                estimated_cost=float(row.dt[0, :length].sum().item()),
+                estimated_cost=float(row_template.dt.sum().item()),
             )
             item = CandidateWorkItem(spec=spec, template=row_template)
-            self._pending.append(item)
             created.append(item)
+        self._pending.extend(created)
+        self._seen_fingerprints.update(fingerprint for _, _, fingerprint in prepared)
         return tuple(created)
 
     def take_next(self) -> CandidateWorkItem | None:
