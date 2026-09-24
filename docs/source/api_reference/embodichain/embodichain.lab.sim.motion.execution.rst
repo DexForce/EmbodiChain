@@ -15,9 +15,40 @@ and velocities are recomputed on the executed grid.
 
    JointTrajectoryPlaybackCfg
    play_joint_trajectory
+   InitialStatePort
+   MeasuredExecutor
+   EpisodeSink
+   FixedSceneInitialStatePort
+   SingleSlotOutcome
+   SingleSlotRunner
 
 .. autoclass:: JointTrajectoryPlaybackCfg
     :members:
     :exclude-members: __init__, copy, replace, to_dict, validate
 
 .. autofunction:: play_joint_trajectory
+
+Generation host integration
+---------------------------
+
+The single-slot runner coordinates injected restore, measured-execution, and
+persistence ports. Candidate identity, budgets, coverage, and receipts remain
+owned by :class:`embodichain.lab.sim.motion.expansion.GenerationSession`.
+
+.. autoclass:: InitialStatePort
+   :members:
+
+.. autoclass:: MeasuredExecutor
+   :members:
+
+.. autoclass:: EpisodeSink
+   :members:
+
+.. autoclass:: FixedSceneInitialStatePort
+   :members:
+
+.. autoclass:: SingleSlotOutcome
+   :members:
+
+.. autoclass:: SingleSlotRunner
+   :members:

@@ -488,6 +488,7 @@ class GenerationSession:
         initial_state_id: str,
         *,
         episode_byte_budget: int | None = None,
+        candidate_id: str | None = None,
     ) -> CandidateTrajectoryBatch | None:
         """Reserve a row, rollout attempt, and pending payload capacity before execution.
 
@@ -501,12 +502,18 @@ class GenerationSession:
             case_id: Registered scene-case identifier to execute next.
             initial_state_id: Registered initial state whose ready rows may be selected.
             episode_byte_budget: Maximum episode payload bytes to reserve for this row.
+            candidate_id: Optional exact ready candidate to reserve. Omission
+                preserves deterministic FIFO selection within the case.
 
         Returns:
             One assigned candidate row, or ``None`` when no matching row or capacity
             is available or the session has stopped.
         """
         self._cases[(case_id, initial_state_id)]
+        if candidate_id is not None and (
+            type(candidate_id) is not str or not candidate_id.strip()
+        ):
+            raise ValueError("candidate_id must be a nonempty string or None.")
         byte_limit = self._cfg.persistence.pending_max_bytes
         budget = byte_limit if episode_byte_budget is None else episode_byte_budget
         if type(budget) is not int or not 0 < budget <= byte_limit:
@@ -528,10 +535,15 @@ class GenerationSession:
             return None
         for attempt in self._attempts.values():
             identity = attempt.identity
-            if attempt.state == "ready" and (
-                identity.scene_case_id,
-                identity.initial_state_id,
-            ) == (case_id, initial_state_id):
+            if (
+                attempt.state == "ready"
+                and (
+                    identity.scene_case_id,
+                    identity.initial_state_id,
+                )
+                == (case_id, initial_state_id)
+                and (candidate_id is None or identity.candidate_id == candidate_id)
+            ):
                 attempt.state = "assigned"
                 attempt.episode_byte_budget = budget
                 trajectory, attempt.trajectory = attempt.trajectory, None

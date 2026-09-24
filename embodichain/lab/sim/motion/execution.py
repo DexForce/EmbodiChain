@@ -19,12 +19,17 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Literal, Sequence
+from dataclasses import dataclass
+from typing import Callable, Protocol, TYPE_CHECKING, Literal, Sequence
 
 import torch
 
 from embodichain.compute.trajectory import retime_to_control_grid
 from embodichain.utils import configclass
+
+from .expansion.contracts import CommitReceipt, ExpertEpisode, ValidationResult
+from .expansion.coordinator import CandidateCoordinator, CandidateWorkItem
+from .expansion.session import GenerationSession
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -35,6 +40,12 @@ JointCommandMode = Literal["position", "position_velocity"]
 __all__ = [
     "JointTrajectoryPlaybackCfg",
     "play_joint_trajectory",
+    "InitialStatePort",
+    "MeasuredExecutor",
+    "EpisodeSink",
+    "FixedSceneInitialStatePort",
+    "SingleSlotOutcome",
+    "SingleSlotRunner",
 ]
 
 
@@ -159,3 +170,241 @@ def play_joint_trajectory(
     robot.set_qpos(positions[:, -1], joint_ids=resolved_joint_ids)
     if cfg.joint_command_mode == "position_velocity":
         robot.set_qvel(velocities[:, -1], joint_ids=resolved_joint_ids)
+
+
+class InitialStatePort(Protocol):
+    """Restore and verify one candidate's complete initial state."""
+
+    def restore(self, item: CandidateWorkItem) -> object:
+        """Restore a candidate and return an opaque prepared binding."""
+
+
+class MeasuredExecutor(Protocol):
+    """Plan-check and execute one prepared candidate."""
+
+    def validate_plan(self, item: CandidateWorkItem) -> ValidationResult:
+        """Return host-owned planning/path validation evidence."""
+
+    def execute(
+        self,
+        item: CandidateWorkItem,
+        prepared: object,
+        *,
+        episode_id: str,
+        commit_id: str,
+        on_rollout_started: Callable[[], None],
+    ) -> ExpertEpisode:
+        """Execute and report the first actual command through the callback."""
+
+
+class EpisodeSink(Protocol):
+    """Persist one accepted episode and return its final receipt."""
+
+    def submit(
+        self,
+        episode: ExpertEpisode,
+        *,
+        submission_id: int,
+    ) -> CommitReceipt:
+        """Persist and confirm one episode synchronously or through a bounded sink."""
+
+
+class FixedSceneInitialStatePort:
+    """Adapt fixed-scene restore/verify methods to :class:`InitialStatePort`."""
+
+    def __init__(self, host: object) -> None:
+        if not callable(getattr(host, "restore_initial", None)):
+            raise TypeError("host must provide restore_initial()")
+        if not callable(getattr(host, "verify_initial", None)):
+            raise TypeError("host must provide verify_initial(binding)")
+        self._host = host
+
+    def restore(self, item: CandidateWorkItem) -> object:
+        """Restore and verify the host-owned fixed initial state."""
+        del item
+        binding = self._host.restore_initial()
+        result = self._host.verify_initial(binding)
+        if not getattr(result, "accepted", False):
+            raise RuntimeError("fixed-scene initial-state verification failed")
+        return binding
+
+
+@dataclass(frozen=True)
+class SingleSlotOutcome:
+    """Result of one coordinator-driven physical candidate attempt."""
+
+    status: str
+    candidate_id: str | None = None
+    receipt: CommitReceipt | None = None
+    reason: str | None = None
+    episode_id: str | None = None
+    commit_id: str | None = None
+    submission_id: int | None = None
+
+
+class SingleSlotRunner:
+    """Drive one candidate through host restore, execution, and persistence."""
+
+    def __init__(
+        self,
+        coordinator: CandidateCoordinator,
+        restorer: InitialStatePort,
+        executor: MeasuredExecutor,
+        sink: EpisodeSink,
+        *,
+        episode_byte_budget: int,
+    ) -> None:
+        if not isinstance(coordinator, CandidateCoordinator):
+            raise TypeError("coordinator must be a CandidateCoordinator")
+        for name, value in (
+            ("restorer", restorer),
+            ("executor", executor),
+            ("sink", sink),
+        ):
+            if value is None:
+                raise TypeError(f"{name} must be supplied")
+        if type(episode_byte_budget) is not int or episode_byte_budget <= 0:
+            raise ValueError("episode_byte_budget must be a positive integer")
+        self._coordinator = coordinator
+        self._restorer = restorer
+        self._executor = executor
+        self._sink = sink
+        self._episode_byte_budget = episode_byte_budget
+
+    @staticmethod
+    def _release_if_uncommitted(
+        session: GenerationSession,
+        item: CandidateWorkItem,
+        *,
+        reason: str,
+    ) -> None:
+        """Release a candidate unless its owning operation already did so."""
+        try:
+            session.release(item.spec.identity, reason=reason)
+        except ValueError:
+            pass
+
+    def run_next(self) -> SingleSlotOutcome:
+        """Execute the next FIFO candidate, or report an empty queue."""
+        item = self._coordinator.take_next()
+        if item is None:
+            return SingleSlotOutcome("no_candidate")
+        identity = item.spec.identity
+        candidate_id = identity.candidate_id
+        session = self._coordinator.session
+        try:
+            validation = self._executor.validate_plan(item)
+            self._coordinator.admit_planned(item, validation)
+        except Exception as error:
+            self._release_if_uncommitted(
+                session,
+                item,
+                reason="planning_failed",
+            )
+            return SingleSlotOutcome(
+                "planning_rejected",
+                candidate_id=candidate_id,
+                reason=str(error),
+            )
+
+        ready = session.take_ready(
+            identity.scene_case_id,
+            identity.initial_state_id,
+            episode_byte_budget=self._episode_byte_budget,
+            candidate_id=candidate_id,
+        )
+        if ready is None:
+            session.release(identity, reason="execution_capacity_unavailable")
+            return SingleSlotOutcome("capacity_unavailable", candidate_id=candidate_id)
+        if ready.identities != (identity,):
+            session.release(identity, reason="assigned_candidate_mismatch")
+            raise RuntimeError("session assigned a different candidate")
+
+        episode_id, commit_id = session.episode_ids(identity)
+        started = False
+
+        def on_rollout_started() -> None:
+            nonlocal started
+            if started:
+                raise RuntimeError("rollout start callback may run only once")
+            session.mark_rollout_started(identity)
+            started = True
+
+        try:
+            prepared = self._restorer.restore(item)
+            episode = self._executor.execute(
+                item,
+                prepared,
+                episode_id=episode_id,
+                commit_id=commit_id,
+                on_rollout_started=on_rollout_started,
+            )
+            if not started:
+                raise RuntimeError("executor returned before starting the rollout")
+        except Exception:
+            self._release_if_uncommitted(
+                session,
+                item,
+                reason="execution_failed",
+            )
+            raise
+
+        try:
+            accepted = session.accept_episode(episode)
+        except Exception:
+            self._release_if_uncommitted(
+                session,
+                item,
+                reason="measured_admission_failed",
+            )
+            raise
+        if not accepted:
+            return SingleSlotOutcome("measured_rejected", candidate_id=candidate_id)
+
+        submission_id = 0
+        try:
+            receipt = self._sink.submit(
+                episode,
+                submission_id=submission_id,
+            )
+        except Exception as error:
+            return SingleSlotOutcome(
+                "write_pending",
+                candidate_id=candidate_id,
+                reason=str(error),
+                episode_id=episode_id,
+                commit_id=commit_id,
+                submission_id=submission_id,
+            )
+        session.apply_receipt(receipt)
+        return SingleSlotOutcome(
+            "committed" if receipt.confirmed else "write_failed",
+            candidate_id=candidate_id,
+            receipt=receipt,
+            reason=receipt.error or None,
+            episode_id=episode_id,
+            commit_id=commit_id,
+            submission_id=submission_id,
+        )
+
+    def run_until_empty(
+        self,
+        *,
+        max_attempts: int | None = None,
+    ) -> tuple[SingleSlotOutcome, ...]:
+        """Consume the current bounded queue through the same single slot."""
+        if max_attempts is not None and (
+            type(max_attempts) is not int or max_attempts < 0
+        ):
+            raise ValueError("max_attempts must be a non-negative integer or None")
+        outcomes: list[SingleSlotOutcome] = []
+        while self._coordinator.pending_count:
+            if max_attempts is not None and len(outcomes) >= max_attempts:
+                raise RuntimeError("single-slot attempt budget exhausted")
+            outcomes.append(self.run_next())
+        return tuple(outcomes)
+
+    @property
+    def coordinator(self) -> CandidateCoordinator:
+        """Return the coordinator owned by this runner."""
+        return self._coordinator
