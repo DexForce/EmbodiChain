@@ -52,7 +52,7 @@ class PytorchSolverCfg(SolverCfg):
     class_type: str = "PytorchSolver"
 
     # Solver iteration parameters
-    pos_eps: float = 5e-4
+    pos_eps: float = 5e-3
     """Tolerance for convergence for position"""
 
     rot_eps: float = 5e-4
