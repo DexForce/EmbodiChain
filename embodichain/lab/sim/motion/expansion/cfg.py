@@ -81,6 +81,19 @@ def _fixed(value: str, supported: str, name: str) -> None:
         raise ValueError(f"{name} currently supports only {supported!r}")
 
 
+def _decode_tuple_value(
+    value: object,
+    *,
+    member_type: type,
+    name: str,
+) -> tuple[object, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"{name} must be a sequence")
+    if any(type(item) is not member_type for item in value):
+        raise ValueError(f"{name} contains an invalid value type")
+    return tuple(value)
+
+
 def _decode(cls: type, data: Mapping[str, Any], path: str = "") -> Any:
     if not isinstance(data, Mapping):
         raise ValueError(f"{path or cls.__name__} must be a mapping")
@@ -112,6 +125,28 @@ def _decode(cls: type, data: Mapping[str, Any], path: str = "") -> Any:
             ):
                 raise ValueError(f"{name} contains an invalid value type")
             decoded[key] = tuple(value)
+        elif get_origin(expected) is dict:
+            key_type, value_type = get_args(expected)
+            if key_type is not str or not isinstance(value, Mapping):
+                raise ValueError(f"{name} must be a string-keyed mapping")
+            if any(type(item_key) is not str for item_key in value):
+                raise ValueError(f"{name} must use string keys")
+            if get_origin(value_type) is tuple:
+                member_type = get_args(value_type)[0]
+                decoded[key] = {
+                    item_key: _decode_tuple_value(
+                        item_value,
+                        member_type=member_type,
+                        name=f"{name}.{item_key}",
+                    )
+                    for item_key, item_value in value.items()
+                }
+            elif value_type is str:
+                if any(type(item_value) is not str for item_value in value.values()):
+                    raise ValueError(f"{name} must map strings to strings")
+                decoded[key] = dict(value)
+            else:
+                raise TypeError(f"unsupported config mapping annotation: {expected}")
         elif expected is float and type(value) in (float, int):
             decoded[key] = float(value)
         elif type(value) is expected:
@@ -325,6 +360,7 @@ class TrajectoryAugmentationCfg:
     """Local random seed, explicitly enabled factors, and geometry coverage limits."""
 
     seed: int = 0
+    max_variants_per_reference: int = 1
     start_state: _ProvidedStartCfg = _ProvidedStartCfg()
     factors: _FactorsCfg = _FactorsCfg()
     coverage: _CoverageCfg = _CoverageCfg()
@@ -333,6 +369,10 @@ class TrajectoryAugmentationCfg:
         _count(self.seed, "seed", 0)
         if self.seed >= 2**63:
             raise ValueError("seed must be less than 2**63")
+        _count(
+            self.max_variants_per_reference,
+            "max_variants_per_reference",
+        )
         self.validate_semantics()
 
     @classmethod
@@ -358,19 +398,26 @@ class TrajectoryAugmentationCfg:
         _count(self.seed, "seed", 0)
         if self.seed >= 2**63:
             raise ValueError("seed must be less than 2**63")
+        _count(
+            self.max_variants_per_reference,
+            "max_variants_per_reference",
+        )
 
 
 @configclass
 class _SourceCfg:
     kind: str = "handwritten"
     source_id: str = "handwritten_qpos"
+    source_revision: str = "unversioned"
+    unit_scope: str = "action"
     template_id: str = "reference_0"
+    phase_permissions: dict[str, tuple[str, ...]] = {}
+    phase_kinds: dict[str, str] = {}
 
     def __post_init__(self) -> None:
         if self.kind not in (
             "handwritten",
             "motion_generator",
-            "atomic",
             "atomic_action",
             "task_program",
         ):
@@ -378,8 +425,35 @@ class _SourceCfg:
                 "source.kind must be handwritten, motion_generator, "
                 "atomic_action, or task_program"
             )
-        _id(self.source_id, "source_id")
-        _id(self.template_id, "template_id")
+        for name in ("source_id", "source_revision", "template_id"):
+            _id(getattr(self, name), name)
+        _fixed(self.unit_scope, "action", "source.unit_scope")
+        permissions = {
+            phase_id: tuple(operators)
+            for phase_id, operators in self.phase_permissions.items()
+        }
+        kinds = dict(self.phase_kinds)
+        if set(permissions) != set(kinds):
+            raise ValueError(
+                "source.phase_permissions and source.phase_kinds must name "
+                "the same phases"
+            )
+        for phase_id, operators in permissions.items():
+            _id(phase_id, "source phase")
+            if len(set(operators)) != len(operators):
+                raise ValueError(f"source.phase_permissions.{phase_id} must be unique")
+            if any(operator not in SPATIAL_METHODS for operator in operators):
+                raise ValueError(
+                    f"source.phase_permissions.{phase_id} contains an unsupported operator"
+                )
+        for phase_id, kind in kinds.items():
+            _id(phase_id, "source phase")
+            if kind not in ("free", "contact", "hold"):
+                raise ValueError(
+                    f"source.phase_kinds.{phase_id} must be free, contact, or hold"
+                )
+        self.phase_permissions = permissions
+        self.phase_kinds = kinds
 
 
 @configclass
@@ -394,6 +468,26 @@ class _AffordanceCfg:
         _boolean(self.enabled, "affordance.enabled")
         _count(self.branches_per_family, "affordance.branches_per_family")
         _count(self.max_proposals, "affordance.max_proposals")
+
+
+@configclass
+class _ObservationCfg:
+    """Post-rollout observation profile declarations without fan-out runtime."""
+
+    enabled: bool = False
+    profiles: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _boolean(self.enabled, "observation.enabled")
+        for profile in self.profiles:
+            _id(profile, "observation profile")
+        if len(set(self.profiles)) != len(self.profiles):
+            raise ValueError("observation.profiles must be unique")
+        self.profiles = tuple(self.profiles)
+        if self.enabled and not self.profiles:
+            raise ValueError("enabled observation requires at least one profile")
+        if not self.enabled and self.profiles:
+            raise ValueError("disabled observation cannot declare profiles")
 
 
 @configclass
@@ -449,6 +543,8 @@ class _ExecutionCfg:
         _count(self.ready_high_watermark, "ready_high_watermark")
         _count(self.ready_max_bytes, "ready_max_bytes")
         _count(self.max_inflight, "execution.max_inflight")
+        if self.max_inflight != 1:
+            raise ValueError("execution.max_inflight currently supports only 1")
         if self.ready_low_watermark >= self.ready_high_watermark:
             raise ValueError(
                 "ready_low_watermark must be less than ready_high_watermark"
@@ -566,6 +662,7 @@ class TrajectoryGenerationJobCfg:
     source: _SourceCfg = _SourceCfg()
     augmentation: TrajectoryAugmentationCfg = TrajectoryAugmentationCfg()
     affordance: _AffordanceCfg = _AffordanceCfg()
+    observation: _ObservationCfg = _ObservationCfg()
     scheduling: _SchedulingCfg = _SchedulingCfg()
     planning: _PlanningCfg = _PlanningCfg()
     execution: _ExecutionCfg = _ExecutionCfg()
@@ -593,6 +690,14 @@ class TrajectoryGenerationJobCfg:
         """Validate configuration without loading hosts, profiles, or sources."""
         for name, expected in get_type_hints(type(self)).items():
             _validate_nested(getattr(self, name), expected, name)
+        if (
+            self.scheduling.candidate_budget
+            < self.augmentation.max_variants_per_reference
+        ):
+            raise ValueError(
+                "scheduling.candidate_budget cannot be smaller than "
+                "augmentation.max_variants_per_reference"
+            )
 
     def validate_capabilities(
         self,

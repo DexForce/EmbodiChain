@@ -62,6 +62,7 @@ and persistence confirmations; this package does not instantiate them.
    expand_trajectory_variants
    sample_approach_cone
    GenerationSession
+   load_generation_profile
    SourceContext
    SourceAdapter
    TemplateSourceAdapter
@@ -204,6 +205,8 @@ capability does not implement the EEF replanning its poses require. Deployment p
 .. autoclass:: TrajectoryGenerationJobCfg
    :members:
    :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autofunction:: load_generation_profile
 
 Operators, Coverage, and Session
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -431,6 +434,15 @@ The package import path above is convenient for callers combining them.
 
    CandidateCoordinator
    CandidateWorkItem
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.profile
+
+.. autosummary::
+   :nosignatures:
+
+   load_generation_profile
+
+.. autofunction:: load_generation_profile
 
 .. currentmodule:: embodichain.lab.sim.motion.expansion.cfg
 

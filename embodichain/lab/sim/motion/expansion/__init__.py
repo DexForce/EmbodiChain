@@ -74,6 +74,7 @@ from .operators import (
     via_points,
 )
 from .session import GenerationSession
+from .profile import load_generation_profile
 from .source import (
     PlanResultSourceAdapter,
     SourceAdapter,
@@ -125,6 +126,7 @@ __all__ = [
     "validate_motion_limits",
     "via_points",
     "GenerationSession",
+    "load_generation_profile",
     "SourceAdapter",
     "SourceContext",
     "TemplateSourceAdapter",

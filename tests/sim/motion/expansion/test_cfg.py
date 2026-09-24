@@ -16,7 +16,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import yaml
 
 from embodichain.lab.sim.motion.expansion import (
     TrajectoryAugmentationCfg,
@@ -36,6 +39,32 @@ def _capabilities() -> dict[str, set[str]]:
         },
         "sink_ids": {"lerobot"},
         "operators": {"joint_residual", "retime"},
+    }
+
+
+def _task_program_profile_payload() -> dict[str, object]:
+    return {
+        "source": {
+            "kind": "task_program",
+            "source_id": "repeated_cube_pick_place",
+            "source_revision": "config:repeated_pick_place_v1",
+            "unit_scope": "action",
+            "template_id": "place",
+            "phase_permissions": {
+                "approach": [],
+                "release": [],
+                "retract": ["joint_residual", "via_points"],
+            },
+            "phase_kinds": {
+                "approach": "free",
+                "release": "contact",
+                "retract": "free",
+            },
+        },
+        "augmentation": {"max_variants_per_reference": 3},
+        "scheduling": {"candidate_budget": 3},
+        "execution": {"max_inflight": 1},
+        "observation": {"enabled": False, "profiles": []},
     }
 
 
@@ -99,6 +128,79 @@ def test_generation_profile_rejects_unimplemented_scheduler() -> None:
 def test_generation_profile_accepts_all_source_adapters(kind):
     cfg = TrajectoryGenerationJobCfg.from_mapping({"source": {"kind": kind}})
     assert cfg.source.kind == kind
+
+
+def test_generation_profile_decodes_task_program_source_contract() -> None:
+    cfg = TrajectoryGenerationJobCfg.from_mapping(_task_program_profile_payload())
+
+    assert cfg.source.source_revision == "config:repeated_pick_place_v1"
+    assert cfg.source.phase_permissions["retract"] == (
+        "joint_residual",
+        "via_points",
+    )
+    assert cfg.augmentation.max_variants_per_reference == 3
+    assert cfg.observation.profiles == ()
+
+
+@pytest.mark.parametrize("field", ["backend", "num_envs", "control_dt", "robot"])
+def test_generation_profile_rejects_environment_owned_fields(field: str) -> None:
+    with pytest.raises(ValueError, match="unknown fields"):
+        TrajectoryGenerationJobCfg.from_mapping({field: "forbidden"})
+
+
+def test_generation_profile_rejects_implicit_or_inconsistent_phases() -> None:
+    payload = _task_program_profile_payload()
+    source = payload["source"]
+    assert isinstance(source, dict)
+    permissions = source["phase_permissions"]
+    assert isinstance(permissions, dict)
+    permissions.pop("release")
+
+    with pytest.raises(ValueError, match="phase_permissions.*phase_kinds"):
+        TrajectoryGenerationJobCfg.from_mapping(payload)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"execution": {"max_inflight": 2}},
+        {
+            "augmentation": {"max_variants_per_reference": 4},
+            "scheduling": {"candidate_budget": 3},
+        },
+    ],
+)
+def test_generation_profile_rejects_unsupported_t4_capacity(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError):
+        TrajectoryGenerationJobCfg.from_mapping(payload)
+
+
+def test_generation_profile_requires_enabled_observation_profiles() -> None:
+    with pytest.raises(ValueError, match="enabled observation"):
+        TrajectoryGenerationJobCfg.from_mapping(
+            {"observation": {"enabled": True, "profiles": []}}
+        )
+
+
+def test_generation_profile_rejects_transitional_atomic_source_kind() -> None:
+    with pytest.raises(ValueError, match="source.kind"):
+        TrajectoryGenerationJobCfg.from_mapping({"source": {"kind": "atomic"}})
+
+
+def test_load_generation_profile_uses_strict_decoder(tmp_path: Path) -> None:
+    from embodichain.lab.sim.motion.expansion.profile import load_generation_profile
+
+    path = tmp_path / "generation.yaml"
+    path.write_text(
+        yaml.safe_dump(_task_program_profile_payload()),
+        encoding="utf-8",
+    )
+
+    cfg = load_generation_profile(path)
+
+    assert cfg.source.kind == "task_program"
 
 
 @pytest.mark.parametrize(
