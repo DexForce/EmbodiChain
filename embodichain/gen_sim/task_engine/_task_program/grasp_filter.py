@@ -124,9 +124,9 @@ def accepted_candidates(
 class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
     """Check single-arm opening clearance and configured object-region rules.
 
-    Rules are fixed at assembly. End-specific proposals bypass region rules but
-    still require opening clearance; dual grasps retain their paired protocol.
-    This provider owns no
+    Rules are fixed at assembly and selected by an immutable per-Pick view.
+    Unscoped calls check only opening clearance; dual grasps retain their paired
+    protocol. This provider owns no
     execution cursor, held relation, eligibility state, or recovery policy.
     """
 
@@ -136,10 +136,7 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         super().__init__(delegate.gripper_model)
         self._delegate = delegate
         self._rules = rules
-        keys = {rule.geometry for rule in rules}
-        self._by_geometry = {
-            key: tuple(rule for rule in rules if rule.geometry == key) for key in keys
-        }
+        self._active_rules: tuple[GraspRule, ...] = ()
 
     def require_rule(
         self,
@@ -148,14 +145,33 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         vertices: torch.Tensor,
         triangles: torch.Tensor,
     ) -> None:
+        self.for_pick(object_id, target_id, vertices, triangles)
+
+    def for_pick(
+        self,
+        object_id: str,
+        target_id: str,
+        vertices: torch.Tensor,
+        triangles: torch.Tensor,
+    ) -> TaskGraspPoseGenerator:
+        """Return a call-local view without changing the shared provider."""
         key = geometry_key(vertices, triangles)
-        if not any(
-            rule.object_id == object_id
+        matches = tuple(
+            rule
+            for rule in self._rules
+            if rule.object_id == object_id
             and rule.target_id == target_id
             and rule.geometry == key
-            for rule in self._rules
-        ):
+        )
+        if not matches:
             raise ValueError("Constrained Pick has no matching immutable grasp filter.")
+        if any(rule != matches[0] for rule in matches[1:]):
+            raise ValueError(
+                "Constrained Pick has conflicting immutable grasp filters."
+            )
+        scoped = TaskGraspPoseGenerator(self._delegate, self._rules)
+        scoped._active_rules = matches[:1]
+        return scoped
 
     def get_valid_grasp_poses(
         self,
@@ -175,11 +191,14 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             obj_longest_axis=obj_longest_axis,
             is_positive_part=is_positive_part,
         )
-        rules = (
-            ()
-            if obj_longest_axis is not None
-            else self._by_geometry.get(geometry_key(mesh_vertices, mesh_triangles), ())
-        )
+        rules = self._active_rules
+        if rules and (
+            obj_longest_axis is not None
+            or rules[0].geometry != geometry_key(mesh_vertices, mesh_triangles)
+        ):
+            raise ValueError(
+                "Constrained Pick requires matching center-sampled geometry."
+            )
         if obj_poses.shape != (len(results), 4, 4):
             raise ValueError("Grasp filter rows must match the observed object poses.")
         filtered = []

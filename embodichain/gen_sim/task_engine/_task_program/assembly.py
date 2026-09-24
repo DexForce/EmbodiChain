@@ -175,6 +175,8 @@ class _TaskFactory(SimulationTaskProgramFactory):
 
     def create_atomic_action_engine(self, profile: Any) -> Any:
         """Keep drawer-owned transport separate from ordinary GenSim wrappers."""
+        from .actions import GenSimMoveHeldObject, GenSimPickUp, GenSimPlace, GenSimPour
+
         if self._drawers:
             from .drawer_runtime import DrawerPlacementEngine
 
@@ -184,12 +186,11 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 grasp_pose_generators=self._grasp_pose_generators,
                 drawer_observations=self._drawers,
             )
+            engine.register(GenSimPickUp(), replace=True)
             self.task_program_registration.validate_engine(engine)
             return engine
 
         engine = super().create_atomic_action_engine(profile)
-        from .actions import GenSimMoveHeldObject, GenSimPickUp, GenSimPlace, GenSimPour
-
         engine.register(GenSimPickUp(), replace=True)
         engine.register(GenSimMoveHeldObject(), replace=True)
         engine.register(GenSimPlace(), replace=True)

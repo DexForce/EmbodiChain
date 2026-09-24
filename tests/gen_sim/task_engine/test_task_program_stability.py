@@ -138,6 +138,7 @@ def _local_port(
     pose: torch.Tensor,
     *,
     reference_pose: torch.Tensor | None = None,
+    vertices: dict[str, torch.Tensor] | None = None,
 ):
     preset = "gen_sim.target.stable"
     policy = CompiledPostPolicy(
@@ -159,6 +160,8 @@ def _local_port(
         entities[cfg.reference] = SimpleNamespace(
             get_local_pose=lambda **kwargs: reference_pose.clone()
         )
+    for entity, mesh in (vertices or {}).items():
+        entities[entity].get_vertices = Mock(return_value=mesh)
     port = TaskStabilityPort(
         Mock(),
         SimpleNamespace(get_rigid_object=entities.get),
@@ -173,6 +176,156 @@ def _local_port(
         step_dt=0.04,
     )
     return port, policy, segment
+
+
+def _box_vertices(half_extents: tuple[float, float, float], count: int) -> torch.Tensor:
+    from itertools import product
+
+    return torch.tensor(list(product(*[(-x, x) for x in half_extents]))).repeat(
+        count, 1, 1
+    )
+
+
+def test_supported_placement_uses_current_mesh_rotation_without_locking_it():
+    count = 5
+    upper = torch.eye(4).repeat(count, 1, 1)
+    upper[:, 2, 3] = 0.11
+    upper[1:, :3, :3] = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+    )
+    # Rolling changes the bottom offset from -0.10 m to -0.02 m.
+    upper[1:, 2, 3] = torch.tensor([0.03, 0.055, 0.005, 0.03])
+    upper[4, 0, 3] = 0.4
+    support = torch.eye(4).repeat(count, 1, 1)
+    port, policy, segment = _local_port(
+        StabilityConstraint(
+            entity="upper",
+            reference="support",
+            kind="supported_placement",
+            displacement=(0.0, 0.0, 0.03),
+            position_tolerance=0.5,
+            duration=0.08,
+            timeout=0.12,
+        ),
+        upper,
+        reference_pose=support,
+        vertices={
+            "upper": _box_vertices((0.01, 0.02, 0.10), count),
+            "support": _box_vertices((0.3, 0.3, 0.01), count),
+        },
+    )
+    list(
+        port.actions(
+            policy, segment=segment, active_mask=torch.ones(count, dtype=torch.bool)
+        )
+    )
+    assert port.post_policy_result(policy, segment=segment).tolist() == [
+        True,
+        True,
+        False,
+        False,
+        False,
+    ]
+    measured = port.post_policy_metadata(policy, segment=segment)["measurements"]
+    assert "alignment" not in measured
+    assert measured["support_gap"] == pytest.approx([0, 0, 0.025, -0.025, 0], abs=1e-7)
+
+
+@pytest.mark.parametrize("moving", ["upper", "support"])
+@pytest.mark.parametrize("motion", ["translation", "rotation"])
+def test_supported_placement_still_requires_a_stable_window(moving, motion):
+    upper = torch.eye(4)[None]
+    upper[:, 2, 3] = 0.11
+    support = torch.eye(4)[None]
+    port, policy, segment = _local_port(
+        StabilityConstraint(
+            entity="upper",
+            reference="support",
+            kind="supported_placement",
+            displacement=(0.0, 0.0, 0.11),
+            duration=0.12,
+            timeout=0.24,
+        ),
+        upper,
+        reference_pose=support,
+        vertices={
+            "upper": _box_vertices((0.01, 0.02, 0.1), 1),
+            "support": _box_vertices((0.3, 0.3, 0.01), 1),
+        },
+    )
+    for step, _ in enumerate(
+        port.actions(policy, segment=segment, active_mask=torch.tensor([True]))
+    ):
+        pose = upper if moving == "upper" else support
+        if motion == "translation":
+            pose[:, 0, 3] = 0.03 if step % 2 == 0 else 0.0
+        else:
+            angle = 0.3 if step % 2 == 0 else 0.0
+            pose[:, :2, :2] = torch.tensor(
+                [
+                    [math.cos(angle), -math.sin(angle)],
+                    [math.sin(angle), math.cos(angle)],
+                ]
+            )
+    assert port.post_policy_result(policy, segment=segment).tolist() == [False]
+
+
+def test_supported_placement_requires_a_relative_target():
+    with pytest.raises(ValueError, match="relative target"):
+        StabilityConstraint(entity="upper", kind="supported_placement")
+
+
+def test_supported_placement_rotates_reference_geometry_and_footprint():
+    upper = torch.eye(4).repeat(2, 1, 1)
+    upper[:, 2, 3] = 0.11
+    upper[1, 1, 3] = 0.15
+    support = torch.eye(4).repeat(2, 1, 1)
+    # Turning the support swaps its top offset and its narrow footprint axis.
+    support[:, :3, :3] = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+    )
+    port, policy, segment = _local_port(
+        StabilityConstraint(
+            entity="upper",
+            reference="support",
+            kind="supported_placement",
+            displacement=(0.0, 0.0, 0.11),
+            position_tolerance=0.3,
+            duration=0.08,
+            timeout=0.12,
+        ),
+        upper,
+        reference_pose=support,
+        vertices={
+            "upper": _box_vertices((0.01, 0.02, 0.01), 2),
+            "support": _box_vertices((0.3, 0.1, 0.01), 2),
+        },
+    )
+    list(
+        port.actions(
+            policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+        )
+    )
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, False]
+
+
+@pytest.mark.parametrize(
+    "mesh",
+    [torch.empty(1, 0, 3), torch.full((1, 8, 3), float("nan")), torch.zeros(2, 8, 3)],
+)
+def test_supported_placement_rejects_invalid_mesh_without_static_fallback(mesh):
+    with pytest.raises(ValueError, match="Support geometry"):
+        _local_port(
+            StabilityConstraint(
+                entity="upper",
+                reference="support",
+                kind="supported_placement",
+                displacement=(0.0, 0.0, 0.0),
+            ),
+            torch.eye(4)[None],
+            reference_pose=torch.eye(4)[None],
+            vertices={"upper": mesh, "support": _box_vertices((0.3, 0.3, 0.01), 1)},
+        )
 
 
 @pytest.mark.parametrize("motion", ["translation", "rotation"])

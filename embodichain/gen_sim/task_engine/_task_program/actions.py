@@ -54,10 +54,11 @@ from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 __all__ = ["GenSimPickUp", "GenSimMoveHeldObject", "GenSimPlace", "GenSimPour"]
 
 _HANDOVER_SOURCE_AXIS = "gen_sim.handover_source_axis"
+_PICK_GRASP_RULE = "gen_sim.pick_grasp_rule"
 
 
 class GenSimPickUp(PickUp):
-    """Select a local-axis end only for explicitly marked E4 source calls."""
+    """Apply explicit call-local grasp rules without changing shared sampling."""
 
     skill_id = PickUp.skill_id
     GoalType = PickUp.GoalType
@@ -79,7 +80,8 @@ class GenSimPickUp(PickUp):
     ):
         affordance = semantics.affordance
         declared_axis = affordance.get_custom_config(_HANDOVER_SOURCE_AXIS)
-        if declared_axis is None:
+        rule_selector = affordance.get_custom_config(_PICK_GRASP_RULE)
+        if declared_axis is None and rule_selector is None:
             return super()._resolve_grasp_pose(
                 semantics,
                 object_pose,
@@ -91,23 +93,43 @@ class GenSimPickUp(PickUp):
                 context,
                 sample_key=sample_key,
             )
-        axis = object_pose.new_tensor(declared_axis)
-        if (
-            not isinstance(affordance, AntipodalAffordance)
-            or options.pick_object_part != "top"
-            or axis.shape != (3,)
-            or not torch.isfinite(axis).all()
-            or torch.linalg.vector_norm(axis) <= 1e-6
-        ):
-            raise ValueError(
-                "GenSim handover source requires a finite local axis and top selection."
-            )
+        if not isinstance(affordance, AntipodalAffordance):
+            raise ValueError("GenSim Pick requires AntipodalAffordance.")
+        world_axis = None
+        if declared_axis is not None:
+            axis = object_pose.new_tensor(declared_axis)
+            if (
+                rule_selector is not None
+                or options.pick_object_part != "top"
+                or axis.shape != (3,)
+                or not torch.isfinite(axis).all()
+                or torch.linalg.vector_norm(axis) <= 1e-6
+            ):
+                raise ValueError(
+                    "GenSim handover source requires a finite local axis and top selection."
+                )
+            world_axis = object_pose[:, :3, :3] @ axis
         generator = self.planning_services.grasp_pose_generator(grasp_target_id)
+        if rule_selector is not None:
+            from .grasp_filter import TaskGraspPoseGenerator
+
+            if (
+                not isinstance(generator, TaskGraspPoseGenerator)
+                or options.pick_object_part != "center"
+                or len(rule_selector) != 2
+                or rule_selector[0] != semantics.entity_id
+            ):
+                raise ValueError(
+                    "Constrained Pick requires its call-local grasp filter."
+                )
+            generator = generator.for_pick(
+                *rule_selector, affordance.mesh_vertices, affordance.mesh_triangles
+            )
         candidates = affordance.get_grasp_candidates(
             generator,
             object_pose,
             approach_direction,
-            obj_longest_axis=object_pose[:, :3, :3] @ axis,
+            obj_longest_axis=world_axis,
             is_positive_part=True,
         )
         poses, ik_success = self._select_feasible_grasp_variants(

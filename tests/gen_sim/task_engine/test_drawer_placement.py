@@ -65,7 +65,9 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
         assert result is drawer
         constructor.assert_called_once()
         parent.assert_not_called()
-        drawer.register.assert_not_called()
+        drawer.register.assert_called_once()
+        assert isinstance(drawer.register.call_args.args[0], GenSimPickUp)
+        assert drawer.register.call_args.kwargs == {"replace": True}
     else:
         assert result is standard
         parent.assert_called_once()
