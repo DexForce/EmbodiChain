@@ -48,6 +48,7 @@ embodichain.lab.sim.atomic_actions
       ArticulationAffordanceGeometry
       ArticulationGeometryProvider
       ArticulationJointGeometry
+      create_rigidized_articulation_antipodal_affordance
       sample_initial_articulation_geometry
 
    .. rubric:: Semantic resource contracts
@@ -174,6 +175,8 @@ geometry keys.
 
 .. autoclass:: ArticulationAffordanceGeometry
    :members:
+
+.. autofunction:: create_rigidized_articulation_antipodal_affordance
 
 .. autofunction:: sample_initial_articulation_geometry
 

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -29,8 +30,10 @@ from embodichain.lab.task_program.integrations.simulation import (
     ControlPartCommandPreset,
     ControlPartEndpointBinding,
     ControlPartResourceBinding,
+    RigidizedArticulationAntipodalGraspBinding,
     SimulationArticulationBinding,
     SimulationArticulationLinkBinding,
+    SimulationRigidizedArticulationObjectBinding,
     SimulationRigidObjectBinding,
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
@@ -145,6 +148,79 @@ class _Simulation:
         return self.articulation if uid == "native_drawer" else None
 
 
+class _RigidizedArticulation:
+    """Floating articulation whose only joint is locked by coincident limits."""
+
+    uid = "cube_articulation"
+    pk_chain = None
+    joint_names = ("top_turn",)
+    link_names = ("lower_two_layers",)
+
+    def __init__(
+        self,
+        *,
+        fixed_base: bool = False,
+        limits: tuple[float, float] = (0.0, 0.0),
+        vertices: torch.Tensor | None = None,
+    ) -> None:
+        self.cfg = SimpleNamespace(root_props=SimpleNamespace(fixed_base=fixed_base))
+        self.pose = torch.eye(4).repeat(_BATCH_SIZE, 1, 1)
+        self.qpos = torch.zeros((_BATCH_SIZE, 1), dtype=torch.float32)
+        self.limits = torch.tensor(limits, dtype=torch.float32).reshape(1, 1, 2)
+        self.limits = self.limits.repeat(_BATCH_SIZE, 1, 1)
+        self.vertices = (
+            torch.tensor(
+                ((0.0, 0.0, 0.0), (0.1, 0.0, 0.0), (0.0, 0.1, 0.0)),
+                dtype=torch.float32,
+            )
+            if vertices is None
+            else vertices
+        )
+        self.triangles = torch.tensor(((0, 1, 2),), dtype=torch.int64)
+
+    def get_local_pose(self, *, to_matrix: bool) -> torch.Tensor:
+        assert to_matrix is True
+        return self.pose
+
+    def get_link_pose(self, link_name: str, *, to_matrix: bool) -> torch.Tensor:
+        assert link_name == "lower_two_layers"
+        assert to_matrix is True
+        return self.pose
+
+    def get_link_vert_face(self, link_name: str) -> tuple[torch.Tensor, torch.Tensor]:
+        assert link_name == "lower_two_layers"
+        return self.vertices, self.triangles
+
+    def get_qpos(self, *, target: bool = False) -> torch.Tensor:
+        del target
+        return self.qpos
+
+    def get_joint_drive(self) -> tuple[torch.Tensor, ...]:
+        stiffness = torch.ones_like(self.qpos)
+        zeros = torch.zeros_like(self.qpos)
+        return (stiffness, zeros, zeros, zeros, zeros, zeros)
+
+    def get_qpos_limits(self) -> torch.Tensor:
+        return self.limits
+
+
+class _RigidizedSimulation:
+    """Record which native lookup path the rigidized binding uses."""
+
+    def __init__(self, articulation: _RigidizedArticulation | None = None) -> None:
+        self.articulation = articulation or _RigidizedArticulation()
+        self.articulation_lookups: list[str] = []
+        self.rigid_object_lookups: list[str] = []
+
+    def get_articulation(self, uid: str) -> _RigidizedArticulation | None:
+        self.articulation_lookups.append(uid)
+        return self.articulation if uid == "cube_articulation" else None
+
+    def get_rigid_object(self, uid: str) -> None:
+        self.rigid_object_lookups.append(uid)
+        return None
+
+
 class _Robot:
     """Minimal robot control-part lookup fixture."""
 
@@ -252,6 +328,215 @@ def _scene_binding() -> SimulationSceneBinding:
             ),
         ),
     )
+
+
+def _rigidized_scene_binding() -> SimulationSceneBinding:
+    """Build one provider-free Rubik's Cube binding."""
+    return SimulationSceneBinding(
+        registry_id="rubiks_scene",
+        rigidized_articulations=(
+            SimulationRigidizedArticulationObjectBinding(
+                entity_id="rubiks_cube",
+                simulation_uid="cube_articulation",
+                locked_qpos={"top_turn": 0.0},
+                dynamics=SceneDynamics.DYNAMIC,
+                semantic_type="rubiks_cube",
+                default_grasp_affordance="rubiks_cube_grasp",
+            ),
+        ),
+        rigidized_articulation_grasps=(
+            RigidizedArticulationAntipodalGraspBinding(
+                entity_id="rubiks_cube_grasp",
+                object_id="rubiks_cube",
+                grasp_link="lower_two_layers",
+                native_name="lower_two_layers",
+                revision="1",
+            ),
+        ),
+    )
+
+
+def test_rigidized_articulation_binding_declares_object_and_grasp() -> None:
+    manifest = _rigidized_scene_binding().declare()
+
+    object_entry = manifest.lookup(SceneObjectRef("rubiks_cube"))
+    grasp_entry = manifest.lookup(SceneAffordanceRef("rubiks_cube_grasp"))
+    assert object_entry.semantic_type == "rubiks_cube"
+    assert grasp_entry.parent == SceneObjectRef("rubiks_cube")
+    assert grasp_entry.affordance_payload_type is AntipodalAffordance
+
+
+@pytest.mark.parametrize(
+    ("locked_qpos", "exception", "message"),
+    [
+        ({}, ValueError, "must not be empty"),
+        ({"top_turn": True}, TypeError, "finite number"),
+        ({"top_turn": float("inf")}, ValueError, "finite"),
+    ],
+)
+def test_rigidized_articulation_binding_rejects_invalid_locked_qpos(
+    locked_qpos: dict[str, float],
+    exception: type[Exception],
+    message: str,
+) -> None:
+    with pytest.raises(exception, match=message):
+        SimulationRigidizedArticulationObjectBinding(
+            entity_id="rubiks_cube",
+            simulation_uid="cube_articulation",
+            locked_qpos=locked_qpos,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "exception"),
+    [
+        ("joint_position_tolerance", 0.0, ValueError),
+        ("joint_position_tolerance", float("inf"), ValueError),
+        ("joint_position_tolerance", 10.0, ValueError),
+        ("link_transform_tolerance", -1.0, ValueError),
+        ("link_transform_tolerance", True, TypeError),
+        ("link_transform_tolerance", 10.0, ValueError),
+    ],
+)
+def test_rigidized_articulation_binding_rejects_invalid_tolerance(
+    field_name: str,
+    value: float,
+    exception: type[Exception],
+) -> None:
+    with pytest.raises(exception, match=field_name):
+        SimulationRigidizedArticulationObjectBinding(
+            entity_id="rubiks_cube",
+            simulation_uid="cube_articulation",
+            locked_qpos={"top_turn": 0.0},
+            **{field_name: value},
+        )
+
+
+def test_rigidized_articulation_binding_owns_locked_qpos() -> None:
+    locked_qpos = {"top_turn": 0.0}
+    binding = SimulationRigidizedArticulationObjectBinding(
+        entity_id="rubiks_cube",
+        simulation_uid="cube_articulation",
+        locked_qpos=locked_qpos,
+    )
+
+    locked_qpos["top_turn"] = 1.0
+
+    assert dict(binding.locked_qpos) == {"top_turn": 0.0}
+    with pytest.raises(TypeError):
+        binding.locked_qpos["top_turn"] = 1.0  # type: ignore[index]
+
+
+def test_rigidized_articulation_grasp_requires_rigidized_parent() -> None:
+    grasp = _rigidized_scene_binding().rigidized_articulation_grasps[0]
+
+    with pytest.raises(KeyError, match="unbound rigidized articulation"):
+        SimulationSceneBinding(
+            registry_id="rubiks_scene",
+            rigidized_articulation_grasps=(grasp,),
+        ).declare()
+
+
+def test_ordinary_antipodal_grasp_rejects_rigidized_parent() -> None:
+    root = _rigidized_scene_binding().rigidized_articulations[0]
+
+    with pytest.raises(KeyError, match="unbound object"):
+        SimulationSceneBinding(
+            registry_id="rubiks_scene",
+            rigidized_articulations=(root,),
+            antipodal_grasps=(
+                AntipodalGraspAffordanceBinding(
+                    entity_id="rubiks_cube_grasp",
+                    object_id="rubiks_cube",
+                    native_name="mesh_antipodal",
+                    revision="1",
+                ),
+            ),
+        ).declare()
+
+
+def test_rigidized_articulation_ids_share_global_namespace() -> None:
+    root = _rigidized_scene_binding().rigidized_articulations[0]
+
+    with pytest.raises(ValueError, match="must be unique"):
+        SimulationSceneBinding(
+            registry_id="rubiks_scene",
+            rigidized_articulations=(root,),
+            rigid_objects=(
+                SimulationRigidObjectBinding(
+                    entity_id="rubiks_cube",
+                    simulation_uid="native_cube",
+                ),
+            ),
+        )
+
+
+def test_rigidized_articulation_binding_builds_from_native_articulation() -> None:
+    simulation = _RigidizedSimulation()
+
+    registry = _rigidized_scene_binding().build(simulation)  # type: ignore[arg-type]
+
+    root = registry.lookup(SceneObjectRef("rubiks_cube"))
+    grasp = registry.lookup(SceneAffordanceRef("rubiks_cube_grasp"))
+    assert root.semantic_type == "rubiks_cube"
+    assert isinstance(grasp.affordance, AntipodalAffordance)
+    assert grasp.parent == SceneObjectRef("rubiks_cube")
+    assert simulation.articulation_lookups
+    assert set(simulation.articulation_lookups) == {"cube_articulation"}
+    assert simulation.rigid_object_lookups == []
+
+
+def test_rigidized_articulation_remains_a_placement_parent() -> None:
+    binding = _rigidized_scene_binding()
+    support = SupportSurfaceAffordanceBinding(
+        entity_id="cube_support",
+        parent_id="rubiks_cube",
+        native_name="support",
+        is_default=True,
+    )
+    configured = replace(binding, support_surfaces=(support,))
+
+    declared = configured.declare().lookup(SceneAffordanceRef("cube_support"))
+    live = configured.build(_RigidizedSimulation()).lookup(
+        SceneAffordanceRef("cube_support")
+    )
+
+    assert declared.parent == SceneObjectRef("rubiks_cube")
+    assert live.parent == SceneObjectRef("rubiks_cube")
+
+
+def test_rigidized_articulation_binding_rejects_fixed_root() -> None:
+    simulation = _RigidizedSimulation(_RigidizedArticulation(fixed_base=True))
+
+    with pytest.raises(ValueError, match="floating"):
+        _rigidized_scene_binding().build(simulation)  # type: ignore[arg-type]
+
+
+def test_rigidized_articulation_binding_requires_coincident_limits() -> None:
+    simulation = _RigidizedSimulation(_RigidizedArticulation(limits=(-1.0, 1.0)))
+
+    with pytest.raises(ValueError, match="coincident"):
+        _rigidized_scene_binding().build(simulation)  # type: ignore[arg-type]
+
+
+def test_rigidized_articulation_limit_lock_uses_fixed_safety_epsilon() -> None:
+    simulation = _RigidizedSimulation(_RigidizedArticulation(limits=(-4.0e-4, 4.0e-4)))
+
+    with pytest.raises(ValueError, match="coincident"):
+        _rigidized_scene_binding().build(simulation)  # type: ignore[arg-type]
+
+
+def test_rigidized_articulation_binding_fails_before_returning_invalid_geometry() -> (
+    None
+):
+    vertices = torch.tensor(
+        ((float("nan"), 0.0, 0.0), (0.1, 0.0, 0.0), (0.0, 0.1, 0.0)),
+        dtype=torch.float32,
+    )
+    simulation = _RigidizedSimulation(_RigidizedArticulation(vertices=vertices))
+
+    with pytest.raises(ValueError, match="finite"):
+        _rigidized_scene_binding().build(simulation)  # type: ignore[arg-type]
 
 
 def _profile_binding() -> SimulationRobotSkillProfileBinding:

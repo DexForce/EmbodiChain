@@ -40,6 +40,10 @@ from embodichain.lab.sim.atomic_actions import (
     AxisAlignAffordance,
     ControlPartCommandProfile,
     EntityState,
+    create_rigidized_articulation_antipodal_affordance,
+)
+from embodichain.lab.sim.atomic_actions.articulation_geometry import (
+    _rigidized_articulation_tolerance,
 )
 from embodichain.lab.task_program.semantics.profiles import (
     ControlPartEndpoint,
@@ -96,6 +100,7 @@ _IDENTITY_POSE = (
     0.0,
     1.0,
 )
+_LOCKED_LIMIT_COINCIDENCE_TOLERANCE = 1.0e-6
 
 
 def _identifier(value: str, *, field_name: str) -> str:
@@ -225,6 +230,81 @@ class SimulationRigidObjectBinding:
 
 
 @dataclass(frozen=True, slots=True)
+class SimulationRigidizedArticulationObjectBinding:
+    """Bind one locked, floating articulation as a semantic object.
+
+    Args:
+        entity_id: Canonical scene object ID.
+        simulation_uid: Explicit native articulation UID.
+        locked_qpos: Exact locked position for every native joint.
+        aliases: Optional non-authoritative lookup aliases.
+        dynamics: Semantic dynamics classification.
+        collision_role: Collision-world participation role.
+        semantic_type: Optional semantic object classification.
+        default_grasp_affordance: Optional default grasp affordance ID.
+        geometry_provider: Optional planner-facing collision geometry provider.
+        joint_position_tolerance: Positive joint-state tolerance no greater than
+            ``1e-3``. Configured limit coincidence uses a separate fixed epsilon.
+        link_transform_tolerance: Positive cross-arena transform tolerance no
+            greater than ``1e-5``.
+
+    .. attention::
+       Live configured assembly accepts only floating roots whose native joint
+       limits are finite and coincident at every declared lock position. The
+       coincidence proof uses a fixed safety epsilon and cannot be weakened by
+       an authoring tolerance.
+    """
+
+    entity_id: str
+    simulation_uid: str
+    locked_qpos: Mapping[str, float]
+    aliases: tuple[str, ...] = ()
+    dynamics: SceneDynamics = SceneDynamics.UNKNOWN
+    collision_role: SceneCollisionRole = SceneCollisionRole.NONE
+    semantic_type: str | None = None
+    default_grasp_affordance: str | None = None
+    geometry_provider: SceneGeometryProvider | None = None
+    joint_position_tolerance: float = 1.0e-3
+    link_transform_tolerance: float = 1.0e-5
+
+    def __post_init__(self) -> None:
+        _identifier(self.entity_id, field_name="entity_id")
+        _identifier(self.simulation_uid, field_name="simulation_uid")
+        if not isinstance(self.locked_qpos, Mapping):
+            raise TypeError("locked_qpos must be a mapping.")
+        locked_qpos: dict[str, float] = {}
+        for joint_name, position in self.locked_qpos.items():
+            _identifier(joint_name, field_name="locked_qpos joint names")
+            locked_qpos[joint_name] = _finite(
+                position,
+                field_name=f"locked_qpos[{joint_name!r}]",
+            )
+        if not locked_qpos:
+            raise ValueError("locked_qpos must not be empty.")
+        object.__setattr__(self, "locked_qpos", MappingProxyType(locked_qpos))
+        object.__setattr__(
+            self,
+            "aliases",
+            _identifier_tuple(self.aliases, field_name="aliases"),
+        )
+        _validate_scene_classification(self.dynamics, self.collision_role)
+        _optional_identifier(self.semantic_type, field_name="semantic_type")
+        _optional_identifier(
+            self.default_grasp_affordance,
+            field_name="default_grasp_affordance",
+        )
+        for field_name in (
+            "joint_position_tolerance",
+            "link_transform_tolerance",
+        ):
+            tolerance = _rigidized_articulation_tolerance(
+                getattr(self, field_name),
+                field_name=field_name,
+            )
+            object.__setattr__(self, field_name, tolerance)
+
+
+@dataclass(frozen=True, slots=True)
 class SimulationArticulationBinding:
     """Explicit binding for one simulation articulation."""
 
@@ -321,6 +401,49 @@ class AntipodalGraspAffordanceBinding:
             if math.sqrt(sum(value * value for value in axis)) <= 1.0e-6:
                 raise ValueError("internal_axis must be non-zero.")
             object.__setattr__(self, "internal_axis", axis)
+
+
+@dataclass(frozen=True, slots=True)
+class RigidizedArticulationAntipodalGraspBinding:
+    """Build a root-frame grasp mesh from one rigidized articulation link.
+
+    Args:
+        entity_id: Canonical affordance ID.
+        object_id: Parent rigidized-articulation object ID.
+        grasp_link: Native link supplying the grasp mesh.
+        native_name: Stable native name for the affordance.
+        revision: Affordance payload revision.
+        aliases: Optional non-authoritative lookup aliases.
+        relative_pose: Flattened affordance-to-object SE(3) transform.
+    """
+
+    entity_id: str
+    object_id: str
+    grasp_link: str
+    native_name: str
+    revision: str
+    aliases: tuple[str, ...] = ()
+    relative_pose: tuple[float, ...] = _IDENTITY_POSE
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "entity_id",
+            "object_id",
+            "grasp_link",
+            "native_name",
+            "revision",
+        ):
+            _identifier(getattr(self, field_name), field_name=field_name)
+        object.__setattr__(
+            self,
+            "aliases",
+            _identifier_tuple(self.aliases, field_name="aliases"),
+        )
+        object.__setattr__(
+            self,
+            "relative_pose",
+            _pose_tuple(self.relative_pose, field_name="relative_pose"),
+        )
 
 
 def _validate_placement_binding(value: object) -> None:
@@ -472,6 +595,60 @@ def _native_names(entity: Any, *, attribute: str, owner: str) -> tuple[str, ...]
     return names
 
 
+def _require_coincident_locked_limits(
+    articulation: Any,
+    binding: SimulationRigidizedArticulationObjectBinding,
+) -> None:
+    """Require every declared joint to be physically pinned at its lock value."""
+    joint_names = _native_names(
+        articulation,
+        attribute="joint_names",
+        owner=f"articulation {binding.entity_id!r}",
+    )
+    declared = set(binding.locked_qpos)
+    missing = sorted(set(joint_names) - declared)
+    unknown = sorted(declared - set(joint_names))
+    if missing or unknown:
+        raise ValueError(
+            f"locked_qpos for rigidized articulation {binding.entity_id!r} must "
+            f"declare every native joint exactly; missing {missing}, unknown "
+            f"{unknown}."
+        )
+    getter = getattr(articulation, "get_qpos_limits", None)
+    if not callable(getter):
+        raise TypeError("Rigidized articulation must provide get_qpos_limits().")
+    limits = torch.as_tensor(getter()).detach().cpu().to(torch.float64)
+    joint_count = len(joint_names)
+    if limits.numel() == 0 or limits.numel() % (joint_count * 2):
+        raise ValueError(
+            "Rigidized articulation qpos limits must contain lower and upper "
+            "values for every arena and joint."
+        )
+    limits = limits.reshape(-1, joint_count, 2)
+    if not bool(torch.isfinite(limits).all().item()):
+        raise ValueError("Rigidized articulation qpos limits must be finite.")
+    expected = torch.tensor(
+        [binding.locked_qpos[name] for name in joint_names],
+        dtype=torch.float64,
+    ).reshape(1, joint_count)
+    tolerance = _LOCKED_LIMIT_COINCIDENCE_TOLERANCE
+    coincident = (
+        ((limits[..., 1] - limits[..., 0]).abs() <= tolerance)
+        & ((limits[..., 0] - expected).abs() <= tolerance)
+        & ((limits[..., 1] - expected).abs() <= tolerance)
+    )
+    if not bool(coincident.all().item()):
+        flat_index = int(torch.argmin(coincident.flatten().to(torch.uint8)).item())
+        arena, joint = divmod(flat_index, joint_count)
+        raise ValueError(
+            f"Joint {joint_names[joint]!r} of rigidized articulation "
+            f"{binding.entity_id!r} must have finite coincident limits at "
+            f"{float(expected[0, joint]):.6f}; arena {arena} reports "
+            f"[{float(limits[arena, joint, 0]):.6f}, "
+            f"{float(limits[arena, joint, 1]):.6f}]."
+        )
+
+
 def _mesh_tensor(
     entity: Any,
     *,
@@ -541,11 +718,14 @@ def _placement_parent_ref(
     parent_id: str,
     *,
     objects: Mapping[str, SimulationRigidObjectBinding],
+    rigidized_articulations: Mapping[str, SimulationRigidizedArticulationObjectBinding],
     articulations: Mapping[str, SimulationArticulationBinding],
     links: Mapping[str, SimulationArticulationLinkBinding],
 ) -> SceneEntityRef:
     """Resolve an explicitly declared placement parent to its exact ref type."""
     if parent_id in objects:
+        return SceneObjectRef(parent_id)
+    if parent_id in rigidized_articulations:
         return SceneObjectRef(parent_id)
     if parent_id in articulations:
         return SceneArticulationRef(parent_id)
@@ -585,9 +765,15 @@ class SimulationSceneBinding:
 
     registry_id: str
     rigid_objects: tuple[SimulationRigidObjectBinding, ...] = ()
+    rigidized_articulations: tuple[
+        SimulationRigidizedArticulationObjectBinding, ...
+    ] = ()
     articulations: tuple[SimulationArticulationBinding, ...] = ()
     links: tuple[SimulationArticulationLinkBinding, ...] = ()
     antipodal_grasps: tuple[AntipodalGraspAffordanceBinding, ...] = ()
+    rigidized_articulation_grasps: tuple[
+        RigidizedArticulationAntipodalGraspBinding, ...
+    ] = ()
     support_surfaces: tuple[SupportSurfaceAffordanceBinding, ...] = ()
     containers: tuple[ContainerAffordanceBinding, ...] = ()
     collision_world_mode: SceneCollisionWorldMode | None = None
@@ -596,9 +782,13 @@ class SimulationSceneBinding:
         _identifier(self.registry_id, field_name="registry_id")
         expected_types = {
             "rigid_objects": SimulationRigidObjectBinding,
+            "rigidized_articulations": SimulationRigidizedArticulationObjectBinding,
             "articulations": SimulationArticulationBinding,
             "links": SimulationArticulationLinkBinding,
             "antipodal_grasps": AntipodalGraspAffordanceBinding,
+            "rigidized_articulation_grasps": (
+                RigidizedArticulationAntipodalGraspBinding
+            ),
             "support_surfaces": SupportSurfaceAffordanceBinding,
             "containers": ContainerAffordanceBinding,
         }
@@ -628,6 +818,9 @@ class SimulationSceneBinding:
     def declare(self) -> SceneManifest:
         """Project the complete provider-free scene declaration."""
         objects = {item.entity_id: item for item in self.rigid_objects}
+        rigidized_articulations = {
+            item.entity_id: item for item in self.rigidized_articulations
+        }
         articulations = {item.entity_id: item for item in self.articulations}
         links = {item.entity_id: item for item in self.links}
         placement_defaults = _placement_defaults(
@@ -637,6 +830,28 @@ class SimulationSceneBinding:
         entries: list[SceneEntityManifest] = []
 
         for binding in self.rigid_objects:
+            native_aliases = (
+                ()
+                if binding.simulation_uid == binding.entity_id
+                else (binding.simulation_uid,)
+            )
+            defaults = dict(placement_defaults.get(binding.entity_id, {}))
+            if binding.default_grasp_affordance is not None:
+                defaults[GRASP_AFFORDANCE_CAPABILITY] = SceneAffordanceRef(
+                    binding.default_grasp_affordance
+                )
+            entries.append(
+                SceneEntityManifest(
+                    ref=SceneObjectRef(binding.entity_id),
+                    aliases=(*native_aliases, *binding.aliases),
+                    dynamics=binding.dynamics,
+                    collision_role=binding.collision_role,
+                    semantic_type=binding.semantic_type,
+                    default_affordances=defaults,
+                )
+            )
+
+        for binding in self.rigidized_articulations:
             native_aliases = (
                 ()
                 if binding.simulation_uid == binding.entity_id
@@ -721,6 +936,25 @@ class SimulationSceneBinding:
                 )
             )
 
+        for binding in self.rigidized_articulation_grasps:
+            if binding.object_id not in rigidized_articulations:
+                raise KeyError(
+                    f"Rigidized grasp affordance {binding.entity_id!r} references "
+                    f"unbound rigidized articulation {binding.object_id!r}."
+                )
+            entries.append(
+                SceneEntityManifest(
+                    ref=SceneAffordanceRef(binding.entity_id),
+                    aliases=binding.aliases,
+                    parent=SceneObjectRef(binding.object_id),
+                    native_name=binding.native_name,
+                    affordance_capabilities=frozenset({GRASP_AFFORDANCE_CAPABILITY}),
+                    affordance_payload_type=AntipodalAffordance,
+                    affordance_revision=binding.revision,
+                    relative_pose=_pose_metadata(binding.relative_pose),
+                )
+            )
+
         for capability, payload_type, bindings in (
             (
                 PLACE_ON_AFFORDANCE_CAPABILITY,
@@ -737,6 +971,7 @@ class SimulationSceneBinding:
                 parent = _placement_parent_ref(
                     binding.parent_id,
                     objects=objects,
+                    rigidized_articulations=rigidized_articulations,
                     articulations=articulations,
                     links=links,
                 )
@@ -768,6 +1003,10 @@ class SimulationSceneBinding:
             Immutable registry with typed roots, links, and affordances.
         """
         objects = {item.entity_id: item for item in self.rigid_objects}
+        rigidized_articulations = {
+            item.entity_id: item for item in self.rigidized_articulations
+        }
+        object_bindings = {**objects, **rigidized_articulations}
         articulations = {item.entity_id: item for item in self.articulations}
         placement_defaults = _placement_defaults(
             self.support_surfaces,
@@ -775,17 +1014,49 @@ class SimulationSceneBinding:
         )
         geometry = {
             item.entity_id: item.geometry_provider
-            for item in (*self.rigid_objects, *self.articulations)
+            for item in (
+                *self.rigid_objects,
+                *self.rigidized_articulations,
+                *self.articulations,
+            )
             if item.geometry_provider is not None
         }
         roles = {
             item.entity_id: item.collision_role
-            for item in (*self.rigid_objects, *self.articulations)
+            for item in (
+                *self.rigid_objects,
+                *self.rigidized_articulations,
+                *self.articulations,
+            )
         }
+        native_rigidized_articulations: dict[str, Any] = {}
+        for binding in self.rigidized_articulations:
+            articulation = _require_native_entity(
+                simulation,
+                getter_name="get_articulation",
+                registry_id=binding.entity_id,
+                simulation_uid=binding.simulation_uid,
+            )
+            fixed_base = getattr(
+                getattr(getattr(articulation, "cfg", None), "root_props", None),
+                "fixed_base",
+                None,
+            )
+            if fixed_base is not False:
+                raise ValueError(
+                    f"Rigidized articulation {binding.entity_id!r} must have a "
+                    "floating root (root_props.fixed_base: false)."
+                )
+            _require_coincident_locked_limits(articulation, binding)
+            native_rigidized_articulations[binding.entity_id] = articulation
         base = SceneRegistry.from_simulation(
             simulation,
             rigid_objects={
                 item.entity_id: item.simulation_uid for item in self.rigid_objects
+            },
+            articulation_objects={
+                item.entity_id: item.simulation_uid
+                for item in self.rigidized_articulations
             },
             articulations={
                 item.entity_id: item.simulation_uid for item in self.articulations
@@ -799,7 +1070,7 @@ class SimulationSceneBinding:
         for registration in base.registrations:
             entity_id = registration.ref.entity_id
             if isinstance(registration.ref, SceneObjectRef):
-                binding = objects[entity_id]
+                binding = object_bindings[entity_id]
                 defaults = dict(placement_defaults.get(entity_id, {}))
                 if binding.default_grasp_affordance is not None:
                     defaults[GRASP_AFFORDANCE_CAPABILITY] = SceneAffordanceRef(
@@ -898,6 +1169,37 @@ class SimulationSceneBinding:
                 )
             )
 
+        for binding in self.rigidized_articulation_grasps:
+            object_binding = rigidized_articulations.get(binding.object_id)
+            if object_binding is None:
+                raise KeyError(
+                    f"Rigidized grasp affordance {binding.entity_id!r} references "
+                    f"unbound rigidized articulation {binding.object_id!r}."
+                )
+            articulation = native_rigidized_articulations[binding.object_id]
+            registrations.append(
+                SceneEntityRegistration(
+                    ref=SceneAffordanceRef(binding.entity_id),
+                    aliases=binding.aliases,
+                    parent=SceneObjectRef(binding.object_id),
+                    native_name=binding.native_name,
+                    affordance=create_rigidized_articulation_antipodal_affordance(
+                        articulation,
+                        grasp_link=binding.grasp_link,
+                        locked_qpos=object_binding.locked_qpos,
+                        joint_position_tolerance=(
+                            object_binding.joint_position_tolerance
+                        ),
+                        link_transform_tolerance=(
+                            object_binding.link_transform_tolerance
+                        ),
+                    ),
+                    affordance_capabilities=frozenset({GRASP_AFFORDANCE_CAPABILITY}),
+                    affordance_revision=binding.revision,
+                    relative_pose=_pose_tensor(binding.relative_pose),
+                )
+            )
+
         for capability, payload_type, bindings in (
             (
                 PLACE_ON_AFFORDANCE_CAPABILITY,
@@ -914,6 +1216,7 @@ class SimulationSceneBinding:
                 parent = _placement_parent_ref(
                     binding.parent_id,
                     objects=objects,
+                    rigidized_articulations=rigidized_articulations,
                     articulations=articulations,
                     links=links,
                 )

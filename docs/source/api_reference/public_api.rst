@@ -36,6 +36,7 @@ EmbodiChain data cache.
    CoordinatedPlacementAndPickment
    DeformableDemoData
    MultiW1Data
+   RubiksCube
    ScoopIceNewEnv
 
 embodichain.data.assets.planner_assets
