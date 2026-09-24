@@ -294,6 +294,78 @@ def test_handover_minimum_height_preserves_retreat_headroom(
     )
 
 
+def test_relative_place_geometry_uses_only_preceding_alignment(monkeypatch) -> None:
+    place = {
+        "id": "place",
+        "task_type": "E1",
+        "call": {
+            "kind": "registered",
+            "call_id": "simulation.place_relative",
+            "arguments": {"object": "cup", "reference": "mat", "relation": "on"},
+        },
+    }
+    align = {
+        "id": "align",
+        "task_type": "E2",
+        "call": {
+            "kind": "registered",
+            "call_id": task_program_bundle._MOVE_HELD_OBJECT_CALL_ID,
+            "arguments": {"object": "cup"},
+        },
+    }
+    scene = SimpleNamespace(planner_objects=(), table_top_z=0.7)
+    monkeypatch.setattr(
+        task_program_bundle,
+        "_relative_world_displacement",
+        lambda *a, axis_align_objects, **kw: [
+            0.0,
+            0.0,
+            float("cup" in axis_align_objects),
+        ],
+    )
+    routes = task_program_bundle._relative_place_route_payloads
+    assert routes({"nodes": [place, align]}, scene) == routes({"nodes": [place]}, scene)
+    assert routes({"nodes": [align, place]}, scene)[0]["world_displacement"][2] == 1.0
+    with pytest.raises(ValueError, match="stage-specific"):
+        routes({"nodes": [place, align, place]}, scene)
+
+
+def test_future_upright_does_not_change_earlier_placement_validation(monkeypatch):
+    place = {
+        "id": "place",
+        "task_instance_id": "place_group",
+        "task_type": "E1",
+        "call": {
+            "kind": "registered",
+            "call_id": "simulation.place_relative",
+            "arguments": {"object": "cup", "reference": "table", "relation": "on"},
+        },
+    }
+    align = {
+        "id": "align",
+        "task_instance_id": "upright_group",
+        "task_type": "E2",
+        "call": {
+            "kind": "registered",
+            "call_id": task_program_bundle._MOVE_HELD_OBJECT_CALL_ID,
+            "arguments": {"object": "cup"},
+        },
+    }
+    scene = SimpleNamespace(planner_objects=({"runtime_uid": "cup"},), table_top_z=0.7)
+    monkeypatch.setattr(
+        task_program_bundle, "_relative_world_displacement", lambda *a, **k: [0, 0, 0.1]
+    )
+    monkeypatch.setattr(
+        task_program_bundle, "_longest_local_axis", lambda *a: [1, 0, 0]
+    )
+    for nodes, expected in (([place, align], "placement"), ([align, place], "upright")):
+        graph = {"nodes": nodes, "task_groups": []}
+        result = task_program_bundle._task_stability_payload(
+            graph, scene, {"skill_profile": {"resources": []}}
+        )
+        assert result["presets"]["gen_sim.place.stable"]["kind"] == expected
+
+
 @pytest.mark.parametrize("table_height", [None, float("nan"), float("inf")])
 def test_handover_minimum_requires_finite_table_height(table_height) -> None:
     with pytest.raises(ValueError, match="tabletop height"):
@@ -1627,6 +1699,41 @@ def test_stack_alignment_does_not_replace_support_acceptance_with_upright_only(
         graph, scene, {"skill_profile": {"resources": []}}
     )
     assert constraints["presets"]["gen_sim.node_2.stable"]["kind"] == "stack"
+
+
+def test_ordinary_on_placement_does_not_invent_an_orientation_requirement(tmp_path):
+    source_scene = _prepared_axis_scene(tmp_path)
+    objects = source_scene.planner_objects
+    scene = SimpleNamespace(
+        planner_objects=(*objects, {**objects[0], "runtime_uid": "support"}),
+        table_top_z=0.72,
+    )
+    graph = _graph()
+    graph["nodes"] = [
+        {
+            "id": "place",
+            "task_type": "E1",
+            "task_instance_id": "place_group",
+            "call": {
+                "kind": "registered",
+                "call_id": "simulation.place_relative",
+                "arguments": {
+                    "object": "bottle",
+                    "reference": "support",
+                    "relation": "on",
+                },
+            },
+        }
+    ]
+    graph["task_groups"] = [{"node_ids": ["place"]}]
+    cfg = task_program_bundle._task_stability_payload(
+        graph, scene, {"skill_profile": {"resources": []}}
+    )["presets"]["gen_sim.place.stable"]
+    assert cfg["kind"] == "supported_placement"
+    assert (
+        not {"local_axis", "reference_axis", "object_bottom", "reference_top"}
+        & cfg.keys()
+    )
 
 
 @pytest.mark.parametrize(

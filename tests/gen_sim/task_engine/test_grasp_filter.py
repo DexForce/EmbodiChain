@@ -372,7 +372,7 @@ def test_filter_uses_object_local_region_independently_for_each_row() -> None:
     before = poses.clone()
     provider = TaskGraspPoseGenerator(
         CandidateGenerator(((0.08, 0.15), (0.08,))), (rule(),)
-    )
+    ).for_pick("can", "release", VERTICES, TRIANGLES)
     rows = sample(provider, poses)
     assert rows[0][0].shape == (1, 4, 4)
     assert rows[0][0][0, 2, 3].item() == pytest.approx(0.15)
@@ -385,7 +385,7 @@ def test_filter_uses_object_local_region_independently_for_each_row() -> None:
 def test_release_filter_rejects_a_low_grasp_before_stock_ik() -> None:
     provider = TaskGraspPoseGenerator(
         CandidateGenerator(((0.06, 0.10),)), (rule(upper_half=False),)
-    )
+    ).for_pick("can", "release", VERTICES, TRIANGLES)
     rows = sample(provider, torch.eye(4).unsqueeze(0))
     assert rows[0][0][:, 2, 3].tolist() == pytest.approx([0.10])
 
@@ -403,7 +403,9 @@ def test_symmetric_roll_variants_have_identical_release_clearance() -> None:
 
 
 def test_no_candidate_is_encoded_as_ineligible_not_as_a_fake_success() -> None:
-    provider = TaskGraspPoseGenerator(CandidateGenerator(((), (0.05,))), (rule(),))
+    provider = TaskGraspPoseGenerator(
+        CandidateGenerator(((), (0.05,))), (rule(),)
+    ).for_pick("can", "release", VERTICES, TRIANGLES)
     rows = sample(provider, torch.eye(4).repeat(2, 1, 1))
     assert all(
         p.shape == (1, 4, 4) and torch.isfinite(p).all() and torch.isinf(c).all()
@@ -430,6 +432,29 @@ def test_rule_identity_must_match_the_bound_object_and_geometry() -> None:
         provider.require_rule("other", "release", VERTICES, TRIANGLES)
     with pytest.raises(ValueError, match="matching"):
         provider.require_rule("can", "release", VERTICES * 2, TRIANGLES)
+
+
+def test_future_pick_rule_does_not_filter_handover_or_another_pick() -> None:
+    provider = TaskGraspPoseGenerator(CandidateGenerator(((0.06, 0.15),)), (rule(),))
+    poses = torch.eye(4).unsqueeze(0)
+    assert sample(provider, poses)[0][0].shape[0] == 2
+    scoped = provider.for_pick("can", "release", VERTICES, TRIANGLES)
+    assert sample(scoped, poses)[0][0][:, 2, 3].tolist() == pytest.approx([0.15])
+    assert sample(provider, poses)[0][0].shape[0] == 2
+
+
+def test_pick_rule_does_not_intersect_other_targets_with_same_geometry() -> None:
+    from dataclasses import replace
+
+    provider = TaskGraspPoseGenerator(
+        CandidateGenerator(((0.15,),)),
+        (rule(), replace(rule(), target_id="later", midpoint=0.2)),
+    )
+    poses = torch.eye(4).unsqueeze(0)
+    first = provider.for_pick("can", "release", VERTICES, TRIANGLES)
+    later = provider.for_pick("can", "later", VERTICES, TRIANGLES)
+    assert torch.isfinite(sample(first, poses)[0][1]).all()
+    assert torch.isinf(sample(later, poses)[0][1]).all()
 
 
 def test_e6_approach_is_scoped_to_bound_handle_geometry() -> None:

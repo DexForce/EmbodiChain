@@ -57,7 +57,13 @@ class StabilityConstraint:
     world_axis: tuple[float, float, float] | None = None
 
     def __post_init__(self) -> None:
-        if self.kind not in {"upright", "stack", "hold", "placement"}:
+        if self.kind not in {
+            "upright",
+            "stack",
+            "hold",
+            "placement",
+            "supported_placement",
+        }:
             raise ValueError(f"Unsupported task stability kind {self.kind!r}.")
         for name in ("entity", "reference"):
             value = getattr(self, name)
@@ -142,6 +148,12 @@ class StabilityConstraint:
             and (self.reference is None or self.displacement is None)
         ):
             raise ValueError("Placement stability requires an explicit target.")
+        if self.kind == "supported_placement" and (
+            self.reference is None or self.displacement is None
+        ):
+            raise ValueError(
+                "Supported placement requires an explicit relative target."
+            )
         if self.target_position is not None and self.displacement is not None:
             raise ValueError(
                 "Task stability cannot combine absolute and relative targets."
@@ -205,6 +217,26 @@ class TaskStabilityPort:
                     entity not in self._objects or self._objects[entity] is None
                 ):
                     raise ValueError(f"Task stability entity {entity!r} is not bound.")
+        self._support_vertices: dict[str, torch.Tensor] = {}
+        for cfg in self._constraints.values():
+            if cfg.kind != "supported_placement":
+                continue
+            for entity in (cfg.entity, cfg.reference):
+                if entity in self._support_vertices:
+                    continue
+                vertices = self._objects[entity].get_vertices(scale=True)
+                if (
+                    not isinstance(vertices, torch.Tensor)
+                    or vertices.ndim != 3
+                    or vertices.shape[-1] != 3
+                    or vertices.shape[1] == 0
+                    or vertices.shape[0] != self._pose(entity).shape[0]
+                    or not torch.isfinite(vertices).all()
+                ):
+                    raise ValueError(
+                        "Support geometry requires finite per-environment vertices."
+                    )
+                self._support_vertices[entity] = vertices.detach().clone()
         self._results: dict[int, torch.Tensor] = {}
         self._metadata: dict[int, dict[str, Any]] = {}
 
@@ -281,7 +313,11 @@ class TaskStabilityPort:
         maximum = math.ceil(cfg.timeout / self._dt)
         consecutive = torch.zeros_like(active, dtype=torch.long)
         anchor = initial.clone()
-        reference_anchor = self._pose(cfg.reference) if cfg.kind == "stack" else None
+        reference_anchor = (
+            self._pose(cfg.reference)
+            if cfg.kind in {"stack", "supported_placement"}
+            else None
+        )
         initial_attachments = self._attachments(initial, cfg.motion_parts)
         failed = torch.zeros_like(active)
         for elapsed in range(maximum + 1):
@@ -336,6 +372,37 @@ class TaskStabilityPort:
                 measurements.update(
                     support_gap=gap.tolist(),
                     reference_alignment=alignment.tolist(),
+                    reference_translation_drift=reference_translation.tolist(),
+                    reference_rotation_drift=reference_rotation.tolist(),
+                )
+            if cfg.kind == "supported_placement":
+                assert reference is not None and reference_anchor is not None
+                vertices = self._support_vertices[cfg.entity].to(pose)
+                support_vertices = self._support_vertices[cfg.reference].to(reference)
+                bottom = (vertices @ pose[:, 2, :3, None]).squeeze(-1).amin(-1) + pose[
+                    :, 2, 3
+                ]
+                support_world = (
+                    support_vertices @ reference[:, :3, :3].transpose(-1, -2)
+                    + reference[:, None, :3, 3]
+                )
+                top = support_world[:, :, 2].amax(-1)
+                gap = bottom - top
+                # Preserve the support-envelope check using observed geometry.
+                # Projected mesh bounds alone are not contact evidence.
+                lower = support_world[:, :, :2].amin(1) + 0.002
+                upper = support_world[:, :, :2].amax(1) - 0.002
+                inside = ((pose[:, :2, 3] >= lower) & (pose[:, :2, 3] <= upper)).all(-1)
+                valid &= (gap.abs() <= cfg.support_tolerance) & inside
+                reference_translation, reference_rotation = self._drift(
+                    reference, reference_anchor
+                )
+                valid &= (reference_translation <= cfg.translation_drift) & (
+                    reference_rotation <= cfg.rotation_drift
+                )
+                measurements.update(
+                    support_gap=gap.tolist(),
+                    support_footprint=inside.tolist(),
                     reference_translation_drift=reference_translation.tolist(),
                     reference_rotation_drift=reference_rotation.tolist(),
                 )

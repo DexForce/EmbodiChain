@@ -496,15 +496,7 @@ def _task_stability_payload(
 ) -> dict[str, Any]:
     """Declare task conditions without adding public validator or runtime types."""
     objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
-    upright = {
-        str(node["call"]["arguments"]["object"])
-        for node in graph["nodes"]
-        if node["call"]["kind"] == "registered"
-        and (
-            node["task_type"] == "E2" or node["call"]["call_id"] == _ALIGN_HELD_CALL_ID
-        )
-        and "object" in node["call"]["arguments"]
-    }
+    upright: set[str] = set()
     oriented_groups = {
         node["task_instance_id"]
         for node in graph["nodes"]
@@ -562,6 +554,11 @@ def _task_stability_payload(
         if call["kind"] != "registered":
             continue
         arguments = call["arguments"]
+        if call["call_id"] in {_AXIS_ALIGN_CALL_ID, _ALIGN_HELD_CALL_ID} or (
+            node.get("task_type") == "E2"
+            and call["call_id"] == _MOVE_HELD_OBJECT_CALL_ID
+        ):
+            upright.add(str(arguments["object"]))
         if call["call_id"] in {_PLACE_RELATIVE_CALL_ID, _STACK_PLACE_CALL_ID}:
             object_id = str(arguments["object"])
             reference_id = str(arguments["reference"])
@@ -626,31 +623,8 @@ def _task_stability_payload(
                     and arguments["relation"] == "on"
                     and reference_id != "table"
                 ):
-                    bottom, _ = _vertical_mesh_bounds(
-                        objects[object_id], axis_aligned=False
-                    )
-                    _, top = _vertical_mesh_bounds(
-                        objects[reference_id], axis_aligned=False
-                    )
                     presets[f"gen_sim.{node['id']}.stable"].update(
-                        kind="stack",
-                        local_axis=_initial_local_up(objects[object_id]),
-                        reference_axis=_initial_local_up(objects[reference_id]),
-                        object_bottom=bottom,
-                        reference_top=top,
-                        reference_half_extents=[
-                            max(
-                                0.001,
-                                _horizontal_half_extent(
-                                    objects[reference_id],
-                                    world_axis=axis,
-                                    axis_aligned=False,
-                                )
-                                - 0.002,
-                            )
-                            for axis in (0, 1)
-                        ],
-                        minimum_alignment=math.cos(math.pi / 18.0),
+                        kind="supported_placement",
                     )
         elif (
             call["call_id"] == _ALIGN_HELD_CALL_ID
@@ -2048,11 +2022,10 @@ def _relative_place_route_payloads(
     *,
     settled: bool = False,
 ) -> list[dict[str, Any]]:
-    """Project release targets or their expected post-settle support positions."""
+    """Project each release using only orientation changes preceding that call."""
     axis_align_objects: set[str] = set()
-    selectors: set[tuple[str, str, str]] = set()
-    stack_selectors: set[tuple[str, str, str]] = set()
-    upright_targets: dict[tuple[str, str, str], str] = {}
+    scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
+    routes: dict[tuple[str, str, str], dict[str, Any]] = {}
     for node in graph["nodes"]:
         call = node["call"]
         if call["kind"] != "registered":
@@ -2062,42 +2035,22 @@ def _relative_place_route_payloads(
             and call["call_id"] == _MOVE_HELD_OBJECT_CALL_ID
         ):
             axis_align_objects.add(str(call["arguments"]["object"]))
-        elif call["call_id"] in {_PLACE_RELATIVE_CALL_ID, _STACK_PLACE_CALL_ID}:
-            arguments = call["arguments"]
-            if call["call_id"] == _STACK_PLACE_CALL_ID:
-                stack_selectors.add(
-                    (
-                        str(arguments["object"]),
-                        str(arguments["reference"]),
-                        str(arguments["relation"]),
-                    )
-                )
-            if node.get("task_type") == "E2":
-                upright_targets[
-                    (
-                        str(arguments["object"]),
-                        str(arguments["reference"]),
-                        str(arguments["relation"]),
-                    )
-                ] = f"{node['task_instance_id']}_upright_target"
-            selectors.add(
-                (
-                    str(arguments["object"]),
-                    str(arguments["reference"]),
-                    str(arguments["relation"]),
-                )
-            )
-    scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
-    routes: list[dict[str, Any]] = []
-    for selector in sorted(selectors):
+        if call["call_id"] not in {_PLACE_RELATIVE_CALL_ID, _STACK_PLACE_CALL_ID}:
+            continue
+        arguments = call["arguments"]
+        selector = (
+            str(arguments["object"]),
+            str(arguments["reference"]),
+            str(arguments["relation"]),
+        )
         object_id, reference_id, relation = selector
         if reference_id == "table" and relation not in {"on", "above"}:
             raise ValueError(
                 "A lateral table-relative placement has no supported landing surface. "
                 "Bind the named relation anchor, not the surrounding tabletop region."
             )
-        if selector in upright_targets:
-            target_id = upright_targets[selector]
+        if node.get("task_type") == "E2":
+            target_id = f"{node['task_instance_id']}_upright_target"
             target = _single_target_pose(graph, target_id)
             reference_position = _position(scene_objects[reference_id])
             displacement = [
@@ -2116,17 +2069,22 @@ def _relative_place_route_payloads(
                 axis_align_objects=axis_align_objects,
                 table_top_z=scene.table_top_z,
             )
-            if settled and selector in stack_selectors:
+            if settled and call["call_id"] == _STACK_PLACE_CALL_ID:
                 displacement[2] -= _PLACEMENT_CLEARANCE
-        routes.append(
-            {
-                "object_id": object_id,
-                "reference_entity_id": reference_id,
-                "relation": relation,
-                "world_displacement": displacement,
-            }
-        )
-    return routes
+        route = {
+            "object_id": object_id,
+            "reference_entity_id": reference_id,
+            "relation": relation,
+            "world_displacement": displacement,
+        }
+        # The current relative-call contract has no occurrence selector. Never
+        # silently reuse a later orientation's route for an earlier placement.
+        if selector in routes and routes[selector] != route:
+            raise ValueError(
+                f"Repeated placement {selector!r} requires stage-specific routes."
+            )
+        routes[selector] = route
+    return [routes[selector] for selector in sorted(routes)]
 
 
 def _relative_world_displacement(

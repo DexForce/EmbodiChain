@@ -359,6 +359,12 @@ class _PickLowerer(RegisteredSemanticLowerer):
                 semantics.affordance.mesh_vertices,
                 semantics.affordance.mesh_triangles,
             )
+            from .actions import _PICK_GRASP_RULE
+
+            semantics = deepcopy(semantics)
+            semantics.affordance.set_custom_config(
+                _PICK_GRASP_RULE, (route.object_id, route.target_id)
+            )
         return SemanticLowering(
             goal=GraspGoal(semantics=semantics),
             registered_effect=RegisteredSemanticEffect(
