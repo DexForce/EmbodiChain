@@ -74,6 +74,174 @@ from embodichain.utils.utility import load_config
 __all__: list[str] = []
 
 
+@pytest.mark.parametrize("horizontal", [False, True])
+def test_handover_source_axis_is_call_local_and_does_not_filter_receiver(horizontal):
+    from embodichain.gen_sim.task_engine._task_program.actions import (
+        _HANDOVER_SOURCE_AXIS,
+    )
+    from embodichain.gen_sim.task_engine._task_program.services import make_pick_factory
+    from embodichain.lab.sim.atomic_actions.affordance import AxisAlignAffordance
+
+    semantics = ObjectSemantics(
+        affordance=AxisAlignAffordance(
+            mesh_vertices=torch.tensor(
+                [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+            ),
+            mesh_triangles=torch.tensor([[0, 1, 2]]),
+            internal_axis=torch.tensor([1.0, 0.0, 0.0]),
+        ),
+        geometry={},
+        entity_id="cup",
+    )
+    route = _PickRoute(object_id="cup", target_id="source")
+    call_id = (
+        "gen_sim.pick.handover_horizontal_source.cup"
+        if horizontal
+        else "gen_sim.pick.ordinary"
+    )
+    factory = make_pick_factory((route,), call_id)
+    lowerer = factory.lowerer_type((route,), (semantics,))
+    result = lowerer.lower(
+        RegisteredSemanticCall(
+            call_id=call_id, arguments={"object": "cup", "target": "source"}
+        ),
+        context=SimpleNamespace(),
+        bound=SimpleNamespace(),
+        option_template=PickUpOptions(pick_object_part="top"),
+    )
+    assert semantics.affordance.custom_config == {}
+    affordance = result.goal.semantics.affordance
+    assert affordance.get_custom_config(_HANDOVER_SOURCE_AXIS) == (
+        (1.0, 0.0, 0.0) if horizontal else None
+    )
+    assert factory.revision == ("3" if horizontal else "2")
+    if horizontal:
+        assert affordance is not semantics.affordance
+    # Even if HandOver observes the held snapshot, its center request stays unfiltered.
+    generator = SimpleNamespace(
+        get_valid_grasp_poses=Mock(return_value=[(torch.eye(4)[None], torch.zeros(1))])
+    )
+    affordance.get_grasp_candidates(
+        generator, torch.eye(4)[None], torch.tensor([0.0, 0.0, -1.0])
+    )
+    assert generator.get_valid_grasp_poses.call_args.kwargs["obj_longest_axis"] is None
+
+
+@pytest.mark.parametrize("marked", [False, True])
+def test_gensim_source_pick_changes_only_marked_candidate_axis(monkeypatch, marked):
+    from embodichain.gen_sim.task_engine._task_program.actions import (
+        GenSimPickUp,
+        _HANDOVER_SOURCE_AXIS,
+    )
+    from embodichain.lab.sim.atomic_actions.affordance import AxisAlignAffordance
+
+    affordance = AxisAlignAffordance(internal_axis=torch.tensor([1.0, 0.0, 0.0]))
+    if marked:
+        affordance.set_custom_config(_HANDOVER_SOURCE_AXIS, (1.0, 0.0, 0.0))
+    poses = torch.eye(4).repeat(2, 2, 1, 1)
+    valid = torch.ones(2, 2, dtype=torch.bool)
+    ik_valid = torch.tensor([[True, False], [False, True]])
+    candidates = SimpleNamespace(poses=poses, costs=torch.zeros(2, 2), valid=valid)
+    get_candidates = Mock(return_value=candidates)
+    monkeypatch.setattr(affordance, "get_grasp_candidates", get_candidates)
+    sample = Mock(side_effect=lambda candidates, **kw: candidates)
+    monkeypatch.setattr(affordance, "sample_candidates", sample)
+    action = GenSimPickUp()
+    action._planning_services = SimpleNamespace(
+        device=torch.device("cpu"), grasp_pose_generator=Mock()
+    )
+    monkeypatch.setattr(
+        action, "_select_feasible_grasp_variants", Mock(return_value=(poses, ik_valid))
+    )
+    object_pose = torch.eye(4).repeat(2, 1, 1)
+    object_pose[0, :3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    object_pose[1, :3, :3] = torch.tensor(
+        [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]
+    )
+    context = SimpleNamespace(affordance_sampling=None, env_ids=torch.tensor([0, 1]))
+    result = action._resolve_grasp_pose(
+        ObjectSemantics(affordance=affordance, geometry={}, entity_id="cup"),
+        object_pose,
+        torch.zeros(2, 7),
+        object(),
+        "hand",
+        PickUpOptions(pick_object_part="top"),
+        torch.tensor([0.0, 0.0, -1.0]),
+        context,
+        sample_key="source",
+    )
+    expected = (
+        torch.tensor([[0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
+        if marked
+        else torch.tensor([0.0, 0.0, 1.0])
+    )
+    torch.testing.assert_close(
+        get_candidates.call_args.kwargs["obj_longest_axis"], expected
+    )
+    assert torch.equal(result.valid, ik_valid)
+    assert sample.call_args.kwargs["key"] == "source"
+
+
+def test_shared_pick_options_do_not_expose_gensim_axis():
+    from dataclasses import fields
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_action_options,
+    )
+
+    assert "pick_object_local_axis" not in {item.name for item in fields(PickUpOptions)}
+    with pytest.raises(ValueError, match="unsupported fields"):
+        _decode_action_options(
+            {"kind": "pick_up", "pick_object_local_axis": [1.0, 0.0, 0.0]},
+            path="options",
+        )
+
+
+def test_unmarked_gensim_pick_delegates_without_changing_inputs(monkeypatch):
+    from embodichain.gen_sim.task_engine._task_program.actions import GenSimPickUp
+    from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp
+
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(), geometry={}, entity_id="cup"
+    )
+    original = Mock(return_value=object())
+    monkeypatch.setattr(PickUp, "_resolve_grasp_pose", original)
+    args = (
+        semantics,
+        object(),
+        object(),
+        object(),
+        "hand",
+        object(),
+        object(),
+        object(),
+    )
+    result = GenSimPickUp()._resolve_grasp_pose(*args, sample_key="unchanged")
+    original.assert_called_once_with(*args, sample_key="unchanged")
+    assert result is original.return_value
+
+
+def test_horizontal_source_lowerer_requires_declared_axis():
+    from embodichain.gen_sim.task_engine._task_program.services import make_pick_factory
+
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(), geometry={}, entity_id="cup"
+    )
+    routes = (_PickRoute(object_id="cup", target_id="source"),)
+    call_id = "gen_sim.pick.handover_horizontal_source.cup"
+    lowerer = make_pick_factory(routes, call_id).lowerer_type(routes, (semantics,))
+    with pytest.raises(ValueError, match="declared local axis"):
+        lowerer.lower(
+            RegisteredSemanticCall(
+                call_id=call_id, arguments={"object": "cup", "target": "source"}
+            ),
+            context=SimpleNamespace(),
+            bound=SimpleNamespace(),
+            option_template=PickUpOptions(pick_object_part="top"),
+        )
+
+
 def test_motion_velocity_guard_rejects_joint_branch_jumps_per_environment() -> None:
     from embodichain.gen_sim.task_engine._task_program.motion import _velocity_validity
 

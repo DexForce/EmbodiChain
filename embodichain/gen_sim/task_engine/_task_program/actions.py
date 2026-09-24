@@ -25,7 +25,13 @@ import torch
 
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.effects import StateDelta
-from embodichain.lab.sim.atomic_actions.affordance import AxisAlignAffordance
+from embodichain.lab.sim.atomic_actions.affordance import (
+    AntipodalAffordance,
+    AxisAlignAffordance,
+)
+from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+    AffordancePoseCandidates,
+)
 from embodichain.lab.sim.atomic_actions.core import ObjectSemantics
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
@@ -37,6 +43,7 @@ from embodichain.lab.sim.atomic_actions.primitives.move_held_object import (
 )
 from embodichain.lab.sim.atomic_actions.primitives.pour import Pour
 from embodichain.lab.sim.atomic_actions.primitives.place import Place
+from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp
 from embodichain.lab.sim.atomic_actions.plans import PlannerDiagnostics
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
@@ -44,7 +51,84 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
 )
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
-__all__ = ["GenSimMoveHeldObject", "GenSimPlace", "GenSimPour"]
+__all__ = ["GenSimPickUp", "GenSimMoveHeldObject", "GenSimPlace", "GenSimPour"]
+
+_HANDOVER_SOURCE_AXIS = "gen_sim.handover_source_axis"
+
+
+class GenSimPickUp(PickUp):
+    """Select a local-axis end only for explicitly marked E4 source calls."""
+
+    skill_id = PickUp.skill_id
+    GoalType = PickUp.GoalType
+    OptionsType = PickUp.OptionsType
+    binding_contract = PickUp.binding_contract
+
+    def _resolve_grasp_pose(
+        self,
+        semantics,
+        object_pose,
+        start_qpos,
+        manipulator,
+        grasp_target_id,
+        options,
+        approach_direction,
+        context,
+        *,
+        sample_key,
+    ):
+        affordance = semantics.affordance
+        declared_axis = affordance.get_custom_config(_HANDOVER_SOURCE_AXIS)
+        if declared_axis is None:
+            return super()._resolve_grasp_pose(
+                semantics,
+                object_pose,
+                start_qpos,
+                manipulator,
+                grasp_target_id,
+                options,
+                approach_direction,
+                context,
+                sample_key=sample_key,
+            )
+        axis = object_pose.new_tensor(declared_axis)
+        if (
+            not isinstance(affordance, AntipodalAffordance)
+            or options.pick_object_part != "top"
+            or axis.shape != (3,)
+            or not torch.isfinite(axis).all()
+            or torch.linalg.vector_norm(axis) <= 1e-6
+        ):
+            raise ValueError(
+                "GenSim handover source requires a finite local axis and top selection."
+            )
+        generator = self.planning_services.grasp_pose_generator(grasp_target_id)
+        candidates = affordance.get_grasp_candidates(
+            generator,
+            object_pose,
+            approach_direction,
+            obj_longest_axis=object_pose[:, :3, :3] @ axis,
+            is_positive_part=True,
+        )
+        poses, ik_success = self._select_feasible_grasp_variants(
+            candidates.poses,
+            start_qpos,
+            object_pose,
+            manipulator,
+            options,
+            approach_direction,
+        )
+        return affordance.sample_candidates(
+            AffordancePoseCandidates(
+                poses=poses,
+                costs=candidates.costs,
+                valid=candidates.valid & ik_success,
+            ),
+            sampling=context.affordance_sampling,
+            env_ids=context.env_ids,
+            key=sample_key,
+            reference_poses=object_pose,
+        )
 
 
 def _unit(value: torch.Tensor) -> torch.Tensor:

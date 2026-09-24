@@ -39,6 +39,7 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
         SimulationTaskProgramFactory,
     )
     from embodichain.gen_sim.task_engine._task_program.actions import (
+        GenSimPickUp,
         GenSimMoveHeldObject,
         GenSimPlace,
         GenSimPour,
@@ -70,6 +71,7 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
         parent.assert_called_once()
         constructor.assert_not_called()
         assert [type(c.args[0]) for c in standard.register.call_args_list] == [
+            GenSimPickUp,
             GenSimMoveHeldObject,
             GenSimPlace,
             GenSimPour,
