@@ -47,6 +47,65 @@ from embodichain.gen_sim.task_engine.agent import (
 _UPRIGHT_CAN_INSTRUCTION = "test-instruction"
 
 
+def test_grounding_receives_support_evidence_without_changing_source() -> None:
+    from embodichain.gen_sim.task_engine.orchestration.grounding import (
+        _grounding_inventory,
+    )
+    from embodichain.gen_sim.task_engine.orchestration.scene_inventory import (
+        SceneInventory,
+    )
+
+    objects = [{"uid": uid, "role": "rigid_object"} for uid in ("fork", "tray")]
+    original = deepcopy(objects)
+    graph = {
+        "nodes": [
+            {
+                "uid": "fork",
+                "parent_uid": "tray",
+                "parent_relation": "on",
+                "source": "scene_graph",
+            }
+        ]
+    }
+    augmented = scene_adapter_module._augment_grounding_objects(
+        objects, {}, scene_graph=graph
+    )
+    inventory = _grounding_inventory(
+        SceneInventory(augmented, robot_profile="dual_franka"), augmented
+    )
+    fork = next(item for item in inventory if item["uid"] == "fork")
+    assert fork["attributes"]["support_evidence"] == {
+        "parent_uid": "tray",
+        "relation": "on",
+        "source": "scene_graph",
+    }
+    assert objects == original
+    assert fork["initial_state"] == {}
+
+
+@pytest.mark.parametrize(
+    "parent,relation", [("missing", "on"), ("tray", "unknown"), ("fork", "on")]
+)
+def test_grounding_does_not_invent_support(parent: str, relation: str) -> None:
+    objects = [{"uid": uid, "role": "rigid_object"} for uid in ("fork", "tray")]
+    graph = {
+        "nodes": [
+            {
+                "uid": "fork",
+                "parent_uid": parent,
+                "parent_relation": relation,
+                "source": "scene_graph",
+            }
+        ]
+    }
+    augmented = scene_adapter_module._augment_grounding_objects(
+        objects, {}, scene_graph=graph
+    )
+    assert all(
+        "support_evidence" not in item.get("attributes", {}) for item in augmented
+    )
+
+
 def test_vertical_part_ranks_follow_handle_height_not_joint_name() -> None:
     parts = [
         {
@@ -75,6 +134,46 @@ def test_vertical_part_ranks_follow_handle_height_not_joint_name() -> None:
     ]
     assert [part["vertical_index"] for part in ranked] == [0, 1, 2]
     assert all(part["part_count"] == 3 for part in ranked)
+
+
+def test_side_by_side_parts_do_not_gain_false_vertical_ranks() -> None:
+    from embodichain.gen_sim.task_engine.orchestration.grounding import (
+        _grounding_inventory,
+    )
+    from embodichain.gen_sim.task_engine.orchestration.scene_inventory import (
+        SceneInventory,
+    )
+
+    parts = [
+        {
+            "part_id": "part_left",
+            "joint": "right_drawer_slide",
+            "handle_center_world": [0.0, -0.15, 0.8000],
+        },
+        {
+            "part_id": "part_right",
+            "joint": "left_drawer_slide",
+            "handle_center_world": [0.0, 0.15, 0.8004],
+        },
+    ]
+    ranked = scene_adapter_module._rank_parts_by_lateral_position(
+        scene_adapter_module._rank_parts_by_vertical_position(parts)
+    )
+    augmented = scene_adapter_module._augment_grounding_objects(
+        [{"uid": "cabinet", "role": "articulation", "init_pos": [0.0, 0.0, 0.7]}],
+        {"cabinet": ranked},
+    )
+    visible = _grounding_inventory(
+        SceneInventory(augmented, robot_profile="dual_franka"), augmented
+    )
+    by_uid = {item["uid"]: item for item in visible}
+
+    assert all("vertical_rank" not in part for part in ranked)
+    assert [part["lateral_rank"] for part in ranked] == ["left", "right"]
+    assert by_uid["cabinet::part_left"]["side"] == "left"
+    assert by_uid["cabinet::part_right"]["side"] == "right"
+    assert by_uid["cabinet::part_left"]["attributes"]["lateral_rank"] == "left"
+    assert by_uid["cabinet::part_right"]["attributes"]["lateral_rank"] == "right"
 
 
 @pytest.fixture
@@ -339,6 +438,34 @@ def test_scene_source_fingerprint_reads_without_copying(scene_export: Path) -> N
     assert len(fingerprint.config_sha256) == 64
     assert len(fingerprint.asset_sha256) == 3
     assert after == before
+
+
+def test_scene_adapter_passes_exported_support_to_grounder(scene_export: Path) -> None:
+    graph = {
+        "nodes": [
+            {"object_id": "table", "parent_id": None, "parent_relation": None},
+            {"object_id": "red_can", "parent_id": "table", "parent_relation": "on"},
+            {"object_id": "blue_can", "parent_id": "table", "parent_relation": "on"},
+        ],
+        "relations": [],
+    }
+    (scene_export / "scene_graph.json").write_text(json.dumps(graph), encoding="utf-8")
+    prompts = []
+
+    def caller(**kwargs):
+        prompts.append(kwargs["prompt"])
+        return _grounder(**kwargs)
+
+    result = SceneAdapter(grounding_caller=caller).adapt(
+        _candidate_set([_candidate("support", "red can")]),
+        scene_export,
+    )
+    assert result.selected_candidate_id == "support"
+    assert prompts
+    assert (
+        '"support_evidence": {"parent_uid": "table", "relation": "on", "source": "scene_graph"}'
+        in prompts[0]
+    )
 
 
 @pytest.mark.parametrize("filename", ["gym_config.json", "gym_config_merged.json"])

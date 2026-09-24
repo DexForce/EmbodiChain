@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 from shapely.geometry import Point, Polygon
 from shapely.ops import nearest_points, unary_union
@@ -30,6 +32,8 @@ def select_container_landing(
     mesh: trimesh.Trimesh,
     child_vertices: np.ndarray,
     arm_root: np.ndarray,
+    *,
+    occupied: Sequence[tuple[float, float, float]] = (),
 ) -> tuple[float, float, float] | None:
     """Prefer the arm-side floor region after eroding by the object footprint.
 
@@ -55,6 +59,12 @@ def select_container_landing(
         raise ValueError(
             "Container floor cannot contain the object footprint and margin."
         )
+    for x, y, previous_radius in occupied:
+        safe = safe.difference(
+            Point(float(x), float(y)).buffer(radius + float(previous_radius) + 0.02)
+        )
+    if safe.is_empty or safe.area <= 1e-8:
+        raise ValueError("Container floor has no remaining landing space.")
     point = nearest_points(safe, Point(arm_root[:2]))[0]
     height = float(triangles[:, :, 2].max() - child_vertices[:, 2].min() + 0.001)
     return float(point.x), float(point.y), height

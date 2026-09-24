@@ -87,6 +87,28 @@ controls. Imported mimic behavior and shared robot defaults are unchanged.
 E1 placement on another object retains its original position tolerance and adds
 the existing stack stability checks for vertical orientation, support gap and
 reference stability. Source pose matrices take precedence over Euler fields.
+After UID grounding, independent E1 placement, E2 upright, and E5
+lift-and-return `count`/`all` sets lower to ordered single-object steps;
+line layout, E5 terminal hold, other task routes, and a downstream
+`step_result` consumer still reject implicit expansion.
+For an unbound existing Gym scene, Task Engine automatically renders the
+current GLB assets into UID-labeled overviews, segmentation masks and crops,
+then retries grounding with the same LLM transport configured for text binding
+in `gen_sim/.env` or the process environment;
+`--reference-image` is not this binding input. A deterministic tenth of already
+bound scenes receives an audit-only visual spot check. Evidence records the
+scene revision and image hashes; the VLM may propose only visible inventory
+UIDs, while native semantic compatibility remains authoritative. Articulation
+proxy GLBs do not represent live joint state, so E6-E9 binding does not use
+this visual path. Without usable Task Engine LLM configuration, text-only
+binding and its existing conflict behavior remain unchanged.
+E4 may defer unnamed transfer/receiver arms as `auto`; the planner binds the
+source from the held state or nearest scene side and the other arm as receiver,
+while preserving explicitly named arms. Multiple children
+placed inside the same measured container reserve each prior landing footprint
+and margin; insufficient space or an unmeasured shared floor fails preflight
+instead of assigning overlapping destinations. These are planning contracts,
+not physical placement acceptance.
 Generated non-drawer held-object transports declare a measured attachment postcondition.
 For deployments without drawer routes, GenSim installs wrappers around MoveHeldObject and Pour
 descriptors after shared engine validation; shared Lab action classes and
