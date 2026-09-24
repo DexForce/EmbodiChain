@@ -81,6 +81,38 @@ def _trajectory_fingerprint(template: TrajectoryTemplate) -> str:
     return digest.hexdigest()
 
 
+def _compatibility_key(
+    template: TrajectoryTemplate,
+    *,
+    source_context: SourceContext,
+    backend_id: str,
+    observation_profiles: tuple[str, ...],
+) -> str:
+    """Derive one strict host compatibility bucket from complete layout data."""
+    payload = (
+        source_context.scene_case.scene_case_id,
+        source_context.scene_case.initial_state_id,
+        template.joint_names,
+        tuple(
+            (
+                phase.phase_id,
+                phase.start_index,
+                phase.stop_index,
+                phase.kind,
+            )
+            for phase in template.phases
+        ),
+        source_context.control_dt,
+        backend_id,
+        template.validator_id,
+        observation_profiles,
+    )
+    digest = hashlib.sha256(
+        json.dumps(payload, separators=(",", ":")).encode()
+    ).hexdigest()
+    return "strict:" + digest
+
+
 @dataclass(frozen=True)
 class CandidateWorkItem:
     """One logical candidate ready for planning validation or slot assignment."""
@@ -120,6 +152,7 @@ class CandidateCoordinator:
         source_adapter: SourceAdapter[object],
         source_context: SourceContext,
         joint_limits: torch.Tensor,
+        backend_id: str = "unspecified",
         velocity_limits: torch.Tensor | None = None,
         acceleration_limits: torch.Tensor | None = None,
         task_jacobians: torch.Tensor | None = None,
@@ -134,6 +167,8 @@ class CandidateCoordinator:
             raise TypeError("source_context must be a SourceContext")
         if not isinstance(joint_limits, torch.Tensor):
             raise TypeError("joint_limits must be a tensor")
+        if type(backend_id) is not str or not backend_id.strip():
+            raise ValueError("backend_id must be a nonempty string")
         if (velocity_limits is None) != (acceleration_limits is None):
             raise ValueError(
                 "velocity_limits and acceleration_limits must be supplied together"
@@ -143,6 +178,10 @@ class CandidateCoordinator:
         self._source_adapter = source_adapter
         self._source_context = source_context
         self._joint_limits = joint_limits.detach().clone()
+        self._backend_id = backend_id
+        self._observation_profiles = (
+            self._cfg.observation.profiles if self._cfg.observation.enabled else ()
+        )
         self._velocity_limits = (
             None if velocity_limits is None else velocity_limits.detach().clone()
         )
@@ -242,11 +281,15 @@ class CandidateCoordinator:
             task_jacobians=self._task_jacobians,
             generator=generator,
         )
-        key = compatibility_key or (
-            f"{self._source_context.scene_case.scene_case_id}:"
-            f"{self._source_context.scene_case.initial_state_id}:"
-            f"dt={self._source_context.control_dt:g}:"
-            f"validator={template.validator_id}"
+        if compatibility_key is not None and (
+            type(compatibility_key) is not str or not compatibility_key.strip()
+        ):
+            raise ValueError("compatibility_key must be a nonempty string or None")
+        key = compatibility_key or _compatibility_key(
+            template,
+            source_context=self._source_context,
+            backend_id=self._backend_id,
+            observation_profiles=self._observation_profiles,
         )
         prepared: list[tuple[TrajectoryVariant, TrajectoryTemplate, str]] = []
         batch_fingerprints: set[str] = set()
@@ -303,6 +346,7 @@ class CandidateCoordinator:
                 trajectory_variant=variant.factors,
                 compatibility_key=key,
                 estimated_cost=float(row_template.dt.sum().item()),
+                observation_profiles=self._observation_profiles,
             )
             item = CandidateWorkItem(spec=spec, template=row_template)
             created.append(item)

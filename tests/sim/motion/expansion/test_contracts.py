@@ -355,6 +355,43 @@ def test_candidate_coordinator_enqueue_is_atomic() -> None:
     assert session.snapshot()["audit"] == ()
 
 
+def test_candidate_coordinator_populates_strict_compatibility_metadata() -> None:
+    cfg = TrajectoryGenerationJobCfg.from_mapping(
+        {
+            "observation": {"enabled": True, "profiles": ["rgb_train"]},
+            "scheduling": {"candidate_budget": 2},
+        }
+    )
+    case = _case()
+    limits = torch.tensor([[-2.0, 2.0], [-2.0, 2.0]])
+    template = _template(controlled_joint_indices=(0, 1))
+
+    def build(backend_id: str) -> CandidateWorkItem:
+        session = GenerationSession(cfg)
+        session.register_case(case, limits, joint_names=("arm", "tool"))
+        coordinator = CandidateCoordinator(
+            cfg,
+            session=session,
+            source_adapter=TemplateSourceAdapter(),
+            source_context=SourceContext(
+                "handwritten",
+                "revision",
+                "unit",
+                case,
+                0.1,
+            ),
+            joint_limits=limits,
+            backend_id=backend_id,
+        )
+        return coordinator.enqueue_source(template, count=1)[0]
+
+    first = build("default")
+    second = build("newton")
+
+    assert first.spec.observation_profiles == ("rgb_train",)
+    assert first.spec.compatibility_key != second.spec.compatibility_key
+
+
 def _batch(**changes: object) -> CandidateTrajectoryBatch:
     fields = dict(
         positions=torch.tensor(

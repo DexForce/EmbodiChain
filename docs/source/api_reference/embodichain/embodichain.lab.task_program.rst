@@ -173,8 +173,16 @@ template contract.
    :nosignatures:
 
    TaskProgramSourceAdapter
+   TaskProgramGenerationRecord
+   TaskProgramCandidatePlanTransformFactory
 
 .. autoclass:: TaskProgramSourceAdapter
+   :members:
+
+.. autoclass:: TaskProgramGenerationRecord
+   :members:
+
+.. autoclass:: TaskProgramCandidatePlanTransformFactory
    :members:
 
 .. currentmodule:: embodichain.lab.task_program
