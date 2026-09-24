@@ -3294,7 +3294,7 @@
           "symbol": "EmbodiedEnv.create_task_program_bridge",
           "start_line": 2242,
           "end_line": 2242,
-          "excerpt": "        return self._checked_task_program_adapter().create_bridge(program)"
+          "excerpt": "        return self._checked_task_program_adapter().create_bridge("
         }
       ]
     },
@@ -3400,9 +3400,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 740,
-          "end_line": 747,
-          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,\n            observation_provider,\n            command_sink,\n            evidence_collector,\n            clock=clock,\n            runner_cfg=deepcopy(selected_runner_cfg),\n        )"
+          "start_line": 768,
+          "end_line": 776,
+          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,\n            observation_provider,\n            command_sink,\n            evidence_collector,\n            clock=clock,\n            runner_cfg=deepcopy(selected_runner_cfg),\n            plan_transform_factory=plan_transform_factory,\n        )"
         }
       ]
     },
@@ -3479,9 +3479,9 @@
         {
           "path": "embodichain/lab/task_program/runtime/executor.py",
           "symbol": "SemanticCallExecutor._prepare_grounded_call",
-          "start_line": 940,
-          "end_line": 944,
-          "excerpt": "        session = self._engine.start(\n            (invocation,),\n            context,\n            eligible_mask=active_mask,\n        )"
+          "start_line": 969,
+          "end_line": 974,
+          "excerpt": "        session = self._engine.start(\n            (invocation,),\n            context,\n            eligible_mask=active_mask,\n            plan_transform=plan_transform,\n        )"
         }
       ]
     },
