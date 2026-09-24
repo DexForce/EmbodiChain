@@ -146,3 +146,26 @@ def test_sparse_rows_use_device_count_and_environment_qualified_actor_ids(device
     )
     assert history.contact.tolist() == [[True, False], [False, True]]
     assert history.contact_count.tolist() == [1.0, 1.0]
+
+
+def test_full_reset_clears_every_field_in_all_pools():
+    """env_ids=None 路径：foreach 融合清零必须覆盖全部字段与全部行。"""
+    history = ContactHistory(torch.tensor([[10], [20]]))
+    history.update(sample([[[0, 10]], [[0, 20]]]), 0.1)
+    history.update(sample([[[0, 10]], [[0, 20]]]), 0.1)
+    fields = (
+        "contact",
+        "found",
+        "first_contact",
+        "force",
+        "peak_force",
+        "current_air_time",
+        "last_air_time",
+        "contact_count",
+        "_hits",
+        "_env_hits",
+    )
+    history.reset(None)
+    for name in fields:
+        value = getattr(history, name)
+        assert not value.any(), f"{name} 未被清零"

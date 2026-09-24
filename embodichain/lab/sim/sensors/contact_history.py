@@ -81,7 +81,8 @@ class ContactHistory:
         # fuses into a handful of launches instead of one CUDA write per
         # field. The public attributes remain per-field contiguous views.
         self._bool_pool = torch.zeros(
-            (3, *shape), device=actor_ids.device, dtype=torch.bool)
+            (3, *shape), device=actor_ids.device, dtype=torch.bool
+        )
         self.contact = self._bool_pool[0]
         self.found = self._bool_pool[1]
         self.first_contact = self._bool_pool[2]

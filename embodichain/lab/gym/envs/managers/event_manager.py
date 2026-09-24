@@ -311,11 +311,20 @@ class EventManager(ManagerBase):
                         mode, functor_name, functor_cfg, self._env, None
                     )
                 elif functor_cfg.interval_step == 1:
-                    # Every environment is due on every step: pass None (all
-                    # rows) instead of a GPU nonzero + host len(), which
-                    # forces a device sync on every control step.
+                    # Every environment is due on every step. Pass the explicit
+                    # all-row ID tensor (functors may call len(env_ids)); the
+                    # tensor is created on-device without synchronization.
+                    valid_env_ids = torch.arange(
+                        self._interval_functor_step_count[index].numel(),
+                        device=self._interval_functor_step_count[index].device,
+                        dtype=torch.long,
+                    )
                     self._call_event_functor(
-                        mode, functor_name, functor_cfg, self._env, None
+                        mode,
+                        functor_name,
+                        functor_cfg,
+                        self._env,
+                        valid_env_ids,
                     )
                 else:
                     valid_env_ids = (
