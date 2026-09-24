@@ -2346,11 +2346,14 @@ class EmbodiedEnv(BaseEnv):
                 if type(selected_program) is CompiledTaskProgram
                 else self.compile_task_program(selected_program)
             )
-            bridge = self.create_task_program_bridge(
-                compiled_program,
-                generation_profile=generation_profile,
-                generation_candidate_index=generation_candidate_index,
-            )
+            if generation_profile is None and generation_candidate_index == 0:
+                bridge = self.create_task_program_bridge(compiled_program)
+            else:
+                bridge = self.create_task_program_bridge(
+                    compiled_program,
+                    generation_profile=generation_profile,
+                    generation_candidate_index=generation_candidate_index,
+                )
             self._active_task_program_bridge = bridge
             return bridge.iter_segments()
 
