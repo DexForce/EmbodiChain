@@ -572,6 +572,7 @@ class AtomicActionEngine:
         context: PlanningContext | None = None,
         *,
         eligible_mask: torch.Tensor | None = None,
+        plan_transform: PlanTransform | None = None,
     ) -> ExecutionSession:
         """Start incremental execution for a grounded invocation sequence.
 
@@ -582,6 +583,8 @@ class AtomicActionEngine:
             eligible_mask: Optional per-environment cohort allowed to execute.
                 Ineligible rows remain excluded for the whole session. All rows
                 are eligible when omitted.
+            plan_transform: Optional transform scoped to every planning call in
+                the returned execution session.
 
         Returns:
             Stateful execution session advanced by ``session.tick(...)``.
@@ -594,6 +597,7 @@ class AtomicActionEngine:
             tuple(invocations),
             initial,
             eligible_mask=eligible_mask,
+            plan_transform=plan_transform,
         )
 
     def _validate_context(self, context: PlanningContext) -> None:

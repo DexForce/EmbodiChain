@@ -67,6 +67,7 @@ embodichain.lab.sim.atomic_actions
 
       AtomicAction
       AtomicActionEngine
+      PlanTransform
       ExecutionSession
       ExecutionRunner
       ExecutionRunnerCfg
@@ -319,6 +320,8 @@ Engine and execution
 
 .. autoclass:: AtomicActionEngine
    :members:
+
+.. autodata:: PlanTransform
 
 .. autoclass:: ExecutionSession
    :members:

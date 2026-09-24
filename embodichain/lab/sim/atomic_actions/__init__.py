@@ -66,7 +66,7 @@ from .control import (
 )
 from .core import AtomicAction, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
-from .engine import AtomicActionEngine
+from .engine import AtomicActionEngine, PlanTransform
 from .execution import (
     ExecutionEvent,
     ExecutionEventKind,
@@ -280,6 +280,7 @@ __all__ = [
     "AxisAlignOptions",
     "AtomicAction",
     "AtomicActionEngine",
+    "PlanTransform",
     "BUILTIN_ACTION_TYPES",
     "BATCH_INVERSE_KINEMATICS_CAPABILITY",
     "CARTESIAN_POSE_CAPABILITY",

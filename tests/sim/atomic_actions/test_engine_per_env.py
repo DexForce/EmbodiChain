@@ -1697,6 +1697,63 @@ def test_scene_motion_replans_late_bound_goal() -> None:
     assert tick.command is not None
 
 
+def test_execution_session_applies_call_scoped_plan_transform() -> None:
+    engine, _ = _engine()
+    calls: list[int] = []
+
+    def transform(request, context, plan):
+        del context
+        calls.append(request.revision)
+        return replace(
+            plan,
+            diagnostics=replace(
+                plan.diagnostics,
+                metadata={**plan.diagnostics.metadata, "generation_test": True},
+            ),
+        )
+
+    session = engine.start(
+        (_invocation(engine),),
+        _context(0.0, 0.0, 0.1, 0),
+        plan_transform=transform,
+    )
+
+    assert calls == [0]
+    assert session.active_plan.diagnostics.metadata["generation_test"] is True
+
+
+def test_execution_session_reuses_transform_for_replan() -> None:
+    engine, _ = _engine()
+    calls: list[int] = []
+
+    def transform(request, context, plan):
+        del context
+        calls.append(request.revision)
+        return plan
+
+    initial = _context(0.0, 0.0, 0.1, 0)
+    session = engine.start(
+        (_invocation(engine),),
+        initial,
+        plan_transform=transform,
+    )
+    session.tick(initial)
+    session.tick(_context(0.1, 0.0, 0.3, 1))
+
+    assert calls == [0, 0]
+
+
+def test_execution_session_without_transform_is_unchanged() -> None:
+    engine, _ = _engine()
+
+    session = engine.start(
+        (_invocation(engine),),
+        _context(0.0, 0.0, 0.1, 0),
+    )
+
+    assert "generation_test" not in session.active_plan.diagnostics.metadata
+
+
 def test_scene_motion_is_ignored_after_dependency_segment_is_dispatched() -> None:
     engine, _ = _engine()
     action = StagedDynamicAction()
