@@ -265,6 +265,111 @@ def test_velocity_invalid_e6_retries_with_denser_samples(monkeypatch) -> None:
     assert options.sample_count == 140
 
 
+@pytest.mark.parametrize(
+    "recoverable,primary_safe", [(True, False), (True, True), (False, False)]
+)
+def test_local_place_ik_preserves_targets_limits_and_rng(
+    monkeypatch, recoverable, primary_safe
+):
+    from embodichain.gen_sim.task_engine._task_program import motion
+
+    seed = torch.tensor([[-0.99, 0.0]])
+    pose = torch.eye(4).unsqueeze(0)
+    calls = []
+
+    def solve(_generator, targets, *, options):
+        torch.rand(1)
+        calls.append(targets[0].xpos.clone())
+        qpos = (
+            torch.tensor([[-0.97, 0.0]])
+            if (recoverable and options.start_qpos[0, 0] > -0.9)
+            else torch.tensor([[-0.999 if primary_safe else 0.5, 0.0]])
+        )
+        return motion.PlanResult(
+            success=torch.tensor([True]),
+            positions=torch.stack((options.start_qpos, qpos), dim=1),
+            dt=torch.tensor([[0.0, 0.04]]),
+        )
+
+    robot = SimpleNamespace(
+        get_qpos_limits=lambda **kw: torch.tensor([[[-1.0, 1.0], [-1.0, 1.0]]]),
+    )
+    monkeypatch.setattr(motion.MotionGenerator, "generate", solve)
+    monkeypatch.setattr(motion, "_joint_velocity_limits", lambda *a: torch.ones(1, 2))
+    options = motion.MotionGenOptions(
+        strategy="ik_interp", control_part="arm", start_qpos=seed, interpolation_dt=0.04
+    )
+    rng = torch.get_rng_state().clone()
+    result = motion._local_place_ik(
+        SimpleNamespace(robot=robot),
+        [motion.PlanState(move_type=motion.MoveType.EEF_MOVE, xpos=pose)],
+        options,
+    )
+    assert torch.equal(rng, torch.get_rng_state())
+    assert all(torch.equal(value, pose) for value in calls)
+    torch.testing.assert_close(seed, torch.tensor([[-0.99, 0.0]]))
+    if recoverable:
+        assert result.success.tolist() == [True]
+        torch.testing.assert_close(
+            result.positions, torch.tensor([[[-0.99, 0.0], [-0.97, 0.0]]])
+        )
+        torch.testing.assert_close(result.dt, torch.tensor([[0.0, 0.04]]))
+    else:
+        assert result is None
+
+
+@pytest.mark.parametrize(
+    "scoped,success,batch,recovered",
+    [
+        (False, False, 1, False),
+        (True, True, 1, False),
+        (True, False, 1, True),
+        (True, False, 2, False),
+    ],
+)
+def test_place_local_ik_only_runs_after_scoped_single_env_failure(
+    monkeypatch, scoped, success, batch, recovered
+):
+    from contextlib import nullcontext
+    from embodichain.gen_sim.task_engine._task_program import motion
+
+    generator = object.__new__(motion.ApproachMotionGenerator)
+    start = torch.eye(4).repeat(batch, 1, 1)
+    generator.robot = SimpleNamespace(compute_fk=lambda **kw: start.clone())
+    monkeypatch.setattr(
+        motion, "_joint_velocity_limits", lambda *a: torch.ones(batch, 1)
+    )
+    original = motion.PlanResult(
+        success=torch.full((batch,), success),
+        positions=torch.zeros(batch, 5, 1),
+        dt=torch.full((batch, 5), 0.04),
+    )
+    monkeypatch.setattr(motion.MotionGenerator, "generate", lambda *a, **kw: original)
+    local = Mock(
+        return_value=motion.PlanResult(
+            success=torch.ones(batch, dtype=torch.bool),
+            positions=original.positions,
+            dt=original.dt,
+        )
+    )
+    monkeypatch.setattr(motion, "_local_place_ik", local)
+    options = motion.MotionGenOptions(
+        strategy="ik_interp",
+        control_part="arm",
+        start_qpos=torch.zeros(batch, 1),
+        sample_count=5,
+        interpolation_dt=0.04,
+    )
+    with motion.place_ik_recovery() if scoped else nullcontext():
+        result = generator.generate(
+            [motion.PlanState(move_type=motion.MoveType.EEF_MOVE, xpos=start)], options
+        )
+    assert local.called is recovered
+    assert motion._PLACE_IK_RECOVERY.get() is None
+    if not recovered:
+        assert result is original
+
+
 def test_stack_place_allows_equivalent_tcp_roll_without_moving_release(
     monkeypatch,
 ) -> None:
@@ -296,6 +401,39 @@ def test_stack_place_allows_equivalent_tcp_roll_without_moving_release(
     torch.testing.assert_close(
         result.goal.xpos[0, :, 2, 3], torch.tensor([1.21, 1.193])
     )
+
+
+@pytest.mark.parametrize(
+    "recovered,unsafe", [(False, True), (True, False), (True, True)]
+)
+def test_recovered_place_checks_final_resampled_commands(
+    monkeypatch, recovered, unsafe
+):
+    from embodichain.gen_sim.task_engine._task_program import motion
+    from embodichain.gen_sim.task_engine._task_program.actions import GenSimPlace
+    from embodichain.lab.sim.atomic_actions.primitives.place import Place
+
+    action = GenSimPlace()
+    action._planning_services = SimpleNamespace(robot=object())
+    failed = object()
+    monkeypatch.setattr(action, "failed_plan", Mock(return_value=failed))
+    monkeypatch.setattr(motion, "_joint_velocity_limits", lambda *a: torch.ones(1, 1))
+    plan = SimpleNamespace(
+        plan_success=torch.tensor([True]),
+        joint_trajectory=SimpleNamespace(
+            positions=torch.tensor([[[0.0], [0.2 if unsafe else 0.02]]]),
+            dt=torch.tensor([[0.0, 0.04]]),
+        ),
+    )
+
+    def generate(*args):
+        motion._PLACE_IK_RECOVERY.get().used = recovered
+        return plan
+
+    monkeypatch.setattr(Place, "_plan", generate)
+    result = action._plan(object(), object())
+    assert result is (failed if recovered and unsafe else plan)
+    assert motion._PLACE_IK_RECOVERY.get() is None
 
 
 def test_velocity_limits_use_urdf_names_and_preserve_stricter_runtime_limits(
