@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import datetime
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -491,6 +492,130 @@ class TaskEngineWorkflow:
                     status="failed",
                     failure_class="internal_error",
                 )
+            source_hash = (
+                analysis.source_fingerprint.config_sha256
+                if analysis.source_fingerprint is not None
+                else None
+            )
+            spot_check = (
+                selection.selected_candidate is not None
+                and source_hash is not None
+                and int(
+                    hashlib.sha256(
+                        f"{normalized['task_id']}:{source_hash}".encode()
+                    ).hexdigest()[:8],
+                    16,
+                )
+                % 10
+                == 0
+            )
+            if (
+                (selection.selected_candidate is None or spot_check)
+                and analysis.input_kind == "gym_project"
+                and normalized["scene_edit_prompt"] is None
+            ):
+                from .orchestration.visual_grounding import (
+                    make_visual_grounding_caller,
+                    visual_grounding_available,
+                )
+
+                has_articulation_route = any(
+                    step["task_type"] in {"E6", "E7", "E8", "E9"}
+                    for candidate in candidate_set["candidates"]
+                    for step in candidate["draft"]["steps"]
+                )
+                visual_status_path = staging / "visual_grounding_status.json"
+                if has_articulation_route or not visual_grounding_available():
+                    _write_json(
+                        visual_status_path,
+                        {
+                            "status": "skipped",
+                            "reason": (
+                                "native_joint_state_or_part_required"
+                                if has_articulation_route
+                                else "visual_model_unavailable"
+                            ),
+                        },
+                    )
+                else:
+                    from .orchestration.visual_evidence import (
+                        render_scene_visual_evidence,
+                    )
+
+                    try:
+                        visual_root = staging / "visual_grounding"
+                        evidence = render_scene_visual_evidence(
+                            analysis.source, visual_root
+                        )
+                        visual_caller = make_visual_grounding_caller(
+                            evidence, visual_root / "calls"
+                        )
+                        visual_selection = self.scene_backend.select(
+                            analysis,
+                            candidate_set,
+                            self.scene_adapter,
+                            force_most_likely=False,
+                            grounding_caller=visual_caller,
+                        )
+                        _write_json(
+                            staging / "text_binding_report.json",
+                            selection.binding_report,
+                        )
+                        agreement = (
+                            visual_selection.selected_candidate
+                            == selection.selected_candidate
+                            and visual_selection.role_bindings
+                            == selection.role_bindings
+                        )
+                        if spot_check:
+                            _write_json(
+                                staging / "visual_binding_report.json",
+                                visual_selection.binding_report,
+                            )
+                        else:
+                            selection = visual_selection
+                        _write_json(
+                            visual_status_path,
+                            {
+                                "status": "completed",
+                                "mode": "spot_check" if spot_check else "fallback",
+                                "binding_status": visual_selection.binding_report[
+                                    "status"
+                                ],
+                                "agreement": agreement,
+                                "source_config_sha256": evidence[
+                                    "source_config_sha256"
+                                ],
+                            },
+                        )
+                    except Exception as exc:
+                        _write_json(
+                            visual_status_path,
+                            {
+                                "status": "failed",
+                                "error_type": type(exc).__name__,
+                                "message": str(exc),
+                            },
+                        )
+                        if not spot_check:
+                            state = fail_stage(
+                                state,
+                                WorkflowStage.CANDIDATE_SELECTION,
+                                reason=f"Visual grounding failed: {type(exc).__name__}: {exc}",
+                            )
+                            return self._publish(
+                                transaction,
+                                staging,
+                                normalized,
+                                workflow_cfg,
+                                planning_cfg,
+                                execution_cfg,
+                                run_metadata,
+                                state,
+                                attempts,
+                                status="failed",
+                                failure_class="visual_grounding",
+                            )
             _write_json(
                 staging / "initial_binding_report.json", selection.binding_report
             )

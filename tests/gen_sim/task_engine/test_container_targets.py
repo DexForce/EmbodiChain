@@ -56,6 +56,38 @@ def test_landing_does_not_invent_room_for_an_oversized_object() -> None:
         select_container_landing(floor, child, np.array([1.0, 0.0, 0.3]))
 
 
+def test_landing_reserves_space_for_prior_object() -> None:
+    floor = trimesh.creation.box(extents=[0.5, 0.3, 0.01])
+    child = np.asarray(trimesh.creation.box(extents=[0.08, 0.08, 0.08]).vertices)
+    arm_root = np.array([1.0, 0.0, 0.3])
+    first = select_container_landing(floor, child, arm_root)
+    assert first is not None
+    radius = float(np.linalg.norm(child[:, :2], axis=1).max())
+
+    second = select_container_landing(
+        floor, child, arm_root, occupied=[(first[0], first[1], radius)]
+    )
+
+    assert second is not None
+    assert np.linalg.norm(np.asarray(second[:2]) - np.asarray(first[:2])) >= (
+        2 * radius + 0.019
+    )
+
+
+def test_landing_rejects_full_floor_without_overlapping() -> None:
+    floor = trimesh.creation.box(extents=[0.22, 0.22, 0.01])
+    child = np.asarray(trimesh.creation.box(extents=[0.08, 0.08, 0.08]).vertices)
+    arm_root = np.array([1.0, 0.0, 0.3])
+    first = select_container_landing(floor, child, arm_root)
+    assert first is not None
+    radius = float(np.linalg.norm(child[:, :2], axis=1).max())
+
+    with pytest.raises(ValueError, match="remaining landing space"):
+        select_container_landing(
+            floor, child, arm_root, occupied=[(first[0], first[1], radius)]
+        )
+
+
 def test_landing_requires_a_dominant_near_horizontal_surface() -> None:
     curved = trimesh.creation.icosphere(subdivisions=2, radius=0.2)
     child = np.asarray(trimesh.creation.box(extents=[0.02, 0.02, 0.02]).vertices)
@@ -93,13 +125,21 @@ def test_bundle_landing_is_invariant_under_world_yaw(tmp_path: Path) -> None:
     baseline = _container_target_pose(
         *sources, resource="left", embodiment={"simulation": simulation}
     )
+    assert baseline is not None
+    reserved = _container_target_pose(
+        *sources,
+        resource="left",
+        embodiment={"simulation": simulation},
+        occupied=[(baseline, sources[1])],
+    )
+    assert reserved is not None
+    assert abs(reserved[3] - baseline[3]) > 0.1
     for source in [*sources, simulation]:
         source["init_rot"] = [0.0, 0.0, 90.0]
     rotated = _container_target_pose(
         *sources, resource="left", embodiment={"simulation": simulation}
     )
 
-    assert baseline is not None
     assert baseline[3] > 0.1
     assert rotated == pytest.approx(baseline)
 

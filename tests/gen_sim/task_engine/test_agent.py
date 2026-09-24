@@ -378,28 +378,325 @@ def test_target_requirements_describe_capabilities_not_concrete_roles(
     assert target["affordances"] == expected_affordances
 
 
-def test_semantic_planner_rejects_implicit_multi_object_expansion():
+def test_semantic_planner_rejects_multi_object_pour_expansion():
     def interpreter(_instruction, **_kwargs):
-        step = _step(reference="all cans")
+        step = _step(reference="all bottles")
+        step.update(
+            task_type="E3",
+            target=_selector("scene_ref", reference="bowl"),
+            relation="above",
+            orientation_goal="none",
+        )
         step["object"].update(quantifier="all")
         return _result(step)
 
     candidate = TaskAgent(interpreter=interpreter).generate(
-        "upright", _TEST_INSTRUCTION, candidate_count=1
+        "pour", _TEST_INSTRUCTION, candidate_count=1
     )["candidates"][0]
-    with pytest.raises(ValueError, match="must resolve to exactly one scene entity"):
+    with pytest.raises(
+        UnsupportedSemanticCapabilityError, match="cannot lower multiple"
+    ):
         SemanticTaskPlanner().plan(
             candidate,
             {
                 "schema_version": ROLE_BINDINGS_SCHEMA,
-                "task_id": "upright",
+                "task_id": "pour",
                 "candidate_id": candidate["candidate_id"],
-                "reference_bindings": {"step_01.object": ["can_a", "can_b"]},
+                "reference_bindings": {
+                    "step_01.object": ["bottle_a", "bottle_b"],
+                    "step_01.target": ["bowl"],
+                },
                 "role_bindings": {},
             },
             [
-                {"uid": "can_a", "init_pos": [0.0, -0.2, 0.7]},
-                {"uid": "can_b", "init_pos": [0.0, 0.2, 0.7]},
+                {"uid": "bottle_a", "init_pos": [0.0, -0.2, 0.7]},
+                {"uid": "bottle_b", "init_pos": [0.0, 0.2, 0.7]},
+                {"uid": "bowl", "init_pos": [0.1, 0.0, 0.7]},
+            ],
+        )
+
+
+@pytest.mark.parametrize("quantifier,count", [("count", 2), ("all", 0)])
+def test_semantic_planner_expands_multi_object_upright(
+    quantifier: str, count: int
+) -> None:
+    def interpreter(_instruction, **_kwargs):
+        step = _step(reference="fallen cans")
+        step["object"].update(quantifier=quantifier, count=count)
+        return _result(step)
+
+    candidate = TaskAgent(interpreter=interpreter).generate(
+        "upright_cans", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    graph = SemanticTaskPlanner().plan(
+        candidate,
+        {
+            "schema_version": ROLE_BINDINGS_SCHEMA,
+            "task_id": "upright_cans",
+            "candidate_id": candidate["candidate_id"],
+            "reference_bindings": {"step_01.object": ["can_a", "can_b"]},
+            "role_bindings": {},
+        },
+        [
+            {"uid": "can_a", "init_pos": [0.0, -0.2, 0.7], "init_rot": [0, 90, 0]},
+            {"uid": "can_b", "init_pos": [0.0, 0.2, 0.7], "init_rot": [0, 90, 0]},
+        ],
+    )
+
+    assert [group["id"] for group in graph["task_groups"]] == [
+        "step_01__01",
+        "step_01",
+    ]
+    assert graph["task_groups"][1]["depends_on"] == ["step_01__01"]
+    assert [term["step_id"] for term in graph["success"]["source"]["terms"]] == [
+        "step_01__01",
+        "step_01",
+    ]
+
+
+def test_semantic_planner_expands_dual_arm_lift_and_return_set() -> None:
+    def interpreter(_instruction, **_kwargs):
+        step = _step(reference="two trays")
+        step.update(
+            task_type="E5",
+            required_arm="none",
+            orientation_goal="none",
+            terminal_behavior="place",
+        )
+        step["object"].update(quantifier="count", count=2)
+        return _result(step)
+
+    candidate = TaskAgent(interpreter=interpreter).generate(
+        "return_trays", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    graph = SemanticTaskPlanner().plan(
+        candidate,
+        {
+            "schema_version": ROLE_BINDINGS_SCHEMA,
+            "task_id": "return_trays",
+            "candidate_id": candidate["candidate_id"],
+            "reference_bindings": {"step_01.object": ["tray_a", "tray_b"]},
+            "role_bindings": {},
+        },
+        [
+            {"uid": "tray_a", "init_pos": [0.0, -0.2, 0.7], "init_rot": [0, 0, 0]},
+            {"uid": "tray_b", "init_pos": [0.0, 0.2, 0.7], "init_rot": [0, 0, 0]},
+        ],
+    )
+
+    assert [group["id"] for group in graph["task_groups"]] == [
+        "step_01__01",
+        "step_01",
+    ]
+    assert graph["task_groups"][1]["depends_on"] == ["step_01__01"]
+
+
+def test_semantic_planner_does_not_expand_two_simultaneously_held_trays() -> None:
+    def interpreter(_instruction, **_kwargs):
+        step = _step(reference="two trays")
+        step.update(
+            task_type="E5",
+            required_arm="none",
+            orientation_goal="none",
+            direction="up",
+            terminal_behavior="hold",
+        )
+        step["object"].update(quantifier="count", count=2)
+        return _result(step)
+
+    candidate = TaskAgent(interpreter=interpreter).generate(
+        "hold_trays", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    with pytest.raises(
+        UnsupportedSemanticCapabilityError, match="cannot lower multiple"
+    ):
+        SemanticTaskPlanner().plan(
+            candidate,
+            {
+                "schema_version": ROLE_BINDINGS_SCHEMA,
+                "task_id": "hold_trays",
+                "candidate_id": candidate["candidate_id"],
+                "reference_bindings": {"step_01.object": ["tray_a", "tray_b"]},
+                "role_bindings": {},
+            },
+            [
+                {"uid": "tray_a", "init_pos": [0.0, -0.2, 0.7]},
+                {"uid": "tray_b", "init_pos": [0.0, 0.2, 0.7]},
+            ],
+        )
+
+
+@pytest.mark.parametrize(
+    "transfer,receive,expected",
+    [
+        ("auto", "auto", {"source": "left", "destination": "right"}),
+        ("left_arm", "auto", {"source": "left", "destination": "right"}),
+        ("auto", "left_arm", {"source": "right", "destination": "left"}),
+    ],
+)
+def test_handover_binds_unnamed_arm_from_scene(
+    transfer: str, receive: str, expected: dict[str, str]
+) -> None:
+    def interpreter(_instruction, **_kwargs):
+        step = _step(reference="bottle")
+        step.update(
+            task_type="E4",
+            required_arm="auto",
+            transfer_arm=transfer,
+            receive_arm=receive,
+            orientation_goal="none",
+            terminal_behavior="hold",
+        )
+        return _result(step)
+
+    candidate = TaskAgent(interpreter=interpreter).generate(
+        "handover", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    graph = SemanticTaskPlanner().plan(
+        candidate,
+        {
+            "schema_version": ROLE_BINDINGS_SCHEMA,
+            "task_id": "handover",
+            "candidate_id": candidate["candidate_id"],
+            "reference_bindings": {"step_01.object": ["bottle"]},
+            "role_bindings": {},
+        },
+        [{"uid": "bottle", "init_pos": [0.0, -0.2, 0.7]}],
+    )
+
+    handover = next(
+        node["call"] for node in graph["nodes"] if node["call"]["kind"] == "hand_over"
+    )
+    assert handover["resources"] == expected
+
+
+def test_handover_rejects_same_explicit_source_and_receiver() -> None:
+    step = _step(reference="bottle")
+    step.update(
+        task_type="E4",
+        required_arm="auto",
+        transfer_arm="left_arm",
+        receive_arm="left_arm",
+        orientation_goal="none",
+        terminal_behavior="hold",
+    )
+
+    with pytest.raises(ValueError, match="transfer and receive arms must differ"):
+        validate_instruction_intent({"steps": [step]})
+
+
+@pytest.mark.parametrize("quantifier,count", [("count", 3), ("all", 0)])
+def test_semantic_planner_expands_multi_object_placement(
+    quantifier: str, count: int
+) -> None:
+    def interpreter(_instruction, **_kwargs):
+        step = _step(reference="all cups")
+        step.update(
+            task_type="E1",
+            target=_selector("scene_ref", reference="tray"),
+            relation="inside",
+            orientation_goal="none",
+        )
+        step["object"].update(quantifier=quantifier, count=count)
+        return _result(step)
+
+    candidate = TaskAgent(interpreter=interpreter).generate(
+        "place_cups", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    bindings = {
+        "schema_version": ROLE_BINDINGS_SCHEMA,
+        "task_id": "place_cups",
+        "candidate_id": candidate["candidate_id"],
+        "reference_bindings": {
+            "step_01.object": ["cup_a", "cup_b", "cup_c"],
+            "step_01.target": ["tray"],
+        },
+        "role_bindings": {},
+    }
+    scene = [
+        {"uid": uid, "init_pos": [0.0, offset, 0.7]}
+        for uid, offset in (("cup_a", -0.2), ("cup_b", 0.0), ("cup_c", 0.2))
+    ] + [{"uid": "tray", "init_pos": [0.1, 0.0, 0.7]}]
+
+    graph = SemanticTaskPlanner().plan(candidate, bindings, scene)
+
+    assert [group["id"] for group in graph["task_groups"]] == [
+        "step_01__01",
+        "step_01__02",
+        "step_01",
+    ]
+    assert graph["task_groups"][1]["depends_on"] == ["step_01__01"]
+    assert graph["task_groups"][2]["depends_on"] == ["step_01__02"]
+    assert [term["step_id"] for term in graph["success"]["source"]["terms"]] == [
+        "step_01__01",
+        "step_01__02",
+        "step_01",
+    ]
+    assert [
+        node["call"]["object"]
+        for node in graph["nodes"]
+        if node["call"]["kind"] == "pick"
+    ] == ["cup_a", "cup_b", "cup_c"]
+    assert candidate["draft"]["steps"][0]["object"]["quantifier"] == quantifier
+    assert bindings["reference_bindings"]["step_01.object"] == [
+        "cup_a",
+        "cup_b",
+        "cup_c",
+    ]
+
+
+def test_multi_object_placement_rejects_ambiguous_result_reference() -> None:
+    first = _step(step_id="place", reference="two cups")
+    first.update(
+        task_type="E1",
+        target=_selector("scene_ref", reference="tray"),
+        relation="inside",
+        orientation_goal="none",
+    )
+    first["object"].update(quantifier="count", count=2)
+    second = _step(step_id="move", reference="")
+    second.update(
+        task_type="E1",
+        object=_selector("step_result", step_id="place"),
+        target=_selector("scene_ref", reference="table"),
+        relation="on",
+        orientation_goal="none",
+        depends_on=["place"],
+    )
+
+    def interpreter(_instruction, **_kwargs):
+        return InstructionDraftResult(
+            intent={"steps": [first, second]},
+            model="injected_caller",
+            attempts=1,
+            latency_seconds=0.01,
+            normalizations=(),
+        )
+
+    candidate = TaskAgent(interpreter=interpreter).generate(
+        "place_cups", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    with pytest.raises(
+        UnsupportedSemanticCapabilityError, match="step_result consumer"
+    ):
+        SemanticTaskPlanner().plan(
+            candidate,
+            {
+                "schema_version": ROLE_BINDINGS_SCHEMA,
+                "task_id": "place_cups",
+                "candidate_id": candidate["candidate_id"],
+                "reference_bindings": {
+                    "step_01.object": ["cup_a", "cup_b"],
+                    "step_01.target": ["tray"],
+                    "step_02.target": ["table"],
+                },
+                "role_bindings": {},
+            },
+            [
+                {"uid": "cup_a", "init_pos": [0.0, -0.2, 0.7]},
+                {"uid": "cup_b", "init_pos": [0.0, 0.2, 0.7]},
+                {"uid": "tray", "init_pos": [0.1, 0.0, 0.7]},
+                {"uid": "table", "init_pos": [0.0, 0.0, 0.0]},
             ],
         )
 

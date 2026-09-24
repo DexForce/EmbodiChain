@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -459,6 +461,239 @@ def test_candidate_selection_protocol_error_is_not_input_conflict(
 
     assert result.status == "failed"
     assert result.failure_class == "candidate_selection"
+
+
+def test_unbound_scene_automatically_retries_with_visual_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidates = _candidate_set()
+    unbound = CandidateSelection(
+        scene_manifest={},
+        role_bindings=None,
+        binding_report={
+            "status": "unsatisfied",
+            "selection_reason": "no_fully_bound_candidate",
+        },
+        selected_candidate=None,
+        candidate_bindings={},
+    )
+
+    class VisualBackend(_SceneBackend):
+        def select(self, *_args, **kwargs):
+            self.selection_options.append(dict(kwargs))
+            return (
+                unbound if len(self.selection_options) == 1 else _selection(candidates)
+            )
+
+    scene = VisualBackend(_selection(candidates), input_kind="gym_project")
+    monkeypatch.setattr(
+        "embodichain.gen_sim.task_engine.orchestration.visual_grounding.visual_grounding_available",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "embodichain.gen_sim.task_engine.orchestration.visual_evidence.render_scene_visual_evidence",
+        lambda _source, _output: {"source_config_sha256": "a" * 64},
+    )
+    monkeypatch.setattr(
+        "embodichain.gen_sim.task_engine.orchestration.visual_grounding.make_visual_grounding_caller",
+        lambda *_args: lambda **_kwargs: {},
+    )
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=scene,
+        coordinator=_Coordinator(["bound"]),
+        action_executor=_Executor([[True]]),
+    )
+
+    result = workflow.run(_request(tmp_path, existing=True))
+
+    assert result.succeeded
+    assert len(scene.selection_options) == 2
+    assert callable(scene.selection_options[1]["grounding_caller"])
+    assert (result.output_dir / "text_binding_report.json").is_file()
+    visual = json.loads(
+        (result.output_dir / "visual_grounding_status.json").read_text()
+    )
+    assert visual == {
+        "status": "completed",
+        "mode": "fallback",
+        "binding_status": "bound",
+        "agreement": False,
+        "source_config_sha256": "a" * 64,
+    }
+
+
+@pytest.mark.parametrize("visual_fails", [False, True])
+def test_bound_scene_visual_spot_check_is_audited_without_replacing_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, visual_fails: bool
+) -> None:
+    candidates = _candidate_set()
+    unbound = CandidateSelection(
+        scene_manifest={},
+        role_bindings=None,
+        binding_report={"status": "unsatisfied", "selection_reason": "not_found"},
+        selected_candidate=None,
+        candidate_bindings={},
+    )
+    source_hash = next(
+        f"{index:064x}"
+        for index in range(100)
+        if int(hashlib.sha256(f"place_can:{index:064x}".encode()).hexdigest()[:8], 16)
+        % 10
+        == 0
+    )
+
+    class SpotCheckBackend(_SceneBackend):
+        def analyze(self, request, output_root):
+            return replace(
+                super().analyze(request, output_root),
+                source_fingerprint=SimpleNamespace(config_sha256=source_hash),
+            )
+
+        def select(self, *_args, **kwargs):
+            self.selection_options.append(dict(kwargs))
+            if len(self.selection_options) == 1:
+                return _selection(candidates)
+            if visual_fails:
+                raise RuntimeError("vision transport failed")
+            return unbound
+
+    scene = SpotCheckBackend(_selection(candidates), input_kind="gym_project")
+    monkeypatch.setattr(
+        "embodichain.gen_sim.task_engine.orchestration.visual_grounding.visual_grounding_available",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "embodichain.gen_sim.task_engine.orchestration.visual_evidence.render_scene_visual_evidence",
+        lambda _source, _output: {"source_config_sha256": source_hash},
+    )
+    monkeypatch.setattr(
+        "embodichain.gen_sim.task_engine.orchestration.visual_grounding.make_visual_grounding_caller",
+        lambda *_args: lambda **_kwargs: {},
+    )
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=scene,
+        coordinator=_Coordinator(["bound"]),
+        action_executor=_Executor([[True]]),
+    )
+
+    result = workflow.run(_request(tmp_path, existing=True))
+
+    assert result.succeeded
+    assert len(scene.selection_options) == 2
+    assert (
+        json.loads((result.output_dir / "initial_binding_report.json").read_text())[
+            "status"
+        ]
+        == "bound"
+    )
+    visual = json.loads(
+        (result.output_dir / "visual_grounding_status.json").read_text()
+    )
+    if visual_fails:
+        assert visual["status"] == "failed"
+        assert visual["error_type"] == "RuntimeError"
+    else:
+        assert (
+            json.loads((result.output_dir / "visual_binding_report.json").read_text())[
+                "status"
+            ]
+            == "unsatisfied"
+        )
+        assert visual == {
+            "status": "completed",
+            "mode": "spot_check",
+            "binding_status": "unsatisfied",
+            "agreement": False,
+            "source_config_sha256": source_hash,
+        }
+
+
+def test_unbound_scene_without_visual_provider_keeps_input_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidates = _candidate_set()
+    unbound = CandidateSelection(
+        scene_manifest={},
+        role_bindings=None,
+        binding_report={
+            "status": "unsatisfied",
+            "selection_reason": "no_fully_bound_candidate",
+        },
+        selected_candidate=None,
+        candidate_bindings={},
+    )
+    monkeypatch.setattr(
+        "embodichain.gen_sim.task_engine.orchestration.visual_grounding.visual_grounding_available",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "embodichain.gen_sim.task_engine.orchestration.visual_evidence.render_scene_visual_evidence",
+        lambda *_args: pytest.fail(
+            "No visual provider must not render or send images."
+        ),
+    )
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=_SceneBackend(unbound, input_kind="gym_project"),
+        coordinator=_Coordinator(["bound"]),
+        action_executor=_Executor([[True]]),
+    )
+
+    result = workflow.run(_request(tmp_path, existing=True))
+
+    assert result.status == "input_conflict"
+    assert result.failure_class == "unbound_scene_reference"
+    visual = json.loads(
+        (result.output_dir / "visual_grounding_status.json").read_text()
+    )
+    assert visual == {
+        "status": "skipped",
+        "reason": "visual_model_unavailable",
+    }
+
+
+def test_articulation_grounding_never_uses_proxy_as_live_joint_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidates = _candidate_set()
+    candidates["candidates"][0]["draft"]["steps"][0]["task_type"] = "E6"
+    unbound = CandidateSelection(
+        scene_manifest={},
+        role_bindings=None,
+        binding_report={
+            "status": "unsatisfied",
+            "selection_reason": "no_fully_bound_candidate",
+        },
+        selected_candidate=None,
+        candidate_bindings={},
+    )
+    monkeypatch.setattr(
+        "embodichain.gen_sim.task_engine.orchestration.visual_grounding.visual_grounding_available",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "embodichain.gen_sim.task_engine.orchestration.visual_evidence.render_scene_visual_evidence",
+        lambda *_args: pytest.fail("Articulation state requires native observations."),
+    )
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=_SceneBackend(unbound, input_kind="gym_project"),
+        coordinator=_Coordinator(["bound"]),
+        action_executor=_Executor([[True]]),
+    )
+
+    result = workflow.run(_request(tmp_path, existing=True))
+
+    assert result.failure_class == "unbound_scene_reference"
+    visual = json.loads(
+        (result.output_dir / "visual_grounding_status.json").read_text()
+    )
+    assert visual == {
+        "status": "skipped",
+        "reason": "native_joint_state_or_part_required",
+    }
 
 
 def test_parallel_workflow_preserves_requested_robot_profile(tmp_path: Path) -> None:

@@ -525,6 +525,36 @@ def test_part_grounding_uses_vertical_geometry_over_preselection() -> None:
     }
 
 
+def test_part_grounding_uses_lateral_geometry_over_joint_names() -> None:
+    intent = {
+        "steps": [
+            {
+                "id": "slide",
+                "task_type": "E6",
+                "object": _selector("left drawer"),
+            }
+        ]
+    }
+    parts = {
+        "cabinet": [
+            {"part_id": "part_a", "joint": "right_slide", "lateral_rank": "left"},
+            {"part_id": "part_b", "joint": "left_slide", "lateral_rank": "right"},
+        ]
+    }
+
+    result = ground_articulation_parts(
+        "open the left drawer",
+        intent,
+        {"slide.object": ["cabinet"]},
+        parts,
+        None,
+        lambda **kw: pytest.fail("Measured side selection must not call a model"),
+        preselected={"slide.object": "part_b"},
+    )
+
+    assert result == {"slide.object": "part_a"}
+
+
 def test_part_grounding_rejects_unavailable_vertical_rank() -> None:
     intent = {
         "steps": [

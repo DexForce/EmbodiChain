@@ -169,6 +169,40 @@ def test_backend_select_passes_v2_blueprint_contract(tmp_path: Path) -> None:
     assert captured["scene_objects"][0]["uid"] == "table"
 
 
+def test_existing_scene_select_forwards_visual_grounding_caller(tmp_path: Path) -> None:
+    analysis = SceneAnalysis(
+        input_kind="gym_project",
+        source=tmp_path / "project",
+        blueprint=None,
+        source_fingerprint=None,
+    )
+    captured = {}
+    caller = lambda **_kwargs: {"bindings": []}
+
+    class CapturingAdapter:
+        def adapt(self, *args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return SimpleNamespace(
+                scene_manifest={},
+                role_bindings=None,
+                binding_report={"status": "unsatisfied"},
+                selected_candidate=None,
+                candidate_bindings={},
+            )
+
+    SceneEngineBackend().select(
+        analysis,
+        {"candidate": "value"},
+        CapturingAdapter(),
+        force_most_likely=False,
+        grounding_caller=caller,
+    )
+
+    assert captured["kwargs"]["grounding_caller"] is caller
+    assert captured["args"][1] == analysis.source
+
+
 def test_existing_scene_edit_creates_revision_and_never_writes_source(
     tmp_path: Path,
     monkeypatch,

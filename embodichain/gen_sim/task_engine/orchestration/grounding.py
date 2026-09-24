@@ -183,15 +183,26 @@ def ground_articulation_parts(
             continue
         parts = tuple(part_catalogs[uids[0]])
         vertical_rank = _requested_vertical_rank(str(request["reference"]))
-        if vertical_rank is not None and len(parts) > 1:
+        lateral_rank = _requested_lateral_rank(str(request["reference"]))
+        use_lateral_rank = lateral_rank is not None and all(
+            "lateral_rank" in part for part in parts
+        )
+        if len(parts) > 1 and (vertical_rank is not None or use_lateral_rank):
             matches = [
                 part
                 for part in parts
-                if str(part.get("vertical_rank", "")) == vertical_rank
+                if (
+                    vertical_rank is None
+                    or str(part.get("vertical_rank", "")) == vertical_rank
+                )
+                and (
+                    not use_lateral_rank
+                    or str(part.get("lateral_rank", "")) == lateral_rank
+                )
             ]
             if len(matches) != 1:
                 raise ValueError(
-                    f"Requested vertical rank {vertical_rank!r} is not uniquely "
+                    f"Requested part ranks {(vertical_rank, lateral_rank)!r} are not uniquely "
                     f"available for {request['reference_id']!r}."
                 )
             resolved[request["reference_id"]] = str(matches[0]["part_id"])
@@ -245,6 +256,7 @@ def ground_articulation_parts(
                     "joint": str(part.get("joint", "")),
                     "link": str(part.get("link", "")),
                     "vertical_rank": str(part.get("vertical_rank", "")),
+                    "lateral_rank": str(part.get("lateral_rank", "")),
                     "vertical_index": part.get("vertical_index"),
                     "part_count": part.get("part_count"),
                     "semantic_labels": _part_labels(part),
@@ -351,9 +363,30 @@ def _requested_vertical_rank(reference: str) -> str | None:
     return next(iter(matches), None)
 
 
+def _requested_lateral_rank(reference: str) -> str | None:
+    normalized = reference.strip().lower()
+    matches = {
+        rank
+        for rank, chinese, english in (("left", "左", "left"), ("right", "右", "right"))
+        if chinese in normalized or re.search(rf"\b{english}\b", normalized)
+    }
+    if len(matches) > 1:
+        raise ValueError(
+            f"Articulation reference {reference!r} contains conflicting lateral ranks."
+        )
+    return next(iter(matches), None)
+
+
 def _part_labels(part: Mapping[str, Any]) -> list[str]:
     labels: set[str] = set()
-    for key in ("joint", "link", "joint_path", "link_path", "vertical_rank"):
+    for key in (
+        "joint",
+        "link",
+        "joint_path",
+        "link_path",
+        "vertical_rank",
+        "lateral_rank",
+    ):
         value = str(part.get(key, "")).strip().lower()
         if not value:
             continue
