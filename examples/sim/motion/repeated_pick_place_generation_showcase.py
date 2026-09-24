@@ -30,11 +30,9 @@ if str(_REPOSITORY_ROOT) not in sys.path:
 
 import gymnasium
 
+from embodichain.cli.sim import add_seed_arg_to_parser, add_sim_args_to_parser
 from embodichain.lab.gym.envs.demo import DemoEpisodeResult, execute_demo_episode
-from embodichain.lab.gym.utils.gym_utils import (
-    add_env_launcher_args_to_parser,
-    build_env_cfg_from_args,
-)
+from embodichain.lab.gym.utils.gym_utils import build_env_cfg_from_args
 from embodichain.lab.gym.utils.registration import (
     discover_task_packages,
     execute_init_hooks,
@@ -153,7 +151,8 @@ def _create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run configured Repeated Pick/Place trajectory candidates."
     )
-    add_env_launcher_args_to_parser(parser, require_gym_config=False)
+    add_sim_args_to_parser(parser)
+    add_seed_arg_to_parser(parser, default=None, scope="task environment")
     parser.add_argument(
         "--task-config",
         dest="gym_config",
@@ -174,6 +173,17 @@ def _create_parser() -> argparse.ArgumentParser:
         default=[0, 1, 2],
     )
     parser.add_argument("--save-video", action="store_true")
+    parser.set_defaults(
+        action_config=None,
+        preview=False,
+        filter_visual_rand=False,
+        filter_dataset_saving=False,
+        max_episodes=None,
+        record_trajectory=False,
+        trajectory_save_dir=None,
+        profile=False,
+        profile_output=None,
+    )
     return parser
 
 
