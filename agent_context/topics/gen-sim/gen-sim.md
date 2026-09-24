@@ -77,6 +77,12 @@ acquired orientation during the staging lift, then turns the object aloft.
 Only yaw-free alignment calls enable alternative final headings; exact-pose
 transport retains its orientation contract. All candidates use the same motion
 and velocity checks.
+For non-drawer, single-environment Place only, exhausted Cartesian IK planning
+may retry through the shared motion generator with nearby joint seeds and a
+joint-limit-margin preference. Already successful plans are returned unchanged;
+the fallback preserves Cartesian samples, control timing and random state,
+and rechecks full-robot velocity after Place resampling. This is a bounded
+kinematic recovery, not collision or physical-placement qualification.
 E2 release preserves the observed aligned heading instead of adding another
 fixed yaw during descent; an upright instruction does not require that rotation.
 Generated E1/E2-only deployments cap the used Robotiq gripper `max_effort` at 0.5

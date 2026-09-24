@@ -18,10 +18,12 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
 import json
 import math
-from typing import Any
+from typing import Any, Iterator
 import xml.etree.ElementTree as ET
 
 import torch
@@ -42,6 +44,113 @@ __all__: list[str] = []
 
 MOTION_VALIDATION_REVISION = 4
 VELOCITY_RETIME_SAMPLES = (260, 320)
+
+
+@dataclass
+class _PlaceIKRecovery:
+    used: bool = False
+
+
+_PLACE_IK_RECOVERY: ContextVar[_PlaceIKRecovery | None] = ContextVar(
+    "gen_sim_place_ik_recovery", default=None
+)
+
+
+@contextmanager
+def place_ik_recovery() -> Iterator[_PlaceIKRecovery]:
+    """Scope the bounded fallback to one GenSim Place planning call."""
+    state = _PlaceIKRecovery()
+    token = _PLACE_IK_RECOVERY.set(state)
+    try:
+        yield state
+    finally:
+        _PLACE_IK_RECOVERY.reset(token)
+
+
+def _local_place_ik(
+    generator: MotionGenerator, targets: list[PlanState], options: MotionGenOptions
+) -> PlanResult | None:
+    """Recover a single-environment path without changing targets or timing."""
+    robot = generator.robot
+    seed = options.start_qpos.clone()
+    bounds = robot.get_qpos_limits(name=options.control_part).to(seed)
+    lower, upper = bounds[..., 0], bounds[..., 1]
+    limits = _joint_velocity_limits(robot, options.control_part).to(seed)
+    step_dt = options.interpolation_dt
+    allowed = limits * step_dt + 1e-5
+    positions = [seed]
+    repairs = 0
+
+    def solve(
+        target: PlanState, trial: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        result = MotionGenerator.generate(
+            generator,
+            [target],
+            options=replace(
+                options,
+                start_qpos=trial,
+                sample_count=2,
+                preserve_cartesian_samples=True,
+            ),
+        )
+        return result.success, result.positions[:, -1]
+
+    def feasible(ok: torch.Tensor, qpos: torch.Tensor) -> bool:
+        return bool(
+            ok.all()
+            and torch.isfinite(qpos).all()
+            and (qpos >= lower).all()
+            and (qpos <= upper).all()
+            and ((qpos - seed).abs() <= allowed).all()
+        )
+
+    # Failed searches must not perturb the later grasp-candidate random stream.
+    devices = [seed.device.index] if seed.is_cuda else []
+    with torch.random.fork_rng(devices=devices):
+        for target in targets:
+            ok, qpos = solve(target, seed)
+            qpos = qpos.reshape_as(seed)
+            best = qpos if feasible(ok, qpos) else None
+            margin = (
+                float(torch.minimum(best - lower, upper - best).min())
+                if best is not None
+                else -1.0
+            )
+            if margin < 0.02:
+                # Near a joint stop, global random seeds can miss a nearby
+                # redundant branch. Bias only seeds, never emitted commands.
+                for joint in range(seed.shape[1]):
+                    for offset in (-0.15, 0.15, -0.05, 0.05):
+                        trial = seed.clone()
+                        trial[:, joint] += offset
+                        trial = trial.clamp(lower, upper)
+                        ok, candidate = solve(target, trial)
+                        candidate = candidate.reshape_as(seed)
+                        if feasible(ok, candidate):
+                            candidate_margin = float(
+                                torch.minimum(
+                                    candidate - lower, upper - candidate
+                                ).min()
+                            )
+                            if candidate_margin > margin:
+                                best, margin = candidate, candidate_margin
+                repairs += 1
+            if best is None:
+                return None
+            seed = best
+            positions.append(seed)
+    path = torch.stack(positions, dim=1)
+    dt = path.new_full(path.shape[:2], step_dt)
+    dt[:, 0] = 0.0
+    success = _velocity_validity(path, dt, limits)
+    if not success.all():
+        return None
+    logger.log_info(
+        f"GenSim Place local IK recovery accepted: {repairs} local searches, "
+        f"{path.shape[1]} unchanged-time samples."
+    )
+    return PlanResult(success=success, positions=path, dt=dt)
 
 
 def _velocity_retry_samples(sample_count: int | None) -> tuple[int, ...]:
@@ -276,6 +385,18 @@ class ApproachMotionGenerator(CheckedMotionGenerator):
                         f"GenSim adaptive velocity retime accepted sample_count={sample_count}."
                     )
                     break
+            recovery = _PLACE_IK_RECOVERY.get()
+            if (
+                recovery is not None
+                and not result.success.any()
+                and options.start_qpos.shape[0] == 1
+                and options.interpolation_dt is not None
+                and options.interpolation_dt > 0
+            ):
+                retry = _local_place_ik(self, target_states, options)
+                if retry is not None:
+                    result = retry
+                    recovery.used = True
         logger.log_info(
             "GenSim motion plan: "
             + json.dumps(

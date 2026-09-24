@@ -36,6 +36,7 @@ from embodichain.lab.sim.atomic_actions.primitives.move_held_object import (
     MoveHeldObject,
 )
 from embodichain.lab.sim.atomic_actions.primitives.pour import Pour
+from embodichain.lab.sim.atomic_actions.primitives.place import Place
 from embodichain.lab.sim.atomic_actions.plans import PlannerDiagnostics
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
@@ -43,7 +44,7 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
 )
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
-__all__ = ["GenSimMoveHeldObject", "GenSimPour"]
+__all__ = ["GenSimMoveHeldObject", "GenSimPlace", "GenSimPour"]
 
 
 def _unit(value: torch.Tensor) -> torch.Tensor:
@@ -115,6 +116,37 @@ class GenSimMoveHeldObject(MoveHeldObject):
                 plan,
                 expected_effects=StateDelta(held_object_updates={task_key: held}),
             )
+        return plan
+
+
+class GenSimPlace(Place):
+    """Keep ordinary Place unchanged unless its Cartesian IK plan fails."""
+
+    skill_id = Place.skill_id
+    GoalType = Place.GoalType
+    OptionsType = Place.OptionsType
+    binding_contract = Place.binding_contract
+
+    def _plan(self, request, context):
+        from .motion import (
+            _joint_velocity_limits,
+            _velocity_validity,
+            place_ik_recovery,
+        )
+
+        with place_ik_recovery() as recovery:
+            plan = super()._plan(request, context)
+        if recovery.used and plan.plan_success.any():
+            trajectory = plan.joint_trajectory
+            limits = _joint_velocity_limits(self.robot, None).to(trajectory.positions)
+            if not _velocity_validity(
+                trajectory.positions, trajectory.dt, limits
+            ).all():
+                return self.failed_plan(
+                    request,
+                    context,
+                    message="Recovered Place exceeds final resampled joint velocity limits.",
+                )
         return plan
 
 
