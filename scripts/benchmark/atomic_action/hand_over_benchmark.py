@@ -17,9 +17,9 @@
 """Benchmark HandOver atomic action on the dual-arm tutorial scene.
 
 Reports the ordered stages defined for HandOver in ``BENCHMARK_STANDARD.md``:
-grasped, transferred, handed_over, placed. The delivery budget is the derived
-one the standard gives a skill that breaks and re-establishes contact three
-times, and the object must never be dropped during the transfer.
+grasped, transferred, handed_over, placed. The horizontal delivery budget is
+derived from three contact phases; a separate height tolerance permits settling
+onto the support surface after release. Transfer drops still fail the benchmark.
 Run: embodichain benchmark atomic-action --action hand_over
 """
 
@@ -58,25 +58,29 @@ from scripts.benchmark.atomic_action.common import (
     timed_call,
     warmup_planning,
     write_markdown_report,
+    xy_distance_m,
     xyz_distance_m,
 )
 
-DUAL_ROBOT_TYPE = "ur5"
+DUAL_ROBOT_TYPE = "ur10"
 GRIPPER_TCP_Z = 0.15
-HAND_CLOSE_QPOS = 0.04
 HANDOVER_SAMPLE_INTERVAL = 220
 HANDOVER_HAND_INTERP_STEPS = 10
 HANDOVER_PRE_GRASP_DISTANCE = 0.08
 HANDOVER_LIFT_HEIGHT = 0.15
 SUPPORT_SURFACE_Z = 0.50
-FINAL_OBJECT_XYZ = (0.0, -0.2, 0.6)
+FINAL_OBJECT_XYZ = (-0.2, -0.2, 0.6)
 SETTLE_ITERATIONS = 50
 REPLAY_HOLD_STEPS = 60
 # HandOver breaks and re-establishes contact three times -- source grasp,
-# transfer, delivery -- so its delivery budget is the derived one from
+# transfer, delivery -- so its horizontal delivery budget is derived from
 # BENCHMARK_STANDARD.md section 0 rather than a constant of its own.
 HANDOVER_CONTACT_PHASES = 3
 HANDOVER_DELIVERY_TOLERANCE_M = HANDOVER_CONTACT_PHASES * TASK_POSITION_TOLERANCE_M
+# The commanded release pose is 10 cm above the table. Allow the object's
+# origin to settle by that distance. Above-target error keeps the horizontal
+# delivery budget, since settling cannot explain an upward offset.
+HANDOVER_HEIGHT_TOLERANCE_M = 0.10
 
 
 @dataclass(frozen=True)
@@ -122,6 +126,16 @@ def _select_cases(case_names: list[str]) -> list[HandOverCase]:
     if "all" in case_names:
         return list(HAND_OVER_CASES.values())
     return [HAND_OVER_CASES[name] for name in case_names]
+
+
+def _delivery_goal_reached(xy_error_m: float, height_error_m: float) -> bool:
+    """Check XY distance and signed height error (final Z minus target Z)."""
+    return (
+        0.0 <= xy_error_m <= HANDOVER_DELIVERY_TOLERANCE_M
+        and -HANDOVER_HEIGHT_TOLERANCE_M
+        <= height_error_m
+        <= HANDOVER_DELIVERY_TOLERANCE_M
+    )
 
 
 def _build_invocation(atomic_engine, semantics, device, physics_dt):
@@ -276,12 +290,18 @@ def _run_case(
 
     trace = None if traces is None else traces["delivery"]
     min_z = None
+    dropped = None
+    final_xy_error = None
+    final_height_error = None
     if trace is None:
         ladder.fail("grasped", "invalid_case")
     else:
         ladder.max_tracking_error_rad = trace.max_tracking_error_rad
         min_z = traces["height"].min_position
         dropped = dropped_below_support(min_z, SUPPORT_SURFACE_Z)
+        final_position = object_position_tuple(obj)
+        final_xy_error = xy_distance_m(final_position, FINAL_OBJECT_XYZ)
+        final_height_error = final_position[2] - FINAL_OBJECT_XYZ[2]
         # The handing arm holds the object: it left the pose it was resting in.
         ladder.record(
             "grasped",
@@ -296,7 +316,7 @@ def _run_case(
             "object_dropped" if dropped else "task_goal_miss",
         )
         left_open, left_close = get_hand_open_close_qpos(
-            robot, hand_control_part="left_hand", close_qpos=HAND_CLOSE_QPOS
+            robot, hand_control_part="left_hand"
         )
         # The handing arm let go and the object is still held, not on the floor.
         ladder.record(
@@ -306,7 +326,7 @@ def _run_case(
         )
         ladder.record(
             "placed",
-            trace.settled_position <= HANDOVER_DELIVERY_TOLERANCE_M,
+            _delivery_goal_reached(final_xy_error, final_height_error),
             "task_goal_miss",
         )
 
@@ -337,6 +357,8 @@ def _run_case(
         video_path,
         peak_gpu,
         traj,
+        final_xy_error=final_xy_error,
+        final_height_error=final_height_error,
     )
 
 
@@ -352,6 +374,9 @@ def _case_result(
     video_path: str,
     peak_gpu: float = 0.0,
     traj=None,
+    *,
+    final_xy_error: float | None = None,
+    final_height_error: float | None = None,
 ) -> dict[str, object]:
     """Assemble one HandOver case result row."""
     mem_delta = mem_delta or {"cpu_mb": 0.0, "gpu_mb": 0.0}
@@ -367,6 +392,8 @@ def _case_result(
         "max_tracking_error_rad": trace.max_tracking_error_rad if trace else None,
         "initial_delivery_distance_m": trace.initial_position if trace else None,
         "final_delivery_distance_m": trace.settled_position if trace else None,
+        "final_delivery_xy_error_m": final_xy_error,
+        "final_delivery_z_error_m": final_height_error,
         "min_object_z_m": min_object_z,
         "object_dropped": bool(dropped) if dropped is not None else None,
         "trajectory_waypoints": (
@@ -412,6 +439,12 @@ def _build_rows(results: list[dict[str, object]]):
                 ),
                 "final_delivery_distance_m": format_float(
                     result["final_delivery_distance_m"], 4
+                ),
+                "final_delivery_xy_error_m": format_float(
+                    result["final_delivery_xy_error_m"], 4
+                ),
+                "final_delivery_z_error_m": format_float(
+                    result["final_delivery_z_error_m"], 4
                 ),
                 "min_object_z_m": format_float(result["min_object_z_m"], 4),
                 "object_dropped": result["object_dropped"],
@@ -498,10 +531,10 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
 
             semantics = create_antipodal_semantics(obj, label="handover")
             left_open, left_close = get_hand_open_close_qpos(
-                robot, hand_control_part="left_hand", close_qpos=HAND_CLOSE_QPOS
+                robot, hand_control_part="left_hand"
             )
             right_open, right_close = get_hand_open_close_qpos(
-                robot, hand_control_part="right_hand", close_qpos=HAND_CLOSE_QPOS
+                robot, hand_control_part="right_hand"
             )
             grasp_pose_generator = create_parallel_jaw_grasp_pose_generator(
                 n_sample=n_sample, force_refresh=args.force_reannotate
@@ -564,6 +597,8 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
                     f"time={result['cost_time_ms']:>9.2f} ms | "
                     f"{stages} "
                     f"dist={format_float(result['final_delivery_distance_m'], 4)} "
+                    f"xy_err={format_float(result['final_delivery_xy_error_m'], 4)} "
+                    f"z_err={format_float(result['final_delivery_z_error_m'], 4)} "
                     f"min_z={format_float(result['min_object_z_m'], 3)} "
                     f"[{ladder.failure_reason or 'ok'}]"
                 )
@@ -589,12 +624,19 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
             "transferred (it ended on the receiving arm's side of the two "
             "hands without falling), handed_over (the handing hand ended "
             "nearer its open command than its closed one, object still up), "
-            "placed (it settled within "
-            f"{HANDOVER_DELIVERY_TOLERANCE_M:.3f} m of the commanded delivery "
+            "placed (settled XY error <= "
+            f"{HANDOVER_DELIVERY_TOLERANCE_M:.3f} m and signed height error in "
+            f"[-{HANDOVER_HEIGHT_TOLERANCE_M:.3f}, "
+            f"+{HANDOVER_DELIVERY_TOLERANCE_M:.3f}] m from the commanded delivery "
             f"pose {FINAL_OBJECT_XYZ}).",
-            f"The delivery budget is {HANDOVER_CONTACT_PHASES} x "
+            f"The horizontal delivery budget is {HANDOVER_CONTACT_PHASES} x "
             "TASK_POSITION_TOLERANCE_M, the derived budget the standard gives "
             "a skill that breaks and re-establishes contact.",
+            "The downward height budget permits settling after release onto the table; "
+            "upward error uses the horizontal budget. "
+            "final_delivery_distance_m remains a 3D diagnostic, while "
+            "final_delivery_xy_error_m and final_delivery_z_error_m decide placed. "
+            "final_delivery_z_error_m is signed: final Z minus target Z.",
             "motion_valid and max_tracking_error_rad are diagnostics; neither "
             "fails a stage.",
             "object_dropped uses the minimum object height observed across the "

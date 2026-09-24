@@ -6,6 +6,16 @@ Twelve skills measured under
 default backend, 10 ms physics timestep, one environment, `--repeat 1`. Per-case
 tables are in `outputs/benchmarks/`.
 
+The HandOver numbers and GIF below are historical: they use UR5, object-start
+XY `(0.0, 0.02)`, delivery XYZ `(0.0, -0.2, 0.6)`, and the former 3D
+delivery-error limit of 3 cm. The current benchmark uses UR10 with Robotiq
+2F-140 grippers and moves both poses 20 cm in negative X, to start XY
+`(-0.2, 0.02)` and delivery XYZ `(-0.2, -0.2, 0.6)`. It also changes placement
+scoring to XY error ≤ 3 cm and signed height error in [−10 cm, +3 cm] to allow
+downward settling after release. These results and the GIF have not been
+regenerated for the new robot, scene, or scoring rule; future numbers are not
+a like-for-like comparison.
+
 `success_rate` is the last link of a chain. Each stage is scored only on the
 cases that reached it, so a rate says what fraction of the cases that got there
 passed:
@@ -107,6 +117,9 @@ pose.
 
 ### `hand_over` — 0 % of 2 cases, failing only at `placed`
 
+Historical UR5 scene and 3D scoring rule; see the robot, scene, and scoring
+changes noted above. The GIF also predates all three changes.
+
 Both cases pass `grasped`, `transferred` and `handed_over`, then miss `placed`:
 delivery distance 0.1048 m and 0.0680 m against the derived budget of
 3 × `TASK_POSITION_TOLERANCE_M` = 0.03 m. Neither case dropped the object;
@@ -114,7 +127,8 @@ the minimum object height was 0.5319 m and 0.5342 m.
 
 ![HandOver delivers outside its budget](../../../docs/source/_static/benchmarks/atomic_action/hand_over_delivery_miss.gif)
 
-`vertical_can`. The transfer itself is clean and only the delivery misses.
+`vertical_can` (historical UR5 run). The transfer itself is clean and only the
+delivery misses under the former 3D rule.
 
 ### `open_door` — 66.67 % of 3 cases, losing `open_90` at `grasped`
 

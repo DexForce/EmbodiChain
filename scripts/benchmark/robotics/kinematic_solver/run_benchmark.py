@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Unified benchmark for OPW, UR, and Pytorch kinematic solvers.
+"""Unified benchmark for OPW, UR, FEP, and Pytorch kinematic solvers.
 
 Measures IK wall-clock latency, pose accuracy, success rate, and memory usage
 across OPW (Warp CUDA vs CPU), UR analytic (Warp CPU vs CUDA), and the
@@ -41,6 +41,7 @@ from embodichain.lab.sim.motion.solvers.pytorch_solver import (
     PytorchSolverCfg,
 )
 from embodichain.lab.sim.motion.solvers.ur_solver import URSolver, URSolverCfg
+from embodichain.lab.sim.motion.solvers.fep_solver import FEPSolver, FEPSolverCfg
 
 OPW_LOWER_LIMITS = [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944]
 OPW_UPPER_LIMITS = [2.618, 3.14159, 0.0, 1.745, 1.22, 2.0944]
@@ -64,7 +65,7 @@ UR_TCP = [
 ]
 
 SAMPLE_SIZES = [100, 1000, 10000]
-SUPPORTED_SOLVERS = ("opw", "pytorch", "ur")
+SUPPORTED_SOLVERS = ("opw", "pytorch", "ur", "fep")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -79,7 +80,7 @@ def _parse_args() -> argparse.Namespace:
         choices=(*SUPPORTED_SOLVERS, "all"),
         default=["all"],
         help=(
-            "Solvers to benchmark. Use one or more of: opw, pytorch, ur, all. "
+            "Solvers to benchmark. Use one or more of: opw, pytorch, ur, fep, all. "
             "Default: all"
         ),
     )
@@ -139,13 +140,13 @@ def _format_markdown_table(rows: list[dict[str, object]]) -> list[str]:
     if not rows:
         return ["No data."]
 
-    headers = list(rows[0].keys())
+    headers = list(dict.fromkeys(key for row in rows for key in row))
     lines = [
         "| " + " | ".join(headers) + " |",
         "| " + " | ".join(["---"] * len(headers)) + " |",
     ]
     for row in rows:
-        lines.append("| " + " | ".join(str(row[h]) for h in headers) + " |")
+        lines.append("| " + " | ".join(str(row.get(h, "")) for h in headers) + " |")
     return lines
 
 
@@ -875,8 +876,140 @@ def benchmark_ur_solver() -> tuple[list[dict[str, object]], list[dict[str, objec
     return perf_rows, metric_rows
 
 
+def _timed_fep_ik_call(
+    solver: FEPSolver,
+    fk_xpos: torch.Tensor,
+    qpos_seed: torch.Tensor,
+) -> tuple[float, dict[str, float], float, torch.Tensor, torch.Tensor]:
+    """Measure median FEP latency over ten synchronized, warmed calls."""
+    solver.get_ik(fk_xpos, qpos_seed)
+    _sync_cuda()
+    _reset_peak_gpu_memory()
+    before = _memory_snapshot()
+    timings = []
+    for _ in range(10):
+        start = time.perf_counter()
+        success, joints = solver.get_ik(fk_xpos, qpos_seed)
+        _sync_cuda()
+        timings.append(time.perf_counter() - start)
+    elapsed = float(np.median(timings))
+    after = _memory_snapshot()
+    delta = {key: after[key] - before[key] for key in before}
+    return elapsed, delta, _peak_gpu_memory_mb(), success, joints
+
+
+def benchmark_fep_solver() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Compare fixed-q7 and searched FEP with the same Franka targets and seeds."""
+    from scipy.spatial.transform import Rotation
+
+    perf_rows: list[dict[str, object]] = []
+    metric_rows: list[dict[str, object]] = []
+    devices = [torch.device("cpu")]
+    if torch.cuda.is_available():
+        devices.append(torch.device("cuda"))
+    print("\n=== FEP solver: known q7, blind seed q7, and redundancy search ===")
+    generator = torch.Generator().manual_seed(7)
+    fixtures = []
+    for count in (1, *SAMPLE_SIZES):
+        fractions = 0.25 + torch.rand(count, 7, generator=generator) * 0.5
+        seed_fractions = torch.rand(count, 7, generator=generator)
+        fixtures.append(("central", fractions, seed_fractions, None, None))
+    # Keep the original central-range workload, and add independently seeded
+    # full-range, near-boundary and bounded-motion workloads.
+    stress_generator = torch.Generator().manual_seed(2026)
+    for scenario, count in (("wide", 4096), ("boundary", 1024), ("small_step", 1024)):
+        fractions = torch.rand(count, 7, generator=stress_generator)
+        if scenario == "boundary":
+            rows = torch.arange(count)
+            fractions[rows, rows % 7] = (rows % 2) * 0.998 + 0.001
+        seed_fractions = torch.rand(count, 7, generator=stress_generator)
+        offsets = None
+        if scenario == "small_step":
+            offsets = (torch.rand(count, 7, generator=stress_generator) - 0.5) * 0.07
+        fixtures.append(
+            (
+                scenario,
+                fractions,
+                seed_fractions,
+                offsets,
+                0.04 if offsets is not None else None,
+            )
+        )
+    for device in devices:
+        solver = FEPSolverCfg(
+            urdf_path=get_data_path("Franka/Panda/PandaWithHand.urdf"),
+            root_link_name="base",
+            end_link_name="fr3_hand_tcp",
+        ).init_solver(device=device)
+        for scenario, fractions, seed_fractions, offsets, max_step in fixtures:
+            qpos = solver.lower_qpos_limits + fractions.to(device) * (
+                solver.upper_qpos_limits - solver.lower_qpos_limits
+            )
+            seed = solver.lower_qpos_limits + seed_fractions.to(device) * (
+                solver.upper_qpos_limits - solver.lower_qpos_limits
+            )
+            if offsets is not None:
+                seed = (qpos + offsets.to(device)).clamp(
+                    solver.lower_qpos_limits, solver.upper_qpos_limits
+                )
+            for mode in ("known_q7", "seed_q7", "search"):
+                solver.cfg.redundancy_search = mode == "search"
+                solver.cfg.max_joint_step = max_step if mode == "search" else None
+                trial_seed = seed.clone()
+                if mode == "known_q7":
+                    trial_seed[:, 6] = qpos[:, 6]
+                target = solver.get_fk(qpos)
+                elapsed, memory, peak, success, joints = _timed_fep_ik_call(
+                    solver, target, trial_seed
+                )
+                if max_step is not None:
+                    success &= (joints - trial_seed).abs().amax(-1) <= max_step
+                # Project float32 FK rotations before measuring small angles;
+                # trace/acos alone has a rounding floor above FEP's tolerance.
+                expected = target[success].cpu().numpy().astype(np.float64)
+                actual = solver.get_fk(joints[success]).cpu().numpy().astype(np.float64)
+                translation = np.linalg.norm(
+                    expected[:, :3, 3] - actual[:, :3, 3], axis=-1
+                )
+                rotation = (
+                    (
+                        Rotation.from_matrix(actual[:, :3, :3]).inv()
+                        * Rotation.from_matrix(expected[:, :3, :3])
+                    ).magnitude()
+                    if len(actual)
+                    else np.empty(0)
+                )
+                common = {
+                    "sample_size": len(qpos),
+                    "scenario": scenario,
+                    "impl": f"fep_{mode}_{device.type}",
+                    "component": "fep_ik",
+                }
+                perf_rows.append(
+                    {
+                        **common,
+                        "cost_time_ms": f"{elapsed * 1000:.6f}",
+                        "cpu_delta_mb": f"{memory['cpu_mb']:.6f}",
+                        "gpu_delta_mb": f"{memory['gpu_mb']:.6f}",
+                        "peak_gpu_mb": f"{peak:.6f}",
+                    }
+                )
+                metric_rows.append(
+                    {
+                        **common,
+                        "success_rate": f"{success.float().mean().item():.6f}",
+                        "translation_err_mm": f"{(float(translation.mean()) if len(translation) else float('nan')) * 1000:.6f}",
+                        "rotation_err_deg": f"{(float(rotation.mean()) if len(rotation) else float('nan')) * 180 / np.pi:.6f}",
+                    }
+                )
+                print(
+                    f"  {device.type} {scenario}/{mode} n={len(qpos):>7d}: {elapsed * 1000:.2f} ms, success={success.float().mean().item():.2%}, CPU Δ={memory['cpu_mb']:+.1f} MB, GPU Δ={memory['gpu_mb']:+.1f} MB, peak GPU={peak:.1f} MB"
+                )
+    return perf_rows, metric_rows
+
+
 def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
-    """Run unified OPW + UR + Pytorch kinematic solver benchmarks."""
+    """Run unified OPW + UR + FEP + Pytorch kinematic solver benchmarks."""
     solvers_to_run = _normalize_selected_solvers(selected_solvers)
 
     print("=" * 60)
@@ -892,6 +1025,8 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
     )
     print("- Pytorch solver: UR10 URDF-based PytorchSolver with " "UR10 joint limits.")
     print("- UR solver: analytic UR10 IK via URSolverCfg with UR10 DH parameters.")
+    if "fep" in solvers_to_run:
+        print("- FEP solver: fixed-q7 geometry and optional q7 search on Franka.")
 
     perf_rows: list[dict[str, object]] = []
     metric_rows: list[dict[str, object]] = []
@@ -911,6 +1046,11 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
         perf_rows.extend(ur_perf_rows)
         metric_rows.extend(ur_metric_rows)
 
+    if "fep" in solvers_to_run:
+        fep_perf_rows, fep_metric_rows = benchmark_fep_solver()
+        perf_rows.extend(fep_perf_rows)
+        metric_rows.extend(fep_metric_rows)
+
     leaderboard_rows = _build_leaderboard_rows(metric_rows)
 
     benchmark_name = "kinematic_solver"
@@ -928,6 +1068,13 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
             "CPU/GPU memory fields are deltas measured around timed calls.",
             "This report contains exactly three tables: Time & Memory, Success & Other Metrics, and Leaderboard.",
         ]
+        + (
+            [
+                "FEP reports median latency over ten synchronized warmed calls. known_q7 supplies a feasible q7; seed_q7 and search use the same seeds without the true q7. central targets sample the central half of joint limits; wide samples the full range; boundary places one joint within 0.1% of a bound. small_step perturbs seeds by at most 0.035 rad and requires all accepted joints to stay within 0.04 rad of the seed. For fixed-q7 modes this displacement filter is applied after timing. Pose errors include accepted rows only. Finite search does not prove global completeness."
+            ]
+            if "fep" in solvers_to_run
+            else []
+        )
         + (
             [
                 "OPW and Pytorch solvers use different initialization paths and different lower/upper joint limits."

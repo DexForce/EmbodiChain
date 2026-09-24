@@ -326,7 +326,7 @@ def test_atomic_action_tutorial_uses_native_mujoco_contact_settings() -> None:
         (
             "press",
             "create_button_semantics",
-            "button_cap",
+            "button_link",
             "press_axis",
             (-1.0, -1.0, -0.5),
             (-2.0 / 3.0, -2.0 / 3.0, -1.0 / 3.0),
@@ -334,7 +334,7 @@ def test_atomic_action_tutorial_uses_native_mujoco_contact_settings() -> None:
         (
             "twist",
             "create_knob_semantics",
-            "cap_1",
+            "knob_link",
             "twist_axis",
             (0.5, -1.0, -1.0),
             (1.0 / 3.0, -2.0 / 3.0, -2.0 / 3.0),
@@ -710,7 +710,12 @@ def test_dual_franka_mount_preserves_single_arm_facing_direction() -> None:
         )
 
 
-def test_hand_commands_cover_all_six_robotiq_joints_with_mimic_directions() -> None:
+@pytest.mark.parametrize(
+    ("close_qpos", "expected_magnitude"), [(None, 0.55), (0.4, 0.4)]
+)
+def test_hand_commands_cover_all_six_robotiq_joints_with_mimic_directions(
+    close_qpos: float | None, expected_magnitude: float
+) -> None:
     robot = MagicMock()
     robot.device = torch.device("cpu")
     robot.cfg.control_parts = {
@@ -739,13 +744,13 @@ def test_hand_commands_cover_all_six_robotiq_joints_with_mimic_directions() -> N
     hand_open, hand_close = get_hand_open_close_qpos(
         robot,
         hand_control_part="left_hand",
-        close_qpos=0.4,
+        close_qpos=close_qpos,
     )
 
     assert torch.allclose(hand_open, torch.zeros(6))
     assert torch.allclose(
         hand_close,
-        torch.tensor([0.4, -0.4, 0.4, -0.4, -0.4, 0.4]),
+        expected_magnitude * torch.tensor([1.0, -1.0, 1.0, -1.0, -1.0, 1.0]),
     )
 
 
@@ -1006,7 +1011,8 @@ def test_all_atomic_action_tutorials_accept_both_robot_choices(
     ):
         trapezoidal_args = module.parse_arguments()
 
-    assert default_args.robot == "ur5"
+    expected_robot = "ur10" if module_name == "hand_over" else "ur5"
+    assert default_args.robot == expected_robot
     assert franka_args.robot == "franka"
     expected_planner = (
         "curobo" if module_name == "dynamic_obstacle_recovery" else "trapezoidal"
@@ -1132,12 +1138,12 @@ def test_shared_tutorial_tunes_selected_newton_articulation_link() -> None:
         sim,
         articulation_cfg,
         group_name="newton_handle_contacts",
-        link_names_expr=["door_handle"],
+        link_names_expr=["handle_link"],
     )
 
     assert "existing" in articulation_cfg.link_attrs
     override = articulation_cfg.link_attrs["newton_handle_contacts"]
-    assert override.link_names_expr == ["door_handle"]
+    assert override.link_names_expr == ["handle_link"]
     assert override.attrs.material_props.ke == pytest.approx(
         NEWTON_GRASP_CONTACT_STIFFNESS
     )
@@ -1156,9 +1162,9 @@ def test_shared_tutorial_tunes_selected_newton_articulation_link() -> None:
     ("module_name", "factory_name", "group_name", "contact_link"),
     (
         ("slide", "create_drawer", "newton_handle_contacts", "large_handle_bar"),
-        ("open_door", "create_microwave", "newton_handle_contacts", "door_handle"),
-        ("twist", "create_microwave", "newton_knob_contacts", "cap_1"),
-        ("press", "create_microwave", "newton_button_contacts", "button_cap"),
+        ("open_door", "create_microwave", "newton_handle_contacts", "handle_link"),
+        ("twist", "create_microwave", "newton_knob_contacts", "knob_link"),
+        ("press", "create_microwave", "newton_button_contacts", "button_link"),
     ),
 )
 def test_articulation_contact_tutorials_author_newton_material_before_spawn(
