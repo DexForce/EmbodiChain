@@ -193,7 +193,7 @@ def main(argv: list[str] | None = None) -> None:
     env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
     try:
         for candidate_index in candidate_indices:
-            env.reset(options={"save_data": False})
+            env.reset(seed=args.seed, options={"save_data": False})
             recording_started = False
             try:
                 if args.save_video:

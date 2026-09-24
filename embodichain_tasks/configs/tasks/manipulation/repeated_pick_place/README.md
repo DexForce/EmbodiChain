@@ -32,7 +32,7 @@ python examples/sim/motion/repeated_pick_place_generation_showcase.py \
   --task-config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
   --generation-profile embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/generation.demo.yaml \
   --output-dir /tmp/repeated-pick-place-generation \
-  --device cuda --headless
+  --seed 7 --device cuda --headless
 ```
 
 The showcase executes candidate ordinals 0, 1, and 2 as separate Task Program
@@ -40,6 +40,9 @@ episodes and writes JSON provenance plus joint-trajectory plots. Add
 `--save-video` for one MP4 per candidate. The profile varies only the Place
 retract phase on the original control grid; Pick, release/contact samples, and
 phase endpoints remain unchanged.
+
+The explicit environment seed rewinds reset and grasp-sampling streams before
+each candidate so all three ordinals start from the same reference episode.
 
 This is a projected-assurance visualization. Completion means the configured
 command sequence completed; it is not measured task success, receipt-confirmed
