@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from embodichain.lab.gym.utils.registration import register_env
+from embodichain.learning.rl.policy_evaluation.camera import PolicyViewerCameraCfg
 
 from ._embodichain import EmbodiChainVelocityEnv
 from .contracts.anymal_c.config import load_config
@@ -43,6 +44,9 @@ _CONFIG = load_config()
 class ANYmalCFlatEnv(EmbodiChainVelocityEnv):
     """Track planar velocity commands with the 12-DOF ANYmal-C model."""
 
+    policy_viewer_camera_cfg = PolicyViewerCameraCfg(
+        eye_offset=(-1.65, -1.3, 0.9), target_height=0.43
+    )
     velocity_task_config = _CONFIG
     state_type = ANYmalCState
     build_observations_fn = staticmethod(build_observations)

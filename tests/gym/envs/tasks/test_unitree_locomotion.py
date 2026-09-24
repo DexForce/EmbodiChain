@@ -149,3 +149,20 @@ def test_unitree_deployments_preserve_task_physics(
     assert config.robot.root_props.self_collision_enabled is (robot in {"g1", "h1_2"})
     assert config.robot.asset_physics_mode == "overlay"
     assert config.sensor[0].articulation_cfg_list[0].link_name_list == []
+
+
+def test_policy_viewer_target_pose_preserves_world_xyzw_and_copies_state():
+    from types import SimpleNamespace
+
+    from embodichain_tasks.locomotion.velocity._embodichain import (
+        EmbodiChainVelocityEnv,
+    )
+
+    pose = torch.tensor([[1.0, 2.0, 3.0, 0.0, 0.0, 0.6, 0.8]])
+    env = SimpleNamespace(
+        robot=SimpleNamespace(body_data=SimpleNamespace(root_pose=pose))
+    )
+    target = EmbodiChainVelocityEnv.get_policy_viewer_target_pose(env)
+    assert target.tolist() == pytest.approx(pose[0].tolist())
+    target[:] = 0
+    assert pose[0].tolist() == pytest.approx([1, 2, 3, 0, 0, 0.6, 0.8])

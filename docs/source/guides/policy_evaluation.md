@@ -122,6 +122,44 @@ embodichain eval-policy \
 `--gym-config` can be omitted when the training configuration already refers to
 the task configuration.
 
+## Locomotion Viewer camera and recording
+
+The bundled ANYmal-C, G1, Go1, Go2, H1_2 and MicroDuck flat velocity tasks
+start with a close rear-quarter view sized for each robot, on both Default
+and Newton backends. For example, use the original run's snapshots and FastRT:
+
+```bash
+embodichain eval-policy /path/to/locomotion-run \
+  --viewer --renderer fast-rt \
+  --device cuda:0 --sim-device gpu \
+  --command 0.3 0 0 --duration 20
+```
+
+On reset, framing follows the robot's initial heading. During walking, the
+camera follows only world X-Y translation: its height and orientation stay
+fixed as the body bobs or turns. Orbit and zoom adjustments are preserved.
+Press `T` to enter free view with panning; press it again to recenter on the
+robot using the task's preset. `Backspace` and automatic episode resets restore
+the preset and enable tracking. Tasks without a camera preset retain their
+existing view.
+
+Click inside the Viewer before using its keys. Press `R` to start or stop
+EmbodiChain's existing window recorder. By default, clips are written to
+`outputs/videos/` under the working directory. Programmatic callers can use
+`env.unwrapped.sim.start_window_record(save_path="walk.mp4", fps=20)` and
+`stop_window_record()`. The default recorder reads the live window camera,
+so it captures tracking and manual camera adjustments. A supplied `fixed_pose`,
+`look_at` or `pose_provider` overrides that camera source. Keep clips within the
+configured recording memory limit, or adjust `WindowRecordCfg` for longer clips.
+
+Custom tasks can expose `policy_viewer_camera_cfg: PolicyViewerCameraCfg` and
+`get_policy_viewer_target_pose() -> np.ndarray`, returning a copied world root
+pose `(x, y, z, qx, qy, qz, qw)`. Import the config from
+`embodichain.learning.rl.policy_evaluation`. Its `eye_offset` is relative to the
+look-at point in the initial heading frame; `target_height` is a fixed world Z
+for flat scenes. These hooks affect native Viewer evaluation only; training and
+headless evaluation keep their original behavior.
+
 ## Headless locomotion checkpoint example
 
 Use a checkpoint trained with the Go2 Default deployment's

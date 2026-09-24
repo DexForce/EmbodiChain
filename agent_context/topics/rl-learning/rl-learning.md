@@ -159,6 +159,7 @@ the complete-rollout safety and normalization contracts.
 | Standard collect/update loop | `utils/trainer.py` |
 | Differentiable TBPTT/update loop | `differentiable_trainer.py` |
 | Shared completed-episode evaluation | `evaluation.py` |
+| Saved-checkpoint CLI and native Viewer adapter | `policy_evaluation/cli.py`, `policy_evaluation/viewer.py` |
 | Learning environment protocol and registry | `env.py` |
 | End-to-end config and runtime assembly | `train.py` |
 
@@ -175,6 +176,26 @@ measurement. These rollout fields have explicit dimensions in the buffer.
 
 Read [training and extension](training.md) for evaluation, checkpoints,
 distributed ownership, official examples and adding algorithms/policies/envs.
+
+## Native policy Viewer
+
+`embodichain eval-policy --viewer` supplies `EmbodiChainTaskEnvironment` to
+DexSim's Motion Policy Evaluator, preserving the original task's reset, step,
+observation and action path. Supplying an Environment means the adapter owns
+its camera lifecycle; Kit's default flat-ground camera is not applied to it.
+
+Tasks opt in through `PolicyViewerCameraCfg` and
+`get_policy_viewer_target_pose()` (world XYZ + XYZW). The six bundled flat
+velocity tasks own their presets; `policy_evaluation/_viewer_camera.py` owns
+reset framing, X-Y translation and tracking/free-view transitions. Other tasks
+retain their existing camera. Use native window operations so manual orbit and
+zoom persist and the existing `SimulationManager` window recorder sees the
+same view. Window camera operations are queued to the render thread; reading a
+pose immediately after an update can still return the preceding rendered pose.
+
+Validate changes with `tests/learning/rl/policy_evaluation/test_viewer.py` and
+an actual native Viewer run. User controls and recording are described in the
+[policy evaluation guide](../../../docs/source/guides/policy_evaluation.md).
 
 ## Invariants
 
