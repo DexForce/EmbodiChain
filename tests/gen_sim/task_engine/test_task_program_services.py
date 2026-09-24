@@ -222,6 +222,71 @@ def test_unmarked_gensim_pick_delegates_without_changing_inputs(monkeypatch):
     assert result is original.return_value
 
 
+def test_constrained_pick_marks_only_its_goal_and_uses_a_scoped_generator(monkeypatch):
+    from embodichain.gen_sim.task_engine._task_program.actions import (
+        GenSimPickUp,
+        _PICK_GRASP_RULE,
+    )
+    from embodichain.gen_sim.task_engine._task_program.grasp_filter import (
+        TaskGraspPoseGenerator,
+    )
+
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(), geometry={}, entity_id="cup"
+    )
+    route = _PickRoute(object_id="cup", target_id="upright", grasp_region="upper_half")
+    sampler = Mock(spec=TaskGraspPoseGenerator)
+    bound = SimpleNamespace(
+        binding=SimpleNamespace(
+            resources={
+                "primary": SimpleNamespace(
+                    endpoints={
+                        "grasp": SimpleNamespace(
+                            runtime_target=SimpleNamespace(target_id="hand")
+                        )
+                    }
+                )
+            }
+        )
+    )
+    result = _PickLowerer((route,), (semantics,), {"hand": sampler}).lower(
+        RegisteredSemanticCall(
+            call_id="gen_sim.pick", arguments={"object": "cup", "target": "upright"}
+        ),
+        context=SimpleNamespace(),
+        bound=bound,
+        option_template=PickUpOptions(),
+    )
+    assert semantics.affordance.custom_config == {}
+    marked = result.goal.semantics
+    assert marked.affordance.get_custom_config(_PICK_GRASP_RULE) == ("cup", "upright")
+    poses = torch.eye(4)[None, None]
+    valid = torch.ones(1, 1, dtype=torch.bool)
+    candidates = SimpleNamespace(poses=poses, valid=valid, costs=torch.zeros(1, 1))
+    get_candidates = Mock(return_value=candidates)
+    monkeypatch.setattr(marked.affordance, "get_grasp_candidates", get_candidates)
+    monkeypatch.setattr(marked.affordance, "sample_candidates", Mock())
+    action = GenSimPickUp()
+    action._planning_services = SimpleNamespace(grasp_pose_generator=lambda _: sampler)
+    monkeypatch.setattr(
+        action, "_select_feasible_grasp_variants", lambda *a: (poses, valid)
+    )
+    action._resolve_grasp_pose(
+        marked,
+        torch.eye(4)[None],
+        torch.zeros(1, 7),
+        object(),
+        "hand",
+        PickUpOptions(),
+        torch.tensor([0.0, 0.0, -1.0]),
+        SimpleNamespace(affordance_sampling=None, env_ids=torch.tensor([0])),
+        sample_key="upright",
+    )
+    sampler.for_pick.assert_called_once()
+    assert get_candidates.call_args.args[0] is sampler.for_pick.return_value
+    assert get_candidates.call_args.kwargs["obj_longest_axis"] is None
+
+
 def test_horizontal_source_lowerer_requires_declared_axis():
     from embodichain.gen_sim.task_engine._task_program.services import make_pick_factory
 

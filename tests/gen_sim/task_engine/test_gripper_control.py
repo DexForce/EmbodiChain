@@ -190,9 +190,8 @@ def test_on_placement_generates_support_checks_without_relaxing_position(
         graph, SimpleNamespace(planner_objects=objects, table_top_z=0.7), embodiment
     )
     cfg = StabilityConstraint.decode(payload["presets"]["gen_sim.place.stable"])
-    assert cfg.kind == "stack"
+    assert cfg.kind == "supported_placement"
     assert cfg.position_tolerance == 0.05
-    assert cfg.local_axis == cfg.reference_axis == (0.0, 0.0, 1.0)
-    assert cfg.object_bottom == 0.0 and cfg.reference_top == pytest.approx(0.1)
-    assert cfg.reference_half_extents == pytest.approx((0.048, 0.048))
+    assert cfg.local_axis is None and cfg.reference_axis is None
+    assert cfg.reference_half_extents is None
     assert cfg.displacement == pytest.approx((0.0, 0.0, 0.11))

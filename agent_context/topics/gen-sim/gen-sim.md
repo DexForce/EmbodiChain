@@ -90,9 +90,15 @@ when every picked rigid body has an explicitly declared mass of at most 10 g.
 The full closing range is retained; smaller existing effort limits are not
 increased. Unknown/heavier loads and other recipe families retain their declared
 controls. Imported mimic behavior and shared robot defaults are unchanged.
-E1 placement on another object retains its original position tolerance and adds
-the existing stack stability checks for vertical orientation, support gap and
-reference stability. Source pose matrices take precedence over Euler fields.
+Ordinary E1 placement on another object retains its position tolerance and uses
+`supported_placement`: scaled local mesh vertices are cached per environment,
+then transformed by observed poses for vertical gap and projected support-envelope
+checks. It does not impose initial roll or either object's initial up direction.
+Both objects must still remain stable for the declared window. This geometric
+envelope is not contact evidence for arbitrary concave or tilted supports.
+Explicit upright, oriented hold and stack constraints retain their axis checks;
+legacy presets are unchanged, so regenerate bundles to select the new policy.
+Source pose matrices take precedence over Euler fields.
 After UID grounding, independent E1 placement, E2 upright, and E5
 lift-and-return `count`/`all` sets lower to ordered single-object steps;
 line layout, E5 terminal hold, other task routes, and a downstream
@@ -114,8 +120,16 @@ while preserving explicitly named arms. For scene-horizontal objects, generated
 source lowerers snapshot the measured object-local axis into task-owned grasp
 metadata and declare an end-directed diagonal approach. The GenSim Pick wrapper
 uses that axis only for marked source calls, retaining shared Pick options and
-the receiver's separate center-grasp candidates. Unmarked Pick calls delegate
-unchanged. Terminal preserve-pose handovers verify receiver attachment and the
+the receiver's separate center-grasp candidates. Constrained E2 Pick lowerers
+snapshot their object/target rule selector into the goal; only that Pick uses
+an immutable filtered-generator view. Unscoped sampling, including HandOver,
+checks opening clearance without applying another stage's region/release rules.
+Unmarked Pick calls delegate unchanged, including drawer-engine picks; drawer
+transport and release remain drawer-owned. Relative placement geometry and
+stability use preceding alignment operations, never future E2 state. Repeated
+identical relation selectors with conflicting stage geometry fail generation
+until the relative-call contract can distinguish occurrences.
+Terminal preserve-pose handovers verify receiver attachment and the
 declared world-axis alignment; ordinary upright constraints still use world Z.
 Regenerate horizontal E4 bundles after lowerer revisions; do not bypass their
 fingerprint checks or extend the shared Pick/AxisAlign configuration schema.
