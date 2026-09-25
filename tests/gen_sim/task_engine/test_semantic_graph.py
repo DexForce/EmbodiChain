@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 import math
 from pathlib import Path
 
@@ -1454,6 +1455,154 @@ def _prepared_axis_scene(
         asset_hashes={},
     )
     return scene
+
+
+def test_upright_after_placement_has_stage_specific_support_geometry(
+    tmp_path: Path,
+) -> None:
+    scene = _prepared_axis_scene(tmp_path, source_extents=(0.24, 0.06, 0.06))
+    pad_path = tmp_path / "pad.glb"
+    # GLB's Y-up thickness becomes the runtime support's Z extent.
+    trimesh.creation.box(extents=[0.3, 0.02, 0.3]).export(pad_path)
+    pad = {
+        "uid": "pad",
+        "shape": {"shape_type": "Mesh", "fpath": str(pad_path)},
+        "init_pos": [0.15, 0.42, 0.74],
+        "init_rot": [0.0, 0.0, 0.0],
+    }
+    scene = replace(
+        scene,
+        rigid_objects=(*scene.rigid_objects, pad),
+        planner_objects=(
+            *scene.planner_objects,
+            {**pad, "runtime_uid": "pad", "role": "rigid_object"},
+        ),
+        uid_map={**scene.uid_map, "pad": "pad"},
+    )
+    graph = _graph()
+    graph["targets"] = {
+        f"upright_{suffix}": {
+            "kind": "cyclic_pose",
+            "values": [
+                {"position": [0.15, 0.42, 0.9], "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0]}
+            ],
+        }
+        for suffix in ("upright_target", "upright_staging_target")
+    }
+    relative = {"object": "bottle", "reference": "pad", "relation": "on"}
+    calls = [
+        ("place", {"kind": "pick", "object": "bottle"}),
+        (
+            "place",
+            {
+                "kind": "registered",
+                "call_id": "simulation.place_relative",
+                "arguments": relative,
+            },
+        ),
+        (
+            "upright",
+            {
+                "kind": "registered",
+                "call_id": "simulation.pick",
+                "arguments": {"object": "bottle", "target": "upright_upright_target"},
+            },
+        ),
+        *[
+            (
+                "upright",
+                {
+                    "kind": "registered",
+                    "call_id": "gen_sim.align_held",
+                    "arguments": {
+                        "object": "bottle",
+                        "target": "upright_upright_staging_target",
+                        "preserve_yaw": preserve,
+                    },
+                },
+            )
+            for preserve in (False, True)
+        ],
+        (
+            "upright",
+            {
+                "kind": "registered",
+                "call_id": "gen_sim.place_upright",
+                "arguments": relative,
+            },
+        ),
+        (
+            "upright",
+            {
+                "kind": "registered",
+                "call_id": "gen_sim.clear_released",
+                "arguments": {
+                    "object": "bottle",
+                    "target": "upright_upright_staging_target",
+                },
+            },
+        ),
+        (
+            "upright",
+            {"kind": "registered", "call_id": "simulation.park", "arguments": {}},
+        ),
+    ]
+    graph["nodes"] = [
+        {
+            "id": f"call_{index}",
+            "task_instance_id": group,
+            "task_type": "E1" if group == "place" else "E2",
+            "role": "cleanup" if index >= 6 else "primary",
+            "depends_on": [f"call_{index - 1}"] if index else [],
+            "call": {**call, "resources": {"primary": "right"}},
+        }
+        for index, (group, call) in enumerate(calls)
+    ]
+    graph["task_groups"] = [
+        {
+            "id": group,
+            "task_type": "E1" if group == "place" else "E2",
+            "depends_on": [] if group == "place" else ["place"],
+            "node_ids": [
+                node["id"]
+                for node in graph["nodes"]
+                if node["task_instance_id"] == group
+            ],
+            "success": {"kind": "call_completed"},
+        }
+        for group in ("place", "upright")
+    ]
+    generated, paths = generate_task_program_bundle(
+        graph, scene, tmp_path / "bundle", robot_profile="dual_franka"
+    )
+    _verify_program_projection(paths.program, generated)
+    integration = load_config(paths.integration)
+    routes = {
+        item["kind"]: item["routes"][0]
+        for item in integration["runtime_services"]["registered_semantic_lowerers"]
+        if item["kind"] in {"place_relative", "place_upright"}
+    }
+    assert integration["profile"]["action_options"]["gen_sim.pick.upright"][
+        "approach_direction"
+    ] == [0.0, 0.0, -1.0]
+    assert routes["place_relative"]["world_displacement"][2] == pytest.approx(0.05)
+    assert routes["place_upright"]["world_displacement"][2] == pytest.approx(0.14)
+    assert generated["targets"]["upright_upright_target"]["values"][0][
+        "position"
+    ] == pytest.approx([0.15, 0.42, 0.88])
+    pick_route = next(
+        item
+        for item in integration["runtime_services"]["registered_semantic_lowerers"]
+        if item.get("call_id") == "gen_sim.pick.upright"
+    )["routes"][0]
+    assert pick_route["release_clearance_plane_z"] == pytest.approx(0.75)
+    constraints = load_config(paths.program.parent / "constraints.json")["presets"]
+    assert constraints["gen_sim.call_1.stable"]["kind"] == "supported_placement"
+    assert constraints["gen_sim.call_5.stable"]["kind"] == "upright"
+    assert constraints["gen_sim.call_5.stable"]["reference"] == "pad"
+    terminal = load_config(paths.program)["program"]["items"][-1]
+    assert terminal["validators"][0]["reference"] == "pad"
+    assert terminal["validators"][0]["displacement"][2] == pytest.approx(0.13)
 
 
 @pytest.mark.parametrize(

@@ -62,6 +62,7 @@ from .services import (
     _CoordinatedHoldLowererFactory,
     _RelativePlaceRoute,
     _RelativePlaceLowererFactory,
+    _UprightPlaceLowererFactory,
 )
 
 __all__: list[str] = []
@@ -308,7 +309,7 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
             else _CoordinatedHoldLowererFactory
         )
         return factory_type(routes=tuple(routes))
-    if kind == "place_relative":
+    if kind in {"place_relative", "place_upright"}:
         config = _mapping(
             value,
             path=path,
@@ -357,7 +358,12 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                     ),
                 )
             )
-        return _RelativePlaceLowererFactory(routes=tuple(routes))
+        factory_type = (
+            _UprightPlaceLowererFactory
+            if kind == "place_upright"
+            else _RelativePlaceLowererFactory
+        )
+        return factory_type(routes=tuple(routes))
     if kind in {
         "articulation_slide",
         "articulation_withdraw",

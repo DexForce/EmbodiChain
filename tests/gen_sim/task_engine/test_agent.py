@@ -1333,6 +1333,57 @@ def test_explicit_upright_adds_alignment_on_the_final_holding_arm(
         assert calls[-1] is alignment
 
 
+@pytest.mark.parametrize("required_arm", ["auto", "right_arm"])
+def test_upright_after_placement_keeps_the_latest_support(required_arm: str) -> None:
+    place = _step(step_id="place", reference="cup")
+    place.update(
+        task_type="E1",
+        orientation_goal="none",
+        target=_selector("scene_ref", reference="mat"),
+        relation="on",
+        required_arm="right_arm",
+    )
+    upright = _step(step_id="upright")
+    upright.update(
+        object=_selector("step_result", step_id="place"),
+        depends_on=["place"],
+        required_arm=required_arm,
+    )
+    interpreted = _result(place)
+    interpreted.intent["steps"].append(upright)
+    candidate = TaskAgent(interpreter=lambda *_a, **_kw: interpreted).generate(
+        "place_then_upright", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    graph = SemanticTaskPlanner().plan(
+        candidate,
+        {
+            "schema_version": ROLE_BINDINGS_SCHEMA,
+            "task_id": "place_then_upright",
+            "candidate_id": candidate["candidate_id"],
+            "reference_bindings": {
+                "step_01.object": ["cup"],
+                "step_01.target": ["mat"],
+            },
+            "role_bindings": {},
+        },
+        [
+            {"runtime_uid": "cup", "init_pos": [0.3, -0.2, 0.75]},
+            {"runtime_uid": "mat", "init_pos": [0.15, 0.42, 0.75]},
+            {"runtime_uid": "table", "init_pos": [0.0, 0.0, 0.0]},
+        ],
+    )
+    calls = [node["call"] for node in graph["nodes"] if node["task_type"] == "E2"]
+    assert all(call["resources"] == {"primary": "right"} for call in calls)
+    release = next(call for call in calls if call["call_id"] == "gen_sim.place_upright")
+    assert release["arguments"] == {
+        "object": "cup",
+        "reference": "mat",
+        "relation": "on",
+    }
+    for target in graph["targets"].values():
+        assert target["values"][0]["position"][:2] == [0.15, 0.42]
+
+
 def test_handover_continuation_does_not_pick_an_already_held_object() -> None:
     first = _step(step_id="one", reference="can")
     first.update(

@@ -34,6 +34,7 @@ _COORDINATED_TRANSPORT_CALL_ID: Final = "simulation.coordinated_transport"
 _COORDINATED_HOLD_CALL_ID: Final = "simulation.coordinated_hold"
 _PARK_CALL_ID: Final = "simulation.park"
 _PLACE_RELATIVE_CALL_ID: Final = "simulation.place_relative"
+_UPRIGHT_PLACE_CALL_ID: Final = "gen_sim.place_upright"
 _STACK_PLACE_CALL_ID: Final = "gen_sim.stack_place"
 _STACK_PICK_CALL_ID: Final = "gen_sim.stack_pick"
 _MOVE_HELD_OBJECT_CALL_ID: Final = "simulation.move_held_object"
@@ -142,9 +143,11 @@ class SemanticTaskPlanner:
                         f"Step {step_id!r} E2 currently requires "
                         "orientation_goal='upright'."
                     )
+                support_id = _preceding_support(object_id, nodes)
                 requested = str(step.get("required_arm", "auto"))
                 resource = (
-                    held_by.get(object_id) or self._nearest_resource(object_id, objects)
+                    held_by.get(object_id)
+                    or self._nearest_resource(object_id, objects, target_id=support_id)
                     if requested in {"auto", "none"}
                     else _resource(requested, field="required_arm")
                 )
@@ -153,6 +156,7 @@ class SemanticTaskPlanner:
                 upright_position = self._upright_target_position(
                     object_id,
                     objects,
+                    support_id=support_id,
                 )
                 targets.update(_upright_targets(step_id, upright_position))
                 calls = []
@@ -187,10 +191,14 @@ class SemanticTaskPlanner:
                         },
                         {
                             "kind": "registered",
-                            "call_id": _PLACE_RELATIVE_CALL_ID,
+                            "call_id": (
+                                _PLACE_RELATIVE_CALL_ID
+                                if support_id == "table"
+                                else _UPRIGHT_PLACE_CALL_ID
+                            ),
                             "arguments": {
                                 "object": object_id,
-                                "reference": "table",
+                                "reference": support_id,
                                 "relation": "on",
                             },
                             "resources": {"primary": resource},
@@ -891,8 +899,10 @@ class SemanticTaskPlanner:
     def _upright_target_position(
         object_id: str,
         objects: Mapping[str, Mapping[str, Any]],
+        *,
+        support_id: str = "table",
     ) -> list[float]:
-        """Place an upright object at its original XY and measured support height."""
+        """Retain the preceding placement, or the initial XY for standalone E2."""
         item = objects.get(object_id)
         if item is None:
             raise ValueError(f"Scene metadata is missing object {object_id!r}.")
@@ -900,13 +910,15 @@ class SemanticTaskPlanner:
         if not isinstance(position, Sequence) or len(position) != 3:
             raise ValueError(f"Scene object {object_id!r} has no three-value init_pos.")
         result = [float(value) for value in position]
+        if support_id != "table":
+            result[:2] = [float(value) for value in objects[support_id]["init_pos"][:2]]
         attributes = item.get("attributes", {})
         object_aabb = (
             attributes.get("final_world_aabb")
             if isinstance(attributes, Mapping)
             else None
         )
-        table = objects.get("table")
+        table = objects.get(support_id)
         table_attributes = table.get("attributes", {}) if table is not None else {}
         table_aabb = (
             table_attributes.get("final_world_aabb")
@@ -931,6 +943,22 @@ class SemanticTaskPlanner:
                 )
                 result[2] = float(table_max[2]) + 0.01 + longest_extent / 2.0
         return result
+
+
+def _preceding_support(object_id: str, nodes: Sequence[Mapping[str, Any]]) -> str:
+    """Use only the latest operation on this object, never a future placement."""
+    for node in reversed(nodes):
+        if node["role"] != "primary":
+            continue
+        call = node["call"]
+        args = call.get("arguments", call)
+        if args.get("object") != object_id:
+            continue
+        if call.get("call_id") in {_PLACE_RELATIVE_CALL_ID, _UPRIGHT_PLACE_CALL_ID}:
+            if args["relation"] in {"on", "above"}:
+                return str(args["reference"])
+        break
+    return "table"
 
 
 def _expand_multi_object_steps(
