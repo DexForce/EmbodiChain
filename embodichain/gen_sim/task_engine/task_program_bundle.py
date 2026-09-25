@@ -84,6 +84,7 @@ _HANDOVER_SOURCE_PICK: Final = "gen_sim.pick.handover_source"
 _HORIZONTAL_HANDOVER_SOURCE_PICK: Final = "gen_sim.pick.handover_horizontal_source"
 _DEFAULT_PICK_LIFT_HEIGHT: Final = 0.16
 _PLACE_RELATIVE_CALL_ID: Final = "simulation.place_relative"
+_UPRIGHT_PLACE_CALL_ID: Final = "gen_sim.place_upright"
 _STACK_PLACE_CALL_ID: Final = "gen_sim.stack_place"
 _STACK_PICK_CALL_ID: Final = "gen_sim.stack_pick"
 
@@ -516,6 +517,12 @@ def _task_stability_payload(
         (r["object_id"], r["reference_entity_id"], r["relation"]): r
         for r in _relative_place_route_payloads(graph, scene, settled=True)
     }
+    upright_routes = {
+        (r["object_id"], r["reference_entity_id"], r["relation"]): r
+        for r in _relative_place_route_payloads(
+            graph, scene, settled=True, upright_only=True
+        )
+    }
     motion_parts = {
         resource["resource_id"]: next(
             endpoint["control_part"]
@@ -559,7 +566,11 @@ def _task_stability_payload(
             and call["call_id"] == _MOVE_HELD_OBJECT_CALL_ID
         ):
             upright.add(str(arguments["object"]))
-        if call["call_id"] in {_PLACE_RELATIVE_CALL_ID, _STACK_PLACE_CALL_ID}:
+        if call["call_id"] in {
+            _PLACE_RELATIVE_CALL_ID,
+            _STACK_PLACE_CALL_ID,
+            _UPRIGHT_PLACE_CALL_ID,
+        }:
             object_id = str(arguments["object"])
             reference_id = str(arguments["reference"])
             if (
@@ -571,7 +582,14 @@ def _task_stability_payload(
                     and arguments["relation"] in {"on", "above"}
                 )
             ):
-                route = routes[(object_id, reference_id, arguments["relation"])]
+                selected_routes = (
+                    upright_routes
+                    if call["call_id"] == _UPRIGHT_PLACE_CALL_ID
+                    else routes
+                )
+                route = selected_routes[
+                    (object_id, reference_id, arguments["relation"])
+                ]
                 presets[f"gen_sim.{node['id']}.stable"] = {
                     "kind": "upright",
                     "entity": object_id,
@@ -695,10 +713,24 @@ def _program_payload(
             for route in _relative_place_route_payloads(graph, scene, settled=True)
         }
     )
+    upright_routes = (
+        {}
+        if scene is None
+        else {
+            (route["object_id"], route["reference_entity_id"], route["relation"]): route
+            for route in _relative_place_route_payloads(
+                graph, scene, settled=True, upright_only=True
+            )
+        }
+    )
     items = [
         _program_node(
             node,
-            relative_routes=relative_routes,
+            relative_routes=(
+                upright_routes
+                if node["call"].get("call_id") == _UPRIGHT_PLACE_CALL_ID
+                else relative_routes
+            ),
             axis_by_object=axis_by_object,
             task_stability=f"gen_sim.{node['id']}.stable"
             in (stability_presets or set()),
@@ -761,6 +793,7 @@ def _program_payload(
                         or placement.get("call_id")
                         in {
                             _PLACE_RELATIVE_CALL_ID,
+                            _UPRIGHT_PLACE_CALL_ID,
                             _STACK_PLACE_CALL_ID,
                         }
                     )
@@ -817,6 +850,7 @@ def _program_node(
     elif call["kind"] == "registered" and call["call_id"] in {
         _COORDINATED_TRANSPORT_CALL_ID,
         _PLACE_RELATIVE_CALL_ID,
+        _UPRIGHT_PLACE_CALL_ID,
         _STACK_PLACE_CALL_ID,
     }:
         if call["call_id"] == _COORDINATED_TRANSPORT_CALL_ID:
@@ -833,6 +867,7 @@ def _program_node(
         ]
     if call["kind"] == "registered" and call["call_id"] in {
         _PLACE_RELATIVE_CALL_ID,
+        _UPRIGHT_PLACE_CALL_ID,
         _STACK_PLACE_CALL_ID,
     }:
         arguments = call["arguments"]
@@ -863,7 +898,7 @@ def _program_node(
             call["kind"] == "place"
             or (
                 call["kind"] == "registered"
-                and call["call_id"] == _PLACE_RELATIVE_CALL_ID
+                and call["call_id"] in {_PLACE_RELATIVE_CALL_ID, _UPRIGHT_PLACE_CALL_ID}
             )
         )
     ):
@@ -976,6 +1011,14 @@ def _integration_payload(
     axis_align_objects: set[str] = set()
     pour_objects: set[str] = set()
     relative_lowerer_routes = _relative_place_route_payloads(graph, scene)
+    upright_lowerer_routes = _relative_place_route_payloads(
+        graph, scene, upright_only=True
+    )
+    supported_upright_groups = {
+        node["task_instance_id"]
+        for node in graph["nodes"]
+        if node["call"].get("call_id") == _UPRIGHT_PLACE_CALL_ID
+    }
     has_relative_place = False
     has_park_call = False
     has_articulation_park_call = False
@@ -1068,6 +1111,7 @@ def _integration_payload(
             referenced_objects.add(object_id)
             referenced_objects.add("table")
             call_id = call["call_id"]
+            source = scene_objects[object_id]
             source_axis = _longest_local_axis(scene_objects[object_id])
             if object_id in upright_move_objects | axis_align_objects:
                 world_axis = np.array([0.0, 0.0, 1.0])
@@ -1084,6 +1128,10 @@ def _integration_payload(
             approach = (
                 np.array([0.0, 0.0, -1.0]) if length <= 1e-6 else approach / length
             )
+            if node.get("task_instance_id") in supported_upright_groups:
+                # A top-down regrasp becomes a side grasp after uprighting,
+                # avoiding an end-directed approach into the rim at release.
+                approach = np.array([0.0, 0.0, -1.0])
             options = {
                 "kind": "pick_up",
                 "hand_interp_steps": default_pick_options["hand_interp_steps"],
@@ -1106,7 +1154,13 @@ def _integration_payload(
                     # Transport checks live reachability; yaw does not change
                     # the fingertip heights used by release-clearance screening.
                     "release_clearance_object_pose": {"kind": "pose", **final_pose},
-                    "release_clearance_plane_z": float(table_top),
+                    "release_clearance_plane_z": (
+                        float(final_pose["position"][2])
+                        + _vertical_mesh_bounds(source, axis_aligned=True)[0]
+                        - _upright_release_clearance(source)
+                        if node.get("task_instance_id") in supported_upright_groups
+                        else float(table_top)
+                    ),
                     "release_clearance_safety_margin": _E2_RELEASE_SAFETY_MARGIN,
                     "grasp_region": "upper_half",
                 }
@@ -1117,6 +1171,7 @@ def _integration_payload(
             axis_align_objects.add(object_id)
         elif call["kind"] == "registered" and call["call_id"] in {
             _PLACE_RELATIVE_CALL_ID,
+            _UPRIGHT_PLACE_CALL_ID,
             _STACK_PLACE_CALL_ID,
         }:
             arguments = call["arguments"]
@@ -1418,7 +1473,7 @@ def _integration_payload(
                 **pick_options,
                 **(
                     {
-                        _PLACE_RELATIVE_CALL_ID: {
+                        call_id: {
                             "kind": "place",
                             "hand_interp_steps": 12,
                             "release_settle_steps": 60,
@@ -1426,6 +1481,14 @@ def _integration_payload(
                             "cartesian_waypoint_count": 2,
                             "preserve_current_object_orientation": True,
                         }
+                        for call_id in (
+                            _PLACE_RELATIVE_CALL_ID,
+                            *(
+                                (_UPRIGHT_PLACE_CALL_ID,)
+                                if upright_lowerer_routes
+                                else ()
+                            ),
+                        )
                     }
                     if has_relative_place
                     else {}
@@ -1544,11 +1607,17 @@ def _integration_payload(
                         # clause remain strict physical checks; orientation
                         # is intentionally relaxed for this calibrated scene.
                         "attached_translation_threshold": (
-                            0.02 if semantic_id == _PLACE_RELATIVE_CALL_ID else 0.06
+                            0.02
+                            if semantic_id
+                            in {_PLACE_RELATIVE_CALL_ID, _UPRIGHT_PLACE_CALL_ID}
+                            else 0.06
                         ),
                         "attached_rotation_threshold": 3.0,
                         "detached_translation_threshold": (
-                            0.03 if semantic_id == _PLACE_RELATIVE_CALL_ID else 0.08
+                            0.03
+                            if semantic_id
+                            in {_PLACE_RELATIVE_CALL_ID, _UPRIGHT_PLACE_CALL_ID}
+                            else 0.08
                         ),
                         "detached_rotation_threshold": 3.141592653589793,
                     },
@@ -1563,6 +1632,7 @@ def _integration_payload(
                     *((_MOVE_HELD_OBJECT_CALL_ID,) if not drawers else ()),
                     *pick_routes,
                     _PLACE_RELATIVE_CALL_ID,
+                    _UPRIGHT_PLACE_CALL_ID,
                 )
                 if any(
                     node["call"].get("kind") == semantic_id
@@ -1616,7 +1686,12 @@ def _integration_payload(
                 ],
                 *(
                     [{"kind": "place_relative", "routes": relative_lowerer_routes}]
-                    if has_relative_place
+                    if relative_lowerer_routes
+                    else []
+                ),
+                *(
+                    [{"kind": "place_upright", "routes": upright_lowerer_routes}]
+                    if upright_lowerer_routes
                     else []
                 ),
                 *(
@@ -2021,6 +2096,7 @@ def _relative_place_route_payloads(
     scene: Any,
     *,
     settled: bool = False,
+    upright_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Project each release using only orientation changes preceding that call."""
     axis_align_objects: set[str] = set()
@@ -2035,7 +2111,12 @@ def _relative_place_route_payloads(
             and call["call_id"] == _MOVE_HELD_OBJECT_CALL_ID
         ):
             axis_align_objects.add(str(call["arguments"]["object"]))
-        if call["call_id"] not in {_PLACE_RELATIVE_CALL_ID, _STACK_PLACE_CALL_ID}:
+        selected_calls = (
+            {_UPRIGHT_PLACE_CALL_ID}
+            if upright_only
+            else {_PLACE_RELATIVE_CALL_ID, _STACK_PLACE_CALL_ID}
+        )
+        if call["call_id"] not in selected_calls:
             continue
         arguments = call["arguments"]
         selector = (
@@ -2574,7 +2655,7 @@ def _refine_upright_targets(
     graph: SemanticTaskGraph,
     scene: Any,
 ) -> SemanticTaskGraph:
-    """Use normalized mesh origins to place E2 objects on the measured table."""
+    """Use normalized mesh origins and the stage's declared supporting surface."""
     selected = deepcopy(graph)
     objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
     table = objects.get("table")
@@ -2583,7 +2664,21 @@ def _refine_upright_targets(
     if scene.table_top_z is None:
         return selected
     table_top = float(scene.table_top_z)
+    support_heights: dict[str, float] = {}
+    upright_objects: set[str] = set()
+    for node in selected["nodes"]:
+        call = node["call"]
+        if call.get("call_id") in {_ALIGN_HELD_CALL_ID, _AXIS_ALIGN_CALL_ID}:
+            upright_objects.add(call["arguments"]["object"])
+        if call.get("call_id") == _UPRIGHT_PLACE_CALL_ID:
+            support_id = call["arguments"]["reference"]
+            support = objects[support_id]
+            _, top = _vertical_mesh_bounds(
+                support, axis_aligned=support_id in upright_objects
+            )
+            support_heights[node["task_instance_id"]] = _position(support)[2] + top
     target_routes: dict[str, tuple[str, str]] = {}
+    target_heights: dict[str, float] = {}
     for node in selected["nodes"]:
         call = node["call"]
         if (
@@ -2603,12 +2698,15 @@ def _refine_upright_targets(
         target_id = str(arguments.get("target", ""))
         resource = str(call.get("resources", {}).get("primary", ""))
         target_routes[target_id] = (object_id, resource)
+        support_height = support_heights.get(node["task_instance_id"], table_top)
+        target_heights[target_id] = support_height
         # Place owns the final descent; its release target still needs the
         # same mesh-origin refinement when no separate final Move is emitted.
         target_routes[f"{node['task_instance_id']}_upright_target"] = (
             object_id,
             resource,
         )
+        target_heights[f"{node['task_instance_id']}_upright_target"] = support_height
     for target_id, (object_id, resource) in target_routes.items():
         source = objects.get(object_id)
         target = selected["targets"].get(target_id) if target_id is not None else None
@@ -2626,7 +2724,7 @@ def _refine_upright_targets(
         if not isinstance(position, list) or len(position) != 3:
             continue
         clearance = _upright_release_clearance(source)
-        position[2] = table_top + clearance - local_minimum
+        position[2] = target_heights[target_id] + clearance - local_minimum
         if target_id.endswith("_upright_staging_target"):
             position[2] += _UPRIGHT_STAGING_CLEARANCE
         values[0]["quaternion_xyzw"] = _upright_target_quaternion(

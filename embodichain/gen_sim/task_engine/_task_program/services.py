@@ -795,6 +795,9 @@ class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
     target_descriptor: ClassVar[SkillDescriptor] = Place.descriptor()
 
     routes: tuple[_RelativePlaceRoute, ...]
+    lowerer_type: ClassVar[type[_ObservedRelativePlaceLowerer]] = (
+        _ObservedRelativePlaceLowerer
+    )
 
     def __post_init__(self) -> None:
         if type(self.routes) is not tuple or not self.routes:
@@ -837,7 +840,19 @@ class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
                     world_yaw_offset=route.world_yaw_offset,
                 )
             )
-        return _ObservedRelativePlaceLowerer(tuple(routes), robot)
+        return self.lowerer_type(tuple(routes), robot)
+
+
+class _UprightPlaceLowerer(_ObservedRelativePlaceLowerer):
+    """Keep a later upright release separate from the preceding horizontal one."""
+
+    call_id: ClassVar[str] = "gen_sim.place_upright"
+
+
+@dataclass(frozen=True, slots=True)
+class _UprightPlaceLowererFactory(_RelativePlaceLowererFactory):
+    call_id: ClassVar[str] = "gen_sim.place_upright"
+    lowerer_type: ClassVar[type[_ObservedRelativePlaceLowerer]] = _UprightPlaceLowerer
 
 
 class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
