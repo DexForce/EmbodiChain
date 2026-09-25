@@ -432,19 +432,23 @@ class EmbodiedEnv(BaseEnv):
             self._traj_buffer: TensorDict | None = None
             self._traj_steps: torch.Tensor | None = None
             self._traj_raw_action: EnvAction | None = None
+            self._trajectory_action_kind: str | None = None
             self._raw_action_history: list[list[EnvAction]] = [
                 [] for _ in range(self.num_envs)
             ]
             self._traj_save_count = 0
             self._traj_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             if self.cfg.record_trajectory:
+                self._trajectory_action_kind = (
+                    "policy" if self.action_manager is not None else "expert"
+                )
                 self._traj_buffer = build_trajectory_buffer(
                     env=self,
                     max_steps=self.max_episode_steps,
                     num_envs=self.num_envs,
                     device=self.device,
                     uids=self.cfg.trajectory_uids,
-                    action_space=self._expert_action_space,
+                    action_space=self._trajectory_action_space(),
                 )
                 self._traj_steps = torch.zeros(
                     self.num_envs, dtype=torch.long, device=self.device
@@ -1420,7 +1424,14 @@ class EmbodiedEnv(BaseEnv):
         buffer_step_ids = step_ids.to(buffer_device)
 
         expert_action_spec = getattr(self, "expert_action_spec", None)
-        if (
+        policy_action = bool(getattr(self, "_record_raw_actions", False))
+        if policy_action:
+            if not isinstance(action, torch.Tensor):
+                raise TypeError(
+                    "Policy rollout recording requires one flat torch.Tensor action."
+                )
+            action_to_store = action
+        elif (
             expert_action_spec is not None
             and expert_action_spec.joint_command_mode == "position_velocity"
         ):
@@ -1444,9 +1455,13 @@ class EmbodiedEnv(BaseEnv):
                 "skipping action storage in rollout buffer."
             )
             action_to_store = None
-        if action_to_store is not None and not (
-            expert_action_spec is not None
-            and expert_action_spec.joint_command_mode == "position_velocity"
+        if (
+            action_to_store is not None
+            and not policy_action
+            and not (
+                expert_action_spec is not None
+                and expert_action_spec.joint_command_mode == "position_velocity"
+            )
         ):
             robot = getattr(self, "robot", None)
             get_qpos = getattr(robot, "get_qpos", None)
@@ -1599,6 +1614,32 @@ class EmbodiedEnv(BaseEnv):
             return action.snapshot()
         expected_dim = int(np.prod(self.single_action_space.shape))
         return self._normalize_demo_action_tensor(action, expected_dim)
+
+    def _trajectory_action_space(self) -> gym.spaces.Space:
+        """Return the fixed action layout owned by trajectory recording."""
+        if self.action_manager is not None:
+            return self.action_space
+        return self._expert_action_space
+
+    def _trajectory_action_metadata(self) -> dict[str, Any]:
+        """Describe the action layout stored in trajectory files."""
+        if getattr(self, "_trajectory_action_kind", None) == "policy":
+            if self.action_manager is None:
+                raise RuntimeError(
+                    "Policy trajectory metadata requires an ActionManager."
+                )
+            return {
+                "action_kind": "policy",
+                "action_dim": self.action_manager.total_action_dim,
+                "action_terms": [
+                    descriptor.to_dict()
+                    for descriptor in self.action_manager.descriptors
+                ],
+            }
+        return {
+            "action_kind": "expert",
+            **self.expert_action_spec.metadata(step_dt=self.step_dt),
+        }
 
     def _mask_demo_action(
         self,
@@ -1975,10 +2016,26 @@ class EmbodiedEnv(BaseEnv):
         """Resolve one raw or controller-ready action for robot control."""
         is_controller_action = isinstance(action, ControllerAction)
         controller_metadata = action.metadata if is_controller_action else None
+        policy_trajectory = self._traj_buffer is not None and (
+            getattr(self, "_trajectory_action_kind", None) == "policy"
+        )
+        policy_recording = bool(getattr(self, "_record_raw_actions", False))
+        if is_controller_action and (policy_recording or policy_trajectory):
+            incompatible = []
+            if policy_recording:
+                incompatible.append("policy action recording")
+            if policy_trajectory:
+                incompatible.append("policy trajectory")
+            raise ValueError(
+                "ControllerAction cannot be used with "
+                + " or ".join(incompatible)
+                + "."
+            )
         if is_controller_action:
             action = action.value
         record_position_velocity = (
             self._traj_buffer is not None
+            and not policy_trajectory
             and getattr(self, "expert_action_spec", None) is not None
             and self.expert_action_spec.joint_command_mode == "position_velocity"
         )
@@ -1991,6 +2048,12 @@ class EmbodiedEnv(BaseEnv):
             else action
         )
         if self.action_manager is not None and not is_controller_action:
+            if policy_recording:
+                if self.dataset_manager is None:
+                    raise RuntimeError(
+                        "Policy action recording requires an initialized DatasetManager."
+                    )
+                self.dataset_manager.validate_policy_action(action)
             self.action_manager.process_action(action)
             if getattr(self, "_demo_no_auto_reset", False):
                 self.action_manager.mask_inactive(self._demo_active_mask)
@@ -2002,7 +2065,9 @@ class EmbodiedEnv(BaseEnv):
             action = self._prepare_controller_action(action)
             if getattr(self, "_demo_no_auto_reset", False):
                 action = self._mask_controller_demo_action(action)
-        if record_position_velocity:
+        if policy_trajectory:
+            self._traj_raw_action = raw_action.clone()
+        elif record_position_velocity:
             self._traj_raw_action = encode_expert_action(
                 action,
                 spec=self.expert_action_spec,
@@ -2481,7 +2546,7 @@ class EmbodiedEnv(BaseEnv):
                 self.get_demo_episode_metadata(int(env_id)) for env_id in env_ids
             ],
         }
-        meta.update(self.expert_action_spec.metadata(step_dt=self.step_dt))
+        meta.update(self._trajectory_action_metadata())
         torch.save({"states": states, "actions": actions, "meta": meta}, path)
         return path
 

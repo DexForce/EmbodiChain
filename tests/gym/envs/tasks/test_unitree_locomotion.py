@@ -173,3 +173,40 @@ def test_unitree_deployments_preserve_task_physics(
     assert config.robot.root_props.self_collision_enabled is (robot in {"g1", "h1_2"})
     assert config.robot.asset_physics_mode == "overlay"
     assert config.sensor[0].articulation_cfg_list[0].link_name_list == []
+
+
+def test_velocity_env_injects_one_ordered_joint_selector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime locomotion binding must not combine part and joint selectors."""
+    from embodichain.lab.gym.envs import EmbodiedEnv
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+    from embodichain.lab.sim import cfg as sim_cfg
+    from embodichain.utils.utility import load_config
+    from embodichain_tasks.locomotion.velocity.go1_flat import UnitreeGo1FlatEnv
+
+    monkeypatch.setattr(sim_cfg, "get_data_path", lambda value: value)
+    path = Path("embodichain_tasks/configs/tasks/locomotion/velocity/go1_flat/env.yaml")
+    cfg = config_to_cfg(
+        load_config(path),
+        source_path=path,
+        manager_modules=[
+            f"embodichain_tasks.locomotion.managers.{module}"
+            for module in ("observations", "rewards")
+        ],
+    )
+    captured: dict[str, object] = {}
+
+    def capture_init(self, resolved_cfg, **kwargs) -> None:
+        del self, kwargs
+        captured["cfg"] = resolved_cfg
+
+    monkeypatch.setattr(EmbodiedEnv, "__init__", capture_init)
+
+    UnitreeGo1FlatEnv(cfg)
+
+    resolved = captured["cfg"]
+    params = resolved.actions.joint_position.params
+    assert "part_name" not in params
+    assert params["joint_names"] == go1_config.load_config().joint_names
+    assert params["preserve_order"] is True

@@ -23,7 +23,7 @@ import json
 import math
 import threading
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
@@ -455,6 +455,36 @@ class LeRobotRecorder(Functor):
                 "Raw policy action history must match the descriptor layout "
                 f"shape {expected_shape}, got {tuple(actions.shape)}."
             )
+        self._validate_policy_action_values(actions)
+        return actions.detach().cpu().clone()
+
+    def validate_policy_action(self, action: torch.Tensor) -> None:
+        """Reject invalid live policy values before term processing or execution.
+
+        Args:
+            action: Flat policy tensor for all vector environments.
+
+        Raises:
+            TypeError: If the action is not a floating tensor.
+            ValueError: If its layout or descriptor-owned values are invalid.
+        """
+        if not self._policy_action_descriptors:
+            return
+        if not isinstance(action, torch.Tensor) or not action.is_floating_point():
+            raise TypeError("Policy dataset actions must be floating tensors.")
+        expected = (
+            self._env.num_envs,
+            self._policy_action_descriptors[-1].stop,
+        )
+        if tuple(action.shape) != expected:
+            raise ValueError(
+                f"Policy dataset action must have shape {expected}, "
+                f"got {tuple(action.shape)}."
+            )
+        self._validate_policy_action_values(action)
+
+    def _validate_policy_action_values(self, actions: torch.Tensor) -> None:
+        """Validate descriptor-specific values for one flat action batch."""
         for descriptor in self._policy_action_descriptors:
             values = actions[:, descriptor.start : descriptor.stop]
             representation = descriptor.term.representation
@@ -467,7 +497,6 @@ class LeRobotRecorder(Functor):
                 raise ValueError(
                     "Parallel-gripper policy actions must be finite and within [-1, 1]."
                 )
-        return actions.detach().cpu().clone()
 
     def _contract_action_list(self, env_id: int, step: int, stored_actions: Any) -> Any:
         """Build the primary and optional executed actions for one contract."""
@@ -981,6 +1010,7 @@ class LeRobotRecorder(Functor):
                     obs,
                     action,
                     frame_subtask if use_official_task_index else task,
+                    env_id=env_id,
                     annotations=frame_annotations,
                     subtask_index=(
                         None
@@ -1610,9 +1640,24 @@ class LeRobotRecorder(Functor):
             }
         return features
 
-    def _to_eef_observation(self, qpos: torch.Tensor) -> torch.Tensor:
-        """Convert measured qpos into the configured auxiliary EEF layout."""
+    def _to_eef_observation(
+        self,
+        qpos: torch.Tensor,
+        *,
+        env_ids: Sequence[int],
+    ) -> torch.Tensor:
+        """Convert measured qpos rows into the configured auxiliary EEF layout.
+
+        Args:
+            qpos: Measured joint-position rows.
+            env_ids: Source vector-environment IDs matching those rows.
+
+        Returns:
+            Arena-frame xyz/RPY plus normalized gripper rows.
+        """
         qpos = qpos.to(device=self._env.device, dtype=torch.float32)
+        if len(env_ids) != qpos.shape[0]:
+            raise ValueError("env_ids must contain one source row for each qpos row.")
         binding = getattr(self, "_eef_observation_terms", None)
         if binding is None:
             arm_name = "arm"
@@ -1622,7 +1667,10 @@ class LeRobotRecorder(Functor):
             arm_name = arm_term.part_name
             arm_ids = list(arm_term.controlled_joint_ids)
         pose = self._env.robot.compute_fk(
-            qpos=qpos[:, arm_ids], name=arm_name, to_matrix=True
+            qpos=qpos[:, arm_ids],
+            name=arm_name,
+            env_ids=env_ids,
+            to_matrix=True,
         )
         rotation = pose[:, :3, :3]
         sy = torch.sqrt(rotation[:, 0, 0] ** 2 + rotation[:, 1, 0] ** 2)
@@ -1788,6 +1836,8 @@ class LeRobotRecorder(Functor):
         obs: TensorDict,
         action: TensorDict | torch.Tensor,
         task: str,
+        *,
+        env_id: int,
         annotations: Mapping[str, Any] | None = None,
         subtask_index: int | None = None,
     ) -> Dict:
@@ -1797,6 +1847,7 @@ class LeRobotRecorder(Functor):
             obs: Single environment observation (already extracted from batch)
             action: Single environment action (already extracted from batch)
             task: Episode-level task description.
+            env_id: Source vector-environment row for FK-sensitive features.
             annotations: Optional segment and terminal fields for this frame.
             subtask_index: Optional legacy dataset-global subtask index.
 
@@ -1850,7 +1901,8 @@ class LeRobotRecorder(Functor):
         frame[LeRobotKey.OBS_QF.value] = obs["robot"]["qf"].cpu()
         if self.record_eef_observation:
             frame["observation.eef_pose"] = self._to_eef_observation(
-                obs["robot"]["qpos"].unsqueeze(0)
+                obs["robot"]["qpos"].unsqueeze(0),
+                env_ids=[env_id],
             )[0].cpu()
 
         # Add extra observation features if they exist

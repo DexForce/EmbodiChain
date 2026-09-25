@@ -394,6 +394,31 @@ class TestAsyncLeRobotRecorder:
         )
         torch.testing.assert_close(saved, expected)
 
+    def test_invalid_policy_action_never_enters_async_queue(self) -> None:
+        """Descriptor validation fails in the caller before enqueue or execution."""
+        env = _MockEnv(num_envs=1, num_joints=7, steps=1)
+        invalid = torch.tensor([[0.0, 0, 0, 0, 0, 0, 1.1]])
+        env.get_raw_action_history = Mock(return_value=invalid)
+        env.action_manager = Mock()
+        env.action_manager.descriptors = _policy_descriptors()
+        env.action_manager.get_term.return_value = Mock(_scale=torch.tensor(1.0))
+        recorder = _make_recorder(
+            env,
+            _MockDataset(),
+            action_contract={
+                "version": 1,
+                "representation": "eef_pose_parallel_gripper",
+                "record_eef_observation": False,
+            },
+        )
+
+        with pytest.raises(ValueError, match=r"within \[-1, 1\]"):
+            recorder(env, env_ids=torch.tensor([0]))
+
+        assert recorder._save_queue.empty()
+        env.current_rollout_step = 0
+        recorder.finalize()
+
     def test_finalize_drains_and_finalizes_dataset(self):
         """finalize() must drain the worker then call dataset.finalize()."""
         env = _MockEnv(num_envs=1, steps=2)

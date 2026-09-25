@@ -88,6 +88,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             if term_cfg is not None:
                 mapping = {
                     "joint_names": self.velocity_task_config.joint_names,
+                    "preserve_order": True,
                     "offset": self.velocity_task_config.default_joint_position,
                     "scale": self.velocity_task_config.action_scale,
                 }

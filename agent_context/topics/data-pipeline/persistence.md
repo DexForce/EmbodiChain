@@ -41,7 +41,8 @@
    and before the next control step. Synchronous, asynchronous, and fragment
    persistence retain identical descriptor order and clone before live buffers
    can be reused. Vector batches transfer to CPU once per step before their rows
-   enter per-environment history.
+   enter per-environment history. Invalid EEF/gripper values fail before manager
+   processing and are checked again before sync writes or async enqueue.
 9. The async worker records per-payload errors but continues draining later items. Finalize
    rejects new work, queues a sentinel after all existing payloads, joins the worker, calls
    base finalization, and aggregates background plus storage errors. Its queue is unbounded,

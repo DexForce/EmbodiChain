@@ -63,6 +63,9 @@ is omitted. Expert contracts select `joint_position` or
 come from the live `ActionManager` descriptors. The descriptor sequence must
 match the declared representation and is stored as
 `embodichain.action_terms` in action-feature metadata and episode sidecars.
+Policy recorders validate EEF finiteness and normalized gripper bounds before
+ActionManager processing, then validate again before persistence. A
+`ControllerAction` cannot be written into this policy schema.
 Contract datasets use per-frame LeRobot `task` / `task_index` for segment
 instructions. Executed controller commands are not a separate dataset feature.
 

@@ -137,6 +137,8 @@ def test_official_action_configs_use_new_classes_only() -> None:
         for term in config.get("env", {}).get("actions", {}).values():
             assert term["func"].endswith("Action"), config_path
             assert "mode" not in term, config_path
+            if term["func"] == "DefaultJointPositionAction":
+                assert "part_name" not in term.get("params", {}), config_path
 
 
 def test_action_docs_and_context_use_new_public_contract() -> None:

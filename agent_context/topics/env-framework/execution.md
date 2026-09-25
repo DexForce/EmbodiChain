@@ -51,6 +51,9 @@ Read this when the request needs these details. [Topic overview](env-framework.m
 - Task Program runtime commands, waits, and abort-safe holds use
   `ControllerAction`; they retain the ordinary Gym lifecycle without becoming
   policy actions.
+- Descriptor-driven policy recording and policy-width trajectory recording do
+  not accept `ControllerAction`; mixing those fixed layouts fails before action
+  processing. Expert recording continues to use `ExpertActionSpec`.
 - For raw-policy vector demos with staggered completion, ActionManager masks
   inactive rows after processing: selected qpos resources hold measured values,
   while qvel/qf resources receive zero commands.
@@ -217,8 +220,9 @@ from the event config before the event manager is created.
 
 - **Recording**: set `cfg.record_trajectory = True`. A dedicated per-env
   `self._traj_buffer` (TensorDict: `states` = robot root_pose+qpos, articulations,
-  rigid objects; `actions` = the **pre-process** action in position mode, or
-  effective flat `[qpos, qvel]` targets in position-velocity expert mode) is written each step via
+  rigid objects; `actions` = the flat raw policy action when ActionManager is
+  configured, active qpos for position-mode experts, or effective flat
+  `[qpos, qvel]` targets in position-velocity expert mode) is written each step via
   `_write_trajectory_step` (called from `_hook_after_sim_step`). A per-env
   `self._traj_steps` counter means **async parallel envs** (different reset times)
   don't corrupt each other. `cfg.trajectory_uids` restricts which non-robot objects
@@ -237,8 +241,9 @@ from the event config before the event manager is created.
 - **Decoupled from `rollout_buffer`**: the trajectory buffer is separate from the
   shared `rollout_buffer` (obs/actions/rewards) used by LeRobot/RL.
   `current_rollout_step`, LeRobot recorder, and RL mode are untouched.
-- **Expert action space**: expert rollout/trajectory buffers use a private
-  stored-action layout, leaving the policy-facing Gym `action_space` unchanged.
+- **Fixed action layout**: an ActionManager-backed trajectory uses the batched
+  policy action space; a controller/expert trajectory uses the private
+  `ExpertActionSpec` layout. One trajectory cannot mix these schemas.
 - **CLI**: `run-env --replay --replay_trajectory <path> --replay_mode {kinematic,dynamic,control}`.
 
 ---

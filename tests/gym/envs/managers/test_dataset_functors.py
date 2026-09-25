@@ -598,7 +598,9 @@ class TestLeRobotRecorderFeatures:
             batch_size=[],
         )
         requested = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, -1.0])
-        frame = recorder._convert_frame_to_lerobot(obs, requested, "test_task")
+        frame = recorder._convert_frame_to_lerobot(
+            obs, requested, "test_task", env_id=0
+        )
         torch.testing.assert_close(frame[LeRobotKey.ACTION.value], requested)
         assert not any("controller_qpos" in key for key in frame)
         assert "subtask_index" not in frame
@@ -1307,6 +1309,7 @@ class TestLeRobotRecorderFrameConversion:
             obs,
             action,
             "test_task",
+            env_id=0,
             annotations={
                 "episode_step": 4,
                 "segment_id": 2,
@@ -1371,7 +1374,7 @@ class TestLeRobotRecorderFrameConversion:
             batch_size=[],
         )
 
-        frame = recorder._convert_frame_to_lerobot(obs, action, "test_task")
+        frame = recorder._convert_frame_to_lerobot(obs, action, "test_task", env_id=0)
 
         torch.testing.assert_close(
             frame[LeRobotKey.ACTION.value],
@@ -1438,7 +1441,9 @@ class TestLeRobotRecorderFrameConversion:
                 },
                 batch_size=[],
             )
-            frame = recorder._convert_frame_to_lerobot(obs, torch.zeros(6), "test_task")
+            frame = recorder._convert_frame_to_lerobot(
+                obs, torch.zeros(6), "test_task", env_id=0
+            )
 
         assert torch.equal(frame["observation.depth.camera"], depth)
         assert torch.equal(frame["observation.mask.camera"], mask)
@@ -1529,6 +1534,16 @@ def test_policy_action_list_validates_term_values(
         recorder._policy_action_list(0, 1)
 
 
+def test_policy_action_validation_rejects_before_persistence() -> None:
+    """The live policy validator uses the same descriptor value contract."""
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder._env = SimpleNamespace(num_envs=1)
+    recorder._policy_action_descriptors = policy_descriptors()
+
+    with pytest.raises(ValueError, match=r"within \[-1, 1\]"):
+        recorder.validate_policy_action(torch.tensor([[0.0, 0, 0, 0, 0, 0, 1.1]]))
+
+
 def test_eef_observation_uses_bound_parts_and_opposing_gripper_mapping() -> None:
     """Auxiliary EEF state inverts the configured independent-joint mapping."""
     arm_term = SimpleNamespace(
@@ -1554,10 +1569,11 @@ def test_eef_observation_uses_bound_parts_and_opposing_gripper_mapping() -> None
         ]
     )
 
-    observation = recorder._to_eef_observation(qpos)
+    observation = recorder._to_eef_observation(qpos, env_ids=[2, 4, 6])
 
     torch.testing.assert_close(observation[:, -1], torch.tensor([-1.0, 0.0, 1.0]))
     assert robot.compute_fk.call_args.kwargs["name"] == "manipulator"
+    assert robot.compute_fk.call_args.kwargs["env_ids"] == [2, 4, 6]
 
 
 def test_joint_contract_action_list_keeps_primary_action_only() -> None:
@@ -2001,6 +2017,7 @@ def test_policy_episode_sidecar_contains_action_terms() -> None:
 
     assert recorder._save_single_episode(0, [object()], [torch.zeros(7)])
 
+    assert recorder._convert_frame_to_lerobot.call_args.kwargs["env_id"] == 0
     metadata = recorder._write_episode_metadata.call_args.args[0]
     assert metadata["embodichain.action_terms"] == [
         descriptor.to_dict() for descriptor in policy_descriptors()

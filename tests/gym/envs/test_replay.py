@@ -536,12 +536,12 @@ class ReplayDeltaEnv(EmbodiedEnv):
                 func=RelativeJointPositionAction,
                 params={
                     "joint_names": (
-                        "shoulder_pan_joint",
-                        "shoulder_lift_joint",
-                        "elbow_joint",
-                        "wrist_1_joint",
-                        "wrist_2_joint",
-                        "wrist_3_joint",
+                        "Joint1",
+                        "Joint2",
+                        "Joint3",
+                        "Joint4",
+                        "Joint5",
+                        "Joint6",
                     ),
                     "preserve_order": True,
                     "scale": 1.0,
@@ -572,6 +572,9 @@ def test_dynamic_replay_with_action_manager(tmp_path):
         # Recorded action must be the raw delta (pre-process), not the resolved qpos.
         rec = torch.load(path, weights_only=False)
         assert torch.allclose(rec["actions"][0, 0], deltas[0][0], atol=1e-6)
+        assert rec["meta"]["action_kind"] == "policy"
+        assert [term["name"] for term in rec["meta"]["action_terms"]] == ["arm"]
+        assert "joint_command_mode" not in rec["meta"]
         assert torch.allclose(rec["states"]["robot"]["qpos"][:, 0], init_qpos)
         for step in range(1, len(deltas)):
             assert torch.allclose(

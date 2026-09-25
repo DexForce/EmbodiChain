@@ -204,6 +204,17 @@ class DatasetManager(ManagerBase):
             for functor_cfg in self._mode_functor_cfgs.get("save", [])
         )
 
+    def validate_policy_action(self, action: torch.Tensor) -> None:
+        """Validate a live policy action for every descriptor-driven recorder.
+
+        Args:
+            action: Flat policy tensor before ActionManager processing.
+        """
+        for functor_cfg in self._mode_functor_cfgs.get("save", []):
+            validator = getattr(functor_cfg.func, "validate_policy_action", None)
+            if callable(validator):
+                validator(action)
+
     """
     Operations.
     """

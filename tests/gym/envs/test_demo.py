@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import threading
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
@@ -148,6 +149,7 @@ def _controller_action_env() -> EmbodiedEnv:
     env._num_envs = 2
     env._traj_buffer = None
     env.action_manager = Mock()
+    env.dataset_manager = Mock()
     env._demo_no_auto_reset = False
     env.active_joint_ids = [0, 1, 2]
     env.robot = Mock()
@@ -224,12 +226,107 @@ def test_policy_history_snapshots_manager_owned_flat_action() -> None:
 def test_controller_action_does_not_append_policy_history() -> None:
     """Expert controller commands never masquerade as policy actions."""
     env = _controller_action_env()
-    env._record_raw_actions = True
+    env._record_raw_actions = False
     env._raw_action_history = [[], []]
 
     env._preprocess_action(ControllerAction(torch.ones(2, 3)))
 
     assert env.get_raw_action_history(0).shape == (0, 0)
+
+
+def test_policy_recorder_rejects_controller_action_before_execution() -> None:
+    """A controller-ready expert cannot enter a policy dataset layout."""
+    env = _controller_action_env()
+    env._record_raw_actions = True
+
+    with pytest.raises(ValueError, match="policy action recording"):
+        env._preprocess_action(ControllerAction(torch.ones(2, 3)))
+
+    env.action_manager.process_action.assert_not_called()
+
+
+def test_policy_recorder_validates_before_manager_processing() -> None:
+    """Invalid contract actions fail before term state or robot commands change."""
+    env = _controller_action_env()
+    env._record_raw_actions = True
+    env.dataset_manager = Mock()
+    env.dataset_manager.validate_policy_action.side_effect = ValueError(
+        "invalid policy action"
+    )
+    action = torch.ones(2, 3)
+
+    with pytest.raises(ValueError, match="invalid policy action"):
+        env._preprocess_action(action)
+
+    env.dataset_manager.validate_policy_action.assert_called_once_with(action)
+    env.action_manager.process_action.assert_not_called()
+
+
+def test_policy_trajectory_uses_policy_action_space() -> None:
+    """Action-managed trajectories allocate the flat policy width."""
+    policy_space = object()
+    expert_space = object()
+    env = SimpleNamespace(
+        action_manager=object(),
+        action_space=policy_space,
+        _expert_action_space=expert_space,
+    )
+
+    assert EmbodiedEnv._trajectory_action_space(env) is policy_space
+
+
+def test_policy_trajectory_metadata_uses_action_descriptors() -> None:
+    """Saved policy trajectories never advertise an expert qvel layout."""
+    descriptor = SimpleNamespace(to_dict=lambda: {"name": "arm_action"})
+    env = SimpleNamespace(
+        _trajectory_action_kind="policy",
+        action_manager=SimpleNamespace(
+            total_action_dim=2,
+            descriptors=(descriptor,),
+        ),
+        expert_action_spec=build_expert_action_spec(
+            joint_names=["joint_0", "joint_1"],
+            joint_command_mode="position_velocity",
+        ),
+        step_dt=0.04,
+    )
+
+    metadata = EmbodiedEnv._trajectory_action_metadata(env)
+
+    assert metadata == {
+        "action_kind": "policy",
+        "action_dim": 2,
+        "action_terms": [{"name": "arm_action"}],
+    }
+    assert "qvel_slice" not in metadata
+
+
+def test_policy_trajectory_ignores_expert_position_velocity_encoding() -> None:
+    """Flat policy trajectories retain manager raw input regardless of expert mode."""
+    env = _controller_action_env()
+    env._traj_buffer = object()
+    env._trajectory_action_kind = "policy"
+    env._record_raw_actions = False
+    env.expert_action_spec = build_expert_action_spec(
+        joint_names=["joint_0", "joint_1", "joint_2"],
+        joint_command_mode="position_velocity",
+    )
+    manager_action = torch.tensor([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
+    env.action_manager.action = manager_action
+
+    env._preprocess_action(manager_action.clone())
+
+    torch.testing.assert_close(env._traj_raw_action, manager_action)
+
+
+def test_policy_trajectory_rejects_controller_action() -> None:
+    """One fixed-width trajectory cannot mix policy and expert schemas."""
+    env = _controller_action_env()
+    env._traj_buffer = object()
+    env._trajectory_action_kind = "policy"
+
+    with pytest.raises(ValueError, match="policy trajectory"):
+        env._preprocess_action(ControllerAction(torch.ones(2, 3)))
 
 
 @pytest.mark.parametrize("key", ["qpos", "qvel"])
@@ -1074,6 +1171,29 @@ def test_expert_rollout_writer_uses_independent_per_env_lengths() -> None:
         env.rollout_buffer["obs"]["state"][1, 3], torch.tensor([2.0, 2.0])
     )
     assert env.current_rollout_step == 3
+
+
+def test_policy_rollout_writer_ignores_expert_position_velocity_schema() -> None:
+    """A policy contract stores the flat manager input, not expert encoding."""
+    env = _RolloutWriterStub()
+    env._record_raw_actions = True
+    env.active_joint_ids = [0, 1]
+    env.expert_action_spec = build_expert_action_spec(
+        joint_names=["joint_0", "joint_1"],
+        joint_command_mode="position_velocity",
+    )
+    action = torch.tensor([[0.1, 0.2], [0.3, 0.4]])
+    obs = TensorDict({"state": torch.zeros(2, 2)}, batch_size=[2])
+
+    EmbodiedEnv._write_episode_rollout_step(
+        env,
+        obs=obs,
+        action=action,
+        rewards=torch.zeros(2),
+    )
+
+    torch.testing.assert_close(env.rollout_buffer["actions"][0, 0], action[0])
+    torch.testing.assert_close(env.rollout_buffer["actions"][1, 2], action[1])
 
 
 def test_end_segment_retroactively_annotates_accepted_frame_spans() -> None:
