@@ -50,6 +50,7 @@ from embodichain.lab.task_program.semantics import (
     HeldObjectRelation,
     RegisteredSemanticCall,
     SceneObjectRef,
+    SceneArticulationRef,
     SceneRegistry,
     SemanticEffectKind,
     SemanticPose,
@@ -796,7 +797,7 @@ class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
     """Create fresh relative-placement lowerers from canonical scene refs."""
 
     call_id: ClassVar[str] = _PLACE_RELATIVE_CALL_ID
-    revision: ClassVar[str] = "3"
+    revision: ClassVar[str] = "4"
     target_descriptor: ClassVar[SkillDescriptor] = Place.descriptor()
 
     routes: tuple[_RelativePlaceRoute, ...]
@@ -834,8 +835,18 @@ class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
             )
             reference_ref = scene_registry.resolve(
                 route.reference_entity_id,
-                expected_type=SceneObjectRef,
             )
+            if type(reference_ref) not in {SceneObjectRef, SceneArticulationRef}:
+                raise TypeError(
+                    "Relative Place reference must be a rigid or articulation root."
+                )
+            if isinstance(reference_ref, SceneArticulationRef) and route.relation in {
+                "on",
+                "above",
+            }:
+                raise ValueError(
+                    "Articulated supports require qualified link bindings."
+                )
             routes.append(
                 _RelativePlaceRoute(
                     object_id=object_ref.entity_id,

@@ -1268,3 +1268,121 @@ def test_task_pick_alias_factory_has_stable_immutable_identity() -> None:
 def test_task_decoder_rejects_out_of_scope_services(kind: str) -> None:
     with pytest.raises(ValueError, match="unsupported Task Engine service"):
         decode_task_lowerer({"kind": kind}, path="lowerer")
+
+
+@pytest.mark.parametrize("articulated", [False, True])
+def test_relative_place_observes_either_native_reference_root(articulated):
+    from embodichain.lab.task_program.semantics import (
+        SceneRegistry,
+        SceneArticulationRef,
+        SceneObjectRef,
+    )
+    from embodichain.lab.sim.atomic_actions import PlaceOptions
+    from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
+
+    cup_pose = torch.eye(4).repeat(2, 1, 1)
+    reference_pose = cup_pose.clone()
+    cup = SimpleNamespace(get_local_pose=lambda **kw: cup_pose.clone())
+    reference = SimpleNamespace(
+        get_local_pose=lambda **kw: reference_pose.clone(),
+        joint_names=("press",),
+        get_qpos=lambda **kw: torch.zeros(2, 1),
+    )
+    rigid = {"cup": cup, **({} if articulated else {"anchor": reference})}
+    simulation = SimpleNamespace(
+        get_rigid_object=rigid.get, get_articulation=lambda uid: reference
+    )
+    registry = SceneRegistry.from_simulation(
+        simulation,
+        rigid_objects={uid: uid for uid in rigid},
+        articulations={"anchor": "anchor"} if articulated else {},
+    )
+    assert type(registry.resolve("anchor")) is (
+        SceneArticulationRef if articulated else SceneObjectRef
+    )
+    robot = SimpleNamespace(compute_fk=lambda **kw: cup_pose.clone())
+    factory = decode_task_lowerer(
+        {
+            "kind": "place_relative",
+            "routes": [
+                {
+                    "object_id": "cup",
+                    "reference_entity_id": "anchor",
+                    "relation": "behind",
+                    "world_displacement": [0.2, 0.0, 0.0],
+                }
+            ],
+        },
+        path="relative",
+    )
+    lowerer = factory.create(
+        simulation=simulation,
+        robot=robot,
+        scene_registry=registry,
+        engine=SimpleNamespace(robot=robot),
+    )
+    provider = registry.make_scene_provider(batch_size=2)
+    env_ids = torch.tensor([0, 1])
+    held = SimpleNamespace(
+        semantics=SimpleNamespace(entity_id="cup"),
+        object_to_eef=torch.eye(4).repeat(2, 1, 1),
+    )
+    context = SimpleNamespace(
+        scene=provider.snapshot(timestamp=0.0, env_ids=env_ids),
+        task=SimpleNamespace(get_held_object=lambda key: held),
+        robot=SimpleNamespace(qpos=torch.zeros(2, 1)),
+        batch_size=2,
+        env_ids=env_ids,
+    )
+    bound = SimpleNamespace(
+        binding=SimpleNamespace(
+            resources={
+                "primary": SimpleNamespace(
+                    endpoints={
+                        "motion": SimpleNamespace(
+                            task_state_key="arm",
+                            runtime_target=SimpleNamespace(
+                                joint_ids=(0,), control_part="arm"
+                            ),
+                        )
+                    }
+                )
+            }
+        )
+    )
+    result = lowerer.lower(
+        RegisteredSemanticCall(
+            call_id="simulation.place_relative",
+            arguments={"object": "cup", "reference": "anchor", "relation": "behind"},
+        ),
+        context=context,
+        bound=bound,
+        option_template=PlaceOptions(preserve_current_object_orientation=True),
+    )
+    assert result.goal.xpos.entity_id == "anchor"
+    before = resolve_pose_goal(result.goal.xpos, context, name="release")
+    reference_pose[1, 0, 3] = 0.1
+    context.scene = provider.snapshot(timestamp=1.0, env_ids=env_ids)
+    after = resolve_pose_goal(result.goal.xpos, context, name="release")
+    torch.testing.assert_close(
+        after[:, 0, 3] - before[:, 0, 3], torch.tensor([0.0, 0.1])
+    )
+    if articulated:
+        config = {
+            "kind": "place_relative",
+            "routes": [
+                {
+                    "object_id": "cup",
+                    "reference_entity_id": "anchor",
+                    "relation": "on",
+                    "world_displacement": [0.0, 0.0, 0.1],
+                }
+            ],
+        }
+        with pytest.raises(ValueError, match="qualified link"):
+            decode_task_lowerer(config, path="support").create(
+                simulation=simulation,
+                robot=robot,
+                scene_registry=registry,
+                engine=SimpleNamespace(robot=robot),
+            )

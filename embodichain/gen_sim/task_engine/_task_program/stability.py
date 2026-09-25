@@ -211,12 +211,30 @@ class TaskStabilityPort:
             binding.entity_id: simulation.get_rigid_object(binding.simulation_uid)
             for binding in scene_binding.rigid_objects
         }
+        self._references = {
+            **self._objects,
+            **{
+                binding.entity_id: simulation.get_articulation(binding.simulation_uid)
+                for binding in scene_binding.articulations
+            },
+        }
         for cfg in self._constraints.values():
+            if cfg.entity not in self._objects:
+                raise ValueError(
+                    "Task stability manipulated entities must be rigid objects."
+                )
             for entity in (cfg.entity, cfg.reference):
                 if entity is not None and (
-                    entity not in self._objects or self._objects[entity] is None
+                    entity not in self._references or self._references[entity] is None
                 ):
                     raise ValueError(f"Task stability entity {entity!r} is not bound.")
+            if cfg.reference not in self._objects and cfg.kind in {
+                "stack",
+                "supported_placement",
+            }:
+                raise ValueError(
+                    "Articulated support acceptance requires qualified link geometry."
+                )
         self._support_vertices: dict[str, torch.Tensor] = {}
         for cfg in self._constraints.values():
             if cfg.kind != "supported_placement":
@@ -254,7 +272,7 @@ class TaskStabilityPort:
             raise ValueError("Task stability declaration and compiled policy disagree.")
 
     def _pose(self, entity: str) -> torch.Tensor:
-        pose = self._objects[entity].get_local_pose(to_matrix=True)
+        pose = self._references[entity].get_local_pose(to_matrix=True)
         if (
             not isinstance(pose, torch.Tensor)
             or pose.ndim != 3

@@ -730,6 +730,11 @@ def _program_payload(
             )
         }
     )
+    articulated_references = {
+        str(item["runtime_uid"])
+        for item in (() if scene is None else scene.planner_objects)
+        if item.get("role") == "articulation"
+    }
     items = [
         _program_node(
             node,
@@ -741,6 +746,8 @@ def _program_payload(
             axis_by_object=axis_by_object,
             task_stability=f"gen_sim.{node['id']}.stable"
             in (stability_presets or set()),
+            articulated_reference=node["call"].get("arguments", {}).get("reference")
+            in articulated_references,
         )
         for node in graph["nodes"]
     ]
@@ -836,6 +843,7 @@ def _program_node(
     relative_routes: dict[tuple[str, str, str], dict[str, Any]] | None = None,
     axis_by_object: dict[str, list[float]] | None = None,
     task_stability: bool = False,
+    articulated_reference: bool = False,
 ) -> dict[str, Any]:
     """Materialize one task node as one canonical runtime segment."""
     call = deepcopy(node["call"])
@@ -889,15 +897,23 @@ def _program_node(
             raise ValueError(
                 f"Relative placement has no generated route for {selector!r}."
             ) from exc
-        segment["validators"] = [
-            {
-                "kind": "object_near_relative_target",
-                "object": route["object_id"],
-                "reference": route["reference_entity_id"],
-                "displacement": deepcopy(route["world_displacement"]),
-                "position_tolerance": _RELATIVE_POSITION_TOLERANCE,
-            }
-        ]
+        if articulated_reference:
+            # The shared validator is rigid-only. The GenSim post-policy uses
+            # the same displacement/tolerance and observes either native root.
+            if not task_stability:
+                raise ValueError(
+                    "Articulated references require task stability acceptance."
+                )
+        else:
+            segment["validators"] = [
+                {
+                    "kind": "object_near_relative_target",
+                    "object": route["object_id"],
+                    "reference": route["reference_entity_id"],
+                    "displacement": deepcopy(route["world_displacement"]),
+                    "position_tolerance": _RELATIVE_POSITION_TOLERANCE,
+                }
+            ]
     if (
         not task_stability
         and node.get("task_type") == "E2"
@@ -1281,12 +1297,22 @@ def _integration_payload(
             if source["role"] != "articulation"
         )
     rigid_bindings: list[dict[str, Any]] = []
+    spatial_articulations: set[str] = set()
     for entity_id in sorted(referenced_objects | {"table"}):
         source = scene_objects.get(entity_id)
         if source is None:
             raise ValueError(
                 f"Semantic graph references missing scene entity {entity_id!r}."
             )
+        if source["role"] == "articulation":
+            if any(container == entity_id for _, container, *_ in inside_routes) or any(
+                support == entity_id for _, support, _ in on_routes
+            ):
+                raise ValueError(
+                    "Articulated supports/containers require qualified link bindings."
+                )
+            spatial_articulations.add(entity_id)
+            continue
         affordances: list[dict[str, Any]] = []
         if str(source["role"]) == "rigid_object":
             grasp_affordance = {
@@ -1409,7 +1435,10 @@ def _integration_payload(
             "rigid_objects": rigid_bindings,
             "articulations": [
                 {"entity_id": uid, "simulation_uid": uid}
-                for uid in sorted({b.object_id for b in articulation_bindings.values()})
+                for uid in sorted(
+                    {b.object_id for b in articulation_bindings.values()}
+                    | spatial_articulations
+                )
             ],
             "links": [
                 {
@@ -2098,6 +2127,11 @@ def _relative_place_route_payloads(
     """Project each release using only orientation changes preceding that call."""
     axis_align_objects: set[str] = set()
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
+    actuated_references = {
+        node["call"].get("arguments", {}).get("object")
+        for node in graph["nodes"]
+        if node["call"].get("call_id") == SLIDE_CALL
+    }
     routes: dict[tuple[str, str, str], dict[str, Any]] = {}
     for node in graph["nodes"]:
         call = node["call"]
@@ -2122,6 +2156,20 @@ def _relative_place_route_payloads(
             str(arguments["relation"]),
         )
         object_id, reference_id, relation = selector
+        if reference_id in actuated_references:
+            raise ValueError(
+                f"Spatial reference {reference_id!r} changes joints in this program; "
+                "use qualified link geometry instead of an authored root envelope."
+            )
+        if scene_objects.get(reference_id, {}).get(
+            "role"
+        ) == "articulation" and relation in {
+            "on",
+            "above",
+        }:
+            raise ValueError(
+                "Articulated supports require qualified link bindings; root references support side relations only."
+            )
         if reference_id == "table" and relation not in {"on", "above"}:
             raise ValueError(
                 "A lateral table-relative placement has no supported landing surface. "
@@ -2262,6 +2310,7 @@ def _relative_world_displacement(
             object_axis_aligned=object_id in axis_align_objects,
             reference_axis_aligned=reference_id in axis_align_objects,
             minimum=_LATERAL_RELATION_DISTANCE,
+            reference_direction=-1,
         )
     elif relation == "front_of":
         displacement[0] = -_horizontal_relation_distance(
@@ -2271,6 +2320,7 @@ def _relative_world_displacement(
             object_axis_aligned=object_id in axis_align_objects,
             reference_axis_aligned=reference_id in axis_align_objects,
             minimum=_FRONT_RELATION_DISTANCE,
+            reference_direction=-1,
         )
     elif relation == "behind":
         displacement[0] = _horizontal_relation_distance(
@@ -2294,8 +2344,26 @@ def _horizontal_relation_distance(
     object_axis_aligned: bool,
     reference_axis_aligned: bool,
     minimum: float,
+    reference_direction: int = 1,
 ) -> float:
     """Return geometry-aware center separation for one planar relation."""
+    if reference.get("role") == "articulation":
+        # An articulation root need not be at its geometry center. Measure the
+        # outward edge in its actual root frame, not half the aggregate span.
+        points = _mesh_vertices(reference) @ _initial_rotation(reference).T
+        edge = float((points[:, world_axis] * reference_direction).max())
+        return max(
+            minimum,
+            edge
+            + _horizontal_half_extent(
+                obj, world_axis=world_axis, axis_aligned=object_axis_aligned
+            )
+            + (
+                _AXIS_ALIGNED_RELATION_CLEARANCE
+                if object_axis_aligned
+                else _RELATION_CLEARANCE
+            ),
+        )
     return max(
         minimum,
         _horizontal_half_extent(
@@ -2452,7 +2520,21 @@ def _vertical_mesh_bounds(
 
 
 def _mesh_vertices(source: dict[str, Any]) -> np.ndarray:
-    """Load one configured mesh in DexSim's object-local coordinate basis."""
+    """Load native geometry in the configured entity's runtime root frame."""
+    if source.get("role") == "articulation":
+        from .scene.articulation_geometry import read_articulation_geometry
+
+        path = source.get("fpath")
+        if not path:
+            raise ValueError(
+                f"Articulated reference {source.get('runtime_uid')!r} has no native USD asset."
+            )
+        scale = np.asarray(source.get("body_scale", [1.0, 1.0, 1.0]), dtype=np.float64)
+        if scale.shape != (3,) or not np.isfinite(scale).all() or (scale <= 0).any():
+            raise ValueError(
+                "Articulated reference requires a finite positive body_scale."
+            )
+        return read_articulation_geometry(path).vertices * scale
     shape = source.get("shape")
     if not isinstance(shape, dict) or not shape.get("fpath"):
         raise ValueError(

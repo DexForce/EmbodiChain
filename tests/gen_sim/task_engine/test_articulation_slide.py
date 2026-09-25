@@ -1368,3 +1368,193 @@ def test_drawer_place_preparation_uses_live_target_without_fit_gate(
         changed.goal.xpos[0, 0, :3, 3] - prepared.goal.xpos[0, 0, :3, 3],
         torch.tensor([0.12, 0, 0]),
     )
+
+
+@pytest.mark.parametrize("relation", ["behind", "left_of", "front_right_of"])
+def test_articulation_can_be_a_spatial_reference_without_becoming_a_rigid_body(
+    scene: PreparedScene, tmp_path: Path, relation: str
+) -> None:
+    from embodichain.gen_sim.task_engine.task_program_bundle import _mesh_vertices
+
+    mesh = tmp_path / "cup.glb"
+    trimesh.creation.box(extents=(0.04, 0.06, 0.04)).export(mesh)
+    cup = {
+        "uid": "cup",
+        "shape": {"shape_type": "Mesh", "fpath": str(mesh)},
+        "init_pos": [0.15, -0.2, 0.74],
+        "init_rot": [0.0, 0.0, 0.0],
+    }
+    scene = replace(
+        scene,
+        rigid_objects=(cup,),
+        planner_objects=(
+            *scene.planner_objects,
+            {**cup, "runtime_uid": "cup", "role": "rigid_object"},
+        ),
+        uid_map={**scene.uid_map, "cup": "cup"},
+    )
+    graph = {
+        "schema_version": "semantic_task_graph/v1",
+        "task_id": "spatial",
+        "instruction": "place cup beside articulation",
+        "planner_route": "offline",
+        "integration_fingerprint": "0" * 64,
+        "targets": {},
+        "nodes": [
+            {
+                "id": "pick",
+                "task_instance_id": "move",
+                "task_type": "E1",
+                "role": "primary",
+                "depends_on": [],
+                "call": {
+                    "kind": "pick",
+                    "object": "cup",
+                    "resources": {"primary": "left"},
+                },
+            },
+            {
+                "id": "place",
+                "task_instance_id": "move",
+                "task_type": "E1",
+                "role": "primary",
+                "depends_on": ["pick"],
+                "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.place_relative",
+                    "arguments": {
+                        "object": "cup",
+                        "reference": "drawer",
+                        "relation": relation,
+                    },
+                    "resources": {"primary": "left"},
+                },
+            },
+        ],
+        "task_groups": [
+            {
+                "id": "move",
+                "task_type": "E1",
+                "node_ids": ["pick", "place"],
+                "depends_on": [],
+                "success": {"kind": "call_completed"},
+            }
+        ],
+        "success": {"kind": "all_task_groups"},
+    }
+    generated, paths = generate_task_program_bundle(
+        graph, scene, tmp_path / "bundle", robot_profile="dual_franka"
+    )
+    _verify_program_projection(paths.program, generated)
+    config = load_config(paths.integration)
+    assert [a["entity_id"] for a in config["scene_binding"]["articulations"]] == [
+        "drawer"
+    ]
+    assert "drawer" not in {
+        r["entity_id"] for r in config["scene_binding"]["rigid_objects"]
+    }
+    program = load_config(paths.program)
+    place = program["program"]["items"][-1]
+    assert "validators" not in place
+    assert place["post"][-1]["preset"] == "gen_sim.place.stable"
+    constraint = load_config(paths.program.parent / "constraints.json")["presets"][
+        "gen_sim.place.stable"
+    ]
+    assert (
+        constraint["reference"] == "drawer" and constraint["position_tolerance"] == 0.05
+    )
+    expected = (
+        read_articulation_geometry(scene.articulations[0]["fpath"]).vertices * 0.5
+    )
+    np.testing.assert_allclose(_mesh_vertices(scene.planner_objects[0]), expected)
+
+
+def test_spatial_reference_uses_native_root_offset_not_proxy_or_half_extent(
+    scene: PreparedScene, monkeypatch
+):
+    from embodichain.gen_sim.task_engine import task_program_bundle as bundle
+
+    obj = {"runtime_uid": "cup"}
+    reference = {
+        "runtime_uid": "bell",
+        "role": "articulation",
+        "init_rot": [0.0, 0.0, 0.0],
+    }
+    monkeypatch.setattr(
+        bundle,
+        "_mesh_vertices",
+        lambda value: (
+            np.array([[0.0, -0.05, 0.0], [0.4, 0.05, 0.1]])
+            if value is reference
+            else np.array([[-0.03, -0.03, -0.03], [0.03, 0.03, 0.03]])
+        ),
+    )
+    kwargs = dict(
+        world_axis=0,
+        object_axis_aligned=False,
+        reference_axis_aligned=False,
+        minimum=0.18,
+    )
+    assert bundle._horizontal_relation_distance(
+        obj, reference, **kwargs
+    ) == pytest.approx(0.45)
+    assert bundle._horizontal_relation_distance(
+        obj, reference, **kwargs, reference_direction=-1
+    ) == pytest.approx(0.18)
+
+
+def test_articulated_reference_cannot_drop_acceptance():
+    from embodichain.gen_sim.task_engine.task_program_bundle import _program_node
+
+    arguments = {"object": "cup", "reference": "bell", "relation": "behind"}
+    node = {
+        "id": "place",
+        "call": {
+            "kind": "registered",
+            "call_id": "simulation.place_relative",
+            "arguments": arguments,
+        },
+    }
+    route = {
+        "object_id": "cup",
+        "reference_entity_id": "bell",
+        "relation": "behind",
+        "world_displacement": [0.2, 0.0, 0.0],
+    }
+    with pytest.raises(ValueError, match="stability acceptance"):
+        _program_node(
+            node,
+            relative_routes={("cup", "bell", "behind"): route},
+            articulated_reference=True,
+        )
+
+
+def test_spatial_root_reference_rejects_joint_motion_in_the_same_program(scene):
+    from embodichain.gen_sim.task_engine.task_program_bundle import (
+        _relative_place_route_payloads,
+    )
+
+    graph = {
+        "nodes": [
+            {
+                "call": {
+                    "kind": "registered",
+                    "call_id": SLIDE_CALL,
+                    "arguments": {"object": "drawer"},
+                }
+            },
+            {
+                "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.place_relative",
+                    "arguments": {
+                        "object": "cup",
+                        "reference": "drawer",
+                        "relation": "behind",
+                    },
+                }
+            },
+        ]
+    }
+    with pytest.raises(ValueError, match="changes joints"):
+        _relative_place_route_payloads(graph, scene)
