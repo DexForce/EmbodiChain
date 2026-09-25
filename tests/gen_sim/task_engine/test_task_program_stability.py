@@ -139,6 +139,7 @@ def _local_port(
     *,
     reference_pose: torch.Tensor | None = None,
     vertices: dict[str, torch.Tensor] | None = None,
+    articulated_reference: bool = False,
 ):
     preset = "gen_sim.target.stable"
     policy = CompiledPostPolicy(
@@ -164,13 +165,23 @@ def _local_port(
         entities[entity].get_vertices = Mock(return_value=mesh)
     port = TaskStabilityPort(
         Mock(),
-        SimpleNamespace(get_rigid_object=entities.get),
+        SimpleNamespace(get_rigid_object=entities.get, get_articulation=entities.get),
         robot,
         SimpleNamespace(
             rigid_objects=tuple(
                 SimpleNamespace(entity_id=entity, simulation_uid=entity)
                 for entity in entities
-            )
+                if not articulated_reference or entity != cfg.reference
+            ),
+            articulations=(
+                (
+                    SimpleNamespace(
+                        entity_id=cfg.reference, simulation_uid=cfg.reference
+                    ),
+                )
+                if articulated_reference
+                else ()
+            ),
         ),
         {preset: cfg},
         step_dt=0.04,
@@ -184,6 +195,34 @@ def _box_vertices(half_extents: tuple[float, float, float], count: int) -> torch
     return torch.tensor(list(product(*[(-x, x) for x in half_extents]))).repeat(
         count, 1, 1
     )
+
+
+def test_relative_acceptance_reads_articulation_root_and_keeps_tolerance():
+    reference = torch.eye(4).repeat(2, 1, 1)
+    pose = reference.clone()
+    pose[:, 0, 3] = 0.2
+    cfg = StabilityConstraint(
+        kind="placement",
+        entity="cup",
+        reference="bell",
+        displacement=(0.2, 0.0, 0.0),
+        position_tolerance=0.05,
+        duration=0.08,
+        timeout=0.12,
+    )
+    port, policy, segment = _local_port(
+        cfg, pose, reference_pose=reference, articulated_reference=True
+    )
+    # A fresh root observation moves the second row's target by 6 cm.
+    reference[1, 0, 3] = 0.06
+    list(
+        port.actions(
+            policy, segment=segment, active_mask=torch.ones(2, dtype=torch.bool)
+        )
+    )
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, False]
+    measured = port.post_policy_metadata(policy, segment=segment)["measurements"]
+    assert measured["position_error"] == pytest.approx([0.0, 0.06])
 
 
 def test_supported_placement_uses_current_mesh_rotation_without_locking_it():
@@ -573,7 +612,10 @@ def test_upright_policy_validates_each_environments_measured_rotation() -> None:
     entity = SimpleNamespace(get_local_pose=lambda **kwargs: pose.clone())
     simulation = SimpleNamespace(get_rigid_object=lambda uid: entity)
     binding = SimpleNamespace(
-        rigid_objects=(SimpleNamespace(entity_id="cube", simulation_uid="native_cube"),)
+        rigid_objects=(
+            SimpleNamespace(entity_id="cube", simulation_uid="native_cube"),
+        ),
+        articulations=(),
     )
     preset = "gen_sim.cube.upright"
     policy = CompiledPostPolicy(

@@ -745,6 +745,12 @@ def _planner_object(
         "name": str(config.get("name", "")).strip(),
         "description": description,
         "shape": shape,
+        **({"fpath": config["fpath"]} if role == "articulation" else {}),
+        **(
+            {"init_local_pose": deepcopy(config["init_local_pose"])}
+            if role == "articulation" and config.get("init_local_pose") is not None
+            else {}
+        ),
         "init_pos": list(config["init_pos"]),
         "init_rot": list(config["init_rot"]),
         "body_scale": list(config.get("body_scale", [1.0, 1.0, 1.0])),
