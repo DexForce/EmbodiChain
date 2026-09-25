@@ -238,36 +238,28 @@ class get_object_mass(Functor):
 
 ### Example: Action Functor
 
-Action functors inherit from `ActionTerm` and implement `process_action`. They transform raw policy actions into robot control commands.
+Action functors process one manager-owned flat slice and apply only their owned
+resources. A custom term can extend a built-in term while retaining its
+selection, descriptor, reset, and direct-application contract.
 
 ```python
 from __future__ import annotations
 import torch
-from embodichain.lab.gym.envs.managers.actions import ActionTerm
+from embodichain.lab.gym.envs.managers.actions import RelativeJointPositionAction
 from embodichain.lab.gym.envs.managers.cfg import ActionTermCfg
 
 
-class DeltaQposTerm(ActionTerm):
-    """Delta joint position: current_qpos + scale * action -> target qpos.
-
-    The policy outputs a position offset, which is added to the current
-    joint positions to get the target.
-    """
+class SmoothRelativeJointPositionAction(RelativeJointPositionAction):
+    """Low-pass-filter relative joint-position targets."""
 
     def __init__(self, cfg: ActionTermCfg, env):
         super().__init__(cfg, env)
-        self._scale = cfg.params.get("scale", 1.0)
+        self._blend = float(cfg.params.get("blend", 0.5))
 
-    @property
-    def input_key(self) -> str:
-        return "qpos"
-
-    @property
-    def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
-
-    def process_action(self, action: torch.Tensor) -> torch.Tensor:
-        return action * self._scale + self._env.robot.get_qpos()
+    def process_actions(self, actions: torch.Tensor) -> None:
+        previous = self.processed_actions.clone()
+        super().process_actions(actions)
+        self._processed_actions.lerp_(previous, self._blend)
 ```
 
 Register it in your gym config file (JSON or YAML):
@@ -275,8 +267,8 @@ Register it in your gym config file (JSON or YAML):
 ```json
 "actions": {
     "delta_qpos": {
-        "func": "DeltaQposTerm",
-        "params": {"scale": 0.1}
+        "func": "SmoothRelativeJointPositionAction",
+        "params": {"part_name": "arm", "scale": 0.1, "blend": 0.5}
     }
 }
 ```

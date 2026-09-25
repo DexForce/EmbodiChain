@@ -147,9 +147,7 @@ def _controller_action_env() -> EmbodiedEnv:
     env = object.__new__(EmbodiedEnv)
     env._num_envs = 2
     env._traj_buffer = None
-    env.action_manager = Mock(
-        process_action=Mock(side_effect=lambda action, mode: action)
-    )
+    env.action_manager = Mock()
     env._demo_no_auto_reset = False
     env.active_joint_ids = [0, 1, 2]
     env.robot = Mock()
@@ -163,11 +161,13 @@ def test_embodied_env_skips_preprocessing_for_controller_action() -> None:
     action = ControllerAction(value=torch.ones(2, 3))
 
     normalized = env._normalize_demo_action(action)
-    controller = env._preprocess_action(normalized)
+    prepared = env._preprocess_action(normalized)
 
     assert isinstance(normalized, ControllerAction)
     assert normalized is not action
-    assert torch.equal(controller, action.value)
+    assert isinstance(prepared, ControllerAction)
+    assert prepared is not normalized
+    assert torch.equal(prepared.value, action.value)
     env.action_manager.process_action.assert_not_called()
 
 
@@ -175,20 +175,75 @@ def test_embodied_env_preprocesses_raw_action_before_controller_validation() -> 
     env = _controller_action_env()
     raw_action = torch.ones(2, 3)
 
-    controller = env._preprocess_action(raw_action)
+    processed = env._preprocess_action(raw_action)
 
-    assert torch.equal(controller, raw_action)
-    env.action_manager.process_action.assert_called_once_with(raw_action, mode="pre")
+    assert torch.equal(processed, raw_action)
+    env.action_manager.process_action.assert_called_once_with(raw_action)
 
 
-def test_embodied_env_applies_post_terms_to_controller_action() -> None:
+def test_policy_action_processes_and_applies_through_manager() -> None:
     env = _controller_action_env()
-    action = ControllerAction(value=torch.ones(2, 3))
+    raw_action = torch.ones(2, 3)
 
-    controller = env._preprocess_action(action)
-    env._postprocess_action(controller)
+    processed = env._preprocess_action(raw_action)
+    returned = env._step_action(processed)
 
-    env.action_manager.process_action.assert_called_once_with(controller, mode="post")
+    env.action_manager.process_action.assert_called_once_with(raw_action)
+    env.action_manager.apply_action.assert_called_once_with()
+    torch.testing.assert_close(returned, raw_action)
+
+
+def test_policy_action_masks_completed_demo_rows_through_manager() -> None:
+    """Sticky vector-demo completion delegates safe row masking to the manager."""
+    env = _controller_action_env()
+    env._demo_no_auto_reset = True
+    env._demo_active_mask = torch.tensor([False, True])
+    raw_action = torch.ones(2, 3)
+
+    env._preprocess_action(raw_action)
+
+    env.action_manager.mask_inactive.assert_called_once_with(env._demo_active_mask)
+
+
+def test_policy_history_snapshots_manager_owned_flat_action() -> None:
+    """Dataset history captures manager state after validation and owns it."""
+    env = _controller_action_env()
+    env._record_raw_actions = True
+    env._raw_action_history = [[], []]
+    manager_action = torch.tensor([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
+    env.action_manager.action = manager_action
+
+    env._preprocess_action(manager_action.clone())
+    manager_action.fill_(9.0)
+
+    torch.testing.assert_close(
+        env.get_raw_action_history(0), torch.tensor([[0.1, 0.2, 0.3]])
+    )
+
+
+def test_controller_action_does_not_append_policy_history() -> None:
+    """Expert controller commands never masquerade as policy actions."""
+    env = _controller_action_env()
+    env._record_raw_actions = True
+    env._raw_action_history = [[], []]
+
+    env._preprocess_action(ControllerAction(torch.ones(2, 3)))
+
+    assert env.get_raw_action_history(0).shape == (0, 0)
+
+
+@pytest.mark.parametrize("key", ["qpos", "qvel"])
+def test_controller_action_bypasses_manager(key: str) -> None:
+    env = _controller_action_env()
+    value = TensorDict({key: torch.zeros(env.num_envs, 3)}, batch_size=[env.num_envs])
+
+    prepared = env._preprocess_action(ControllerAction(value))
+    returned = env._step_action(prepared)
+
+    env.action_manager.process_action.assert_not_called()
+    env.action_manager.apply_action.assert_not_called()
+    getattr(env.robot, f"set_{key}").assert_called_once()
+    torch.testing.assert_close(returned[key], value[key])
 
 
 def test_embodied_env_validates_controller_action_batch_size() -> None:
@@ -223,7 +278,8 @@ def test_embodied_env_preserves_controller_action_auxiliary_fields() -> None:
 
     controller = env._preprocess_action(action)
 
-    assert torch.equal(controller["ik_success"], torch.tensor([True, False]))
+    assert isinstance(controller, ControllerAction)
+    assert torch.equal(controller.value["ik_success"], torch.tensor([True, False]))
 
 
 def test_position_velocity_trajectory_recording_captures_effective_targets() -> None:
@@ -1111,6 +1167,29 @@ def test_expert_rollout_writer_stores_position_and_velocity_targets() -> None:
         env.rollout_buffer["actions"][1, 2],
         torch.tensor([11.0, 21.0, 1.1, 2.1]),
     )
+
+
+@pytest.mark.parametrize("command_key", ["qvel", "qf"])
+def test_expert_rollout_writer_rejects_non_qpos_position_actions(
+    command_key: str,
+) -> None:
+    """Joint-position datasets cannot silently relabel velocity or force."""
+    env = _RolloutWriterStub()
+    env.active_joint_ids = [0, 1]
+    env.expert_action_spec = build_expert_action_spec(
+        joint_names=["joint_0", "joint_1"],
+        joint_command_mode="position",
+    )
+    obs = TensorDict({"state": torch.zeros(2, 2)}, batch_size=[2])
+    action = TensorDict({command_key: torch.ones(2, 2)}, batch_size=[2])
+
+    with pytest.raises(ValueError, match="joint-position recording requires qpos"):
+        EmbodiedEnv._write_episode_rollout_step(
+            env,
+            obs=obs,
+            action=action,
+            rewards=torch.zeros(2),
+        )
 
 
 class _RobotQposStub:

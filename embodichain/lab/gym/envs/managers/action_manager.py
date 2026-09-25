@@ -14,369 +14,382 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Action manager for processing policy actions into robot control commands.
-
-This module provides the :class:`ActionManager` class which handles the interpretation
-and preprocessing of raw actions from the policy into the format expected by the robot.
-
-The concrete action term implementations (e.g., :class:`QposTerm`, :class:`DeltaQposTerm`)
-are available in :mod:`actions` module.
-"""
+"""Ordered flat policy-action processing and application."""
 
 from __future__ import annotations
 
-import inspect
-from collections.abc import Mapping
-
-import torch
-import numpy as np
-import gymnasium as gym
-
-from functools import cached_property
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any, Literal
+from functools import cached_property
+import inspect
+from typing import TYPE_CHECKING
+
+import gymnasium as gym
+import numpy as np
 from prettytable import PrettyTable
-from tensordict import TensorDict
+import torch
 
-from embodichain.lab.sim.types import EnvAction
-from embodichain.utils.string import string_to_callable
 from embodichain.utils import logger
+from embodichain.utils.string import string_to_callable
 
+from .action_types import ActionDescriptor, ActionTermDescriptor
 from .cfg import ActionTermCfg
 from .manager_base import Functor, ManagerBase
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
-__all__ = ["ActionTerm", "ActionManager"]
+__all__ = ["ActionManager", "ActionTerm"]
 
 
 class ActionTerm(Functor):
-    """Base class for action terms.
-
-    The action term is responsible for processing the raw actions sent to the environment
-    and converting them to the format expected by the robot (e.g., qpos, qvel, qf).
-    """
-
-    SUPPORTED_TYPES = ["qpos", "qvel", "qf", "eef_pose"]
-    """The supported action types. Each term must specify one of these as its output type, which
-    determines how the processed action is applied to the robot.
-    """
+    """Base class for one independently processed and applied action slice."""
 
     def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
-        """Initialize the action term.
+        """Initialize an action term.
 
         Args:
-            cfg: The configuration object.
-            env: The environment instance.
+            cfg: Term configuration.
+            env: Owning embodied environment.
         """
         super().__init__(cfg, env)
-
-    @property
-    @abstractmethod
-    def input_key(self) -> str:
-        """The output type of the action term, which determines how the processed action is applied to the robot.
-
-        Must be one of the supported types defined in SUPPORTED_TYPES.
-        """
-        ...
 
     @property
     @abstractmethod
     def action_dim(self) -> int:
-        """Dimension of the action term (policy output dimension)."""
+        """Number of raw policy-action dimensions owned by the term."""
+        ...
+
+    @property
+    @abstractmethod
+    def action_space(self) -> gym.spaces.Box:
+        """Raw policy-action bounds for this term."""
+        ...
+
+    @property
+    @abstractmethod
+    def raw_actions(self) -> torch.Tensor:
+        """Current raw policy-action rows."""
+        ...
+
+    @property
+    @abstractmethod
+    def processed_actions(self) -> torch.Tensor:
+        """Current term-owned processed command rows."""
+        ...
+
+    @property
+    @abstractmethod
+    def command_type(self) -> str:
+        """Controller command or resource type written by the term."""
+        ...
+
+    @property
+    @abstractmethod
+    def controlled_joint_ids(self) -> tuple[int, ...]:
+        """Ordered robot joint IDs owned by the term."""
+        ...
+
+    @property
+    @abstractmethod
+    def descriptor(self) -> ActionTermDescriptor:
+        """Describe the raw policy-action representation."""
         ...
 
     @abstractmethod
-    def process_action(self, action: torch.Tensor) -> EnvAction | torch.Tensor:
-        """Process raw action from policy into robot control format.
-
-        Args:
-            action: Raw action tensor from policy, shape (num_envs, action_dim).
-
-        Returns:
-            Processed action tensor ready for robot control, shape depends on input_key.
-        """
+    def process_actions(self, actions: torch.Tensor) -> None:
+        """Process one manager-owned raw action slice."""
         ...
 
-    def __call__(self, *args, **kwargs) -> Any:
-        """Not used for ActionTerm; use process_action instead."""
-        return self.process_action(*args, **kwargs)
+    @abstractmethod
+    def apply_actions(self) -> None:
+        """Apply the latest processed command to the owned resource."""
+        ...
 
 
 class ActionManager(ManagerBase):
-    """Manager for processing actions sent to the environment.
-
-    The action manager handles the interpretation and preprocessing of raw actions
-    from the policy into the format expected by the robot. It supports a single
-    active action term per environment (matching current RL usage).
-    """
+    """Split one flat policy action across independently applied terms."""
 
     def __init__(self, cfg: object, env: EmbodiedEnv):
-        """Initialize the action manager.
+        """Initialize action terms, their slices, and manager-owned history.
 
         Args:
-            cfg: A configuration object or dictionary (``dict[str, ActionTermCfg]``).
-            env: The environment instance.
+            cfg: Mapping or component object containing `ActionTermCfg` values.
+            env: Owning embodied environment.
         """
         self._term_names: list[str] = []
         self._terms: dict[str, ActionTerm] = {}
-        self._term_modes: dict[str, Literal["pre", "post"]] = {}
-        self._mode_term_names: dict[Literal["pre", "post"], list[str]] = {
-            "pre": [],
-            "post": [],
-        }
+        self._slices: dict[str, slice] = {}
+        self._descriptors: tuple[ActionDescriptor, ...] = ()
         super().__init__(cfg, env)
+        self._action = torch.zeros(
+            (env.num_envs, self.total_action_dim),
+            dtype=torch.float32,
+            device=env.device,
+        )
+        self._previous_action = torch.zeros_like(self._action)
 
     def __str__(self) -> str:
-        """Returns: A string representation for action manager."""
-        msg = f"<ActionManager> contains {len(self._term_names)} active term(s).\n"
+        """Return a table describing the ordered flat action layout."""
         table = PrettyTable()
-        table.title = "Active Action Terms"
-        table.field_names = ["Index", "Name", "Mode", "Dimension"]
+        table.title = f"Active Action Terms (shape: {self.total_action_dim})"
+        table.field_names = ["Index", "Name", "Slice", "Dimension", "Command"]
         table.align["Name"] = "l"
-        table.align["Mode"] = "c"
         table.align["Dimension"] = "r"
         for index, name in enumerate(self._term_names):
             term = self._terms[name]
-            mode = self._term_modes.get(name, "pre")
-            table.add_row([index, name, mode, term.action_dim])
-        msg += table.get_string()
-        msg += "\n"
-        return msg
+            term_slice = self._slices[name]
+            table.add_row(
+                [
+                    index,
+                    name,
+                    f"[{term_slice.start}:{term_slice.stop}]",
+                    term.action_dim,
+                    term.command_type,
+                ]
+            )
+        return f"<ActionManager> contains {len(self._term_names)} active term(s).\n{table}\n"
 
     @property
     def active_functors(self) -> list[str]:
-        """Name of active action terms."""
-        return self._term_names
+        """Return active term names in flat policy order."""
+        return list(self._term_names)
 
-    def get_terms_by_mode(
-        self, mode: Literal["pre", "post"]
-    ) -> list[tuple[str, ActionTerm]]:
-        """Get action terms filtered by mode.
-
-        Args:
-            mode: The mode to filter by ("pre" or "post").
-
-        Returns:
-            List of (name, term) tuples for terms with the specified mode.
-        """
-        return [(name, self._terms[name]) for name in self._mode_term_names[mode]]
-
-    @cached_property
+    @property
     def total_action_dim(self) -> int:
-        """Total dimension of actions (sum of all term dimensions)."""
-        terms = self.get_terms_by_mode("pre")
-        return sum(term.action_dim for _, term in terms)
+        """Return the width of the complete flat policy action."""
+        return sum(term.action_dim for term in self._terms.values())
+
+    @property
+    def action(self) -> torch.Tensor:
+        """Return current complete raw policy actions."""
+        return self._action
+
+    @property
+    def previous_action(self) -> torch.Tensor:
+        """Return previous complete raw policy actions."""
+        return self._previous_action
+
+    @property
+    def descriptors(self) -> tuple[ActionDescriptor, ...]:
+        """Return ordered action-term descriptors bound to flat slices."""
+        return self._descriptors
 
     @cached_property
-    def single_action_space(self) -> torch.Tensor | gym.Space:
-        terms = self.get_terms_by_mode("pre")
-        if len(terms) == 0:
-            qpos_limits = (
-                self._env.robot.body_data.qpos_limits[0, self._env.active_joint_ids]
-                .cpu()
-                .numpy()
+    def single_action_space(self) -> gym.spaces.Box:
+        """Return concatenated raw action bounds in term order."""
+        if not self._terms:
+            return gym.spaces.Box(
+                low=np.empty((0,), dtype=np.float32),
+                high=np.empty((0,), dtype=np.float32),
+                dtype=np.float32,
             )
-            single_action_space = gym.spaces.Box(
-                low=qpos_limits[:, 0], high=qpos_limits[:, 1], dtype=np.float32
-            )
-            return single_action_space
-        else:
-            # Create dict action space for multiple terms.
-            spaces = {}
-            for name, term in terms:
-                custom_space = getattr(term, "action_space", None)
-                if custom_space is not None:
-                    spaces[term.input_key] = custom_space
-                    continue
-                if term.input_key == "qpos":
-                    qpos_limits = (
-                        self._env.robot.body_data.qpos_limits[
-                            0, self._env.active_joint_ids
-                        ]
-                        .cpu()
-                        .numpy()
-                    )
-                    spaces[term.input_key] = gym.spaces.Box(
-                        low=qpos_limits[:, 0], high=qpos_limits[:, 1], dtype=np.float32
-                    )
-                elif term.input_key == "qvel":
-                    qvel_limits = (
-                        self._env.robot.body_data.qvel_limits[
-                            0, self._env.active_joint_ids
-                        ]
-                        .cpu()
-                        .numpy()
-                    )
-                    spaces[term.input_key] = gym.spaces.Box(
-                        low=-qvel_limits, high=qvel_limits, dtype=np.float32
-                    )
-                elif term.input_key == "qf":
-                    qf_limits = (
-                        self._env.robot.body_data.qf_limits[
-                            0, self._env.active_joint_ids
-                        ]
-                        .cpu()
-                        .numpy()
-                    )
-                    spaces[term.input_key] = gym.spaces.Box(
-                        low=-qf_limits, high=qf_limits, dtype=np.float32
-                    )
-                else:
-                    spaces[term.input_key] = gym.spaces.Box(
-                        low=-np.inf,
-                        high=np.inf,
-                        shape=(term.action_dim,),
-                        dtype=np.float32,
-                    )
-            if (
-                len(terms) == 1
-                and getattr(terms[0][1], "action_space", None) is not None
-            ):
-                return next(iter(spaces.values()))
-            if len(spaces) == 1 and "qpos" in spaces:
-                return spaces["qpos"]
-            else:
-                return gym.spaces.Dict(spaces)
+        lows = [
+            np.asarray(term.action_space.low, dtype=np.float32)
+            for term in self._terms.values()
+        ]
+        highs = [
+            np.asarray(term.action_space.high, dtype=np.float32)
+            for term in self._terms.values()
+        ]
+        return gym.spaces.Box(
+            low=np.concatenate(lows),
+            high=np.concatenate(highs),
+            dtype=np.float32,
+        )
 
-    def convert_policy_action_to_env_action(self, action: torch.Tensor) -> EnvAction:
-        """Convert raw action from policy into robot control format.
-
-        This is a convenience method for processing a raw action tensor through the active terms.
-        It assumes the input action is ordered according to the active terms and concatenated into a single tensor.
+    def process_action(self, action: torch.Tensor) -> None:
+        """Validate, store, and distribute one complete flat policy action.
 
         Args:
-            action: Raw action tensor from policy, shape (num_envs, total_action_dim).
+            action: Floating tensor with shape `(num_envs, total_action_dim)`.
 
-        Returns:
-            Processed action tensor ready for robot control, shape depends on active terms.
+        Raises:
+            TypeError: If the action is not a floating tensor.
+            ValueError: If shape or device does not match the environment.
         """
-        terms = self.get_terms_by_mode("pre")
-        if len(terms) == 0 or len(terms) == 1:
-            return action
-        else:
-            action_dict = {}
-            current_dim = 0
-            for _, term in terms:
-                term_action = action[:, current_dim : current_dim + term.action_dim]
-                action_dict[term.input_key] = term_action
-                current_dim += term.action_dim
-            return TensorDict(
-                action_dict, batch_size=[action.shape[0]], device=action.device
+        if not isinstance(action, torch.Tensor):
+            raise TypeError(
+                "ActionManager expects one flat torch.Tensor policy action."
+            )
+        expected = (self._env.num_envs, self.total_action_dim)
+        if tuple(action.shape) != expected:
+            raise ValueError(
+                f"Expected action shape {expected}, got {tuple(action.shape)}."
+            )
+        if not action.is_floating_point():
+            raise TypeError("Policy action must use a floating dtype.")
+        expected_device = torch.device(self._env.device)
+        if action.device != expected_device:
+            raise ValueError(
+                f"Policy action must be on {expected_device}, got {action.device}."
             )
 
-    def get_action_dim_by_mode(self, mode: Literal["pre", "post"]) -> int:
-        """Get total action dimension for terms of a specific mode.
+        self._previous_action.copy_(self._action)
+        self._action.copy_(action)
+        for name, term in self._terms.items():
+            term.process_actions(self._action[:, self._slices[name]])
+
+    def apply_action(self) -> None:
+        """Apply every processed term command in configuration order."""
+        for term in self._terms.values():
+            term.apply_actions()
+
+    def mask_inactive(self, active_mask: torch.Tensor) -> None:
+        """Replace inactive vector rows with resource-safe commands.
+
+        Position terms hold measured selected-joint positions. Velocity and
+        effort terms use zero commands. This is used by sticky vectorized demo
+        execution after term processing and before application.
 
         Args:
-            mode: The mode to filter by ("pre" or "post").
+            active_mask: Boolean tensor of shape ``(num_envs,)`` on the
+                environment device. ``True`` rows retain processed commands.
 
-        Returns:
-            Sum of action dimensions for terms with the specified mode.
+        Raises:
+            TypeError: If the mask is not boolean.
+            ValueError: If mask or processed-command layout is invalid.
+            RuntimeError: If a resource type has no defined safe inactive value.
         """
-        mode_terms = self.get_terms_by_mode(mode)
-        return sum(term.action_dim for _, term in mode_terms)
+        if not isinstance(active_mask, torch.Tensor) or active_mask.dtype != torch.bool:
+            raise TypeError("active_mask must be a boolean torch.Tensor.")
+        expected = (self._env.num_envs,)
+        if tuple(active_mask.shape) != expected:
+            raise ValueError(
+                f"Expected active_mask shape {expected}, got {tuple(active_mask.shape)}."
+            )
+        expected_device = torch.device(self._env.device)
+        if active_mask.device != expected_device:
+            raise ValueError(
+                f"active_mask must be on {expected_device}, got {active_mask.device}."
+            )
 
-    def process_action(
-        self, action: EnvAction, mode: Literal["pre", "post"] = "pre"
-    ) -> EnvAction:
-        """Process raw action from policy into robot control format.
-
-        Supports:
-        1. Tensor input: Passed to the active (first) term of the specified mode.
-        2. Dict/TensorDict input: Uses key matching term name; raises an error if no match.
-
-        Args:
-            action: Raw action from policy (tensor or dict).
-            mode: The processing mode - "pre" for preprocessing (default) or "post"
-                for postprocessing. When "post", only terms with mode="post" are applied.
-
-        Returns:
-            TensorDict action ready for robot control.
-        """
-        # Filter terms by mode
-        mode_terms = self._mode_term_names[mode]
-
-        if not mode_terms:
-            return action
-
-        if len(mode_terms) == 1:
-            term_name = mode_terms[0]
-            term = self._terms[term_name]
-            if isinstance(action, TensorDict) and term.input_key in action:
-                action = action[term.input_key]
-            elif isinstance(action, Mapping) and term.input_key in action:
-                action = torch.as_tensor(
-                    action[term.input_key], device=self._env.device
+        measured_qpos: torch.Tensor | None = None
+        for name, term in self._terms.items():
+            joint_ids = list(term.controlled_joint_ids)
+            processed = term.processed_actions
+            expected_processed = (self._env.num_envs, len(joint_ids))
+            if tuple(processed.shape) != expected_processed:
+                raise ValueError(
+                    f"Action term {name!r} processed command must have shape "
+                    f"{expected_processed}, got {tuple(processed.shape)}."
                 )
-            return term.process_action(action)
-        else:
-            for name in mode_terms:
-                term = self._terms[name]
-                action[term.input_key] = term.process_action(action[term.input_key])
-            return action
+            if term.command_type == "qpos":
+                if measured_qpos is None:
+                    measured_qpos = self._env.robot.get_qpos()
+                replacement = measured_qpos[:, joint_ids]
+            elif term.command_type in {"qvel", "qf"}:
+                replacement = torch.zeros_like(processed)
+            else:
+                raise RuntimeError(
+                    f"Action term {name!r} command type {term.command_type!r} "
+                    "does not define an inactive-row safety command."
+                )
+            processed.copy_(torch.where(active_mask[:, None], processed, replacement))
 
     def reset(
         self, env_ids: list[int] | torch.Tensor | None = None
     ) -> dict[str, float]:
-        """Reset state owned by action terms for selected environments.
+        """Reset manager and term state for selected environments.
 
         Args:
-            env_ids: Selected rows. None resets every row.
+            env_ids: Selected rows. `None` resets every row.
 
         Returns:
-            Empty manager diagnostic mapping.
+            Empty diagnostic mapping.
         """
-        for mode in ("pre", "post"):
-            for _, term in self.get_terms_by_mode(mode):
-                term.reset(env_ids=env_ids)
+        ids = slice(None) if env_ids is None else env_ids
+        self._action[ids] = 0
+        self._previous_action[ids] = 0
+        for term in self._terms.values():
+            term.reset(env_ids=env_ids)
         return {}
 
     def get_term(self, name: str) -> ActionTerm:
-        """Get action term by name."""
+        """Return one configured term by name."""
         return self._terms[name]
 
     def _prepare_functors(self) -> None:
-        """Parse config and create action terms.
-
-        ActionTerm uses process_action(action) (a bound instance method) rather than
-        __call__(env, env_ids, ...), so we skip the base class params signature check
-        and resolve terms directly.
-        """
-        if isinstance(self.cfg, dict):
-            cfg_items = self.cfg.items()
-        else:
-            cfg_items = self.cfg.__dict__.items()
+        """Resolve action term classes and bind ordered slices/descriptors."""
+        cfg_items = (
+            self.cfg.items()
+            if isinstance(self.cfg, dict)
+            else self.cfg.__dict__.items()
+        )
+        descriptors: list[ActionDescriptor] = []
+        owners: dict[tuple[str, int], tuple[str, str]] = {}
+        offset = 0
 
         for term_name, term_cfg in cfg_items:
             if term_cfg is None:
                 continue
             if not isinstance(term_cfg, ActionTermCfg):
-                logger.log_error(
-                    f"Configuration for the term '{term_name}' is not of type ActionTermCfg. "
-                    f"Received: '{type(term_cfg)}'.",
-                    error_type=TypeError,
+                raise TypeError(
+                    f"Configuration for action term {term_name!r} must be ActionTermCfg, "
+                    f"got {type(term_cfg).__name__}."
                 )
-            # Resolve string to callable (skip base class params check for ActionTerm)
             if isinstance(term_cfg.func, str):
                 term_cfg.func = string_to_callable(term_cfg.func)
-            if not callable(term_cfg.func):
-                logger.log_error(
-                    f"The action term '{term_name}' is not callable. "
-                    f"Received: '{term_cfg.func}'",
-                    error_type=TypeError,
-                )
-            if inspect.isclass(term_cfg.func) and not issubclass(
+            if not inspect.isclass(term_cfg.func) or not issubclass(
                 term_cfg.func, ActionTerm
             ):
-                logger.log_error(
-                    f"Configuration for the term '{term_name}' must be a subclass of "
-                    f"ActionTerm. Received: '{type(term_cfg.func)}'.",
-                    error_type=TypeError,
+                raise TypeError(
+                    f"Action term {term_name!r} must resolve to an ActionTerm class."
                 )
+
             self._process_functor_cfg_at_play(term_name, term_cfg)
+            term = term_cfg.func
+            if not isinstance(term, ActionTerm):
+                raise TypeError(
+                    f"Action term {term_name!r} did not initialize correctly."
+                )
+            if term.action_dim <= 0:
+                raise ValueError(
+                    f"Action term {term_name!r} must own at least one dimension."
+                )
+            if not isinstance(
+                term.action_space, gym.spaces.Box
+            ) or term.action_space.shape != (term.action_dim,):
+                raise ValueError(
+                    f"Action term {term_name!r} must expose a Box with shape "
+                    f"({term.action_dim},)."
+                )
+
+            start = offset
+            stop = start + term.action_dim
             self._term_names.append(term_name)
-            self._terms[term_name] = term_cfg.func
-            self._term_modes[term_name] = term_cfg.mode
-            self._mode_term_names[term_cfg.mode].append(term_name)
+            self._terms[term_name] = term
+            self._slices[term_name] = slice(start, stop)
+            descriptors.append(
+                ActionDescriptor(term_name, start, stop, term.descriptor)
+            )
+            offset = stop
+
+            controlled_joint_ids = tuple(term.controlled_joint_ids)
+            descriptor_joint_names = tuple(term.descriptor.joint_names)
+            if term.command_type in {"qpos", "qvel", "qf"}:
+                expected_joint_names = tuple(
+                    self._env.robot.joint_names[int(joint_id)]
+                    for joint_id in controlled_joint_ids
+                )
+                if descriptor_joint_names != expected_joint_names:
+                    raise ValueError(
+                        f"Action term {term_name!r} controlled joint IDs must "
+                        "correspond exactly to descriptor joint_names."
+                    )
+
+                for joint_id, joint_name in zip(
+                    controlled_joint_ids,
+                    descriptor_joint_names,
+                    strict=True,
+                ):
+                    key = (term.command_type, int(joint_id))
+                    if key in owners:
+                        previous_name, previous_joint = owners[key]
+                        raise ValueError(
+                            f"Action terms {previous_name!r} and {term_name!r} "
+                            f"both own {term.command_type} command for joint "
+                            f"{joint_name or previous_joint!r}."
+                        )
+                    owners[key] = (term_name, joint_name)
+
+        self._descriptors = tuple(descriptors)

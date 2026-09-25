@@ -39,15 +39,21 @@ Read this when the request needs these details. [Topic overview](env-framework.m
 
 ### Action boundary (`types.py`, `embodied_env.py`)
 
-- Raw policy actions run through `ActionManager` terms in `pre` mode.
-- `ControllerAction` wraps a command that already completed raw-policy
-  preprocessing. `EmbodiedEnv` unwraps it and skips only `pre` terms.
-- Both paths converge at `_prepare_controller_action()`, which validates the
-  vector batch, control keys (`qpos`, `qvel`, `qf`), active/full joint width,
-  floating dtype, and environment device before robot control.
-- `ControllerAction` does not bypass `env.step()` or `ActionManager` terms in
-  `post` mode. Task Program uses this boundary so runtime commands, wait
-  holds, and abort-safe holds retain the normal Gym lifecycle.
+- Raw policy actions are flat floating tensors. `ActionManager.process_action()`
+  validates and slices them in configuration order; `_step_action()` then calls
+  `ActionManager.apply_action()` once before physics.
+- `ControllerAction` wraps a controller-ready qpos/qvel/qf command.
+  `EmbodiedEnv` keeps the envelope through preprocessing so `_step_action()` can
+  bypass `ActionManager` and apply it through the direct controller boundary.
+- `_prepare_controller_action()` validates controller batch, keys, active/full
+  joint width, floating dtype, and device. Policy tensors use the manager's
+  flat shape/device validation instead.
+- Task Program runtime commands, waits, and abort-safe holds use
+  `ControllerAction`; they retain the ordinary Gym lifecycle without becoming
+  policy actions.
+- For raw-policy vector demos with staggered completion, ActionManager masks
+  inactive rows after processing: selected qpos resources hold measured values,
+  while qvel/qf resources receive zero commands.
 - A structured controller `TensorDict` may carry auxiliary fields such as
   `ik_success`, but it must contain at least one supported control key.
 - Position-velocity expert actions are canonicalized only after validation and
@@ -146,10 +152,11 @@ reset(options)
 ```
 step(action)
   ├── _preprocess_action(action)
-  │     ├── raw action → ActionManager "pre"
-  │     ├── ControllerAction → unwrap and skip "pre"
-  │     └── _prepare_controller_action() validation
-  ├── _step_action(action)           # subclass sends control to sim
+  │     ├── flat policy action → ActionManager.process_action()
+  │     └── ControllerAction → validate and preserve envelope
+  ├── _step_action(action)
+  │     ├── policy → ActionManager.apply_action()
+  │     └── ControllerAction → direct qpos/qvel/qf application
   ├── sim.update(dt, sim_steps_per_control)
   ├── _update_sim_state()            # event_manager "interval" mode
   ├── get_obs()
@@ -158,7 +165,7 @@ step(action)
   │     └── _extend_obs()            # ObservationManager.compute()
   ├── get_info() → evaluate()
   ├── get_reward() + _extend_reward()  # RewardManager.compute()
-  ├── _postprocess_action(action)
+  ├── _postprocess_action(action)     # BaseEnv no-op; no action post mode
   ├── elapsed_steps += 1
   ├── compute terminateds (success | fail), truncateds (time limit)
   ├── _hook_after_sim_step()         # rollout buffer write

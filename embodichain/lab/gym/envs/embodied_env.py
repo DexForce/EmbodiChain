@@ -373,7 +373,6 @@ class EmbodiedEnv(BaseEnv):
         self.action_manager: ActionManager | None = None
         self.dataset_manager: DatasetManager | None = None
         self._record_raw_actions = False
-        self._record_controller_qpos = False
 
         super().__init__(cfg, **kwargs)
 
@@ -410,17 +409,19 @@ class EmbodiedEnv(BaseEnv):
                 self.dataset_manager = DatasetManager(self.cfg.dataset, self)
                 self.cfg.init_rollout_buffer = True
                 self._record_raw_actions = self.dataset_manager.requires_raw_actions
-                self._record_controller_qpos = (
-                    self.dataset_manager.requires_controller_qpos
-                )
 
             self.rollout_buffer: TensorDict | None = None
             self._max_rollout_steps = 0
             self._rollout_buffer_mode: str | None = None
             if self.cfg.init_rollout_buffer:
+                rollout_action_space = (
+                    self.action_space
+                    if self._record_raw_actions
+                    else self._expert_action_space
+                )
                 self.rollout_buffer = init_rollout_buffer_from_gym_space(
                     obs_space=self.observation_space,
-                    action_space=self._expert_action_space,
+                    action_space=rollout_action_space,
                     max_episode_steps=self.max_episode_steps,
                     num_envs=self.num_envs,
                     device=self.device,
@@ -432,9 +433,6 @@ class EmbodiedEnv(BaseEnv):
             self._traj_steps: torch.Tensor | None = None
             self._traj_raw_action: EnvAction | None = None
             self._raw_action_history: list[list[EnvAction]] = [
-                [] for _ in range(self.num_envs)
-            ]
-            self._controller_qpos_history: list[list[torch.Tensor]] = [
                 [] for _ in range(self.num_envs)
             ]
             self._traj_save_count = 0
@@ -577,25 +575,7 @@ class EmbodiedEnv(BaseEnv):
             ]
 
         names = [str(name) for name in active_functors]
-        if manager_name != "ActionManager":
-            return [("terms", names)] if names else []
-
-        get_terms_by_mode = getattr(manager, "get_terms_by_mode", None)
-        if not callable(get_terms_by_mode):
-            return [("terms", names)] if names else []
-
-        groups: list[tuple[str, list[str]]] = []
-        grouped_names: set[str] = set()
-        for mode in ("pre", "post"):
-            mode_names = [str(name) for name, _ in get_terms_by_mode(mode)]
-            if mode_names:
-                groups.append((mode, mode_names))
-                grouped_names.update(mode_names)
-
-        remaining_names = [name for name in names if name not in grouped_names]
-        if remaining_names:
-            groups.append(("terms", remaining_names))
-        return groups
+        return [("terms", names)] if names else []
 
     def reset(
         self, seed: int | None = None, options: dict | None = None
@@ -1087,11 +1067,6 @@ class EmbodiedEnv(BaseEnv):
             for env_id in env_ids_to_process.cpu().tolist():
                 if 0 <= env_id < len(raw_action_history):
                     raw_action_history[env_id].clear()
-        controller_qpos_history = getattr(self, "_controller_qpos_history", None)
-        if controller_qpos_history is not None:
-            for env_id in env_ids_to_process.cpu().tolist():
-                if 0 <= env_id < len(controller_qpos_history):
-                    controller_qpos_history[env_id].clear()
 
     def _clear_expert_rollout_rows(self, env_ids: torch.Tensor) -> None:
         """Invalidate selected expert-buffer rows without clearing large frames."""
@@ -1455,11 +1430,12 @@ class EmbodiedEnv(BaseEnv):
                 active_joint_ids=self.active_joint_ids,
             )
         elif isinstance(action, TensorDict):
-            action_to_store = (
-                action["qpos"]
-                if "qpos" in action
-                else (action["qvel"] if "qvel" in action else action["qf"])
-            )
+            if "qpos" not in action:
+                raise ValueError(
+                    "Expert joint-position recording requires qpos; received "
+                    f"controller keys {list(action.keys())}."
+                )
+            action_to_store = action["qpos"]
         elif isinstance(action, torch.Tensor):
             action_to_store = action
         else:
@@ -1880,22 +1856,30 @@ class EmbodiedEnv(BaseEnv):
 
         return action[..., self.active_joint_ids]
 
-    def _step_action(self, action: EnvAction) -> EnvAction:
-        """Set action control command into simulation.
+    def _step_action(self, action: EnvAction | ControllerAction) -> EnvAction:
+        """Apply a policy action or a direct controller-ready command.
 
-        Supports multiple action formats:
-        1. torch.Tensor: Interpreted as qpos (joint positions)
-        2. Dict with keys:
-           - "qpos": Joint positions
-           - "qvel": Joint velocities
-           - "qf": Joint forces/torques
+        Flat policy tensors are applied by :class:`ActionManager`. Explicit
+        :class:`ControllerAction` values bypass the manager and are sent to the
+        robot through the qpos/qvel/qf controller boundary.
 
         Args:
-            action: The action applied to the robot agent.
+            action: Prepared policy or controller action.
 
         Returns:
-            The action return.
+            The raw policy tensor or applied controller value.
         """
+
+        if isinstance(action, ControllerAction):
+            return EmbodiedEnv._apply_controller_action(self, action.value)
+        action_manager = getattr(self, "action_manager", None)
+        if action_manager is not None:
+            action_manager.apply_action()
+            return action
+        return EmbodiedEnv._apply_controller_action(self, action)
+
+    def _apply_controller_action(self, action: EnvAction) -> EnvAction:
+        """Apply one validated controller command directly to active joints."""
 
         def active_joint_command(command: torch.Tensor, key: str) -> torch.Tensor:
             """Normalize full-robot commands to the active-joint layout."""
@@ -1932,7 +1916,6 @@ class EmbodiedEnv(BaseEnv):
         else:
             logger.log_error(f"Unsupported action type: {type(action)}")
 
-        EmbodiedEnv._record_controller_qpos_action(self, action)
         return action
 
     def compute_task_state(
@@ -1986,9 +1969,12 @@ class EmbodiedEnv(BaseEnv):
                 eval_dict[key] = value
         return eval_dict
 
-    def _preprocess_action(self, action: EnvAction | ControllerAction) -> EnvAction:
+    def _preprocess_action(
+        self, action: EnvAction | ControllerAction
+    ) -> EnvAction | ControllerAction:
         """Resolve one raw or controller-ready action for robot control."""
         is_controller_action = isinstance(action, ControllerAction)
+        controller_metadata = action.metadata if is_controller_action else None
         if is_controller_action:
             action = action.value
         record_position_velocity = (
@@ -1996,10 +1982,6 @@ class EmbodiedEnv(BaseEnv):
             and getattr(self, "expert_action_spec", None) is not None
             and self.expert_action_spec.joint_command_mode == "position_velocity"
         )
-        # Action terms may mutate a TensorDict while composing multiple
-        # controller commands. Snapshot before preprocessing so the dataset
-        # contract always receives the policy request, not the transformed
-        # command.
         retain_raw_action = getattr(self, "_record_raw_actions", False) or (
             self._traj_buffer is not None and not record_position_velocity
         )
@@ -2009,12 +1991,17 @@ class EmbodiedEnv(BaseEnv):
             else action
         )
         if self.action_manager is not None and not is_controller_action:
-            action = self.action_manager.process_action(action, mode="pre")
+            self.action_manager.process_action(action)
+            if getattr(self, "_demo_no_auto_reset", False):
+                self.action_manager.mask_inactive(self._demo_active_mask)
+            raw_action = self.action_manager.action
         elif not is_controller_action:
             action = super()._preprocess_action(action)
-        action = self._prepare_controller_action(action)
-        if getattr(self, "_demo_no_auto_reset", False):
-            action = self._mask_controller_demo_action(action)
+            action = self._prepare_controller_action(action)
+        elif is_controller_action:
+            action = self._prepare_controller_action(action)
+            if getattr(self, "_demo_no_auto_reset", False):
+                action = self._mask_controller_demo_action(action)
         if record_position_velocity:
             self._traj_raw_action = encode_expert_action(
                 action,
@@ -2022,11 +2009,17 @@ class EmbodiedEnv(BaseEnv):
                 active_joint_ids=self.active_joint_ids,
             )
         elif self._traj_buffer is not None:
-            self._traj_raw_action = raw_action
+            self._traj_raw_action = (
+                raw_action.clone()
+                if hasattr(raw_action, "clone")
+                else copy.deepcopy(raw_action)
+            )
         # Do not retain malformed actions: validation, masking and trajectory
         # encoding above are the ownership boundary for raw-action history.
         if not is_controller_action:
             self._record_raw_action(raw_action)
+        if is_controller_action:
+            return ControllerAction(value=action, metadata=controller_metadata)
         return action
 
     def _record_raw_action(self, action: EnvAction) -> None:
@@ -2042,9 +2035,8 @@ class EmbodiedEnv(BaseEnv):
         if isinstance(action, TensorDict):
             if tuple(action.batch_size) != (num_envs,):
                 return
-            rows = [
-                action[index].detach().cpu().clone() for index in range(self.num_envs)
-            ]
+            batch_action = action.detach().cpu().clone()
+            rows = [batch_action[index].clone() for index in range(num_envs)]
         elif isinstance(action, Mapping):
             tensors = {
                 key: torch.as_tensor(value).detach().cpu().clone()
@@ -2060,9 +2052,8 @@ class EmbodiedEnv(BaseEnv):
         elif isinstance(action, torch.Tensor):
             if action.ndim == 0 or action.shape[0] != num_envs:
                 return
-            rows = [
-                action[index].detach().cpu().clone() for index in range(self.num_envs)
-            ]
+            batch_action = action.detach().cpu().clone()
+            rows = list(batch_action.unbind(0))
         else:
             rows = [copy.deepcopy(action) for _ in range(self.num_envs)]
         active_mask = getattr(self, "_demo_active_mask", None)
@@ -2089,57 +2080,6 @@ class EmbodiedEnv(BaseEnv):
         if all(isinstance(row, TensorDict) for row in rows):
             return TensorDict.stack(rows, dim=0)
         return rows
-
-    def _record_controller_qpos_action(self, action: EnvAction) -> None:
-        """Keep qpos exactly as applied at the robot-control boundary."""
-        if not getattr(self, "_record_controller_qpos", False):
-            return
-        qpos = action.get("qpos", None) if isinstance(action, TensorDict) else action
-        if not isinstance(qpos, torch.Tensor):
-            return
-        num_envs = int(self.num_envs)
-        if qpos.ndim != 2 or qpos.shape[0] != num_envs:
-            return
-
-        history = getattr(self, "_controller_qpos_history", None)
-        if history is None:
-            history = [[] for _ in range(num_envs)]
-            self._controller_qpos_history = history
-        active_mask = getattr(self, "_demo_active_mask", None)
-        if active_mask is not None and getattr(self, "_demo_no_auto_reset", False):
-            active_mask = torch.as_tensor(active_mask, device="cpu", dtype=torch.bool)
-        else:
-            active_mask = None
-        for index in range(num_envs):
-            if active_mask is None or bool(active_mask[index]):
-                history[index].append(qpos[index].detach().cpu().clone())
-
-    def get_controller_qpos_history(
-        self, env_id: int, length: int | None = None
-    ) -> torch.Tensor:
-        """Return qpos commands captured for one environment episode.
-
-        Args:
-            env_id: Parallel environment row.
-            length: Optional maximum number of commands to return.
-
-        Returns:
-            Stacked active-joint qpos commands on CPU.
-        """
-        history = getattr(self, "_controller_qpos_history", None)
-        if history is None:
-            return torch.empty((0, 0), dtype=torch.float32)
-        rows = history[int(env_id)]
-        if length is not None:
-            rows = rows[:length]
-        if not rows:
-            return torch.empty((0, 0), dtype=torch.float32)
-        return torch.stack(rows, dim=0)
-
-    def _postprocess_action(self, action):
-        if self.action_manager is not None:
-            return self.action_manager.process_action(action, mode="post")
-        return super()._postprocess_action(action)
 
     def _declare_robot(self, **kwargs) -> Robot:
         """Declare the configured robot without reading articulation metadata."""

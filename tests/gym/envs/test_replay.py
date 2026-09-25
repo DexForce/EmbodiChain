@@ -34,7 +34,7 @@ from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import JointDrivePropertiesCfg, RigidObjectCfg, RobotCfg
 from embodichain.lab.sim.shapes import CubeCfg
-from embodichain.lab.gym.envs.managers.actions import DeltaQposTerm
+from embodichain.lab.gym.envs.managers.actions import RelativeJointPositionAction
 from embodichain.lab.gym.envs.managers.cfg import ActionTermCfg
 
 pytestmark = [pytest.mark.requires_sim, pytest.mark.slow]
@@ -532,7 +532,21 @@ class ReplayDeltaEnv(EmbodiedEnv):
             )
         ]
         cfg.actions = {
-            "arm": ActionTermCfg(func=DeltaQposTerm, mode="pre", params={"scale": 1.0})
+            "arm": ActionTermCfg(
+                func=RelativeJointPositionAction,
+                params={
+                    "joint_names": (
+                        "shoulder_pan_joint",
+                        "shoulder_lift_joint",
+                        "elbow_joint",
+                        "wrist_1_joint",
+                        "wrist_2_joint",
+                        "wrist_3_joint",
+                    ),
+                    "preserve_order": True,
+                    "scale": 1.0,
+                },
+            )
         }
         cfg.record_trajectory = record_trajectory
         cfg.trajectory_auto_save = False

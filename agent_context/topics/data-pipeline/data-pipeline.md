@@ -49,19 +49,22 @@ physical reset. The recorder requires an exactly representable integer FPS.
 
 Expert rollout actions use the environment's `ExpertActionSpec`, independently
 of the policy action space. The default position mode preserves active-joint
-qpos storage. Position-velocity mode stores a flat `[qpos, qvel]` vector;
+qpos storage and rejects qvel/qf-only controller commands. Position-velocity
+mode stores a flat `[qpos, qvel]` vector;
 LeRobot feature width and ordered names follow that layout, while episode and
 trajectory metadata publish its version, joint names, slices, mode, and
 environment `step_dt`.
 
-LeRobot recording preserves that existing schema when `action_contract` is
-omitted. A versioned contract is opt-in and selects one primary `action`
-representation: `joint_position`, `joint_position_velocity`, or
-`eef_pose_gripper`. Contract datasets store the descriptor in the official
-action feature metadata and use per-frame LeRobot `task` / `task_index` for
-segment instructions. Auxiliary measured EEF poses and executed controller qpos
-are declared only when requested; controller qpos is captured at the robot
-boundary before action postprocessing.
+LeRobot recording preserves that existing expert schema when `action_contract`
+is omitted. Expert contracts select `joint_position` or
+`joint_position_velocity` and continue to derive width, names, and slices from
+`ExpertActionSpec`. Policy contracts select `eef_pose_parallel_gripper` or
+`joint_position_parallel_gripper`; their width, ordered names, and term slices
+come from the live `ActionManager` descriptors. The descriptor sequence must
+match the declared representation and is stored as
+`embodichain.action_terms` in action-feature metadata and episode sidecars.
+Contract datasets use per-frame LeRobot `task` / `task_index` for segment
+instructions. Executed controller commands are not a separate dataset feature.
 
 `dataset.save_episode()` is the LeRobot commit point. A later depth/sidecar
 failure cannot roll back that episode. Fragment IDs provide same-recorder

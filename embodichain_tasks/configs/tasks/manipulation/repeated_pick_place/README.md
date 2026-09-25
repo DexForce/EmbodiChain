@@ -43,24 +43,25 @@ resulting simulation state.
 | Contract representation | Primary `action` | `observation.state` | Auxiliary EEF field | Controller boundary |
 |---|---|---|---|---|
 | omitted (main-compatible default) | Active joints in the configured joint order | Measured active-joint qpos | None | Not recorded separately |
-| `joint_position` | Active joints in the configured joint order | Measured active-joint qpos | Optional measured `observation.eef_pose` | Optional `action.controller_qpos` |
-| `joint_position_velocity` | Active-joint `[qpos, qvel]` | Measured active-joint qpos | Optional measured `observation.eef_pose` | Optional `action.controller_qpos` |
-| `eef_pose_gripper` | `[x, y, z, roll, pitch, yaw, gripper]` | Measured active-joint qpos | Optional measured `observation.eef_pose` | IK-generated `action.controller_qpos` |
+| `joint_position` | Active joints in the configured joint order | Measured active-joint qpos | Optional measured `observation.eef_pose` | Not recorded separately |
+| `joint_position_velocity` | Active-joint `[qpos, qvel]` | Measured active-joint qpos | Optional measured `observation.eef_pose` | Not recorded separately |
+| `eef_pose_parallel_gripper` | `[x, y, z, roll, pitch, yaw, gripper]` from `arm_action`, then `gripper_action` | Measured active-joint qpos | Optional measured `observation.eef_pose` | Not recorded separately |
+| `joint_position_parallel_gripper` | Seven arm joints from `arm_action`, then one `gripper_action` scalar | Measured active-joint qpos | Optional measured `observation.eef_pose` | Not recorded separately |
 
 EEF actions are absolute arena-frame targets. Rotation is XYZ Euler/RPY in
 radians, and gripper values are normalized to `[-1, 1]`. The requested EEF
-target is captured from the raw policy command; it is never reconstructed from
-the measured pose. The versioned action contract is stored in the official
-LeRobot action feature metadata and the episode sidecar. Existing configurations
-that omit `action_contract` keep the current joint schema unchanged. Select
-EEF recording explicitly:
+target is captured from the Action Manager's validated flat policy command; it
+is never reconstructed from the measured pose. Policy feature width, names, and
+slices come from the manager's ordered descriptors, which are stored as
+`embodichain.action_terms` in the LeRobot action feature metadata and episode
+sidecar. Configurations that omit `action_contract` keep the expert joint schema
+unchanged. Select EEF policy recording explicitly:
 
 ```yaml
 params:
   action_contract:
     version: 1
-    representation: eef_pose_gripper
-    record_controller_qpos: true
+    representation: eef_pose_parallel_gripper
     record_eef_observation: true
 ```
 

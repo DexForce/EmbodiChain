@@ -14,466 +14,312 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Tests for built-in joint action terms."""
+
 from __future__ import annotations
 
-import gymnasium as gym
-import pytest
+import numpy as np
 import torch
-from tensordict import TensorDict
 
-from embodichain.lab.gym.envs.managers import ActionManager
+from embodichain.lab.gym.envs.managers import ActionManager, ActionTermCfg
 from embodichain.lab.gym.envs.managers.actions import (
-    DeltaQposTerm,
-    EefPoseGripperTerm,
-    EefPoseTerm,
-    JointPositionGripperTerm,
-    QposTerm,
-    QposDenormalizedTerm,
-    QposNormalizedTerm,
-    QvelTerm,
-    QfTerm,
+    EefPoseAction,
+    JointEffortAction,
+    JointPositionAction,
+    JointPositionToLimitsAction,
+    JointVelocityAction,
+    ParallelGripperAction,
+    RelativeJointPositionAction,
 )
-from embodichain.lab.gym.envs.managers.cfg import ActionTermCfg
+
+from action_test_utils import make_action_env, make_cfg
 
 
-class MockEnv:
-    """Minimal mock env for ActionTerm tests."""
+def test_joint_position_applies_selected_policy_order() -> None:
+    """Non-contiguous part order is preserved at the controller boundary."""
+    env = make_action_env(
+        num_envs=1,
+        joint_names=("joint_0", "joint_1", "joint_2", "joint_3"),
+        parts={"arm": (3, 1)},
+    )
+    term = JointPositionAction(
+        make_cfg(JointPositionAction, part_name="arm", preserve_order=True), env
+    )
 
-    def __init__(self, num_envs: int = 4, action_dim: int = 6):
-        self.num_envs = num_envs
-        self.active_joint_ids = list(range(action_dim))
-        self.device = torch.device("cpu")
+    term.process_actions(torch.tensor([[0.3, 0.1]]))
+    term.apply_actions()
 
-    def get_qpos(self):
-        return torch.zeros(
-            self.num_envs, len(self.active_joint_ids), device=self.device
+    kwargs = env.robot.set_qpos.call_args.kwargs
+    assert kwargs["joint_ids"] == [3, 1]
+    torch.testing.assert_close(kwargs["qpos"], torch.tensor([[0.3, 0.1]]))
+    assert term.controlled_joint_ids == (3, 1)
+    assert term.descriptor.joint_names == ("joint_3", "joint_1")
+
+
+def test_joint_position_to_limits_maps_each_dimension() -> None:
+    """Normalized actions use each selected joint's own limits."""
+    env = make_action_env(joint_names=("joint_0", "joint_1"))
+    env.robot.body_data.qpos_limits = torch.tensor([[[-2.0, 2.0], [0.0, 4.0]]])
+    term = JointPositionToLimitsAction(
+        make_cfg(JointPositionToLimitsAction, part_name="arm"), env
+    )
+
+    term.process_actions(torch.tensor([[-1.0, 1.0], [0.0, 0.0]]))
+
+    torch.testing.assert_close(
+        term.processed_actions,
+        torch.tensor([[-2.0, 4.0], [0.0, 2.0]]),
+    )
+    np.testing.assert_array_equal(term.action_space.low, np.full(2, -1.0))
+    np.testing.assert_array_equal(term.action_space.high, np.full(2, 1.0))
+
+
+def test_relative_joint_position_uses_selected_current_qpos() -> None:
+    """Relative commands add scaled actions to current selected joints."""
+    env = make_action_env(
+        num_envs=1,
+        joint_names=("joint_0", "joint_1", "joint_2"),
+        parts={"arm": (2, 0)},
+    )
+    env.robot.get_qpos.return_value = torch.tensor([[0.1, 5.0, 0.3]])
+    term = RelativeJointPositionAction(
+        make_cfg(
+            RelativeJointPositionAction,
+            part_name="arm",
+            preserve_order=True,
+            scale=0.5,
+            clip=1.0,
+        ),
+        env,
+    )
+
+    term.process_actions(torch.tensor([[2.0, -2.0]]))
+
+    torch.testing.assert_close(term.raw_actions, torch.tensor([[1.0, -1.0]]))
+    torch.testing.assert_close(term.processed_actions, torch.tensor([[0.8, -0.4]]))
+
+
+def test_joint_velocity_applies_selected_limits_and_ids() -> None:
+    """Velocity actions use selected velocity bounds and setter."""
+    env = make_action_env(num_envs=1, joint_names=("joint_0", "joint_1"))
+    env.robot.body_data.qvel_limits = torch.tensor([[2.0, 3.0]])
+    term = JointVelocityAction(
+        make_cfg(JointVelocityAction, part_name="arm", scale=2.0), env
+    )
+
+    term.process_actions(torch.tensor([[0.5, -0.5]]))
+    term.apply_actions()
+
+    torch.testing.assert_close(term.processed_actions, torch.tensor([[1.0, -1.0]]))
+    np.testing.assert_array_equal(term.action_space.low, np.array([-2.0, -3.0]))
+    assert env.robot.set_qvel.call_args.kwargs["joint_ids"] == [0, 1]
+
+
+def test_joint_effort_applies_selected_limits_and_ids() -> None:
+    """Effort actions use selected effort bounds and setter."""
+    env = make_action_env(num_envs=1, joint_names=("joint_0", "joint_1"))
+    env.robot.body_data.qf_limits = torch.tensor([[4.0, 5.0]])
+    term = JointEffortAction(
+        make_cfg(JointEffortAction, part_name="arm", scale=2.0), env
+    )
+
+    term.process_actions(torch.tensor([[0.5, -0.5]]))
+    term.apply_actions()
+
+    torch.testing.assert_close(term.processed_actions, torch.tensor([[1.0, -1.0]]))
+    np.testing.assert_array_equal(term.action_space.high, np.array([4.0, 5.0]))
+    assert env.robot.set_qf.call_args.kwargs["joint_ids"] == [0, 1]
+
+
+def test_joint_action_reset_preserves_unselected_rows() -> None:
+    """Term reset clears raw and processed state only for selected rows."""
+    env = make_action_env(num_envs=2, joint_names=("joint_0", "joint_1"))
+    term = JointPositionAction(make_cfg(JointPositionAction, part_name="arm"), env)
+    action = torch.tensor([[0.1, 0.2], [0.3, 0.4]])
+    term.process_actions(action)
+
+    term.reset(torch.tensor([0]))
+
+    torch.testing.assert_close(term.raw_actions[0], torch.zeros(2))
+    torch.testing.assert_close(term.raw_actions[1], action[1])
+    torch.testing.assert_close(term.processed_actions[0], torch.zeros(2))
+    torch.testing.assert_close(term.processed_actions[1], action[1])
+
+
+def test_manager_masks_inactive_position_rows_with_measured_joint_hold() -> None:
+    """Completed vector-demo rows hold measured qpos before term application."""
+    env = make_action_env(num_envs=2, joint_names=("joint_0", "joint_1"))
+    env.robot.get_qpos.return_value = torch.tensor([[0.1, 0.2], [0.3, 0.4]])
+    manager = ActionManager(
+        {
+            "arm_action": ActionTermCfg(
+                func=JointPositionAction,
+                params={"part_name": "arm"},
+            )
+        },
+        env,
+    )
+    manager.process_action(torch.tensor([[9.0, 9.0], [8.0, 8.0]]))
+
+    manager.mask_inactive(torch.tensor([False, True]))
+    manager.apply_action()
+
+    torch.testing.assert_close(
+        env.robot.set_qpos.call_args.kwargs["qpos"],
+        torch.tensor([[0.1, 0.2], [8.0, 8.0]]),
+    )
+
+
+def test_eef_action_applies_ik_only_to_selected_arm() -> None:
+    """EEF IK applies only the selected arm joints in configured order."""
+    env = make_action_env(
+        num_envs=1,
+        joint_names=("joint_0", "joint_1", "joint_2"),
+        parts={"arm": (0, 2)},
+    )
+    env.robot.get_qpos.return_value = torch.tensor([[0.1, 9.0, 0.2]])
+    env.robot.compute_ik.return_value = (
+        torch.tensor([True]),
+        torch.tensor([[0.4, 0.5]]),
+    )
+    term = EefPoseAction(
+        make_cfg(EefPoseAction, part_name="arm", pose_representation="xyz_rpy"),
+        env,
+    )
+
+    term.process_actions(torch.zeros(1, 6))
+    term.apply_actions()
+
+    kwargs = env.robot.set_qpos.call_args.kwargs
+    assert kwargs["joint_ids"] == [0, 2]
+    torch.testing.assert_close(kwargs["qpos"], torch.tensor([[0.4, 0.5]]))
+    assert term.action_dim == 6
+
+
+def test_eef_action_holds_failed_ik_row() -> None:
+    """Failed IK rows retain the current selected arm configuration."""
+    env = make_action_env(
+        num_envs=2,
+        joint_names=("joint_0", "joint_1"),
+        parts={"arm": (0, 1)},
+    )
+    env.robot.get_qpos.return_value = torch.tensor([[0.1, 0.2], [0.3, 0.4]])
+    env.robot.compute_ik.return_value = (
+        torch.tensor([True, False]),
+        torch.tensor([[0.5, 0.6], [0.8, 0.9]]),
+    )
+    term = EefPoseAction(
+        make_cfg(EefPoseAction, part_name="arm", pose_representation="xyz_rpy"),
+        env,
+    )
+
+    term.process_actions(torch.zeros(2, 6))
+
+    torch.testing.assert_close(term.processed_actions[0], torch.tensor([0.5, 0.6]))
+    torch.testing.assert_close(term.processed_actions[1], torch.tensor([0.3, 0.4]))
+    assert term.ik_success.tolist() == [True, False]
+
+
+def test_continuous_parallel_gripper_maps_opposing_commands() -> None:
+    """One scalar interpolates explicit per-joint endpoint commands."""
+    env = make_action_env(
+        num_envs=2,
+        joint_names=("j0", "j1", "j2", "j3", "j4", "left", "j6", "right"),
+        parts={"hand": (5, 7)},
+    )
+    term = ParallelGripperAction(
+        make_cfg(
+            ParallelGripperAction,
+            part_name="hand",
+            command_mode="continuous",
+            lower_command={"left": 0.0, "right": 0.04},
+            upper_command={"left": 0.04, "right": 0.0},
+        ),
+        env,
+    )
+
+    term.process_actions(torch.tensor([[-1.0], [1.0]]))
+
+    torch.testing.assert_close(
+        term.processed_actions,
+        torch.tensor([[0.0, 0.04], [0.04, 0.0]]),
+    )
+
+
+def test_binary_parallel_gripper_has_one_policy_dimension() -> None:
+    """Binary grippers select complete close/open joint configurations."""
+    env = make_action_env(
+        num_envs=2,
+        joint_names=("left", "right"),
+        parts={"hand": (0, 1)},
+    )
+    term = ParallelGripperAction(
+        make_cfg(
+            ParallelGripperAction,
+            part_name="hand",
+            command_mode="binary",
+            open_command={"left": 0.04, "right": 0.04},
+            close_command={"left": 0.0, "right": 0.0},
+        ),
+        env,
+    )
+
+    term.process_actions(torch.tensor([[-0.1], [0.1]]))
+
+    assert term.action_dim == 1
+    torch.testing.assert_close(term.processed_actions[0], term.close_command)
+    torch.testing.assert_close(term.processed_actions[1], term.open_command)
+
+
+def test_arm_plus_gripper_dimensions_follow_resolved_arm_width() -> None:
+    """UR and Franka layouts derive 6+1 and 7+1 widths without literals."""
+    for arm_width, expected in ((6, 7), (7, 8)):
+        joint_names = tuple(f"arm_{index}" for index in range(arm_width)) + ("finger",)
+        env = make_action_env(
+            num_envs=1,
+            joint_names=joint_names,
+            parts={"arm": tuple(range(arm_width)), "hand": (arm_width,)},
         )
-
-    @property
-    def robot(self):
-        """DeltaQposTerm uses env.robot.get_qpos()."""
-        return self
-
-
-class MockEnvWithLimits(MockEnv):
-    """Mock env with qpos_limits for QposDenormalizedTerm."""
-
-    def __init__(self, num_envs: int = 4, action_dim: int = 6):
-        super().__init__(num_envs, action_dim)
-        # qpos_limits shape: (1, dof, 2) for [low, high]
-        self._qpos_limits = torch.zeros(1, action_dim, 2)
-        self._qpos_limits[..., 0] = -1.0
-        self._qpos_limits[..., 1] = 1.0
-
-    @property
-    def robot(self):
-        return self
-
-    @property
-    def body_data(self):
-        class BodyData:
-            def __init__(_, limits):
-                _.qpos_limits = limits
-
-        return BodyData(self._qpos_limits)
+        manager = ActionManager(
+            {
+                "arm_action": ActionTermCfg(
+                    func=JointPositionAction,
+                    params={"part_name": "arm"},
+                ),
+                "gripper_action": ActionTermCfg(
+                    func=ParallelGripperAction,
+                    params={
+                        "part_name": "hand",
+                        "command_mode": "continuous",
+                        "use_joint_limits": True,
+                    },
+                ),
+            },
+            env,
+        )
+        assert manager.total_action_dim == expected
+        assert manager.single_action_space.shape == (expected,)
 
 
-class MockEnvForEef(MockEnv):
-    """Mock env with compute_ik for EefPoseTerm."""
-
-    def __init__(self, num_envs: int = 2, action_dim: int = 6):
-        super().__init__(num_envs, action_dim)
-
-    def compute_ik(self, pose, joint_seed):
-        """Return (all success, joint_seed) to simulate IK success."""
-        batch_size = joint_seed.shape[0]
-        ret = torch.ones(batch_size, dtype=torch.bool, device=self.device)
-        return ret, joint_seed.clone()
-
-
-class MockEnvForGripper(MockEnvForEef):
-    """Mock robot with arm and one non-mimic gripper joint."""
-
-    def __init__(self, num_envs: int = 2):
-        super().__init__(num_envs=num_envs, action_dim=8)
-        self._qpos_limits = torch.zeros(1, 8, 2)
-        self._qpos_limits[..., 0] = -1.0
-        self._qpos_limits[..., 1] = 1.0
-
-    def get_joint_ids(self, name, remove_mimic=False):
-        del remove_mimic
-        return list(range(7)) if name == "arm" else [7]
-
-    def compute_ik(self, pose, joint_seed, name=None):
-        del pose, name
-        return super().compute_ik(pose=None, joint_seed=joint_seed)
-
-    @property
-    def body_data(self):
-        class BodyData:
-            def __init__(_, limits):
-                _.qpos_limits = limits
-
-        return BodyData(self._qpos_limits)
-
-
-def test_delta_qpos_term_process_action():
-    """DeltaQposTerm: qpos = current_qpos + scale * action."""
-    env = MockEnv(num_envs=4, action_dim=6)
-    cfg = ActionTermCfg(func=DeltaQposTerm, params={"scale": 0.1})
-    term = DeltaQposTerm(cfg, env)
-
-    action = torch.ones(4, 6) * 2.0
-    result = term.process_action(action)
-
-    # DeltaQposTerm returns tensor directly, not dict
-    expected = env.get_qpos() + 0.1 * action
-    torch.testing.assert_close(result, expected)
-    assert term.action_dim == 6
-
-
-def test_qpos_term_process_action():
-    """QposTerm: qpos = scale * action."""
-    env = MockEnv(num_envs=2, action_dim=3)
-    cfg = ActionTermCfg(func=QposTerm, params={"scale": 0.5})
-    term = QposTerm(cfg, env)
-
-    action = torch.ones(2, 3)
-    result = term.process_action(action)
-
-    # QposTerm returns tensor directly, not dict
-    torch.testing.assert_close(result, torch.ones(2, 3) * 0.5)
-    assert term.action_dim == 3
-
-
-def test_qpos_denormalized_term_process_action():
-    """QposDenormalizedTerm: [-1,1] -> [low, high] with scale=1."""
-    env = MockEnvWithLimits(num_envs=2, action_dim=2)
-    cfg = ActionTermCfg(func=QposDenormalizedTerm, params={"scale": 1.0})
-    term = QposDenormalizedTerm(cfg, env)
-
-    # action=-1 -> low, action=1 -> high
-    action = torch.tensor([[-1.0, -1.0], [1.0, 1.0]])
-    result = term.process_action(action)
-
-    # QposDenormalizedTerm returns tensor directly, not dict
-    # low=-1, high=1: qpos = low + (action + 1.0) * 0.5 * (high - low)
-    expected = torch.tensor([[-1.0, -1.0], [1.0, 1.0]])
-    torch.testing.assert_close(result, expected)
-    assert term.action_dim == 2
-
-
-def test_eef_pose_term_process_action_6d():
-    """EefPoseTerm: 6D pose (x,y,z,euler) -> IK -> qpos."""
-    env = MockEnvForEef(num_envs=2, action_dim=6)
-    cfg = ActionTermCfg(func=EefPoseTerm, params={"scale": 1.0, "pose_dim": 6})
-    term = EefPoseTerm(cfg, env)
-
-    # 6D: position + euler angles
-    action = torch.zeros(2, 6)
-    action[:, :3] = 0.1  # position
-    action[:, 3:6] = 0.0  # euler (identity rotation)
-    result = term.process_action(action)
-
-    assert "qpos" in result
-    assert "ik_success" in result
-    assert result["qpos"].shape == (2, 6)
-    assert result["ik_success"].shape == (2,)
-    assert result["eef_pose"].shape == (2, 6)
-    # Mock returns joint_seed (zeros); verify output matches
-    torch.testing.assert_close(result["qpos"], env.get_qpos())
-    assert term.action_dim == 6
-
-
-def test_eef_pose_term_process_action_7d():
-    """EefPoseTerm: 7D pose (x,y,z,quat) -> IK -> qpos."""
-    env = MockEnvForEef(num_envs=2, action_dim=6)
-    cfg = ActionTermCfg(func=EefPoseTerm, params={"scale": 1.0, "pose_dim": 7})
-    term = EefPoseTerm(cfg, env)
-
-    # 7D: position + quaternion (x,y,z,w)
-    action = torch.zeros(2, 7)
-    action[:, :3] = 0.1
-    action[:, 6] = 1.0  # xyzw identity
-    result = term.process_action(action)
-
-    assert "qpos" in result
-    assert "ik_success" in result
-    assert result["qpos"].shape == (2, 6)
-    assert result["eef_pose"].shape == (2, 7)
-    torch.testing.assert_close(result["qpos"], env.get_qpos())
-    assert term.action_dim == 7
-
-
-def test_eef_pose_term_invalid_dim_raises():
-    """EefPoseTerm raises ValueError for non-6D/7D action."""
-    env = MockEnvForEef(num_envs=2, action_dim=6)
-    cfg = ActionTermCfg(func=EefPoseTerm, params={"scale": 1.0, "pose_dim": 5})
-    term = EefPoseTerm(cfg, env)
-
-    with pytest.raises(ValueError, match="EEF pose action must be 6D or 7D"):
-        term.process_action(torch.zeros(2, 5))
-
-
-def test_eef_pose_gripper_term_maps_shared_gripper():
-    """EEF pose plus normalized gripper action maps to arm and hand qpos."""
-    env = MockEnvForGripper()
-    term = EefPoseGripperTerm(
-        ActionTermCfg(func=EefPoseGripperTerm, params={"part_name": "arm"}), env
+def test_parallel_gripper_never_controls_mimic_follower() -> None:
+    """Resolved hand IDs contain only the independent gripper leader."""
+    env = make_action_env(
+        num_envs=1,
+        joint_names=("arm", "finger_leader", "finger_follower"),
+        parts={"hand": (1,)},
     )
-
-    action = torch.zeros(2, 7)
-    action[:, 6] = 1.0
-    result = term.process_action(action)
-
-    assert result["qpos"].shape == (2, 8)
-    torch.testing.assert_close(result["eef_pose"], action)
-    torch.testing.assert_close(result["qpos"][:, 7], torch.ones(2))
-
-
-def test_joint_position_gripper_term_maps_arm_and_hand():
-    """Eight joint actions map seven arm joints and one shared gripper."""
-    env = MockEnvForGripper()
-    term = JointPositionGripperTerm(ActionTermCfg(func=JointPositionGripperTerm), env)
-
-    action = torch.arange(16, dtype=torch.float32).reshape(2, 8)
-    result = term.process_action(action)
-
-    torch.testing.assert_close(result[:, :7], action[:, :7])
-    torch.testing.assert_close(result[:, 7], torch.ones(2))
-
-
-def test_joint_position_gripper_term_exposes_eight_dim_action_space():
-    """The policy space matches seven arm joints plus normalized gripper."""
-    env = MockEnvForGripper()
-    manager = ActionManager(
-        {"joint": ActionTermCfg(func=JointPositionGripperTerm)}, env
-    )
-
-    assert manager.single_action_space.shape == (8,)
-    assert manager.single_action_space.low[-1] == -1.0
-    assert manager.single_action_space.high[-1] == 1.0
-
-
-def test_eef_pose_gripper_term_exposes_flat_box_action_space():
-    """A sole EEF term exposes the flat policy contract and gripper bounds."""
-    env = MockEnvForGripper()
-    manager = ActionManager(
-        {
-            "eef": ActionTermCfg(
-                func=EefPoseGripperTerm,
-                params={"part_name": "arm"},
-            )
-        },
+    term = ParallelGripperAction(
+        make_cfg(
+            ParallelGripperAction,
+            part_name="hand",
+            command_mode="continuous",
+            use_joint_limits=True,
+        ),
         env,
     )
 
-    space = manager.single_action_space
-    assert isinstance(space, gym.spaces.Box)
-    assert space.shape == (7,)
-    assert space.low[-1] == -1.0
-    assert space.high[-1] == 1.0
+    term.process_actions(torch.zeros(1, 1))
+    term.apply_actions()
 
-
-def test_single_legacy_eef_term_keeps_dict_action_space():
-    """Existing non-qpos singleton terms retain their public Dict contract."""
-    env = MockEnvForEef(num_envs=2, action_dim=6)
-    manager = ActionManager(
-        {"eef": ActionTermCfg(func=EefPoseTerm, params={"pose_dim": 6})}, env
-    )
-
-    space = manager.single_action_space
-    assert isinstance(space, gym.spaces.Dict)
-    assert list(space.spaces) == ["eef_pose"]
-
-
-def test_single_eef_term_unwraps_tensor_dict_policy_action():
-    """Dict-shaped Gym actions are unwrapped before the sole EEF term runs."""
-    env = MockEnvForGripper()
-    manager = ActionManager(
-        {
-            "eef": ActionTermCfg(
-                func=EefPoseGripperTerm,
-                params={"part_name": "arm"},
-            )
-        },
-        env,
-    )
-    eef_action = torch.zeros(2, 7)
-    eef_action[:, 6] = 1.0
-
-    result = manager.process_action(
-        TensorDict({"eef_pose": eef_action}, batch_size=[2])
-    )
-
-    torch.testing.assert_close(result["eef_pose"], eef_action)
-
-
-def test_qvel_term_process_action():
-    """QvelTerm: qvel = scale * action."""
-    env = MockEnv(num_envs=2, action_dim=3)
-    cfg = ActionTermCfg(func=QvelTerm, params={"scale": 0.2})
-    term = QvelTerm(cfg, env)
-
-    action = torch.ones(2, 3)
-    result = term.process_action(action)
-
-    # QvelTerm returns tensor directly, not dict
-    torch.testing.assert_close(result, torch.ones(2, 3) * 0.2)
-
-
-def test_qf_term_process_action():
-    """QfTerm: qf = scale * action."""
-    env = MockEnv(num_envs=2, action_dim=3)
-    cfg = ActionTermCfg(func=QfTerm, params={"scale": 10.0})
-    term = QfTerm(cfg, env)
-
-    action = torch.ones(2, 3)
-    result = term.process_action(action)
-
-    # QfTerm returns tensor directly, not dict
-    torch.testing.assert_close(result, torch.ones(2, 3) * 10.0)
-
-
-def test_action_manager_tensor_input():
-    """ActionManager passes dict input to the specified term."""
-    env = MockEnv(num_envs=2, action_dim=3)
-    cfg = {
-        "delta_qpos": ActionTermCfg(func=DeltaQposTerm, params={"scale": 0.1}),
-    }
-    manager = ActionManager(cfg, env)
-
-    # ActionManager expects dict with input_key matching term
-    action = torch.ones(2, 3)
-    result = manager.process_action(action)
-
-    expected = env.get_qpos() + 0.1 * torch.ones(2, 3)
-    torch.testing.assert_close(result, expected)
-
-
-def test_action_manager_dict_input():
-    """ActionManager processes dict input with single term."""
-    env = MockEnv(num_envs=2, action_dim=3)
-    cfg = {
-        "qpos": ActionTermCfg(func=QposTerm, params={"scale": 1.0}),
-    }
-    manager = ActionManager(cfg, env)
-
-    action_dict = torch.ones(2, 3) * 0.5
-    result = manager.process_action(action_dict)
-
-    torch.testing.assert_close(result, torch.ones(2, 3) * 0.5)
-
-
-# Tests for action term mode (pre/post)
-
-
-def test_action_term_cfg_default_mode():
-    """ActionTermCfg defaults to mode='pre'."""
-    cfg = ActionTermCfg(func=DeltaQposTerm, params={})
-    assert cfg.mode == "pre"
-
-
-def test_action_term_cfg_post_mode():
-    """ActionTermCfg supports mode='post'."""
-    cfg = ActionTermCfg(func=QposNormalizedTerm, params={}, mode="post")
-    assert cfg.mode == "post"
-
-
-def test_action_manager_process_action_pre_mode():
-    """ActionManager.process_action defaults to pre mode."""
-    env = MockEnv(num_envs=2, action_dim=3)
-    cfg = {
-        "delta_qpos": ActionTermCfg(func=DeltaQposTerm, params={"scale": 0.1}),
-    }
-    manager = ActionManager(cfg, env)
-
-    action = torch.ones(2, 3)
-    result = manager.process_action(action, mode="pre")
-
-    expected = env.get_qpos() + 0.1 * torch.ones(2, 3)
-    torch.testing.assert_close(result, expected)
-
-
-def test_action_manager_process_action_post_mode():
-    """ActionManager.process_action with post mode uses post terms only."""
-    env = MockEnvWithLimits(num_envs=2, action_dim=3)
-    cfg = {
-        "norm": ActionTermCfg(func=QposNormalizedTerm, mode="post"),
-    }
-    manager = ActionManager(cfg, env)
-
-    # Action values are qpos that will be normalized
-    action = torch.ones(2, 3) * 0.5
-    result = manager.process_action(action, mode="post")
-
-    # With qpos_limits = [-1, 1], qpos=0.5 normalizes to (0.5-(-1))/(1-(-1)) = 0.75
-    torch.testing.assert_close(result, torch.ones(2, 3) * 0.75)
-
-
-def test_action_manager_mixed_pre_post_terms():
-    """ActionManager with both pre and post terms works correctly."""
-    env = MockEnvWithLimits(num_envs=2, action_dim=3)
-    cfg = {
-        "qpos": ActionTermCfg(func=QposTerm, params={"scale": 1.0}, mode="pre"),
-        "norm": ActionTermCfg(func=QposNormalizedTerm, mode="post"),
-    }
-    manager = ActionManager(cfg, env)
-
-    # Pre mode: should return qpos term output
-    action = torch.ones(2, 3) * 0.5
-    result_pre = manager.process_action(action, mode="pre")
-    torch.testing.assert_close(result_pre, torch.ones(2, 3) * 0.5)
-
-    # Post mode: should return normalized output
-    result_post = manager.process_action(action, mode="post")
-    # Values should be normalized to [0, 1] range
-    # With qpos_limits = [-1, 1], normalized qpos = (0.5 - (-1)) / (1 - (-1)) = 0.75
-    expected = torch.ones(2, 3) * 0.75
-    torch.testing.assert_close(result_post, expected)
-
-
-def test_action_manager_get_terms_by_mode():
-    """ActionManager.get_terms_by_mode returns correct terms."""
-    env = MockEnv(num_envs=2, action_dim=3)
-    cfg = {
-        "qpos": ActionTermCfg(func=QposTerm, params={}, mode="pre"),
-        "norm": ActionTermCfg(func=QposNormalizedTerm, params={}, mode="post"),
-    }
-    manager = ActionManager(cfg, env)
-
-    pre_terms = manager.get_terms_by_mode("pre")
-    assert len(pre_terms) == 1
-    assert pre_terms[0][0] == "qpos"
-
-    post_terms = manager.get_terms_by_mode("post")
-    assert len(post_terms) == 1
-    assert post_terms[0][0] == "norm"
-
-
-def test_action_manager_get_action_dim_by_mode():
-    """ActionManager.get_action_dim_by_mode returns correct dimensions."""
-    env = MockEnv(num_envs=2, action_dim=3)
-    cfg = {
-        "qpos": ActionTermCfg(func=QposTerm, params={}, mode="pre"),
-        "norm": ActionTermCfg(func=QposNormalizedTerm, params={}, mode="post"),
-    }
-    manager = ActionManager(cfg, env)
-
-    assert manager.get_action_dim_by_mode("pre") == 3
-    assert manager.get_action_dim_by_mode("post") == 3
-
-
-def test_qpos_normalized_term_from_qpos():
-    """QposNormalizedTerm normalizes qpos from limits to [0, 1] range."""
-    env = MockEnvWithLimits(num_envs=2, action_dim=3)
-    cfg = ActionTermCfg(func=QposNormalizedTerm, params={})
-    term = QposNormalizedTerm(cfg, env)
-
-    # qpos at limits: [-1, 1]
-    action = torch.tensor([[-1.0, 0.0, 1.0], [-1.0, 0.0, 1.0]])
-    result = term.process_action(action)
-
-    # [-1, 0, 1] -> [0, 0.5, 1] when normalized to [0, 1]
-    expected = torch.tensor([[0.0, 0.5, 1.0], [0.0, 0.5, 1.0]])
-    torch.testing.assert_close(result, expected)
+    assert term.controlled_joint_ids == (1,)
+    assert env.robot.set_qpos.call_args.kwargs["joint_ids"] == [1]

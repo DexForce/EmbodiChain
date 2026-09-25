@@ -337,15 +337,24 @@ embodichain.lab.gym.envs.managers.actions
 
 .. autosummary::
 
-   DeltaQposTerm
-   QposTerm
-   QposDenormalizedTerm
-   QposNormalizedTerm
-   EefPoseTerm
-   EefPoseGripperTerm
-   JointPositionGripperTerm
-   QvelTerm
-   QfTerm
+   DefaultJointPositionAction
+   EefPoseAction
+   JointEffortAction
+   JointPositionAction
+   JointPositionToLimitsAction
+   JointVelocityAction
+   ParallelGripperAction
+   RelativeJointPositionAction
+
+embodichain.lab.gym.envs.managers.action_types
+----------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.action_types
+
+.. autosummary::
+
+   ActionDescriptor
+   ActionTermDescriptor
 
 embodichain.lab.gym.envs.wrapper.replay
 ---------------------------------------

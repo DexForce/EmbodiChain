@@ -111,6 +111,30 @@ def test_heading_commands_consume_xyzw_quaternions() -> None:
     torch.testing.assert_close(env.command, torch.zeros((1, 3)), atol=1e-6, rtol=0)
 
 
+def test_locomotion_state_binds_new_action_term_buffers() -> None:
+    """Velocity state reads current, previous, and encoder-bias buffers."""
+    from types import SimpleNamespace
+
+    from embodichain_tasks.locomotion.velocity._embodichain import (
+        EmbodiChainVelocityEnv,
+    )
+
+    term = SimpleNamespace(
+        raw_actions=torch.ones(2, 3),
+        previous_raw_actions=torch.full((2, 3), 2.0),
+        position_bias=torch.full((2, 3), 0.1),
+    )
+    env = SimpleNamespace(
+        action_manager=SimpleNamespace(get_term=lambda name: term),
+    )
+
+    EmbodiChainVelocityEnv._bind_locomotion_action_state(env)
+
+    assert env.locomotion_action is term.raw_actions
+    assert env.last_locomotion_action is term.previous_raw_actions
+    assert env.encoder_bias is term.position_bias
+
+
 @pytest.mark.parametrize("robot", ["g1", "h1_2", "go1", "go2"])
 @pytest.mark.parametrize("backend", ["default", "newton"])
 def test_unitree_deployments_preserve_task_physics(

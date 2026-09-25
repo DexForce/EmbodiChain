@@ -204,14 +204,6 @@ class DatasetManager(ManagerBase):
             for functor_cfg in self._mode_functor_cfgs.get("save", [])
         )
 
-    @property
-    def requires_controller_qpos(self) -> bool:
-        """Whether a recorder needs qpos captured at the controller boundary."""
-        return any(
-            bool(getattr(functor_cfg.func, "requires_controller_qpos", False))
-            for functor_cfg in self._mode_functor_cfgs.get("save", [])
-        )
-
     """
     Operations.
     """
