@@ -687,7 +687,14 @@ def _task_stability_payload(
                 ),
                 "position_tolerance": 0.02 if holding else _RELATIVE_POSITION_TOLERANCE,
             }
-    return {"schema_version": "gen_sim_task_constraints/v1", "presets": presets}
+    return {
+        "schema_version": "gen_sim_task_constraints/v1",
+        "presets": presets,
+        "adaptive_pick": any(
+            n["call"]["kind"] == "pick" and not n["call"].get("grasp")
+            for n in graph["nodes"]
+        ),
+    }
 
 
 def _program_payload(
@@ -1073,7 +1080,6 @@ def _integration_payload(
             arguments = call["arguments"]
             object_id = str(arguments["object"])
             call_id = call["call_id"]
-            horizontal = call_id.startswith(_HORIZONTAL_HANDOVER_SOURCE_PICK + ".")
             referenced_objects.add(object_id)
             pick_routes.setdefault(call_id, []).append(
                 {
@@ -1083,18 +1089,9 @@ def _integration_payload(
             )
             pick_options[call_id] = {
                 **default_pick_options,
-                "pick_object_part": "top",
+                "pick_object_part": "center",
             }
-            if horizontal:
-                source = scene_objects[object_id]
-                horizontal_handover_objects.add(object_id)
-                axis = _initial_rotation(source) @ np.asarray(
-                    _longest_local_axis(source)
-                )
-                approach = np.array([0.0, 0.0, -1.0]) - axis
-                pick_options[call_id]["approach_direction"] = (
-                    approach / np.linalg.norm(approach)
-                ).tolist()
+            horizontal_handover_objects.add(object_id)
         elif call["kind"] == "registered" and (
             call["call_id"] == _PICK_CALL_ID
             or call["call_id"].startswith("gen_sim.pick.")

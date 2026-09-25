@@ -19,7 +19,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import replace
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
 
 import torch
 
@@ -31,6 +32,7 @@ from embodichain.lab.sim.atomic_actions.affordance import (
 )
 from embodichain.lab.sim.atomic_actions.affordance_sampling import (
     AffordancePoseCandidates,
+    AffordanceSample,
 )
 from embodichain.lab.sim.atomic_actions.core import ObjectSemantics
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
@@ -44,6 +46,7 @@ from embodichain.lab.sim.atomic_actions.primitives.move_held_object import (
 from embodichain.lab.sim.atomic_actions.primitives.pour import Pour
 from embodichain.lab.sim.atomic_actions.primitives.place import Place
 from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp
+from embodichain.lab.sim.atomic_actions.primitives.hand_over import HandOver
 from embodichain.lab.sim.atomic_actions.plans import PlannerDiagnostics
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
@@ -51,10 +54,38 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
 )
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
-__all__ = ["GenSimPickUp", "GenSimMoveHeldObject", "GenSimPlace", "GenSimPour"]
+from .adaptive_grasp import (
+    ADAPTIVE_GRASP,
+    grasp_strategies,
+    observed_axis,
+    opposite_grasp_end,
+    select_grasp,
+)
 
-_HANDOVER_SOURCE_AXIS = "gen_sim.handover_source_axis"
+__all__ = [
+    "GenSimPickUp",
+    "GenSimHandOver",
+    "GenSimMoveHeldObject",
+    "GenSimPlace",
+    "GenSimPour",
+]
+
 _PICK_GRASP_RULE = "gen_sim.pick_grasp_rule"
+
+
+@dataclass
+class _PickSelection:
+    direction: torch.Tensor | None = None
+    request: object = None
+    trajectory: tuple | None = None
+
+
+_PICK_SELECTION: ContextVar[_PickSelection | None] = ContextVar(
+    "gen_sim_pick_selection", default=None
+)
+_RECEIVE_SELECTION: ContextVar[tuple | None] = ContextVar(
+    "gen_sim_receive_selection", default=None
+)
 
 
 class GenSimPickUp(PickUp):
@@ -64,6 +95,67 @@ class GenSimPickUp(PickUp):
     GoalType = PickUp.GoalType
     OptionsType = PickUp.OptionsType
     binding_contract = PickUp.binding_contract
+    adaptive_unconstrained = False
+
+    def _plan(self, request, context):
+        if self.adaptive_unconstrained:
+            goal, options = request.goal, request.skill_options
+            affordance = goal.semantics.affordance
+            if (
+                goal.grasp_xpos is None
+                and options.fixed_object_to_eef is None
+                and isinstance(affordance, AntipodalAffordance)
+                and affordance.get_custom_config(ADAPTIVE_GRASP) is None
+                and affordance.get_custom_config(_PICK_GRASP_RULE) is None
+                and options.pick_object_part == "center"
+                and options.rotate_upright is None
+                and options.obj_upright_direction is None
+                and torch.equal(
+                    options.approach_direction,
+                    options.approach_direction.new_tensor([0.0, 0.0, -1.0]),
+                )
+            ):
+                semantics = deepcopy(goal.semantics)
+                semantics.affordance.set_custom_config(ADAPTIVE_GRASP, "free")
+                request = replace(request, goal=replace(goal, semantics=semantics))
+        token = _PICK_SELECTION.set(_PickSelection(request=request))
+        try:
+            return super()._plan(request, context)
+        finally:
+            _PICK_SELECTION.reset(token)
+
+    def _get_full_pickup_trajectory(
+        self,
+        grasp_xpos,
+        start_arm_qpos,
+        last_qpos,
+        motion_policy,
+        options,
+        approach_direction,
+        manipulator,
+        end_effector,
+        hand_open_qpos,
+        hand_grasp_qpos,
+        interpolation_dt,
+    ):
+        selection = _PICK_SELECTION.get()
+        if selection is not None and selection.trajectory is not None:
+            return selection.trajectory
+        if selection is not None and selection.direction is not None:
+            approach_direction = selection.direction
+        return super()._get_full_pickup_trajectory(
+            grasp_xpos,
+            start_arm_qpos,
+            last_qpos,
+            motion_policy,
+            options,
+            approach_direction,
+            manipulator,
+            end_effector,
+            hand_open_qpos,
+            hand_grasp_qpos,
+            interpolation_dt,
+        )
 
     def _resolve_grasp_pose(
         self,
@@ -79,9 +171,36 @@ class GenSimPickUp(PickUp):
         sample_key,
     ):
         affordance = semantics.affordance
-        declared_axis = affordance.get_custom_config(_HANDOVER_SOURCE_AXIS)
+        mode = affordance.get_custom_config(ADAPTIVE_GRASP)
         rule_selector = affordance.get_custom_config(_PICK_GRASP_RULE)
-        if declared_axis is None and rule_selector is None:
+        selection = _PICK_SELECTION.get()
+        if (
+            mode in {"free", "ends"}
+            and selection is not None
+            and rule_selector is None
+            and options.pick_object_part == "center"
+            and options.rotate_upright is None
+            and options.obj_upright_direction is None
+        ):
+            axis = observed_axis(affordance, object_pose)
+            tcp = self.robot.compute_fk(
+                qpos=start_qpos, name=manipulator.control_part, to_matrix=True
+            )
+            generator = self.planning_services.grasp_pose_generator(grasp_target_id)
+            choices = grasp_strategies(axis, object_pose, tcp, ends=mode == "ends")
+            return self._select_adaptive_pick(
+                affordance,
+                generator,
+                object_pose,
+                start_qpos,
+                manipulator,
+                options,
+                context,
+                sample_key,
+                choices,
+                selection,
+            )
+        if rule_selector is None:
             return super()._resolve_grasp_pose(
                 semantics,
                 object_pose,
@@ -95,20 +214,6 @@ class GenSimPickUp(PickUp):
             )
         if not isinstance(affordance, AntipodalAffordance):
             raise ValueError("GenSim Pick requires AntipodalAffordance.")
-        world_axis = None
-        if declared_axis is not None:
-            axis = object_pose.new_tensor(declared_axis)
-            if (
-                rule_selector is not None
-                or options.pick_object_part != "top"
-                or axis.shape != (3,)
-                or not torch.isfinite(axis).all()
-                or torch.linalg.vector_norm(axis) <= 1e-6
-            ):
-                raise ValueError(
-                    "GenSim handover source requires a finite local axis and top selection."
-                )
-            world_axis = object_pose[:, :3, :3] @ axis
         generator = self.planning_services.grasp_pose_generator(grasp_target_id)
         if rule_selector is not None:
             from .grasp_filter import TaskGraspPoseGenerator
@@ -129,7 +234,7 @@ class GenSimPickUp(PickUp):
             generator,
             object_pose,
             approach_direction,
-            obj_longest_axis=world_axis,
+            obj_longest_axis=None,
             is_positive_part=True,
         )
         poses, ik_success = self._select_feasible_grasp_variants(
@@ -151,6 +256,180 @@ class GenSimPickUp(PickUp):
             key=sample_key,
             reference_poses=object_pose,
         )
+
+    def _select_adaptive_pick(
+        self,
+        affordance,
+        generator,
+        object_pose,
+        start_qpos,
+        manipulator,
+        options,
+        context,
+        sample_key,
+        choices,
+        selection,
+    ):
+        request = selection.request
+        grasp = request.binding.endpoint("primary", "grasp")
+        hand = grasp.require_target(JointPositionTarget)
+        commands = [
+            grasp.joint_positions(
+                name,
+                num_envs=context.batch_size,
+                device=self.device,
+                dtype=context.robot.qpos.dtype,
+            )
+            for name in ("open", "grasp")
+        ]
+        success = torch.zeros(context.batch_size, dtype=torch.bool, device=self.device)
+        poses = object_pose.clone()
+        directions = torch.zeros_like(object_pose[:, :3, 3])
+        strategies = torch.full_like(success, -1, dtype=torch.long)
+        candidate_ids = torch.full_like(strategies, -1)
+        full, lengths = None, None
+        attempts = []
+        for index, choice in enumerate(choices):
+            sample, direction = select_grasp(
+                affordance,
+                generator,
+                object_pose,
+                (choice,),
+                context,
+                f"{sample_key}:strategy_{index}",
+                feasible=lambda values, approach: self._select_feasible_grasp_variants(
+                    values,
+                    start_qpos,
+                    object_pose,
+                    manipulator,
+                    options,
+                    approach[:, None, None, :],
+                ),
+            )
+            viable = sample.success & ~success
+            attempt = {"strategy": index, "grasp_feasible": sample.success.tolist()}
+            attempts.append(attempt)
+            if not viable.any():
+                continue
+            # Screen the exact trajectory once, then return that same path to
+            # PickUp's effect builder rather than planning it again from new seeds.
+            (
+                path_ok,
+                candidate_path,
+                candidate_lengths,
+            ) = super()._get_full_pickup_trajectory(
+                sample.poses,
+                start_qpos,
+                context.last_qpos,
+                request.motion_policy,
+                options,
+                direction,
+                manipulator,
+                hand,
+                *commands,
+                context.require_control_dt(),
+            )
+            accepted = viable & path_ok
+            attempt["path_feasible"] = path_ok.tolist()
+            if full is None:
+                full = context.last_qpos[:, None].expand_as(candidate_path).clone()
+                lengths = candidate_lengths
+            if candidate_path.shape != full.shape or candidate_lengths != lengths:
+                raise ValueError("Adaptive Pick strategies must preserve phase timing.")
+            full = torch.where(accepted[:, None, None], candidate_path, full)
+            poses = torch.where(accepted[:, None, None], sample.poses, poses)
+            directions = torch.where(accepted[:, None], direction, directions)
+            strategies = torch.where(accepted, index, strategies)
+            candidate_ids = torch.where(
+                accepted,
+                candidate_ids.new_tensor(sample.metadata["candidate_ids"]),
+                candidate_ids,
+            )
+            success |= accepted
+            if success.all():
+                break
+        if full is not None:
+            selection.trajectory = (success, full, lengths)
+        selection.direction = directions
+        return AffordanceSample(
+            success,
+            poses,
+            {
+                "key": sample_key,
+                "candidate_ids": candidate_ids.tolist(),
+                "adaptive_grasp": {
+                    "strategy_indices": strategies.tolist(),
+                    "approach_directions": directions.tolist(),
+                    "attempts": attempts,
+                },
+            },
+        )
+
+
+class GenSimHandOver(HandOver):
+    """Choose receiving geometry locally; retain shared transfer and effects."""
+
+    skill_id = HandOver.skill_id
+    GoalType = HandOver.GoalType
+    OptionsType = HandOver.OptionsType
+    binding_contract = HandOver.binding_contract
+
+    def _plan_existing_hold(self, request, context, resources, held):
+        mode = held.semantics.affordance.get_custom_config(ADAPTIVE_GRASP)
+        token = _RECEIVE_SELECTION.set(
+            (resources, held) if mode in {"free", "ends"} else None
+        )
+        try:
+            return super()._plan_existing_hold(request, context, resources, held)
+        finally:
+            _RECEIVE_SELECTION.reset(token)
+
+    def _resolve_grasp(
+        self,
+        affordance,
+        object_pose,
+        approach_direction,
+        grasp_target_id,
+        *,
+        obj_longest_axis,
+        is_positive_part,
+        center_axis=None,
+        context,
+        sample_key,
+    ):
+        selection = _RECEIVE_SELECTION.get()
+        if selection is None:
+            return super()._resolve_grasp(
+                affordance,
+                object_pose,
+                approach_direction,
+                grasp_target_id,
+                obj_longest_axis=obj_longest_axis,
+                is_positive_part=is_positive_part,
+                center_axis=center_axis,
+                context=context,
+                sample_key=sample_key,
+            )
+        resources, held = selection
+        axis = observed_axis(affordance, object_pose)
+        source = object_pose @ held.object_to_eef.to(object_pose)
+        destination = self.robot.compute_fk(
+            qpos=context.robot.qpos[:, list(resources.second.arm.joint_ids)],
+            name=resources.second.arm.control_part,
+            to_matrix=True,
+        )
+        positive = opposite_grasp_end(axis, object_pose, source, destination)
+        sample, _ = select_grasp(
+            affordance,
+            self.planning_services.grasp_pose_generator(grasp_target_id),
+            object_pose,
+            grasp_strategies(
+                axis, object_pose, destination, ends=True, positive=positive
+            ),
+            context,
+            sample_key,
+        )
+        return sample
 
 
 def _unit(value: torch.Tensor) -> torch.Tensor:
