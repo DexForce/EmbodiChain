@@ -201,6 +201,7 @@ def test_position_velocity_targets_keep_fixed_env_step_and_are_saved(tmp_path):
         update.assert_called_once_with(
             env.physics_dt,
             env.cfg.sim_steps_per_control,
+            render_final_step=False,
         )
         assert env.action_space.shape[-1] == env.robot.dof
         assert env.rollout_buffer["actions"].shape[-1] == 2 * env.robot.dof
