@@ -1637,7 +1637,7 @@ def test_handover_source_region_follows_measured_axis(
         else "gen_sim.pick.handover_source"
     )
     options = integration["profile"]["action_options"][call_id]
-    assert options["pick_object_part"] == "top"
+    assert options["pick_object_part"] == "center"
     assert "pick_object_local_axis" not in options
     factory = next(
         x
@@ -1647,7 +1647,7 @@ def test_handover_source_region_follows_measured_axis(
     assert "grasp_region" not in factory["routes"][0]
     assert len(generated["nodes"]) == 3
     if horizontal:
-        assert np.linalg.norm(options["approach_direction"]) == pytest.approx(1.0)
+        assert "approach_direction" not in options
         binding = next(
             x
             for x in integration["scene_binding"]["rigid_objects"]
@@ -1776,7 +1776,7 @@ def test_explicit_orientation_bundle_uses_shared_preflight_and_terminal_post(
             source_call["call_id"] == "gen_sim.pick.handover_horizontal_source.bottle"
         )
         options = integration["profile"]["action_options"]
-        assert options[source_call["call_id"]]["pick_object_part"] == "top"
+        assert options[source_call["call_id"]]["pick_object_part"] == "center"
         assert "pick_object_local_axis" not in options[source_call["call_id"]]
         assert options["hand_over"]["receive_pick_object_part"] == "center"
         assert source_call["call_id"] in integration["profile"]["effect_monitors"]

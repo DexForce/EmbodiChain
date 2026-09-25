@@ -116,16 +116,26 @@ this visual path. Without usable Task Engine LLM configuration, text-only
 binding and its existing conflict behavior remain unchanged.
 E4 may defer unnamed transfer/receiver arms as `auto`; the planner binds the
 source from the held state or nearest scene side and the other arm as receiver,
-while preserving explicitly named arms. For scene-horizontal objects, generated
-source lowerers snapshot the measured object-local axis into task-owned grasp
-metadata and declare an end-directed diagonal approach. The GenSim Pick wrapper
-uses that axis only for marked source calls, retaining shared Pick options and
-the receiver's separate center-grasp candidates. Constrained E2 Pick lowerers
+while preserving explicitly named arms. The GenSim `adaptive_pick` declaration
+enables automatic geometry for unconstrained built-in Pick calls without replacing
+their semantic identity or compiler-owned downstream reachability constraints.
+The wrapper marks only an owned goal snapshot; E4 source lowerers additionally
+reserve an object end. `_task_program/adaptive_grasp.py` ranks top-down and
+arm-relative diagonal approaches from the observed axis and bound arm TCP,
+without fixed world-side or axis-sign assumptions. `GenSimPickUp` screens each
+candidate strategy through the shared full pickup planner and retains the exact
+successful trajectory per row; endpoint IK alone is not acceptance. Explicit
+grasp poses, fixed calibrations and constrained picks retain their contracts.
+`GenSimHandOver` chooses the receiving end from the actual source attachment,
+reusing the same geometry policy while delegating transfer, release, retreat
+and state effects to shared HandOver. These are GenSim-local skill replacements,
+not another executor or changes to shared goal/options types. Unmarked calls
+delegate unchanged; drawer-owned motion does not install the handover wrapper.
+Constrained E2 Pick lowerers
 snapshot their object/target rule selector into the goal; only that Pick uses
 an immutable filtered-generator view. Unscoped sampling, including HandOver,
 checks opening clearance without applying another stage's region/release rules.
-Unmarked Pick calls delegate unchanged, including drawer-engine picks; drawer
-transport and release remain drawer-owned. Relative placement geometry and
+Drawer transport and release remain drawer-owned. Relative placement geometry and
 stability use preceding alignment operations, never future E2 state. E2 after
 an explicit on/above placement retains that support and uses its measured top
 for staging, release and grasp clearance. Its constrained regrasp uses a
@@ -137,7 +147,7 @@ route. Repeated identical selectors within either call family still reject
 conflicting stage geometry instead of silently overwriting a prior route.
 Terminal preserve-pose handovers verify receiver attachment and the
 declared world-axis alignment; ordinary upright constraints still use world Z.
-Regenerate horizontal E4 bundles after lowerer revisions; do not bypass their
+Regenerate bundles after adaptive-policy/lowerer revisions; do not bypass their
 fingerprint checks or extend the shared Pick/AxisAlign configuration schema.
 Multiple children
 placed inside the same measured container reserve each prior landing footprint
