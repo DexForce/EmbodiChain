@@ -66,3 +66,10 @@ environment files.
 
 Select provider-backed or simulator conversion tests only when that runtime
 boundary changes; source/unit checks do not establish remote service quality.
+
+## Data analysis entry
+
+The Gradio header links to the separately launched local analysis workbench at
+`http://127.0.0.1:7865`. Start it with `embodichain analyze-data serve --catalog
+<catalog.sqlite>`. This reuses Gradio and Viser without initializing GenSim
+pipelines. See [data-analysis](../data-analysis/data-analysis.md).

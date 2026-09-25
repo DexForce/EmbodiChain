@@ -68,6 +68,7 @@ def test_map_registers_the_supported_context_domains() -> None:
         "gen-sim",
         "data-assets",
         "data-pipeline",
+        "data-analysis",
         "robot-workspace",
         "differentiable-env",
     }
