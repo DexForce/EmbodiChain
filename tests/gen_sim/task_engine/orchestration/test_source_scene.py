@@ -481,3 +481,32 @@ def test_scene_export_rejects_unknown_format(scene_export: Path) -> None:
 
     with pytest.raises(ValueError, match="unsupported format"):
         resolve_source_scene(config_path)
+
+
+def test_articulation_planner_view_keeps_native_geometry_and_pose():
+    from embodichain.gen_sim.task_engine.orchestration.source_scene import (
+        _planner_object,
+    )
+
+    pose = [
+        [1.0, 0.0, 0.0, 0.2],
+        [0.0, 1.0, 0.0, 0.3],
+        [0.0, 0.0, 1.0, 0.7],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    config = {
+        "uid": "bell",
+        "fpath": "native.usdc",
+        "proxy_glb_fpath": "preview.glb",
+        "init_pos": [0.2, 0.3, 0.7],
+        "init_rot": [0.0, 0.0, 0.0],
+        "init_local_pose": pose,
+        "body_scale": [0.2, 0.2, 0.2],
+    }
+    result = _planner_object(config, source_uid="bell", role="articulation")
+    assert result["fpath"] == "native.usdc"
+    assert result["shape"] == {}
+    assert result["body_scale"] == [0.2, 0.2, 0.2]
+    assert result["init_local_pose"] == pose
+    result["init_local_pose"][0][3] = 99.0
+    assert pose[0][3] == 0.2

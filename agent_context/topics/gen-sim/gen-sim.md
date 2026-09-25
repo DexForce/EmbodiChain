@@ -96,6 +96,16 @@ then transformed by observed poses for vertical gap and projected support-envelo
 checks. It does not impose initial roll or either object's initial up direction.
 Both objects must still remain stable for the declared window. This geometric
 envelope is not contact evidence for arbitrary concave or tilted supports.
+Relative side placement accepts rigid and articulation roots as spatial anchors.
+Articulated anchors keep native USD paths in the planner view; geometry is read
+in the runtime base-link frame with configured scale, never from a preview proxy.
+Binding preserves `SceneArticulationRef` and the shared registry observes its
+live root pose. GenSim stability acceptance reads the same root/displacement and
+retains the position tolerance, replacing only the rigid-only duplicate validator.
+This uses the authored articulation geometry envelope, not a changing-joint
+collision envelope; a reference also actuated by Slide in the same program is
+rejected rather than reusing stale extents. Articulated `on/above/inside` support still requires qualified
+link geometry; spatial-reference support does not authorize joint manipulation.
 Explicit upright, oriented hold and stack constraints retain their axis checks;
 legacy presets are unchanged, so regenerate bundles to select the new policy.
 Source pose matrices take precedence over Euler fields.
