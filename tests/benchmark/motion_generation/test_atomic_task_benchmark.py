@@ -56,6 +56,7 @@ from scripts.benchmark.motion_generation.scenarios.atomic_task import (
     _case_generation_seed,
     _randomization_parameters,
     _seeded_jitter,
+    _snapshot_case_qpos,
     atomic_skill_provider_names,
     create_atomic_skill_provider,
 )
@@ -517,7 +518,9 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
 ):
     batch_size = 8
     robot = Mock(device=torch.device("cpu"))
-    robot.get_qpos.return_value = torch.zeros(batch_size, 7)
+    raw_start = torch.full((batch_size, 7), 0.002798617584630847)
+    robot.get_qpos.return_value = raw_start
+    robot.get_joint_ids.return_value = list(range(7))
     robot.compute_fk.return_value = torch.eye(4).repeat(batch_size, 1, 1)
     scenario = Mock(robot=robot, control_part="arm")
     entity = Mock(uid=f"benchmark_{config['articulation']}")
@@ -570,6 +573,9 @@ def test_new_atomic_skill_cases_freeze_reference_waypoints(
 
     assert case.skill_id == skill_id
     assert case.case_id == f"atomic-task:{skill_id}:{config['name']}:b8:s11"
+    assert torch.equal(case.full_start_qpos, _canonical_case_qpos(raw_start))
+    assert torch.equal(case.start_qpos, case.full_start_qpos[:, list(range(7))])
+    assert not torch.equal(case.start_qpos, raw_start)
     assert case.num_waypoints == expected_waypoints
     assert case.target_waypoints.shape == (batch_size, expected_waypoints, 4, 4)
     assert case.reference_qpos.shape == (batch_size, expected_waypoints, 7)
@@ -608,6 +614,7 @@ def test_fixed_held_object_case_keeps_pickup_and_transport_at_table_pose() -> No
 
     robot = Mock(device=torch.device("cpu"))
     robot.get_qpos.side_effect = lambda name=None: torch.zeros(batch_size, 7)
+    robot.get_joint_ids.return_value = list(range(7))
     robot.compute_ik.side_effect = lambda pose, joint_seed, name: (
         torch.ones(batch_size, dtype=torch.bool),
         joint_seed.clone(),
@@ -1171,3 +1178,87 @@ def test_runner_skips_video_outside_measured_phase(tmp_path):
 
     assert path is None
     provider.record_replay.assert_not_called()
+
+
+def test_case_snapshot_uses_one_read_and_runtime_joint_order() -> None:
+    """Arm/full states share a snapshot, including batched noncontiguous joints."""
+    raw = torch.tensor(
+        [[0.123421, 0.4, -0.456779, 0.8], [0.234521, 0.5, -0.567879, 0.9]],
+        dtype=torch.float32,
+    )
+    before = raw.clone()
+    robot = Mock()
+    robot.get_qpos.return_value = raw
+    robot.get_joint_ids.return_value = [2, 0]
+
+    start, full = _snapshot_case_qpos(robot, "noncontiguous_arm")
+
+    robot.get_qpos.assert_called_once_with()
+    robot.get_joint_ids.assert_called_once_with(name="noncontiguous_arm")
+    assert torch.equal(full, _canonical_case_qpos(before))
+    assert torch.equal(start, full[:, [2, 0]])
+    full.fill_(9.0)
+    assert torch.equal(raw, before)
+    assert torch.equal(start, _canonical_case_qpos(before)[:, [2, 0]])
+
+
+def test_move_joints_case_uses_canonical_snapshot_for_targets(tmp_path: Path) -> None:
+    """The generated case, FK inputs and manifest share one rounded start."""
+    joint_ids = [6, 0, 4, 2, 7, 1, 5]
+    raw = torch.tensor(
+        [
+            [
+                0.0027986176,
+                0.123421,
+                -0.456779,
+                0.02,
+                -0.0193351433,
+                0.003220673,
+                0.234521,
+                -0.345621,
+                0.03,
+            ]
+        ],
+        dtype=torch.float32,
+    ).repeat(2, 1)
+    raw[1] += 0.001
+    alternate = torch.nextafter(raw, torch.full_like(raw, float("inf")))
+    canonical = _canonical_case_qpos(raw)
+    assert torch.equal(canonical, _canonical_case_qpos(alternate))
+    config = {
+        "name": "canonical_joint_offsets",
+        "target_offsets_rad": [[0.1] * 7, [-0.05] * 7],
+    }
+    expected_start = canonical[:, joint_ids]
+    expected_targets = expected_start[:, None] + torch.cumsum(
+        torch.tensor(config["target_offsets_rad"], dtype=raw.dtype), dim=0
+    )
+    manifests = []
+    for index, observed in enumerate((raw, alternate)):
+        robot = Mock(device=torch.device("cpu"))
+        robot.get_qpos.return_value = observed
+        robot.get_joint_ids.return_value = joint_ids
+        robot.get_qpos_limits.return_value = torch.tensor(
+            [[[-3.0, 3.0]] * len(joint_ids)], dtype=torch.float32
+        )
+        robot.compute_fk.return_value = torch.eye(4).repeat(2, 1, 1)
+        scenario = Mock(robot=robot, control_part="arm")
+        case = create_atomic_skill_provider("move_joints").generate_case(
+            scenario,
+            Mock(suite_version="snapshot_test_v1", robot=Mock(id="franka_pgi")),
+            Mock(id="atomic-task"),
+            config,
+            seed=103,
+            batch_size=2,
+        )
+        robot.get_qpos.assert_called_once_with()
+        assert torch.equal(case.full_start_qpos, canonical)
+        assert torch.equal(case.start_qpos, expected_start)
+        assert torch.equal(case.reference_qpos, expected_targets)
+        assert all(
+            torch.equal(call.args[0], expected_targets[:, waypoint])
+            for waypoint, call in enumerate(robot.compute_fk.call_args_list)
+        )
+        manifest = write_case_manifest(tmp_path / f"case-{index}.json", [case])
+        manifests.append(json.loads(manifest.read_text()))
+    assert manifests[0] == manifests[1]

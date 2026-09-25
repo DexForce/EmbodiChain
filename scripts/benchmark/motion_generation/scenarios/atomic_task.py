@@ -349,6 +349,15 @@ def _canonical_case_qpos(qpos: torch.Tensor) -> torch.Tensor:
     return torch.round(qpos / _CASE_QPOS_RESOLUTION_RAD) * _CASE_QPOS_RESOLUTION_RAD
 
 
+def _snapshot_case_qpos(
+    robot: "Robot", control_part: str
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Capture one canonical full state and its controlled joints."""
+    full_qpos = _canonical_case_qpos(robot.get_qpos())
+    joint_ids = robot.get_joint_ids(name=control_part)
+    return full_qpos[:, joint_ids].clone(), full_qpos
+
+
 def _randomized_vector(
     base: Sequence[float],
     config: Mapping[str, object],
@@ -978,7 +987,9 @@ class _MoveEndEffectorCases(AtomicSkillCaseProvider):
         if not base_offsets:
             raise ValueError("target_offsets_m must not be empty.")
 
-        start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
+        start_qpos, full_start_qpos = _snapshot_case_qpos(
+            scenario.robot, scenario.control_part
+        )
         start_pose = scenario.robot.compute_fk(
             start_qpos, name=scenario.control_part, to_matrix=True
         )
@@ -1053,7 +1064,7 @@ class _MoveEndEffectorCases(AtomicSkillCaseProvider):
             skill_id=self.skill_id,
             task_difficulty=_difficulty(config),
             primary_success="task_success",
-            full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
+            full_start_qpos=full_start_qpos,
             case_parameters={
                 "sample_count": int(config.get("sample_count", 80)),
                 "target_offsets_m": offsets,
@@ -1220,7 +1231,9 @@ class _PickUpCases(AtomicSkillCaseProvider):
         lift = grasp_pose.clone()
         lift[:, 2, 3] += lift_height
         targets = torch.stack([pre_grasp, grasp_pose, lift], dim=1)
-        start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
+        start_qpos, full_start_qpos = _snapshot_case_qpos(
+            scenario.robot, scenario.control_part
+        )
         references = scenario.solve_reference_qpos(start_qpos, targets)
         name = _case_name(config)
         return BenchmarkCase(
@@ -1247,7 +1260,7 @@ class _PickUpCases(AtomicSkillCaseProvider):
             object_id=object_id,
             task_difficulty=_difficulty(config),
             primary_success="task_success",
-            full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
+            full_start_qpos=full_start_qpos,
             case_parameters={
                 "sample_count": int(config.get("sample_count", 120)),
                 "grasp_source": grasp_source,
@@ -1369,7 +1382,9 @@ class _MoveJointsCases(AtomicSkillCaseProvider):
         ]
         if not base_offsets:
             raise ValueError("target_offsets_rad must not be empty.")
-        start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
+        start_qpos, full_start_qpos = _snapshot_case_qpos(
+            scenario.robot, scenario.control_part
+        )
         offset_tensor = torch.stack(
             [
                 _randomized_vector_batch(
@@ -1438,7 +1453,7 @@ class _MoveJointsCases(AtomicSkillCaseProvider):
             skill_id=self.skill_id,
             task_difficulty=_difficulty(config),
             primary_success="task_success",
-            full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
+            full_start_qpos=full_start_qpos,
             case_parameters={
                 "sample_count": int(config.get("sample_count", 80)),
                 "target_offsets_rad": offsets,
@@ -1722,7 +1737,9 @@ class _MoveHeldObjectCases(_HeldObjectCases):
             )
         pre_pick_qpos = _canonical_case_qpos(pre_pick_qpos)
         scenario.set_robot_start(pre_pick_qpos, open_gripper=True)
-        start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
+        start_qpos, full_start_qpos = _snapshot_case_qpos(
+            scenario.robot, scenario.control_part
+        )
         references = scenario.solve_reference_qpos(start_qpos, target_eef[:, None])
         name = _case_name(config)
         return BenchmarkCase(
@@ -1749,7 +1766,7 @@ class _MoveHeldObjectCases(_HeldObjectCases):
             object_id=handle.object_id,
             task_difficulty=_difficulty(config),
             primary_success="task_success",
-            full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
+            full_start_qpos=full_start_qpos,
             case_parameters={
                 **self._held_parameters(handle, object_pose, grasp_pose, object_to_eef),
                 "object_initial_pose": table_object_pose.detach().cpu().tolist(),
@@ -1882,7 +1899,9 @@ class _PlaceCases(_HeldObjectCases):
             )
         pre_pick_qpos = _canonical_case_qpos(pre_pick_qpos)
         scenario.set_robot_start(pre_pick_qpos, open_gripper=True)
-        start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
+        start_qpos, full_start_qpos = _snapshot_case_qpos(
+            scenario.robot, scenario.control_part
+        )
         references = scenario.solve_reference_qpos(start_qpos, targets)
         name = _case_name(config)
         return BenchmarkCase(
@@ -1909,7 +1928,7 @@ class _PlaceCases(_HeldObjectCases):
             object_id=handle.object_id,
             task_difficulty=_difficulty(config),
             primary_success="task_success",
-            full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
+            full_start_qpos=full_start_qpos,
             case_parameters={
                 **self._held_parameters(handle, object_pose, grasp_pose, object_to_eef),
                 # The replay starts with the cube on the table.  PickUp is
@@ -2022,7 +2041,9 @@ class _PressCases(AtomicSkillCaseProvider):
             stream=32,
         )
         scenario.randomize_robot_start(config, seed=seed, stream=31)
-        start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
+        start_qpos, full_start_qpos = _snapshot_case_qpos(
+            scenario.robot, scenario.control_part
+        )
         start_pose = scenario.robot.compute_fk(
             start_qpos, name=scenario.control_part, to_matrix=True
         )
@@ -2092,7 +2113,7 @@ class _PressCases(AtomicSkillCaseProvider):
             object_id=articulation_id,
             task_difficulty=_difficulty(config),
             primary_success="task_success",
-            full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
+            full_start_qpos=full_start_qpos,
             case_parameters={
                 "sample_count": int(config.get("sample_count", 80)),
                 "press_target_pose": target_pose.detach().cpu().tolist(),
@@ -2241,7 +2262,9 @@ class _SlideCases(AtomicSkillCaseProvider):
             stream=42,
         )
         scenario.randomize_robot_start(config, seed=seed, stream=41)
-        start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
+        start_qpos, full_start_qpos = _snapshot_case_qpos(
+            scenario.robot, scenario.control_part
+        )
         articulation_initial_qpos = handle.entity.get_qpos().clone()
         target_pose = handle.link_pose(target_link).to(device=start_qpos.device)
         mesh_vertices, mesh_triangles = handle.link_mesh(target_link)
@@ -2328,7 +2351,7 @@ class _SlideCases(AtomicSkillCaseProvider):
             object_id=articulation_id,
             task_difficulty=_difficulty(config),
             primary_success="task_success",
-            full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
+            full_start_qpos=full_start_qpos,
             case_parameters={
                 "sample_count": int(config.get("sample_count", 140)),
                 "slide_target_pose": target_pose.detach().cpu().tolist(),
@@ -2498,7 +2521,9 @@ class _TwistCases(AtomicSkillCaseProvider):
             stream=52,
         )
         scenario.randomize_robot_start(config, seed=seed, stream=51)
-        start_qpos = scenario.robot.get_qpos(name=scenario.control_part).clone()
+        start_qpos, full_start_qpos = _snapshot_case_qpos(
+            scenario.robot, scenario.control_part
+        )
         start_pose = scenario.robot.compute_fk(
             start_qpos, name=scenario.control_part, to_matrix=True
         )
@@ -2581,7 +2606,7 @@ class _TwistCases(AtomicSkillCaseProvider):
             object_id=articulation_id,
             task_difficulty=_difficulty(config),
             primary_success="task_success",
-            full_start_qpos=_canonical_case_qpos(scenario.robot.get_qpos().clone()),
+            full_start_qpos=full_start_qpos,
             case_parameters={
                 "sample_count": int(config.get("sample_count", 140)),
                 "twist_target_pose": target_pose.detach().cpu().tolist(),

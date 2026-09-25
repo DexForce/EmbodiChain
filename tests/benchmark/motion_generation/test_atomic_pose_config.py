@@ -209,6 +209,7 @@ def test_none_mode_rejects_nonzero_jitter_when_enabled() -> None:
 def test_b1_offset_manifest_keeps_legacy_waypoint_shape() -> None:
     """B=1 metadata remains ``[waypoint][xyz]`` after batched generation."""
     robot = Mock(device=torch.device("cpu"))
+    robot.get_joint_ids.return_value = list(range(7))
     robot.get_qpos.return_value = torch.zeros(1, 7)
     robot.compute_fk.return_value = torch.eye(4).unsqueeze(0)
     scenario = Mock(robot=robot, control_part="arm")
@@ -238,6 +239,7 @@ def test_pose_batch_moveeef_shares_translation_across_waypoints() -> None:
     """One pose sample translates a whole MoveEEF waypoint path together."""
     batch_size = 4
     robot = Mock(device=torch.device("cpu"))
+    robot.get_joint_ids.return_value = list(range(7))
     robot.get_qpos.side_effect = lambda name=None: torch.zeros(
         batch_size, 7 if name == "arm" else 9
     )
@@ -423,6 +425,7 @@ def test_pickup_case_pins_settle_steps_in_pose_manifest() -> None:
         config={"settle_steps": 10},
     )
     robot = Mock(device=torch.device("cpu"))
+    robot.get_joint_ids.return_value = list(range(7))
     robot.get_qpos.side_effect = lambda name=None: (
         torch.zeros(1, 7) if name == "arm" else torch.zeros(1, 9)
     )
