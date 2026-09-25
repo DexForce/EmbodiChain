@@ -126,9 +126,15 @@ an immutable filtered-generator view. Unscoped sampling, including HandOver,
 checks opening clearance without applying another stage's region/release rules.
 Unmarked Pick calls delegate unchanged, including drawer-engine picks; drawer
 transport and release remain drawer-owned. Relative placement geometry and
-stability use preceding alignment operations, never future E2 state. Repeated
-identical relation selectors with conflicting stage geometry fail generation
-until the relative-call contract can distinguish occurrences.
+stability use preceding alignment operations, never future E2 state. E2 after
+an explicit on/above placement retains that support and uses its measured top
+for staging, release and grasp clearance. Its constrained regrasp uses a
+top-down approach so uprighting yields a side grasp instead of an end-directed
+rim approach. Standalone E2 retains its original table target and grasp policy.
+The GenSim-owned `gen_sim.place_upright` call reuses Place while
+separating the later upright release geometry from the earlier ordinary Place
+route. Repeated identical selectors within either call family still reject
+conflicting stage geometry instead of silently overwriting a prior route.
 Terminal preserve-pose handovers verify receiver attachment and the
 declared world-axis alignment; ordinary upright constraints still use world Z.
 Regenerate horizontal E4 bundles after lowerer revisions; do not bypass their
