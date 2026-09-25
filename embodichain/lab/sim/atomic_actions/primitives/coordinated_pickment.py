@@ -582,6 +582,7 @@ class CoordinatedPickment(
                 "CoordinatedPickment requires an AntipodalAffordance to sample "
                 "dual-arm grasps."
             )
+        semantics.affordance.require_whole_object_mesh()
         num_envs = object_poses.shape[0]
         identity = torch.eye(4, dtype=torch.float32, device=self.device)
         left_grasp_xpos = identity.unsqueeze(0).repeat(num_envs, 1, 1)

@@ -33,6 +33,7 @@ __all__ = [
     "CoordinatedPlacementAndPickment",
     "DeformableDemoData",
     "MultiW1Data",
+    "RubiksCube",
     "ScoopIceNewEnv",
 ]
 
@@ -114,6 +115,24 @@ class CoordinatedPlacementAndPickment(EmbodiChainDataset):
                 "coordinated_placement_and_pickment.zip",
             ),
             "297c10b386a4d7a8ccb68926d69425e9",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+        super().__init__(prefix, data_descriptor, path)
+
+
+class RubiksCube(EmbodiChainDataset):
+    """Downloadable articulated Rubik's-cube asset for manipulation demos."""
+
+    def __init__(self, data_root: str | None = None) -> None:
+        """Initialize the Rubik's-cube asset bundle.
+
+        Args:
+            data_root: Optional cache root overriding the EmbodiChain default.
+        """
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, demo_assets, "RubiksCube.zip"),
+            "2f77b313cd4d14dd41cc29d740e8fdb6",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root

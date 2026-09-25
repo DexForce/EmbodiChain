@@ -96,6 +96,7 @@ not by Task Program or Gym.
 
 | Environment | Assurance | Source |
 |---|---|---|
+| `TaskProgramRubiksCubePickPlace-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/rubiks_cube_pick_place/` |
 | `TaskProgramRepeatedPickPlace-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/` |
 | `TaskProgramRepeatedPickPlace-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.newton.yaml` |
 | `TaskProgramRepeatedPickPlace-Franka-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.newton.yaml` |

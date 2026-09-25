@@ -135,3 +135,106 @@ def test_native_options_keep_profile_and_viewer_inputs_explicit():
         _validate_native_options(profile_args)
     with pytest.raises(ValueError, match="--control-steps.*require --viewer"):
         _validate_native_options(viewer_args)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ("some-run",),
+        ("--checkpoint", "best"),
+        ("--profile", "example"),
+        ("--config", "train.yaml"),
+        ("--gym-config", "env.yaml"),
+    ],
+)
+def test_pretrained_conflicts_are_rejected_before_download(arguments, monkeypatch):
+    from embodichain.data.assets import policy_assets
+
+    def fail(*args, **kwargs):
+        pytest.fail("conflicting input must not download")
+
+    monkeypatch.setattr(policy_assets, "download_pretrained_policy", fail)
+    with pytest.raises(ValueError, match="--pretrained cannot be combined"):
+        _resolve_input(parse_args(("--pretrained", "example", *arguments)))
+
+
+def test_revision_requires_pretrained():
+    with pytest.raises(ValueError, match="--revision requires --pretrained"):
+        _resolve_input(parse_args(("--revision", "main")))
+
+
+@pytest.mark.parametrize("option", ("--offline", "--physics-backend"))
+def test_pretrained_keeps_profile_only_options_explicit(option):
+    args = ["--pretrained", "example", option]
+    if option == "--physics-backend":
+        args.append("newton")
+    with pytest.raises(ValueError, match="requires --profile"):
+        _resolve_input(parse_args(args))
+
+
+@pytest.mark.parametrize("viewer", (False, True))
+def test_pretrained_uses_native_runtime_and_records_source(
+    tmp_path, monkeypatch, viewer
+):
+    from embodichain.data.assets import policy_assets
+
+    module = importlib.import_module("embodichain.learning.rl.policy_evaluation.cli")
+    run_path, checkpoint = _run(tmp_path)
+    source = {
+        "repo_id": "DexForceAI/embodichain_model",
+        "revision": "a" * 40,
+        "model_id": "example",
+    }
+    downloads = []
+
+    def download(model_id, **kwargs):
+        downloads.append((model_id, kwargs))
+        return run_path, source
+
+    monkeypatch.setattr(policy_assets, "download_pretrained_policy", download)
+    monkeypatch.setattr(module, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(module, "execute_init_hooks", lambda: None)
+    captured = []
+
+    def evaluate(args, resolved):
+        captured.append(resolved)
+        return tmp_path / "report.json"
+
+    handler = "_run_native_viewer" if viewer else "_run_native_headless"
+    monkeypatch.setattr(module, handler, evaluate)
+    arguments = [
+        "--pretrained",
+        "example",
+        "--cache-dir",
+        str(tmp_path / "cache"),
+        "--revision",
+        "release",
+    ]
+    if viewer:
+        arguments.append("--viewer")
+    module.run(parse_args(arguments))
+    resolved = captured[0]
+    assert resolved.checkpoint == checkpoint
+    assert module._checkpoint_inputs(resolved)["pretrained"] == source
+    assert downloads == [
+        ("example", {"revision": "release", "cache_dir": str(tmp_path / "cache")})
+    ]
+    assert (
+        module._output_parent(None, resolved)
+        == module.Path.cwd() / "outputs/policy_eval/example"
+    )
+    assert module._output_parent("chosen-output", resolved) == module.Path(
+        "chosen-output"
+    )
+
+
+def test_pretrained_incomplete_bundle_fails_before_runtime(tmp_path, monkeypatch):
+    from embodichain.data.assets import policy_assets
+
+    run_path, checkpoint = _run(tmp_path)
+    checkpoint.unlink()
+    monkeypatch.setattr(
+        policy_assets, "download_pretrained_policy", lambda *a, **kw: (run_path, {})
+    )
+    with pytest.raises(FileNotFoundError, match="Run manifest file does not exist"):
+        _resolve_input(parse_args(("--pretrained", "example")))

@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 import math
 from numbers import Real
-from typing import Any, ClassVar, TYPE_CHECKING
+from typing import Any, ClassVar, Literal, TYPE_CHECKING
 
 import torch
 
@@ -126,21 +126,31 @@ class Affordance:
 class AntipodalAffordance(Affordance):
     """Antipodal grasp affordance for parallel-jaw grippers.
 
-    The affordance owns only target-local triangle-mesh data. Simulator entity
-    handles and live poses belong to scene grounding, not semantic geometry.
+    The affordance owns only target-local triangle-mesh data. Its mesh may
+    describe either the whole object or one selected articulation link;
+    operations that infer whole-object geometry reject the latter. Simulator
+    entity handles and live poses belong to scene grounding.
     """
 
     mesh_vertices: torch.Tensor | None = None
-    """Object mesh vertices, shape [N, 3]."""
+    """Target-local mesh vertices, shape [N, 3]."""
 
     mesh_triangles: torch.Tensor | None = None
-    """Object mesh triangle indices, shape [M, 3]."""
+    """Target-local mesh triangle indices, shape [M, 3]."""
+
+    mesh_scope: Literal["object", "link"] = "object"
+    """Whether the mesh describes the whole object or one selected link."""
 
     MAX_SURFACE_POINT_COUNT: ClassVar[int] = 1000
     """Maximum point-cloud size used for geometry-distribution analysis."""
 
     def __post_init__(self) -> None:
         """Validate optional target-local geometry without owning a generator."""
+        if type(self.mesh_scope) is not str or self.mesh_scope not in (
+            "object",
+            "link",
+        ):
+            raise ValueError("mesh_scope must be 'object' or 'link'.")
         if self.mesh_vertices is None and self.mesh_triangles is None:
             return
         if self.mesh_vertices is None or self.mesh_triangles is None:
@@ -284,6 +294,7 @@ class AntipodalAffordance(Affordance):
         max_points: int = 1000,
     ) -> torch.Tensor:
         """Return the widest surface-point distribution axis in world space."""
+        self.require_whole_object_mesh()
         if obj_poses.ndim != 3 or obj_poses.shape[1:] != (4, 4):
             raise ValueError("obj_poses must have shape (B, 4, 4).")
         points = self.sample_surface_points(max_points=max_points).to(
@@ -302,6 +313,18 @@ class AntipodalAffordance(Affordance):
         if torch.any(singular_values[:, 0] <= 1.0e-8):
             raise ValueError("Object surface point distribution has no principal axis.")
         return torch.nn.functional.normalize(vh[:, 0, :], dim=1)
+
+    def require_whole_object_mesh(self) -> None:
+        """Reject a link-only grasp mesh where whole-object geometry is required.
+
+        Raises:
+            ValueError: If this affordance contains only a selected link mesh.
+        """
+        if self.mesh_scope != "object":
+            raise ValueError(
+                "This operation requires whole-object geometry; the antipodal "
+                "affordance contains only a selected articulation link mesh."
+            )
 
     @staticmethod
     def _evenly_subsample_points(

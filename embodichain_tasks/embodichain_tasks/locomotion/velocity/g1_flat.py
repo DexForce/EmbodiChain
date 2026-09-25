@@ -21,6 +21,7 @@ from __future__ import annotations
 import torch
 
 from embodichain.lab.gym.utils.registration import register_env
+from embodichain.learning.rl.policy_evaluation.camera import PolicyViewerCameraCfg
 
 from ._embodichain import EmbodiChainVelocityEnv
 from .contracts._reward_terms import corrupt_actor_observation
@@ -46,6 +47,9 @@ _CONFIG = load_config()
 class UnitreeG1FlatEnv(EmbodiChainVelocityEnv):
     """Track planar velocity commands with the 29-DOF G1 model."""
 
+    policy_viewer_camera_cfg = PolicyViewerCameraCfg(
+        eye_offset=(-1.8, -1.45, 0.8), target_height=0.67
+    )
     velocity_task_config = _CONFIG
     state_type = G1State
     build_observations_fn = staticmethod(build_observations)

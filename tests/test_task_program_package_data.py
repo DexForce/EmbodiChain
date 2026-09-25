@@ -42,6 +42,9 @@ _REPEATED_PICK_PLACE_GENERATION = Path(
     "tasks/manipulation/repeated_pick_place/generation.demo.yaml"
 )
 _PROGRAMS = {
+    Path(
+        "tasks/manipulation/rubiks_cube_pick_place/task_program/program.yaml"
+    ): "rubiks_cube_pick_place",
     Path("tasks/manipulation/repeated_pick_place/task_program/program.yaml"): (
         "repeated_cube_pick_place"
     ),
@@ -56,6 +59,11 @@ _PROGRAMS = {
     ): "pour_water_with_right_arm",
 }
 _DEPLOYMENTS = {
+    Path("tasks/manipulation/rubiks_cube_pick_place/task.ur5.yaml"): (
+        "rubiks_cube_pick_place",
+        "task_program_rubiks_cube_pick_place",
+        "ur5_dh_pgi_140_80",
+    ),
     Path("tasks/manipulation/repeated_pick_place/task.ur5.yaml"): (
         "repeated_cube_pick_place",
         "task_program_repeated_pick_place",
@@ -128,6 +136,8 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/repeated_pick_place/env.yaml"),
         Path("tasks/manipulation/repeated_pick_place/env.newton.yaml"),
         Path("tasks/manipulation/repeated_pick_place/task_program/integration.yaml"),
+        Path("tasks/manipulation/rubiks_cube_pick_place/env.yaml"),
+        Path("tasks/manipulation/rubiks_cube_pick_place/task_program/integration.yaml"),
         Path("tasks/manipulation/tableware/pour_water/env.yaml"),
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),
     }

@@ -27,7 +27,7 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
     URDFCfg,
 )
-from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+from embodichain.lab.sim.motion.solvers import FEPSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.utils import configclass
 
@@ -61,8 +61,9 @@ class FrankaPandaCfg(RobotCfg):
     """Configuration for the Franka Emika Panda robot with Panda hand.
 
     The PandaWithHand URDF includes both the 7-DOF arm and the parallel-jaw
-    gripper in a single file. The solver defaults to
-    :class:`~embodichain.lab.sim.motion.solvers.PytorchSolverCfg`.
+    gripper in a single file. The arm defaults to
+    :class:`~embodichain.lab.sim.motion.solvers.FEPSolverCfg` with redundancy
+    search enabled.
 
     Example:
 
@@ -127,7 +128,7 @@ class FrankaPandaCfg(RobotCfg):
         }
 
         self.solver_cfg = {
-            "arm": PytorchSolverCfg(
+            "arm": FEPSolverCfg(
                 end_link_name="fr3_hand_tcp",
                 root_link_name="base",
                 tcp=[
@@ -136,7 +137,7 @@ class FrankaPandaCfg(RobotCfg):
                     [0.0, 0.0, 1.0, 0.0],
                     [0.0, 0.0, 0.0, 1.0],
                 ],
-                num_samples=30,
+                redundancy_search=True,
             ),
         }
 
