@@ -1188,6 +1188,98 @@ class TestConfigToCfgFromFile:
                 source_path=tmp_path / "task.ur5.yaml",
             )
 
+    @classmethod
+    def _write_rigidized_articulation_deployment(
+        cls,
+        directory: Path,
+        *,
+        physical_category: str,
+    ) -> None:
+        """Write one deployment with a category-sensitive articulation object."""
+        cls._write_deployment(directory)
+        integration_path = directory / "integration.yaml"
+        integration = load_config(integration_path)
+        integration["scene_binding"]["rigid_objects"] = []
+        integration["scene_binding"]["rigidized_articulations"] = [
+            {
+                "entity_id": "cube",
+                "simulation_uid": "cube",
+                "locked_qpos": {"top_turn": 0.0},
+                "affordances": [
+                    {
+                        "kind": "antipodal_grasp",
+                        "entity_id": "cube_grasp",
+                        "grasp_link": "lower_two_layers",
+                    }
+                ],
+            }
+        ]
+        save_config(integration_path, integration)
+
+        environment_path = directory / "env.yaml"
+        environment = load_config(environment_path)
+        simulation = environment["simulation"]
+        cube_config = deepcopy(simulation["rigid_object"][0])
+        simulation["rigid_object"] = []
+        simulation["background"] = []
+        simulation["articulation"] = []
+        if physical_category == "articulation":
+            simulation["articulation"] = [
+                {
+                    "uid": "cube",
+                    "fpath": "Drawer/model_split_links_with_inertials.urdf",
+                    "init_qpos": [0.0],
+                    "root_props": {"fixed_base": False},
+                }
+            ]
+        elif physical_category == "rigid_object":
+            simulation["rigid_object"] = [cube_config]
+        elif physical_category == "background":
+            simulation["background"] = [cube_config]
+        else:
+            raise AssertionError(f"Unknown physical category {physical_category!r}.")
+        save_config(environment_path, environment)
+
+    @pytest.mark.parametrize("physical_category", ("rigid_object", "background"))
+    def test_rigidized_articulation_binding_rejects_non_articulation_physical_entity(
+        self,
+        tmp_path,
+        physical_category: str,
+    ) -> None:
+        self._write_rigidized_articulation_deployment(
+            tmp_path,
+            physical_category=physical_category,
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="rigidized_articulations.*cube.*physical environment",
+        ):
+            config_to_cfg(
+                self._minimal_gym_config(),
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "task.ur5.yaml",
+            )
+
+    def test_rigidized_articulation_binding_accepts_physical_articulation(
+        self,
+        tmp_path,
+    ) -> None:
+        self._write_rigidized_articulation_deployment(
+            tmp_path,
+            physical_category="articulation",
+        )
+        config = self._minimal_gym_config()
+        config["id"] = "TaskProgramRigidizedArticulationPhysical-v1"
+
+        cfg = config_to_cfg(
+            config,
+            manager_modules=DEFAULT_MANAGER_MODULES,
+            source_path=tmp_path / "task.ur5.yaml",
+        )
+
+        assert [articulation.uid for articulation in cfg.articulation] == ["cube"]
+
     @pytest.mark.parametrize(
         "task_name",
         (

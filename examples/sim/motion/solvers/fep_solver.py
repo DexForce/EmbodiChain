@@ -18,8 +18,8 @@
 Run: python -m examples.sim.motion.solvers.fep_solver --device cuda
 Use --headless --max-steps 301 for a finite smoke run, or --headless --viser
 for browser visualization. The default radius is 15 cm; set --radius in metres.
-The seed keeps q7 fixed by default. Add --redundancy-search to optimize q7;
---arm-angle sets a soft swivel preference in radians (otherwise follow the seed).
+The Franka preset enables q7 redundancy search by default. --arm-angle sets a
+soft swivel preference in radians (otherwise follow the seed).
 Green shows the target circle; orange traces the actual TCP over the last lap.
 Position/velocity drives track interpolated commands; this is not collision
 planning. The example uses stiffer arm drives to reduce tracking error.
@@ -46,30 +46,29 @@ def main() -> None:
         "--radius", type=float, default=0.15, help="Horizontal circle radius in metres."
     )
     parser.add_argument(
-        "--redundancy-search", action="store_true", help="Optimize q7 and arm posture."
+        "--redundancy-search",
+        action="store_true",
+        help="Accepted for compatibility; redundancy search is now the default.",
     )
     parser.add_argument(
         "--arm-angle",
         type=float,
         default=None,
-        help="Preferred swivel angle in radians; requires --redundancy-search.",
+        help="Preferred swivel angle in radians.",
     )
     args = parser.parse_args()
     if args.max_steps is not None and args.max_steps < 1:
         parser.error("--max-steps must be positive")
     if not math.isfinite(args.radius) or args.radius <= 0:
         parser.error("--radius must be finite and positive")
-    if args.arm_angle is not None and (
-        not math.isfinite(args.arm_angle) or not args.redundancy_search
-    ):
-        parser.error("--arm-angle must be finite and requires --redundancy-search")
+    if args.arm_angle is not None and not math.isfinite(args.arm_angle):
+        parser.error("--arm-angle must be finite")
 
     import numpy as np
     import torch
 
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
-    from embodichain.lab.sim.motion.solvers import FEPSolverCfg
     from embodichain.lab.sim.robots import FrankaPandaCfg
     from embodichain.lab.visualization import visualization_cfg_from_args
     from embodichain.lab.visualization.protocol import SceneOverlays, TrajectoryOverlay
@@ -93,22 +92,16 @@ def main() -> None:
     max_joint_step = 0.0
     try:
         cfg = FrankaPandaCfg.from_dict({})
-        cfg.solver_cfg["arm"] = FEPSolverCfg(
-            root_link_name="base",
-            end_link_name="fr3_hand_tcp",
-            redundancy_search=args.redundancy_search,
-            arm_angle=args.arm_angle,
-            # At 50 Hz this caps each searched joint command at 2 rad/s.
-            max_joint_step=0.04 if args.redundancy_search else None,
-        )
+        cfg.solver_cfg["arm"].arm_angle = args.arm_angle
+        # At 50 Hz this caps each searched joint command at 2 rad/s.
+        cfg.solver_cfg["arm"].max_joint_step = 0.04
         # Demo-only tuning: the default 1e4/1e3 stiffness/damping gives
         # visible tracking lag and load deflection. Keep the robot preset intact.
         cfg.joint_drive_props.stiffness["fr3_joint[1-7]"] = 1e5
         robot = sim.add_robot(cfg=cfg)
         sim.prepare()
         seed = robot.get_solver("arm").get_default_qpos_seed()[None]
-        # The limit midpoint has q2=0, a shoulder singularity: tiny Cartesian
-        # steps can cause large, unavoidable fixed-q7 branch changes there.
+        # The limit midpoint has q2=0, a shoulder singularity.
         seed[:, 1] = -0.4
         seed = seed.expand(sim.num_envs, -1).clone()
         velocity_limits = robot.get_qvel_limits(name="arm")
@@ -158,7 +151,7 @@ def main() -> None:
             )
         print(
             f"Franka FEP on {sim.device}; horizontal circle radius={args.radius:.2f} m. "
-            f"Redundancy search={'on' if args.redundancy_search else 'off'}. "
+            "Redundancy search=on. "
             "Green: target; orange: actual TCP. Ctrl+C to stop.",
             flush=True,
         )

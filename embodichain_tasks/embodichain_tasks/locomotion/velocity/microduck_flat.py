@@ -21,6 +21,7 @@ from __future__ import annotations
 import torch
 
 from embodichain.lab.gym.utils.registration import register_env
+from embodichain.learning.rl.policy_evaluation.camera import PolicyViewerCameraCfg
 
 from ._embodichain import EmbodiChainVelocityEnv
 from .contracts._reward_terms import corrupt_actor_observation
@@ -46,6 +47,9 @@ _CONFIG = load_config()
 class MicroDuckFlatEnv(EmbodiChainVelocityEnv):
     """Track planar velocity commands with the 14-DOF MicroDuck model."""
 
+    policy_viewer_camera_cfg = PolicyViewerCameraCfg(
+        eye_offset=(-0.48, -0.4, 0.26), target_height=0.14
+    )
     velocity_task_config = _CONFIG
     state_type = MicroDuckState
     build_observations_fn = staticmethod(build_observations)

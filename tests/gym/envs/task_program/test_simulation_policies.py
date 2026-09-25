@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -26,7 +27,9 @@ import torch
 
 from embodichain.lab.task_program import TaskProgramCompiler, decode_task_program
 from embodichain.lab.task_program.integrations import (
+    RigidizedArticulationAntipodalGraspBinding,
     SimulationArticulationBinding,
+    SimulationRigidizedArticulationObjectBinding,
     SimulationRigidObjectBinding,
     SimulationSceneBinding,
 )
@@ -40,6 +43,7 @@ from embodichain.lab.task_program.integrations.simulation.policies import (
 from embodichain.lab.gym.envs.settling import DynamicSettleMonitorCfg
 from embodichain.lab.sim.atomic_actions import EntityState
 from embodichain.lab.task_program.semantics.scene import (
+    SceneAffordanceRef,
     SceneArticulationRef,
     SceneEntityRegistration,
     SceneObjectRef,
@@ -106,8 +110,13 @@ class _Articulation:
 
     joint_names = ("cabinet_to_drawer",)
 
-    def __init__(self, qpos: torch.Tensor) -> None:
+    def __init__(
+        self, qpos: torch.Tensor, positions: torch.Tensor | None = None
+    ) -> None:
         self._qpos = qpos
+        self._pose = torch.eye(4).expand(qpos.shape[0], -1, -1).clone()
+        if positions is not None:
+            self._pose[:, :3, 3] = positions
         self.body_data = SimpleNamespace(
             body_link_vel=torch.zeros(qpos.shape[0], 1, 6),
         )
@@ -115,6 +124,10 @@ class _Articulation:
     def get_qpos(self) -> torch.Tensor:
         """Return the configured batched joint state."""
         return self._qpos.clone()
+
+    def get_local_pose(self, *, to_matrix: bool) -> torch.Tensor:
+        assert to_matrix
+        return self._pose.clone()
 
 
 class _Simulation:
@@ -132,7 +145,11 @@ class _Simulation:
         return self.entity if uid == "native_cube" else None
 
     def get_articulation(self, uid: str) -> _Articulation | None:
-        return self.articulation if uid == "native_drawer" else None
+        return (
+            self.articulation
+            if uid in {"native_drawer", "native_cube_articulation"}
+            else None
+        )
 
 
 def _compiled_segment(*, settle_preset: str = "fast"):
@@ -277,6 +294,94 @@ def _port(
         },
     )
     return port, entity, robot
+
+
+def _rigidized_port(
+    positions: torch.Tensor,
+) -> tuple[SimulationSegmentPolicyPort, _Articulation]:
+    articulation = _Articulation(
+        torch.zeros(positions.shape[0], 1), positions=positions
+    )
+    port = SimulationSegmentPolicyPort(
+        _Simulation(articulation=articulation),
+        _Robot(torch.zeros(positions.shape[0], 2)),
+        SimulationSceneBinding(
+            registry_id="test_scene",
+            rigidized_articulations=(
+                SimulationRigidizedArticulationObjectBinding(
+                    entity_id="cube",
+                    simulation_uid="native_cube_articulation",
+                    locked_qpos={"cabinet_to_drawer": 0.0},
+                ),
+            ),
+            rigidized_articulation_grasps=(
+                RigidizedArticulationAntipodalGraspBinding(
+                    entity_id="cube_grasp",
+                    object_id="cube",
+                    grasp_link="lower_two_layers",
+                    native_name="lower_two_layers",
+                    revision="1",
+                ),
+            ),
+        ),
+        settle_presets={
+            "fast": DynamicSettleMonitorCfg(
+                min_steps=0,
+                max_steps=3,
+                check_interval_steps=1,
+                required_stable_checks=2,
+            )
+        },
+    )
+    return port, articulation
+
+
+def test_rigidized_articulation_object_can_wait_for_stability() -> None:
+    segment = _compiled_segment()
+    port, _ = _rigidized_port(torch.zeros(2, 3))
+    policy = segment.post_policies[0]
+
+    port.validate_policy(policy, segment=segment)
+    list(
+        port.actions(
+            policy,
+            segment=segment,
+            active_mask=torch.ones(2, dtype=torch.bool),
+        )
+    )
+
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, True]
+
+
+def test_rigidized_articulation_object_can_validate_target_position() -> None:
+    segment = _compiled_segment()
+    port, _ = _rigidized_port(torch.tensor([[0.01, 0.0, 0.0], [0.20, 0.0, 0.0]]))
+
+    result = port.validate(segment.validators[0], segment=segment)
+
+    assert result.tolist() == [True, False]
+
+
+def test_rigidized_articulation_grasp_uses_parent_settle_target() -> None:
+    segment = _compiled_segment()
+    policy = replace(
+        segment.post_policies[0],
+        cfg=replace(segment.post_policies[0].cfg, entity="cube_grasp"),
+        entity=SceneAffordanceRef("cube_grasp"),
+    )
+    segment = replace(segment, post_policies=(policy,))
+    port, _ = _rigidized_port(torch.zeros(2, 3))
+
+    port.validate_policy(policy, segment=segment)
+    list(
+        port.actions(
+            policy,
+            segment=segment,
+            active_mask=torch.ones(2, dtype=torch.bool),
+        )
+    )
+
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True, True]
 
 
 def test_port_implements_complete_bridge_policy_protocols() -> None:

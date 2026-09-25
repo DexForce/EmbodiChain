@@ -32,6 +32,7 @@ from .articulation_geometry import (
     ArticulationAffordanceGeometry,
     ArticulationGeometryProvider,
     ArticulationJointGeometry,
+    create_rigidized_articulation_antipodal_affordance,
     sample_initial_articulation_geometry,
 )
 from .affordance import (
@@ -237,6 +238,8 @@ from .runner import (
 )
 from .scene import SceneProvider
 from .sim_adapter import (
+    SceneEntity,
+    create_rigidized_articulation_antipodal_semantics,
     create_simulation_atomic_action_engine,
     RigidObjectSceneProvider,
     RigidObjectSceneProviderCfg,
@@ -270,6 +273,7 @@ __all__ = [
     "ArticulationAffordanceGeometry",
     "ArticulationGeometryProvider",
     "ArticulationJointGeometry",
+    "create_rigidized_articulation_antipodal_affordance",
     "ArticulationJointState",
     "AssembleAffordance",
     "AssembleGoal",
@@ -290,6 +294,8 @@ __all__ = [
     "CommandSink",
     "ControlCommand",
     "ControlPartCommandProfile",
+    "SceneEntity",
+    "create_rigidized_articulation_antipodal_semantics",
     "create_simulation_atomic_action_engine",
     "CoordinatedHeldObjectState",
     "CoordinatedPickGoal",

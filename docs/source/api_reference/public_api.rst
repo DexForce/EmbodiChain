@@ -36,6 +36,7 @@ EmbodiChain data cache.
    CoordinatedPlacementAndPickment
    DeformableDemoData
    MultiW1Data
+   RubiksCube
    ScoopIceNewEnv
 
 embodichain.data.assets.planner_assets
@@ -46,6 +47,21 @@ embodichain.data.assets.planner_assets
 .. autosummary::
 
    download_neural_planner_checkpoint
+
+embodichain.data.assets.policy_assets
+-------------------------------------
+
+Resolve one official model ID to a pinned repository snapshot and materialize
+its native RUN files inside the model cache. The returned provenance records
+the exact repository and revision used for evaluation.
+
+.. currentmodule:: embodichain.data.assets.policy_assets
+
+.. autosummary::
+
+   download_pretrained_policy
+
+.. autofunction:: download_pretrained_policy
 
 embodichain.data.assets.solver_assets
 -------------------------------------
@@ -822,9 +838,11 @@ embodichain.lab.sim.atomic_actions.sim_adapter
 
 .. autosummary::
 
+   create_rigidized_articulation_antipodal_semantics
    create_simulation_atomic_action_engine
    RigidObjectSceneProvider
    RigidObjectSceneProviderCfg
+   SceneEntity
    SceneSnapshotSupplier
    SimulationExecutionAdapter
 

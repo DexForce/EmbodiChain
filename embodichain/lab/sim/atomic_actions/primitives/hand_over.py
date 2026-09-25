@@ -301,6 +301,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             )
         if not isinstance(goal.semantics.affordance, AntipodalAffordance):
             raise ValueError("HandOver requires an AntipodalAffordance.")
+        goal.semantics.affordance.require_whole_object_mesh()
 
         object_pose = _resolve_object_pose(
             goal.semantics,

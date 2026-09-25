@@ -210,3 +210,20 @@ def test_velocity_env_injects_one_ordered_joint_selector(
     assert "part_name" not in params
     assert params["joint_names"] == go1_config.load_config().joint_names
     assert params["preserve_order"] is True
+
+
+def test_policy_viewer_target_pose_preserves_world_xyzw_and_copies_state():
+    from types import SimpleNamespace
+
+    from embodichain_tasks.locomotion.velocity._embodichain import (
+        EmbodiChainVelocityEnv,
+    )
+
+    pose = torch.tensor([[1.0, 2.0, 3.0, 0.0, 0.0, 0.6, 0.8]])
+    env = SimpleNamespace(
+        robot=SimpleNamespace(body_data=SimpleNamespace(root_pose=pose))
+    )
+    target = EmbodiChainVelocityEnv.get_policy_viewer_target_pose(env)
+    assert target.tolist() == pytest.approx(pose[0].tolist())
+    target[:] = 0
+    assert pose[0].tolist() == pytest.approx([1, 2, 3, 0, 0, 0.6, 0.8])
