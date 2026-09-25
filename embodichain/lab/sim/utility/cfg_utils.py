@@ -14,17 +14,24 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import MISSING
 from typing import TypeVar
 
 from embodichain.lab.sim.cfg import (
     _raise_removed_articulation_cfg_fields,
     JointDrivePropertiesCfg,
+    LinkPhysicsOverrideCfg,
     RigidBodyPhysicsCfg,
     RobotCfg,
 )
 from embodichain.lab.sim.cfg.rigid import _rigid_body_physics_from_dict
 from embodichain.lab.sim.motion.solvers import SolverCfg
 from embodichain.utils import is_configclass, logger
+
+__all__ = ["merge_robot_cfg", "merge_solver_cfg"]
 
 _ConfigT = TypeVar("_ConfigT")
 
@@ -39,13 +46,60 @@ def _merge_non_none_config(base: _ConfigT | None, override: _ConfigT) -> _Config
             base_value = getattr(base, field_name)
             if (
                 base_value is not None
-                and type(base_value) is type(value)
+                and isinstance(base_value, type(value))
                 and is_configclass(base_value)
             ):
                 _merge_non_none_config(base_value, value)
             else:
                 setattr(base, field_name, value)
     return base
+
+
+def _merge_link_attrs(
+    base_cfg: RobotCfg,
+    override: Mapping[str, object] | None,
+) -> None:
+    """Merge named per-link physics groups into a robot configuration."""
+    if override is None:
+        base_cfg.link_attrs = None
+        return
+    if not isinstance(override, Mapping):
+        raise TypeError("link_attrs must be a mapping or None.")
+    if not override:
+        return
+    if base_cfg.link_attrs is None:
+        base_cfg.link_attrs = {}
+
+    for group_name, group_override in override.items():
+        if group_override is None:
+            base_cfg.link_attrs.pop(group_name, None)
+            continue
+        if isinstance(group_override, LinkPhysicsOverrideCfg):
+            parsed = group_override
+            has_link_names = parsed.link_names_expr is not MISSING
+            has_attrs = True
+        elif isinstance(group_override, Mapping):
+            group_data = dict(group_override)
+            parsed = LinkPhysicsOverrideCfg.from_dict(group_data)
+            has_link_names = "link_names_expr" in group_data
+            has_attrs = "attrs" in group_data
+        else:
+            raise TypeError(
+                f"link_attrs[{group_name!r}] must be a mapping, "
+                "LinkPhysicsOverrideCfg, or None."
+            )
+
+        base_group = base_cfg.link_attrs.get(group_name)
+        if base_group is None:
+            base_cfg.link_attrs[group_name] = parsed
+            continue
+        if has_link_names:
+            base_group.link_names_expr = parsed.link_names_expr
+        if has_attrs:
+            if parsed.attrs is None:
+                base_group.attrs = RigidBodyPhysicsCfg()
+            else:
+                _merge_non_none_config(base_group.attrs, parsed.attrs)
 
 
 def merge_solver_cfg(
@@ -122,7 +176,11 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
     # and @configclass strips class-level defaults so hasattr(RobotCfg, k)
     # returns False for all keys.
     base_fields = RobotCfg.__dataclass_fields__
-    base_safe = {k: v for k, v in override_cfg_dict.items() if k in base_fields}
+    base_safe = {
+        k: v
+        for k, v in override_cfg_dict.items()
+        if k in base_fields and k != "link_attrs"
+    }
     robot_cfg = RobotCfg.from_dict(base_safe)
 
     for key, value in override_cfg_dict.items():
@@ -218,6 +276,8 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                 logger.log_warning(
                     "attrs should be a dictionary. Skipping attrs merge."
                 )
+        elif key == "link_attrs":
+            _merge_link_attrs(base_cfg, value)
         elif key == "control_parts":
             # merge control parts
             user_control_parts_dict = override_cfg_dict.get("control_parts")
