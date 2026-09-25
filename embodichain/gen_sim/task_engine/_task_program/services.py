@@ -381,8 +381,10 @@ class _PickLowerer(RegisteredSemanticLowerer):
         )
 
 
-class _HorizontalHandoverPickLowerer(_PickLowerer):
-    """Carry source-only grasp geometry in an owned affordance snapshot."""
+class _AdaptivePickLowerer(_PickLowerer):
+    """Declare automatic geometry selection on an owned goal snapshot."""
+
+    grasp_mode: ClassVar[str] = "ends"
 
     def lower(
         self,
@@ -392,20 +394,15 @@ class _HorizontalHandoverPickLowerer(_PickLowerer):
         bound: BoundSemanticCall,
         option_template: ActionOptions,
     ) -> SemanticLowering:
-        from .actions import _HANDOVER_SOURCE_AXIS
+        from .adaptive_grasp import ADAPTIVE_GRASP
 
         lowering = super().lower(
             call, context=context, bound=bound, option_template=option_template
         )
         semantics = deepcopy(lowering.goal.semantics)
-        axis = getattr(semantics.affordance, "internal_axis", None)
-        if not isinstance(axis, torch.Tensor) or axis.shape != (3,):
-            raise ValueError(
-                "Horizontal handover source requires its declared local axis."
-            )
-        semantics.affordance.set_custom_config(
-            _HANDOVER_SOURCE_AXIS, tuple(float(value) for value in axis.detach().cpu())
-        )
+        if option_template.pick_object_part != "center":
+            raise ValueError("Adaptive Pick requires unrestricted region options.")
+        semantics.affordance.set_custom_config(ADAPTIVE_GRASP, self.grasp_mode)
         return replace(lowering, goal=replace(lowering.goal, semantics=semantics))
 
 
@@ -462,8 +459,8 @@ def make_pick_factory(
 ) -> _PickLowererFactory:
     """Bind a task policy alias to the baseline's class-level factory identity.
 
-    Ordinary aliases retain the baseline lowerer. Horizontal E4 sources opt
-    into task-owned grasp geometry without extending the shared goal/options.
+    Automatic pickup aliases declare task-owned geometry selection without
+    extending the shared goal/options. Constrained aliases retain their rules.
     No executable code comes from data.
     """
     if call_id == _PICK_CALL_ID:
@@ -471,11 +468,19 @@ def make_pick_factory(
     if not call_id.startswith("gen_sim.pick."):
         raise ValueError("Task Pick aliases must use the gen_sim.pick namespace.")
     suffix = hashlib.sha256(call_id.encode("utf-8")).hexdigest()[:16]
-    horizontal = call_id.startswith("gen_sim.pick.handover_horizontal_source.")
+    handover = call_id == "gen_sim.pick.handover_source" or call_id.startswith(
+        "gen_sim.pick.handover_horizontal_source."
+    )
+    adaptive = handover
     lowerer_type = type(
         f"_TaskPickLowerer_{suffix}",
-        (_HorizontalHandoverPickLowerer if horizontal else _PickLowerer,),
-        {"call_id": call_id, "__module__": __name__, "__slots__": ()},
+        (_AdaptivePickLowerer if adaptive else _PickLowerer,),
+        {
+            "call_id": call_id,
+            "grasp_mode": "ends" if handover else "free",
+            "__module__": __name__,
+            "__slots__": (),
+        },
     )
     factory_type = make_dataclass(
         f"_TaskPickFactory_{suffix}",
@@ -484,7 +489,7 @@ def make_pick_factory(
         namespace={
             "call_id": call_id,
             "lowerer_type": lowerer_type,
-            **({"revision": "3"} if horizontal else {}),
+            **({"revision": "4"} if adaptive else {}),
             "__module__": __name__,
         },
         frozen=True,

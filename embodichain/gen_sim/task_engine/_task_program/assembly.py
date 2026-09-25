@@ -48,6 +48,8 @@ from .motion import (
 
 __all__: list[str] = []
 
+from .adaptive_grasp import ADAPTIVE_GRASP_REVISION
+
 ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v4"
 
 
@@ -136,10 +138,12 @@ class _TaskFactory(SimulationTaskProgramFactory):
         articulation_bindings: tuple = (),
         pour_receivers: dict[str, str] | None = None,
         drawer_routes: tuple = (),
+        adaptive_pick: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._pour_receivers = dict(pour_receivers or {})
+        self._adaptive_pick = adaptive_pick
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -175,7 +179,13 @@ class _TaskFactory(SimulationTaskProgramFactory):
 
     def create_atomic_action_engine(self, profile: Any) -> Any:
         """Keep drawer-owned transport separate from ordinary GenSim wrappers."""
-        from .actions import GenSimMoveHeldObject, GenSimPickUp, GenSimPlace, GenSimPour
+        from .actions import (
+            GenSimHandOver,
+            GenSimMoveHeldObject,
+            GenSimPickUp,
+            GenSimPlace,
+            GenSimPour,
+        )
 
         if self._drawers:
             from .drawer_runtime import DrawerPlacementEngine
@@ -191,7 +201,10 @@ class _TaskFactory(SimulationTaskProgramFactory):
             return engine
 
         engine = super().create_atomic_action_engine(profile)
-        engine.register(GenSimPickUp(), replace=True)
+        pick = GenSimPickUp()
+        pick.adaptive_unconstrained = self._adaptive_pick
+        engine.register(pick, replace=True)
+        engine.register(GenSimHandOver(), replace=True)
         engine.register(GenSimMoveHeldObject(), replace=True)
         engine.register(GenSimPlace(), replace=True)
         engine.register(GenSimPour(self._pour_receivers), replace=True)
@@ -214,6 +227,7 @@ class TaskAdapterFactory:
     articulation_bindings: tuple = ()
     pour_receivers: tuple[tuple[str, str], ...] = ()
     drawer_routes: tuple = ()
+    adaptive_pick: bool = False
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Return the exact shared adapter; no Session or Bridge is overridden."""
@@ -333,6 +347,7 @@ class TaskAdapterFactory:
             articulation_bindings=self.articulation_bindings,
             pour_receivers=dict(self.pour_receivers),
             drawer_routes=self.drawer_routes,
+            adaptive_pick=self.adaptive_pick,
         )
         return factory.create_adapter()
 
@@ -355,13 +370,16 @@ def load_deployment(
     if (
         type(payload) is not dict
         or not {"schema_version", "presets"}.issubset(payload)
-        or set(payload) - {"schema_version", "presets", "drawers"}
+        or set(payload) - {"schema_version", "presets", "drawers", "adaptive_pick"}
         or payload["schema_version"] != "gen_sim_task_constraints/v1"
     ):
         raise ValueError(
             "Unsupported GenSim task constraint format; regenerate the bundle."
         )
     presets = payload["presets"]
+    adaptive_pick = payload.get("adaptive_pick", False)
+    if type(adaptive_pick) is not bool:
+        raise ValueError("GenSim adaptive_pick must be an explicit boolean.")
     if type(presets) is not dict or any(
         type(name) is not str or not name.startswith("gen_sim.") or name != name.strip()
         for name in presets
@@ -513,6 +531,7 @@ def load_deployment(
     )
     fingerprint = canonical_hash(
         {
+            "adaptive_grasp_revision": ADAPTIVE_GRASP_REVISION,
             **(
                 {"drawer_curobo_revision": 1}
                 if any(
@@ -548,6 +567,7 @@ def load_deployment(
         articulation_bindings,
         pour_receivers,
         drawers,
+        adaptive_pick=adaptive_pick,
     )
     integration = replace(
         base.integration,

@@ -76,8 +76,8 @@ __all__: list[str] = []
 
 @pytest.mark.parametrize("horizontal", [False, True])
 def test_handover_source_axis_is_call_local_and_does_not_filter_receiver(horizontal):
-    from embodichain.gen_sim.task_engine._task_program.actions import (
-        _HANDOVER_SOURCE_AXIS,
+    from embodichain.gen_sim.task_engine._task_program.adaptive_grasp import (
+        ADAPTIVE_GRASP,
     )
     from embodichain.gen_sim.task_engine._task_program.services import make_pick_factory
     from embodichain.lab.sim.atomic_actions.affordance import AxisAlignAffordance
@@ -107,14 +107,14 @@ def test_handover_source_axis_is_call_local_and_does_not_filter_receiver(horizon
         ),
         context=SimpleNamespace(),
         bound=SimpleNamespace(),
-        option_template=PickUpOptions(pick_object_part="top"),
+        option_template=PickUpOptions(pick_object_part="center"),
     )
     assert semantics.affordance.custom_config == {}
     affordance = result.goal.semantics.affordance
-    assert affordance.get_custom_config(_HANDOVER_SOURCE_AXIS) == (
-        (1.0, 0.0, 0.0) if horizontal else None
+    assert affordance.get_custom_config(ADAPTIVE_GRASP) == (
+        "ends" if horizontal else None
     )
-    assert factory.revision == ("3" if horizontal else "2")
+    assert factory.revision == ("4" if horizontal else "2")
     if horizontal:
         assert affordance is not semantics.affordance
     # Even if HandOver observes the held snapshot, its center request stays unfiltered.
@@ -128,16 +128,18 @@ def test_handover_source_axis_is_call_local_and_does_not_filter_receiver(horizon
 
 
 @pytest.mark.parametrize("marked", [False, True])
-def test_gensim_source_pick_changes_only_marked_candidate_axis(monkeypatch, marked):
+def test_explicit_top_selection_is_not_reinterpreted_as_automatic(monkeypatch, marked):
     from embodichain.gen_sim.task_engine._task_program.actions import (
         GenSimPickUp,
-        _HANDOVER_SOURCE_AXIS,
+    )
+    from embodichain.gen_sim.task_engine._task_program.adaptive_grasp import (
+        ADAPTIVE_GRASP,
     )
     from embodichain.lab.sim.atomic_actions.affordance import AxisAlignAffordance
 
     affordance = AxisAlignAffordance(internal_axis=torch.tensor([1.0, 0.0, 0.0]))
     if marked:
-        affordance.set_custom_config(_HANDOVER_SOURCE_AXIS, (1.0, 0.0, 0.0))
+        affordance.set_custom_config(ADAPTIVE_GRASP, "ends")
     poses = torch.eye(4).repeat(2, 2, 1, 1)
     valid = torch.ones(2, 2, dtype=torch.bool)
     ik_valid = torch.tensor([[True, False], [False, True]])
@@ -172,11 +174,7 @@ def test_gensim_source_pick_changes_only_marked_candidate_axis(monkeypatch, mark
         context,
         sample_key="source",
     )
-    expected = (
-        torch.tensor([[0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
-        if marked
-        else torch.tensor([0.0, 0.0, 1.0])
-    )
+    expected = torch.tensor([0.0, 0.0, 1.0])
     torch.testing.assert_close(
         get_candidates.call_args.kwargs["obj_longest_axis"], expected
     )
@@ -287,7 +285,7 @@ def test_constrained_pick_marks_only_its_goal_and_uses_a_scoped_generator(monkey
     assert get_candidates.call_args.kwargs["obj_longest_axis"] is None
 
 
-def test_horizontal_source_lowerer_requires_declared_axis():
+def test_adaptive_source_lowerer_rejects_conflicting_explicit_region():
     from embodichain.gen_sim.task_engine._task_program.services import make_pick_factory
 
     semantics = ObjectSemantics(
@@ -296,7 +294,7 @@ def test_horizontal_source_lowerer_requires_declared_axis():
     routes = (_PickRoute(object_id="cup", target_id="source"),)
     call_id = "gen_sim.pick.handover_horizontal_source.cup"
     lowerer = make_pick_factory(routes, call_id).lowerer_type(routes, (semantics,))
-    with pytest.raises(ValueError, match="declared local axis"):
+    with pytest.raises(ValueError, match="unrestricted region"):
         lowerer.lower(
             RegisteredSemanticCall(
                 call_id=call_id, arguments={"object": "cup", "target": "source"}
