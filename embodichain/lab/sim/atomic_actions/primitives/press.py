@@ -228,66 +228,89 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             hand_grasp_qpos,
             n_waypoints=options.hand_interp_steps,
         )
-        approach_success, approach_arm = self._plan_pose_segment(
-            approach_xpos,
-            start_arm_qpos,
-            control_part,
-            request,
-            n_approach,
-            interpolation_dt=interpolation_dt,
-        )
-        contact_keyframes = axis_translation_keyframes(
-            approach_xpos,
-            contact_xpos,
-            contact_xpos[:, :3, 2],
-            n_waypoints=n_contact - 1,
-        )
-        contact_success, contact_arm = self._plan_pose_segment(
-            contact_keyframes,
-            approach_arm[:, -1],
-            control_part,
-            request,
-            n_contact,
-            interpolation_dt=interpolation_dt,
-            cartesian_linear=True,
-        )
-        press_keyframes = axis_translation_keyframes(
-            contact_xpos,
-            pressed_xpos,
-            contact_xpos[:, :3, 2],
-            n_waypoints=n_press - 1,
-        )
-        press_success, press_arm = self._plan_pose_segment(
-            press_keyframes,
-            contact_arm[:, -1],
-            control_part,
-            request,
-            n_press,
-            interpolation_dt=interpolation_dt,
-            cartesian_linear=True,
-        )
-        retract_keyframes = axis_translation_keyframes(
-            pressed_xpos,
-            approach_xpos,
-            contact_xpos[:, :3, 2],
-            n_waypoints=n_retract - 1,
-        )
-        retract_success, retract_arm = self._plan_pose_segment(
-            retract_keyframes,
-            press_arm[:, -1],
-            control_part,
-            request,
-            n_retract,
-            interpolation_dt=interpolation_dt,
-            cartesian_linear=True,
-        )
-        success = (
-            contact_sample.success
-            & approach_success
-            & contact_success
-            & press_success
-            & retract_success
-        )
+        if request.motion_policy.strategy == "motion_gen":
+            targets = torch.stack(
+                (approach_xpos, contact_xpos, pressed_xpos, approach_xpos), dim=1
+            )
+            motion_options = request.motion_policy.to_motion_gen_options(
+                start_qpos=start_arm_qpos,
+                control_part=control_part,
+                interpolation_dt=interpolation_dt,
+            )
+            motion_options.sample_count = None
+            result = self.motion_generator.generate(
+                build_pose_plan_states(targets), options=motion_options
+            )
+            assert isinstance(result.success, torch.Tensor)
+            assert result.positions is not None
+            approach_arm, contact_arm, press_arm, retract_arm = self._split_motion_path(
+                result.positions,
+                targets[:, :3],
+                control_part,
+                (n_approach, n_contact, n_press, n_retract),
+            )
+            success = contact_sample.success & result.success
+        else:
+            approach_success, approach_arm = self._plan_pose_segment(
+                approach_xpos,
+                start_arm_qpos,
+                control_part,
+                request,
+                n_approach,
+                interpolation_dt=interpolation_dt,
+            )
+            contact_keyframes = axis_translation_keyframes(
+                approach_xpos,
+                contact_xpos,
+                contact_xpos[:, :3, 2],
+                n_waypoints=n_contact - 1,
+            )
+            contact_success, contact_arm = self._plan_pose_segment(
+                contact_keyframes,
+                approach_arm[:, -1],
+                control_part,
+                request,
+                n_contact,
+                interpolation_dt=interpolation_dt,
+                cartesian_linear=True,
+            )
+            press_keyframes = axis_translation_keyframes(
+                contact_xpos,
+                pressed_xpos,
+                contact_xpos[:, :3, 2],
+                n_waypoints=n_press - 1,
+            )
+            press_success, press_arm = self._plan_pose_segment(
+                press_keyframes,
+                contact_arm[:, -1],
+                control_part,
+                request,
+                n_press,
+                interpolation_dt=interpolation_dt,
+                cartesian_linear=True,
+            )
+            retract_keyframes = axis_translation_keyframes(
+                pressed_xpos,
+                approach_xpos,
+                contact_xpos[:, :3, 2],
+                n_waypoints=n_retract - 1,
+            )
+            retract_success, retract_arm = self._plan_pose_segment(
+                retract_keyframes,
+                press_arm[:, -1],
+                control_part,
+                request,
+                n_retract,
+                interpolation_dt=interpolation_dt,
+                cartesian_linear=True,
+            )
+            success = (
+                contact_sample.success
+                & approach_success
+                & contact_success
+                & press_success
+                & retract_success
+            )
 
         parts = (hand_close, approach_arm, contact_arm, press_arm, retract_arm)
         lengths = tuple(part.shape[1] for part in parts)
@@ -356,6 +379,69 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         base, remainder = divmod(motion_count, 4)
         values = [base + (index < remainder) for index in range(4)]
         return values[0], values[1], values[2], values[3]
+
+    def _split_motion_path(
+        self,
+        trajectory: torch.Tensor,
+        split_poses: torch.Tensor,
+        control_part: str,
+        sample_counts: tuple[int, int, int, int],
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Split at minimum-error boundaries in temporal order before resampling."""
+        poses = self.robot.compute_batch_fk(
+            qpos=trajectory, name=control_part, to_matrix=True
+        )
+        position_error = torch.linalg.vector_norm(
+            poses[:, None, :, :3, 3] - split_poses[:, :, None, :3, 3], dim=-1
+        )
+        relative_rotation = torch.matmul(
+            poses[:, None, :, :3, :3].transpose(-1, -2),
+            split_poses[:, :, None, :3, :3],
+        )
+        trace = relative_rotation.diagonal(dim1=-2, dim2=-1).sum(dim=-1)
+        error = position_error + torch.acos(((trace - 1.0) * 0.5).clamp(-1.0, 1.0))
+        cost = error[:, 0]
+        predecessors = []
+        for goal_index in (1, 2):
+            prefix_cost, prefix_index = torch.cummin(cost, dim=1)
+            predecessors.append(prefix_index)
+            cost = prefix_cost + error[:, goal_index]
+        index = cost.argmin(dim=1)
+        boundaries = [index]
+        for predecessor in reversed(predecessors):
+            index = predecessor.gather(1, index[:, None]).squeeze(1)
+            boundaries.append(index)
+        boundaries.reverse()
+        boundaries = (
+            torch.stack(
+                (
+                    torch.zeros_like(index),
+                    *boundaries,
+                    torch.full_like(index, trajectory.shape[1] - 1),
+                ),
+                dim=1,
+            )
+            .cpu()
+            .tolist()
+        )
+        segments = []
+        for segment_index, count in enumerate(sample_counts):
+            segments.append(
+                torch.cat(
+                    [
+                        resample_planned_trajectory(
+                            trajectory[
+                                row : row + 1,
+                                indices[segment_index] : indices[segment_index + 1] + 1,
+                            ],
+                            count,
+                        )
+                        for row, indices in enumerate(boundaries)
+                    ],
+                    dim=0,
+                )
+            )
+        return segments[0], segments[1], segments[2], segments[3]
 
     def _plan_pose_segment(
         self,
