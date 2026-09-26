@@ -139,9 +139,22 @@ current GLB assets into UID-labeled overviews, segmentation masks and crops,
 then retries grounding with the same LLM transport configured for text binding
 in `gen_sim/.env` or the process environment;
 `--reference-image` is not this binding input. A deterministic tenth of already
-bound scenes receives an audit-only visual spot check. Evidence records the
-scene revision and image hashes; the VLM may propose only visible inventory
-UIDs, while native semantic compatibility remains authoritative. Articulation
+bound scenes receives an audit-only visual spot check. Text and visual binding
+share semantic identity rules: descriptive categories are not exact-match labels;
+synonyms, translations and supported broad names may identify the same entity,
+but explicit modifiers, exact UIDs and counts cannot be relaxed into substitutes.
+Model responses include matching support, conflicts and nearby candidate UIDs;
+reported conflicts cannot authorize a resolved binding. This evidence is not
+new scene state or physical capability. Legacy four-field response replay stays
+supported. Genuine missing/ambiguous results are not retried into guesses.
+Run-local binding audits retain prompts, schemas, responses and model identity,
+including early failures; candidates and source fingerprints survive failed
+selection. Visual evidence also records scene revision and image hashes; the
+VLM may select only visible inventory UIDs, while native semantic compatibility
+remains authoritative. `task_engine/binding_evaluation.py` provides frozen
+positive/rejection controls and per-reference/paraphrase metrics; provider calls
+require `--run-model`. These text-only metrics do not certify visual or physical
+success. Articulation
 proxy GLBs do not represent live joint state, so E6-E9 binding does not use
 this visual path. Without usable Task Engine LLM configuration, text-only
 binding and its existing conflict behavior remain unchanged.
