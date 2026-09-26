@@ -25,6 +25,7 @@ existing owners and can adopt these helpers incrementally.
 | Camera workload and runtime selection | `scripts/benchmark/rendering/workload.py`, `run_benchmark.py` |
 | Camera process and platform APIs | `scripts/benchmark/rendering/worker.py`, `backends/` |
 | Camera-specific report layout | `scripts/benchmark/rendering/report.py` |
+| G-03 case, attempt, receipt and fixture runner | `scripts/benchmark/expert_generation/` |
 
 ## Boundaries
 
@@ -64,6 +65,13 @@ outputs are generated from already frozen run IDs and do not initialize a GPU.
 Physical stepping, reset, task predicates and production commit receipts
 remain in existing domain/host owners. Shared benchmark execution does not
 provide a second generation coordinator or dataset sink.
+
+The G-03 benchmark runner consumes those owner-provided outcomes through an
+executor callback. Its accepted-yield rule requires completed execution,
+measured validation, task success and a confirmed persistence receipt. It keeps
+attempt failures, duplicate commits and budget-exhausted not-run rows visible;
+the fixture under `scripts/benchmark/expert_generation/` is deliberately
+simulator-free and does not replace #670's coordinator or `GenerationSession`.
 
 ## Camera-specific cautions
 

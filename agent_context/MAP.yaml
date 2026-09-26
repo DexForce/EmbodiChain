@@ -16,7 +16,8 @@ topics:
   - scripts/benchmark/core/
   - scripts/benchmark/reporting/
   - scripts/benchmark/rendering/
-  watch_paths: [scripts/benchmark/core/, scripts/benchmark/reporting/, scripts/benchmark/rendering/, tests/benchmark/core/, tests/benchmark/reporting/, tests/benchmark/rendering/]
+  - scripts/benchmark/expert_generation/
+  watch_paths: [scripts/benchmark/core/, scripts/benchmark/reporting/, scripts/benchmark/rendering/, scripts/benchmark/expert_generation/, tests/benchmark/core/, tests/benchmark/reporting/, tests/benchmark/rendering/, tests/benchmark/expert_generation/]
   related_topics: [simulation-system, sensor-system, motion-planning, env-framework]
   status: active
 - id: simulation-system

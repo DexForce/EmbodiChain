@@ -35,6 +35,11 @@ scripts/benchmark/
       isaaclab.py               Isaac Lab 3 对照实现
     report.py                  相机专用报告模板，调用 reporting 公共逻辑
     camera_pilot.json           首个样例实验的参数
+  expert_generation/
+    contracts.py                G-03 case、attempt、persistence receipt
+    runner.py                   有预算的 attempt runner 和 accepted yield
+    fixtures.py                 无仿真依赖的协议 fixture
+    report.py                   attempt/stage/confirmed-yield 报告
     common.py                  v0.1 导入兼容层
 ```
 
@@ -106,6 +111,26 @@ Isaac adapter 在独立解释器里启动 Kit，使用本机固定 Isaac Lab 3 �
 
 首个样例尚未完成独立画质标定，保持 `not_qualified`，报告不计算等画质加速比。
 旧版相机 `runs.json` 可以继续重建，旧导入 `rendering.common` 也保留兼容。
+
+## G-03 最小纵向切片
+
+公共框架的第一条 generation 消费者是无仿真依赖的 G-03 fixture：
+
+```bash
+python -m scripts.benchmark expert-generation \
+  --fixture --attempts 4 \
+  --output outputs/benchmarks/expert-generation
+```
+
+它固定一个 Atomic Action 来源 case，演示执行成功、测量验证失败、持久化
+receipt 失败和确认写入四类结果。只有 `execution=completed`、
+`validation=passed`、`task=passed` 且 receipt `confirmed=true` 的 attempt
+进入 accepted yield。重复 `commit_id` 不增加 accepted 数量，预算耗尽的
+attempt 保留为 `not_run`。
+
+真实 G-03 executor 应在这个接口上接入 #670 的 Candidate Coordinator、
+GenerationSession、Physical Executor、Measured Validator 和 EpisodeSink；
+fixture 不创建第二套候选或 persistence 状态机。
 
 ## 如何接入下一项实验
 

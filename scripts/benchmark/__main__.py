@@ -89,6 +89,14 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         camera_main(arguments[1:])
         return
+    if arguments and arguments[0] == "expert-generation":
+        # Keep the simulator-free G-03 fixture and offline report path light.
+        from scripts.benchmark.expert_generation.run_benchmark import (
+            main as generation_main,
+        )
+
+        generation_main(arguments[1:])
+        return
 
     parser = argparse.ArgumentParser(
         prog="embodichain benchmark",
@@ -99,6 +107,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         "camera-pilot",
         add_help=False,
         help="Run the minimal camera comparison or rebuild its report offline.",
+    )
+    subparsers.add_parser(
+        "expert-generation",
+        add_help=False,
+        help="Run the minimal simulator-free G-03 protocol fixture.",
     )
 
     # -- rl ------------------------------------------------------------------
