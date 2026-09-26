@@ -505,13 +505,24 @@ class LeRobotRecorder(Functor):
         if representation in POLICY_ACTION_CONTRACT_TERMS:
             return self._policy_action_list(env_id, step)
 
-        # Legacy and explicit joint-position recorders consume the command
+        # Expert-controller and explicit joint-position recorders consume the command
         # that reached the controller.  This is kept separately from the
         # shared rollout buffer so a policy-contract recorder can coexist with
         # a legacy recorder even when their primary action widths differ.
         if cfg is None or representation == "joint_position":
             env = getattr(self, "_env", None)
-            executed_getter = getattr(env, "get_executed_qpos_history", None)
+            expert_spec = getattr(env, "expert_action_spec", None)
+            if (
+                expert_spec is not None
+                and expert_spec.joint_command_mode == "position_velocity"
+            ):
+                # Position-velocity expert rows are already encoded as
+                # [qpos, qvel] in the rollout buffer. Executed qpos history
+                # intentionally contains only qpos and must not replace it.
+                return torch.as_tensor(stored_actions).detach().cpu().clone()
+            executed_getter = getattr(env, "get_expert_controller_qpos_history", None)
+            if not callable(executed_getter):
+                executed_getter = getattr(env, "get_executed_qpos_history", None)
             if callable(executed_getter):
                 executed_actions = executed_getter(env_id, step)
                 if (

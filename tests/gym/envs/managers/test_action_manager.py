@@ -350,3 +350,30 @@ def test_parallel_gripper_never_controls_mimic_follower() -> None:
 
     assert term.controlled_joint_ids == (1,)
     assert env.robot.set_qpos.call_args.kwargs["joint_ids"] == [1]
+
+
+def test_action_manager_trace_separates_requested_and_processed_commands() -> None:
+    """Action traces preserve policy requests beside term commands."""
+    env = make_action_env(
+        num_envs=1,
+        joint_names=("joint_0", "joint_1"),
+        parts={"arm": (0, 1)},
+    )
+    manager = ActionManager(
+        {
+            "arm_action": ActionTermCfg(
+                func=JointPositionAction,
+                params={"part_name": "arm", "scale": 2.0},
+            )
+        },
+        env,
+    )
+    requested = torch.tensor([[0.1, 0.2]])
+    manager.process_action(requested)
+
+    trace = manager.action_trace()
+
+    torch.testing.assert_close(trace.requested, requested)
+    torch.testing.assert_close(trace.processed["arm_action"], requested * 2.0)
+    torch.testing.assert_close(trace.executed["arm_action"], requested * 2.0)
+    assert trace.command_types == ("qpos",)
