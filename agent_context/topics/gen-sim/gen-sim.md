@@ -15,7 +15,7 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Image → scene | `scene_engine/pipeline/generate.py`: `generate_scene_from_image()` |
 | Edit portable scene | `scene_engine/pipeline/edit.py`: `edit_scene()` |
 | Portable scene contract | `scene_engine/pipeline/utils/scene_exporter.py`, `scene_importer.py` |
-| Whole-scene USD package | `scene_engine/pipeline/utils/scene_usd.py`: `build_scene_usd()`, preview loading |
+| Whole-scene USD package | `scene_engine/pipeline/utils/scene_usd.py`: `build_scene_usd()`, direct preview loading; `usd_scene.py`: entity index |
 | General asset ingest | `simready_pipeline/pipeline/ingest.py`: `ingest_one_asset()` |
 | Web app configuration | `gradio_ui/gradio_app.py`, `app_env.py` |
 | Session-owned subprocesses | `gradio_ui/app_processes.py`: `SessionProcessRegistry` |
@@ -34,9 +34,11 @@ behavior, Gradio artifact ownership and focused failure diagnosis.
 The `scene_export/` directory contains `scene.json`, `scene_config.json`,
 `scene_graph.json`, `mesh_assets/` and `articulated_assets/`.
 Generation and editing also produce an optional `scene_usd/` delivery package
-with `scene.usda`, a manifest, external textures, and native GLTF/USDC runtime
-assets. Build it only after the complete simulation scene is prepared; validate
-UIDs and keep every packaged asset path inside the output root.
+with a schema-v2 `scene.usda` carrying EmbodiChain entity metadata. DexSim
+preview loads schema-v2 stages directly; the manifest and native GLTF/USDC
+assets remain legacy compatibility data. Build it only after the complete
+simulation scene is prepared; validate UIDs and keep every packaged asset path
+inside the output root.
 
 - Scene object IDs and graph node IDs must be equal sets on import and export.
 - Editable scene state is Y-up; portable runtime output is Z-up. Convert world

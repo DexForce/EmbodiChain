@@ -18,9 +18,10 @@
    the same portable directory (`edit.py`).
 5. The editable export is `scene_export/` with `scene.json`, `scene_config.json`,
    `scene_graph.json`, `mesh_assets/`, and `articulated_assets/`. Generation and
-   editing may additionally build `scene_usd/` with a USD snapshot, manifest,
-   external textures, and native GLTF/USDC runtime assets. It represents a
-   scene, not a complete `EmbodiedEnv` deployment.
+   editing may additionally build `scene_usd/`; schema-v2 `scene.usda` carries
+   stable EmbodiChain entity metadata and is loaded directly by DexSim. The
+   manifest and native GLTF/USDC files remain legacy compatibility data. It
+   represents a scene, not a complete `EmbodiedEnv` deployment.
 6. The general SimReady CLI is a separate ingest path. `simready_pipeline/cli/start.py` sets
    `PYOPENGL_PLATFORM=egl`, builds `JsonStore` and `ParserManager`, then calls
    `ingest_one_asset()`.

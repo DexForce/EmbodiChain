@@ -37,6 +37,10 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.visualization import VisualizationCfg
+from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import (
+    USD_SCENE_SCHEMA,
+    UsdSceneIndex,
+)
 
 _SCENE_EXPORT_FORMAT = "embodichain.scene-export/v1"
 _SCENE_USD_FORMAT = "embodichain.scene-usd/v1"
@@ -141,11 +145,10 @@ def build_scene_usd(
 ) -> Path:
     """Materialize a Scene Engine export as a self-contained USD package.
 
-    ``scene.usda`` remains the scene-level USD interchange artifact.  Its
-    adjacent ``assets/`` directory contains externally textured GLTF/USDC
-    runtime payloads, and the manifest binds every payload to its scene pose.
-    Native DexSim preview uses those payloads because its current flattened
-    USD mesh importer does not preserve GLB internal node transforms.
+    ``scene.usda`` is the scene-level USD interchange artifact and receives
+    stable EmbodiChain entity metadata. Its adjacent ``assets/`` directory is
+    retained for legacy compatibility and texture packaging; schema-v2 preview
+    loads the USD stage directly through :meth:`SimulationManager.add_usd`.
 
     Args:
         output_root: Scene Engine output root containing ``scene_export/``.
@@ -217,6 +220,11 @@ def build_scene_usd(
             runtime_assets=runtime_assets,
             sim=sim,
         )
+        _author_usd_entity_metadata(
+            scene_usd_path=temporary_scene_usd_path,
+            scene_config=scene_config,
+            sim=sim,
+        )
         temporary_scene_usd_path.replace(scene_usd_path)
         _write_scene_usd_manifest(
             path=manifest_path,
@@ -247,7 +255,12 @@ def load_scene_usd_into_sim(
     sim: SimulationManager,
     output_root: str | Path,
 ) -> list[Articulation]:
-    """Load a generated scene USD package and restore its named resources."""
+    """Load a generated USD scene, preferring direct stage import.
+
+    Schema-v2 stages are indexed from prim metadata and loaded through
+    ``SimulationManager.add_usd``. Legacy snapshots without entity metadata
+    retain the manifest/runtime-asset compatibility path.
+    """
     resolved_output_root = Path(output_root).expanduser().resolve()
     manifest_path = resolved_output_root / "scene_usd" / "scene_usd_manifest.json"
     if not manifest_path.is_file():
@@ -279,6 +292,22 @@ def load_scene_usd_into_sim(
         or not scene_usd_path.is_file()
     ):
         raise FileNotFoundError(f"Scene USD not found: {scene_usd_path}")
+    usd_index = UsdSceneIndex.load(scene_usd_path)
+    if usd_index.entities:
+        manifest_uids = {
+            entry.get("uid") for entry in entries if isinstance(entry.get("uid"), str)
+        }
+        indexed_uids = {entity.uid for entity in usd_index.entities}
+        if indexed_uids != manifest_uids:
+            raise ValueError(
+                "USD entity metadata and scene manifest contain different UID sets."
+            )
+        if usd_index.schema_version == USD_SCENE_SCHEMA:
+            return _load_embodichain_usd_stage(
+                sim=sim,
+                scene_usd_path=scene_usd_path,
+                index=usd_index,
+            )
     if all(isinstance(entry.get("runtime_asset"), str) for entry in entries):
         return _load_packaged_scene_usd(
             sim=sim,
@@ -297,6 +326,32 @@ def load_scene_usd_into_sim(
         output_root=resolved_output_root,
         force_static_rigids=True,
     )
+
+
+def _load_embodichain_usd_stage(
+    *,
+    sim: SimulationManager,
+    scene_usd_path: Path,
+    index: UsdSceneIndex,
+) -> list[Articulation]:
+    """Load a schema-v2 USD stage directly through SimulationManager.add_usd()."""
+    assets = sim.add_usd(
+        name=scene_usd_path.stem,
+        file_path=str(scene_usd_path),
+    )
+    articulations: list[Articulation] = []
+    for entity in index.entities:
+        if entity.kind != "articulation":
+            continue
+        asset = assets.get(entity.prim_path)
+        if asset is None:
+            asset = sim.get_articulation(entity.uid)
+        if asset is None:
+            raise RuntimeError(
+                f"USD stage did not produce articulation entity {entity.uid!r}."
+            )
+        articulations.append(asset)  # type: ignore[arg-type]
+    return articulations
 
 
 def _load_packaged_scene_usd(
@@ -1304,6 +1359,80 @@ def _vector3(value: object, field_name: str) -> list[float]:
         return [float(item) for item in value]
     except (TypeError, ValueError) as exc:
         raise ValueError(f"Scene config field {field_name!r} must be numeric.") from exc
+
+
+def _author_usd_entity_metadata(
+    *,
+    scene_usd_path: Path,
+    scene_config: dict[str, Any],
+    sim: SimulationManager,
+) -> None:
+    """Author stable EmbodiChain identity metadata directly on USD prims."""
+    from pxr import Usd, UsdGeom, Vt
+
+    stage = Usd.Stage.Open(str(scene_usd_path))
+    if stage is None:
+        raise RuntimeError(f"Could not reopen exported USD: {scene_usd_path}")
+    world = stage.GetPrimAtPath("/World")
+    if not world.IsValid():
+        world = UsdGeom.Xform.Define(stage, "/World").GetPrim()
+    world.SetCustomDataByKey("embodichain:scene_schema", USD_SCENE_SCHEMA)
+    world.SetCustomDataByKey("embodichain:up_axis", "Z")
+    world.SetCustomDataByKey("embodichain:meters_per_unit", 1.0)
+
+    def author_entity(
+        *,
+        entry: dict[str, Any],
+        kind: str,
+        scene_object: object,
+    ) -> None:
+        uid = _validate_uid(entry.get("uid"), label="Scene USD entity")
+        entities = getattr(scene_object, "_entities", ())
+        if not entities:
+            raise RuntimeError(f"USD entity {uid!r} has no bound runtime entity.")
+        runtime_name = entities[0].get_name()
+        prim = _find_named_prim(stage, runtime_name)
+        if prim is None:
+            raise RuntimeError(
+                f"Exported USD has no prim for entity {uid!r} ({runtime_name!r})."
+            )
+        prim.SetCustomDataByKey("embodichain:uid", uid)
+        prim.SetCustomDataByKey("embodichain:kind", kind)
+        prim.SetCustomDataByKey("embodichain:runtime_name", runtime_name)
+        shape = entry.get("shape")
+        source_asset = entry.get("fpath")
+        if source_asset is None and isinstance(shape, dict):
+            source_asset = shape.get("fpath")
+        prim.SetCustomDataByKey("embodichain:source_asset", str(source_asset or ""))
+        if kind == "rigid":
+            prim.SetCustomDataByKey(
+                "embodichain:body_type", entry.get("body_type", "static")
+            )
+        else:
+            prim.SetCustomDataByKey(
+                "embodichain:fixed_base", entry.get("fix_base", True)
+            )
+            joint_names = tuple(getattr(scene_object, "joint_names", ()))
+            prim.SetCustomDataByKey(
+                "embodichain:joint_names", Vt.StringArray(joint_names)
+            )
+
+    for field_name in ("background", "rigid_object"):
+        for entry in _config_entries(scene_config, field_name):
+            uid = _validate_uid(entry.get("uid"), label="Scene USD entity")
+            rigid = sim.get_rigid_object(uid)
+            if rigid is None:
+                raise RuntimeError(f"Scene USD export did not register rigid {uid!r}.")
+            author_entity(entry=entry, kind="rigid", scene_object=rigid)
+    for entry in _config_entries(scene_config, "articulation"):
+        uid = _validate_uid(entry.get("uid"), label="Scene USD entity")
+        articulation = sim.get_articulation(uid)
+        if articulation is None:
+            raise RuntimeError(
+                f"Scene USD export did not register articulation {uid!r}."
+            )
+        author_entity(entry=entry, kind="articulation", scene_object=articulation)
+    stage.GetRootLayer().Save()
 
 
 def _write_scene_usd_manifest(

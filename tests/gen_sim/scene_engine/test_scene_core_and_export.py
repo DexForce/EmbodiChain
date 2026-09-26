@@ -49,6 +49,10 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
     _validate_uid,
     load_scene_usd_into_sim,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import (
+    USD_SCENE_SCHEMA,
+    UsdSceneIndex,
+)
 from embodichain.lab.visualization import VisualizationCfg
 
 
@@ -451,6 +455,77 @@ def test_scene_usd_overwrites_existing_runtime_texture(tmp_path: Path) -> None:
 def test_scene_usd_rejects_path_like_uids() -> None:
     with pytest.raises(ValueError, match="safe single path component"):
         _validate_uid("../outside", label="Scene object")
+
+
+def test_usd_scene_index_reads_entity_metadata(tmp_path: Path) -> None:
+    from pxr import Usd, UsdGeom, Vt
+
+    scene_path = tmp_path / "scene.usda"
+    stage = Usd.Stage.CreateNew(str(scene_path))
+    world = UsdGeom.Xform.Define(stage, "/World").GetPrim()
+    world.SetCustomDataByKey("embodichain:scene_schema", USD_SCENE_SCHEMA)
+    entity = UsdGeom.Xform.Define(stage, "/World/Scene/Entities/drawer").GetPrim()
+    entity.SetCustomDataByKey("embodichain:uid", "drawer")
+    entity.SetCustomDataByKey("embodichain:kind", "articulation")
+    entity.SetCustomDataByKey("embodichain:runtime_name", "drawer_0")
+    entity.SetCustomDataByKey("embodichain:fixed_base", True)
+    entity.SetCustomDataByKey(
+        "embodichain:joint_names", Vt.StringArray(["joint_a", "joint_b"])
+    )
+    stage.GetRootLayer().Save()
+
+    index = UsdSceneIndex.load(scene_path, require_schema=True)
+
+    drawer = index.get("drawer")
+    assert drawer.prim_path == "/World/Scene/Entities/drawer"
+    assert drawer.kind == "articulation"
+    assert drawer.fixed_base is True
+    assert drawer.joint_names == ("joint_a", "joint_b")
+
+
+def test_schema_v2_usd_preview_uses_direct_simulation_import(
+    tmp_path: Path,
+) -> None:
+    from pxr import Usd, UsdGeom
+
+    output_root = tmp_path / "output"
+    scene_usd_root = output_root / "scene_usd"
+    scene_usd_root.mkdir(parents=True)
+    scene_path = scene_usd_root / "scene.usda"
+    stage = Usd.Stage.CreateNew(str(scene_path))
+    world = UsdGeom.Xform.Define(stage, "/World").GetPrim()
+    world.SetCustomDataByKey("embodichain:scene_schema", USD_SCENE_SCHEMA)
+    entity = UsdGeom.Xform.Define(stage, "/World/Scene/Entities/drawer").GetPrim()
+    entity.SetCustomDataByKey("embodichain:uid", "drawer")
+    entity.SetCustomDataByKey("embodichain:kind", "articulation")
+    stage.GetRootLayer().Save()
+    (scene_usd_root / "scene_usd_manifest.json").write_text(
+        json.dumps(
+            {
+                "format": "embodichain.scene-usd/v1",
+                "scene_usd": "scene_usd/scene.usda",
+                "objects": [{"uid": "drawer", "kind": "articulation"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    drawer = object()
+
+    class _DirectUsdSim:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, str]] = []
+
+        def add_usd(self, **kwargs: str) -> dict[str, object]:
+            self.calls.append(kwargs)
+            return {"/World/Scene/Entities/drawer": drawer}
+
+        def get_articulation(self, _uid: str) -> None:
+            return None
+
+    sim = _DirectUsdSim()
+    assert load_scene_usd_into_sim(sim=sim, output_root=output_root) == [drawer]  # type: ignore[arg-type]
+    assert sim.calls == [{"name": "scene", "file_path": str(scene_path)}]
 
 
 def test_preview_prepares_before_viser_joint_control(
