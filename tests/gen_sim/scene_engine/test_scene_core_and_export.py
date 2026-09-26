@@ -53,6 +53,7 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import (
     USD_SCENE_SCHEMA,
+    UsdSceneBinding,
     UsdSceneIndex,
 )
 from embodichain.lab.visualization import VisualizationCfg
@@ -535,6 +536,11 @@ def test_schema_v2_usd_preview_uses_direct_simulation_import(
         scene_usd_path=scene_path,
     ) == [drawer]
     assert standalone_sim.calls == [{"name": "scene", "file_path": str(scene_path)}]
+
+    binding_sim = _DirectUsdSim()
+    binding = UsdSceneBinding.load_into(binding_sim, scene_path)
+    assert binding.get("drawer").runtime is drawer
+    assert binding.scene_entity_cfg("drawer").uid == "drawer"
 
 
 def test_build_scene_usdz_creates_relocatable_single_file(tmp_path: Path) -> None:

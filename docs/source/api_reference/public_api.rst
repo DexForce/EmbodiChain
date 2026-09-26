@@ -289,7 +289,9 @@ Entity metadata and deterministic UID indexing for schema-v2 USD scene stages.
 .. autosummary::
 
    USD_SCENE_SCHEMA
+   UsdEntityBinding
    UsdEntityDesc
+   UsdSceneBinding
    UsdSceneIndex
 
 embodichain.gen_sim.simready_pipeline.cli.start

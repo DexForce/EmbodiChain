@@ -39,6 +39,7 @@ from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.visualization import VisualizationCfg
 from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import (
     USD_SCENE_SCHEMA,
+    UsdSceneBinding,
     UsdSceneIndex,
 )
 
@@ -404,22 +405,12 @@ def _load_embodichain_usd_stage(
     index: UsdSceneIndex,
 ) -> list[Articulation]:
     """Load a schema-v2 USD stage directly through SimulationManager.add_usd()."""
-    assets = sim.add_usd(
-        name=scene_usd_path.stem,
-        file_path=str(scene_usd_path),
-    )
+    binding = UsdSceneBinding.load_into(sim, scene_usd_path)
     articulations: list[Articulation] = []
     for entity in index.entities:
         if entity.kind != "articulation":
             continue
-        asset = assets.get(entity.prim_path)
-        if asset is None:
-            asset = sim.get_articulation(entity.uid)
-        if asset is None:
-            raise RuntimeError(
-                f"USD stage did not produce articulation entity {entity.uid!r}."
-            )
-        articulations.append(asset)  # type: ignore[arg-type]
+        articulations.append(binding.get(entity.uid).runtime)  # type: ignore[arg-type]
     return articulations
 
 

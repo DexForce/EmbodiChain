@@ -23,7 +23,13 @@ from pathlib import Path
 
 USD_SCENE_SCHEMA = "embodichain.scene/v2"
 
-__all__ = ["USD_SCENE_SCHEMA", "UsdEntityDesc", "UsdSceneIndex"]
+__all__ = [
+    "USD_SCENE_SCHEMA",
+    "UsdEntityDesc",
+    "UsdSceneIndex",
+    "UsdEntityBinding",
+    "UsdSceneBinding",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,3 +186,71 @@ class UsdSceneIndex:
             return self._by_uid[uid]
         except KeyError as exc:
             raise KeyError(f"USD scene entity {uid!r} is not registered.") from exc
+
+
+@dataclass(frozen=True, slots=True)
+class UsdEntityBinding:
+    """One USD entity paired with its simulator facade."""
+
+    desc: UsdEntityDesc
+    runtime: object
+
+
+class UsdSceneBinding:
+    """Map one USD entity index to DexSim/EmbodiChain runtime objects.
+
+    ``SceneEntityCfg(uid=...)`` objects can be created from this binding, so
+    Gym managers resolve the same stable UID that the USD stage uses.
+    """
+
+    def __init__(
+        self,
+        *,
+        index: UsdSceneIndex,
+        bindings: tuple[UsdEntityBinding, ...],
+    ) -> None:
+        self.index = index
+        self._bindings = bindings
+        self._by_uid = {binding.desc.uid: binding for binding in bindings}
+
+    @classmethod
+    def load_into(cls, sim: object, stage_path: str | Path) -> "UsdSceneBinding":
+        """Import a schema-v2 USD stage and bind every indexed entity."""
+        path = Path(stage_path).expanduser().resolve()
+        index = UsdSceneIndex.load(path, require_schema=True)
+        assets = sim.add_usd(name=path.stem, file_path=str(path))
+        bindings: list[UsdEntityBinding] = []
+        for desc in index.entities:
+            runtime = assets.get(desc.prim_path)
+            if runtime is None:
+                getter = (
+                    sim.get_articulation
+                    if desc.kind == "articulation"
+                    else sim.get_rigid_object
+                )
+                runtime = getter(desc.uid)
+            if runtime is None:
+                raise RuntimeError(
+                    f"USD entity {desc.uid!r} has no simulator runtime binding."
+                )
+            bindings.append(UsdEntityBinding(desc=desc, runtime=runtime))
+        return cls(index=index, bindings=tuple(bindings))
+
+    @property
+    def entities(self) -> tuple[UsdEntityBinding, ...]:
+        """Return all UID-to-runtime bindings in USD prim order."""
+        return self._bindings
+
+    def get(self, uid: str) -> UsdEntityBinding:
+        """Return the runtime binding for one stable entity UID."""
+        try:
+            return self._by_uid[uid]
+        except KeyError as exc:
+            raise KeyError(f"USD scene entity {uid!r} is not bound.") from exc
+
+    def scene_entity_cfg(self, uid: str) -> object:
+        """Create the Gym ``SceneEntityCfg`` corresponding to ``uid``."""
+        self.get(uid)
+        from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
+
+        return SceneEntityCfg(uid=uid)
