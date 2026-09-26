@@ -32,10 +32,12 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Compiled program model and AST expansion | `embodichain/lab/task_program/compiler/program.py` |
 | Semantic Call analysis and lowering | `embodichain/lab/task_program/compiler/lowering.py` |
 | Semantic Call execution | `embodichain/lab/task_program/runtime/executor.py`, `results.py` |
+| Grounded call plan-transform request | `embodichain/lab/task_program/runtime/generation.py` |
 | Parallel scheduling and safety boundary | `embodichain/lab/task_program/runtime/parallel.py`, `parallel_executor.py` |
 | Semantic Calls, scene, profile, effects, evidence | `embodichain/lab/task_program/semantics/` |
 | Immutable catalog and extension declarations | `embodichain/lab/task_program/integrations/catalog.py`, `extensions.py` |
 | Environment adapter and runtime assembly | `embodichain/lab/task_program/integrations/environment.py` |
+| Generation source adapter, candidate transform and records | `embodichain/lab/task_program/integrations/generation.py` |
 | Physical Gym component composition | `embodichain/lab/gym/utils/_component_composition.py` |
 | Configured semantic/policy composition | `embodichain/lab/task_program/integrations/_configured_composition.py` |
 | Callable-free configured runtime decode | `embodichain/lab/task_program/integrations/configured.py` |
@@ -70,6 +72,20 @@ generates no controller action. Live grounding occurs only after
 `TaskProgramEnvironmentAdapter` matches the compiled scene/profile/catalog
 snapshot to the exact integration registration.
 
+Generation is optional and episode-scoped, not part of compilation.
+`EmbodiedEnv.create_demo_segments()` passes a separate Generation Profile and
+candidate ordinal into a fresh bridge. After a matching Semantic Call is
+grounded, the runtime asks `TaskProgramPlanTransformFactory` for that call's
+Atomic plan transform; the bridge exposes immutable
+`TaskProgramGenerationRecord` provenance. Nonmatching calls and episodes
+without a profile keep the ordinary path.
+
+The current configured transform is B=1 and accepts neither timing nor
+Affordance generation. Generic profile decoding, source adapters, candidate
+identity and coordination are owned by the
+[Motion Planning augmentation boundary](../motion-planning/motion-planning.md#trajectory-augmentation-boundary),
+not by Task Program or Gym.
+
 ## Read on demand
 
 - [Language and semantic integration](configuration.md): strict decoding, scene/profile contracts, component ownership and service allowlists.
@@ -89,6 +105,13 @@ snapshot to the exact integration registration.
 | `HandOver-v1` | verified | `embodichain_tasks/configs/tasks/manipulation/hand_over/` |
 | `PourWater-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/` |
 
+The task-local configured example is
+`embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/generation.demo.yaml`;
+its README routes to
+`examples/sim/motion/repeated_pick_place_generation_showcase.py`. That showcase
+reports projected completion and candidate provenance, not measured physical
+success or receipt-confirmed coverage.
+
 ## Recommended change sites
 
 | Requested change | Start here |
@@ -99,11 +122,13 @@ snapshot to the exact integration registration.
 | Call-to-Atomic-Skill lowering | `compiler/lowering.py` |
 | Semantic Call, scene, robot, effect contracts | `semantics/` |
 | Runtime sequencing or parallel behavior | `runtime/` |
+| Grounded call transform protocol | `runtime/generation.py`, then `runtime/executor.py` |
 | Registration fingerprint/extensions | `integrations/catalog.py`, `extensions.py` |
 | Configured integration format | `integrations/configured.py` |
 | Live simulation binding | `integrations/simulation/` |
+| Task Program candidate adaptation and provenance | `integrations/generation.py` |
 | Gym action/segment lifecycle | `gym/envs/task_program/bridge.py` |
-| Episode program selection/final success | `gym/envs/embodied_env.py` |
+| Episode program/generation selection and final success | `gym/envs/embodied_env.py` |
 | Outcome annotations and persistence mode | `gym/envs/demo.py`, `gym/envs/embodied_env.py` |
 | LeRobot fragment slicing/idempotency | `gym/envs/managers/datasets.py`, `async_datasets.py` |
 

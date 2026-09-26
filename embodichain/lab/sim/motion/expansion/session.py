@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields, replace
 import json
 import math
@@ -33,6 +33,7 @@ from .contracts import (
     CandidateTrajectoryBatch,
     CommitReceipt,
     ExpertEpisode,
+    ProposalRequest,
     SceneCase,
     ValidationCheck,
     ValidationResult,
@@ -133,6 +134,7 @@ class GenerationSession:
         ] = {}
         self._coverage: dict[str, CoverageIndex] = {}
         self._bands: dict[tuple[str, str], ManipulabilityBands] = {}
+        self._generation_ordinals: dict[tuple[str, ...], int] = {}
         self._ordinals: dict[tuple[str, ...], int] = {}
         self._attempts: dict[str, _Attempt] = {}
         self._commits: dict[str, str] = {}
@@ -147,6 +149,11 @@ class GenerationSession:
             ),
             0,
         )
+
+    @property
+    def pending_max_bytes(self) -> int:
+        """Return the maximum bytes reservable by pending episode writes."""
+        return self._cfg.persistence.pending_max_bytes
 
     def register_case(
         self,
@@ -244,6 +251,122 @@ class GenerationSession:
                 factor.band_edges, reference=manipulability_reference
             )
 
+    def generation_generator(
+        self,
+        case_id: str,
+        initial_state_id: str,
+        *,
+        source_id: str,
+        source_revision: str,
+        template_id: str,
+        operation_id: str,
+    ) -> torch.Generator:
+        """Allocate the next deterministic logical-generation random stream.
+
+        Logical generation ordinals do not consume physical proposal capacity.
+        The caller serializes this operation with the rest of the session.
+        """
+        self._cases[(case_id, initial_state_id)]
+        for value, name in (
+            (source_id, "source_id"),
+            (source_revision, "source_revision"),
+            (template_id, "template_id"),
+            (operation_id, "operation_id"),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{name} must be a nonempty string.")
+        stream = (
+            case_id,
+            initial_state_id,
+            source_id,
+            source_revision,
+            template_id,
+            operation_id,
+        )
+        ordinal = self._generation_ordinals.get(stream, 0)
+        digest = _digest(self._cfg.augmentation.seed, *stream, ordinal)
+        self._generation_ordinals[stream] = ordinal + 1
+        return torch.Generator(device="cpu").manual_seed(int(digest[:16], 16) % 2**63)
+
+    def propose_many(
+        self,
+        requests: Sequence[ProposalRequest],
+    ) -> tuple[tuple[CandidateIdentity, torch.Generator], ...]:
+        """Atomically allocate physical candidate identities and private RNGs."""
+        if isinstance(requests, (str, bytes)):
+            raise TypeError("requests must be a sequence of ProposalRequest values.")
+        values = tuple(requests)
+        if not all(isinstance(request, ProposalRequest) for request in values):
+            raise TypeError("requests must contain only ProposalRequest values.")
+        if not values:
+            return ()
+        for request in values:
+            self._cases[(request.scene_case_id, request.initial_state_id)]
+        if (
+            self.stop_reason
+            or self._counts["proposed"] + len(values)
+            > self._cfg.collection.max_proposals
+        ):
+            raise RuntimeError(
+                "Proposal budget is exhausted or the session has stopped."
+            )
+
+        ordinals = dict(self._ordinals)
+        allocated: list[tuple[CandidateIdentity, torch.Generator]] = []
+        for request in values:
+            if request.parent_id is not None:
+                try:
+                    parent = self._attempts[request.parent_id].identity
+                except KeyError as exc:
+                    raise ValueError("Candidate parent is not registered.") from exc
+                if (parent.scene_case_id, parent.initial_state_id) != (
+                    request.scene_case_id,
+                    request.initial_state_id,
+                ):
+                    raise ValueError(
+                        "A candidate parent must belong to the same case and initial state."
+                    )
+            stream = (
+                request.scene_case_id,
+                request.initial_state_id,
+                request.source_id,
+                request.source_revision,
+                request.template_id,
+                request.operator_id,
+            )
+            ordinal = ordinals.get(stream, 0)
+            digest = _digest(self._cfg.augmentation.seed, *stream, ordinal)
+            identity = CandidateIdentity(
+                request.scene_case_id,
+                request.initial_state_id,
+                "candidate_" + digest,
+                request.geometry_family_id or "geometry_" + digest,
+                request.source_id,
+                request.source_revision,
+                request.template_id,
+                parent_id=request.parent_id,
+            )
+            if identity.candidate_id in self._attempts or any(
+                existing.candidate_id == identity.candidate_id
+                for existing, _ in allocated
+            ):
+                raise ValueError("Candidate identity allocation produced a duplicate.")
+            allocated.append(
+                (
+                    identity,
+                    torch.Generator(device="cpu").manual_seed(
+                        int(digest[:16], 16) % 2**63
+                    ),
+                )
+            )
+            ordinals[stream] = ordinal + 1
+
+        self._ordinals = ordinals
+        for identity, _ in allocated:
+            self._attempts[identity.candidate_id] = _Attempt(identity)
+        self._counts["proposed"] += len(allocated)
+        return tuple(allocated)
+
     def propose(
         self,
         case_id: str,
@@ -271,51 +394,20 @@ class GenerationSession:
         Returns:
             The new candidate identity and its seeded local CPU generator.
         """
-        self._cases[(case_id, initial_state_id)]
-        if (
-            self.stop_reason
-            or self._counts["proposed"] >= self._cfg.collection.max_proposals
-        ):
-            raise RuntimeError(
-                "Proposal budget is exhausted or the session has stopped."
+        return self.propose_many(
+            (
+                ProposalRequest(
+                    case_id,
+                    initial_state_id,
+                    source_id,
+                    source_revision,
+                    template_id,
+                    operator_id,
+                    geometry_family_id,
+                    parent_id,
+                ),
             )
-        if not isinstance(operator_id, str) or not operator_id.strip():
-            raise ValueError("operator_id must be a nonempty string.")
-        stream = (
-            case_id,
-            initial_state_id,
-            source_id,
-            source_revision,
-            template_id,
-            operator_id,
-        )
-        ordinal = self._ordinals.get(stream, 0)
-        digest = _digest(self._cfg.augmentation.seed, *stream, ordinal)
-        identity = CandidateIdentity(
-            case_id,
-            initial_state_id,
-            "candidate_" + digest,
-            geometry_family_id or "geometry_" + digest,
-            source_id,
-            source_revision,
-            template_id,
-            parent_id=parent_id,
-        )
-        if parent_id is not None:
-            parent = self._attempts[parent_id].identity
-            if (parent.scene_case_id, parent.initial_state_id) != (
-                case_id,
-                initial_state_id,
-            ):
-                raise ValueError(
-                    "A candidate parent must belong to the same case and initial state."
-                )
-        self._ordinals[stream] = ordinal + 1
-        self._attempts[identity.candidate_id] = _Attempt(identity)
-        self._counts["proposed"] += 1
-        return identity, torch.Generator(device="cpu").manual_seed(
-            int(digest[:16], 16) % 2**63
-        )
+        )[0]
 
     def _attempt(self, identity: CandidateIdentity, *states: str) -> _Attempt:
         attempt = self._attempts[identity.candidate_id]
@@ -401,6 +493,7 @@ class GenerationSession:
         initial_state_id: str,
         *,
         episode_byte_budget: int | None = None,
+        candidate_id: str | None = None,
     ) -> CandidateTrajectoryBatch | None:
         """Reserve a row, rollout attempt, and pending payload capacity before execution.
 
@@ -414,12 +507,18 @@ class GenerationSession:
             case_id: Registered scene-case identifier to execute next.
             initial_state_id: Registered initial state whose ready rows may be selected.
             episode_byte_budget: Maximum episode payload bytes to reserve for this row.
+            candidate_id: Optional exact ready candidate to reserve. Omission
+                preserves deterministic FIFO selection within the case.
 
         Returns:
             One assigned candidate row, or ``None`` when no matching row or capacity
             is available or the session has stopped.
         """
         self._cases[(case_id, initial_state_id)]
+        if candidate_id is not None and (
+            type(candidate_id) is not str or not candidate_id.strip()
+        ):
+            raise ValueError("candidate_id must be a nonempty string or None.")
         byte_limit = self._cfg.persistence.pending_max_bytes
         budget = byte_limit if episode_byte_budget is None else episode_byte_budget
         if type(budget) is not int or not 0 < budget <= byte_limit:
@@ -441,10 +540,15 @@ class GenerationSession:
             return None
         for attempt in self._attempts.values():
             identity = attempt.identity
-            if attempt.state == "ready" and (
-                identity.scene_case_id,
-                identity.initial_state_id,
-            ) == (case_id, initial_state_id):
+            if (
+                attempt.state == "ready"
+                and (
+                    identity.scene_case_id,
+                    identity.initial_state_id,
+                )
+                == (case_id, initial_state_id)
+                and (candidate_id is None or identity.candidate_id == candidate_id)
+            ):
                 attempt.state = "assigned"
                 attempt.episode_byte_budget = budget
                 trajectory, attempt.trajectory = attempt.trajectory, None

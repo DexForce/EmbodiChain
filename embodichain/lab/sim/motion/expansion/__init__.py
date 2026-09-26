@@ -29,12 +29,35 @@ from .cfg import (
     TrajectoryAugmentationCfg,
     TrajectoryGenerationJobCfg,
 )
+from .combined import (
+    CandidateRecipe,
+    CombinedGenerationProfile,
+    CubeInitialPoseProvider,
+    CycleRecipe,
+    PhysicalSlotPool,
+    ReferenceFamilySpec,
+    SlotReservation,
+    enumerate_candidate_recipes,
+    load_visual_profile_registry,
+    schedule_digest,
+)
+from .combined_runtime import (
+    CombinedAssignment,
+    CombinedEpisodeCoordinator,
+    MeasuredValidator,
+    VisualProfileApplication,
+    VisualProfileRegistry,
+    round_robin_recipes,
+)
+from .coordinator import CandidateCoordinator, CandidateWorkItem
 from .contracts import (
     CandidateIdentity,
+    CandidateSpec,
     CandidateTrajectoryBatch,
     CommitReceipt,
     ExpertEpisode,
     MotionSnapshot,
+    ProposalRequest,
     SceneCase,
     TrajectoryPhase,
     TrajectoryTemplate,
@@ -71,14 +94,37 @@ from .operators import (
     via_points,
 )
 from .session import GenerationSession
+from .profile import load_generation_profile
+from .source import (
+    PlanResultSourceAdapter,
+    SourceAdapter,
+    SourceContext,
+    TemplateSourceAdapter,
+)
 
 __all__ = [
     "SPATIAL_METHODS",
     "CandidateIdentity",
+    "CandidateRecipe",
+    "CombinedAssignment",
+    "CombinedEpisodeCoordinator",
+    "CandidateSpec",
+    "CandidateCoordinator",
+    "CandidateWorkItem",
     "CandidateTrajectoryBatch",
     "CommitReceipt",
+    "CombinedGenerationProfile",
+    "CubeInitialPoseProvider",
+    "CycleRecipe",
+    "MeasuredValidator",
+    "PhysicalSlotPool",
     "ExpertEpisode",
     "MotionSnapshot",
+    "ProposalRequest",
+    "ReferenceFamilySpec",
+    "SlotReservation",
+    "VisualProfileApplication",
+    "VisualProfileRegistry",
     "SceneCase",
     "TrajectoryAugmentationCfg",
     "TrajectoryGenerationJobCfg",
@@ -102,6 +148,10 @@ __all__ = [
     "expand_trajectory_variants",
     "plan_trajectory_variants",
     "sample_approach_cone",
+    "enumerate_candidate_recipes",
+    "load_visual_profile_registry",
+    "schedule_digest",
+    "round_robin_recipes",
     "TIMING_PROFILES",
     "ProposalRejected",
     "joint_residual",
@@ -112,4 +162,9 @@ __all__ = [
     "validate_motion_limits",
     "via_points",
     "GenerationSession",
+    "load_generation_profile",
+    "SourceAdapter",
+    "SourceContext",
+    "TemplateSourceAdapter",
+    "PlanResultSourceAdapter",
 ]

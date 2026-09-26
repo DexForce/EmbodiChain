@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from .executor import SemanticCallExecutor
+from .generation import TaskProgramPlanRequest, TaskProgramPlanTransformFactory
 from .parallel import ParallelTimingPolicy
 from .parallel_executor import ParallelSemanticExecutor
 from .results import SemanticExecutionResult, SemanticExecutionStatus
@@ -27,6 +28,8 @@ __all__ = [
     "ParallelSemanticExecutor",
     "ParallelTimingPolicy",
     "SemanticCallExecutor",
+    "TaskProgramPlanRequest",
+    "TaskProgramPlanTransformFactory",
     "SemanticExecutionResult",
     "SemanticExecutionStatus",
 ]

@@ -27,10 +27,12 @@ import torch
 
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
+    ActionPlanTemplateAdapter,
     ActionControlOverrides,
     ActionInvocation,
     ActionOptions,
     ActionPlan,
+    ArticulationJointState,
     AffordanceSamplingContext,
     AtomicAction,
     AtomicActionEngine,
@@ -52,8 +54,17 @@ from embodichain.lab.sim.atomic_actions import (
     SkillBindingContract,
     SkillEndpointRequirement,
     SkillResourceSlot,
+    StateDelta,
     TimedTrajectory,
     TrackingPolicy,
+)
+from embodichain.lab.sim.motion.expansion import (
+    SceneCase,
+    SourceAdapter,
+    SourceContext,
+    TrajectoryVariant,
+    apply_trajectory_variant,
+    default_variant_factors,
 )
 
 ACTION_DT = 0.02
@@ -63,6 +74,7 @@ class StubAction(AtomicAction[JointPositionGoal, ActionOptions]):
     """Deterministic test action that commands every robot joint."""
 
     skill_id: ClassVar[str] = "stub"
+    sample_count: ClassVar[int] = 2
     GoalType: ClassVar[type] = JointPositionGoal
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
@@ -94,8 +106,19 @@ class StubAction(AtomicAction[JointPositionGoal, ActionOptions]):
         if torch.isnan(target).any(dim=1).any():
             success &= ~torch.isnan(target).any(dim=1)
             target = torch.nan_to_num(target)
+        fractions = torch.linspace(
+            0.0,
+            1.0,
+            self.sample_count,
+            device=context.robot.qpos.device,
+            dtype=context.robot.qpos.dtype,
+        )
         trajectory = TimedTrajectory.from_uniform_step(
-            torch.stack([context.robot.qpos, target], dim=1),
+            torch.lerp(
+                context.robot.qpos[:, None, :],
+                target[:, None, :],
+                fractions[None, :, None],
+            ),
             env_ids=context.env_ids,
             step_dt=ACTION_DT,
         )
@@ -111,6 +134,13 @@ class OtherStubAction(StubAction):
     """Second configured skill used to verify shared engine resources."""
 
     skill_id: ClassVar[str] = "other_stub"
+
+
+class ThreeFrameStubAction(StubAction):
+    """Stub action with an interior free-phase sample for variant tests."""
+
+    sample_count: ClassVar[int] = 3
+    binding_contract: ClassVar[SkillBindingContract] = StubAction.binding_contract
 
 
 class StubSceneProvider:
@@ -593,3 +623,308 @@ def test_engine_rejects_plan_for_a_different_skill() -> None:
 
     with pytest.raises(ValueError, match="must match its request"):
         engine.compile((_invocation(engine, torch.zeros(2, 3)),))
+
+
+def test_plan_transform_runs_after_normal_plan_validation() -> None:
+    calls = []
+
+    def transform(request, context, plan):
+        calls.append((request, context, plan))
+        return plan.snapshot()
+
+    engine = _engine()
+    engine.register(StubAction())
+
+    plan = engine.plan(
+        _invocation(engine, torch.ones(2, 3)),
+        plan_transform=transform,
+    )
+
+    assert plan.success_all
+    assert len(calls) == 1
+    assert calls[0][2].skill_id == "stub"
+
+
+def test_plan_transform_must_return_a_validated_action_plan() -> None:
+    engine = _engine()
+    engine.register(StubAction())
+
+    with pytest.raises(TypeError, match="must return an ActionPlan"):
+        engine.plan(
+            _invocation(engine, torch.ones(2, 3)),
+            plan_transform=lambda request, context, plan: object(),
+        )
+
+
+def test_plan_transform_revalidates_mutated_tensor_invariants() -> None:
+    engine = _engine()
+    engine.register(StubAction())
+
+    def transform(request, context, plan):
+        del request, context
+        plan.plan_success.resize_(1)
+        return plan
+
+    with pytest.raises(ValueError, match="plan_success batch"):
+        engine.plan(
+            _invocation(engine, torch.ones(2, 3)),
+            plan_transform=transform,
+        )
+
+
+def test_plan_request_exposes_the_same_call_scoped_transform() -> None:
+    engine = _engine()
+    action = StubAction()
+    engine.register(action)
+    invocation = _invocation(engine, torch.ones(2, 3))
+    request = action.resolve_request(invocation)
+    calls = []
+
+    result = engine.plan_request(
+        request,
+        plan_transform=lambda resolved, context, plan: calls.append(resolved) or plan,
+    )
+
+    assert result.success_all
+    assert calls == [request]
+
+
+def test_plan_transform_rejects_mutated_expected_effect_tensor() -> None:
+    engine = _engine()
+    engine.register(StubAction())
+
+    def transform(request, context, plan):
+        del request, context
+        transformed = replace(
+            plan,
+            expected_effects=StateDelta(
+                articulation_joint_updates={
+                    ("drawer", "joint"): ArticulationJointState(torch.tensor([0.5]))
+                }
+            ),
+        )
+        effect = transformed.expected_effects.articulation_joint_updates[
+            ("drawer", "joint")
+        ]
+        assert effect is not None
+        effect.position.fill_(torch.nan)
+        return transformed
+
+    with pytest.raises(ValueError, match="position must be finite"):
+        engine.plan(
+            _invocation(engine, torch.ones(2, 3)),
+            plan_transform=transform,
+        )
+
+
+def test_plan_transform_owns_returned_expected_effect_tensors() -> None:
+    engine = _engine()
+    engine.register(StubAction())
+    retained: list[ArticulationJointState] = []
+
+    def transform(request, context, plan):
+        del request, context
+        transformed = replace(
+            plan,
+            expected_effects=StateDelta(
+                articulation_joint_updates={
+                    ("drawer", "joint"): ArticulationJointState(torch.tensor([0.5]))
+                }
+            ),
+        )
+        effect = transformed.expected_effects.articulation_joint_updates[
+            ("drawer", "joint")
+        ]
+        assert effect is not None
+        retained.append(effect)
+        return transformed
+
+    result = engine.plan(
+        _invocation(engine, torch.ones(2, 3)),
+        plan_transform=transform,
+    )
+    retained[0].position.fill_(torch.nan)
+
+    result_effect = result.expected_effects.articulation_joint_updates[
+        ("drawer", "joint")
+    ]
+    assert result_effect is not None
+    assert torch.equal(result_effect.position, torch.tensor([0.5]))
+
+
+def test_action_plan_template_adapter_rebuilds_same_grid_commands() -> None:
+    engine = _engine(batch_size=1)
+    action = ThreeFrameStubAction()
+    engine.register(action)
+    invocation = _invocation(engine, torch.ones(1, 3))
+    context = engine.initial_context()
+    plan = engine.plan(invocation, context)
+    request = action.resolve_request(invocation)
+    adapter = ActionPlanTemplateAdapter(
+        joint_names=("j0", "j1", "j2"),
+        phase_permissions={"stub": ("joint_residual",)},
+        phase_kinds={"stub": "free"},
+    )
+    source_context = SourceContext(
+        "atomic_stub",
+        "test:r1",
+        "stub:0",
+        SceneCase("case", "initial", "signature", "task", "robot"),
+        ACTION_DT,
+    )
+
+    template = adapter.export_template(plan, context=source_context)
+    variant = apply_trajectory_variant(
+        template,
+        TrajectoryVariant(1, "joint_residual", 1.0, "uniform"),
+        cfg=default_variant_factors(redundancy=False),
+        joint_limits=torch.tensor([[-2.0, 2.0]] * 3),
+        control_dt=ACTION_DT,
+    )
+    rebuilt = engine.rebuild_plan_from_trajectory(
+        request,
+        context,
+        plan,
+        TimedTrajectory.from_positions(
+            variant.positions.unsqueeze(0),
+            env_ids=context.env_ids,
+            dt=variant.dt.unsqueeze(0),
+        ),
+    )
+
+    assert rebuilt.success_all
+    assert rebuilt.commands.frame_count == plan.commands.frame_count
+    assert not torch.equal(
+        rebuilt.joint_trajectory.positions,
+        plan.joint_trajectory.positions,
+    )
+    assert tuple(segment.name for segment in rebuilt.segments) == ("stub",)
+
+
+def test_action_plan_template_adapter_implements_source_contract() -> None:
+    engine = _engine(batch_size=1)
+    engine.register(ThreeFrameStubAction())
+    plan = engine.plan(_invocation(engine, torch.ones(1, 3)))
+    adapter = ActionPlanTemplateAdapter(
+        joint_names=("j0", "j1", "j2"),
+        phase_permissions={"stub": ("joint_residual",)},
+        phase_kinds={"stub": "free"},
+    )
+    context = SourceContext(
+        source_id="atomic_stub",
+        source_revision="test:r1",
+        unit_id="stub:0",
+        scene_case=SceneCase(
+            "case",
+            "initial",
+            "signature",
+            "task",
+            "robot",
+        ),
+        control_dt=ACTION_DT,
+    )
+
+    assert isinstance(adapter, SourceAdapter)
+    template = adapter.export_template(plan, context=context)
+
+    assert (template.source_id, template.source_revision, template.template_id) == (
+        "atomic_stub",
+        "test:r1",
+        "stub:0",
+    )
+
+
+def test_action_plan_template_adapter_rejects_inexact_phase_declarations() -> None:
+    engine = _engine(batch_size=1)
+    engine.register(ThreeFrameStubAction())
+    plan = engine.plan(_invocation(engine, torch.ones(1, 3)))
+    context = SourceContext(
+        "atomic_stub",
+        "test:r1",
+        "stub:0",
+        SceneCase("case", "initial", "signature", "task", "robot"),
+        ACTION_DT,
+    )
+
+    for permissions, kinds in (
+        ({}, {}),
+        (
+            {"stub": (), "extra": ()},
+            {"stub": "free", "extra": "free"},
+        ),
+    ):
+        adapter = ActionPlanTemplateAdapter(
+            joint_names=("j0", "j1", "j2"),
+            phase_permissions=permissions,
+            phase_kinds=kinds,
+        )
+        with pytest.raises(ValueError, match="exact phase declaration"):
+            adapter.export_template(plan, context=context)
+
+
+def test_action_plan_template_adapter_rejects_batch_and_failed_plan() -> None:
+    context = SourceContext(
+        "atomic_stub",
+        "test:r1",
+        "stub:0",
+        SceneCase("case", "initial", "signature", "task", "robot"),
+        ACTION_DT,
+    )
+    adapter = ActionPlanTemplateAdapter(
+        joint_names=("j0", "j1", "j2"),
+        phase_permissions={"stub": ()},
+        phase_kinds={"stub": "free"},
+    )
+    batched_engine = _engine(batch_size=2)
+    batched_engine.register(ThreeFrameStubAction())
+    batched = batched_engine.plan(_invocation(batched_engine, torch.ones(2, 3)))
+    failed_engine = _engine(batch_size=1)
+    failed_engine.register(ThreeFrameStubAction())
+    failed = failed_engine.plan(
+        _invocation(failed_engine, torch.full((1, 3), torch.nan))
+    )
+
+    with pytest.raises(ValueError, match="one successful row"):
+        adapter.export_template(batched, context=context)
+    with pytest.raises(ValueError, match="one successful row"):
+        adapter.export_template(failed, context=context)
+
+
+def test_rebuild_plan_rejects_changed_same_grid_dt() -> None:
+    engine = _engine(batch_size=1)
+    action = ThreeFrameStubAction()
+    engine.register(action)
+    invocation = _invocation(engine, torch.ones(1, 3))
+    context = engine.initial_context()
+    plan = engine.plan(invocation, context)
+    request = action.resolve_request(invocation)
+    changed_timing = replace(
+        plan.joint_trajectory,
+        dt=torch.tensor([[0.0, 0.01, 0.03]]),
+    )
+
+    with pytest.raises(ValueError, match="same-grid.*dt"):
+        engine.rebuild_plan_from_trajectory(
+            request,
+            context,
+            plan,
+            changed_timing,
+        )
+
+
+def test_rebuild_plan_validates_source_plan_identity() -> None:
+    engine = _engine(batch_size=1)
+    action = ThreeFrameStubAction()
+    engine.register(action)
+    invocation = _invocation(engine, torch.ones(1, 3))
+    context = engine.initial_context()
+    plan = engine.plan(invocation, context)
+    request = action.resolve_request(invocation)
+
+    with pytest.raises(ValueError, match="invocation_id"):
+        engine.rebuild_plan_from_trajectory(
+            request,
+            context,
+            replace(plan, invocation_id="different"),
+            plan.joint_trajectory,
+        )

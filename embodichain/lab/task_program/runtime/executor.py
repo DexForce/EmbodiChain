@@ -98,6 +98,7 @@ from .results import (
     _snapshot_event,
     _snapshot_task_state,
 )
+from .generation import TaskProgramPlanRequest, TaskProgramPlanTransformFactory
 from ..compiler.lowering import (
     GroundedHeldObjectGuard,
     GroundedPhaseEffectGate,
@@ -196,13 +197,20 @@ class _PrimedObservationProvider:
         delegate: ObservationProvider,
     ) -> None:
         self._context: PlanningContext | None = context
+        self._affordance_sampling = context.affordance_sampling
         self._delegate = delegate
 
     def observe(self, task_state: TaskState) -> PlanningContext:
         """Reuse the grounding snapshot for the session's first due cycle."""
         context = self._context
         if context is None:
-            return self._delegate.observe(task_state)
+            observed = self._delegate.observe(task_state)
+            if self._affordance_sampling is None:
+                return observed
+            return replace(
+                observed,
+                affordance_sampling=self._affordance_sampling,
+            )
         self._context = None
         return PlanningContext(
             robot=context.robot,
@@ -210,6 +218,7 @@ class _PrimedObservationProvider:
             scene=context.scene,
             env_ids=context.env_ids,
             control_dt=context.control_dt,
+            affordance_sampling=context.affordance_sampling,
         )
 
 
@@ -232,6 +241,7 @@ class SemanticCallExecutor:
         task_state: TaskState | None = None,
         clock: ExecutionClock | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
+        plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
     ) -> None:
         if not isinstance(compiler, SemanticCallCompiler):
             raise TypeError("compiler must be a SemanticCallCompiler.")
@@ -247,6 +257,14 @@ class SemanticCallExecutor:
             raise TypeError("clock must implement ExecutionClock.")
         if runner_cfg is not None and not isinstance(runner_cfg, ExecutionRunnerCfg):
             raise TypeError("runner_cfg must be an ExecutionRunnerCfg or None.")
+        if plan_transform_factory is not None and not isinstance(
+            plan_transform_factory,
+            TaskProgramPlanTransformFactory,
+        ):
+            raise TypeError(
+                "plan_transform_factory must implement "
+                "TaskProgramPlanTransformFactory or be None."
+            )
         integration = compiler.integration
         engine = integration.engine
         if not isinstance(engine, AtomicActionEngine):
@@ -268,6 +286,7 @@ class SemanticCallExecutor:
         self._evidence_collector = evidence_collector
         self._clock = clock or MonotonicExecutionClock()
         self._runner_cfg_override = runner_cfg
+        self._plan_transform_factory = plan_transform_factory
         self._step_observer: Callable[[RunnerStep], None] | None = None
         self._task_state = _snapshot_task_state(initial_task)
         self._env_ids = torch.arange(
@@ -811,6 +830,7 @@ class SemanticCallExecutor:
             scene=context.scene,
             env_ids=context.env_ids,
             control_dt=context.control_dt,
+            affordance_sampling=context.affordance_sampling,
         )
         if normalized.batch_size != self._task_state.batch_size:
             raise ValueError(
@@ -937,10 +957,50 @@ class SemanticCallExecutor:
                 raise TypeError(
                     "Grounded semantic call preset must own an ExecutionRunnerCfg."
                 )
+        plan_transform = None
+        if self._plan_transform_factory is not None:
+            if self._workflow_id is None:
+                raise RuntimeError("A grounded call requires an active workflow ID.")
+            plan_request = TaskProgramPlanRequest(
+                workflow_id=self._workflow_id,
+                workflow_call_index=workflow_call_index,
+                analysis_call_index=analysis_call_index,
+                call=call,
+                invocation=invocation,
+            )
+            prepare_context = getattr(
+                self._plan_transform_factory,
+                "prepare_planning_context",
+                None,
+            )
+            if prepare_context is not None:
+                if not callable(prepare_context):
+                    raise TypeError(
+                        "prepare_planning_context must be callable when provided."
+                    )
+                prepared_context = prepare_context(
+                    plan_request,
+                    context,
+                    engine=self._engine,
+                )
+                if not isinstance(prepared_context, PlanningContext):
+                    raise TypeError(
+                        "prepare_planning_context() must return PlanningContext."
+                    )
+                context = prepared_context
+            plan_transform = self._plan_transform_factory.create_plan_transform(
+                plan_request,
+                engine=self._engine,
+            )
+            if plan_transform is not None and not callable(plan_transform):
+                raise TypeError(
+                    "create_plan_transform() must return a callable or None."
+                )
         session = self._engine.start(
             (invocation,),
             context,
             eligible_mask=active_mask,
+            plan_transform=plan_transform,
         )
         primed = _PrimedObservationProvider(context, self._observation_provider)
         runner = ExecutionRunner(

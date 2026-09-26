@@ -71,6 +71,7 @@ from embodichain.lab.sim.atomic_actions import (
     RobotObservation,
     TaskState,
 )
+from embodichain.lab.sim.motion.expansion import TrajectoryGenerationJobCfg
 from embodichain.lab.task_program.semantics import (
     COMPOSITE_EFFECT_MONITOR_ID,
     COMPOSITE_EFFECT_MONITOR_REVISION,
@@ -450,6 +451,27 @@ def _program(
     )
 
 
+def _generation_profile(
+    program_id: str = "fake_pick",
+    *,
+    template_id: str = "pick_up",
+) -> TrajectoryGenerationJobCfg:
+    return TrajectoryGenerationJobCfg.from_mapping(
+        {
+            "source": {
+                "kind": "task_program",
+                "source_id": program_id,
+                "source_revision": "test:r1",
+                "unit_scope": "action",
+                "template_id": template_id,
+            },
+            "augmentation": {"max_variants_per_reference": 1},
+            "scheduling": {"candidate_budget": 1},
+            "execution": {"max_inflight": 1},
+        }
+    )
+
+
 def _program_with_later_parallel_conflict() -> TaskProgramCfg:
     """Build an early sequential call followed by conflicting branch claims."""
     return _program(
@@ -530,6 +552,58 @@ def test_embodied_env_delegates_compilation_and_bridge_assembly() -> None:
     assert segment.name == "invoke:pick"
     assert segment.failure_policy == "row_independent"
     segment_iterator.close()
+
+
+def test_bridge_without_generation_profile_preserves_default_path() -> None:
+    adapter = TaskProgramEnvironmentAdapter(
+        _FakeEnvironmentFactory(),
+        step_dt=_STEP_DT,
+    )
+    compiled = adapter.compile(_program())
+
+    default_bridge = adapter.create_bridge(compiled)
+    explicit_bridge = adapter.create_bridge(
+        compiled,
+        generation_profile=None,
+        candidate_index=0,
+    )
+
+    assert default_bridge.generation_records == ()
+    assert explicit_bridge.generation_records == ()
+
+
+def test_generation_profile_rejects_skill_absent_from_program() -> None:
+    factory = _FakeEnvironmentFactory()
+    adapter = TaskProgramEnvironmentAdapter(factory, step_dt=_STEP_DT)
+    compiled = adapter.compile(_program())
+
+    with pytest.raises(ValueError, match="template_id.*not present"):
+        adapter.create_bridge(
+            compiled,
+            generation_profile=_generation_profile(template_id="place"),
+            candidate_index=0,
+        )
+
+    assert factory.observation_samples == 0
+
+
+def test_embodied_env_threads_episode_generation_profile_to_bridge() -> None:
+    adapter = TaskProgramEnvironmentAdapter(
+        _FakeEnvironmentFactory(),
+        step_dt=_STEP_DT,
+    )
+    env = _FakeDeclarativeEnvironment(adapter)
+    compiled = adapter.compile(_program())
+    profile = _generation_profile()
+
+    segments = env.create_demo_segments(
+        task_program=compiled,
+        generation_profile=profile,
+        generation_candidate_index=0,
+    )
+
+    assert segments is not None
+    assert env.task_program_generation_records == ()
 
 
 def test_adapter_assembles_position_velocity_command_encoder() -> None:

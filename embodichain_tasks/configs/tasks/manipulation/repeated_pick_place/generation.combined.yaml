@@ -1,0 +1,64 @@
+schema_version: 1
+
+source:
+  kind: task_program
+  source_id: repeated_cube_pick_place
+  source_revision: config:repeated_pick_place_v1
+  unit_scope: episode
+  template_id: repeated_pick_place_episode
+
+scene_randomization:
+  enabled: true
+  reference_family_count: 4
+  profile: cube_initial_pose
+  change_scope: cube_initial_pose_only
+  keep_drop_targets: true
+
+affordance:
+  enabled: true
+  branches_per_family: 4
+  max_proposals: 128
+  fallback: next_surviving_branch
+
+trajectory:
+  variants_per_family: 4
+  spatial:
+    enabled: true
+    operators: [joint_residual, via_points]
+    joint_offset_scale: 0.05
+    via_count: 1
+  timing:
+    enabled: false
+
+visual:
+  enabled: true
+  profile_file: generation_profiles/rgb_visual.yaml
+  profiles: [rgb_canonical, rgb_material_01, rgb_camera_01, rgb_light_01]
+  apply_per_rollout: true
+  balance: round_robin
+  restore_before_next_candidate: true
+
+observation:
+  profiles: [rgb_lowres]
+  capture_rgb: true
+  capture_video: false
+
+scheduling:
+  policy: round_robin_fifo
+  candidate_budget: 64
+  reference_family_budget: 4
+  queue_max_items: 64
+  queue_max_bytes: 536870912
+
+execution:
+  max_inflight: 16
+  compatibility: strict
+  restore_initial_state: true
+  cancel_policy: safe_finish_and_drain
+
+persistence:
+  sink: lerobot
+  output_dir: /tmp/repeated-pick-place-generation
+  write_trajectories: true
+  write_observations: true
+  write_manifest: true

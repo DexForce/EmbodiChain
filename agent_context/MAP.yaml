@@ -162,10 +162,12 @@ topics:
 - id: motion-planning
   title: Motion Planning
   aliases: [motion planning, trajectory planning, trajectory playback, fixed-cadence trajectory playback, motion expansion,
-    trajectory expansion, trajectory augmentation, fixed scene trajectory augmentation, trajectory variants,
-    trajectory variant expansion, 轨迹播放, 轨迹扩增, 运动规划, 轨迹规划, 轨迹变体]
+    trajectory expansion, trajectory augmentation, generation profile, configured trajectory generation,
+    fixed scene trajectory augmentation, trajectory variants, trajectory variant expansion,
+    轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体]
   keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
-    expansion, GenerationSession, TrajectoryAugmentationCfg, CandidateTrajectoryBatch,
+    expansion, GenerationSession, TrajectoryAugmentationCfg, TrajectoryGenerationJobCfg,
+    load_generation_profile, SourceAdapter, CandidateCoordinator, CandidateTrajectoryBatch,
     ManipulabilityBands, manipulability_guided_residual, manipulability coverage bands,
     TrajectoryVariant, plan_trajectory_variants, apply_trajectory_variant, expand_trajectory_variants,
     via_points, nullspace_residual, perturb_approach_direction, sample_approach_cone, TIMING_PROFILES,
@@ -283,7 +285,8 @@ topics:
   title: Embodied Task Program
   aliases: [task program, semantic call, 任务程序, 语义调用]
   keywords: [TaskProgramCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
-    EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, execution_policy, SemanticPose, quaternion_xyzw,
+    EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, TaskProgramPlanTransformFactory,
+    TaskProgramCandidatePlanTransformFactory, generation_profile, execution_policy, SemanticPose, quaternion_xyzw,
     joint_command_mode]
   paths: [topics/task-programs/task-programs.md]
   source_of_truth:
