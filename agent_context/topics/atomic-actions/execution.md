@@ -112,8 +112,13 @@ resample fractional durations.
 `MotionPolicy` forwards the explicit strategy unchanged. `ik_interp` rejects
 backend `plan_opts`; `motion_gen` always invokes the backend. Segments requesting
 `cartesian_linear=True` preserve caller-supplied Cartesian samples and currently
-require `ik_interp`, including Press, Slide, PushObject and OpenDoor. A planner
-policy for such a segment raises instead of silently bypassing backend timing.
+require `ik_interp`, as used by Slide, PushObject and OpenDoor. A planner policy
+for such a segment raises instead of silently bypassing backend timing.
+Press supports both strategies: `ik_interp` preserves the contact/press/retract
+Cartesian samples; `motion_gen` sends approach/contact/press/retract targets to
+the selected backend in one ordered request, then aligns the three internal
+boundaries chronologically on native samples before resampling each phase.
+It does not promise a straight path between endpoints or fall back to IK.
 
 Primitive planner results are explicitly retimed before their controlled-joint
 paths are embedded into a full-robot `TimedTrajectory`. Off-grid duration rounds

@@ -3685,6 +3685,139 @@ def test_press_plans_close_approach_press_and_retract(
     assert torch.allclose(planned_targets[-1][:, :3, 3], expected_approach)
 
 
+@pytest.mark.parametrize(
+    ("failed_second_row", "preserve_failure_evidence"),
+    ((False, False), (True, False), (True, True)),
+)
+def test_press_motion_gen_plans_four_ordered_goals_in_one_backend_call(
+    failed_second_row: bool,
+    preserve_failure_evidence: bool,
+) -> None:
+    """Use the real facade, with a Cartesian backend double and mixed row failures."""
+    generator = _motion_generator()
+    generator.planner.supports_move_type.side_effect = (
+        lambda move_type: move_type is MoveType.EEF_MOVE
+    )
+    generator.planner.preserve_plan_samples = True
+    generator.planner.preserve_failed_plan_positions = preserve_failure_evidence
+    generator.generate = Mock(wraps=generator.generate)
+    generator._generate_ik_interpolation = Mock(
+        side_effect=AssertionError("motion_gen must not fall back to IK interpolation")
+    )
+    native_path = torch.zeros(NUM_ENVS, 7, ARM_DOF)
+    # Different arrival times and repeated poses require ordered splits.
+    native_path[0, :, 0] = torch.tensor([0.0, -0.05, -0.1, 0.0, 0.02, 0.0, -0.1])
+    native_path[1, :, 0] = torch.tensor([0.0, -0.1, -0.05, 0.0, 0.01, 0.02, -0.1])
+    native_path[:, :, 3] = torch.arange(7) * 0.01
+
+    def backend_plan(*, target_states, options) -> PlanResult:
+        assert len(target_states) == 4
+        assert all(state.move_type is MoveType.EEF_MOVE for state in target_states)
+
+        def path_fk(*, qpos, name, to_matrix):
+            pose = (
+                target_states[0].xpos[:, None].expand(-1, qpos.shape[1], -1, -1).clone()
+            )
+            pose[:, :, :3, 3] = qpos[:, :, :3]
+            return pose
+
+        generator.robot.compute_batch_fk.side_effect = path_fk
+        success = torch.ones(NUM_ENVS, dtype=torch.bool)
+        if failed_second_row:
+            success[1] = False
+        dt = torch.full((NUM_ENVS, native_path.shape[1]), CONTROL_DT)
+        dt[:, 0] = 0.0
+        return PlanResult(
+            success=success,
+            positions=native_path.clone(),
+            dt=dt,
+        )
+
+    generator.planner.plan.side_effect = backend_plan
+    semantics = ObjectSemantics(
+        affordance=PressAffordance(
+            press_axis=torch.tensor([1.0, 0.0, 0.0]),
+            press_position=(0.0, 0.0, 0.0),
+        ),
+        geometry={},
+        label="button",
+        entity_id="button",
+    )
+    action = _bind_action(generator, Press())
+    context = _context()
+    initial_qpos = context.robot.qpos.clone()
+    sample_count = 80
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="press",
+            goal=PressGoal(semantics, torch.eye(4)),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(
+                strategy="motion_gen", sample_count=sample_count
+            ),
+            skill_options=PressOptions(approach_distance=0.1, press_distance=0.02),
+        ),
+        context,
+    )
+
+    generator.planner.plan.assert_called_once()
+    generator.generate.assert_called_once()
+    generator._generate_ik_interpolation.assert_not_called()
+    generator.robot.compute_ik.assert_not_called()
+    assert plan.plan_success.tolist() == [True, not failed_second_row]
+    options = generator.generate.call_args.kwargs["options"]
+    assert options.strategy == "motion_gen"
+    assert options.sample_count is None
+    assert not options.is_linear and not options.preserve_cartesian_samples
+    expected_x = (-0.1, 0.0, 0.02, -0.1)
+    for state, x in zip(
+        generator.planner.plan.call_args.kwargs["target_states"], expected_x
+    ):
+        pose = state.xpos
+        torch.testing.assert_close(
+            pose[:, :3, 3], torch.tensor([x, 0.0, 0.0]).expand(NUM_ENVS, -1)
+        )
+    torch.testing.assert_close(options.start_qpos, initial_qpos[:, :ARM_DOF])
+    trajectory = _joint_trajectory(plan)
+    assert trajectory.positions.shape == (NUM_ENVS, sample_count, ROBOT_DOF)
+    for row, end_indices in enumerate(((2, 3, 4, 6), (1, 3, 5, 6))):
+        if row == 1 and failed_second_row and not preserve_failure_evidence:
+            continue
+        start_index = 0
+        for name, end_index in zip(
+            ("approach", "contact", "press", "retract"), end_indices
+        ):
+            segment = plan.segment(name)
+            torch.testing.assert_close(
+                trajectory.positions[row, segment.start, :ARM_DOF],
+                native_path[row, start_index],
+            )
+            torch.testing.assert_close(
+                trajectory.positions[row, segment.stop - 1, :ARM_DOF],
+                native_path[row, end_index],
+            )
+            start_index = end_index
+    if failed_second_row and not preserve_failure_evidence:
+        torch.testing.assert_close(
+            trajectory.positions[1], initial_qpos[1].expand(sample_count, -1)
+        )
+    for frame in plan.commands.frames:
+        assert frame.active_mask.tolist() == [True, not failed_second_row]
+    torch.testing.assert_close(context.robot.qpos, initial_qpos)
+
+
+def test_press_combined_split_accepts_stationary_single_sample() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, Press())
+    path = torch.zeros(NUM_ENVS, 1, ARM_DOF)
+    targets = torch.eye(4).repeat(NUM_ENVS, 3, 1, 1)
+    counts = (2, 3, 4, 5)
+    parts = action._split_motion_path(path, targets, "arm", counts)
+    for part, count in zip(parts, counts):
+        torch.testing.assert_close(part, path.expand(-1, count, -1))
+
+
 def test_press_plans_from_rigid_object_pose_snapshot_with_option_position() -> None:
     affordance = PressAffordance(
         press_axis=torch.tensor([1.0, 0.0, 0.0]),
