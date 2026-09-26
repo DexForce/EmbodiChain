@@ -505,7 +505,7 @@ class GenSimMoveHeldObject(MoveHeldObject):
 
 
 class GenSimPlace(Place):
-    """Keep ordinary Place unchanged unless its Cartesian IK plan fails."""
+    """Scope Cartesian planning and bounded IK recovery to this Place call."""
 
     skill_id = Place.skill_id
     GoalType = Place.GoalType

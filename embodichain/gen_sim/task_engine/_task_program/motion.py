@@ -42,7 +42,7 @@ from embodichain.lab.sim.motion.planners.utils import (
 
 __all__: list[str] = []
 
-MOTION_VALIDATION_REVISION = 4
+MOTION_VALIDATION_REVISION = 5
 VELOCITY_RETIME_SAMPLES = (260, 320)
 
 
@@ -186,11 +186,19 @@ def _joint_velocity_limits(robot: Any, control_part: str | None) -> torch.Tensor
 
 
 class CheckedMotionGenerator(MotionGenerator):
-    """Preserve planner output while rejecting velocity-infeasible rows."""
+    """Validate ordinary paths and honor the current Place's Cartesian policy."""
 
     def generate(
         self, target_states: list[PlanState], options: MotionGenOptions | None = None
     ) -> PlanResult:
+        if _PLACE_IK_RECOVERY.get() is not None:
+            return _generate_cartesian_approach(self, target_states, options)
+        return self._generate_checked(target_states, options)
+
+    def _generate_checked(
+        self, target_states: list[PlanState], options: MotionGenOptions | None = None
+    ) -> PlanResult:
+        """Run the shared backend without re-entering task-scoped dispatch."""
         result = super().generate(target_states, options=options)
         if (
             result.positions is not None
@@ -308,6 +316,112 @@ def _cartesian_samples(
     return result
 
 
+def _generate_cartesian_approach(
+    generator: CheckedMotionGenerator,
+    target_states: list[PlanState],
+    options: MotionGenOptions | None = None,
+) -> PlanResult:
+    """Share one policy between Place-scoped and legacy Cartesian requests."""
+    input_target_count = len(target_states)
+    original_targets = target_states
+    original_options = options
+    input_poses = [
+        state.xpos.detach().cpu().tolist()
+        for state in target_states
+        if state.xpos is not None
+    ]
+
+    def build_samples(
+        sample_count: int,
+    ) -> tuple[list[PlanState], MotionGenOptions]:
+        sampled = _cartesian_samples(start, original_targets, sample_count)
+        return sampled, replace(
+            original_options,
+            sample_count=sample_count,
+            preserve_cartesian_samples=True,
+            is_linear=True,
+        )
+
+    if (
+        options is not None
+        and options.strategy == "ik_interp"
+        and not options.preserve_cartesian_samples
+        and len(target_states) >= 1
+        and all(state.move_type is MoveType.EEF_MOVE for state in target_states)
+    ):
+        if (
+            options.start_qpos is None
+            or options.control_part is None
+            or options.sample_count is None
+        ):
+            raise ValueError(
+                "Approach planning requires a bound start and sample count."
+            )
+        start = generator.robot.compute_fk(
+            qpos=options.start_qpos,
+            name=options.control_part,
+            to_matrix=True,
+        )
+        target_states, options = build_samples(options.sample_count)
+    result = generator._generate_checked(target_states, options=options)
+    if (
+        isinstance(result.success, torch.Tensor)
+        and not result.success.any()
+        and original_options is not None
+        and original_options.strategy == "ik_interp"
+        and original_options.sample_count is not None
+        and original_options.sample_count <= VELOCITY_RETIME_SAMPLES[0]
+        and original_options.control_part is not None
+        and not original_options.preserve_cartesian_samples
+        and all(state.move_type is MoveType.EEF_MOVE for state in original_targets)
+    ):
+        # A coarse IK interpolation can violate a real URDF/runtime limit
+        # even when the geometric path is valid. Retry with denser samples
+        # before reporting failure; limits remain unchanged.
+        for sample_count in _velocity_retry_samples(original_options.sample_count):
+            retry_targets, retry_options = build_samples(sample_count)
+            retry = generator._generate_checked(retry_targets, options=retry_options)
+            if isinstance(retry.success, torch.Tensor) and retry.success.any():
+                target_states, options, result = (
+                    retry_targets,
+                    retry_options,
+                    retry,
+                )
+                logger.log_info(
+                    f"GenSim adaptive velocity retime accepted sample_count={sample_count}."
+                )
+                break
+        recovery = _PLACE_IK_RECOVERY.get()
+        if (
+            recovery is not None
+            and not result.success.any()
+            and options.start_qpos.shape[0] == 1
+            and options.interpolation_dt is not None
+            and options.interpolation_dt > 0
+        ):
+            retry = _local_place_ik(generator, target_states, options)
+            if retry is not None:
+                result = retry
+                recovery.used = True
+    logger.log_info(
+        "GenSim motion plan: "
+        + json.dumps(
+            {
+                "control_part": None if options is None else options.control_part,
+                "input_target_count": input_target_count,
+                "planned_target_count": len(target_states),
+                "input_poses": input_poses,
+                "success": (
+                    result.success.detach().cpu().tolist()
+                    if isinstance(result.success, torch.Tensor)
+                    else result.success
+                ),
+            }
+        )
+    )
+    return result
+
+
 class ApproachMotionGenerator(CheckedMotionGenerator):
     """Sample EEF paths in Cartesian space, including single-target transports."""
 
@@ -316,101 +430,4 @@ class ApproachMotionGenerator(CheckedMotionGenerator):
         target_states: list[PlanState],
         options: MotionGenOptions | None = None,
     ) -> PlanResult:
-        input_target_count = len(target_states)
-        original_targets = target_states
-        original_options = options
-        input_poses = [
-            state.xpos.detach().cpu().tolist()
-            for state in target_states
-            if state.xpos is not None
-        ]
-
-        def build_samples(
-            sample_count: int,
-        ) -> tuple[list[PlanState], MotionGenOptions]:
-            sampled = _cartesian_samples(start, original_targets, sample_count)
-            return sampled, replace(
-                original_options,
-                sample_count=sample_count,
-                preserve_cartesian_samples=True,
-                is_linear=True,
-            )
-
-        if (
-            options is not None
-            and options.strategy == "ik_interp"
-            and not options.preserve_cartesian_samples
-            and len(target_states) >= 1
-            and all(state.move_type is MoveType.EEF_MOVE for state in target_states)
-        ):
-            if (
-                options.start_qpos is None
-                or options.control_part is None
-                or options.sample_count is None
-            ):
-                raise ValueError(
-                    "Approach planning requires a bound start and sample count."
-                )
-            start = self.robot.compute_fk(
-                qpos=options.start_qpos,
-                name=options.control_part,
-                to_matrix=True,
-            )
-            target_states, options = build_samples(options.sample_count)
-        result = super().generate(target_states, options=options)
-        if (
-            isinstance(result.success, torch.Tensor)
-            and not result.success.any()
-            and original_options is not None
-            and original_options.strategy == "ik_interp"
-            and original_options.sample_count is not None
-            and original_options.sample_count <= VELOCITY_RETIME_SAMPLES[0]
-            and original_options.control_part is not None
-            and not original_options.preserve_cartesian_samples
-            and all(state.move_type is MoveType.EEF_MOVE for state in original_targets)
-        ):
-            # A coarse IK interpolation can violate a real URDF/runtime limit
-            # even when the geometric path is valid. Retry with denser samples
-            # before reporting failure; limits remain unchanged.
-            for sample_count in _velocity_retry_samples(original_options.sample_count):
-                retry_targets, retry_options = build_samples(sample_count)
-                retry = super().generate(retry_targets, options=retry_options)
-                if isinstance(retry.success, torch.Tensor) and retry.success.any():
-                    target_states, options, result = (
-                        retry_targets,
-                        retry_options,
-                        retry,
-                    )
-                    logger.log_info(
-                        f"GenSim adaptive velocity retime accepted sample_count={sample_count}."
-                    )
-                    break
-            recovery = _PLACE_IK_RECOVERY.get()
-            if (
-                recovery is not None
-                and not result.success.any()
-                and options.start_qpos.shape[0] == 1
-                and options.interpolation_dt is not None
-                and options.interpolation_dt > 0
-            ):
-                retry = _local_place_ik(self, target_states, options)
-                if retry is not None:
-                    result = retry
-                    recovery.used = True
-        logger.log_info(
-            "GenSim motion plan: "
-            + json.dumps(
-                {
-                    "control_part": None if options is None else options.control_part,
-                    "input_target_count": input_target_count,
-                    "planned_target_count": len(target_states),
-                    "input_poses": input_poses,
-                    "success": (
-                        result.success.detach().cpu().tolist()
-                        if isinstance(result.success, torch.Tensor)
-                        else result.success
-                    ),
-                }
-            )
-        )
-        return result
+        return _generate_cartesian_approach(self, target_states, options)
