@@ -29,6 +29,7 @@ from pathlib import Path
 import sys
 
 from scripts.benchmark.core.artifacts import create_experiment_directory
+from scripts.benchmark.core.contracts import Budget, ExperimentDefinition
 from scripts.benchmark.core.execution import (
     execute_worker,
     repeat_schedule,
@@ -89,8 +90,36 @@ def main(argv: Sequence[str] | None = None) -> None:
     from .workload import PilotCfg, config_hash
 
     cfg = PilotCfg.load(args.config)
+    definition = ExperimentDefinition(
+        experiment_id="camera-pilot",
+        definition_version="1.0",
+        parameter_matrix={
+            "backend": tuple(platforms),
+            "repeat": tuple(range(args.repeats)),
+        },
+        budget=Budget(
+            max_runs=len(platforms) * args.repeats,
+            max_attempts=len(platforms) * args.repeats,
+            wall_time_s=args.timeout_s * len(platforms) * args.repeats,
+        ),
+        quality_protocol={
+            "freshness_probe": "camera_eye_x_plus_0.4m_then_restore",
+            "sample_nonempty": True,
+            "status": "not_qualified",
+        },
+        comparison_invariants=(
+            "config_sha256",
+            "hardware_id",
+            "metrics.boundary",
+            "metrics.completion",
+        ),
+    )
     root = create_experiment_directory(
-        args.output, experiment_id="camera-pilot", config=asdict(cfg)
+        args.output,
+        experiment_id="camera-pilot",
+        config=asdict(cfg),
+        definition=definition,
+        assets_manifest={"assets": [], "scene": "procedural_table_three_boxes"},
     )
     repo = Path(__file__).resolve().parents[3]
     worker = Path(__file__).with_name("worker.py")
@@ -134,7 +163,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
     print(f"Run directory: {root}", flush=True)
     try:
-        rows = run_experiment(root, plans, experiment_id="camera-pilot")
+        rows = run_experiment(
+            root,
+            plans,
+            experiment_id="camera-pilot",
+            budget=definition.budget,
+        )
     except KeyboardInterrupt:
         if (root / "runs.json").exists():
             print(rebuild_report(root), flush=True)

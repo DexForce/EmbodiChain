@@ -21,13 +21,27 @@ from __future__ import annotations
 import csv
 import hashlib
 import importlib.metadata
+import os
+import platform
 from pathlib import Path
 import subprocess
 import sys
 from collections.abc import Iterable
 from typing import Any
 
-__all__ = ["git_revision", "package_version", "software_snapshot", "gpu_snapshot"]
+try:
+    import resource
+except ImportError:  # pragma: no cover - resource is unavailable on Windows.
+    resource = None
+
+__all__ = [
+    "git_revision",
+    "gpu_snapshot",
+    "host_snapshot",
+    "process_memory_snapshot",
+    "package_version",
+    "software_snapshot",
+]
 
 
 def git_revision(path: Path) -> str | None:
@@ -51,6 +65,45 @@ def package_version(name: str) -> str | None:
         return importlib.metadata.version(name)
     except importlib.metadata.PackageNotFoundError:
         return None
+
+
+def host_snapshot() -> dict[str, Any]:
+    """Collect standard-library host identity and CPU information."""
+    return {
+        "platform": platform.platform(),
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "processor": platform.processor() or None,
+        "cpu_count": os.cpu_count(),
+        "python": platform.python_version(),
+    }
+
+
+def process_memory_snapshot() -> dict[str, Any]:
+    """Read the process lifetime RSS peak with its platform-dependent method."""
+    if resource is None:
+        return {
+            "value_bytes": None,
+            "unit": "byte",
+            "scope": "process_lifetime_peak",
+            "reason": "resource module unavailable",
+        }
+    try:
+        peak = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        # Linux reports KiB; keep a conservative method label for other hosts.
+        return {
+            "value_bytes": peak * 1024,
+            "unit": "byte",
+            "scope": "process_lifetime_peak",
+            "method": "resource.getrusage_ru_maxrss_linux_kib",
+        }
+    except (AttributeError, OSError, ValueError) as exc:
+        return {
+            "value_bytes": None,
+            "unit": "byte",
+            "scope": "process_lifetime_peak",
+            "reason": str(exc),
+        }
 
 
 def software_snapshot(root: Path, source_files: Iterable[Path]) -> dict[str, Any]:

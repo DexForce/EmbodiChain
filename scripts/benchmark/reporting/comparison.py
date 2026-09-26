@@ -19,9 +19,26 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+import math
+import statistics
 from typing import Any
 
-__all__ = ["comparison_reasons"]
+__all__ = ["ComparisonResult", "compare_metric", "comparison_reasons"]
+
+
+@dataclass(frozen=True)
+class ComparisonResult:
+    """Paired comparison result with explicit eligibility and source count."""
+
+    eligible: bool
+    reasons: tuple[str, ...]
+    baseline: str
+    candidate: str
+    metric: str
+    pairs: int
+    ratio: float | None
+    delta: float | None
 
 
 def _field(row: Mapping[str, Any], path: str) -> Any:
@@ -57,3 +74,78 @@ def comparison_reasons(
         ):
             reasons.append(path)
     return tuple(reasons)
+
+
+def compare_metric(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    metric: str,
+    baseline: str,
+    candidate: str,
+    invariant_paths: Sequence[str],
+) -> ComparisonResult:
+    """Compare one metric over matched case/repeat rows.
+
+    ``ratio`` is baseline divided by candidate, so a lower candidate latency
+    produces a value above one. It is returned only when all declared
+    invariants and independent quality checks pass.
+    """
+    complete = [
+        row
+        for row in rows
+        if row.get("status") == "completed"
+        and row.get("backend") in {baseline, candidate}
+    ]
+    reasons = list(comparison_reasons(complete, invariant_paths=invariant_paths))
+    backends = {row.get("backend") for row in complete}
+    if baseline not in backends or candidate not in backends:
+        reasons.append("requested_backends")
+    if len({row.get("case_id") for row in complete}) > 1:
+        reasons.append("multiple_cases")
+    pairs: list[tuple[float, float]] = []
+    left: dict[tuple[object, object], Mapping[str, Any]] = {}
+    right: dict[tuple[object, object], Mapping[str, Any]] = {}
+    for row in complete:
+        key = (row.get("case_id"), row.get("repeat"))
+        target = left if row.get("backend") == baseline else right
+        if key in target:
+            reasons.append("duplicate_pair_identity")
+        target[key] = row
+    if set(left) != set(right):
+        reasons.append("unmatched_pairs")
+    for key in sorted(set(left) & set(right), key=str):
+        left_value = left[key].get("metrics", {}).get(metric)
+        right_value = right[key].get("metrics", {}).get(metric)
+        if (
+            type(left_value) in (int, float)
+            and type(right_value) in (int, float)
+            and math.isfinite(left_value)
+            and math.isfinite(right_value)
+        ):
+            pairs.append((float(left_value), float(right_value)))
+    if not pairs:
+        reasons.append("no_matched_metric_values")
+    ratios = [
+        left_value / right_value
+        for left_value, right_value in pairs
+        if right_value != 0
+    ]
+    if pairs and len(ratios) != len(pairs):
+        reasons.append("candidate_metric_zero")
+    eligible = not reasons
+    return ComparisonResult(
+        eligible=eligible,
+        reasons=tuple(dict.fromkeys(reasons)),
+        baseline=baseline,
+        candidate=candidate,
+        metric=metric,
+        pairs=len(pairs),
+        ratio=statistics.median(ratios) if eligible else None,
+        delta=(
+            statistics.median(
+                right_value - left_value for left_value, right_value in pairs
+            )
+            if eligible
+            else None
+        ),
+    )

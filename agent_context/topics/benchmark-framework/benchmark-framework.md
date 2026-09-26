@@ -1,7 +1,8 @@
 # Benchmark framework
 
 The shared technical-report core lives in `scripts/benchmark/core/`;
-offline aggregation and comparison rules live in `scripts/benchmark/reporting/`.
+offline aggregation, comparison and report/figure outputs live in
+`scripts/benchmark/reporting/`.
 The camera pilot is the first consumer. Other benchmark domains retain their
 existing owners and can adopt these helpers incrementally.
 
@@ -10,13 +11,17 @@ existing owners and can adopt these helpers incrementally.
 | Request | Start here |
 |---|---|
 | Public command | `embodichain/cli/main.py` → `scripts/benchmark/__main__.py` |
+| Experiment definition and lifecycle states | `scripts/benchmark/core/contracts.py` |
+| Matrix expansion and budget conservation | `scripts/benchmark/core/planning.py` |
 | Run identity and worker-result validation | `scripts/benchmark/core/records.py` |
 | Repeats, subprocesses, timeout/interruption and status ledger | `scripts/benchmark/core/execution.py` |
-| Synchronous operation/window timing | `scripts/benchmark/core/measurement.py` |
-| JSON artifacts, effective config and workload hashes | `scripts/benchmark/core/artifacts.py` |
+| Stage, continuous and attempt measurement | `scripts/benchmark/core/measurement.py` |
+| Standard artifacts, JSONL idempotency and config hashes | `scripts/benchmark/core/artifacts.py` |
 | Software/source/device provenance | `scripts/benchmark/core/provenance.py` |
-| Grouped metrics, missing values and units | `scripts/benchmark/reporting/aggregation.py` |
-| Comparison eligibility | `scripts/benchmark/reporting/comparison.py` |
+| Grouped metrics, missing values, denominators and uncertainty | `scripts/benchmark/reporting/aggregation.py` |
+| Comparison eligibility and paired ratios | `scripts/benchmark/reporting/comparison.py` |
+| Legacy conversion and report tables/figures | `scripts/benchmark/reporting/compat.py`, `tables.py`, `figures.py` |
+| Offline generic report | `scripts/benchmark/reporting/report.py` |
 | Camera workload and runtime selection | `scripts/benchmark/rendering/workload.py`, `run_benchmark.py` |
 | Camera process and platform APIs | `scripts/benchmark/rendering/worker.py`, `backends/` |
 | Camera-specific report layout | `scripts/benchmark/rendering/report.py` |
@@ -34,6 +39,13 @@ Timeout and interruption terminate/reap the isolated worker group. Invalid
 worker JSON is retained, not silently interpreted as success. JSON writes are
 validated and atomically replaced; existing experiments cannot be overwritten.
 
+`ExperimentDefinition` freezes the parameter matrix, quality protocol,
+comparison invariants and `Budget`. `BudgetLedger.reserve_run()` atomically
+consumes one run and one attempt, so retries cannot evade the fixed budget.
+The standard directory contains definition/config/assets, raw JSONL, metrics,
+quality and artifact-index files. `ArtifactStore` rejects conflicting duplicate
+record identities while allowing an identical retry submission to be replayed.
+
 Domain callbacks own completion synchronization and value validation. Core
 excludes warm-up, measures callback latency, and separately retains the full
 loop window. A host-return timer alone is not proof of GPU completion.
@@ -43,6 +55,11 @@ Aggregation separates workload fingerprints and excludes failed measurements
 without dropping failures from scheduled counts. Missing values remain null.
 The domain declares comparison invariants and supplies quality qualification;
 core never substitutes image non-emptiness for quality certification.
+
+Aggregate metric records include a definition version, SI unit, population,
+aggregation rule, denominator, uncertainty summary, missing reasons and source
+run IDs. The generic report/figure helpers are standard-library only; SVG/CSV
+outputs are generated from already frozen run IDs and do not initialize a GPU.
 
 Physical stepping, reset, task predicates and production commit receipts
 remain in existing domain/host owners. Shared benchmark execution does not

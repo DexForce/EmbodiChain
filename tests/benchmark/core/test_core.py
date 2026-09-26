@@ -131,6 +131,9 @@ def test_experiment_retains_failed_runs_and_plan_metadata(tmp_path: Path) -> Non
     assert manifest["experiment_id"] == "scalar"
     assert len(manifest["runs"]) == 2
     assert json.loads((tmp_path / "runs.json").read_text()) == records
+    assert len((tmp_path / "raw.jsonl").read_text().splitlines()) == 2
+    quality = json.loads((tmp_path / "quality.json").read_text())
+    assert {item["run_id"] for item in quality["runs"]} == {"ok", "failure"}
 
 
 def test_core_and_reporting_import_without_site_packages() -> None:

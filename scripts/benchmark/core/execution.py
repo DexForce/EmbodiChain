@@ -29,10 +29,51 @@ import time
 from types import FrameType
 from typing import Any
 
-from .artifacts import read_json_object, write_json
+from .artifacts import ArtifactStore, read_json_object, write_json
+from .contracts import Budget
+from .planning import BudgetExceeded, BudgetLedger
 from .records import SCHEMA_VERSION, RunSpec, validate_run_result
 
 __all__ = ["execute_worker", "repeat_schedule", "run_experiment"]
+
+
+def _record_common_artifacts(
+    root: Path, row: Mapping[str, Any], *, run_output: Path
+) -> None:
+    """Append run evidence to the standard raw, quality and index artifacts."""
+    store = ArtifactStore(root)
+    raw = dict(row)
+    raw["record_id"] = row["run_id"]
+    store.append_raw(raw)
+    quality_path = root / "quality.json"
+    quality = (
+        read_json_object(quality_path)
+        if quality_path.exists()
+        else {"schema_version": SCHEMA_VERSION, "runs": []}
+    )
+    quality_rows = quality.setdefault("runs", [])
+    if not isinstance(quality_rows, list):
+        raise ValueError("quality.json runs must be a list")
+    quality_rows[:] = [
+        item for item in quality_rows if item.get("run_id") != row["run_id"]
+    ]
+    quality_rows.append(
+        {
+            "run_id": row["run_id"],
+            "backend": row.get("backend"),
+            "status": row.get("status"),
+            "quality_status": row.get("quality_status", "missing"),
+            "task_status": row.get("task_status", "not_evaluated"),
+            "data_status": row.get("data_status", "not_evaluated"),
+            "reason": row.get("error") or row.get("failure_reason"),
+            "evidence": row.get("evidence", []),
+        }
+    )
+    write_json(quality_path, quality)
+    for name, kind in (("result.json", "run_result"), ("worker.log", "worker_log")):
+        path = run_output / name
+        if path.is_file():
+            store.register_artifact(path, kind=kind)
 
 
 def _cancel_on_signal(signum: int, frame: FrameType | None) -> None:
@@ -137,7 +178,11 @@ def repeat_schedule(
 
 
 def run_experiment(
-    root: Path, runs: Sequence[RunSpec], *, experiment_id: str
+    root: Path,
+    runs: Sequence[RunSpec],
+    *,
+    experiment_id: str,
+    budget: Budget | None = None,
 ) -> list[dict[str, Any]]:
     """Execute a fixed plan, retaining failed, interrupted and unstarted rows.
 
@@ -167,14 +212,17 @@ def run_experiment(
         directories.append(relative.as_posix())
     manifest_path = root / "manifest.json"
     manifest = read_json_object(manifest_path) if manifest_path.exists() else {}
+    ledger = BudgetLedger(budget or Budget())
     manifest.update(
         schema_version=SCHEMA_VERSION,
         experiment_id=experiment_id,
+        budget=ledger.budget.to_dict(),
         runs=[
             {
                 "run_id": directory,
                 "backend": spec.backend,
                 "repeat": spec.repeat,
+                "attempt": spec.attempt,
                 "case_id": spec.case_id,
                 "command": list(spec.command),
                 "timeout_s": spec.timeout_s,
@@ -191,6 +239,7 @@ def run_experiment(
             "run_dir": directory,
             "backend": spec.backend,
             "repeat": spec.repeat,
+            "attempt": spec.attempt,
             "case_id": spec.case_id,
             "status": "not_run",
             "error": "Not started",
@@ -203,6 +252,17 @@ def run_experiment(
             f"[{index + 1}/{len(runs)}] {spec.backend}, repeat {spec.repeat + 1}",
             flush=True,
         )
+        try:
+            ledger.reserve_run()
+        except BudgetExceeded as exc:
+            row = dict(rows[index])
+            row["error"] = f"Budget exhausted: {exc}"
+            rows[index] = row
+            write_json(root / "runs.json", rows)
+            _record_common_artifacts(root, row, run_output=spec.output)
+            write_json(root / "budget.json", ledger.to_dict())
+            print(f"  not_run: {row['error']}", flush=True)
+            continue
         interrupted = False
         try:
             row = execute_worker(
@@ -226,16 +286,20 @@ def run_experiment(
                     "repeat": spec.repeat,
                 }
             )
+        ledger.finish_attempt(row.get("status", "failed"))
         row.update(
             schema_version=SCHEMA_VERSION,
             experiment_id=experiment_id,
             run_id=directories[index],
             run_dir=directories[index],
             case_id=spec.case_id,
+            attempt=spec.attempt,
         )
         write_json(spec.output / "result.json", row)
         rows[index] = row
         write_json(root / "runs.json", rows)
+        _record_common_artifacts(root, row, run_output=spec.output)
+        write_json(root / "budget.json", ledger.to_dict())
         print(f"  {row['status']}: {row.get('error', 'result saved')}", flush=True)
         if interrupted:
             raise KeyboardInterrupt(

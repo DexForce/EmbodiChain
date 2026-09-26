@@ -18,4 +18,26 @@
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .aggregation import MetricDefinition, aggregate_attempts, aggregate_runs
+from .comparison import ComparisonResult, compare_metric, comparison_reasons
+from .compat import convert_legacy_rows, normalize_legacy_row
+from .figures import FigureStyle, write_metric_csv, write_svg_bar_chart
+from .report import rebuild_summary, write_technical_report
+from .tables import render_markdown_table
+
+__all__ = [
+    "ComparisonResult",
+    "FigureStyle",
+    "MetricDefinition",
+    "aggregate_attempts",
+    "aggregate_runs",
+    "compare_metric",
+    "comparison_reasons",
+    "convert_legacy_rows",
+    "normalize_legacy_row",
+    "rebuild_summary",
+    "render_markdown_table",
+    "write_metric_csv",
+    "write_svg_bar_chart",
+    "write_technical_report",
+]

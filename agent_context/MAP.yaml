@@ -9,7 +9,7 @@ topics:
 - id: benchmark-framework
   title: Benchmark Framework
   aliases: [benchmark framework, technical report benchmark, benchmark框架, benchmark架构, 技术报告框架, 技术报告基准测试]
-  keywords: [camera-pilot, RunSpec, repeat_schedule, measure_loop, comparison_reasons, benchmark reporting]
+  keywords: [camera-pilot, RunSpec, ExperimentDefinition, Budget, BudgetLedger, repeat_schedule, measure_stages, measure_loop, measure_attempts, ArtifactStore, comparison_reasons, compare_metric, benchmark reporting]
   paths: [topics/benchmark-framework/benchmark-framework.md]
   source_of_truth:
   - scripts/benchmark/__main__.py

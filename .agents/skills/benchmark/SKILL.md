@@ -31,6 +31,17 @@ bytes, metric populations and missing-value reasons; keep execution completion
 separate from quality/task/data acceptance. Platform runtimes execute in their
 own Python processes. Domain callbacks supply actual completion synchronization.
 
+For new shared-framework experiments, freeze an `ExperimentDefinition` with a
+parameter matrix, `Budget`, quality protocol and declared comparison invariants.
+Use `build_run_plan`/`run_experiment` for deterministic cases and budgeted
+attempts. Workers may choose `measure_stages`, `measure_loop` or
+`measure_attempts`; persist standard `definition.json`, `effective_config.yaml`,
+`assets_manifest.json`, `raw.jsonl`, `metrics.json`, `quality.json` and
+`artifact_index.json` through the core artifact helpers. Aggregate outputs must
+retain denominator, uncertainty, missing reasons and source run IDs. Use the
+dependency-free reporting table/figure helpers for report rebuilds, and use
+`convert_legacy_rows` before mixing older benchmark records with new ones.
+
 ### File Location
 
 Place benchmark scripts under:

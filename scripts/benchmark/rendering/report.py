@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scripts.benchmark.core.artifacts import read_json, write_json
+from scripts.benchmark.core.artifacts import ArtifactStore, read_json, write_json
 from scripts.benchmark.core.records import validate_run_result
 from scripts.benchmark.reporting.aggregation import MetricDefinition, aggregate_runs
 from scripts.benchmark.reporting.comparison import comparison_reasons
@@ -165,6 +165,7 @@ def rebuild_report(root: Path) -> Path:
         "",
     ]
     write_json(root / "summary.json", summary)
+    ArtifactStore(root).write_metrics(summary)
     output = root / "report.md"
     output.write_text("\n".join(text), encoding="utf-8")
     return output
