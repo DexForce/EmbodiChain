@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "abd754a3d86e82a6838e3062adda001f8b097007",
+  "revision": "89766834a23071ede531abc2cad1d324d064c965",
   "source_ref": "HEAD",
   "package_version": "0.2.4",
   "topic_index": "agent_context/MAP.yaml",
@@ -266,8 +266,8 @@
         {
           "path": "embodichain/lab/sim/motion/expansion/session.py",
           "symbol": "GenerationSession",
-          "start_line": 108,
-          "end_line": 108,
+          "start_line": 104,
+          "end_line": 104,
           "excerpt": "class GenerationSession:"
         }
       ],
@@ -624,7 +624,7 @@
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 22,
-          "excerpt": "\"\"\"Kinematics computations and scalar motion profiles.\n\nPrivate Warp kernels implement OPW, SRS, UR, and trapezoidal/Double-S profiles.\nStateful solver interfaces and robot configuration remain in\n``embodichain.lab.sim.motion.solvers``.\nPure batched manipulability helpers live in :mod:`.manipulability`.\"\"\""
+          "excerpt": "\"\"\"Kinematics computations and scalar motion profiles.\n\nPrivate Warp kernels implement FEP, OPW, SRS, UR, and trapezoidal/Double-S profiles.\nStateful solver interfaces and robot configuration remain in\n``embodichain.lab.sim.motion.solvers``.\nPure batched manipulability helpers live in :mod:`.manipulability`.\"\"\""
         }
       ],
       "documentation": [
@@ -2854,7 +2854,7 @@
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 20,
-          "excerpt": "\"\"\"Inverse-kinematics solvers sharing the ``BaseSolver`` interface.\n\nProvides analytic (SRS, OPW, UR), numerical (Pinocchio, Pink, Differential), and learning-based (PyTorch, NeuralIK) solvers, one per robot control part.\n\"\"\""
+          "excerpt": "\"\"\"Inverse-kinematics solvers sharing the ``BaseSolver`` interface.\n\nProvides analytic (SRS, OPW, UR, FEP), numerical (Pinocchio, Pink, Differential), and learning-based (PyTorch, NeuralIK) solvers, one per robot control part.\n\"\"\""
         }
       ],
       "documentation": [
@@ -5137,15 +5137,15 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_robot",
-          "start_line": 3043,
-          "end_line": 3044,
+          "start_line": 3122,
+          "end_line": 3123,
           "excerpt": "        robot = self._declare_spawn_articulation(cfg, Robot)\n        self._robots[uid] = robot"
         },
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager._declare_spawn_articulation",
-          "start_line": 3077,
-          "end_line": 3080,
+          "start_line": 3156,
+          "end_line": 3159,
           "excerpt": "        facade = facade_type(\n            cfg=cfg,\n            device=self.device,\n        )"
         }
       ]
@@ -5162,8 +5162,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.start_visualization",
-          "start_line": 1008,
-          "end_line": 1012,
+          "start_line": 1010,
+          "end_line": 1014,
           "excerpt": "        runtime = VisualizationRuntime(\n            SceneExporter(self, visualization_cfg),\n            visualization_cfg,\n        )\n        runtime.start()"
         }
       ]
@@ -5180,8 +5180,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_robot",
-          "start_line": 3044,
-          "end_line": 3047,
+          "start_line": 3123,
+          "end_line": 3126,
           "excerpt": "        self._robots[uid] = robot\n        if was_materialized:\n            self.prepare()\n        return robot"
         }
       ]
@@ -5198,8 +5198,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.enable_gizmo",
-          "start_line": 3230,
-          "end_line": 3230,
+          "start_line": 3309,
+          "end_line": 3309,
           "excerpt": "            gizmo = Gizmo(target, gizmo_cfg, control_part)"
         }
       ]
@@ -5216,8 +5216,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.create_rigid_constraint",
-          "start_line": 2746,
-          "end_line": 2746,
+          "start_line": 2825,
+          "end_line": 2825,
           "excerpt": "        constraint = RigidConstraint("
         }
       ]
@@ -5234,8 +5234,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_rigid_object_group",
-          "start_line": 2869,
-          "end_line": 2869,
+          "start_line": 2948,
+          "end_line": 2948,
           "excerpt": "        group = RigidObjectGroup("
         }
       ]
@@ -5252,8 +5252,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager._declare_rigid_objects",
-          "start_line": 2440,
-          "end_line": 2440,
+          "start_line": 2519,
+          "end_line": 2519,
           "excerpt": "            rigid_obj = RigidObject(cfg=cfg, device=self.device)"
         }
       ]
@@ -5270,8 +5270,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_articulation",
-          "start_line": 2968,
-          "end_line": 2968,
+          "start_line": 3047,
+          "end_line": 3047,
           "excerpt": "        self._articulations[uid] = articulation"
         }
       ]
@@ -5288,8 +5288,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_deformable_object",
-          "start_line": 2546,
-          "end_line": 2546,
+          "start_line": 2625,
+          "end_line": 2625,
           "excerpt": "        self._deformable_objects[uid] = deformable"
         }
       ]
@@ -5306,8 +5306,8 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.add_light",
-          "start_line": 2186,
-          "end_line": 2186,
+          "start_line": 2265,
+          "end_line": 2265,
           "excerpt": "        self._lights[uid] = batch_lights"
         }
       ]
