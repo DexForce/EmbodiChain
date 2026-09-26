@@ -40,6 +40,7 @@ scripts/benchmark/
     runner.py                   有预算的 attempt runner 和 accepted yield
     fixtures.py                 无仿真依赖的协议 fixture
     report.py                   attempt/stage/confirmed-yield 报告
+    session_adapter.py          #670 GenerationSession/receipt adapter
     common.py                  v0.1 导入兼容层
 ```
 
@@ -128,9 +129,11 @@ receipt 失败和确认写入四类结果。只有 `execution=completed`、
 进入 accepted yield。重复 `commit_id` 不增加 accepted 数量，预算耗尽的
 attempt 保留为 `not_run`。
 
-真实 G-03 executor 应在这个接口上接入 #670 的 Candidate Coordinator、
-GenerationSession、Physical Executor、Measured Validator 和 EpisodeSink；
-fixture 不创建第二套候选或 persistence 状态机。
+`session_adapter.py` 已把 #670 的 `GenerationSession` 生命周期接到同一
+executor 边界：proposal、rollout evidence、`accept_episode` 和最终 receipt
+都会经过生产 session。真实 host 仍需提供 Candidate Coordinator、Physical
+Executor、Measured Validator 和 EpisodeSink；fixture 不创建第二套候选或
+persistence 状态机。
 
 ## 如何接入下一项实验
 

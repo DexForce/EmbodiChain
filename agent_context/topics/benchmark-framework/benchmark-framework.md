@@ -25,7 +25,7 @@ existing owners and can adopt these helpers incrementally.
 | Camera workload and runtime selection | `scripts/benchmark/rendering/workload.py`, `run_benchmark.py` |
 | Camera process and platform APIs | `scripts/benchmark/rendering/worker.py`, `backends/` |
 | Camera-specific report layout | `scripts/benchmark/rendering/report.py` |
-| G-03 case, attempt, receipt and fixture runner | `scripts/benchmark/expert_generation/` |
+| G-03 case, attempt, receipt, fixture and session adapter | `scripts/benchmark/expert_generation/` |
 
 ## Boundaries
 
@@ -71,7 +71,8 @@ executor callback. Its accepted-yield rule requires completed execution,
 measured validation, task success and a confirmed persistence receipt. It keeps
 attempt failures, duplicate commits and budget-exhausted not-run rows visible;
 the fixture under `scripts/benchmark/expert_generation/` is deliberately
-simulator-free and does not replace #670's coordinator or `GenerationSession`.
+simulator-free, while `session_adapter.py` translates the existing #670
+`GenerationSession` and receipt lifecycle without replacing its coordinator.
 
 ## Camera-specific cautions
 
