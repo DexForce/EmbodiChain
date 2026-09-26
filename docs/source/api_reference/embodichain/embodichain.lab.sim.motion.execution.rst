@@ -18,9 +18,11 @@ and velocities are recomputed on the executed grid.
    InitialStatePort
    MeasuredExecutor
    EpisodeSink
+   LocalArtifactSink
    FixedSceneInitialStatePort
    SingleSlotOutcome
    SingleSlotRunner
+   MultiSlotRunner
 
 .. autoclass:: JointTrajectoryPlaybackCfg
     :members:
@@ -34,6 +36,11 @@ Generation host integration
 The single-slot runner coordinates injected restore, measured-execution, and
 persistence ports. Candidate identity, budgets, coverage, and receipts remain
 owned by :class:`embodichain.lab.sim.motion.expansion.GenerationSession`.
+``LocalArtifactSink`` is the synchronous local implementation: it atomically
+publishes one candidate directory and returns a receipt tied to the episode
+and commit IDs.
+``MultiSlotRunner`` adds generic compatible-slot reservation and exact release
+around the existing runner; its current drain policy is synchronous FIFO.
 
 .. autoclass:: InitialStatePort
    :members:
@@ -44,6 +51,9 @@ owned by :class:`embodichain.lab.sim.motion.expansion.GenerationSession`.
 .. autoclass:: EpisodeSink
    :members:
 
+.. autoclass:: LocalArtifactSink
+   :members:
+
 .. autoclass:: FixedSceneInitialStatePort
    :members:
 
@@ -51,4 +61,7 @@ owned by :class:`embodichain.lab.sim.motion.expansion.GenerationSession`.
    :members:
 
 .. autoclass:: SingleSlotRunner
+   :members:
+
+.. autoclass:: MultiSlotRunner
    :members:

@@ -1,0 +1,31 @@
+profile_id: rgb_visual
+revision: rgb_visual:v1
+profiles:
+  rgb_canonical:
+    seed_offset: 0
+    operations:
+      - kind: authored_cube_material
+        scope: per_environment
+  rgb_material_01:
+    seed_offset: 1
+    operations:
+      - kind: cube_material
+        scope: per_environment
+        base_color: [0.15, 0.45, 0.95]
+        roughness: 0.42
+  rgb_camera_01:
+    seed_offset: 2
+    operations:
+      - kind: camera_extrinsics
+        scope: per_environment
+        position_delta: [0.01, -0.01, 0.0]
+      - kind: camera_intrinsics
+        scope: per_environment
+        focal_scale: 1.02
+  rgb_light_01:
+    seed_offset: 3
+    operations:
+      - kind: local_light
+        scope: per_environment
+        color: [1.0, 0.82, 0.62]
+        intensity_scale: 1.15

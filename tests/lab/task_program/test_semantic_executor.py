@@ -68,6 +68,9 @@ from embodichain.lab.sim.atomic_actions import (
     TrackingProjectorRef,
 )
 from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
+from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+    AffordanceSamplingContext,
+)
 from embodichain.lab.task_program.semantics.calls import (
     HandOver,
     Pick,
@@ -280,6 +283,7 @@ class _EffectAction(AtomicAction[_EffectGoal, ActionOptions]):
     def __init__(self) -> None:
         super().__init__()
         self.plan_count = 0
+        self.sampling_contexts: list[object] = []
 
     def _scene_dependencies(
         self,
@@ -295,6 +299,7 @@ class _EffectAction(AtomicAction[_EffectGoal, ActionOptions]):
     ) -> ActionPlan:
         goal = self.require_goal(request)
         self.plan_count += 1
+        self.sampling_contexts.append(context.affordance_sampling)
         position = torch.full(
             (context.batch_size, 1),
             goal.target_position,
@@ -873,6 +878,27 @@ class _RecordingPlanTransformFactory:
     def __init__(self) -> None:
         self.requests: list[TaskProgramPlanRequest] = []
         self.transform_calls = 0
+        self.prepare_calls = 0
+
+    def prepare_planning_context(
+        self,
+        request: TaskProgramPlanRequest,
+        context: PlanningContext,
+        *,
+        engine: AtomicActionEngine,
+    ) -> PlanningContext:
+        assert isinstance(request, TaskProgramPlanRequest)
+        assert isinstance(engine, AtomicActionEngine)
+        self.prepare_calls += 1
+        return replace(
+            context,
+            affordance_sampling=AffordanceSamplingContext(
+                count=4,
+                seed=11,
+                episode_id=request.workflow_call_index,
+                branch_override=2,
+            ),
+        )
 
     def create_plan_transform(
         self,
@@ -972,6 +998,8 @@ def test_executor_requests_call_scoped_plan_transform() -> None:
 
     assert result.status is SemanticExecutionStatus.RUNNING
     assert factory.transform_calls == 1
+    assert factory.prepare_calls == 1
+    assert system.action.sampling_contexts[0].branch_override == 2
     assert len(factory.requests) == 1
     request = factory.requests[0]
     assert request.workflow_id == "generation-workflow"

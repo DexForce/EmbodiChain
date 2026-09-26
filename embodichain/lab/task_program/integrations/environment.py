@@ -32,7 +32,10 @@ import math
 from typing import Protocol, runtime_checkable
 
 from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
-from embodichain.lab.sim.motion.expansion import TrajectoryGenerationJobCfg
+from embodichain.lab.sim.motion.expansion import (
+    CombinedGenerationProfile,
+    TrajectoryGenerationJobCfg,
+)
 from embodichain.lab.sim.atomic_actions.runner import (
     ExecutionRunnerCfg,
     ObservationProvider,
@@ -94,7 +97,10 @@ from .catalog import (
     IntegrationFingerprintMismatch,
     SimulationTaskProgramRegistration,
 )
-from .generation import TaskProgramCandidatePlanTransformFactory
+from .generation import (
+    CombinedTaskProgramCandidatePlanTransformFactory,
+    TaskProgramCandidatePlanTransformFactory,
+)
 from embodichain.lab.task_program.language.schema import (
     TaskProgramCfg,
     TaskProgramIntegrationCfg,
@@ -296,7 +302,11 @@ class TaskProgramRuntimeAssembly:
     parallel_safety_validator: ParallelCommandSafetyValidator | None
     runtime: SemanticCallExecutor
     plan_transform_factory: TaskProgramPlanTransformFactory | None = None
-    generation_trace_provider: TaskProgramCandidatePlanTransformFactory | None = None
+    generation_trace_provider: (
+        TaskProgramCandidatePlanTransformFactory
+        | CombinedTaskProgramCandidatePlanTransformFactory
+        | None
+    ) = None
 
 
 class TaskProgramEnvironmentAdapter:
@@ -667,7 +677,9 @@ class TaskProgramEnvironmentAdapter:
         *,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
         generation_trace_provider: (
-            TaskProgramCandidatePlanTransformFactory | None
+            TaskProgramCandidatePlanTransformFactory
+            | CombinedTaskProgramCandidatePlanTransformFactory
+            | None
         ) = None,
     ) -> TaskProgramRuntimeAssembly:
         """Attach live observation, evidence, command, and runtime boundaries."""
@@ -683,11 +695,14 @@ class TaskProgramEnvironmentAdapter:
             )
         if generation_trace_provider is not None and not isinstance(
             generation_trace_provider,
-            TaskProgramCandidatePlanTransformFactory,
+            (
+                TaskProgramCandidatePlanTransformFactory,
+                CombinedTaskProgramCandidatePlanTransformFactory,
+            ),
         ):
             raise TypeError(
                 "generation_trace_provider must be a "
-                "TaskProgramCandidatePlanTransformFactory or None."
+                "a supported generation factory or None."
             )
         self._validate_registration_ownership()
 
@@ -827,7 +842,9 @@ class TaskProgramEnvironmentAdapter:
         self,
         program: CompiledTaskProgram,
         *,
-        generation_profile: TrajectoryGenerationJobCfg | None = None,
+        generation_profile: (
+            TrajectoryGenerationJobCfg | CombinedGenerationProfile | None
+        ) = None,
         candidate_index: int = 0,
     ) -> TaskProgramDemoBridge:
         """Create a fresh Gym bridge for one provider-free compiled program.
@@ -846,29 +863,39 @@ class TaskProgramEnvironmentAdapter:
         self._preflight_program(program, semantic.compiler)
         if generation_profile is not None and not isinstance(
             generation_profile,
-            TrajectoryGenerationJobCfg,
+            (TrajectoryGenerationJobCfg, CombinedGenerationProfile),
         ):
             raise TypeError(
-                "generation_profile must be a TrajectoryGenerationJobCfg or None."
+                "generation_profile must be a supported Generation Profile or None."
             )
         if type(candidate_index) is not int or candidate_index < 0:
             raise ValueError("candidate_index must be a non-negative integer.")
         if generation_profile is None and candidate_index != 0:
             raise ValueError("candidate_index requires a generation_profile.")
-        generation = (
-            None
-            if generation_profile is None
-            else TaskProgramCandidatePlanTransformFactory(
+        if isinstance(generation_profile, CombinedGenerationProfile):
+            generation = CombinedTaskProgramCandidatePlanTransformFactory(
                 generation_profile,
                 candidate_index=candidate_index,
                 program_id=program.program_id,
                 integration_id=self._scene_registry_id,
                 robot_profile_id=self._robot_profile_id,
             )
-        )
+        elif isinstance(generation_profile, TrajectoryGenerationJobCfg):
+            generation = TaskProgramCandidatePlanTransformFactory(
+                generation_profile,
+                candidate_index=candidate_index,
+                program_id=program.program_id,
+                integration_id=self._scene_registry_id,
+                robot_profile_id=self._robot_profile_id,
+            )
+        else:
+            generation = None
         if generation_profile is not None:
             program_skill_ids = self._program_skill_ids(program, semantic.compiler)
-            if generation_profile.source.template_id not in program_skill_ids:
+            if (
+                isinstance(generation_profile, TrajectoryGenerationJobCfg)
+                and generation_profile.source.template_id not in program_skill_ids
+            ):
                 raise ValueError(
                     "generation_profile source.template_id "
                     f"{generation_profile.source.template_id!r} is not present in "

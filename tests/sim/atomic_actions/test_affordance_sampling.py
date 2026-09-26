@@ -55,6 +55,7 @@ def _poses(batch_size: int, candidate_count: int | None = None) -> torch.Tensor:
         ("seed", -1),
         ("episode_id", 1.5),
         ("attempt_id", -1),
+        ("branch_override", 2),
     ],
 )
 def test_sampling_context_rejects_invalid_stream_identity(field: str, value: object):
@@ -78,6 +79,25 @@ def test_sampling_context_uses_private_reproducible_generators():
     assert torch.equal(first, second)
     assert not torch.equal(first, changed)
     assert torch.equal(torch.random.get_rng_state(), global_state)
+
+
+def test_sampling_context_can_pin_a_logical_branch_across_environment_rows():
+    context = AffordanceSamplingContext(
+        count=4,
+        seed=3,
+        episode_id=2,
+        branch_override=2,
+    )
+
+    assert context.branch_for(0) == 2
+    assert context.branch_for(17) == 2
+    values = context.sample_range(
+        0.0,
+        (-1.0, 1.0),
+        env_ids=torch.tensor([0, 17]),
+        key="pick",
+    )
+    assert torch.equal(values[0:1], values[1:2])
 
 
 def test_pose_candidates_from_rows_preserves_empty_and_nonfinite_validity():

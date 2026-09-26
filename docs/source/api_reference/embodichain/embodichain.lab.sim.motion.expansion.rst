@@ -20,6 +20,9 @@ and persistence confirmations; this package does not instantiate them.
    :nosignatures:
 
    CandidateIdentity
+   CandidateRecipe
+   CombinedAssignment
+   CombinedEpisodeCoordinator
    ProposalRequest
    CandidateSpec
    CandidateCoordinator
@@ -31,6 +34,15 @@ and persistence confirmations; this package does not instantiate them.
    SceneCase
    TrajectoryAugmentationCfg
    TrajectoryGenerationJobCfg
+   CombinedGenerationProfile
+   ReferenceFamilySpec
+   CubeInitialPoseProvider
+   CycleRecipe
+   MeasuredValidator
+   PhysicalSlotPool
+   SlotReservation
+   VisualProfileApplication
+   VisualProfileRegistry
    SPATIAL_METHODS
    TrajectoryPhase
    TrajectoryTemplate
@@ -67,6 +79,10 @@ and persistence confirmations; this package does not instantiate them.
    SourceAdapter
    TemplateSourceAdapter
    PlanResultSourceAdapter
+   enumerate_candidate_recipes
+   load_visual_profile_registry
+   schedule_digest
+   round_robin_recipes
 
 Values and Evidence
 ~~~~~~~~~~~~~~~~~~~
@@ -164,6 +180,43 @@ the package itself does not write or verify storage.
    :members:
 
 .. autoclass:: CommitReceipt
+   :members:
+
+.. autoclass:: CombinedGenerationProfile
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: ReferenceFamilySpec
+   :members:
+
+.. autoclass:: CubeInitialPoseProvider
+   :members:
+
+.. autoclass:: CycleRecipe
+   :members:
+
+.. autoclass:: CandidateRecipe
+   :members:
+
+.. autoclass:: SlotReservation
+   :members:
+
+.. autoclass:: PhysicalSlotPool
+   :members:
+
+.. autoclass:: VisualProfileApplication
+   :members:
+
+.. autoclass:: VisualProfileRegistry
+   :members:
+
+.. autoclass:: CombinedAssignment
+   :members:
+
+.. autoclass:: CombinedEpisodeCoordinator
+   :members:
+
+.. autoclass:: MeasuredValidator
    :members:
 
 Configuration and Preflight
@@ -509,3 +562,85 @@ The package import path above is convenient for callers combining them.
    :nosignatures:
 
    GenerationSession
+
+Combined Episode Scheduling
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The combined profile and recipe values describe a complete repeated episode.
+They are simulator-independent, so a host can validate capacity and persist the
+same schedule before assigning any physical environment row.
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.combined
+
+.. autosummary::
+   :nosignatures:
+
+   CombinedGenerationProfile
+   ReferenceFamilySpec
+   CubeInitialPoseProvider
+   CycleRecipe
+   CandidateRecipe
+   SlotReservation
+   PhysicalSlotPool
+   enumerate_candidate_recipes
+   load_visual_profile_registry
+   schedule_digest
+
+.. autoclass:: CombinedGenerationProfile
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: ReferenceFamilySpec
+   :members:
+
+.. autoclass:: CubeInitialPoseProvider
+   :members:
+
+.. autoclass:: CycleRecipe
+   :members:
+
+.. autoclass:: CandidateRecipe
+   :members:
+
+.. autoclass:: SlotReservation
+   :members:
+
+.. autoclass:: PhysicalSlotPool
+   :members:
+
+.. autofunction:: enumerate_candidate_recipes
+
+.. autofunction:: load_visual_profile_registry
+
+.. autofunction:: schedule_digest
+
+.. autofunction:: round_robin_recipes
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.combined_runtime
+
+.. autosummary::
+   :nosignatures:
+
+   VisualProfileApplication
+   VisualProfileRegistry
+   CombinedAssignment
+   CombinedEpisodeCoordinator
+   MeasuredValidator
+   round_robin_recipes
+
+.. autoclass:: VisualProfileApplication
+   :members:
+
+.. autoclass:: VisualProfileRegistry
+   :members:
+
+.. autoclass:: CombinedAssignment
+   :members:
+
+.. autoclass:: CombinedEpisodeCoordinator
+   :members:
+
+.. autoclass:: MeasuredValidator
+   :members:
+
+.. autofunction:: round_robin_recipes

@@ -19,8 +19,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
+import subprocess
 import sys
 from typing import Iterable
 
@@ -38,8 +40,11 @@ from embodichain.lab.gym.utils.registration import (
     execute_init_hooks,
 )
 from embodichain.lab.sim.motion.expansion import (
+    CombinedGenerationProfile,
     TrajectoryGenerationJobCfg,
+    enumerate_candidate_recipes,
     load_generation_profile,
+    VisualProfileRegistry,
 )
 from embodichain.lab.task_program.integrations import TaskProgramGenerationRecord
 
@@ -59,7 +64,7 @@ __all__ = ["main"]
 
 
 def _write_generation_json(
-    profile: TrajectoryGenerationJobCfg,
+    profile: TrajectoryGenerationJobCfg | CombinedGenerationProfile,
     records: tuple[TaskProgramGenerationRecord, ...],
     result: DemoEpisodeResult,
     path: Path,
@@ -112,7 +117,15 @@ def _save_generation_plot(
                     linewidth=width,
                     label=(f"{label}:{joint_name}" if joint_index == 0 else None),
                 )
-        selected_template = record.templates[record.candidate_index]
+        selected_template = next(
+            template
+            for candidate, template in zip(
+                record.candidates,
+                record.templates,
+                strict=True,
+            )
+            if candidate.identity.candidate_id == record.selected_candidate_id
+        )
         selected_times = selected_template.dt.cumsum(0).detach().cpu().numpy()
         for phase in selected_template.phases:
             axis.axvline(
@@ -136,12 +149,16 @@ def _save_generation_plot(
 def _validate_candidate_indices(
     values: Iterable[int],
     *,
-    profile: TrajectoryGenerationJobCfg,
+    profile: TrajectoryGenerationJobCfg | CombinedGenerationProfile,
 ) -> tuple[int, ...]:
     indices = tuple(values)
     if not indices or len(set(indices)) != len(indices):
         raise ValueError("candidate indices must be nonempty and unique")
-    limit = profile.augmentation.max_variants_per_reference
+    limit = (
+        len(enumerate_candidate_recipes(profile))
+        if isinstance(profile, CombinedGenerationProfile)
+        else profile.augmentation.max_variants_per_reference
+    )
     if any(type(index) is not int or not 0 <= index < limit for index in indices):
         raise ValueError(f"candidate indices must be within [0, {limit})")
     return indices
@@ -173,6 +190,11 @@ def _create_parser() -> argparse.ArgumentParser:
         default=[0, 1, 2],
     )
     parser.add_argument("--save-video", action="store_true")
+    parser.add_argument(
+        "--concat-video",
+        action="store_true",
+        help="Concatenate selected candidate MP4s and write showcase_manifest.json.",
+    )
     parser.set_defaults(
         action_config=None,
         preview=False,
@@ -185,6 +207,75 @@ def _create_parser() -> argparse.ArgumentParser:
         profile_output=None,
     )
     return parser
+
+
+def _write_combined_video(
+    output_dir: Path,
+    candidate_indices: tuple[int, ...],
+) -> Path:
+    """Concatenate same-format candidate recordings and write a run manifest."""
+    if not candidate_indices:
+        raise ValueError("candidate_indices must be nonempty")
+    recordings = [output_dir / f"candidate_{index}.mp4" for index in candidate_indices]
+    if any(not path.is_file() for path in recordings):
+        raise FileNotFoundError("concat-video requires every candidate MP4")
+    list_path = output_dir / ".concat.txt"
+    list_path.write_text(
+        "".join(f"file '{path.as_posix()}'\n" for path in recordings),
+        encoding="utf-8",
+    )
+    combined = output_dir / f"combined_{len(recordings)}_variants.mp4"
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(list_path),
+                "-c",
+                "copy",
+                str(combined),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    finally:
+        list_path.unlink(missing_ok=True)
+    candidates = []
+    for index in candidate_indices:
+        payload = json.loads(
+            (output_dir / f"candidate_{index}.json").read_text(encoding="utf-8")
+        )
+        candidates.append(
+            {
+                "candidate_index": index,
+                "completed": payload["episode"]["completed"],
+                "length": payload["episode"]["length"],
+                "terminal_reason": payload["episode"]["terminal_reason"],
+                "generation": payload["generation"],
+                "video": str(output_dir / f"candidate_{index}.mp4"),
+            }
+        )
+    manifest = {
+        "status": "measured_showcase",
+        "candidate_count": len(candidates),
+        "accepted_count": sum(item["completed"] for item in candidates),
+        "rejected_count": sum(not item["completed"] for item in candidates),
+        "all_completed": all(item["completed"] for item in candidates),
+        "combined_video": str(combined),
+        "combined_video_sha256": hashlib.sha256(combined.read_bytes()).hexdigest(),
+        "candidates": candidates,
+    }
+    (output_dir / "showcase_manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return combined
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -201,9 +292,28 @@ def main(argv: list[str] | None = None) -> None:
     execute_init_hooks()
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
     env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
+    visual_registry = None
+    combined_recipes = ()
+    if isinstance(profile, CombinedGenerationProfile):
+        visual_registry = VisualProfileRegistry.from_yaml(
+            args.generation_profile.parent / profile.visual.profile_file
+        )
+        combined_recipes = enumerate_candidate_recipes(profile)
     try:
         for candidate_index in candidate_indices:
             env.reset(seed=args.seed, options={"save_data": False})
+            if visual_registry is not None:
+                assignments = {
+                    env_id: combined_recipes[
+                        (candidate_index + env_id) % len(combined_recipes)
+                    ].visual_profile_id
+                    for env_id in range(env.unwrapped.num_envs)
+                }
+                visual_registry.apply_to_environment(
+                    env.unwrapped,
+                    assignments,
+                    seed=7 + candidate_index,
+                )
             recording_started = False
             try:
                 if args.save_video:
@@ -242,9 +352,14 @@ def main(argv: list[str] | None = None) -> None:
                 raise RuntimeError(
                     f"Candidate {candidate_index} stopped: {result.terminal_reason}"
                 )
-            env.reset(options={"save_data": False})
+            env.reset(options={"save_data": result.completed})
     finally:
         env.close()
+    if args.concat_video:
+        if not args.save_video:
+            raise ValueError("--concat-video requires --save-video")
+        combined = _write_combined_video(args.output_dir, candidate_indices)
+        print(f"combined video: {combined}")
 
 
 if __name__ == "__main__":

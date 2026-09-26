@@ -358,6 +358,10 @@ class CandidateCoordinator:
         """Remove and return the next candidate in deterministic FIFO order."""
         return None if not self._pending else self._pending.popleft()
 
+    def peek_next(self) -> CandidateWorkItem | None:
+        """Return the next candidate without changing queue ownership."""
+        return None if not self._pending else self._pending[0]
+
     def admit_planned(
         self,
         item: CandidateWorkItem,

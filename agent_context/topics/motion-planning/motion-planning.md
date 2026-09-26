@@ -87,6 +87,13 @@ reservations and receipts. None owns physical slots, environment lifecycle or
 persistence; host integrations own those boundaries. Keep expansion algorithms
 free of direct Gym imports.
 
+The `expansion.combined` contracts extend this boundary to episode-level
+generation: they decode the combined profile, enumerate reference-family,
+affordance and trajectory recipes, assign one visual profile per episode, and
+reserve generic compatible slots. `schedule_digest` provides deterministic
+rerun identity; restoration, measured acceptance, and artifact writing remain
+host responsibilities.
+
 The generic B=1 host orchestration and its restore/executor/sink ports live in
 `motion/execution.py`, alongside standalone playback. The runner drives injected
 host ports and applies `GenerationSession` transitions; it does not move those

@@ -75,6 +75,7 @@ from embodichain.lab.sim.types import EnvAction
 
 if TYPE_CHECKING:
     from embodichain.lab.task_program.integrations.generation import (
+        CombinedTaskProgramCandidatePlanTransformFactory,
         TaskProgramCandidatePlanTransformFactory,
         TaskProgramGenerationRecord,
     )
@@ -985,7 +986,9 @@ class TaskProgramDemoBridge:
         runner_cfg: ExecutionRunnerCfg | None = None,
         parallel_safety_validator: ParallelCommandSafetyValidator | None = None,
         generation_trace_provider: (
-            TaskProgramCandidatePlanTransformFactory | None
+            TaskProgramCandidatePlanTransformFactory
+            | CombinedTaskProgramCandidatePlanTransformFactory
+            | None
         ) = None,
     ) -> None:
         if not isinstance(program, CompiledTaskProgramPort):
@@ -1020,16 +1023,20 @@ class TaskProgramDemoBridge:
             )
         if generation_trace_provider is not None:
             from embodichain.lab.task_program.integrations.generation import (
+                CombinedTaskProgramCandidatePlanTransformFactory,
                 TaskProgramCandidatePlanTransformFactory,
             )
 
             if not isinstance(
                 generation_trace_provider,
-                TaskProgramCandidatePlanTransformFactory,
+                (
+                    TaskProgramCandidatePlanTransformFactory,
+                    CombinedTaskProgramCandidatePlanTransformFactory,
+                ),
             ):
                 raise TypeError(
                     "generation_trace_provider must be a "
-                    "TaskProgramCandidatePlanTransformFactory or None."
+                    "a supported generation factory or None."
                 )
         self._program = program
         self._runtime = runtime

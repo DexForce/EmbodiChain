@@ -18,16 +18,24 @@
 
 from __future__ import annotations
 
+import json
 import math
+import os
+from pathlib import Path
+import shutil
+import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Callable, Protocol, TYPE_CHECKING, Literal, Sequence
 
+import numpy as np
 import torch
 
 from embodichain.compute.trajectory import retime_to_control_grid
 from embodichain.utils import configclass
 
 from .expansion.contracts import CommitReceipt, ExpertEpisode, ValidationResult
+from .expansion.combined import PhysicalSlotPool
 from .expansion.coordinator import CandidateCoordinator, CandidateWorkItem
 from .expansion.session import GenerationSession
 
@@ -43,9 +51,11 @@ __all__ = [
     "InitialStatePort",
     "MeasuredExecutor",
     "EpisodeSink",
+    "LocalArtifactSink",
     "FixedSceneInitialStatePort",
     "SingleSlotOutcome",
     "SingleSlotRunner",
+    "MultiSlotRunner",
 ]
 
 
@@ -207,6 +217,197 @@ class EpisodeSink(Protocol):
         submission_id: int,
     ) -> CommitReceipt:
         """Persist and confirm one episode synchronously or through a bounded sink."""
+
+
+def _artifact_json(value: object) -> object:
+    """Convert immutable contract metadata into ordinary JSON containers."""
+    if value is None or type(value) in (str, bool, int):
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError("artifact metadata must contain finite numbers")
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _artifact_json(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_artifact_json(item) for item in value]
+    raise ValueError(f"artifact metadata contains unsupported value {type(value)!r}")
+
+
+class LocalArtifactSink:
+    """Write accepted episodes to an atomic local artifact directory.
+
+    The sink is synchronous and deliberately independent of LeRobot. A
+    candidate is first assembled in a sibling temporary directory and then
+    renamed into ``candidates/<candidate-id>``. A repeated submission for the
+    same episode is idempotent; a different episode cannot overwrite it.
+    """
+
+    def __init__(self, output_dir: str | Path) -> None:
+        self._root = Path(output_dir)
+        self._candidates = self._root / "candidates"
+        self._failures = self._root / "failures"
+        self._candidates.mkdir(parents=True, exist_ok=True)
+        self._failures.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def output_dir(self) -> Path:
+        """Return the owned artifact root."""
+        return self._root
+
+    @staticmethod
+    def _identity_payload(episode: ExpertEpisode) -> dict[str, object]:
+        identity = episode.identity
+        return {
+            "candidate_id": identity.candidate_id,
+            "attempt_id": identity.attempt_id,
+            "scene_case_id": identity.scene_case_id,
+            "initial_state_id": identity.initial_state_id,
+            "source_id": identity.source_id,
+            "source_revision": identity.source_revision,
+            "template_id": identity.template_id,
+            "geometry_family_id": identity.geometry_family_id,
+        }
+
+    @staticmethod
+    def _validation_payload(episode: ExpertEpisode) -> dict[str, object]:
+        return {
+            "accepted": episode.validation.accepted,
+            "checks": [
+                {
+                    "check_id": check.check_id,
+                    "status": check.status,
+                    "detail": check.detail,
+                    "metrics": dict(check.metrics),
+                }
+                for check in episode.validation.checks
+            ],
+        }
+
+    def _receipt(
+        self,
+        episode: ExpertEpisode,
+        *,
+        submission_id: int,
+        candidate_dir: Path,
+    ) -> CommitReceipt:
+        return CommitReceipt(
+            episode_id=episode.episode_id,
+            candidate_id=episode.identity.candidate_id,
+            attempt_id=episode.identity.attempt_id,
+            storage_id=str(candidate_dir),
+            commit_id=episode.commit_id,
+            scene_case_id=episode.identity.scene_case_id,
+            submission_id=submission_id,
+        )
+
+    def submit(
+        self,
+        episode: ExpertEpisode,
+        *,
+        submission_id: int,
+    ) -> CommitReceipt:
+        """Atomically persist one accepted episode and return its receipt."""
+        if not isinstance(episode, ExpertEpisode):
+            raise TypeError("episode must be an ExpertEpisode")
+        if type(submission_id) is not int or submission_id < 0:
+            raise ValueError("submission_id must be a non-negative integer")
+        if not episode.validation.accepted:
+            raise ValueError("only accepted episodes may be persisted")
+
+        candidate_id = episode.identity.candidate_id
+        if candidate_id in {".", ".."} or Path(candidate_id).name != candidate_id:
+            raise ValueError("candidate_id must be a single safe path component")
+        candidate_dir = self._candidates / candidate_id
+        existing_episode = candidate_dir / "physical_episode.json"
+        if candidate_dir.exists():
+            if not existing_episode.is_file():
+                raise RuntimeError(
+                    "candidate artifact exists without a physical episode"
+                )
+            existing = json.loads(existing_episode.read_text(encoding="utf-8"))
+            if existing.get("episode_id") != episode.episode_id:
+                raise RuntimeError("candidate artifact belongs to a different episode")
+            return self._receipt(
+                episode,
+                submission_id=submission_id,
+                candidate_dir=candidate_dir,
+            )
+
+        temporary = Path(
+            tempfile.mkdtemp(prefix=f".{candidate_id}.", dir=self._candidates)
+        )
+        try:
+            generation = {
+                **self._identity_payload(episode),
+                "episode_id": episode.episode_id,
+                "commit_id": episode.commit_id,
+                "action_representation": episode.action_representation,
+                "metadata": _artifact_json(episode.metadata),
+            }
+            (temporary / "generation.json").write_text(
+                json.dumps(generation, allow_nan=False, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            physical = {
+                "episode_id": episode.episode_id,
+                "commit_id": episode.commit_id,
+                "identity": self._identity_payload(episode),
+                "validation": self._validation_payload(episode),
+                "timestamps": episode.timestamps.detach().cpu().tolist(),
+                "phases": [
+                    {
+                        "phase_id": phase.phase_id,
+                        "start_index": phase.start_index,
+                        "stop_index": phase.stop_index,
+                        "kind": phase.kind,
+                    }
+                    for phase in episode.phases
+                ],
+            }
+            (temporary / "physical_episode.json").write_text(
+                json.dumps(physical, allow_nan=False, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            torch.save(
+                {
+                    "actions": episode.actions.detach().cpu(),
+                    "timestamps": episode.timestamps.detach().cpu(),
+                },
+                temporary / "trajectory.pt",
+            )
+            observations_dir = temporary / "observations"
+            observations_dir.mkdir()
+            np.savez_compressed(
+                observations_dir / "rgb.npz",
+                **{
+                    key.replace("/", "__"): value.detach().cpu().numpy()
+                    for key, value in episode.observations.items()
+                },
+            )
+            os.replace(temporary, candidate_dir)
+        except Exception:
+            shutil.rmtree(temporary, ignore_errors=True)
+            raise
+        return self._receipt(
+            episode,
+            submission_id=submission_id,
+            candidate_dir=candidate_dir,
+        )
+
+    def write_manifest(self, manifest: Mapping[str, object]) -> Path:
+        """Atomically replace the run manifest and return its path."""
+        payload = _artifact_json(manifest)
+        if not isinstance(payload, dict):
+            raise TypeError("manifest must be a mapping")
+        target = self._root / "manifest.json"
+        temporary = self._root / ".manifest.json.tmp"
+        temporary.write_text(
+            json.dumps(payload, allow_nan=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        os.replace(temporary, target)
+        return target
 
 
 class FixedSceneInitialStatePort:
@@ -449,3 +650,74 @@ class SingleSlotRunner:
     def coordinator(self) -> CandidateCoordinator:
         """Return the coordinator owned by this runner."""
         return self._coordinator
+
+
+class MultiSlotRunner:
+    """Assign queued candidates to compatible slots around a single host runner.
+
+    The current implementation drains FIFO synchronously; the slot pool and
+    exact reservation lifecycle are independent of that execution policy, so a
+    host can replace the inner runner with a concurrent implementation later.
+    """
+
+    def __init__(
+        self,
+        runner: SingleSlotRunner,
+        slot_pool: PhysicalSlotPool,
+    ) -> None:
+        if not isinstance(runner, SingleSlotRunner):
+            raise TypeError("runner must be a SingleSlotRunner")
+        if not isinstance(slot_pool, PhysicalSlotPool):
+            raise TypeError("slot_pool must be a PhysicalSlotPool")
+        self._runner = runner
+        self._slot_pool = slot_pool
+
+    @property
+    def slot_pool(self) -> PhysicalSlotPool:
+        """Return the host-owned physical slot pool."""
+        return self._slot_pool
+
+    def run_next(self) -> SingleSlotOutcome:
+        """Reserve a compatible slot, run one candidate, and release it."""
+        item = self._runner.coordinator.peek_next()
+        if item is None:
+            return SingleSlotOutcome("no_candidate")
+        candidate_id = item.spec.identity.candidate_id
+        try:
+            reservation = self._slot_pool.reserve(
+                candidate_id,
+                item.spec.compatibility_key,
+            )
+        except BufferError:
+            return SingleSlotOutcome(
+                "capacity_unavailable",
+                candidate_id=candidate_id,
+                reason="no compatible physical slot is available",
+            )
+        try:
+            outcome = self._runner.run_next()
+            if outcome.candidate_id != candidate_id:
+                raise RuntimeError("runner consumed a different reserved candidate")
+            return outcome
+        finally:
+            self._slot_pool.release(reservation)
+
+    def run_until_empty(
+        self,
+        *,
+        max_attempts: int | None = None,
+    ) -> tuple[SingleSlotOutcome, ...]:
+        """Drain FIFO candidates while respecting the optional attempt bound."""
+        if max_attempts is not None and (
+            type(max_attempts) is not int or max_attempts < 0
+        ):
+            raise ValueError("max_attempts must be a non-negative integer or None")
+        outcomes: list[SingleSlotOutcome] = []
+        while self._runner.coordinator.pending_count:
+            if max_attempts is not None and len(outcomes) >= max_attempts:
+                raise RuntimeError("multi-slot attempt budget exhausted")
+            outcome = self.run_next()
+            if outcome.status == "capacity_unavailable":
+                break
+            outcomes.append(outcome)
+        return tuple(outcomes)

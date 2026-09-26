@@ -91,7 +91,10 @@ from embodichain.data import get_data_path
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.motion.expansion import TrajectoryGenerationJobCfg
+    from embodichain.lab.sim.motion.expansion import (
+        CombinedGenerationProfile,
+        TrajectoryGenerationJobCfg,
+    )
     from embodichain.lab.task_program import CompiledTaskProgram, TaskProgramCfg
     from embodichain.lab.task_program.integrations import (
         TaskProgramAdapterFactory,
@@ -1280,6 +1283,14 @@ class EmbodiedEnv(BaseEnv):
                     "terminal_reason": terminal_reason,
                 }
             )
+            bridge = getattr(self, "_active_task_program_bridge", None)
+            if bridge is not None:
+                records = bridge.generation_records
+                metadata["generation"] = [
+                    record.to_metadata()
+                    for record in records
+                    if getattr(record, "env_id", None) in (None, env_id)
+                ]
 
     def get_demo_episode_metadata(self, env_id: int) -> dict[str, Any]:
         """Return segment-aware metadata for one buffered episode.
@@ -2418,7 +2429,9 @@ class EmbodiedEnv(BaseEnv):
         self,
         program: CompiledTaskProgram,
         *,
-        generation_profile: TrajectoryGenerationJobCfg | None = None,
+        generation_profile: (
+            TrajectoryGenerationJobCfg | CombinedGenerationProfile | None
+        ) = None,
         generation_candidate_index: int = 0,
     ) -> TaskProgramDemoBridge:
         """Create the Gym demo bridge through the explicit adapter.
@@ -2487,7 +2500,9 @@ class EmbodiedEnv(BaseEnv):
         self,
         *args,
         task_program: TaskProgramCfg | CompiledTaskProgram | None = None,
-        generation_profile: TrajectoryGenerationJobCfg | None = None,
+        generation_profile: (
+            TrajectoryGenerationJobCfg | CombinedGenerationProfile | None
+        ) = None,
         generation_candidate_index: int = 0,
         **kwargs,
     ) -> Iterable[DemoSegment] | None:

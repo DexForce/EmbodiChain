@@ -175,6 +175,7 @@ template contract.
    TaskProgramSourceAdapter
    TaskProgramGenerationRecord
    TaskProgramCandidatePlanTransformFactory
+   CombinedTaskProgramCandidatePlanTransformFactory
 
 .. autoclass:: TaskProgramSourceAdapter
    :members:
@@ -183,6 +184,9 @@ template contract.
    :members:
 
 .. autoclass:: TaskProgramCandidatePlanTransformFactory
+   :members:
+
+.. autoclass:: CombinedTaskProgramCandidatePlanTransformFactory
    :members:
 
 .. currentmodule:: embodichain.lab.task_program

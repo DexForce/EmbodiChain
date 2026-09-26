@@ -18,16 +18,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from embodichain.utils.utility import load_config
 
 from .cfg import TrajectoryGenerationJobCfg
+from .combined import CombinedGenerationProfile
 
 __all__ = ["load_generation_profile"]
 
 
-def load_generation_profile(path: str | Path) -> TrajectoryGenerationJobCfg:
+def load_generation_profile(
+    path: str | Path,
+) -> TrajectoryGenerationJobCfg | CombinedGenerationProfile:
     """Load one callable-free Generation Profile through strict decoding.
 
     Args:
@@ -43,6 +47,10 @@ def load_generation_profile(path: str | Path) -> TrajectoryGenerationJobCfg:
     """
     try:
         data = load_config(path)
+        if not isinstance(data, Mapping):
+            raise TypeError("profile root must be a mapping")
+        if data.get("schema_version") == 1 and "trajectory" in data:
+            return CombinedGenerationProfile.from_mapping(data)
         return TrajectoryGenerationJobCfg.from_mapping(data)
     except (TypeError, ValueError) as error:
         raise ValueError(f"Invalid Generation Profile {path}: {error}") from error

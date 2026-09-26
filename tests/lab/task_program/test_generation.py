@@ -44,6 +44,7 @@ from embodichain.lab.sim.atomic_actions import (
     TimedTrajectory,
 )
 from embodichain.lab.sim.motion.expansion import (
+    CombinedGenerationProfile,
     SceneCase,
     SourceAdapter,
     SourceContext,
@@ -51,6 +52,7 @@ from embodichain.lab.sim.motion.expansion import (
     TrajectoryTemplate,
 )
 from embodichain.lab.task_program.integrations import (
+    CombinedTaskProgramCandidatePlanTransformFactory,
     TaskProgramCandidatePlanTransformFactory,
     TaskProgramSourceAdapter,
 )
@@ -397,3 +399,57 @@ def test_generation_records_own_template_tensors() -> None:
         factory.records[0].templates[0].positions,
         expected,
     )
+
+
+def _combined_profile() -> CombinedGenerationProfile:
+    return CombinedGenerationProfile.from_mapping(
+        {
+            "source": {
+                "kind": "task_program",
+                "source_id": "repeated_cube_pick_place",
+                "source_revision": "config:repeated_pick_place_v1",
+                "unit_scope": "episode",
+                "template_id": "repeated_pick_place_episode",
+            }
+        }
+    )
+
+
+def test_combined_factory_pins_recipe_affordance_before_atomic_planning() -> None:
+    engine, invocation, _, context, _ = _planned_place()
+    factory = CombinedTaskProgramCandidatePlanTransformFactory(
+        _combined_profile(),
+        candidate_index=7,
+        program_id="repeated_cube_pick_place",
+        integration_id="repeated_pick_place_v1",
+        robot_profile_id="franka_panda",
+    )
+    request = _plan_request(invocation, skill_id="pick_up")
+    prepared = factory.prepare_planning_context(request, context, engine=engine)
+
+    assert prepared.affordance_sampling is not None
+    assert prepared.affordance_sampling.branch_overrides == (1,)
+    assert prepared.affordance_sampling.episode_id == 7
+
+
+def test_combined_factory_expands_place_on_requested_cycle_variant() -> None:
+    engine, invocation, resolved, context, plan = _planned_place()
+    factory = CombinedTaskProgramCandidatePlanTransformFactory(
+        _combined_profile(),
+        candidate_index=1,
+        program_id="repeated_cube_pick_place",
+        integration_id="repeated_pick_place_v1",
+        robot_profile_id="franka_panda",
+    )
+    request = replace(_plan_request(invocation), workflow_call_index=1)
+    transform = factory.create_plan_transform(request, engine=engine)
+    assert callable(transform)
+
+    rebuilt = transform(resolved, context, plan)
+    record = factory.records[0]
+
+    assert record.recipe_index == 1
+    assert record.cycle_index == 0
+    assert record.trajectory_requested == 1
+    assert record.trajectory_selected == 1
+    assert torch.equal(rebuilt.joint_trajectory.dt, plan.joint_trajectory.dt)

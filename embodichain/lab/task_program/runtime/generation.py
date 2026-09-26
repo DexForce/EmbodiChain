@@ -60,7 +60,13 @@ class TaskProgramPlanRequest:
 
 @runtime_checkable
 class TaskProgramPlanTransformFactory(Protocol):
-    """Create an optional Atomic plan transform for one grounded call."""
+    """Create an optional Atomic plan transform for one grounded call.
+
+    Implementations may additionally expose a ``prepare_planning_context``
+    method with the same request and engine keyword arguments. The executor
+    calls that optional hook immediately before Atomic planning, which is the
+    ownership boundary for recipe-selected Affordance sampling.
+    """
 
     def create_plan_transform(
         self,

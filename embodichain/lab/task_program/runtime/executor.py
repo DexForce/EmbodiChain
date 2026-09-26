@@ -197,13 +197,20 @@ class _PrimedObservationProvider:
         delegate: ObservationProvider,
     ) -> None:
         self._context: PlanningContext | None = context
+        self._affordance_sampling = context.affordance_sampling
         self._delegate = delegate
 
     def observe(self, task_state: TaskState) -> PlanningContext:
         """Reuse the grounding snapshot for the session's first due cycle."""
         context = self._context
         if context is None:
-            return self._delegate.observe(task_state)
+            observed = self._delegate.observe(task_state)
+            if self._affordance_sampling is None:
+                return observed
+            return replace(
+                observed,
+                affordance_sampling=self._affordance_sampling,
+            )
         self._context = None
         return PlanningContext(
             robot=context.robot,
@@ -211,6 +218,7 @@ class _PrimedObservationProvider:
             scene=context.scene,
             env_ids=context.env_ids,
             control_dt=context.control_dt,
+            affordance_sampling=context.affordance_sampling,
         )
 
 
@@ -822,6 +830,7 @@ class SemanticCallExecutor:
             scene=context.scene,
             env_ids=context.env_ids,
             control_dt=context.control_dt,
+            affordance_sampling=context.affordance_sampling,
         )
         if normalized.batch_size != self._task_state.batch_size:
             raise ValueError(
@@ -952,14 +961,35 @@ class SemanticCallExecutor:
         if self._plan_transform_factory is not None:
             if self._workflow_id is None:
                 raise RuntimeError("A grounded call requires an active workflow ID.")
+            plan_request = TaskProgramPlanRequest(
+                workflow_id=self._workflow_id,
+                workflow_call_index=workflow_call_index,
+                analysis_call_index=analysis_call_index,
+                call=call,
+                invocation=invocation,
+            )
+            prepare_context = getattr(
+                self._plan_transform_factory,
+                "prepare_planning_context",
+                None,
+            )
+            if prepare_context is not None:
+                if not callable(prepare_context):
+                    raise TypeError(
+                        "prepare_planning_context must be callable when provided."
+                    )
+                prepared_context = prepare_context(
+                    plan_request,
+                    context,
+                    engine=self._engine,
+                )
+                if not isinstance(prepared_context, PlanningContext):
+                    raise TypeError(
+                        "prepare_planning_context() must return PlanningContext."
+                    )
+                context = prepared_context
             plan_transform = self._plan_transform_factory.create_plan_transform(
-                TaskProgramPlanRequest(
-                    workflow_id=self._workflow_id,
-                    workflow_call_index=workflow_call_index,
-                    analysis_call_index=analysis_call_index,
-                    call=call,
-                    invocation=invocation,
-                ),
+                plan_request,
                 engine=self._engine,
             )
             if plan_transform is not None and not callable(plan_transform):

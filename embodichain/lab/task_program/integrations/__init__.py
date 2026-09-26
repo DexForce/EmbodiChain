@@ -26,6 +26,7 @@ from .environment import (
     PlanningObservationPort,
 )
 from .generation import (
+    CombinedTaskProgramCandidatePlanTransformFactory,
     TaskProgramCandidatePlanTransformFactory,
     TaskProgramGenerationRecord,
     TaskProgramSourceAdapter,
@@ -95,6 +96,7 @@ __all__ = [
     "TaskProgramIntegrationCatalog",
     "TaskProgramSourceAdapter",
     "TaskProgramCandidatePlanTransformFactory",
+    "CombinedTaskProgramCandidatePlanTransformFactory",
     "TaskProgramGenerationRecord",
     "TaskProgramRuntimeAssembly",
     "IntegrationFingerprintMismatch",

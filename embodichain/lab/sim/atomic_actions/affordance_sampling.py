@@ -42,12 +42,16 @@ class AffordanceSamplingContext:
         seed: Host-selected base seed.
         episode_id: Host-selected episode or batch identity.
         attempt_id: Explicit resampling attempt identity.
+        branch_override: Optional logical branch selected independently of the
+            physical environment row.
     """
 
     count: int = 1
     seed: int = 0
     episode_id: int = 0
     attempt_id: int = 0
+    branch_override: int | None = None
+    branch_overrides: tuple[int, ...] | None = None
 
     def __post_init__(self) -> None:
         if type(self.count) is not int or self.count < 1:
@@ -56,6 +60,23 @@ class AffordanceSamplingContext:
             value = getattr(self, name)
             if type(value) is not int or value < 0:
                 raise ValueError(f"{name} must be a non-negative integer.")
+        if self.branch_override is not None and (
+            type(self.branch_override) is not int
+            or not 0 <= self.branch_override < self.count
+        ):
+            raise ValueError("branch_override must be within the sampling count")
+        if self.branch_overrides is not None:
+            if not self.branch_overrides:
+                raise ValueError("branch_overrides must be non-empty")
+            if any(
+                type(branch) is not int or not 0 <= branch < self.count
+                for branch in self.branch_overrides
+            ):
+                raise ValueError("branch_overrides must stay within the sampling count")
+            if self.branch_override is not None:
+                raise ValueError(
+                    "branch_override and branch_overrides are mutually exclusive"
+                )
 
     @property
     def enabled(self) -> bool:
@@ -79,6 +100,20 @@ class AffordanceSamplingContext:
         payload = repr((self.seed, self.episode_id, self.attempt_id, key, group))
         seed = int.from_bytes(hashlib.sha256(payload.encode()).digest()[:8], "little")
         return torch.Generator(device="cpu").manual_seed(seed % (2**63))
+
+    def branch_for(self, env_id: int, *, row_index: int | None = None) -> int:
+        """Return the selected branch for one environment identity."""
+        if type(env_id) is not int or env_id < 0:
+            raise ValueError("env_id must be a non-negative integer")
+        if self.branch_overrides is not None:
+            if row_index is None or not 0 <= row_index < len(self.branch_overrides):
+                raise ValueError("row_index is required for branch_overrides")
+            return self.branch_overrides[row_index]
+        return (
+            self.branch_override
+            if self.branch_override is not None
+            else env_id % self.count
+        )
 
     def sample_range(
         self,
@@ -117,7 +152,12 @@ class AffordanceSamplingContext:
 
         groups: dict[int, torch.Tensor] = {}
         for row, env_id in enumerate(env_ids.cpu().tolist()):
-            group, branch = divmod(env_id, self.count)
+            branch = self.branch_for(env_id, row_index=row)
+            group = (
+                0
+                if self.branch_override is not None or self.branch_overrides is not None
+                else env_id // self.count
+            )
             if branch == 0:
                 continue
             if group not in groups:
@@ -128,13 +168,15 @@ class AffordanceSamplingContext:
             values[row] = lower + (upper - lower) * float(groups[group][branch - 1])
         return values
 
-    def metadata(self) -> dict[str, int]:
+    def metadata(self) -> dict[str, int | None]:
         """Return JSON-compatible sampling provenance."""
         return {
             "count": self.count,
             "seed": self.seed,
             "episode_id": self.episode_id,
             "attempt_id": self.attempt_id,
+            "branch_override": self.branch_override,
+            "branch_overrides": self.branch_overrides,
         }
 
 
@@ -323,7 +365,15 @@ def _sample_pose_candidates(
         scale = torch.linalg.vector_norm(position.amax(0) - position.amin(0)).clamp_min(
             0.01
         )
-        generator = sampling.generator(key, group=env_id // sampling.count)
+        generator = sampling.generator(
+            key,
+            group=(
+                0
+                if sampling.branch_override is not None
+                or sampling.branch_overrides is not None
+                else env_id // sampling.count
+            ),
+        )
         jitter = torch.rand(len(indices), generator=generator).to(
             candidates.poses.device
         )
@@ -350,7 +400,7 @@ def _sample_pose_candidates(
                 break
             priority = nearest * (0.75 + 0.25 * jitter)
             order.append(int(priority.masked_fill(~available, -torch.inf).argmax()))
-        branch = env_id % sampling.count
+        branch = sampling.branch_for(env_id, row_index=row)
         selected[row] = indices[order[branch % len(order)]]
         unique_counts.append(len(order))
         reused.append(branch >= len(order))

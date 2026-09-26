@@ -24,6 +24,8 @@ from embodichain.lab.sim.motion.execution import (
     EpisodeSink,
     FixedSceneInitialStatePort,
     InitialStatePort,
+    LocalArtifactSink,
+    MultiSlotRunner,
     MeasuredExecutor,
     SingleSlotOutcome,
     SingleSlotRunner,
@@ -35,6 +37,7 @@ from embodichain.lab.sim.motion.expansion import (
     CommitReceipt,
     ExpertEpisode,
     GenerationSession,
+    PhysicalSlotPool,
     SceneCase,
     SourceContext,
     TemplateSourceAdapter,
@@ -256,6 +259,33 @@ def test_fixed_scene_port_adapts_restore_and_verify_contract() -> None:
     port = FixedSceneInitialStatePort(host)
     assert port.restore(object()) == 1
     assert host.calls == 1
+
+
+def test_local_artifact_sink_writes_atomic_episode_layout(tmp_path) -> None:
+    session, coordinator, _ = _coordinator()
+    sink = LocalArtifactSink(tmp_path)
+    outcome = _runner(coordinator, sink=sink).run_next()
+
+    assert outcome.status == "committed"
+    candidate_dir = tmp_path / "candidates" / outcome.candidate_id
+    assert (candidate_dir / "generation.json").is_file()
+    assert (candidate_dir / "physical_episode.json").is_file()
+    assert (candidate_dir / "trajectory.pt").is_file()
+    assert (candidate_dir / "observations" / "rgb.npz").is_file()
+    sink.write_manifest({"status": "complete", "accepted": 1})
+    assert (tmp_path / "manifest.json").is_file()
+    assert session.snapshot()["counts"]["committed"] == 1
+
+
+def test_multi_slot_runner_releases_exact_slot_between_fifo_candidates() -> None:
+    session, coordinator, _ = _coordinator(count=2, target_committed_episodes=2)
+    runner = MultiSlotRunner(_runner(coordinator), PhysicalSlotPool(1))
+
+    outcomes = runner.run_until_empty()
+
+    assert tuple(outcome.status for outcome in outcomes) == ("committed", "committed")
+    assert runner.slot_pool.available_count == 1
+    assert session.snapshot()["counts"]["committed"] == 2
 
 
 def test_single_slot_runner_completes_measured_receipt_lifecycle() -> None:
