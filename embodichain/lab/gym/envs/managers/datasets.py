@@ -501,10 +501,24 @@ class LeRobotRecorder(Functor):
     def _contract_action_list(self, env_id: int, step: int, stored_actions: Any) -> Any:
         """Build the primary and optional executed actions for one contract."""
         cfg = getattr(self, "_action_contract_cfg", None)
-        if cfg is None:
-            return stored_actions
-        if cfg["representation"] in POLICY_ACTION_CONTRACT_TERMS:
+        representation = None if cfg is None else cfg["representation"]
+        if representation in POLICY_ACTION_CONTRACT_TERMS:
             return self._policy_action_list(env_id, step)
+
+        # Legacy and explicit joint-position recorders consume the command
+        # that reached the controller.  This is kept separately from the
+        # shared rollout buffer so a policy-contract recorder can coexist with
+        # a legacy recorder even when their primary action widths differ.
+        if cfg is None or representation == "joint_position":
+            env = getattr(self, "_env", None)
+            executed_getter = getattr(env, "get_executed_qpos_history", None)
+            if callable(executed_getter):
+                executed_actions = executed_getter(env_id, step)
+                if (
+                    isinstance(executed_actions, torch.Tensor)
+                    and len(executed_actions) == step
+                ):
+                    return executed_actions
 
         return torch.as_tensor(stored_actions).detach().cpu().clone()
 
