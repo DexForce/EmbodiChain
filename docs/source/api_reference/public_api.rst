@@ -279,6 +279,21 @@ embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
 
    prepare_scene_edit_assets
 
+embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene
+---------------------------------------------------------
+
+Entity metadata and deterministic UID indexing for schema-v2 USD scene stages.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene
+
+.. autosummary::
+
+   USD_SCENE_SCHEMA
+   UsdEntityBinding
+   UsdEntityDesc
+   UsdSceneBinding
+   UsdSceneIndex
+
 embodichain.gen_sim.simready_pipeline.cli.start
 -----------------------------------------------
 

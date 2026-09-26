@@ -313,6 +313,9 @@ class LoadOption:
     smooth: float = -1.0
     """Angle threshold (in degrees) for smoothing normals. Defaults to -1.0 (no smoothing)."""
 
+    gltfloader: bool = False
+    """Whether to force DexSim's glTF loader. Defaults to False."""
+
     @classmethod
     def from_dict(cls, init_dict: Dict[str, Any]) -> LoadOption:
         """Initialize the configuration from a dictionary."""

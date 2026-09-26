@@ -494,6 +494,15 @@ def _mesh_load_option_from_cfg(cfg: RigidObjectCfg) -> LoadOption:
     option.rebuild_3rdnormal = cfg.shape.load_option.rebuild_3rdnormal
     option.rebuild_3rdtangent = cfg.shape.load_option.rebuild_3rdtangent
     option.smooth = cfg.shape.load_option.smooth
+    if getattr(cfg.shape.load_option, "gltfloader", False):
+        # Older DexSim builds do not expose this optional loader switch.
+        if hasattr(option, "gltfloader"):
+            option.gltfloader = True
+        else:
+            logger.log_warning(
+                "DexSim LoadOption does not support gltfloader; using its "
+                "default glTF import path."
+            )
     return option
 
 
