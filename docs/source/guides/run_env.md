@@ -263,8 +263,6 @@ a separate lazy segment. The next pickup is planned only after the previous
 placement has fallen and become stable, so the planner starts from the cube's
 measured pose rather than its requested release pose.
 
-No action-bank config is needed:
-
 ```bash
 embodichain run-env \
     --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
