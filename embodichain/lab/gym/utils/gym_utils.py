@@ -453,12 +453,14 @@ def config_to_cfg(
     """
 
     from embodichain.lab.sim.cfg import (
+        DenoisingCfg,
         RobotCfg,
         RigidObjectCfg,
         RigidObjectGroupCfg,
         ArticulationCfg,
         LightCfg,
         DLSSCfg,
+        NRDCfg,
         RenderCfg,
         physics_cfg_for_backend,
     )
@@ -637,8 +639,12 @@ def config_to_cfg(
     env_cfg.seed = config.get("seed", None)
 
     render_config = deepcopy(config.get("render_cfg", {}))
+    if isinstance(render_config.get("denoising"), dict):
+        render_config["denoising"] = DenoisingCfg(**render_config["denoising"])
     if isinstance(render_config.get("dlss"), dict):
         render_config["dlss"] = DLSSCfg(**render_config["dlss"])
+    if isinstance(render_config.get("nrd"), dict):
+        render_config["nrd"] = NRDCfg(**render_config["nrd"])
     if "renderer" in config:
         # Keep the existing flat renderer option as the command-line override.
         render_config["renderer"] = config["renderer"]

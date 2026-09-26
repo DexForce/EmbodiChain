@@ -1729,8 +1729,8 @@ class TestConfigToCfgFromFile:
     @pytest.mark.parametrize(
         ("field_name", "invalid_value"),
         [
-            ("dlss_enabled", "false"),
-            ("upscale_enabled", None),
+            ("tiled_enabled", "false"),
+            ("tiled_gutter_pixels", -1),
             ("upsample_ratio", "2.0"),
             ("exposure_compensation", "1.0"),
         ],
@@ -1833,10 +1833,17 @@ class TestConfigToCfgFromFile:
                 "spp": 4,
                 "tone_mapping_enabled": True,
                 "tone_mapping_exposure": 1.25,
+                "denoising": {
+                    "window": "optix",
+                    "offscreen": "nrd",
+                },
                 "dlss": {
-                    "dlss_enabled": True,
-                    "upscale_enabled": True,
                     "dlss_quality": 1,
+                    "tiled_enabled": False,
+                },
+                "nrd": {
+                    "max_accumulated_frame_num": 24,
+                    "taa_min_current_weight": 0.125,
                 },
             },
             "visualization": {
@@ -1902,15 +1909,26 @@ class TestConfigToCfgFromFile:
         assert cfg.sim_cfg.render_cfg.spp == 4
         assert cfg.sim_cfg.render_cfg.tone_mapping_enabled is True
         assert cfg.sim_cfg.render_cfg.tone_mapping_exposure == 1.25
-        from embodichain.lab.sim import DLSSCfg
+        from embodichain.lab.sim import DenoisingCfg, DLSSCfg, NRDCfg
         import dexsim
 
+        assert isinstance(cfg.sim_cfg.render_cfg.denoising, DenoisingCfg)
         assert isinstance(cfg.sim_cfg.render_cfg.dlss, DLSSCfg)
+        assert isinstance(cfg.sim_cfg.render_cfg.nrd, NRDCfg)
         world_config = dexsim.WorldConfig()
         cfg.sim_cfg.render_cfg.apply_to_dexsim_config(world_config)
-        assert world_config.dlss_config.dlss_enabled is True
-        assert world_config.dlss_config.upscale_enabled is True
+        assert (
+            world_config.rt_pipeline_config.window.mode
+            == dexsim.types.RTRenderMode.OPTIX_DENOISE
+        )
+        assert (
+            world_config.rt_pipeline_config.offscreen.mode
+            == dexsim.types.RTRenderMode.NRD_SR
+        )
         assert world_config.dlss_config.dlss_quality == 1
+        assert world_config.dlss_config.tiled_enabled is False
+        assert world_config.nrd_config.max_accumulated_frame_num == 24
+        assert world_config.nrd_config.taa_min_current_weight == pytest.approx(0.125)
         assert cfg.sim_cfg.visualization.backend == "viser"
         assert cfg.sim_cfg.visualization.scene_fps == 12.5
         assert cfg.sim_cfg.visualization.viser_server.host == "0.0.0.0"

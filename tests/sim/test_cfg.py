@@ -27,7 +27,7 @@ from dexsim.engine.newton_physics import (
     NewtonCollisionPipelineCfg as SpawnNewtonCollisionPipelineCfg,
 )
 from dexsim.spawn import DexsimCollisionDesc, DexsimPhysicsDesc, NewtonCollisionDesc
-from dexsim.types import DenoiserType, Renderer, ToneMappingType
+from dexsim.types import RTRenderMode, Renderer, ToneMappingType
 
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -1155,22 +1155,58 @@ def test_default_physics_cfg_applies_fixed_solver_defaults() -> None:
     assert physics_args["enable_friction_every_iteration"] is True
 
 
-def test_render_cfg_applies_default_denoiser() -> None:
-    """Rendering always uses the default OptiX denoiser."""
+def test_render_cfg_defaults_both_targets_to_dlss_rr() -> None:
+    """Default rendering follows DexSim's DLSS RR target defaults."""
     world_config = dexsim.WorldConfig()
 
     RenderCfg(renderer="hybrid").apply_to_dexsim_config(world_config)
 
-    assert world_config.raytrace_config.open_denoise is True
-    assert world_config.raytrace_config.denoiser_type == DenoiserType.OPTIX
+    assert world_config.rt_pipeline_config.window.mode == RTRenderMode.DLSS_RR
+    assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.DLSS_RR
 
 
-def test_render_cfg_does_not_expose_denoiser_options() -> None:
-    """Denoiser implementation details are not part of EmbodiChain's API."""
-    render_cfg = RenderCfg()
+@pytest.mark.parametrize(
+    ("mode", "native_mode"),
+    [
+        ("off", RTRenderMode.RAW),
+        ("optix", RTRenderMode.OPTIX_DENOISE),
+        ("dlss", RTRenderMode.DLSS_RR),
+        ("nrd", RTRenderMode.NRD_SR),
+    ],
+)
+def test_render_cfg_maps_public_denoising_modes(
+    mode: str, native_mode: RTRenderMode
+) -> None:
+    """Every public mode maps to one mutually exclusive DexSim pipeline."""
+    world_config = dexsim.WorldConfig()
+    denoising = sim_cfg.DenoisingCfg(window=mode, offscreen="off")
 
-    assert not hasattr(render_cfg, "denoiser_enabled")
-    assert not hasattr(render_cfg, "denoiser_type")
+    RenderCfg(denoising=denoising).apply_to_dexsim_config(world_config)
+
+    assert world_config.rt_pipeline_config.window.mode == native_mode
+    assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.RAW
+
+
+@pytest.mark.parametrize(
+    "mode", ["dlss-rr", "nrd-sr", "nrd-relax", "nrd-reblur", "raw"]
+)
+def test_denoising_cfg_rejects_modes_outside_the_public_contract(mode: str) -> None:
+    """Native implementation details cannot leak into public mode values."""
+    with pytest.raises(ValueError, match="DenoisingCfg.window"):
+        sim_cfg.DenoisingCfg(window=mode)
+
+
+def test_render_cfg_keeps_window_and_offscreen_modes_independent() -> None:
+    """Window and offscreen cameras can choose different reconstruction paths."""
+    world_config = dexsim.WorldConfig()
+    render_cfg = RenderCfg(
+        denoising=sim_cfg.DenoisingCfg(window="optix", offscreen="nrd")
+    )
+
+    render_cfg.apply_to_dexsim_config(world_config)
+
+    assert world_config.rt_pipeline_config.window.mode == RTRenderMode.OPTIX_DENOISE
+    assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.NRD_SR
 
 
 def test_render_cfg_applies_tone_mapping_and_fixed_exposure() -> None:
@@ -1232,14 +1268,12 @@ def test_dlss_defaults_preserve_native_quality_resolution() -> None:
     assert converted.dlss_quality == 2
 
 
-@pytest.mark.parametrize("sr_enabled", [False, True])
-def test_dlss_upscale_switch_survives_conversion(sr_enabled: bool) -> None:
-    """The SR switch survives native conversion."""
-    converted = DLSSCfg(
-        upscale_enabled=sr_enabled,
-    ).to_dexsim_cfg(1920, 1080)
+@pytest.mark.parametrize("tiled_enabled", [False, True])
+def test_dlss_tiled_switch_survives_conversion(tiled_enabled: bool) -> None:
+    """Multi-camera tiled execution is a DLSS algorithm setting, not a mode."""
+    converted = DLSSCfg(tiled_enabled=tiled_enabled).to_dexsim_cfg(1920, 1080)
 
-    assert converted.upscale_enabled is sr_enabled
+    assert converted.tiled_enabled is tiled_enabled
 
 
 @pytest.mark.parametrize("quality", range(-1, 6))
@@ -1285,12 +1319,16 @@ def test_dlss_ratio_clamps_small_internal_dimensions() -> None:
     assert converted.render_width == converted.render_height == 1
 
 
-def test_render_cfg_instances_do_not_share_dlss_settings() -> None:
-    """Changing one rendering configuration does not alter another."""
+def test_render_cfg_instances_do_not_share_image_processing_settings() -> None:
+    """Changing nested settings on one config does not alter another."""
     first, second = RenderCfg(), RenderCfg()
-    first.dlss.dlss_enabled = False
+    first.denoising.window = "off"
+    first.dlss.tiled_enabled = False
+    first.nrd.max_accumulated_frame_num = 12
 
-    assert second.dlss.dlss_enabled is True
+    assert second.denoising.window == "dlss"
+    assert second.dlss.tiled_enabled is True
+    assert second.nrd.max_accumulated_frame_num == 30
 
 
 @pytest.mark.parametrize(
@@ -1304,6 +1342,8 @@ def test_render_cfg_instances_do_not_share_dlss_settings() -> None:
         ("target_width", -1),
         ("target_height", -1),
         ("render_width", 1.5),
+        ("tiled_gutter_pixels", -1),
+        ("tiled_max_dimension", -1),
         ("upsample_ratio", 0.5),
         ("upsample_ratio", float("inf")),
         ("upsample_ratio", float("nan")),
@@ -1320,6 +1360,7 @@ def test_render_cfg_instances_do_not_share_dlss_settings() -> None:
         ("exposure_compensation", None),
         ("exposure_compensation", []),
         ("exposure_compensation", {}),
+        ("frame_time_delta_ms", -0.1),
     ],
 )
 def test_dlss_rejects_invalid_settings(field_name: str, invalid_value: object) -> None:
@@ -1331,8 +1372,7 @@ def test_dlss_rejects_invalid_settings(field_name: str, invalid_value: object) -
 @pytest.mark.parametrize(
     "field_name",
     [
-        "dlss_enabled",
-        "upscale_enabled",
+        "tiled_enabled",
     ],
 )
 @pytest.mark.parametrize("invalid_value", ["false", 0, 1, None])
@@ -1361,8 +1401,8 @@ def test_dlss_accepts_integer_and_float_numeric_settings(value: int | float) -> 
         ("upsample_ratio", 0.0),
         ("upsample_ratio", "2.0"),
         ("exposure_compensation", "1.0"),
-        ("dlss_enabled", "false"),
-        ("upscale_enabled", None),
+        ("tiled_enabled", "false"),
+        ("frame_time_delta_ms", -1.0),
     ],
 )
 def test_dlss_conversion_revalidates_mutated_settings(
@@ -1374,3 +1414,35 @@ def test_dlss_conversion_revalidates_mutated_settings(
 
     with pytest.raises(ValueError, match=field_name):
         config.to_dexsim_cfg(1920, 1080)
+
+
+def test_nrd_settings_survive_native_conversion() -> None:
+    """EmbodiChain forwards NRD tuning without exposing native mode selection."""
+    converted = sim_cfg.NRDCfg(
+        max_accumulated_frame_num=24,
+        sh_mode_enabled=True,
+        taa_min_current_weight=0.125,
+        taa_sigma_scale=1.75,
+    ).to_dexsim_cfg()
+
+    assert converted.max_accumulated_frame_num == 24
+    assert converted.sh_mode_enabled is True
+    assert converted.taa_min_current_weight == pytest.approx(0.125)
+    assert converted.taa_sigma_scale == pytest.approx(1.75)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("max_indirect_bounces", -1),
+        ("history_confidence_probe_stride", 0),
+        ("denoising_range", 0.0),
+        ("taa_min_current_weight", 1.1),
+        ("min_blur_radius", -0.1),
+        ("sh_mode_enabled", 1),
+    ],
+)
+def test_nrd_rejects_invalid_settings(field_name: str, invalid_value: object) -> None:
+    """Malformed NRD values fail before entering the native renderer."""
+    with pytest.raises(ValueError, match=field_name):
+        sim_cfg.NRDCfg(**{field_name: invalid_value})

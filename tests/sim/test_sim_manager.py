@@ -33,6 +33,7 @@ import embodichain.lab.sim.sim_manager as sim_manager_module
 import embodichain.lab.visualization as visualization_module
 from embodichain.lab.sim.cfg import (
     DefaultPhysicsCfg,
+    DenoisingCfg,
     DLSSCfg,
     MarkerCfg,
     NewtonPhysicsCfg,
@@ -69,15 +70,15 @@ pytestmark = pytest.mark.no_sim
 
 @pytest.mark.parametrize("renderer", ["hybrid", "fast-rt", "rt", "auto"])
 @pytest.mark.parametrize("headless", [False, True])
-@pytest.mark.parametrize("dlss_enabled", [False, True])
-def test_convert_sim_config_applies_dlss_for_all_renderers_and_camera_modes(
+@pytest.mark.parametrize("denoising_mode", ["optix", "dlss"])
+def test_convert_sim_config_applies_render_pipeline_for_all_startup_modes(
     renderer: str,
     headless: bool,
-    dlss_enabled: bool,
+    denoising_mode: str,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Headless and auto-selected renderers retain explicit DLSS configuration."""
+    """Headless and auto-selected renderers retain explicit pipeline settings."""
     monkeypatch.setattr(
         "embodichain.lab.sim.utility.render_utils.select_default_renderer",
         lambda _gpu_id: "hybrid",
@@ -89,8 +90,11 @@ def test_convert_sim_config_applies_dlss_for_all_renderers_and_camera_modes(
         height=480,
         render_cfg=RenderCfg(
             renderer=renderer,
+            denoising=DenoisingCfg(
+                window=denoising_mode,
+                offscreen="nrd",
+            ),
             dlss=DLSSCfg(
-                dlss_enabled=dlss_enabled,
                 dlss_quality=3,
                 target_width=1920,
                 target_height=1080,
@@ -104,7 +108,12 @@ def test_convert_sim_config_applies_dlss_for_all_renderers_and_camera_modes(
 
     world = SimulationManager._convert_sim_config(manager, config)
 
-    assert world.dlss_config.dlss_enabled is dlss_enabled
+    expected_window_mode = {
+        "optix": dexsim.types.RTRenderMode.OPTIX_DENOISE,
+        "dlss": dexsim.types.RTRenderMode.DLSS_RR,
+    }[denoising_mode]
+    assert world.rt_pipeline_config.window.mode == expected_window_mode
+    assert world.rt_pipeline_config.offscreen.mode == dexsim.types.RTRenderMode.NRD_SR
     assert world.dlss_config.dlss_quality == 3
     assert world.dlss_config.render_width == world.dlss_config.render_height == 0
     assert (world.win_config.width, world.win_config.height) == (640, 480)

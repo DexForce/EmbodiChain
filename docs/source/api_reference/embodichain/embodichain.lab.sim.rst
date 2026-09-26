@@ -146,15 +146,26 @@ Utility
 
    embodichain.lab.sim.utility
 
-DLSS Configuration
-------------------
+Ray-Tracing Denoising and Reconstruction
+----------------------------------------
 
 .. currentmodule:: embodichain.lab.sim
 
-Configure window and offscreen Ray Reconstruction and Super Resolution through
-``SimulationManagerCfg.render_cfg.dlss``. Output resolution remains owned by the
-window or camera configuration.
+Select independent window and offscreen image-processing paths through
+``SimulationManagerCfg.render_cfg.denoising``. DLSS and NRD tuning remain in
+their dedicated nested configs; output resolution stays owned by the window or
+camera configuration.
+
+.. autodata:: DenoisingMode
+
+.. autoclass:: DenoisingCfg
+   :members:
+   :undoc-members:
 
 .. autoclass:: DLSSCfg
+   :members:
+   :undoc-members:
+
+.. autoclass:: NRDCfg
    :members:
    :undoc-members:

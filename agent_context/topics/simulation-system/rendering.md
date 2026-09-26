@@ -1,7 +1,8 @@
 # Rendering, attachment and startup diagnostics
 
-Read this for physics/render synchronization, native-window/DLSS configuration
-and readiness reporting. Return to the [simulation overview](simulation-system.md).
+Read this for physics/render synchronization, native-window/offscreen image
+processing and readiness reporting. Return to the
+[simulation overview](simulation-system.md).
 
 ## Rendering does not advance physics
 
@@ -51,22 +52,25 @@ Completion is marked only after all attachments succeed, so partial failures
 retry. The camera registry is the sole attachment-intent store. Detailed
 sensor behavior belongs to [sensors](../sensor-system/sensor-system.md).
 
-## Renderer and DLSS configuration
+## Renderer, denoising and reconstruction configuration
 
-`cfg/simulation.py:RenderCfg.apply_to_dexsim_config()` translates rendering and
-`DLSSCfg` into WorldConfig after automatic renderer resolution. Forward the
-DLSS master switch even when false, and retain config during headless startup
-for offscreen cameras or a later window. Native window/offscreen behavior can
-differ; settings not authored by EmbodiChain retain DexSim defaults.
+`cfg/simulation.py:RenderCfg.apply_to_dexsim_config()` translates rendering,
+`DenoisingCfg`, `DLSSCfg` and `NRDCfg` into WorldConfig after automatic renderer
+resolution. `DenoisingCfg` independently selects the window and offscreen
+pipelines from `off`, `optix`, `dlss` and `nrd`; native RR/SR variants and NRD
+method variants are not part of the EmbodiChain public contract. Retain the
+complete configuration during headless startup for offscreen cameras or a later
+window.
 
 The actual camera/window owns output dimensions; compatibility target fields
 must not resize it. Internal dimensions/upsample ratio affect FastRT/OfflineRT
 windows; hybrid/offscreen sizes derive from output size and quality.
 `frame_time_delta_ms` is render cadence, not physics/control cadence.
-`gym/utils/gym_utils.py:config_to_cfg()` decodes nested DLSS mappings. Scalar
-validation runs at construction and conversion after mutable edits. Configuration
-tests do not prove GPU/NGX support, which initializes on a rendered frame.
-Read exact renderer/quality defaults in the config source.
+`gym/utils/gym_utils.py:config_to_cfg()` decodes all three nested mappings.
+Scalar validation runs at construction and conversion after mutable edits.
+Configuration tests do not prove GPU/NGX/NRD runtime support, which initializes
+on a rendered frame. Read exact renderer and algorithm defaults in the config
+source.
 
 ## Startup summaries
 
