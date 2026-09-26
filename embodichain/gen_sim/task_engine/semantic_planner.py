@@ -205,6 +205,7 @@ class SemanticTaskPlanner:
                         },
                     )
                 )
+                # Check the free heading at release height before Place pins it.
                 calls.insert(
                     -1,
                     {
@@ -212,8 +213,8 @@ class SemanticTaskPlanner:
                         "call_id": _ALIGN_HELD_CALL_ID,
                         "arguments": {
                             "object": object_id,
-                            "target": staging_target_name,
-                            "preserve_yaw": True,
+                            "target": target_name,
+                            "preserve_yaw": False,
                         },
                         "resources": {"primary": resource},
                     },

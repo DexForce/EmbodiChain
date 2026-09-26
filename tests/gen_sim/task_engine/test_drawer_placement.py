@@ -28,13 +28,17 @@ from embodichain.gen_sim.task_engine._task_program.drawer_geometry import (
 
 
 @pytest.mark.parametrize("has_drawers", [False, True])
+@pytest.mark.parametrize("coordinated", [False, True])
 def test_factory_selects_runtime_without_shadowing_drawer_engine(
-    monkeypatch: pytest.MonkeyPatch, has_drawers: bool
+    monkeypatch: pytest.MonkeyPatch, has_drawers: bool, coordinated: bool
 ) -> None:
     from types import SimpleNamespace
     from unittest.mock import Mock
     from embodichain.gen_sim.task_engine._task_program.assembly import _TaskFactory
     from embodichain.gen_sim.task_engine._task_program import drawer_runtime
+    from embodichain.gen_sim.task_engine._task_program.coordinated_motion import (
+        GenSimCoordinatedPickment,
+    )
     from embodichain.lab.task_program.integrations.simulation.environment import (
         SimulationTaskProgramFactory,
     )
@@ -58,6 +62,7 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
     factory._drawers = (object(),) if has_drawers else ()
     factory._pour_receivers = {}
     factory._adaptive_pick = False
+    factory._coordinated_motion = coordinated
     factory._create_motion_generator = Mock(return_value=object())
     factory._grasp_pose_generators = {}
     factory._registration = registration
@@ -67,9 +72,12 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
         assert result is drawer
         constructor.assert_called_once()
         parent.assert_not_called()
-        drawer.register.assert_called_once()
-        assert isinstance(drawer.register.call_args.args[0], GenSimPickUp)
-        assert drawer.register.call_args.kwargs == {"replace": True}
+        assert [type(c.args[0]) for c in drawer.register.call_args_list] == [
+            GenSimPickUp
+        ] + ([GenSimCoordinatedPickment] if coordinated else [])
+        assert all(
+            c.kwargs == {"replace": True} for c in drawer.register.call_args_list
+        )
     else:
         assert result is standard
         parent.assert_called_once()
@@ -80,7 +88,7 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
             GenSimMoveHeldObject,
             GenSimPlace,
             GenSimPour,
-        ]
+        ] + ([GenSimCoordinatedPickment] if coordinated else [])
 
 
 def drawer_meshes() -> list[trimesh.Trimesh]:
