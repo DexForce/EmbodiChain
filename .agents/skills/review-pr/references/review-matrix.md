@@ -70,7 +70,7 @@ simulation-marked test.
 ## Gym environments, managers, functors, and randomization
 
 **Paths:** `embodichain/lab/gym/**`, especially `envs/managers/**`,
-`action_bank/**`, and wrappers.
+wrappers.
 
 Check:
 

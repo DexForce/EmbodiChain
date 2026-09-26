@@ -49,12 +49,6 @@ from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     LightCfg,
 )
-from embodichain.lab.gym.envs.action_bank.configurable_action import (
-    get_func_tag,
-)
-from embodichain.lab.gym.envs.action_bank.configurable_action import (
-    ActionBank,
-)
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
@@ -302,7 +296,6 @@ class EmbodiedEnv(BaseEnv):
         perturbation, etc.
     - observation manager: The observation manager is used to manage the observations in the environment,
         such as depth, segmentation, etc.
-    - action bank: The action bank is used to manage the actions in the environment, such as action composition, action graph, etc.
     - affordance_datas: The affordance data that can be used to store the intermediate results or information
     """
 
@@ -357,7 +350,6 @@ class EmbodiedEnv(BaseEnv):
                     "TaskProgramAdapterFactory or be None."
                 )
         self.affordance_datas = {}
-        self.action_bank = None
         self._task_program_adapter: TaskProgramEnvironmentAdapter | None = None
         self._active_task_program_bridge: TaskProgramDemoBridge | None = None
 
@@ -746,59 +738,6 @@ class EmbodiedEnv(BaseEnv):
                             f"Filtering out visual randomization functor: {attr.func.__name__}"
                         )
                         setattr(self.cfg.events, attr_name, None)
-
-    def _init_action_bank(
-        self, action_bank_cls: ActionBank, action_config: Dict[str, Any]
-    ):
-        """
-        Initialize action bank and parse action graph structure.
-
-        Args:
-            action_bank_cls: The ActionBank class for this environment.
-            action_config: The configuration dict for the action bank.
-        """
-        self.action_bank = action_bank_cls(action_config)
-        try:
-            this_class_name = self.action_bank.__class__.__name__
-            node_func = {}
-            edge_func = {}
-            for class_name in [this_class_name, ActionBank.__name__]:
-                node_func.update(get_func_tag("node").functions.get(class_name, {}))
-                edge_func.update(get_func_tag("edge").functions.get(class_name, {}))
-        except KeyError as e:
-            raise KeyError(
-                f"Function tag for {e} not found in action bank function registry."
-            )
-
-        self.graph_compose, jobs_data, jobkey2index = self.action_bank.parse_network(
-            node_functions=node_func, edge_functions=edge_func, vis_graph=False
-        )
-        self.packages = self.action_bank.gantt(
-            tasks_data=jobs_data, taskkey2index=jobkey2index, vis=False
-        )
-
-    def set_affordance(self, key: str, value: Any):
-        """
-        Set an affordance value by key.
-
-        Args:
-            key (str): The affordance key.
-            value (Any): The affordance value.
-        """
-        self.affordance_datas[key] = value
-
-    def get_affordance(self, key: str, default: Any = None):
-        """
-        Get an affordance value by key.
-
-        Args:
-            key (str): The affordance key.
-            default (Any, optional): Default value if key not found.
-
-        Returns:
-            Any: The affordance value or default.
-        """
-        return self.affordance_datas.get(key, default)
 
     def _hook_after_sim_step(
         self,
