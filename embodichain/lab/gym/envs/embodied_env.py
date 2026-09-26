@@ -1432,7 +1432,9 @@ class EmbodiedEnv(BaseEnv):
                     "Policy rollout recording requires one flat torch.Tensor action."
                 )
             action_to_store = action
-        elif self.action_manager is not None and isinstance(action, torch.Tensor):
+        elif getattr(self, "action_manager", None) is not None and isinstance(
+            action, torch.Tensor
+        ):
             action_to_store = self._last_action_manager_qpos
             if action_to_store is None:
                 raise RuntimeError(
