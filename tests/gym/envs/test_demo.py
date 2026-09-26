@@ -207,6 +207,31 @@ def test_policy_action_masks_completed_demo_rows_through_manager() -> None:
     env.action_manager.mask_inactive.assert_called_once_with(env._demo_active_mask)
 
 
+def test_raw_demo_action_masks_completed_rows_without_action_manager() -> None:
+    """Sticky vector demos also hold inactive rows on the legacy path."""
+    env = _controller_action_env()
+    env.action_manager = None
+    env.dataset_manager = None
+    env._demo_no_auto_reset = True
+    env._demo_active_mask = torch.tensor([False, True])
+
+    processed = env._preprocess_action(torch.ones(2, 3))
+
+    torch.testing.assert_close(processed[0], torch.zeros(3))
+    torch.testing.assert_close(processed[1], torch.ones(3))
+
+
+def test_controller_action_refreshes_executed_qpos_snapshot() -> None:
+    """A direct controller command must not reuse a prior manager snapshot."""
+    env = _controller_action_env()
+    env._last_action_manager_qpos = torch.full((2, 3), 99.0)
+
+    prepared = env._preprocess_action(ControllerAction(torch.ones(2, 3)))
+
+    assert isinstance(prepared, ControllerAction)
+    torch.testing.assert_close(env._last_action_manager_qpos, torch.ones(2, 3))
+
+
 def test_policy_history_snapshots_manager_owned_flat_action() -> None:
     """Dataset history captures manager state after validation and owns it."""
     env = _controller_action_env()

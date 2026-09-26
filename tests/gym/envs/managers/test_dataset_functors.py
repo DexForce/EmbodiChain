@@ -1594,6 +1594,36 @@ def test_joint_contract_action_list_keeps_primary_action_only() -> None:
     torch.testing.assert_close(result, stored_actions)
 
 
+def test_position_velocity_legacy_action_list_keeps_full_encoding() -> None:
+    """Legacy position-velocity demos must not use qpos-only history."""
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder._action_contract_cfg = None
+    recorder._env = SimpleNamespace(
+        expert_action_spec=SimpleNamespace(joint_command_mode="position_velocity"),
+        get_executed_qpos_history=lambda env_id, step: torch.ones(step, 2),
+    )
+    stored_actions = torch.arange(8, dtype=torch.float32).reshape(2, 4)
+
+    result = recorder._contract_action_list(0, 2, stored_actions)
+
+    torch.testing.assert_close(result, stored_actions)
+
+
+def test_expert_controller_recorder_uses_executed_history_for_mixed_widths() -> None:
+    """Legacy recorder reads executed joints when policy storage is wider/different."""
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder._action_contract_cfg = None
+    expected = torch.arange(16, dtype=torch.float32).reshape(2, 8)
+    recorder._env = SimpleNamespace(
+        get_expert_controller_qpos_history=lambda env_id, step: expected[:step]
+    )
+    stored_policy_actions = torch.zeros(2, 7)
+
+    result = recorder._contract_action_list(0, 2, stored_policy_actions)
+
+    torch.testing.assert_close(result, expected)
+
+
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
 def test_episode_metadata_sidecar_appends_json_lines(tmp_path) -> None:
     """The EmbodiChain sidecar is valid append-only JSONL."""
