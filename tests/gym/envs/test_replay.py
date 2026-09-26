@@ -34,7 +34,7 @@ from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import JointDrivePropertiesCfg, RigidObjectCfg, RobotCfg
 from embodichain.lab.sim.shapes import CubeCfg
-from embodichain.lab.gym.envs.managers.actions import DeltaQposTerm
+from embodichain.lab.gym.envs.managers.actions import RelativeJointPositionAction
 from embodichain.lab.gym.envs.managers.cfg import ActionTermCfg
 
 pytestmark = [pytest.mark.requires_sim, pytest.mark.slow]
@@ -201,6 +201,7 @@ def test_position_velocity_targets_keep_fixed_env_step_and_are_saved(tmp_path):
         update.assert_called_once_with(
             env.physics_dt,
             env.cfg.sim_steps_per_control,
+            render_final_step=False,
         )
         assert env.action_space.shape[-1] == env.robot.dof
         assert env.rollout_buffer["actions"].shape[-1] == 2 * env.robot.dof
@@ -532,7 +533,21 @@ class ReplayDeltaEnv(EmbodiedEnv):
             )
         ]
         cfg.actions = {
-            "arm": ActionTermCfg(func=DeltaQposTerm, mode="pre", params={"scale": 1.0})
+            "arm": ActionTermCfg(
+                func=RelativeJointPositionAction,
+                params={
+                    "joint_names": (
+                        "Joint1",
+                        "Joint2",
+                        "Joint3",
+                        "Joint4",
+                        "Joint5",
+                        "Joint6",
+                    ),
+                    "preserve_order": True,
+                    "scale": 1.0,
+                },
+            )
         }
         cfg.record_trajectory = record_trajectory
         cfg.trajectory_auto_save = False
@@ -558,6 +573,9 @@ def test_dynamic_replay_with_action_manager(tmp_path):
         # Recorded action must be the raw delta (pre-process), not the resolved qpos.
         rec = torch.load(path, weights_only=False)
         assert torch.allclose(rec["actions"][0, 0], deltas[0][0], atol=1e-6)
+        assert rec["meta"]["action_kind"] == "policy"
+        assert [term["name"] for term in rec["meta"]["action_terms"]] == ["arm"]
+        assert "joint_command_mode" not in rec["meta"]
         assert torch.allclose(rec["states"]["robot"]["qpos"][:, 0], init_qpos)
         for step in range(1, len(deltas)):
             assert torch.allclose(

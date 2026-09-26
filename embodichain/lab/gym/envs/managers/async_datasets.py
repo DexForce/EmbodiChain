@@ -115,6 +115,11 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
                 "LeRobot is not installed. Please install it with: pip install lerobot"
             )
         super().__init__(cfg, env)
+        if self.record_eef_observation:
+            raise ValueError(
+                "AsyncLeRobotRecorder cannot record EEF observations safely; "
+                "use LeRobotRecorder so FK runs on the simulation thread."
+            )
 
         # Single-worker queue. A single worker guarantees LeRobotDataset is
         # only ever touched from one thread (it is not thread-safe) and keeps
@@ -230,7 +235,8 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
                 if step <= 0:
                     continue
                 obs_view = env.rollout_buffer["obs"][env_id, :step]
-                action_view = env.rollout_buffer["actions"][env_id, :step]
+                stored_actions = env.rollout_buffer["actions"][env_id, :step]
+                action_view = self._contract_action_list(env_id, step, stored_actions)
                 # Clone in the caller thread: the rollout buffer is cleared and
                 # reused by the next episode on reset, so the worker must not hold
                 # a view into it.

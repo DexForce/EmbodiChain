@@ -86,17 +86,20 @@ initializes simulation state and configured managers. An explicit effective
 seed on reset also reaches the event manager; scoped randomization behavior is
 owned by [randomization](../randomization/randomization.md).
 
-The step order is:
+The policy step order is:
 
 ```text
-preprocess → robot control → physics update → interval events
-→ observations → evaluation/info → rewards → postprocess
+flat action validation/slicing → term processing → term application
+→ physics update → interval events → observations → evaluation/info → rewards
 → elapsed steps and termination → rollout hook → optional reset
 ```
 
-Raw policy input goes through action `pre` terms. `ControllerAction` skips only
-that preprocessing; both paths validate controller keys, batch, joint width,
-floating dtype and device, then retain `post` terms and the ordinary Gym loop.
+Raw policy input is one ordered flat floating tensor. `ActionManager` validates
+it before state changes, processes every slice, and applies each term's owned
+resources. `ControllerAction` stays wrapped through preprocessing, bypasses the
+manager entirely, and validates qpos/qvel/qf keys, batch, joint width, floating
+dtype, and device at the direct controller boundary. Both paths retain the
+ordinary observation, reward, termination, and rollout lifecycle.
 
 Read final task success before resetting scene/bridge state. A Task Program
 reports success only after its bridge completes normally and combines runtime,

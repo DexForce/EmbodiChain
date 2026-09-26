@@ -24,6 +24,11 @@ import pytest
 import torch
 from tensordict import TensorDict
 
+from embodichain.lab.gym.envs.managers.action_types import (
+    ActionDescriptor,
+    ActionTermDescriptor,
+)
+
 # Skip all tests if LeRobot is not available.
 try:
     from embodichain.lab.gym.envs.managers.async_datasets import (
@@ -137,21 +142,59 @@ class _MockEnv:
         return self.episode_metadata
 
 
-def _make_recorder(env: _MockEnv, mock_dataset: _MockDataset) -> AsyncLeRobotRecorder:
+def _policy_descriptors() -> tuple[ActionDescriptor, ActionDescriptor]:
+    """Return the canonical EEF plus parallel-gripper policy layout."""
+    arm = ActionDescriptor(
+        "arm_action",
+        0,
+        6,
+        ActionTermDescriptor(
+            "eef_pose",
+            6,
+            ("x", "y", "z", "roll", "pitch", "yaw"),
+            ("m", "m", "m", "rad", "rad", "rad"),
+            None,
+            tuple(f"joint_{index}" for index in range(6)),
+            {"frame": "arena"},
+        ),
+    )
+    gripper = ActionDescriptor(
+        "gripper_action",
+        6,
+        7,
+        ActionTermDescriptor(
+            "parallel_gripper",
+            1,
+            ("gripper",),
+            ("normalized",),
+            "minus_one_to_one",
+            ("finger_joint",),
+            {},
+        ),
+    )
+    return arm, gripper
+
+
+def _make_recorder(
+    env: _MockEnv,
+    mock_dataset: _MockDataset,
+    *,
+    action_contract: dict[str, object] | None = None,
+) -> AsyncLeRobotRecorder:
     """Build an AsyncLeRobotRecorder with the LeRobotDataset.create patched out."""
     from embodichain.lab.gym.envs.managers.cfg import DatasetFunctorCfg
 
-    cfg = DatasetFunctorCfg(
-        func=AsyncLeRobotRecorder,
-        params={
-            "save_path": "/tmp/test_async_recorder",
-            "robot_meta": {"robot_type": "test"},
-            "instruction": {"lang": "test"},
-            "extra": {"scene_type": "s", "task_description": "t"},
-            "use_videos": False,
-            "image_writer_threads": 0,
-        },
-    )
+    params = {
+        "save_path": "/tmp/test_async_recorder",
+        "robot_meta": {"robot_type": "test"},
+        "instruction": {"lang": "test"},
+        "extra": {"scene_type": "s", "task_description": "t"},
+        "use_videos": False,
+        "image_writer_threads": 0,
+    }
+    if action_contract is not None:
+        params["action_contract"] = action_contract
+    cfg = DatasetFunctorCfg(func=AsyncLeRobotRecorder, params=params)
     with patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset") as mock_cls:
         mock_cls.create.return_value = mock_dataset
         return AsyncLeRobotRecorder(cfg, env)
@@ -314,6 +357,67 @@ class TestAsyncLeRobotRecorder:
             assert frame["subtask_index"].tolist() == [0]
         assert mock_ds.meta.subtasks.index.tolist() == ["original segment task"]
         assert mock_ds.add_frame_calls[-1]["annotation.segment_end"].tolist() == [1]
+
+    def test_policy_history_is_cloned_before_async_persistence(self) -> None:
+        """Async persistence owns descriptor-ordered policy rows at enqueue."""
+        env = _MockEnv(num_envs=1, num_joints=7, steps=3)
+        source = torch.tensor(
+            [
+                [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, -1.0],
+                [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 0.0],
+                [2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 1.0],
+            ]
+        )
+        expected = source.clone()
+        env.get_raw_action_history = Mock(return_value=source)
+        env.action_manager = Mock()
+        env.action_manager.descriptors = _policy_descriptors()
+        env.action_manager.get_term.return_value = Mock(_scale=torch.tensor(1.0))
+        mock_ds = _MockDataset()
+        recorder = _make_recorder(
+            env,
+            mock_ds,
+            action_contract={
+                "version": 1,
+                "representation": "eef_pose_parallel_gripper",
+                "record_eef_observation": False,
+            },
+        )
+
+        recorder(env, env_ids=torch.tensor([0]))
+        env.current_rollout_step = 0
+        source.fill_(9.0)
+        recorder.finalize()
+
+        saved = torch.stack(
+            [frame[LeRobotKey.ACTION.value] for frame in mock_ds.add_frame_calls]
+        )
+        torch.testing.assert_close(saved, expected)
+
+    def test_invalid_policy_action_never_enters_async_queue(self) -> None:
+        """Descriptor validation fails in the caller before enqueue or execution."""
+        env = _MockEnv(num_envs=1, num_joints=7, steps=1)
+        invalid = torch.tensor([[0.0, 0, 0, 0, 0, 0, 1.1]])
+        env.get_raw_action_history = Mock(return_value=invalid)
+        env.action_manager = Mock()
+        env.action_manager.descriptors = _policy_descriptors()
+        env.action_manager.get_term.return_value = Mock(_scale=torch.tensor(1.0))
+        recorder = _make_recorder(
+            env,
+            _MockDataset(),
+            action_contract={
+                "version": 1,
+                "representation": "eef_pose_parallel_gripper",
+                "record_eef_observation": False,
+            },
+        )
+
+        with pytest.raises(ValueError, match=r"within \[-1, 1\]"):
+            recorder(env, env_ids=torch.tensor([0]))
+
+        assert recorder._save_queue.empty()
+        env.current_rollout_step = 0
+        recorder.finalize()
 
     def test_finalize_drains_and_finalizes_dataset(self):
         """finalize() must drain the worker then call dataset.finalize()."""

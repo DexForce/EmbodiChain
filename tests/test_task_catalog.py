@@ -228,7 +228,18 @@ def test_official_catalogs_resolve_real_deployments() -> None:
         "ur5",
         "franka_newton",
         "ur5_newton",
+        "franka_rlinf",
+        "franka_rlinf_joint",
+        "franka_rlinf_expert",
     }
+    deployments = {deployment.name: deployment for deployment in pick.deployments}
+    assert deployments["franka_rlinf"].config_ref.endswith("task.franka.rlinf.yaml")
+    assert deployments["franka_rlinf_joint"].config_ref.endswith(
+        "task.franka.rlinf_joint.yaml"
+    )
+    assert deployments["franka_rlinf_expert"].config_ref.endswith(
+        "task.franka.rlinf_expert.yaml"
+    )
     assert catalog._select_task(tasks, "push_cube").deployments[0].capabilities == {
         catalog._RL
     }

@@ -70,22 +70,15 @@ def _summary_functor(*args, **kwargs):
 
 
 class _ActionTermStub:
-    input_key = "action"
+    command_type = "qpos"
     action_dim = 7
     cfg = SimpleNamespace(params={})
 
 
 class _ActionManagerStub:
-    """Action-manager stub exposing terms by processing mode."""
+    """Action-manager stub exposing terms in flat slice order."""
 
     active_functors = ["delta_qpos", "smooth_action"]
-
-    def get_terms_by_mode(self, mode: str) -> list[tuple[str, object]]:
-        terms = {
-            "pre": [("delta_qpos", _ActionTermStub())],
-            "post": [("smooth_action", _ActionTermStub())],
-        }
-        return terms[mode]
 
     def get_term(self, name: str) -> _ActionTermStub:
         return _ActionTermStub()
@@ -226,8 +219,8 @@ def test_full_summary_preserves_every_manager_count_and_functor() -> None:
         ("reset", "randomize_objects"),
         ("modify", "normalize_rgb"),
         ("add", "task_state"),
-        ("pre", "delta_qpos"),
-        ("post", "smooth_action"),
+        ("terms", "delta_qpos"),
+        ("terms", "smooth_action"),
         ("save", "record_episode"),
     ):
         assert any(mode in line and name in line for line in rendered.splitlines())
@@ -246,7 +239,7 @@ def test_compact_summary_separates_counts_from_functor_details() -> None:
     assert "load_scene" in details
     assert "randomize_objects" in details
     assert "_summary_functor" in _column_text(details, 2)
-    assert "input=action" in details
+    assert "command=qpos" in details
     assert "dim=7" in details
     assert "save failed episodes=OFF" in details
 
