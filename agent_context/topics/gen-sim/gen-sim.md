@@ -97,9 +97,16 @@ two verified grasps of the same object are retained through motion, and hands
 open only at release. Missing or conflicting held state cannot fall back to
 re-picking. Consecutive E5 relative targets accumulate for terminal checks;
 release retreat exceeds the unchanged separation threshold with tracking margin.
-For non-drawer, single-environment Place only, exhausted Cartesian IK planning
-may retry through the shared motion generator with nearby joint seeds and a
-joint-limit-margin preference. Already successful plans are returned unchanged;
+For non-drawer Place, the current `GenSimPlace` planning scope selects the same
+Cartesian sampling policy in both checked and approach motion generators. Its
+planning and recovery do not depend on unrelated E2/HandOver calls elsewhere
+in the program. Outside this scope, each generator's existing policy remains
+unchanged; drawer and cuRobo routes retain their own policies. Ordinary Place
+paths that previously used joint interpolation may therefore change; regenerate
+bundles after the motion-policy revision. For a single environment only,
+exhausted Cartesian IK planning may retry through the shared motion generator
+with nearby joint seeds and a joint-limit-margin preference. Successful
+Cartesian plans do not enter local IK recovery;
 the fallback preserves Cartesian samples, control timing and random state,
 and rechecks full-robot velocity after Place resampling. This is a bounded
 kinematic recovery, not collision or physical-placement qualification.
