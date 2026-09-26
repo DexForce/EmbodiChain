@@ -26,6 +26,8 @@ from embodichain.lab.sim.cfg import (
     ArticulationRootPropertiesCfg,
     CollisionPropertiesCfg,
     JointDrivePropertiesCfg,
+    NewtonCollisionPropertiesCfg,
+    NewtonRigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
     RobotCfg,
 )
@@ -593,6 +595,20 @@ def test_specified_robots_use_portable_joint_drive_semantics(
     assert cfg.joint_drive_props.drive_type == "force"
     assert cfg.joint_drive_props.target_mode is None
     assert cfg.joint_drive_props._resolve_modes() == ("position_velocity", "force")
+
+
+def test_franka_panda_owns_newton_fingertip_contact_defaults() -> None:
+    cfg = FrankaPandaCfg.from_dict({})
+
+    group = cfg.link_attrs["newton_gripper_contacts"]
+    assert group.link_names_expr == ["fr3_leftfinger|fr3_rightfinger"]
+    assert isinstance(group.attrs.collision_props, NewtonCollisionPropertiesCfg)
+    assert group.attrs.collision_props.condim == 4
+    assert isinstance(group.attrs.material_props, NewtonRigidBodyMaterialCfg)
+    assert group.attrs.material_props.ke == pytest.approx(40000.0)
+    assert group.attrs.material_props.kd == pytest.approx(400.0)
+    assert group.attrs.material_props.torsional_friction == pytest.approx(0.1)
+    assert group.attrs.material_props.rolling_friction == pytest.approx(0.01)
 
 
 def test_robotcfg_save_to_file(tmp_path):

@@ -24,6 +24,10 @@ import torch
 from embodichain.data import get_data_path
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
+    LinkPhysicsOverrideCfg,
+    NewtonCollisionPropertiesCfg,
+    NewtonRigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
     RobotCfg,
     URDFCfg,
 )
@@ -156,6 +160,20 @@ class FrankaPandaCfg(RobotCfg):
                 "fr3_finger_joint[1-2]": 1e4,
             },
         )
+        self.link_attrs = {
+            "newton_gripper_contacts": LinkPhysicsOverrideCfg(
+                link_names_expr=["fr3_leftfinger|fr3_rightfinger"],
+                attrs=RigidBodyPhysicsCfg(
+                    collision_props=NewtonCollisionPropertiesCfg(condim=4),
+                    material_props=NewtonRigidBodyMaterialCfg(
+                        ke=40000.0,
+                        kd=400.0,
+                        torsional_friction=0.1,
+                        rolling_friction=0.01,
+                    ),
+                ),
+            )
+        }
 
         self.init_qpos = list(_FRANKA_DEFAULT_INIT_QPOS)
 
