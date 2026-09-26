@@ -167,9 +167,8 @@ UR5 vertical slice is stable. Existing `env.yaml`, `task.franka.yaml`,
 - `physics`, `num_envs: 16`, episode limits, simulation cadence, and arena;
 - the dynamic cube and its fixed physical material/mass properties;
 - RGB camera and observation sensor construction;
-- a fixed global base sun/background; and
-- per-environment local point/spot/rect lights when the renderer supports
-  independent instances.
+- one global base sun/background; and
+- the global sun's bounded visual profile hook.
 
 The environment config is the only owner of `num_envs`, camera resolution,
 renderer, and control timing. A Generation Profile may request a registered
@@ -265,8 +264,8 @@ assignment:
 4. the initial-pose provider exposes at least `m` legal poses;
 5. every visual and observation profile ID is registered exactly once;
 6. every editable phase has an explicit kind and operator permission; and
-7. global visual parameters are rejected unless the host declares a separate
-   compatibility bucket/renderer instance.
+7. the only permitted global visual parameter is the bounded `main_light`
+   sun operation; all declarations in one batch must resolve it identically.
 
 The profile does not encode robot joint limits, `control_dt`, backend,
 `num_envs`, recorder construction, or arbitrary Python callables.
@@ -389,7 +388,8 @@ The physical episode follows this order for each candidate:
 2. restore robot, cube, target state, and preparation epoch for the selected
    reference family;
 3. verify the restored state;
-4. apply exactly one visual profile to the selected environment row;
+4. apply exactly one visual profile to the selected environment row and apply
+   any declared global sun state once for the batch;
 5. validate the visual/observation binding;
 6. for each of the three cycles:
    1. build an `AffordanceSamplingContext` from the current measured state;
@@ -466,10 +466,11 @@ The strict compatibility key contains:
 - observation tensor schema and renderer capability.
 
 Visual profile ID is not a physical geometry key. Per-environment visual
-parameters are allowed within one compatibility bucket. A profile that changes
-global sun/background/material state is rejected by default; supporting it
-requires a separate simulator/compatibility bucket and is outside the default
-combined deployment.
+parameters are allowed within one compatibility bucket. This deployment also
+supports one explicitly declared global sun operation. Because the sun is a
+single renderer object, a batch selects at most one global sun state; multiple
+profiles that declare it must agree, and the selected state applies to all
+rows. Unsupported global renderer mutations remain rejected.
 
 Scheduling is family round-robin with FIFO order within each family. It is not
 coverage-per-cost. Candidate and artifact queues are bounded; producers block
@@ -495,12 +496,13 @@ the existing environment functors:
 - `randomize_visual_material` for per-environment object appearance;
 - `randomize_camera_extrinsics` and `randomize_camera_intrinsics` for RGB
   camera variation; and
-- `randomize_light` for per-environment point/spot/rect light instances.
+- the host light port for the single global sun.
 
-The fixed global sun and background remain unchanged in the default deployment
-because the current light randomization contract applies global properties to
-all environments. A profile requesting global state is rejected with an
-actionable compatibility error instead of silently affecting other slots.
+The global sun is reset to its authored state before each rollout. A declared
+`global_sun` profile applies one color and intensity to the whole batch, while
+per-environment material and camera operations remain row-scoped. Unsupported
+global state is rejected with an actionable compatibility error instead of
+silently affecting other renderer objects.
 
 The profile's ID, seed, resolved parameters, application status, and renderer
 capability are recorded in the candidate schedule digest and artifact
@@ -519,10 +521,10 @@ observable without multiplying physical candidates:
 | `rgb_canonical` | authored cube material and camera calibration | unchanged |
 | `rgb_material_01` | deterministic cube base-color/roughness material | unchanged |
 | `rgb_camera_01` | deterministic camera extrinsic/intrinsic perturbation within sensor bounds | unchanged |
-| `rgb_light_01` | deterministic local point/spot/rect light color/intensity perturbation | unchanged |
+| `rgb_light_01` | unchanged | global `main_light` sun color and intensity (`<= 10`) |
 
-The profile resolver validates that every operation is per-environment and
-seedable. It does not place a sun or background mutation in these profiles.
+The profile resolver validates that per-environment operations are seedable and
+that the only supported global operation is the bounded `main_light` sun.
 
 ## Measured validation and local persistence
 

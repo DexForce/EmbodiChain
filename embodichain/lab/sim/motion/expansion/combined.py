@@ -100,6 +100,29 @@ def _strings(value: object, name: str, *, nonempty: bool = True) -> tuple[str, .
     return result
 
 
+def _validate_visual_operation(operation: Mapping[str, Any], name: str) -> None:
+    """Validate the scope and bounds of one visual profile operation."""
+    scope = operation.get("scope")
+    if scope == "per_environment":
+        if operation.get("kind") == "global_sun":
+            raise ValueError("global_sun must use scope 'global'")
+        return
+    if scope != "global" or operation.get("kind") != "global_sun":
+        raise ValueError(f"{name} requests unsupported global state")
+    if operation.get("light_uid") != "main_light":
+        raise ValueError(f"{name}.light_uid must be 'main_light'")
+    color = operation.get("color")
+    if not isinstance(color, (list, tuple)) or len(color) != 3:
+        raise ValueError(f"{name}.color must contain exactly three values")
+    for channel in color:
+        value = _finite(channel, f"{name}.color value")
+        if not 0 <= value <= 1:
+            raise ValueError(f"{name}.color values must be in [0, 1]")
+    intensity = _finite(operation.get("intensity"), f"{name}.intensity")
+    if not 0 <= intensity <= 10:
+        raise ValueError(f"{name}.intensity must be in [0, 10]")
+
+
 @configclass
 class _CombinedSourceCfg:
     kind: str = "task_program"
@@ -279,8 +302,10 @@ class _PersistenceCfg:
     write_manifest: bool = True
 
     def __post_init__(self) -> None:
-        if self.sink != "local_artifact":
-            raise ValueError("combined persistence.sink must be local_artifact")
+        if self.sink not in {"local_artifact", "lerobot"}:
+            raise ValueError(
+                "combined persistence.sink must be local_artifact or lerobot"
+            )
         self.output_dir = _text(self.output_dir, "persistence.output_dir")
         for name in ("write_trajectories", "write_observations", "write_manifest"):
             _bool(getattr(self, name), f"persistence.{name}")
@@ -472,10 +497,12 @@ def load_visual_profile_registry(
     *,
     requested_profile_ids: Sequence[str] | None = None,
 ) -> tuple[str, ...]:
-    """Load and validate seedable per-environment visual profile IDs.
+    """Load and validate seedable visual profile IDs.
 
-    Global renderer mutations are rejected at this boundary because they would
-    affect unrelated physical slots in the default compatibility bucket.
+    The deployment permits one explicitly declared global sun operation.  It
+    is applied to the whole simulator and therefore must be shared by every
+    row in a batch; all other unsupported global renderer mutations are
+    rejected at this boundary.
     """
     with Path(path).open(encoding="utf-8") as stream:
         data = yaml.safe_load(stream)
@@ -498,10 +525,10 @@ def load_visual_profile_registry(
             operation_mapping = _mapping(
                 operation, f"visual profile {profile_id}.operation"
             )
-            if operation_mapping.get("scope") != "per_environment":
-                raise ValueError(
-                    f"visual profile {profile_id} requests unsupported global state"
-                )
+            _validate_visual_operation(
+                operation_mapping,
+                f"visual profile {profile_id}.operation",
+            )
     if requested_profile_ids is not None:
         requested = _strings(requested_profile_ids, "requested_profile_ids")
         if set(requested) != set(ids):

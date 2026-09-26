@@ -68,6 +68,12 @@ combined showcase commits one LeRobot episode per physical row at
 `/tmp/repeated-pick-place-lerobot` and stores the generation records in
 `meta/embodichain_episodes.jsonl`.
 
+It also enables the synchronous `record_camera_data` event recorder. With
+`num_envs: 16`, each captured frame is composed as a 4×4 grid and the episode
+video is written to `/tmp/repeated-pick-place-camera` as
+`episode_<index>_repeated_pick_place_16grid.mp4`. The asynchronous recorder is
+not used here because its current contract only collects four rows.
+
 The full four-family qualification uses the conservative physical profile and
 four batch starts. Together they cover all 64 recipes on sixteen rows and write
 64 LeRobot episodes:

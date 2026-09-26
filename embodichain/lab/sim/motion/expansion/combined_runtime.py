@@ -37,7 +37,12 @@ import yaml
 import torch
 import numpy as np
 
-from .combined import CandidateRecipe, PhysicalSlotPool, SlotReservation
+from .combined import (
+    CandidateRecipe,
+    PhysicalSlotPool,
+    SlotReservation,
+    _validate_visual_operation,
+)
 from .contracts import ExpertEpisode, ValidationCheck, ValidationResult
 
 __all__ = [
@@ -76,7 +81,7 @@ def _plain(value: object) -> object:
 
 @dataclass(frozen=True)
 class VisualProfileApplication:
-    """Resolved per-environment visual operations for one physical episode."""
+    """Resolved visual operations for one physical episode."""
 
     profile_id: str
     revision: str
@@ -100,7 +105,7 @@ class VisualProfileApplication:
 
 
 class VisualProfileRegistry:
-    """Load seedable, per-environment visual profiles from a strict YAML file."""
+    """Load seedable visual profiles from a strict YAML file."""
 
     def __init__(
         self,
@@ -127,10 +132,10 @@ class VisualProfileRegistry:
             for operation in operations:
                 if not isinstance(operation, Mapping):
                     raise ValueError("visual operations must be mappings")
-                if operation.get("scope") != "per_environment":
-                    raise ValueError(
-                        f"visual profile {profile_name!r} requests global renderer state"
-                    )
+                _validate_visual_operation(
+                    operation,
+                    f"visual profile {profile_name!r}.operation",
+                )
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "VisualProfileRegistry":
@@ -178,11 +183,12 @@ class VisualProfileRegistry:
         *,
         seed: int,
     ) -> tuple[VisualProfileApplication, ...]:
-        """Apply resolved per-environment operations through existing functors.
+        """Apply visual operations through existing functors.
 
         The method intentionally accepts a narrow structural environment port
-        rather than importing Gym types. It requires ``env.sim`` and applies
-        only operations declared with ``scope: per_environment``.
+        rather than importing Gym types. A ``global_sun`` operation is applied
+        once to ``main_light``; multiple declared global operations must agree,
+        and per-environment operations are then applied to selected rows.
         """
         if not assignments:
             raise ValueError("assignments must be nonempty")
@@ -193,7 +199,6 @@ class VisualProfileRegistry:
         from embodichain.lab.gym.envs.managers.randomization.visual import (
             randomize_camera_extrinsics,
             randomize_camera_intrinsics,
-            set_rigid_object_visual_material,
         )
         from embodichain.lab.sim import VisualMaterialCfg
 
@@ -203,14 +208,52 @@ class VisualProfileRegistry:
                 raise ValueError("assignments keys must be non-negative row IDs")
             grouped.setdefault(_text(profile_id, "profile_id"), []).append(env_id)
         applications: list[VisualProfileApplication] = []
+        resolved: dict[str, VisualProfileApplication] = {}
+        global_operation: Mapping[str, object] | None = None
+        for profile_id in grouped:
+            application = self.resolve(profile_id, seed=seed)
+            resolved[profile_id] = application
+            for operation in application.operations:
+                if operation.get("scope") != "global":
+                    continue
+                if global_operation is not None and dict(operation) != dict(
+                    global_operation
+                ):
+                    raise ValueError(
+                        "global visual operations must be identical for all rows"
+                    )
+                global_operation = dict(operation)
         torch_state = torch.random.get_rng_state()
         numpy_state = np.random.get_state()
         python_state = random.getstate()
         try:
+            sun = sim.get_light("main_light")
+            if sun is not None:
+                reset = getattr(sun, "reset", None)
+                if callable(reset):
+                    reset()
+            if global_operation is not None:
+                if sun is None or not getattr(sun, "is_global", False):
+                    raise ValueError(
+                        "global_sun requires a global sun light named 'main_light'"
+                    )
+                sun.set_color(
+                    torch.tensor(global_operation["color"], dtype=torch.float32)
+                )
+                sun.set_intensity(
+                    torch.tensor(
+                        float(global_operation["intensity"]), dtype=torch.float32
+                    )
+                )
             for profile_id, env_ids in grouped.items():
-                application = self.resolve(profile_id, seed=seed)
+                application = resolved[profile_id]
                 ids = torch.tensor(env_ids, dtype=torch.long)
+                cube = sim.get_rigid_object("cube")
+                if cube is not None and hasattr(cube, "restore_visual_material"):
+                    cube.restore_visual_material(env_ids=ids)
                 for operation in application.operations:
+                    if operation.get("scope") == "global":
+                        continue
                     kind = operation.get("kind")
                     if kind == "authored_cube_material":
                         continue
@@ -218,16 +261,17 @@ class VisualProfileRegistry:
                         color = list(operation.get("base_color", [0.5, 0.5, 0.5]))
                         if len(color) == 3:
                             color.append(1.0)
-                        set_rigid_object_visual_material(
-                            env,
-                            ids,
-                            SceneEntityCfg(uid="cube"),
+                        material = sim.create_visual_material(
                             VisualMaterialCfg(
                                 uid=f"cube_{profile_id}",
                                 base_color=color,
                                 roughness=float(operation.get("roughness", 0.7)),
-                            ),
+                            )
                         )
+                        if cube is not None:
+                            cube.set_visual_material(
+                                material, env_ids=ids, update_default=False
+                            )
                     elif kind == "camera_extrinsics":
                         delta = list(operation.get("position_delta", [0.0, 0.0, 0.0]))
                         randomize_camera_extrinsics(
@@ -247,17 +291,6 @@ class VisualProfileRegistry:
                             focal_x_range=(fx * (scale - 1.0), fx * (scale - 1.0)),
                             focal_y_range=(fy * (scale - 1.0), fy * (scale - 1.0)),
                         )
-                    elif kind == "local_light":
-                        light = sim.get_light("local_light")
-                        if light is None or getattr(light, "is_global", False):
-                            raise ValueError(
-                                "rgb_light_01 requires a per-environment local_light"
-                            )
-                        color = torch.tensor(
-                            operation.get("color", [1.0, 1.0, 1.0]),
-                            dtype=torch.float32,
-                        ).repeat(len(env_ids), 1)
-                        light.set_color(color, env_ids=ids)
                     else:
                         raise ValueError(f"unsupported visual operation: {kind!r}")
                 applications.append(application)
@@ -432,4 +465,46 @@ class MeasuredValidator:
                     "target_pose_matches", "failed", "one or more targets mismatched"
                 )
             )
+        return ValidationResult(tuple(checks))
+
+    def validate_demo_result(
+        self,
+        result: object,
+        *,
+        cycle_count: int = 3,
+    ) -> ValidationResult:
+        """Validate the measured Gym demo boundary before dataset commit.
+
+        Environment integrations can add object pose and contact checks to the
+        result metadata. This base gate always requires completed rows and the
+        expected number of successful Task Program segments.
+        """
+        if result is None:
+            raise TypeError("result must be a demo result object")
+        if type(cycle_count) is not int or cycle_count < 1:
+            raise ValueError("cycle_count must be a positive integer")
+        completed = bool(getattr(result, "completed", False))
+        segments = tuple(getattr(result, "segments", ()))
+        success_values = tuple(getattr(result, "success", ()))
+        checks = [
+            ValidationCheck(
+                "runtime_completed",
+                "passed" if completed else "failed",
+                "Task Program did not complete" if not completed else "",
+            ),
+            ValidationCheck(
+                "cycle_count",
+                "passed" if len(segments) == cycle_count else "failed",
+                f"expected {cycle_count} segments, got {len(segments)}",
+            ),
+            ValidationCheck(
+                "row_success",
+                "passed" if success_values and all(success_values) else "failed",
+                (
+                    "one or more environment rows failed"
+                    if not success_values or not all(success_values)
+                    else ""
+                ),
+            ),
+        ]
         return ValidationResult(tuple(checks))

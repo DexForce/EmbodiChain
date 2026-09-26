@@ -40,10 +40,14 @@ from embodichain.lab.gym.utils.registration import (
     execute_init_hooks,
 )
 from embodichain.lab.sim.motion.expansion import (
+    CombinedEpisodeCoordinator,
     CombinedGenerationProfile,
+    PhysicalSlotPool,
     TrajectoryGenerationJobCfg,
+    ValidationResult,
     enumerate_candidate_recipes,
     load_generation_profile,
+    MeasuredValidator,
     VisualProfileRegistry,
 )
 from embodichain.lab.task_program.integrations import TaskProgramGenerationRecord
@@ -67,6 +71,7 @@ def _write_generation_json(
     profile: TrajectoryGenerationJobCfg | CombinedGenerationProfile,
     records: tuple[TaskProgramGenerationRecord, ...],
     result: DemoEpisodeResult,
+    measured_validation: ValidationResult,
     path: Path,
 ) -> None:
     """Write one JSON-safe profile, candidate, and Task Program result record."""
@@ -74,6 +79,17 @@ def _write_generation_json(
         "profile": profile.to_dict(),
         "generation": [record.to_metadata() for record in records],
         "episode": result.to_metadata(),
+        "measured_validation": {
+            "accepted": measured_validation.accepted,
+            "checks": [
+                {
+                    "check_id": check.check_id,
+                    "status": check.status,
+                    "detail": check.detail,
+                }
+                for check in measured_validation.checks
+            ],
+        },
     }
     path.write_text(
         json.dumps(payload, allow_nan=False, indent=2, sort_keys=True),
@@ -314,6 +330,39 @@ def main(argv: list[str] | None = None) -> None:
                     assignments,
                     seed=7 + candidate_index,
                 )
+            scheduler = None
+            assignments = ()
+            if isinstance(profile, CombinedGenerationProfile):
+                batch_size = int(env.unwrapped.num_envs)
+                if candidate_index + batch_size > len(combined_recipes):
+                    raise ValueError(
+                        "candidate_index batch exceeds the combined recipe budget"
+                    )
+                batch_recipes = combined_recipes[
+                    candidate_index : candidate_index + batch_size
+                ]
+                scheduler = CombinedEpisodeCoordinator(
+                    batch_recipes,
+                    slot_pool=PhysicalSlotPool(batch_size),
+                    family_count=max(
+                        1,
+                        len({recipe.reference_family_id for recipe in batch_recipes}),
+                    ),
+                    compatibility_key="strict:configured-generation",
+                )
+                assignments = tuple(
+                    assignment
+                    for _ in range(batch_size)
+                    if (assignment := scheduler.acquire_next()) is not None
+                )
+                if len(assignments) != batch_size:
+                    raise RuntimeError("combined scheduler could not reserve every row")
+                if tuple(
+                    assignment.reservation.slot_id for assignment in assignments
+                ) != tuple(range(batch_size)):
+                    raise RuntimeError(
+                        "combined scheduler returned non-contiguous rows"
+                    )
             recording_started = False
             try:
                 if args.save_video:
@@ -338,10 +387,23 @@ def main(argv: list[str] | None = None) -> None:
                         env.unwrapped.sim.stop_window_record()
                     env.unwrapped.sim.wait_window_record_saves()
             records = env.unwrapped.task_program_generation_records
+            measured_validation = MeasuredValidator().validate_demo_result(result)
+            if not measured_validation.accepted:
+                if scheduler is not None:
+                    for assignment in assignments:
+                        scheduler.finish(assignment, status="rejected")
+                raise RuntimeError(
+                    "Measured validation rejected candidate "
+                    f"{candidate_index}: {measured_validation.checks}"
+                )
+            if scheduler is not None:
+                for assignment in assignments:
+                    scheduler.finish(assignment, status="accepted")
             _write_generation_json(
                 profile,
                 records,
                 result,
+                measured_validation,
                 args.output_dir / f"candidate_{candidate_index}.json",
             )
             _save_generation_plot(

@@ -48,7 +48,7 @@ def _profile() -> CombinedGenerationProfile:
     return profile
 
 
-def test_visual_registry_resolves_seeded_per_environment_profile() -> None:
+def test_visual_registry_resolves_seeded_visual_profiles() -> None:
     profile = _profile()
     registry = VisualProfileRegistry.from_yaml(
         _TASK_ROOT / "generation_profiles/rgb_visual.yaml"
@@ -59,6 +59,91 @@ def test_visual_registry_resolves_seeded_per_environment_profile() -> None:
     assert all(
         operation["scope"] == "per_environment" for operation in resolved.operations
     )
+
+    light = registry.resolve("rgb_light_01", seed=123)
+    assert light.operations == (
+        {
+            "kind": "global_sun",
+            "scope": "global",
+            "light_uid": "main_light",
+            "color": [1.0, 0.82, 0.62],
+            "intensity": 5.75,
+        },
+    )
+
+
+def test_visual_registry_rejects_global_sun_intensity_above_ten() -> None:
+    with pytest.raises(ValueError, match=r"intensity.*\[0, 10\]"):
+        VisualProfileRegistry(
+            "rgb_visual",
+            "rgb_visual:v1",
+            {
+                "invalid": {
+                    "operations": [
+                        {
+                            "kind": "global_sun",
+                            "scope": "global",
+                            "light_uid": "main_light",
+                            "color": [1.0, 1.0, 1.0],
+                            "intensity": 10.01,
+                        }
+                    ]
+                }
+            },
+        )
+
+
+def test_visual_registry_applies_global_sun_once_for_all_rows() -> None:
+    class Sun:
+        is_global = True
+
+        def __init__(self) -> None:
+            self.reset_count = 0
+            self.color = None
+            self.intensity = None
+
+        def reset(self) -> None:
+            self.reset_count += 1
+
+        def set_color(self, color) -> None:
+            self.color = color
+
+        def set_intensity(self, intensity) -> None:
+            self.intensity = intensity
+
+    class Sim:
+        def __init__(self, sun) -> None:
+            self.sun = sun
+
+        def get_light(self, uid):
+            assert uid == "main_light"
+            return self.sun
+
+        def get_rigid_object(self, uid):
+            assert uid == "cube"
+            return None
+
+    class Env:
+        def __init__(self, sim) -> None:
+            self.sim = sim
+
+    sun = Sun()
+    registry = VisualProfileRegistry.from_yaml(
+        _TASK_ROOT / "generation_profiles/rgb_visual.yaml"
+    )
+    applications = registry.apply_to_environment(
+        Env(Sim(sun)),
+        {0: "rgb_light_01", 1: "rgb_canonical"},
+        seed=7,
+    )
+
+    assert tuple(item.profile_id for item in applications) == (
+        "rgb_light_01",
+        "rgb_canonical",
+    )
+    assert sun.reset_count == 1
+    assert torch.equal(sun.color, torch.tensor([1.0, 0.82, 0.62]))
+    assert torch.equal(sun.intensity, torch.tensor(5.75))
 
 
 def test_round_robin_coordinator_releases_slots_and_counts_terminal_states() -> None:

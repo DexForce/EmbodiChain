@@ -57,7 +57,7 @@ execution:
   cancel_policy: safe_finish_and_drain
 
 persistence:
-  sink: local_artifact
+  sink: lerobot
   output_dir: /tmp/repeated-pick-place-generation
   write_trajectories: true
   write_observations: true
