@@ -550,6 +550,9 @@ def test_local_place_ik_preserves_targets_limits_and_rng(
 
 
 @pytest.mark.parametrize(
+    "generator_name", ["CheckedMotionGenerator", "ApproachMotionGenerator"]
+)
+@pytest.mark.parametrize(
     "scoped,success,batch,recovered",
     [
         (False, False, 1, False),
@@ -559,12 +562,12 @@ def test_local_place_ik_preserves_targets_limits_and_rng(
     ],
 )
 def test_place_local_ik_only_runs_after_scoped_single_env_failure(
-    monkeypatch, scoped, success, batch, recovered
+    monkeypatch, generator_name, scoped, success, batch, recovered
 ):
     from contextlib import nullcontext
     from embodichain.gen_sim.task_engine._task_program import motion
 
-    generator = object.__new__(motion.ApproachMotionGenerator)
+    generator = object.__new__(getattr(motion, generator_name))
     start = torch.eye(4).repeat(batch, 1, 1)
     generator.robot = SimpleNamespace(compute_fk=lambda **kw: start.clone())
     monkeypatch.setattr(
@@ -575,7 +578,8 @@ def test_place_local_ik_only_runs_after_scoped_single_env_failure(
         positions=torch.zeros(batch, 5, 1),
         dt=torch.full((batch, 5), 0.04),
     )
-    monkeypatch.setattr(motion.MotionGenerator, "generate", lambda *a, **kw: original)
+    backend = Mock(return_value=original)
+    monkeypatch.setattr(motion.MotionGenerator, "generate", backend)
     local = Mock(
         return_value=motion.PlanResult(
             success=torch.ones(batch, dtype=torch.bool),
@@ -591,14 +595,106 @@ def test_place_local_ik_only_runs_after_scoped_single_env_failure(
         sample_count=5,
         interpolation_dt=0.04,
     )
-    with motion.place_ik_recovery() if scoped else nullcontext():
-        result = generator.generate(
-            [motion.PlanState(move_type=motion.MoveType.EEF_MOVE, xpos=start)], options
-        )
+    target = start.clone()
+    target[:, 0, 3] = 0.2
+    targets = [motion.PlanState(move_type=motion.MoveType.EEF_MOVE, xpos=target)]
+    with motion.place_ik_recovery() if scoped else nullcontext() as scope:
+        result = generator.generate(targets, options)
+        if scope is not None:
+            assert scope.used is recovered
     assert local.called is recovered
     assert motion._PLACE_IK_RECOVERY.get() is None
-    if not recovered:
+    if recovered:
+        assert result is local.return_value
+        local_targets, local_options = local.call_args.args[1:]
+        assert len(local_targets) == options.sample_count - 1
+        assert local_options.sample_count == options.sample_count
+        torch.testing.assert_close(local_targets[-1].xpos, targets[-1].xpos)
+    else:
         assert result is original
+    if scoped or generator_name == "ApproachMotionGenerator":
+        expected_counts = [5] if success else [5, 260, 320]
+        assert [
+            call.kwargs["options"].sample_count for call in backend.call_args_list
+        ] == expected_counts
+        for call, sample_count in zip(backend.call_args_list, expected_counts):
+            assert len(call.args[0]) == sample_count - 1
+            assert call.kwargs["options"].preserve_cartesian_samples is True
+            assert call.kwargs["options"].is_linear is True
+            torch.testing.assert_close(call.args[0][-1].xpos, target)
+    else:
+        backend.assert_called_once_with(targets, options=options)
+        assert backend.call_args.args[0] is targets
+        assert backend.call_args.kwargs["options"] is options
+    assert options.sample_count == 5
+    assert options.preserve_cartesian_samples is False
+
+
+@pytest.mark.parametrize(
+    "generator_name", ["CheckedMotionGenerator", "ApproachMotionGenerator"]
+)
+@pytest.mark.parametrize("case", ["presampled", "non_ik", "joint_target"])
+def test_place_scope_preserves_noneligible_planning_requests(
+    monkeypatch, generator_name, case
+):
+    from embodichain.gen_sim.task_engine._task_program import motion
+
+    generator = object.__new__(getattr(motion, generator_name))
+    generator.robot = SimpleNamespace(compute_fk=Mock())
+    monkeypatch.setattr(motion, "_joint_velocity_limits", lambda *a: torch.ones(1, 1))
+    original = motion.PlanResult(
+        success=torch.tensor([False]),
+        positions=torch.zeros(1, 5, 1),
+        dt=torch.full((1, 5), 0.04),
+    )
+    backend = Mock(return_value=original)
+    local = Mock()
+    monkeypatch.setattr(motion.MotionGenerator, "generate", backend)
+    monkeypatch.setattr(motion, "_local_place_ik", local)
+    options = motion.MotionGenOptions(
+        strategy="motion_gen" if case == "non_ik" else "ik_interp",
+        control_part="arm",
+        start_qpos=torch.zeros(1, 1),
+        sample_count=5,
+        preserve_cartesian_samples=case == "presampled",
+        interpolation_dt=0.04,
+    )
+    targets = [
+        (
+            motion.PlanState(
+                move_type=motion.MoveType.JOINT_MOVE, qpos=torch.zeros(1, 1)
+            )
+            if case == "joint_target"
+            else motion.PlanState(move_type=motion.MoveType.EEF_MOVE, xpos=torch.eye(4))
+        )
+    ]
+
+    with motion.place_ik_recovery() as scope:
+        result = generator.generate(targets, options)
+        assert scope.used is False
+
+    assert result is original
+    backend.assert_called_once_with(targets, options=options)
+    assert backend.call_args.args[0] is targets
+    assert backend.call_args.kwargs["options"] is options
+    local.assert_not_called()
+    generator.robot.compute_fk.assert_not_called()
+    assert motion._PLACE_IK_RECOVERY.get() is None
+
+
+def test_place_planning_exception_does_not_leak_recovery_scope(monkeypatch):
+    from embodichain.gen_sim.task_engine._task_program import motion
+    from embodichain.gen_sim.task_engine._task_program.actions import GenSimPlace
+    from embodichain.lab.sim.atomic_actions.primitives.place import Place
+
+    def fail(*args):
+        assert motion._PLACE_IK_RECOVERY.get() is not None
+        raise RuntimeError("planner failed")
+
+    monkeypatch.setattr(Place, "_plan", fail)
+    with pytest.raises(RuntimeError, match="planner failed"):
+        GenSimPlace()._plan(object(), object())
+    assert motion._PLACE_IK_RECOVERY.get() is None
 
 
 def test_stack_place_allows_equivalent_tcp_roll_without_moving_release(
