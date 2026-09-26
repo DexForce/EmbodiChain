@@ -31,7 +31,6 @@ from embodichain.lab.sim.motion.expansion import (
 from embodichain.lab.sim.motion.expansion.combined import load_visual_profile_registry
 from embodichain.lab.sim.motion.expansion.profile import load_generation_profile
 
-
 _PROFILE = Path(__file__).parents[4] / (
     "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
     "generation.combined.yaml"
