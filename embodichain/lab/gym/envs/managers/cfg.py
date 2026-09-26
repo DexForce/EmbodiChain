@@ -348,8 +348,13 @@ class RewardCfg(FunctorCfg):
 class ActionTermCfg(FunctorCfg):
     """Configuration for an action term.
 
-    The action term owns one ordered slice of the flat policy action.
+    The action term owns one ordered slice of the flat policy action. New
+    persisted configurations should use ``contract`` so the action semantics
+    remain stable when the implementation class is renamed.
     """
+
+    contract: str | None = None
+    """Stable semantic contract resolved to a current action implementation."""
 
 
 @configclass

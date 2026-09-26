@@ -253,7 +253,9 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
 
     def _bind_locomotion_action_state(self) -> None:
         """Bind task state to the default-position action term buffers."""
-        action_term = self.action_manager.get_term("joint_position")
+        action_term = self.action_manager.get_term_by_contract(
+            "joint_position.default_offset@1"
+        )
         self.locomotion_action = action_term.raw_actions
         self.last_locomotion_action = action_term.previous_raw_actions
         self.encoder_bias = action_term.position_bias

@@ -192,6 +192,13 @@ preserve those settings when comparing checkpoints. Keep Default and Newton
 results separate. The seed makes the evaluation inputs repeatable within the
 chosen software and device setup.
 
+Locomotion policy bundles created before the action contract migration may
+still contain `DefaultJointPositionTerm` in their saved environment snapshot.
+The evaluator maps that legacy implementation name to the stable
+`joint_position.default_offset@1` contract. New task configurations persist
+the contract ID directly, so action semantics do not depend on an
+`ActionManager` Python class name.
+
 Check `inputs.checkpoint`, `inputs.configs`, `inputs.seed`, `inputs.num_envs`
 and `result.episodes` before interpreting `result.metrics`:
 

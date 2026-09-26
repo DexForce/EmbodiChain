@@ -48,6 +48,7 @@ class ActionTermDescriptor:
         normalization: Optional normalization identifier.
         joint_names: Ordered joints controlled by the term.
         metadata: Additional JSON-compatible representation metadata.
+        contract: Versioned, implementation-independent action contract ID.
     """
 
     representation: str
@@ -57,6 +58,7 @@ class ActionTermDescriptor:
     normalization: str | None
     joint_names: tuple[str, ...]
     metadata: Mapping[str, JSONValue] = field(default_factory=dict)
+    contract: str | None = None
 
     def __post_init__(self) -> None:
         _validate_non_empty_name(self.representation, field_name="representation")
@@ -75,6 +77,8 @@ class ActionTermDescriptor:
             _validate_non_empty_name(self.normalization, field_name="normalization")
         for index, name in enumerate(self.joint_names):
             _validate_non_empty_name(name, field_name=f"joint_names[{index}]")
+        if self.contract is not None:
+            _validate_non_empty_name(self.contract, field_name="contract")
         owned_metadata = json_safe_copy(self.metadata, field_name="metadata")
         object.__setattr__(
             self,
@@ -92,6 +96,7 @@ class ActionTermDescriptor:
             "normalization": self.normalization,
             "joint_names": list(self.joint_names),
             "metadata": json_safe_copy(self.metadata, field_name="metadata"),
+            "contract": self.contract,
         }
 
 

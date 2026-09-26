@@ -20,7 +20,11 @@ from __future__ import annotations
 
 import torch
 
-from embodichain.lab.gym.envs.managers import ActionManager, ActionTermCfg
+from embodichain.lab.gym.envs.managers import (
+    ActionManager,
+    ActionTermCfg,
+    resolve_action_contract,
+)
 from embodichain.lab.gym.envs.managers.actions import DefaultJointPositionAction
 
 from action_test_utils import make_action_env
@@ -82,3 +86,16 @@ def test_manager_selective_reset_clears_action_history_only_in_selected_rows() -
         torch.tensor([[0.0, 0.0], [1.0, 1.0]]),
     )
     torch.testing.assert_close(term.position_bias, torch.full((2, 2), 0.1))
+
+
+def test_default_position_contract_resolves_and_binds() -> None:
+    """The stable contract identifies the current implementation and term."""
+    manager = make_manager()
+
+    assert (
+        resolve_action_contract("joint_position.default_offset@1")
+        is DefaultJointPositionAction
+    )
+    assert manager.get_term_by_contract(
+        "joint_position.default_offset@1"
+    ) is manager.get_term("joint_position")

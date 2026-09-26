@@ -79,6 +79,10 @@ functors), :class:`ActionManager` (``process_action(action)`` then
       randomization.spatial.randomize_rigid_object_pose
       randomization.spatial.randomize_robot_eef_pose
       randomization.spatial.randomize_robot_qpos
+      actions.register_action_contract
+      actions.resolve_action_contract
+      register_action_contract
+      resolve_action_contract
 
 .. currentmodule:: embodichain.lab.gym.envs.managers
 

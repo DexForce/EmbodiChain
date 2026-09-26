@@ -50,6 +50,7 @@ def test_action_descriptor_serializes_bound_slice() -> None:
         normalization=None,
         joint_names=("joint_1", "joint_2"),
         metadata={"frame": "arena"},
+        contract="eef_pose.absolute@1",
     )
     descriptor = ActionDescriptor("arm_action", 0, 6, term)
 
@@ -59,6 +60,7 @@ def test_action_descriptor_serializes_bound_slice() -> None:
     assert serialized["slice"] == [0, 6]
     assert serialized["term"]["representation"] == "eef_pose"
     assert serialized["term"]["metadata"] == {"frame": "arena"}
+    assert serialized["term"]["contract"] == "eef_pose.absolute@1"
 
 
 def test_action_term_descriptor_owns_metadata() -> None:

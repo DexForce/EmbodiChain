@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import gymnasium as gym
 import numpy as np
@@ -44,6 +44,8 @@ __all__ = [
     "JointVelocityAction",
     "ParallelGripperAction",
     "RelativeJointPositionAction",
+    "register_action_contract",
+    "resolve_action_contract",
 ]
 
 
@@ -142,6 +144,7 @@ class _JointAction(ActionTerm):
             normalization=self.normalization,
             joint_names=self._joint_names,
             metadata={},
+            contract=self.resolved_contract_id(),
         )
 
     def _store_raw(self, actions: torch.Tensor) -> None:
@@ -164,6 +167,7 @@ class _JointAction(ActionTerm):
 class JointPositionAction(_JointAction):
     """Apply absolute position actions to selected joints."""
 
+    contract_id: ClassVar[str] = "joint_position.absolute@1"
     command_type = "qpos"
     representation = "joint_position"
     units = "rad_or_m"
@@ -206,6 +210,7 @@ class JointPositionAction(_JointAction):
 class JointPositionToLimitsAction(_JointAction):
     """Map normalized selected-joint actions to position limits."""
 
+    contract_id: ClassVar[str] = "joint_position.limits@1"
     command_type = "qpos"
     representation = "joint_position"
     units = "rad_or_m"
@@ -248,6 +253,7 @@ class JointPositionToLimitsAction(_JointAction):
 class RelativeJointPositionAction(_JointAction):
     """Add scaled relative actions to current selected positions."""
 
+    contract_id: ClassVar[str] = "joint_position.relative@1"
     command_type = "qpos"
     representation = "relative_joint_position"
     units = "rad_or_m"
@@ -289,6 +295,7 @@ class RelativeJointPositionAction(_JointAction):
 class JointVelocityAction(_JointAction):
     """Apply scaled velocity actions to selected joints."""
 
+    contract_id: ClassVar[str] = "joint_velocity@1"
     command_type = "qvel"
     representation = "joint_velocity"
     units = "rad_or_m_per_s"
@@ -325,6 +332,7 @@ class JointVelocityAction(_JointAction):
 class JointEffortAction(_JointAction):
     """Apply scaled effort actions to selected joints."""
 
+    contract_id: ClassVar[str] = "joint_effort@1"
     command_type = "qf"
     representation = "joint_effort"
     units = "N_or_Nm"
@@ -359,8 +367,9 @@ class JointEffortAction(_JointAction):
 
 
 class DefaultJointPositionAction(_JointAction):
-    """Map normalized locomotion actions around a configured default pose."""
+    """Map normalized actions around a configured default joint pose."""
 
+    contract_id: ClassVar[str] = "joint_position.default_offset@1"
     command_type = "qpos"
     representation = "default_joint_position"
     units = "normalized"
@@ -416,6 +425,7 @@ class DefaultJointPositionAction(_JointAction):
 class EefPoseAction(ActionTerm):
     """Convert an absolute EEF pose into selected-arm joint targets."""
 
+    contract_id: ClassVar[str] = "eef_pose.absolute@1"
     command_type = "qpos"
 
     def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv) -> None:
@@ -491,6 +501,7 @@ class EefPoseAction(ActionTerm):
             normalization=None,
             joint_names=self._joint_names,
             metadata={"frame": "arena", "rotation": rotation},
+            contract=self.resolved_contract_id(),
         )
 
     @property
@@ -579,6 +590,7 @@ class EefPoseAction(ActionTerm):
 class ParallelGripperAction(ActionTerm):
     """Map one scalar policy action to explicit parallel-gripper joints."""
 
+    contract_id: ClassVar[str] = "gripper.parallel@1"
     command_type = "qpos"
 
     def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv) -> None:
@@ -649,6 +661,7 @@ class ParallelGripperAction(ActionTerm):
             normalization="minus_one_to_one",
             joint_names=self._joint_names,
             metadata={"command_mode": self._command_mode},
+            contract=self.resolved_contract_id(),
         )
 
     @property
@@ -768,3 +781,64 @@ class ParallelGripperAction(ActionTerm):
         self._raw_actions[ids] = 0
         self._previous_raw_actions[ids] = 0
         self._processed_actions[ids] = 0
+
+
+_ACTION_CONTRACTS: dict[str, type[ActionTerm]] = {}
+
+
+def register_action_contract(contract_id: str, action_class: type[ActionTerm]) -> None:
+    """Register an implementation for a stable action contract.
+
+    Args:
+        contract_id: Versioned, implementation-independent contract ID.
+        action_class: Current :class:`ActionTerm` implementation.
+
+    Raises:
+        TypeError: If ``action_class`` is not an action term class.
+        ValueError: If the contract is already registered to another class.
+    """
+    if not isinstance(contract_id, str) or not contract_id.strip():
+        raise ValueError("contract_id must be a non-empty string.")
+    if not isinstance(action_class, type) or not issubclass(action_class, ActionTerm):
+        raise TypeError("action_class must inherit from ActionTerm.")
+    previous = _ACTION_CONTRACTS.get(contract_id)
+    if previous is not None and previous is not action_class:
+        raise ValueError(
+            f"Action contract {contract_id!r} is already registered to "
+            f"{previous.__name__}."
+        )
+    _ACTION_CONTRACTS[contract_id] = action_class
+
+
+def resolve_action_contract(contract_id: str) -> type[ActionTerm]:
+    """Resolve a stable action contract to the current implementation.
+
+    Args:
+        contract_id: Versioned, implementation-independent contract ID.
+
+    Returns:
+        The current action-term implementation class.
+
+    Raises:
+        KeyError: If the contract is not registered.
+    """
+    try:
+        return _ACTION_CONTRACTS[contract_id]
+    except KeyError as error:
+        available = ", ".join(sorted(_ACTION_CONTRACTS))
+        raise KeyError(
+            f"Unknown action contract {contract_id!r}. Available: {available}"
+        ) from error
+
+
+for _contract_id, _action_class in {
+    "joint_position.absolute@1": JointPositionAction,
+    "joint_position.default_offset@1": DefaultJointPositionAction,
+    "joint_position.limits@1": JointPositionToLimitsAction,
+    "joint_position.relative@1": RelativeJointPositionAction,
+    "joint_velocity@1": JointVelocityAction,
+    "joint_effort@1": JointEffortAction,
+    "eef_pose.absolute@1": EefPoseAction,
+    "gripper.parallel@1": ParallelGripperAction,
+}.items():
+    register_action_contract(_contract_id, _action_class)
