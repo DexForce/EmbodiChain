@@ -373,6 +373,7 @@ class EmbodiedEnv(BaseEnv):
         self.action_manager: ActionManager | None = None
         self.dataset_manager: DatasetManager | None = None
         self._record_raw_actions = False
+        self._last_action_manager_qpos: torch.Tensor | None = None
 
         super().__init__(cfg, **kwargs)
 
@@ -1431,6 +1432,12 @@ class EmbodiedEnv(BaseEnv):
                     "Policy rollout recording requires one flat torch.Tensor action."
                 )
             action_to_store = action
+        elif self.action_manager is not None and isinstance(action, torch.Tensor):
+            action_to_store = self._last_action_manager_qpos
+            if action_to_store is None:
+                raise RuntimeError(
+                    "ActionManager dataset recording has no processed qpos snapshot."
+                )
         elif (
             expert_action_spec is not None
             and expert_action_spec.joint_command_mode == "position_velocity"
@@ -2057,6 +2064,15 @@ class EmbodiedEnv(BaseEnv):
             self.action_manager.process_action(action)
             if getattr(self, "_demo_no_auto_reset", False):
                 self.action_manager.mask_inactive(self._demo_active_mask)
+            if self.dataset_manager is not None and not policy_recording:
+                processed_qpos = getattr(self.action_manager, "_processed_qpos", None)
+                self._last_action_manager_qpos = (
+                    processed_qpos().detach().clone()
+                    if callable(processed_qpos)
+                    else None
+                )
+            else:
+                self._last_action_manager_qpos = None
             raw_action = self.action_manager.action
         elif not is_controller_action:
             action = super()._preprocess_action(action)

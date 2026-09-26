@@ -1548,23 +1548,27 @@ def test_eef_observation_uses_bound_parts_and_opposing_gripper_mapping() -> None
     """Auxiliary EEF state inverts the configured independent-joint mapping."""
     arm_term = SimpleNamespace(
         part_name="manipulator",
-        controlled_joint_ids=(0, 1),
+        controlled_joint_ids=(1, 3),
     )
     gripper_term = SimpleNamespace(
         command_mode="continuous",
-        controlled_joint_ids=(2, 3),
+        controlled_joint_ids=(0, 2),
         lower_command=torch.tensor([0.0, 0.04]),
         upper_command=torch.tensor([0.04, 0.0]),
     )
     robot = Mock()
     robot.compute_fk.return_value = torch.eye(4).repeat(3, 1, 1)
     recorder = LeRobotRecorder.__new__(LeRobotRecorder)
-    recorder._env = SimpleNamespace(device=torch.device("cpu"), robot=robot)
+    recorder._env = SimpleNamespace(
+        device=torch.device("cpu"),
+        robot=robot,
+        active_joint_ids=[3, 1, 0, 2],
+    )
     recorder._eef_observation_terms = (arm_term, gripper_term)
     qpos = torch.tensor(
         [
-            [0.0, 0.0, 0.0, 0.04],
-            [0.0, 0.0, 0.02, 0.02],
+            [0.04, 0.0, 0.0, 0.04],
+            [0.02, 0.0, 0.02, 0.02],
             [0.0, 0.0, 0.04, 0.0],
         ]
     )

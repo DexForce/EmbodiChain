@@ -324,13 +324,16 @@ Config class: `EventCfg` with `mode` (`"startup"`, `"reset"`, or `"interval"`) a
 
 ```python
 class MyActionTerm(ActionTerm):
-    def process_action(self, action: torch.Tensor) -> torch.Tensor
+    def process_actions(self, actions: torch.Tensor) -> None
+    def apply_actions(self) -> None
 ```
 
-- `action`: Raw action from the policy, shape `(num_envs, action_dim)`.
-- Returns: transformed action tensor.
+- `actions`: The term's flat policy slice, shape `(num_envs, action_dim)`.
+- `process_actions`: Stores and transforms the term-owned command.
+- `apply_actions`: Applies the processed command to the owned resource.
 
-Config class: `ActionTermCfg` with `mode` (`"pre"` or `"post"`).
+Config class: `ActionTermCfg`; terms run in configuration order and do not have
+`pre`/`post` modes.
 
 ### Dataset Functors
 

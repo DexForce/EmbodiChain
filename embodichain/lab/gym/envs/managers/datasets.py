@@ -1658,6 +1658,31 @@ class LeRobotRecorder(Functor):
         qpos = qpos.to(device=self._env.device, dtype=torch.float32)
         if len(env_ids) != qpos.shape[0]:
             raise ValueError("env_ids must contain one source row for each qpos row.")
+
+        active_joint_ids = getattr(self._env, "active_joint_ids", None)
+        if active_joint_ids is None:
+            active_joint_ids = tuple(range(qpos.shape[-1]))
+        else:
+            active_joint_ids = tuple(int(joint_id) for joint_id in active_joint_ids)
+        active_columns = {
+            joint_id: column for column, joint_id in enumerate(active_joint_ids)
+        }
+
+        def _active_columns(joint_ids: Sequence[int]) -> list[int]:
+            """Map full-robot joint IDs to the observation's active layout."""
+            try:
+                columns = [active_columns[int(joint_id)] for joint_id in joint_ids]
+            except KeyError as error:
+                raise ValueError(
+                    "EEF observation requires every controlled joint to be present "
+                    "in active_joint_ids."
+                ) from error
+            if any(column >= qpos.shape[-1] for column in columns):
+                raise ValueError(
+                    "EEF observation qpos width does not match active_joint_ids."
+                )
+            return columns
+
         binding = getattr(self, "_eef_observation_terms", None)
         if binding is None:
             arm_name = "arm"
@@ -1667,7 +1692,7 @@ class LeRobotRecorder(Functor):
             arm_name = arm_term.part_name
             arm_ids = list(arm_term.controlled_joint_ids)
         pose = self._env.robot.compute_fk(
-            qpos=qpos[:, arm_ids],
+            qpos=qpos[:, _active_columns(arm_ids)],
             name=arm_name,
             env_ids=env_ids,
             to_matrix=True,
@@ -1684,7 +1709,7 @@ class LeRobotRecorder(Functor):
 
         if binding is None:
             hand_ids = self._env.robot.get_joint_ids("hand", remove_mimic=True)
-            hand_qpos = qpos[:, hand_ids].mean(dim=-1)
+            hand_qpos = qpos[:, _active_columns(hand_ids)].mean(dim=-1)
             limits = self._env.robot.body_data.qpos_limits[0, hand_ids]
             gripper = (
                 2.0
@@ -1694,7 +1719,7 @@ class LeRobotRecorder(Functor):
             )
         else:
             hand_ids = list(gripper_term.controlled_joint_ids)
-            hand_qpos = qpos[:, hand_ids]
+            hand_qpos = qpos[:, _active_columns(hand_ids)]
             lower = gripper_term.lower_command.to(qpos)
             upper = gripper_term.upper_command.to(qpos)
             if gripper_term.command_mode == "continuous":

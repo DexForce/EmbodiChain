@@ -56,6 +56,33 @@ def test_joint_position_applies_selected_policy_order() -> None:
     assert term.descriptor.joint_names == ("joint_3", "joint_1")
 
 
+def test_joint_position_action_space_uses_selected_qpos_limits() -> None:
+    """Absolute joint actions expose the selected joints' physical limits."""
+    env = make_action_env(
+        num_envs=1,
+        joint_names=("joint_0", "joint_1"),
+        parts={"arm": (1, 0)},
+    )
+    env.robot.body_data.qpos_limits = torch.tensor([[[-0.5, 0.7], [-1.2, 1.4]]])
+    term = JointPositionAction(
+        make_cfg(JointPositionAction, part_name="arm", preserve_order=True), env
+    )
+
+    np.testing.assert_allclose(term.action_space.low, [-1.2, -0.5])
+    np.testing.assert_allclose(term.action_space.high, [1.4, 0.7])
+
+
+def test_relative_joint_position_action_space_is_unbounded_without_clip() -> None:
+    """Relative actions remain unbounded unless an explicit clip is configured."""
+    env = make_action_env(num_envs=1, joint_names=("joint_0", "joint_1"))
+    term = RelativeJointPositionAction(
+        make_cfg(RelativeJointPositionAction, part_name="arm"), env
+    )
+
+    assert np.isneginf(term.action_space.low).all()
+    assert np.isposinf(term.action_space.high).all()
+
+
 def test_joint_position_to_limits_maps_each_dimension() -> None:
     """Normalized actions use each selected joint's own limits."""
     env = make_action_env(joint_names=("joint_0", "joint_1"))

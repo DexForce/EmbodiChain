@@ -234,6 +234,25 @@ class ActionManager(ManagerBase):
         for term in self._terms.values():
             term.apply_actions()
 
+    def _processed_qpos(self) -> torch.Tensor:
+        """Return the controller qpos layout represented by processed terms.
+
+        This private snapshot is used by the legacy joint-position dataset
+        recorder when a flat policy action (for example EEF plus gripper) is
+        applied through the manager.  It keeps the recorder's default schema
+        in active-joint order without exposing the removed pre/post protocol.
+        """
+        qpos = self._env.robot.get_qpos().clone()
+        for term in self._terms.values():
+            if term.command_type != "qpos":
+                raise ValueError(
+                    "Default joint-position dataset recording requires every "
+                    "action term to produce qpos commands; declare a policy "
+                    "action_contract for non-qpos actions."
+                )
+            qpos[:, list(term.controlled_joint_ids)] = term.processed_actions
+        return qpos[:, self._env.active_joint_ids]
+
     def mask_inactive(self, active_mask: torch.Tensor) -> None:
         """Replace inactive vector rows with resource-safe commands.
 

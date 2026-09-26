@@ -73,7 +73,7 @@ class FunctorCfg:
 | `ObservationCfg` | `mode`, `name` | ObservationManager |
 | `EventCfg` | `mode`, `interval_step`, `is_global` | EventManager |
 | `RewardCfg` | `weight`, `mode` | RewardManager |
-| `ActionTermCfg` | `mode` | ActionManager |
+| `ActionTermCfg` | *(no extra fields)* | ActionManager |
 | `DatasetFunctorCfg` | `mode` | DatasetManager |
 
 ### Python Config Example

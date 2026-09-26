@@ -115,6 +115,11 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
                 "LeRobot is not installed. Please install it with: pip install lerobot"
             )
         super().__init__(cfg, env)
+        if self.record_eef_observation:
+            raise ValueError(
+                "AsyncLeRobotRecorder cannot record EEF observations safely; "
+                "use LeRobotRecorder so FK runs on the simulation thread."
+            )
 
         # Single-worker queue. A single worker guarantees LeRobotDataset is
         # only ever touched from one thread (it is not thread-safe) and keeps
