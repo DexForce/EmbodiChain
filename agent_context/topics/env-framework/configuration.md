@@ -88,6 +88,15 @@ task integration's nested `scene_binding`. The shared
 `cobotmagic.yaml` component owns a top-view RGB camera, two wrist
 RGB cameras, and an optional right-arm skill profile. Tableware handwritten and
 configured Task Program deployments reuse that same embodiment.
+The runnable Gym config may set `enable_sensor: false` while selecting an
+embodiment with cameras. The component still owns the sensor declarations, but
+`EmbodiedEnv` skips their creation and sensor observations; the run launcher
+provides `--disable_sensor` / `--disable-sensor` as a one-run override. The
+shared online-data rollout buffer also omits image allocation for a disabled
+inline sensor suite. Sensor-dependent event and observation functors are
+removed before their managers are constructed, including nested
+`SceneEntityCfg` references, `all_sensors` selectors, sensor output paths and
+camera-keyed observation descriptors.
 
 ### Configuration-owned Task Program environment
 

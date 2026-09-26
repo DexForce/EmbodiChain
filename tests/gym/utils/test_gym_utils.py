@@ -78,6 +78,26 @@ def test_env_launcher_args_include_physics():
     assert newton_args.device is None
 
 
+def test_env_launcher_can_disable_configured_sensor_acquisition():
+    """The launcher switch preserves the config while disabling sensors."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+
+    args = parser.parse_args(["--gym_config", "task.yaml", "--disable-sensor"])
+    merged = merge_args_with_gym_config(
+        args,
+        {"id": "Dummy-v0", "physics": "default", "enable_sensor": True},
+    )
+
+    assert args.disable_sensor is True
+    assert merged["enable_sensor"] is False
+
+    underscore_args = parser.parse_args(
+        ["--gym_config", "task.yaml", "--disable_sensor"]
+    )
+    assert underscore_args.disable_sensor is True
+
+
 def test_required_gym_launcher_preserves_device_when_omitted() -> None:
     """A config-backed launcher does not manufacture a CPU override."""
     parser = argparse.ArgumentParser()
@@ -305,6 +325,24 @@ class TestInitRolloutBufferFromConfig:
         assert not buffer["segment_accepted"].any()
         assert (buffer["segment_attempt_id"] == -1).all()
         assert (buffer["continuity_id"] == -1).all()
+
+    def test_disabled_sensor_acquisition_does_not_allocate_image_buffers(self):
+        """The shared online-data buffer follows the sensor acquisition switch."""
+        config = {
+            "enable_sensor": False,
+            "sensor": [{"uid": "camera", "width": 640, "height": 480}],
+            "env": {},
+        }
+
+        buffer = init_rollout_buffer_from_config(
+            config=config,
+            max_episode_steps=2,
+            batch_size=1,
+            state_dim=7,
+            device="cpu",
+        )
+
+        assert "sensor" not in buffer["obs"]
 
     def test_extra_observation_with_shape_tuple(self):
         """Test that extra observations with shape tuple are added correctly."""
@@ -1318,6 +1356,27 @@ class TestConfigToCfgFromFile:
             "cam_left_wrist",
         ]
         assert all(type(sensor) is CameraCfg for sensor in cfg.sensor)
+
+    def test_official_handwritten_config_can_disable_shared_embodiment_sensors(
+        self,
+    ) -> None:
+        """A deployment can keep the shared sensor declaration unused."""
+        config_path = _TABLEWARE_CONFIG_ROOT / "blocks_ranking_rgb" / "env.json"
+        config = load_config(config_path)
+        config["enable_sensor"] = False
+
+        cfg = config_to_cfg(
+            config,
+            manager_modules=DEFAULT_MANAGER_MODULES,
+            source_path=config_path,
+        )
+
+        assert cfg.enable_sensor is False
+        assert [sensor.uid for sensor in cfg.sensor] == [
+            "cam_high",
+            "cam_right_wrist",
+            "cam_left_wrist",
+        ]
 
     @pytest.mark.parametrize("field_name", ("robot", "sensor"))
     def test_configured_task_program_rejects_top_level_embodiment_fields(

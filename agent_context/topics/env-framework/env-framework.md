@@ -37,6 +37,10 @@ from `embodichain.cli.sim` with Gym config, seed and recording options. When
 file-owned values. Explicit values override runtime settings (`--headless` / `--no-headless`
 select either mode); `--physics` can only confirm the file-owned backend. An omitted seed preserves the config seed.
 Standalone examples use `add_sim_args_to_parser()` and opt into seed separately.
+`--disable_sensor` (also accepted as `--disable-sensor`) sets the resolved Gym
+config's `enable_sensor` switch to false; this keeps reusable embodiment sensor
+declarations available to the config while skipping their instantiation and
+image acquisition.
 
 ## Timing contract
 
@@ -81,7 +85,7 @@ on each setup, preserving control-part order or copying explicit configured
 IDs. Repeated setup and other environment instances cannot append to that list.
 The isolation cases are in `tests/gym/envs/test_embodied_env_joint_setup.py`.
 
-Construction seeds before scene setup, constructs the robot and sensors, then
+Construction seeds before scene setup, constructs the robot and enabled sensors, then
 initializes simulation state and configured managers. An explicit effective
 seed on reset also reaches the event manager; scoped randomization behavior is
 owned by [randomization](../randomization/randomization.md).
@@ -114,7 +118,7 @@ dataset persistence are separate contracts; see
 |---|---|
 | Timing in `base_env.py` | `tests/gym/envs/test_env_timing.py` |
 | Seeding and reset | `tests/gym/envs/test_env_seed.py`, `tests/gym/envs/managers/test_event_manager_seed.py` |
-| Config or registration | Relevant tests under `tests/gym/`; use `rg --files tests` to select the component/registration case |
+| Config, registration, or sensor acquisition switch | Relevant tests under `tests/gym/`; use `rg --files tests` to select the component/registration case |
 | Controller or demo bridge | Relevant action/demo/Task Program tests under `tests/gym/envs/` |
 | Expert trajectory mode, action layout, or retiming | `tests/gym/envs/test_expert_trajectory.py`, `tests/gym/envs/test_demo.py`, `tests/gym/envs/test_replay.py` |
 | CLI discovery | `tests/test_main.py` |
