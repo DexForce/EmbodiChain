@@ -82,11 +82,37 @@ def _run_workspace_analyzer_cli(_: argparse.Namespace) -> None:
 
 def main(argv: Sequence[str] | None = None) -> None:
     """Dispatch to the appropriate benchmark sub-command CLI."""
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "camera-pilot":
+        # Keep the offline report path independent of motion/simulator imports.
+        from scripts.benchmark.rendering.run_benchmark import main as camera_main
+
+        camera_main(arguments[1:])
+        return
+    if arguments and arguments[0] == "expert-generation":
+        # Keep the simulator-free G-03 fixture and offline report path light.
+        from scripts.benchmark.expert_generation.run_benchmark import (
+            main as generation_main,
+        )
+
+        generation_main(arguments[1:])
+        return
+
     parser = argparse.ArgumentParser(
         prog="embodichain benchmark",
         description="EmbodiChain benchmark command-line interface.",
     )
     subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser(
+        "camera-pilot",
+        add_help=False,
+        help="Run the minimal camera comparison or rebuild its report offline.",
+    )
+    subparsers.add_parser(
+        "expert-generation",
+        add_help=False,
+        help="Run the minimal simulator-free G-03 protocol fixture.",
+    )
 
     # -- rl ------------------------------------------------------------------
     rl_parser = subparsers.add_parser(

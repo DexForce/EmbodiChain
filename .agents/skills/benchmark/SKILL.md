@@ -17,6 +17,31 @@ Invoke this skill when:
 
 ## Key Conventions
 
+### Shared technical-report experiments
+
+For experiments using the technical-report framework, reuse
+`scripts/benchmark/core/` for process execution, timing, artifacts and provenance,
+and `scripts/benchmark/reporting/` for aggregation and comparison eligibility.
+Keep scene construction, platform APIs and domain validation in the experiment's
+own directory. Read [the framework entry points](../../../scripts/benchmark/README.md)
+and use the camera pilot as the first working example.
+
+Core/report rebuilds remain independent of simulator imports. Record raw seconds,
+bytes, metric populations and missing-value reasons; keep execution completion
+separate from quality/task/data acceptance. Platform runtimes execute in their
+own Python processes. Domain callbacks supply actual completion synchronization.
+
+For new shared-framework experiments, freeze an `ExperimentDefinition` with a
+parameter matrix, `Budget`, quality protocol and declared comparison invariants.
+Use `build_run_plan`/`run_experiment` for deterministic cases and budgeted
+attempts. Workers may choose `measure_stages`, `measure_loop` or
+`measure_attempts`; persist standard `definition.json`, `effective_config.yaml`,
+`assets_manifest.json`, `raw.jsonl`, `metrics.json`, `quality.json` and
+`artifact_index.json` through the core artifact helpers. Aggregate outputs must
+retain denominator, uncertainty, missing reasons and source run IDs. Use the
+dependency-free reporting table/figure helpers for report rebuilds, and use
+`convert_legacy_rows` before mixing older benchmark records with new ones.
+
 ### File Location
 
 Place benchmark scripts under:
@@ -229,19 +254,31 @@ if __name__ == "__main__":
     run_all_benchmarks()
 ```
 
-### 8. Save Results to One Markdown Report (Required)
+### 8. Select the Report Template (Required)
 
-Every benchmark script must write its final results to **one Markdown file** after execution.
+Each benchmark invocation writes **one Markdown report** and preserves the
+raw inputs needed to rebuild it. Choose the template from the measured domain:
+
+- **Technical-report loading/rendering/observation experiments:** use domain
+  tables for latency/throughput/memory, validation/failures, and grouped repeated
+  measurements. Include only applicable measured quantities; no success-rate
+  or leaderboard table is required when no physical task is evaluated.
+  Preserve structured run files, units, provenance and comparison eligibility.
+- **Generation experiments:** report attempt populations, stage outcomes and
+  validated/persisted yield from the production owner, with failure denominators.
+- **Legacy algorithm benchmarks:** retain the three-table format below for
+  compatibility. Its success ranking applies only to a defined task-success
+  metric and must not be replaced by process completion.
 
 - Output directory recommendation: `outputs/benchmarks/`
 - File naming recommendation: `<benchmark_name>_<YYYYMMDD_HHMMSS>.md`
-- Requirement: output **exactly three Markdown tables** in the report
+- Legacy requirement: output **exactly three Markdown tables** in the report
     1. `Time & Memory` table (cost time + memory columns)
     2. `Success & Other Metrics` table (success rate + quality/accuracy/extra metrics)
     3. `Leaderboard` table (algorithm ranking by overall success rate, descending)
-- `Leaderboard` coverage rule: include **all algorithms evaluated in the current benchmark scope**. If a provided leaderboard artifact is incomplete, backfill missing algorithms from aggregate summaries before rendering.
+- Legacy `Leaderboard` coverage rule: include **all algorithms evaluated in the current benchmark scope**. If a provided leaderboard artifact is incomplete, backfill missing algorithms from aggregate summaries before rendering.
 
-Use this pattern:
+Legacy algorithm-report pattern:
 
 ```python
 from datetime import datetime
@@ -483,12 +520,12 @@ Before finishing a benchmark script:
 - [ ] Accuracy metrics reported alongside timing (for solver benchmarks)
 - [ ] Graceful skip for benchmarks that need unavailable hardware
 - [ ] `run_all_benchmarks()` orchestrator with formatted separators
-- [ ] Results are written to exactly one Markdown report file per run
-- [ ] Report contains exactly three Markdown tables: `Time & Memory`, `Success & Other Metrics`, and `Leaderboard`
-- [ ] `Time & Memory` table includes `cost_time_ms`, `cpu_delta_mb`, `gpu_delta_mb`, `peak_gpu_mb`
-- [ ] `Success & Other Metrics` table includes `success_rate` and domain-specific quality metrics
-- [ ] `Leaderboard` table ranks algorithms by overall success rate in descending order
-- [ ] `Leaderboard` table includes all benchmarked algorithms (missing entries are backfilled from aggregate summaries if needed)
+- [ ] One Markdown report per benchmark invocation, with raw records retained
+- [ ] Template matches the domain; technical-report experiments retain units, populations, failures and comparison eligibility
+- [ ] Legacy algorithm report has `Time & Memory`, `Success & Other Metrics`, and `Leaderboard`
+- [ ] Legacy time/memory columns preserve existing consumer compatibility
+- [ ] Success-rate fields and ranking use an applicable task-success contract
+- [ ] Legacy leaderboards include all evaluated algorithms (backfill from aggregate summaries when needed)
 - [ ] Console log includes final report path
 - [ ] `if __name__ == "__main__":` entry point
 - [ ] `black .` formatting applied

@@ -19,7 +19,7 @@ ownership. This is selected static coverage, not a complete dependency graph.
 The generated text reference lists topics without represented nodes and overview
 nodes without mapped relationships, using MAP at the snapshot revision. Neither
 a represented topic nor a missing edge establishes complete coverage or independence.
-The current snapshot represents all 18 MAP topics and all 10 top-level production
+The current snapshot represents all 19 MAP topics and all 10 top-level production
 packages. Frontend data tests enforce these entry-point checks and ensure every
 selected node appears in a view. Specialist modules are included in the searchable
 text reference even when omitted from the overview.

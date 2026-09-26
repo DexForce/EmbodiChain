@@ -6,6 +6,20 @@ defaults:
   - conventions/naming.md
   - conventions/topic-lifecycle.md
 topics:
+- id: benchmark-framework
+  title: Benchmark Framework
+  aliases: [benchmark framework, technical report benchmark, benchmark框架, benchmark架构, 技术报告框架, 技术报告基准测试]
+  keywords: [camera-pilot, expert-generation, GenerationCase, GenerationAttempt, PersistenceReceipt, RunSpec, ExperimentDefinition, Budget, BudgetLedger, repeat_schedule, measure_stages, measure_loop, measure_attempts, ArtifactStore, comparison_reasons, compare_metric, benchmark reporting]
+  paths: [topics/benchmark-framework/benchmark-framework.md]
+  source_of_truth:
+  - scripts/benchmark/__main__.py
+  - scripts/benchmark/core/
+  - scripts/benchmark/reporting/
+  - scripts/benchmark/rendering/
+  - scripts/benchmark/expert_generation/
+  watch_paths: [scripts/benchmark/core/, scripts/benchmark/reporting/, scripts/benchmark/rendering/, scripts/benchmark/expert_generation/, tests/benchmark/core/, tests/benchmark/reporting/, tests/benchmark/rendering/, tests/benchmark/expert_generation/]
+  related_topics: [simulation-system, sensor-system, motion-planning, env-framework]
+  status: active
 - id: simulation-system
   title: Simulation System
   aliases: [simulation system, simulation manager, Newton physics backend, motion module, sim motion, camera attachment, 运动能力模块, 仿真系统, 仿真管理器]
