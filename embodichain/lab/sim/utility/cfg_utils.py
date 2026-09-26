@@ -22,6 +22,7 @@ from typing import TypeVar
 
 from embodichain.lab.sim.cfg import (
     _raise_removed_articulation_cfg_fields,
+    CollisionPropertiesCfg,
     JointDrivePropertiesCfg,
     LinkPhysicsOverrideCfg,
     RigidBodyPhysicsCfg,
@@ -55,6 +56,24 @@ def _merge_non_none_config(base: _ConfigT | None, override: _ConfigT) -> _Config
     return base
 
 
+def _sparse_rigid_body_physics_from_dict(
+    value: Mapping[str, object],
+) -> RigidBodyPhysicsCfg:
+    """Parse a grouped overlay without materializing common contact defaults."""
+    parsed = _rigid_body_physics_from_dict(value)
+    collision_data = value.get("collision_props")
+    collision_props = parsed.collision_props
+    if (
+        isinstance(collision_data, Mapping)
+        and type(collision_props) is CollisionPropertiesCfg
+    ):
+        if "contact_offset" not in collision_data:
+            collision_props.contact_offset = None
+        if "rest_offset" not in collision_data:
+            collision_props.rest_offset = None
+    return parsed
+
+
 def _merge_link_attrs(
     base_cfg: RobotCfg,
     override: Mapping[str, object] | None,
@@ -81,6 +100,8 @@ def _merge_link_attrs(
         elif isinstance(group_override, Mapping):
             group_data = dict(group_override)
             parsed = LinkPhysicsOverrideCfg.from_dict(group_data)
+            if isinstance(group_data.get("attrs"), Mapping):
+                parsed.attrs = _sparse_rigid_body_physics_from_dict(group_data["attrs"])
             has_link_names = "link_names_expr" in group_data
             has_attrs = "attrs" in group_data
         else:
@@ -262,13 +283,13 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             user_attrs_dict = override_cfg_dict.get("attrs")
             if isinstance(user_attrs_dict, dict):
                 grouped_fields = set(RigidBodyPhysicsCfg.__dataclass_fields__)
-                parsed = _rigid_body_physics_from_dict(user_attrs_dict)
+                parsed = _sparse_rigid_body_physics_from_dict(user_attrs_dict)
                 for field_name in grouped_fields:
                     override = getattr(parsed, field_name)
                     if override is None:
                         continue
                     base = getattr(base_cfg.attrs, field_name)
-                    if base is not None and type(base) is type(override):
+                    if base is not None and isinstance(base, type(override)):
                         _merge_non_none_config(base, override)
                     else:
                         setattr(base_cfg.attrs, field_name, override)
