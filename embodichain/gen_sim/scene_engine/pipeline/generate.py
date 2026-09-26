@@ -41,7 +41,10 @@ from embodichain.gen_sim.scene_engine.pipeline.generation.scene_generation impor
     generate_scene_and_refine,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import SceneExporter
-from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import build_scene_usd
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
+    build_scene_usd,
+    build_scene_usdz,
+)
 
 
 def generate_scene_from_image(
@@ -108,7 +111,8 @@ def generate_scene_from_image(
     )
     scene_exporter.export()
     try:
-        build_scene_usd(output_root=resolved_output_root)
+        scene_usd_path = build_scene_usd(output_root=resolved_output_root)
+        build_scene_usdz(scene_usd_path=scene_usd_path)
     except RuntimeError as exc:
         # Keep the editable GLB/USDC export usable when a DexSim release cannot
         # serialize one of its texture-backed materials into USD.

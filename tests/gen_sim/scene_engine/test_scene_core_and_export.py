@@ -47,6 +47,7 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
     _copy_runtime_texture,
     _externalize_glb_textures,
     _validate_uid,
+    build_scene_usdz,
     load_scene_usd_into_sim,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import (
@@ -526,6 +527,21 @@ def test_schema_v2_usd_preview_uses_direct_simulation_import(
     sim = _DirectUsdSim()
     assert load_scene_usd_into_sim(sim=sim, output_root=output_root) == [drawer]  # type: ignore[arg-type]
     assert sim.calls == [{"name": "scene", "file_path": str(scene_path)}]
+
+
+def test_build_scene_usdz_creates_relocatable_single_file(tmp_path: Path) -> None:
+    from pxr import Usd, UsdGeom
+
+    scene_path = tmp_path / "scene.usda"
+    stage = Usd.Stage.CreateNew(str(scene_path))
+    UsdGeom.Xform.Define(stage, "/World")
+    stage.GetRootLayer().Save()
+
+    package_path = build_scene_usdz(scene_usd_path=scene_path)
+
+    assert package_path == tmp_path / "scene.usdz"
+    assert package_path.is_file()
+    assert Usd.Stage.Open(str(package_path)) is not None
 
 
 def test_preview_prepares_before_viser_joint_control(

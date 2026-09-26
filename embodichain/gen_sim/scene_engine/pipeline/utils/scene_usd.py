@@ -250,6 +250,55 @@ def build_scene_usd(
     return scene_usd_path
 
 
+def build_scene_usdz(
+    *,
+    scene_usd_path: str | Path,
+    output_path: str | Path | None = None,
+) -> Path:
+    """Package one schema-v2 USD stage into a relocatable USDZ file.
+
+    The USD stage remains the authoring and debug artifact. USDZ is the
+    single-file delivery form: USD asset dependencies referenced by the stage
+    are collected by the USD package writer instead of relying on the original
+    output directory layout.
+
+    Args:
+        scene_usd_path: Existing ``scene.usda`` or ``scene.usdc`` stage.
+        output_path: Destination USDZ path. Defaults to the stage path with a
+            ``.usdz`` suffix.
+
+    Returns:
+        The atomically published USDZ path.
+
+    Raises:
+        FileNotFoundError: If the source stage does not exist.
+        RuntimeError: If USDZ packaging fails.
+    """
+    source_path = Path(scene_usd_path).expanduser().resolve()
+    if not source_path.is_file():
+        raise FileNotFoundError(f"USD scene does not exist: {source_path}")
+    destination = (
+        Path(output_path).expanduser().resolve()
+        if output_path is not None
+        else source_path.with_suffix(".usdz")
+    )
+    if destination.suffix.lower() != ".usdz":
+        raise ValueError(f"USDZ destination must use .usdz: {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.in_progress")
+    _remove_path(temporary)
+    try:
+        from pxr import UsdUtils
+
+        if not UsdUtils.CreateNewUsdzPackage(str(source_path), str(temporary)):
+            raise RuntimeError(f"USDZ packaging failed for {source_path}")
+        temporary.replace(destination)
+    except Exception:
+        _remove_path(temporary)
+        raise
+    return destination
+
+
 def load_scene_usd_into_sim(
     *,
     sim: SimulationManager,

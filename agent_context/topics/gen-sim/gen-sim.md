@@ -34,11 +34,12 @@ behavior, Gradio artifact ownership and focused failure diagnosis.
 The `scene_export/` directory contains `scene.json`, `scene_config.json`,
 `scene_graph.json`, `mesh_assets/` and `articulated_assets/`.
 Generation and editing also produce an optional `scene_usd/` delivery package
-with a schema-v2 `scene.usda` carrying EmbodiChain entity metadata. DexSim
-preview loads schema-v2 stages directly; the manifest and native GLTF/USDC
-assets remain legacy compatibility data. Build it only after the complete
-simulation scene is prepared; validate UIDs and keep every packaged asset path
-inside the output root.
+with a schema-v2 `scene.usda` carrying EmbodiChain entity metadata and a
+relocatable `scene.usdz` single-file package. DexSim preview loads schema-v2
+stages directly; the manifest and native GLTF/USDC assets remain legacy
+compatibility data. Build it only after the complete simulation scene is
+prepared; validate UIDs and keep every packaged asset path inside the output
+root.
 
 - Scene object IDs and graph node IDs must be equal sets on import and export.
 - Editable scene state is Y-up; portable runtime output is Z-up. Convert world
