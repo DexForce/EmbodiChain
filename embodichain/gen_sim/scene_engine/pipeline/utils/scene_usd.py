@@ -29,6 +29,7 @@ from typing import Any
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
+    ArticulationRootPropertiesCfg,
     LightCfg,
     MeshCfg,
     MeshCollisionCfg,
@@ -357,7 +358,7 @@ def _load_packaged_scene_usd(
                         init_pos=init_pos,
                         init_rot=init_rot,
                         body_scale=body_scale,
-                        fix_base=True,
+                        root_props=ArticulationRootPropertiesCfg(fixed_base=True),
                         build_pk_chain=False,
                     )
                 )
@@ -540,7 +541,7 @@ def _add_articulations(
                             f"{uid}.body_scale",
                         )
                     ),
-                    fix_base=True,
+                    root_props=ArticulationRootPropertiesCfg(fixed_base=True),
                     build_pk_chain=False,
                 )
             )

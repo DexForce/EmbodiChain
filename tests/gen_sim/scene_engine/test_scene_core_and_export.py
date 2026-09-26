@@ -49,6 +49,7 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
     _validate_uid,
     load_scene_usd_into_sim,
 )
+from embodichain.lab.visualization import VisualizationCfg
 
 
 def _scene_object(
@@ -501,7 +502,7 @@ def test_preview_prepares_before_viser_joint_control(
     preview_scene_export(
         output_root=output_root,
         headless=True,
-        visualization=object(),  # type: ignore[arg-type]
+        visualization=VisualizationCfg(backend="viser"),
     )
 
     assert events == ["load", "prepare", "controller", "update:1", "destroy", "flush"]
