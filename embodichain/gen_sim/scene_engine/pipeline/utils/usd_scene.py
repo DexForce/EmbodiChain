@@ -53,6 +53,7 @@ class UsdEntityDesc:
     body_type: str | None = None
     fixed_base: bool | None = None
     joint_names: tuple[str, ...] = ()
+    initial_qpos: tuple[float, ...] = ()
 
 
 class UsdSceneIndex:
@@ -139,8 +140,11 @@ class UsdSceneIndex:
             body_type = prim.GetCustomDataByKey("embodichain:body_type")
             fixed_base = prim.GetCustomDataByKey("embodichain:fixed_base")
             joint_names = prim.GetCustomDataByKey("embodichain:joint_names")
+            initial_qpos = prim.GetCustomDataByKey("embodichain:initial_qpos")
             if joint_names is None:
                 joint_names = ()
+            if initial_qpos is None:
+                initial_qpos = ()
             if runtime_name is not None and not isinstance(runtime_name, str):
                 raise ValueError(
                     f"USD entity {uid!r} has invalid runtime_name metadata."
@@ -155,6 +159,16 @@ class UsdSceneIndex:
                 raise ValueError(
                     f"USD entity {uid!r} has invalid joint_names metadata."
                 )
+            if isinstance(initial_qpos, (str, bytes)):
+                raise ValueError(
+                    f"USD entity {uid!r} has invalid initial_qpos metadata."
+                )
+            try:
+                initial_qpos_tuple = tuple(float(value) for value in initial_qpos)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"USD entity {uid!r} has invalid initial_qpos metadata."
+                ) from exc
             seen_uids.add(uid)
             entities.append(
                 UsdEntityDesc(
@@ -165,6 +179,7 @@ class UsdSceneIndex:
                     body_type=body_type,
                     fixed_base=fixed_base,
                     joint_names=tuple(joint_names),
+                    initial_qpos=initial_qpos_tuple,
                 )
             )
 
@@ -254,3 +269,15 @@ class UsdSceneBinding:
         from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 
         return SceneEntityCfg(uid=uid)
+
+    def apply_initial_state(self) -> None:
+        """Apply authored articulation qpos after the simulator is prepared."""
+        for binding in self._bindings:
+            if binding.desc.kind != "articulation" or not binding.desc.initial_qpos:
+                continue
+            setter = getattr(binding.runtime, "set_qpos", None)
+            if setter is None:
+                raise RuntimeError(
+                    f"USD articulation {binding.desc.uid!r} cannot apply initial qpos."
+                )
+            setter(binding.desc.initial_qpos, target=False)

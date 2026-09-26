@@ -475,6 +475,7 @@ def test_usd_scene_index_reads_entity_metadata(tmp_path: Path) -> None:
     entity.SetCustomDataByKey(
         "embodichain:joint_names", Vt.StringArray(["joint_a", "joint_b"])
     )
+    entity.SetCustomDataByKey("embodichain:initial_qpos", Vt.DoubleArray([0.2, -0.4]))
     stage.GetRootLayer().Save()
 
     index = UsdSceneIndex.load(scene_path, require_schema=True)
@@ -484,6 +485,7 @@ def test_usd_scene_index_reads_entity_metadata(tmp_path: Path) -> None:
     assert drawer.kind == "articulation"
     assert drawer.fixed_base is True
     assert drawer.joint_names == ("joint_a", "joint_b")
+    assert drawer.initial_qpos == (0.2, -0.4)
 
 
 def test_schema_v2_usd_preview_uses_direct_simulation_import(
@@ -522,6 +524,9 @@ def test_schema_v2_usd_preview_uses_direct_simulation_import(
         def add_usd(self, **kwargs: str) -> dict[str, object]:
             self.calls.append(kwargs)
             return {"/World/Scene/Entities/drawer": drawer}
+
+        def prepare(self) -> None:
+            return None
 
         def get_articulation(self, _uid: str) -> None:
             return None

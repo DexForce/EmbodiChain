@@ -406,6 +406,8 @@ def _load_embodichain_usd_stage(
 ) -> list[Articulation]:
     """Load a schema-v2 USD stage directly through SimulationManager.add_usd()."""
     binding = UsdSceneBinding.load_into(sim, scene_usd_path)
+    sim.prepare()
+    binding.apply_initial_state()
     articulations: list[Articulation] = []
     for entity in index.entities:
         if entity.kind != "articulation":
@@ -1476,6 +1478,12 @@ def _author_usd_entity_metadata(
             prim.SetCustomDataByKey(
                 "embodichain:joint_names", Vt.StringArray(joint_names)
             )
+            get_qpos = getattr(scene_object, "get_qpos", None)
+            if callable(get_qpos):
+                qpos = get_qpos()[0].detach().cpu().tolist()
+                prim.SetCustomDataByKey(
+                    "embodichain:initial_qpos", Vt.DoubleArray(qpos)
+                )
 
     for field_name in ("background", "rigid_object"):
         for entry in _config_entries(scene_config, field_name):
