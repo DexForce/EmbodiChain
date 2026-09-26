@@ -84,8 +84,6 @@ def preview_scene_export(
         )
     )
     try:
-        if sim.is_use_gpu_physics:
-            sim.init_gpu_physics()
         articulations = (
             load_scene_usd_into_sim(sim=sim, output_root=resolved_output_root)
             if use_usd
@@ -95,6 +93,7 @@ def preview_scene_export(
                 force_static_rigids=True,
             )
         )
+        sim.prepare()
 
         is_viser = sim.sim_config.visualization.backend == "viser"
         joint_controller = _setup_viser_joint_control(

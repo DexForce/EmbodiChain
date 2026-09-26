@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -35,6 +36,7 @@ from embodichain.gen_sim.scene_engine.core.scene_object import (
 from embodichain.gen_sim.scene_engine.cli.preview import (
     _add_articulations,
     _setup_viser_joint_control,
+    preview_scene_export,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import SceneExporter
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
@@ -42,7 +44,9 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
     _apply_runtime_textures_to_usd,
+    _copy_runtime_texture,
     _externalize_glb_textures,
+    _validate_uid,
     load_scene_usd_into_sim,
 )
 
@@ -415,10 +419,92 @@ def test_scene_usd_preview_loads_packaged_runtime_assets(
     ]
     assert sim.rigid_cfg.uid == "table"  # type: ignore[union-attr]
     assert sim.rigid_cfg.shape.fpath == str(runtime_asset)  # type: ignore[union-attr]
+    assert sim.rigid_cfg.shape.collision.approximation == "convex_decomposition"  # type: ignore[union-attr]
+    assert sim.rigid_cfg.shape.collision.max_hulls == 16  # type: ignore[union-attr]
     assert sim.rigid_cfg.init_pos == (1.0, 2.0, 3.0)  # type: ignore[union-attr]
     assert sim.articulation_cfg.uid == "drawer"  # type: ignore[union-attr]
     assert sim.articulation_cfg.fpath == str(articulation_asset)  # type: ignore[union-attr]
     assert sim.articulation_cfg.init_pos == (4.0, 5.0, 6.0)  # type: ignore[union-attr]
+
+
+def test_scene_usd_overwrites_existing_runtime_texture(tmp_path: Path) -> None:
+    scene_usd_root = tmp_path / "scene_usd"
+    texture_root = scene_usd_root / "textures"
+    texture_root.mkdir(parents=True)
+    target_texture = texture_root / "table_image_0.png"
+    target_texture.write_bytes(b"old")
+    source_texture = tmp_path / "image_0.png"
+    source_texture.write_bytes(b"new")
+
+    relative_path = _copy_runtime_texture(
+        source_texture=source_texture,
+        texture_root=texture_root,
+        scene_usd_root=scene_usd_root,
+        uid="table",
+    )
+
+    assert relative_path == "textures/table_image_0.png"
+    assert target_texture.read_bytes() == b"new"
+
+
+def test_scene_usd_rejects_path_like_uids() -> None:
+    with pytest.raises(ValueError, match="safe single path component"):
+        _validate_uid("../outside", label="Scene object")
+
+
+def test_preview_prepares_before_viser_joint_control(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output_root = tmp_path / "output"
+    scene_export_root = output_root / "scene_export"
+    scene_export_root.mkdir(parents=True)
+    (scene_export_root / "scene_config.json").write_text("{}", encoding="utf-8")
+    events: list[str] = []
+
+    class FakeSimulationManager:
+        def __init__(self, _cfg: object) -> None:
+            self.sim_config = SimpleNamespace(
+                visualization=SimpleNamespace(backend="viser")
+            )
+
+        def prepare(self) -> None:
+            events.append("prepare")
+
+        def update(self, *, step: int) -> None:
+            events.append(f"update:{step}")
+            raise KeyboardInterrupt
+
+        def destroy(self, *, exit_process: bool) -> None:
+            events.append("destroy")
+
+        @staticmethod
+        def flush_cleanup_queue() -> None:
+            events.append("flush")
+
+    monkeypatch.setattr(
+        "embodichain.gen_sim.scene_engine.cli.preview.SimulationManager",
+        FakeSimulationManager,
+    )
+    monkeypatch.setattr(
+        "embodichain.gen_sim.scene_engine.cli.preview.load_scene_export_into_sim",
+        lambda **_: events.append("load") or [],
+    )
+    monkeypatch.setattr(
+        "embodichain.gen_sim.scene_engine.cli.preview._setup_viser_joint_control",
+        lambda **_: events.append("controller") or None,
+    )
+    monkeypatch.setattr(
+        "embodichain.gen_sim.scene_engine.cli.preview.SimulationManager.flush_cleanup_queue",
+        lambda: events.append("flush"),
+    )
+
+    preview_scene_export(
+        output_root=output_root,
+        headless=True,
+        visualization=object(),  # type: ignore[arg-type]
+    )
+
+    assert events == ["load", "prepare", "controller", "update:1", "destroy", "flush"]
 
 
 def test_scene_usd_externalizes_every_pbr_gltf_image(tmp_path: Path) -> None:

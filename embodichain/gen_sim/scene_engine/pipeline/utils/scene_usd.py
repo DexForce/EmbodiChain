@@ -27,12 +27,70 @@ from contextlib import contextmanager
 from typing import Any
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import ArticulationCfg, LightCfg, MeshCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    LightCfg,
+    MeshCfg,
+    MeshCollisionCfg,
+    RigidObjectCfg,
+)
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.visualization import VisualizationCfg
 
 _SCENE_EXPORT_FORMAT = "embodichain.scene-export/v1"
 _SCENE_USD_FORMAT = "embodichain.scene-usd/v1"
+
+
+def _validate_uid(value: object, *, label: str) -> str:
+    """Validate a UID before it is used as a filesystem path component."""
+    if (
+        not isinstance(value, str)
+        or not value
+        or value in {".", ".."}
+        or Path(value).name != value
+        or "\\" in value
+    ):
+        raise ValueError(f"{label} uid must be a safe single path component.")
+    return value
+
+
+def _resolve_contained_path(root: Path, relative: str, *, label: str) -> Path:
+    """Resolve a child path and reject symlinks or paths outside ``root``."""
+    root = root.resolve()
+    candidate = root / relative
+    if candidate.is_symlink():
+        raise ValueError(f"{label} destination must not be a symlink: {candidate}")
+    resolved = candidate.resolve()
+    if root not in resolved.parents:
+        raise ValueError(f"{label} destination must stay within {root}.")
+    return resolved
+
+
+def _remove_path(path: Path) -> None:
+    """Remove a file, directory, or symlink without following symlinks."""
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def _mesh_collision_cfg(max_convex_hull_num: object) -> MeshCollisionCfg:
+    """Translate the legacy hull budget into the current mesh schema."""
+    if isinstance(max_convex_hull_num, bool):
+        raise ValueError("max_convex_hull_num must be a positive integer.")
+    try:
+        hull_count = int(max_convex_hull_num)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("max_convex_hull_num must be a positive integer.") from exc
+    if hull_count <= 0:
+        raise ValueError("max_convex_hull_num must be a positive integer.")
+    if hull_count == 1:
+        return MeshCollisionCfg(approximation="convex_hull")
+    return MeshCollisionCfg(
+        approximation="convex_decomposition",
+        max_hulls=hull_count,
+        acd_method="vhacd",
+    )
 
 
 def load_scene_export_into_sim(
@@ -99,13 +157,22 @@ def build_scene_usd(
     config_path = _scene_export_config_path(resolved_output_root)
     scene_config = _read_scene_export(config_path)
     scene_usd_root = resolved_output_root / "scene_usd"
+    if scene_usd_root.is_symlink():
+        raise ValueError(f"Scene USD directory must not be a symlink: {scene_usd_root}")
     scene_usd_root.mkdir(parents=True, exist_ok=True)
+    scene_usd_root = scene_usd_root.resolve()
+    if resolved_output_root not in scene_usd_root.parents:
+        raise ValueError("Scene USD directory must stay within the output root.")
     scene_usd_path = scene_usd_root / "scene.usda"
     temporary_scene_usd_path = scene_usd_root / "scene.in_progress.usda"
     manifest_path = scene_usd_root / "scene_usd_manifest.json"
     runtime_assets_root = scene_usd_root / ".export_runtime_assets"
     packaged_assets_root = scene_usd_root / "assets"
     temporary_scene_usd_path.unlink(missing_ok=True)
+    for managed_file in (scene_usd_path, manifest_path):
+        if managed_file.is_symlink():
+            managed_file.unlink()
+    _remove_path(scene_usd_root / "textures")
 
     sim = SimulationManager(
         SimulationManagerCfg(
@@ -118,8 +185,6 @@ def build_scene_usd(
         )
     )
     try:
-        if sim.is_use_gpu_physics:
-            sim.init_gpu_physics()
         runtime_assets = _prepare_runtime_assets(
             scene_config=scene_config,
             config_dir=config_path.parent,
@@ -134,6 +199,7 @@ def build_scene_usd(
             output_root=resolved_output_root,
             runtime_assets=runtime_assets,
         )
+        sim.prepare()
         # The native exporter calls MaterialInst.get_base_color_map().  That
         # pybind getter is unsafe for embedded GLB maps (it can raise
         # MemoryError/SystemError).  Export the material scalar values first,
@@ -249,10 +315,8 @@ def _load_packaged_scene_usd(
     _add_lights(sim)
     articulations: list[Articulation] = []
     for entry in entries:
-        uid = entry.get("uid")
+        uid = _validate_uid(entry.get("uid"), label="Scene USD object")
         kind = entry.get("kind")
-        if not isinstance(uid, str) or not uid:
-            raise ValueError("Scene USD manifest object has no valid uid.")
         asset_path = _resolve_manifest_runtime_asset(
             output_root=output_root,
             entry=entry,
@@ -265,7 +329,10 @@ def _load_packaged_scene_usd(
             _vector3(entry.get("body_scale", [1.0, 1.0, 1.0]), f"{uid}.body_scale")
         )
         if kind == "rigid":
-            shape = MeshCfg(fpath=str(asset_path))
+            shape = MeshCfg(
+                fpath=str(asset_path),
+                collision=_mesh_collision_cfg(entry.get("max_convex_hull_num", 32)),
+            )
             shape.load_option.gltfloader = True
             sim.add_rigid_object(
                 RigidObjectCfg(
@@ -275,10 +342,6 @@ def _load_packaged_scene_usd(
                     init_pos=init_pos,
                     init_rot=init_rot,
                     body_scale=body_scale,
-                    max_convex_hull_num=max(
-                        1, int(entry.get("max_convex_hull_num", 32))
-                    ),
-                    acd_method="vhacd",
                 )
             )
         elif kind == "articulation":
@@ -400,10 +463,8 @@ def _add_objects(
     """Add exported GLB meshes while preserving their embedded GLB materials."""
     resolved_config_dir = config_dir.resolve()
     for entry in entries:
-        uid = entry.get("uid")
+        uid = _validate_uid(entry.get("uid"), label=f"Scene {label}")
         shape = entry.get("shape")
-        if not isinstance(uid, str) or not uid:
-            raise ValueError(f"Scene {label} has no valid uid.")
         if not isinstance(shape, dict) or not isinstance(shape.get("fpath"), str):
             raise ValueError(f"Scene {label} {uid!r} has no shape.fpath.")
         if shape.get("shape_type") != "Mesh":
@@ -426,7 +487,10 @@ def _add_objects(
             raise ValueError(
                 f"Scene {label} {uid!r} has invalid body_type {body_type!r}."
             )
-        shape_cfg = MeshCfg(fpath=str(mesh_path))
+        shape_cfg = MeshCfg(
+            fpath=str(mesh_path),
+            collision=_mesh_collision_cfg(entry.get("max_convex_hull_num", 32)),
+        )
         shape_cfg.load_option.gltfloader = mesh_path.suffix.lower() == ".gltf"
         sim.add_rigid_object(
             RigidObjectCfg(
@@ -436,8 +500,6 @@ def _add_objects(
                 init_pos=tuple(_vector3(entry.get("init_pos"), f"{uid}.init_pos")),
                 init_rot=tuple(_vector3(entry.get("init_rot"), f"{uid}.init_rot")),
                 body_scale=tuple(body_scale),
-                max_convex_hull_num=max(1, int(entry.get("max_convex_hull_num", 32))),
-                acd_method="vhacd",
             )
         )
 
@@ -452,9 +514,7 @@ def _add_articulations(
     """Add one USDC articulation per entry, without its GLB proxy."""
     articulations: list[Articulation] = []
     for entry in entries:
-        uid = entry.get("uid")
-        if not isinstance(uid, str) or not uid:
-            raise ValueError("Articulation entry has no valid uid.")
+        uid = _validate_uid(entry.get("uid"), label="Articulation")
         usdc_path = _resolve_asset_path(
             config_dir=config_dir.resolve(),
             raw_path=entry.get("fpath"),
@@ -495,16 +555,15 @@ def _prepare_runtime_assets(
     runtime_assets_root: Path,
 ) -> dict[str, Path]:
     """Create external-texture runtime assets without changing scene_export."""
-    if runtime_assets_root.exists():
-        shutil.rmtree(runtime_assets_root)
+    _remove_path(runtime_assets_root)
     runtime_assets_root.mkdir(parents=True)
     runtime_assets: dict[str, Path] = {}
     for field_name in ("background", "rigid_object"):
         for entry in _config_entries(scene_config, field_name):
-            uid = entry.get("uid")
+            uid = _validate_uid(entry.get("uid"), label=f"Scene {field_name}")
             shape = entry.get("shape")
-            if not isinstance(uid, str) or not isinstance(shape, dict):
-                raise ValueError(f"Scene {field_name} entry is missing uid or shape.")
+            if not isinstance(shape, dict):
+                raise ValueError(f"Scene {field_name} entry is missing shape.")
             source_glb = _resolve_asset_path(
                 config_dir=config_dir,
                 raw_path=shape.get("fpath"),
@@ -512,14 +571,17 @@ def _prepare_runtime_assets(
                 uid=uid,
                 label=field_name,
             )
+            runtime_destination = _resolve_contained_path(
+                runtime_assets_root,
+                uid,
+                label=f"Scene {field_name} runtime asset",
+            )
             runtime_assets[uid] = _externalize_glb_textures(
                 source_glb=source_glb,
-                destination_root=runtime_assets_root / uid,
+                destination_root=runtime_destination,
             )
     for entry in _config_entries(scene_config, "articulation"):
-        uid = entry.get("uid")
-        if not isinstance(uid, str):
-            raise ValueError("Scene articulation entry has no valid uid.")
+        uid = _validate_uid(entry.get("uid"), label="Scene articulation")
         source_usdc = _resolve_asset_path(
             config_dir=config_dir,
             raw_path=entry.get("fpath"),
@@ -527,9 +589,15 @@ def _prepare_runtime_assets(
             uid=uid,
             label="articulation",
         )
+        runtime_destination = _resolve_contained_path(
+            runtime_assets_root,
+            uid,
+            label="Scene articulation runtime asset",
+        )
         runtime_assets[uid] = _externalize_usdc_textures(
             source_usdc=source_usdc,
-            destination_root=runtime_assets_root / uid,
+            destination_root=runtime_destination,
+            allowed_root=config_dir,
         )
     return runtime_assets
 
@@ -546,12 +614,18 @@ def _package_runtime_assets(
     native DexSim adapter preserve GLB submesh transforms that its USD mesh
     round-trip currently cannot represent faithfully.
     """
-    shutil.rmtree(destination_root, ignore_errors=True)
+    _remove_path(destination_root)
     packaged_assets: dict[str, Path] = {}
     for uid, source_asset in runtime_assets.items():
-        target_root = destination_root / uid
+        safe_uid = _validate_uid(uid, label="Packaged asset")
+        target_root = _resolve_contained_path(
+            destination_root,
+            safe_uid,
+            label="Packaged asset",
+        )
+        target_root.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source_asset.parent, target_root)
-        packaged_assets[uid] = target_root / source_asset.name
+        packaged_assets[safe_uid] = target_root / source_asset.name
     return packaged_assets
 
 
@@ -675,7 +749,9 @@ def _image_suffix_from_mime_type(mime_type: str, source_glb: Path) -> str:
     return suffix
 
 
-def _externalize_usdc_textures(*, source_usdc: Path, destination_root: Path) -> Path:
+def _externalize_usdc_textures(
+    *, source_usdc: Path, destination_root: Path, allowed_root: Path
+) -> Path:
     """Copy USDC and rewrite directly referenced texture assets locally."""
     from pxr import Sdf, Usd
 
@@ -694,7 +770,12 @@ def _externalize_usdc_textures(*, source_usdc: Path, destination_root: Path) -> 
             value = source_attr.Get()
             if not isinstance(value, Sdf.AssetPath) or not value.resolvedPath:
                 continue
-            source_asset = Path(value.resolvedPath)
+            source_asset = Path(value.resolvedPath).resolve()
+            if allowed_root.resolve() not in source_asset.parents:
+                raise RuntimeError(
+                    "USDC texture reference escapes the scene export root: "
+                    f"{source_asset}"
+                )
             if not source_asset.is_file():
                 continue
             texture_root.mkdir(exist_ok=True)
@@ -815,7 +896,11 @@ def _apply_runtime_textures_to_usd(
     stage = Usd.Stage.Open(str(scene_usd_path))
     if stage is None:
         raise RuntimeError(f"Could not reopen exported USD: {scene_usd_path}")
-    texture_root = scene_usd_root / "textures"
+    texture_root = _resolve_contained_path(
+        scene_usd_root,
+        "textures",
+        label="Scene USD texture",
+    )
     bound_texture_count = 0
     exported_objects = [
         (uid, sim.get_rigid_object(uid)) for uid in sim.get_rigid_object_uid_list()
@@ -834,7 +919,7 @@ def _apply_runtime_textures_to_usd(
                 f"Exported USD has no prim for textured object {uid!r} "
                 f"({runtime_name!r})."
             )
-        texture_root.mkdir(exist_ok=True)
+        texture_root.mkdir(parents=True, exist_ok=True)
         if runtime_asset.suffix.lower() == ".gltf":
             gltf_texture_paths = _gltf_material_texture_paths(runtime_asset)
             if not gltf_texture_paths:
@@ -1022,9 +1107,14 @@ def _copy_runtime_texture(
     uid: str,
 ) -> str:
     """Copy one package-local texture and return its scene-USD-relative URI."""
-    target_texture = texture_root / f"{uid}_{source_texture.name}"
-    if not target_texture.is_file():
-        shutil.copy2(source_texture, target_texture)
+    safe_uid = _validate_uid(uid, label="Scene USD texture")
+    target_texture = _resolve_contained_path(
+        texture_root,
+        f"{safe_uid}_{source_texture.name}",
+        label="Scene USD texture",
+    )
+    texture_root.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source_texture, target_texture)
     return target_texture.relative_to(scene_usd_root).as_posix()
 
 
@@ -1231,7 +1321,7 @@ def _write_scene_usd_manifest(
     objects: list[dict[str, object]] = []
     for field_name in ("background", "rigid_object"):
         for entry in _config_entries(scene_config, field_name):
-            uid = str(entry["uid"])
+            uid = _validate_uid(entry.get("uid"), label="Scene USD object")
             rigid = sim.get_rigid_object(uid)
             if rigid is None:
                 raise RuntimeError(f"Scene USD export did not register rigid {uid!r}.")
@@ -1258,7 +1348,7 @@ def _write_scene_usd_manifest(
                 }
             )
     for entry in _config_entries(scene_config, "articulation"):
-        uid = str(entry["uid"])
+        uid = _validate_uid(entry.get("uid"), label="Scene USD articulation")
         articulation = articulation_by_uid.get(uid)
         if articulation is None:
             raise RuntimeError(
